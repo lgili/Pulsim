@@ -86,7 +86,10 @@ def _explicit_run(mask_of_solve, t_end, vdc, rload):
             m.set(idx_b[i], not bool(ins[i]))
         return m
 
-    res = p.simulate(b, t_end=t_end, dt=DT, switch_fn=switch_fn)
+    # mmc_arms runs without the restart rule (a route reason), so the explicit
+    # chain names the same restart-less stepping and gate timing for parity
+    res = p.simulate(b, t_end=t_end, dt=DT, switch_fn=switch_fn,
+                     discontinuity_restart=False)
     v_c_final = [
         float(res.v(f"m{i}")[-1]
               - (res.v(chain[i + 1])[-1]
@@ -379,7 +382,10 @@ def test_parity_two_floating_arms():
                 m.set(sb, not on)
         return m
 
-    res_e = p.simulate(be, t_end=t_end, dt=DT, switch_fn=switch_fn)
+    # mmc_arms runs without the restart rule (a route reason), so the explicit
+    # chain names the same restart-less stepping and gate timing for parity
+    res_e = p.simulate(be, t_end=t_end, dt=DT, switch_fn=switch_fn,
+                       discontinuity_restart=False)
 
     for node in ("a", "mid", "b2"):
         d = np.max(np.abs(np.asarray(res_t.v(node))

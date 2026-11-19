@@ -343,12 +343,14 @@ def test_torque_trace_is_the_shaft_acceleration():
     shaft = Jm * np.diff(w) / h + TL + Bm * (w[1:] + w[:-1]) / 2
     avg = (T[1:] + T[:-1]) / 2
     assert np.max(np.abs(T)) > 10.0                  # a real start
-    # Interval 0 excluded: the fixed engine starts the J capacitor's
-    # companion from i_C(0) = 0, not T_em - T_load = -1.5 N·m (its known
-    # first-order start), so that interval reads T_load/2 = 0.75 off.
-    # Measured on the rest: 3.5e-12 N·m.
-    assert abs((shaft - avg)[0] - TL / 2) < 1e-9
-    assert np.max(np.abs(shaft - avg)[1:]) < 1e-7 * np.max(np.abs(T))
+    # Every interval, the first included: since the release the fixed
+    # engine's restart rule starts the J capacitor consistently (the old
+    # trapezoidal start read T_load/2 = 0.75 N·m off on interval 0). The
+    # rule's SDIRK sub-steps (intervals 0-2) are not the trapezoid, so the
+    # identity holds there to the integrator's error: measured 3.7e-8 N·m
+    # on 0-2 (bound 1e-7 of the peak torque), 2.0e-11 after (bound 1e-9).
+    assert np.max(np.abs(shaft - avg)) < 1e-7 * np.max(np.abs(T))
+    assert np.max(np.abs(shaft - avg)[3:]) < 1e-9 * np.max(np.abs(T))
 
 
 @pytest.mark.parametrize("cap", ["M_Cra", "M_Crb"])

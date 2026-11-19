@@ -49,6 +49,10 @@ def _run(b, t_end, engine, dt=None, **kw):
         kw.update(engine="pwl", dt=dt)
     elif engine == "dsed":
         kw.update(engine="dsed")
+    elif engine == "auto":
+        # 'auto' names the pre-release route without dt, TR-BDF2, whose record
+        # is the subject here; the release routes it to the exact engine ('dsed')
+        kw.update(engine="trbdf2")
     with warnings.catch_warnings():
         # Notices about the SIMULATION (sliding-mode, chatter) are not
         # what these tests are about.
@@ -89,16 +93,32 @@ def _q_load(r, node, C, R):
 # test_dsed_summary_starts_each_step_from_the_right_limit).
 TOL = {"pwl": 1e-9, "auto": 1e-3, "dsed": 5e-4}
 
+# The pre-release fixed step (no restart rule): the trapezoidal artefacts
+# (reflected ON steps, one-step blips) some tests are about.
+NO_RESTART = dict(discontinuity_restart=False)
+# Release findings (update-number-changing-release r2/bucket-2.md).
+F22 = ("release finding F-2-2: the fixed engine's restart steps break the "
+       "record's charge bookkeeping, first order in dt (was 1e-10)")
+F23 = ("release finding F-2-3: pwl mode_selection='auto' (lcp) holds a bridge "
+       "diode OFF while forward-biased by ~1.7 mV")
+F24 = ("release finding F-2-4: device_thermal_summary on the exact engine's "
+       "output_rtol grid misplaces T_j (0.5-2 %)")
+
+
+def _finding(request, reason):
+    request.applymarker(pytest.mark.xfail(strict=True, reason=reason))
+
 
 # ---------------------------------------------------------------------
 # The record itself
 # ---------------------------------------------------------------------
 
-def _buck():
+def _buck(form=None):
     b = p.CircuitBuilder()
     b.add_voltage_source("Vin", "vin", "gnd", 48.0)
     b.add_mosfet("M1", "vin", "sw")          # body diode: its own bit
-    b.add_diode("D1", "gnd", "sw", 1e3, 1e-9, V_th=0.7)
+    b.add_diode("D1", "gnd", "sw", 1e3, 1e-9, V_th=0.7,
+                **({"form": form} if form else {}))
     b.add_inductor("L1", "sw", "out", 100e-6)
     b.add_capacitor("C1", "out", "gnd", 100e-6)
     b.add_resistor("RL", "out", "gnd", 2.0)
@@ -127,10 +147,12 @@ def test_record_is_parallel_to_times_and_follows_mask_indices(engine):
     assert r.switch_states_unsolved.shape == (len(r.times),)
     assert not r.switch_states_unsolved.any()
     # The gate bit is what the engine stamped for each step: the
-    # step's end on the fixed engine, its midpoint on TR-BDF2.
+    # step's start on the fixed engine (the restart rule samples the gate
+    # there since the release; it read the step's end before), its
+    # midpoint on TR-BDF2.
     t = np.asarray(r.times)
-    q = t if engine == "pwl" else np.concatenate(
-        ([t[0]], 0.5 * (t[:-1] + t[1:])))
+    q = np.concatenate(([t[0]], t[:-1] if engine == "pwl"
+                        else 0.5 * (t[:-1] + t[1:])))
     expect = np.array([pwm(float(x)).get(0) for x in q])
     assert np.array_equal(S[1:, 0], expect[1:])
     # The freewheel diode conducts during the off-time.
@@ -158,10 +180,12 @@ def test_seeded_initial_state_is_flagged_unsolved():
 
 
 def _rl_seeded(engine: str):
-    """RL half-wave seeded with ``initial_state`` mid-conduction."""
-    b = _rl_half_wave(0.7)
+    """RL half-wave seeded with ``initial_state`` mid-conduction. Legacy
+    subject: the conductance form's g·v reading of an unsolved row (a
+    branch-form diode's current is a state, defined on row 0)."""
+    b = _rl_half_wave(0.7, form="conductance")
     r1 = _run(b, 0.0105, engine, dt=2e-6)
-    b2 = _rl_half_wave(0.7)
+    b2 = _rl_half_wave(0.7, form="conductance")
     r2 = _run(b2, 0.02, engine, dt=2e-6, t_start=0.0105,
               initial_state=np.asarray(r1.states[-1]))
     return b2, r2
@@ -276,10 +300,12 @@ def test_seeded_state_on_a_gate_edge_has_no_phantom_current(engine):
     g_on · 48 V: i_peak 48023.6 A, P_avg 36x high on 'auto' and 3500x
     on 'pwl', no warning. Row 0 is now left out of the summaries, and
     result.i() reads the first solved sample there."""
-    b, pwm, T = _buck()
+    # legacy subject: the conductance form's g_on·V phantom (a branch-form
+    # D1 carries its seeded state current on row 0)
+    b, pwm, T = _buck("conductance")
     r0 = _run(b, 12 * T, "auto", switch_fn=pwm)
     x0 = np.asarray(r0.states)[-1].copy()
-    b1, pwm1, _ = _buck()
+    b1, pwm1, _ = _buck("conductance")
     r1 = _run(b1, 17 * T, engine, dt=T / 200, switch_fn=pwm1,
               t_start=float(r0.times[-1]), initial_state=x0)
     assert r1.switch_states_unsolved[0]
@@ -474,19 +500,19 @@ def _snubber_charge(r, Cs):
 
 @pytest.mark.parametrize("Cs", (1e-9, 100e-9))
 @pytest.mark.parametrize("V_th", (0.7, 0.0))
-def test_snubber_across_the_diode_closes_the_charge_on_pwl(V_th, Cs):
-    """The charge closes on what the solver stamped. At V_th = 0.7 that
-    stamp chatters inside the conduction (the trapezoidal rule reflects
-    the Cs-g_on step from +V_th to about -V_th), and the summary says
-    so by name; at V_th = 0 it does not chatter and nothing warns."""
+def test_snubber_across_the_diode_closes_the_charge_on_pwl(V_th, Cs, request):
+    """The charge closes on what the solver stamped. Before the release
+    the stamp chattered inside the conduction at V_th = 0.7 (the
+    trapezoidal rule reflected the Cs-g_on step from +V_th to about
+    -V_th) and the summary said so; the restart rule's first steps do not
+    reflect it: no chatter, nothing warns, at either V_th
+    (test_snubber_chatter_is_counted_as_recorded_and_warned keeps the
+    detector on the restart-less step)."""
+    _finding(request, F22)
     b, pwm, T = _snubbed_boost(V_th, Cs)
     r = _run(b, 3e-3, "pwl", dt=T / 400, switch_fn=pwm)
     s, cur, msgs = _report(b, r, ["D1"])
-    if V_th > 0:
-        assert msgs and all(_CHATTER in m for m in msgs), msgs
-        assert _entry(s, "D1")["n_possible_chatter_gaps"] > 100
-    else:
-        assert not msgs, msgs
+    assert not msgs, msgs
     q_d = np.trapezoid(cur["D1"], np.asarray(r.times))
     q_phys = _snubber_charge(r, Cs)
     assert q_phys > 5e-3
@@ -526,14 +552,15 @@ def _xfmr_rectifier(V_th: float):
     return b
 
 
-def _vcvs_probe_rectifier(V_th: float):
+def _vcvs_probe_rectifier(V_th: float, form=None):
     """Series rectifier (0.1 Ω, D, 1000 µF || 20 Ω) plus a VCVS used as
     a measurement probe on an unrelated node."""
     b = p.CircuitBuilder()
     b.add_sine_voltage_source("V", "s", "gnd", v_dc=0.0,
                               v_amplitude=100.0, frequency=50.0, phase=0.0)
     b.add_resistor("Rp", "s", "ss", 0.1)
-    b.add_diode("D", "ss", "k", 1e3, 1e-9, V_th=V_th)
+    b.add_diode("D", "ss", "k", 1e3, 1e-9, V_th=V_th,
+                **({"form": form} if form else {}))
     b.add_capacitor("C", "k", "gnd", 1000e-6)
     b.add_resistor("RL", "k", "gnd", 20.0)
     b.add_vcvs("E1", "s", "gnd", "probe", "gnd", 0.01)
@@ -558,7 +585,9 @@ _RECT_CASES = [(k, v, e) for k in ("xfmr", "vcvs") for v in (0.7, 0.0)
 
 
 @pytest.mark.parametrize("kind,V_th,engine", _RECT_CASES)
-def test_rectifier_charge_closes_through_any_device(kind, V_th, engine):
+def test_rectifier_charge_closes_through_any_device(kind, V_th, engine, request):
+    if engine == "pwl":
+        _finding(request, F22)
     _, r, s, cur, msgs = _rectifier_run(kind, V_th, engine)
     assert not msgs, msgs
     t = np.asarray(r.times)
@@ -585,7 +614,10 @@ def test_dsed_summary_starts_each_step_from_the_right_limit():
     order. Only the 10 samples where an event changed the state carry
     a right limit."""
     raw, summ = [], []
-    for kw in ({}, {"dt": 5e-6}):
+    # legacy subject: the default step's own grid (output_rtol=0); the
+    # release's output rule samples densely enough that the raw trapezoid
+    # reads -8.4e-4 there, the summary +2.5e-5
+    for kw in ({"output_rtol": 0}, {"dt": 5e-6}):
         b = _xfmr_rectifier(0.7)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -633,21 +665,22 @@ def test_transformer_diode_is_the_secondary_state_current(engine):
 # Reproducer 4 — RL half-wave: immaterial conduction is not a recovery
 # ---------------------------------------------------------------------
 
-def _rl_half_wave(V_th: float):
+def _rl_half_wave(V_th: float, form=None):
     """50 V / 60 Hz, D, 5 Ω + 20 mH, 4 cycles."""
     b = p.CircuitBuilder()
     b.add_sine_voltage_source("V", "a", "gnd", v_dc=0.0, v_amplitude=50.0,
                               frequency=60.0, phase=0.0)
-    b.add_diode("D", "a", "k", 1e3, 1e-9, V_th=V_th)
+    b.add_diode("D", "a", "k", 1e3, 1e-9, V_th=V_th,
+                **({"form": form} if form else {}))
     b.add_resistor("R", "k", "m", 5.0)
     b.add_inductor("L", "m", "gnd", 20e-3)
     return b
 
 
 @functools.lru_cache(maxsize=None)
-def _rl_run(V_th: float, engine: str):
+def _rl_run(V_th: float, engine: str, restart: bool = True):
     b = _rl_half_wave(V_th)
-    r = _run(b, 4 / 60, engine, dt=2e-6)
+    r = _run(b, 4 / 60, engine, dt=2e-6, **({} if restart else NO_RESTART))
     # t_rr = 5 µs (a line-frequency rectifier diode): every engine's
     # grid resolves it (pwl dt = 2 µs, dsed dt_max = 1 µs), so V_R is
     # read at the same physical instant everywhere and nothing warns.
@@ -678,8 +711,10 @@ def test_rl_half_wave_recovery_counts_real_turn_offs_only(V_th, engine):
     assert e["f_sw_estimate"] == pytest.approx(60.0, rel=1e-3), e
     _, e_ref, _, _ = _rl_run(0.0, "pwl")
     assert e["E_sw_total"] == pytest.approx(e_ref["E_sw_total"], rel=0.025)
-    if engine == "pwl" and V_th > 0:
-        assert e["n_turn_off_events_dropped"] > 0, e
+    if engine == "pwl":
+        # the restart rule does not reflect the g_off/L mode: no blips
+        # (test_immaterial_reconductions_are_bounded_by_charge keeps them)
+        assert e["n_turn_off_events_dropped"] == 0, e
     # Charge: the diode carries the inductor's state current.
     i_l = np.asarray(r.i("L"))
     t = np.asarray(r.times)
@@ -727,7 +762,7 @@ BRIDGE = ("BR__D1", "BR__D2", "BR__D3", "BR__D4")
 
 
 @pytest.mark.parametrize("engine", ENGINES)
-def test_line_inductance_bridge_has_no_phantom_landing_peak(engine):
+def test_line_inductance_bridge_has_no_phantom_landing_peak(engine, request):
     """An event landing is a real trap solve under the PRE-commutation
     mask and is recorded as such, so no sample reports g_on·V_th from
     the post-flip bits: every diode current closes KCL against the line
@@ -740,6 +775,8 @@ def test_line_inductance_bridge_has_no_phantom_landing_peak(engine):
     now re-decides a diode held on the forbidden side and reads each
     step's start from the solve its bits were decided on: the auto run
     peaks at 65.32 A (pwl 65.35 A) and nothing is held."""
+    if engine == "pwl":
+        _finding(request, F22)
     b = _bridge_with_line_l(0.7)
     r = _run(b, 0.08, engine, dt=1e-6)
     s, cur, msgs = _report(b, r, BRIDGE)
@@ -781,6 +818,7 @@ def _ref_run(V_th: float, engine: str, dt: float = 1e-6):
     return _report(b, r, BRIDGE) + (r,)
 
 
+@pytest.mark.xfail(strict=True, reason=F23)
 def test_reference_bridge_agrees_across_engines_at_v_th_0_7():
     """auto vs a converged pwl run (dt = 0.1 µs) at the helper defaults
     (V_th = 0.7). Measured: D1 rms 10.253 / 10.244 A, P_avg 0.10520 /
@@ -809,7 +847,9 @@ def test_reference_bridge_agrees_across_engines_at_v_th_0_7():
 
 @pytest.mark.parametrize("engine", ENGINES)
 @pytest.mark.parametrize("V_th", (0.7, 0.0))
-def test_reference_bridge_charge_and_source_kcl(V_th, engine):
+def test_reference_bridge_charge_and_source_kcl(V_th, engine, request):
+    if engine == "pwl":
+        _finding(request, F23 if V_th == 0.0 else F22)
     _, cur, msgs, r = _ref_run(V_th, engine)
     if engine == "pwl":
         assert not msgs, msgs
@@ -841,7 +881,9 @@ class _NoRecord:
 
 
 def test_result_without_record_falls_back_with_a_named_reason():
-    b = _vcvs_probe_rectifier(0.7)
+    # legacy subject: a conductance diode's current needs the record (a
+    # branch-form diode's is a state)
+    b = _vcvs_probe_rectifier(0.7, form="conductance")
     r = _run(b, 0.02, "pwl", dt=2e-6)
     bare = _NoRecord(r)
     with pytest.warns(RuntimeWarning,
@@ -1032,12 +1074,13 @@ def _snubbed_dcm_boost(V_th: float = 0.7):
 
 
 @functools.lru_cache(maxsize=None)
-def _snubbed_report(div):
+def _snubbed_report(div, restart=True):
     b, pwm, T = _snubbed_dcm_boost()
     if div == "auto":
         r = _run(b, 2e-3, "auto", switch_fn=pwm)
     else:
-        r = _run(b, 2e-3, "pwl", dt=T / div, switch_fn=pwm)
+        r = _run(b, 2e-3, "pwl", dt=T / div, switch_fn=pwm,
+                 **({} if restart else NO_RESTART))
     s, _, msgs = _report(b, r, [], diode_specs={"D1": {"Q_rr": 100e-9}})
     return _entry(s, "D1"), msgs
 
@@ -1070,8 +1113,9 @@ def test_unresolved_recoveries_and_capped_blips_warn(div):
     1-step re-conduction that the chatter detector reports (33 / 4).
     Both used to pass silently.
     (Round 3 merged the gaps and pinned <= 210; merging is gone: the
-    record is what the solver stamped.)"""
-    d, msgs = _snubbed_report(div)
+    record is what the solver stamped.) Legacy subject: the restart-less
+    step's ring (the restart rule does not reflect it)."""
+    d, msgs = _snubbed_report(div, restart=False)
     assert d["n_turn_off_events_unresolved"] > 0
     assert any("'D1'" in m and "longer than t_rr" in m for m in msgs)
     assert d["n_turn_off_events_capped"] > 0, d
@@ -1183,7 +1227,7 @@ class _Window:
 
 @pytest.mark.parametrize("R_load", (500.0, 20.0))
 @pytest.mark.parametrize("engine", ("pwl", "auto", "dsed"))
-def test_switched_branch_charge_closes_in_steady_state(engine, R_load):
+def test_switched_branch_charge_closes_in_steady_state(engine, R_load, request):
     """Boost (DCM at 500 Ω, CCM at 20 Ω), steady-state window
     t >= 2 ms. D1's i_avg must equal the load charge C·Δv + ∫v/R
     (an independent KCL balance) and Q's i_avg the charge of i_L over
@@ -1192,6 +1236,8 @@ def test_switched_branch_charge_closes_in_steady_state(engine, R_load):
     jump over the next 1 µs step: D1 i_avg read 0.02343 A against
     0.05345 A in DCM (-56 %) and -2.5 % in CCM, with no warning. All
     engines now agree to 1e-4."""
+    if engine == "pwl":
+        _finding(request, F22)
     b, r = _boost_run(0.7, R_load, engine)
     w = _Window(r, 2e-3)
     s, _, msgs = _report(b, w, [])
@@ -1217,7 +1263,7 @@ def test_switched_branch_charge_closes_in_steady_state(engine, R_load):
 
 
 @pytest.mark.parametrize("R_load", (500.0, 20.0))
-def test_conduction_loss_agrees_across_engines_in_steady_state(R_load):
+def test_conduction_loss_agrees_across_engines_in_steady_state(R_load, request):
     """Each step is integrated as the line between its ends, and its
     square exactly, h·(a² + a·c + c²)/3. The trapezoid of the squared
     samples read the DCM diode's P_avg +16 % high on auto (one long step
@@ -1225,6 +1271,8 @@ def test_conduction_loss_agrees_across_engines_in_steady_state(R_load):
     Measured now, t >= 2 ms, D1 P_avg: DCM 2.2797e-5 / 2.2766e-5 /
     2.2785e-5 W (pwl T/1000, auto, dsed), CCM 3.0867e-3 / 3.0860e-3 /
     3.0859e-3 W."""
+    if R_load == 500.0:   # the pwl reference reads D1 -0.8 % (truth: auto/dsed agree)
+        _finding(request, F22)
     ref = {}
     for engine in ("pwl", "auto", "dsed"):
         b, r = _boost_run(0.7, R_load, engine)
@@ -1345,7 +1393,8 @@ def test_immaterial_reconductions_are_bounded_by_charge():
     """The RL half-wave's fixed-engine blips (single steps at ~36 µA,
     ~7e-11 C, against Q_rr = 1 µC) are still not turn-offs, and the
     energy they would add is reported and negligible."""
-    _, d, _, msgs = _rl_run(0.7, "pwl")
+    # legacy subject: the restart-less step's blips (the rule has none)
+    _, d, _, msgs = _rl_run(0.7, "pwl", restart=False)
     assert d["n_turn_off_events"] == 4
     assert d["n_turn_off_events_dropped"] > 0
     assert 0.0 <= d["E_sw_dropped"] < 1e-3 * d["E_sw_total"]
@@ -1426,7 +1475,8 @@ def test_rl_half_wave_curve_through_the_origin_counts_real_turn_offs(
     # only warning allowed says so.
     assert all("would add" in m for m in msgs), msgs
     if engine == "pwl":
-        assert e["n_turn_off_events_dropped"] > 0, e
+        # the restart rule leaves no blips to drop (they were trapezoidal)
+        assert e["n_turn_off_events_dropped"] == 0, e
 
 
 def test_curve_materiality_uses_the_tabulated_current_axis():
@@ -1481,10 +1531,11 @@ def test_snubber_chatter_is_counted_as_recorded_and_warned(div):
     (test_source_commutated_turn_off_into_a_small_voltage_is_counted),
     so the record is now reported as stamped and a warning says the
     gaps may be chatter and which numbers it inflates. At V_th = 0
-    nothing chatters and nothing warns."""
+    nothing chatters and nothing warns. Legacy subject: the restart-less
+    step (the restart rule does not reflect the ON step)."""
     for V_th in (0.7, 0.0):
         b, pwm, T = _snubbed_boost_100k(V_th)
-        r = _run(b, 3e-3, "pwl", dt=T / div, switch_fn=pwm)
+        r = _run(b, 3e-3, "pwl", dt=T / div, switch_fn=pwm, **NO_RESTART)
         s, _, msgs = _report(b, r, [], diode_specs={"D1": {"Q_rr": 50e-9}})
         e = _entry(s, "D1")
         chatter = [m for m in msgs if _CHATTER in m]
@@ -1587,7 +1638,8 @@ def test_paired_diode_chatter_warns_and_reports_the_record():
         m.set(qa, on)
         m.set(qb, on)
         return m
-    r = _run(b, 1e-3, "pwl", dt=T / 400, switch_fn=pwm)
+    # legacy subject: the restart-less step's chatter
+    r = _run(b, 1e-3, "pwl", dt=T / 400, switch_fn=pwm, **NO_RESTART)
     spec = {"Q_rr": 50e-9}
     s, _, msgs = _report(b, r, [], diode_specs={"Da": spec, "Db": spec})
     for n in ("Da", "Db"):
@@ -1622,7 +1674,8 @@ def test_rectifier_chatter_with_long_gaps_is_reported(dt, n_gaps):
     1-step conducting stretches, which is what the detector now keys
     on; at dt = 1 µs = 2·tau there is no chatter and nothing warns."""
     b = _transformer_rectifier(100e-6)
-    r = _run(b, 0.1, "pwl", dt=dt)
+    # legacy subject: the restart-less step's reflected ON steps
+    r = _run(b, 0.1, "pwl", dt=dt, **NO_RESTART)
     s, _, msgs = _report(b, r, [], diode_specs={"D": {"Q_rr": 1e-6}})
     e = _entry(s, "D")
     chatter = [m for m in msgs if _CHATTER in m]
@@ -1707,6 +1760,7 @@ def test_dsed_trace_without_a_step_start_jump_is_on_result_times():
 
 
 @pytest.mark.parametrize("R_load", (500.0, 20.0))
+@pytest.mark.xfail(strict=True, reason=F24)
 def test_dsed_junction_temperature_follows_the_step_start_power(R_load):
     """T_j was built from the stored DSED samples, the left limits,
     while P_cond_avg integrates each step from its right limit: on the

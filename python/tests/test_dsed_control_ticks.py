@@ -117,7 +117,8 @@ def test_closed_loop_regulates_on_dsed_like_trbdf2():
 def test_every_step_observer_still_refused_on_dsed():
     b = _buck()
     with pytest.raises(p.UnsupportedError) as ei:
-        p.simulate(b, 1e-4, engine="dsed",
+        # Q is undriven on purpose (the subject is the observer): undriven='closed'
+        p.simulate(b, 1e-4, engine="dsed", undriven="closed",
                    step_observer=lambda t, x: None)
     assert (ei.value.engine, ei.value.feature) == ("dsed", "step_observer")
 
@@ -125,6 +126,6 @@ def test_every_step_observer_still_refused_on_dsed():
 def test_controllers_with_t_start_refused_on_dsed():
     b = _buck()
     with pytest.raises(p.UnsupportedError) as ei:
-        p.simulate(b, 2e-4, engine="dsed", t_start=1e-4,
+        p.simulate(b, 2e-4, engine="dsed", t_start=1e-4, undriven="closed",
                    step_observer=lambda t, x: None, controller_period=1e-5)
     assert ei.value.feature == "step_observer"

@@ -206,7 +206,8 @@ def test_device_thermal_summary_switch_reads_the_kernel_record() -> None:
     b = p.CircuitBuilder()
     b.add_voltage_source("Vin", "vin", "gnd", 5.0)
     b.add_resistor("R1", "vin", "mid", 1.0)
-    b.add_switch("SW1", "mid", "gnd", g_on=100.0, g_off=1e-9)
+    # legacy subject: the conductance form's P_cond needs the mask (a branch-form switch reads its current)
+    b.add_switch("SW1", "mid", "gnd", g_on=100.0, g_off=1e-9, form="conductance")
 
     def pwm(t: float):
         m = p.SwitchStateMask(b.graph.num_switches)

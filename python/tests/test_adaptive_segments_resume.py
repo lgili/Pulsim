@@ -45,6 +45,8 @@ def test_adaptive_on_the_fixed_grid_equals_the_fixed_run():
     assert np.asarray(r2.times) == pytest.approx(np.asarray(r1.times), abs=1e-12)
     m1 = p.time_average(np.asarray(r1.times), v1, t_from=3.2e-3)
     m2 = p.time_average(np.asarray(r2.times), v2, t_from=3.2e-3)
-    assert m1 == pytest.approx(8.0431, abs=2e-3)
+    # truth 8.045726 V: trbdf2 at rtol 1e-9 and pwl at dt/100 agree to 3e-7;
+    # the restart rule's run reads 8.045714 (the old restart-less 8.043054)
+    assert m1 == pytest.approx(8.045726, abs=1e-4)
     assert m2 == pytest.approx(m1, abs=1e-6)
     assert np.max(np.abs(v2 - v1)) < 1e-6

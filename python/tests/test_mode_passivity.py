@@ -1,5 +1,5 @@
 """add-complementarity-mode-selection task 5.1: the passivity classes the mode selection knows
-(D3), on real circuits. Reference: pwl at dt = 1e-7 (the same conductance-form devices)."""
+(D3), on real circuits. Reference: pwl at dt = 1e-7 (the same devices: branch form since the release)."""
 
 import warnings
 
@@ -38,7 +38,7 @@ def _vpn(r):
 
 def test_bridge_behind_an_ideal_transformer_is_passive_nonreciprocal():
     b = _bridge_behind_ideal_transformer()
-    r = _run(b, "dsed")
+    r = _run(b, "dsed", mode_selection="legacy")   # legacy subject: the settle's mode guard
     cls = {"class": "passive_nonreciprocal", "device": "T1", "kind": "IdealTransformer"}
     assert r.diagnostics["mode_guard"]["passivity"] == cls
     ref = _run(_bridge_behind_ideal_transformer(), "pwl")
@@ -69,7 +69,9 @@ def test_bridge_behind_an_ideal_transformer_is_passive_nonreciprocal():
     # increment-form port model (was: right to 9 ms, then DiodeModeInconsistentError naming D2 at
     # 10.008 ms): the full 'lcp' run now lands on pwl, 31.876241228 V (more numbers:
     # test_mode_lcp.py::test_lcp_bridge_on_a_floating_source_is_not_decided_by_rounding)
-    r_lcp = _run(_bridge_behind_ideal_transformer(), "dsed", mode_selection="lcp")
+    # the release default mode_selection='auto' takes 'lcp' here
+    r_lcp = _run(_bridge_behind_ideal_transformer(), "dsed")
+    assert r_lcp.diagnostics["mode_selection_auto"]["chosen"] == "lcp"
     assert r_lcp.diagnostics["mode_selection"]["passivity"] == cls
     assert _vpn(r_lcp)[-1] == pytest.approx(_vpn(ref)[-1], abs=1e-7)
 
@@ -84,7 +86,8 @@ def test_the_guard_off_refuses_the_settle_s_wrong_mode_by_name():
     DD.MODE_GUARD = False
     try:
         with pytest.raises(p.UnsupportedError, match="mode guard off") as e:
-            _run(_bridge_behind_ideal_transformer(), "dsed")
+            # legacy subject: the guard is the settle's ('auto' takes 'lcp' here)
+            _run(_bridge_behind_ideal_transformer(), "dsed", mode_selection="legacy")
     finally:
         DD.MODE_GUARD = saved
     assert (e.value.engine, e.value.feature, e.value.kind) == ("dsed", "consistent_mode", "Diode")
@@ -98,8 +101,8 @@ def test_plain_rectifier_is_passive_reciprocal():
     b.add_diode("D", "a", "o", 1e3, 1e-9)
     b.add_capacitor("C", "o", "gnd", 100e-6)
     b.add_resistor("R", "o", "gnd", 100.0)
-    r = _run(b, "dsed")
-    assert r.diagnostics["mode_guard"]["passivity"] == {
+    r = _run(b, "dsed")   # the class is a build-time property: 'auto' -> 'lcp' reports it
+    assert r.diagnostics["mode_selection"]["passivity"] == {
         "class": "passive_reciprocal", "device": "", "kind": ""}
 
 
@@ -114,8 +117,8 @@ def test_rectifier_fed_by_coupled_inductors_is_passive_reciprocal():
     b.add_diode("D1", "s", "o", 1e3, 1e-9)
     b.add_capacitor("C", "o", "r", 100e-6)
     b.add_resistor("R", "o", "r", 100.0)
-    r = _run(b, "dsed")
-    assert r.diagnostics["mode_guard"]["passivity"]["class"] == "passive_reciprocal"
+    r = _run(b, "dsed")   # the class is a build-time property: 'auto' -> 'lcp' reports it
+    assert r.diagnostics["mode_selection"]["passivity"]["class"] == "passive_reciprocal"
     ref = _run(b, "pwl", dt=1e-6)
     t = np.asarray(r.times)
     v = np.asarray(r.v("o")) - np.asarray(r.v("r"))

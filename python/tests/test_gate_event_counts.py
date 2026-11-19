@@ -35,11 +35,11 @@ def _buck(duty):
     return b, f
 
 
-def _pwl(duty):
+def _pwl(duty, **kw):
     b, f = _buck(duty)
     return p.simulate(b, t_end=T_END, dt=DT, engine="pwl", switch_fn=f,
                       enable_substep_state_correction=True,
-                      discontinuity_restart=True)
+                      discontinuity_restart=True, **kw)
 
 
 def test_fixed_engine_counts_every_declared_edge():
@@ -65,10 +65,16 @@ def test_a_pulse_narrower_than_the_snap_is_counted_and_reported():
     # 0.2 ns < split_snap*dt = 0.69 ns: each fall merges into its rise,
     # except the first (its rise is the initial gate; the fall is taken
     # at the step start)
+    # legacy subject: the label tick snaps the fall onto its rise (control_tick='state' lands both)
     with pytest.warns(UserWarning, match="n_gate_events_unresolved"):
-        c = _pwl(1e-5).counters
+        c = _pwl(1e-5, control_tick="label").counters
     assert c["n_gate_events"] == EDGES_NARROW
     assert c["n_gate_events_unresolved"] == 5
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        c = _pwl(1e-5).counters
+    assert c["n_gate_events"] == EDGES_NARROW
+    assert c["n_gate_events_unresolved"] == 0
 
 
 def test_trbdf2_counts_every_declared_edge():

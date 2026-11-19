@@ -62,7 +62,8 @@ def test_healthy_circuit_still_builds():
     cache = pulsim.PwlStateSpaceCache(b.graph, b.pool)
     cache.build(1e-6)          # dt > 0: caps and inductors stamped
     assert cache.num_built_segments() == 2     # 2^1 switch states
-    res = pulsim.simulate(b, t_end=1e-4, dt=1e-6)
+    # S1 is undriven on purpose (the probe's subject is the structure); it ran closed
+    res = pulsim.simulate(b, t_end=1e-4, dt=1e-6, undriven="closed")
     assert res.num_steps() > 0
     assert all(abs(v) < 1e6 for v in res.states[-1])
 

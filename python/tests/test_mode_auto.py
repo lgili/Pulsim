@@ -65,7 +65,8 @@ def _gated():
     (_gated, "gated (T)"),
 ])
 def test_circuit_fallbacks_match_the_lcp_refusals(make, reason):
-    kw = dict(t_end=1e-4, dt=1e-6, engine="pwl")
+    # the thyristor's gate is undriven on purpose (the subject is the mode rule)
+    kw = dict(t_end=1e-4, dt=1e-6, engine="pwl", undriven="closed")
     with pytest.raises(UnsupportedError) as ei:
         p.simulate(make(), mode_selection="lcp", **kw)
     assert ei.value.feature == "mode_selection"
@@ -77,7 +78,7 @@ def test_circuit_fallbacks_match_the_lcp_refusals(make, reason):
     assert _auto(ra) == {"requested": "auto", "chosen": "legacy", "reason": reason}
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        rd = p.simulate(make(), **kw)
+        rd = p.simulate(make(), mode_selection="legacy", **kw)   # the settle, named
     assert np.array_equal(np.asarray(ra.states), np.asarray(rd.states))
 
 
@@ -108,10 +109,13 @@ def test_dsed_auto():
     assert np.array_equal(np.asarray(ra.states), np.asarray(rl.states))
 
 
-def test_auto_is_validated_and_not_the_default():
+def test_auto_is_validated_and_the_default():
     with pytest.raises(ValueError, match="'auto'"):
         p.simulate(_rect(), t_end=1e-5, dt=1e-6, engine="pwl", mode_selection="Auto")
+    # the release default (DECISIONS F5); 'legacy' is the settle, no auto record
     r = p.simulate(_rect(), t_end=1e-5, dt=1e-6, engine="pwl")
+    assert _auto(r) == {"requested": "auto", "chosen": "lcp", "reason": None}
+    r = p.simulate(_rect(), t_end=1e-5, dt=1e-6, engine="pwl", mode_selection="legacy")
     assert "mode_selection_auto" not in r.diagnostics
 
 
