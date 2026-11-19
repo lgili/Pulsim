@@ -63,7 +63,36 @@ Exact engine, `core/include/pulsim/dsed/scheduler.hpp` + `builder_adapter.hpp`:
   `project_` would change control flow (and numbers); a record must be added after the decision.
 - `PEDSimulatorAuto` (scheduler_auto.hpp) only calls `reinit_to_constraint`, no fast projection.
 
-## Hypotheses per finding
+## Traces (env-guarded fprintf in `run_restart`, x0 / stage 1 / stage 2 / end; not committed) [M]
+
+- F-5-1, step t = 0, h = 1 ns, x = (v_g, v_sw, ., i_L):
+  `x0: 15 0 0 100` -> `s1: v_sw = -3.41421e8, i_L = 0` -> `s2: v_sw = 8.57106, i_L = -141.421`.
+  -141.421 = 100 + 2.41421·(0 - 100) = x0* exactly: stage 2 found the IGBT's forward channel at
+  the pseudo-state and stayed there. PROVEN. No diode bits (the IGBT level 1 is a smooth Newton device).
+- F-3-3, first turn-off t = 5 µs, dt = 10 ns, bits (Q1_body, D1), x = (v_in, v_sw, ., ., ., i_p, -i_p, i_s):
+  `x0: bits 00, v_sw 0.0206, i_p -2.061` -> `s1: bits 01, v_sw 3567 V, i_p -7.1e-6, i_s 3.964` ->
+  `s2: bits 11 (body diode ON), v_sw -0.703, i_p +2.887` (≈ -√2·i_p(x0) = +2.915). The body diode is
+  OFF at x0 and in stage 1 and turns on in stage 2 only — the case the stage-2 check excluded.
+  With the exclusion removed: `RS retry keep_be=1`, end `bits 01, v_sw 48.01, i_p -9.6e-8`. PROVEN.
+- F-3-7 (saturable PSFB, dt = 50 ns): the failing restart step at t = 21.5 µs prints `x0` for every
+  halving (50 ns ... 0.78 ns) and never `s1`: Newton fails in STAGE 1 (||dx|| 1.1e4 V at vout).
+  Not the stage-2 pseudo-state; the stage-2 fix leaves it unchanged. PROVEN negative.
+- F-3-1 (bridge1_vf07, k = 0 vs k = 2 ulp): both take the split's "inside" branch;
+  k = 0: `t_d = 33.70395 ms, x0 bits 0010` (one diode), stage 1 turns the second on (iters 2),
+  end i = 14.2994 A; k = 2: `t_d = 33.7040466 ms, x0 bits 0110` (both within snap), end 14.1918 A.
+  The two series diodes of the floating bridge can only conduct together; the split locates the
+  event at the FIRST single diode's interpolated crossing, a tie decided by leakage/rounding. Not an
+  impulse; the stage-2 fix leaves it unchanged. PROVEN.
+- F-5-10 (exact engine): the event projection is OFF by default (`enable_event_projection_ = false`),
+  so the 1 ps g_off mode is integrated exactly; `right_limit_states` at each turn-off holds
+  v_sw = 2.39994e9 V = i_L/g_off and i_L = 2.39994 A (continuous). The energy is dissipated in g_off
+  in that picosecond: nothing is dropped. The defect is the voltage-sanity guard
+  (`_auto_check_voltage_sanity`, python/pulsim/__init__.py) reading only the stored samples, not the
+  right limits. (Also seen, group B: `device_loss_summary` integrates that right-limit spike as a
+  1 µs trapezoid: S's E_total = 5760 J, P_avg 1.9e7 W.) The reading "drops 2.4 A" in r2/bucket-5.md
+  is a misreading of the sampled trace. PROVEN.
+
+## Hypotheses per finding (written before the traces; see above for what held)
 
 - **F-5-1 / F-3-3 [H, numbers consistent]**: the stage-2 pseudo-state. Stage 1 (BE of γh) relaxes the
   stiff interruption (i ≈ 0); x0* = x0 + c(x1 - x0) ≈ (1 - c)·x0 = -√2·x0 (1 - 2.41421 = -1.41421).
