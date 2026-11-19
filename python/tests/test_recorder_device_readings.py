@@ -18,7 +18,6 @@ import pytest
 
 import pulsim as p
 
-from .test_recorders import _skip_legacy_trbdf2
 
 EPS = np.finfo(float).eps
 _RUNS = {"pwl": dict(engine="pwl", dt=1e-6),
@@ -77,7 +76,6 @@ def _run(fac, eng, probes, **rec):
 @pytest.mark.parametrize("eng", sorted(_RUNS))
 @pytest.mark.parametrize("circ", sorted(_CIRCUITS))
 def test_kcl_holds_at_every_recorded_sample(circ, eng):
-    _skip_legacy_trbdf2(eng)
     _, _, _, kcl, caps = _CIRCUITS[circ]()
     devs = sorted({t.lstrip("-") for ts in kcl.values() for t in ts})
     vs = sorted({f"v({n})" for n, _ in caps.values()})
@@ -106,7 +104,6 @@ def test_kcl_holds_at_every_recorded_sample(circ, eng):
 @pytest.mark.parametrize("eng", sorted(_RUNS))
 @pytest.mark.parametrize("circ", ["rc", "buck", "rectifier"])
 def test_capacitor_charge_over_mid_step_windows(circ, eng):
-    _skip_legacy_trbdf2(eng)
     _, _, t_end, _, caps = _CIRCUITS[circ]()
     (cap, (nodes, c)), = caps.items()
     wins = [(0.07 * t_end + 1.234e-9, 0.29 * t_end + 4.321e-9),
@@ -133,8 +130,6 @@ _BUCK_P = ["p(V)", "p(S1)", "p(D1)", "p(R)", "p(L)", "p(C)"]
 
 @pytest.mark.parametrize("eng", ["pwl", "trbdf2", "exact"])
 def test_energy_balance_from_recorder_outputs(eng):
-    if eng != "exact":
-        _skip_legacy_trbdf2(eng)
     # the exact engine is read from its stored samples (linear between
     # them): sampled every 1 us, as the pwl grid
     run = dict(_RUNS.get(eng, {"engine": "exact", "dt": 1e-6}))
@@ -208,7 +203,6 @@ _NEWTON = {
 def test_newton_kind_current_equals_its_series_resistor(kind, eng):
     # KCL at the device's terminal against a series resistor, at every
     # sample, and p() = v(mid)·i() for a two-terminal law
-    _skip_legacy_trbdf2(eng)
     run = dict(_RUNS[eng], dt=2e-6) if eng == "pwl" else _RUNS[eng]
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
@@ -229,7 +223,6 @@ def test_newton_kind_current_equals_its_series_resistor(kind, eng):
 
 @pytest.mark.parametrize("eng", sorted(_RUNS))
 def test_vcvs_and_current_source_readings(eng):
-    _skip_legacy_trbdf2(eng)
     b = p.CircuitBuilder()
     b.add_sine_current_source("I1", "a", "gnd", 0.1, 0.05, 1e3)
     b.add_resistor("Ra", "a", "gnd", 20.0)

@@ -20,7 +20,6 @@ import pytest
 import pulsim as p
 
 from .test_recorder_device_readings import _buck
-from .test_recorders import _skip_legacy_trbdf2
 
 _RUNS = {"pwl": dict(engine="pwl", dt=1e-6),
          "trbdf2": dict(engine="trbdf2", rtol=1e-7, atol=1e-10)}
@@ -68,7 +67,6 @@ def _compare(a, b, exact):
 
 @pytest.mark.parametrize("eng", sorted(_RUNS))
 def test_resumed_record_equals_the_uninterrupted_one(eng):
-    _skip_legacy_trbdf2(eng)
     whole = _sim(T_END, recorders=_recs(), **_RUNS[eng])
     first = _sim(T_SPLIT, recorders=_recs(), **_RUNS[eng])
     snap = first.final_snapshot
@@ -92,7 +90,6 @@ def test_resumed_record_equals_the_uninterrupted_one(eng):
 
 @pytest.mark.parametrize("eng", sorted(_RUNS))
 def test_resume_without_recorder_state_says_so(eng):
-    _skip_legacy_trbdf2(eng)
     snap = _sim(T_SPLIT, **_RUNS[eng]).final_snapshot   # no recorders: no state
     assert len(snap.recorder_state) == 0
     rec = p.Recorder("s", ["v(out)"], keep="none", period=0.13e-3)
