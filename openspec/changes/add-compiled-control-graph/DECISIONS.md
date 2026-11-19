@@ -813,3 +813,13 @@ then ticked themselves): the queue path changed no number.
   `(x, h) -> rows` in both loops. (4) 7.2: a comparator gate as a state
   event needs a located queue source (`add_located`) fed by a crossing
   locator over the step's state interpolant, i.e. a loop hook.
+- **Hand-off (2026-11-18, after G32 / G33).** Open: 6.2 and group 7
+  (hook requests (3) / (4): loop hooks, frozen loops); a dsed snapshot
+  (request (1)); 10.1 docs (control guide: `control_tick='state'` on the
+  queue, pickled controller state). Verified on this tip (macOS): ruff,
+  full pytest (5197 passed + the 3 stub tests after regenerating the
+  stub), `pytest -m reference` 368 passed, `reference_status` exit 0 with
+  the table unchanged, openspec strict, stub `--check`, the cl_buck_pi
+  label / state runs and a two-rate chain byte-identical to the tree
+  before. The full ctest had not finished building when this was written:
+  run it before pushing.
