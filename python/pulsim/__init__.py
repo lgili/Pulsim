@@ -2649,19 +2649,10 @@ def simulate(
     # (fix-control-tick-semantics). Above the dispatch so its refusals
     # (controller_period without an observer, a bad period) hold on
     # every engine; dsed ticks them on its event queue.
-    if control_tick not in ("label", "state"):
-        raise ValueError(
-            f"simulate(control_tick={control_tick!r}): use 'label' (the "
-            "default) or 'state'")
     from ._control_plan import monitor_flags as _monitor_flags
-    _plan = _compose_control(builder, closed_loops, step_observer,
-                             controller_period, switch_fn,
-                             resume=resume_from is not None,
-                             snapshot=resume_from,
-                             control_tick=control_tick)
-    # A control graph's driven sources reach every engine (above the
-    # dispatch: add-compiled-control-graph).
-    b_extra_fn = _plan.merge_b_extra(b_extra_fn)
+    _plan, b_extra_fn = _compose(builder, closed_loops, step_observer,
+                                 controller_period, switch_fn, b_extra_fn,
+                                 resume_from, control_tick)
 
     # ---- Parameter sensitivities: the exact path only. Above the
     # dispatch (three early returns below), so every engine refuses or
@@ -2716,31 +2707,12 @@ def simulate(
             enable_newton_lm=enable_newton_lm,
             newton_roundoff_budget=newton_roundoff_budget,
             should_continue=should_continue)
-        # Controllers tick on the integrator's event queue
-        # (add-unified-event-queue group 3), as on trbdf2.
-        _plan = _plan.for_variable_step("dsed")
-        if _plan.every_step:
-            raise _unsupported(
-                "dsed", "step_observer",
-                "simulate(engine='dsed'): a step_observer needs a cadence: "
-                "this engine has no fixed grid to ride, so pass "
-                "controller_period=<T_ctrl seconds> and the ticks are "
-                "scheduled exactly. A ClosedLoop from bind_pi_to_switch "
-                "carries its own period.")
-        if _plan.ticks and sensitivities is not None:
-            raise _unsupported(
-                "dsed", "sensitivities",
-                "simulate(engine='dsed', sensitivities=...) with controllers: "
-                "the sensitivity run has no control ticks, so the loop would "
-                "run open. Drop sensitivities or the controllers.")
-        if _plan.ticks and float(t_start) != 0.0:
-            raise _unsupported(
-                "dsed", "step_observer",
-                "simulate(engine='dsed', t_start != 0) with controllers: the "
-                "engine runs the gate in its own time from 0, the controller "
-                "in simulate()'s time. Start at t_start=0, or use "
-                "engine='trbdf2'.")
-        switch_fn = _plan.switch_fn
+        (_plan, switch_fn, step_observer, _step_observer_user, _b_extra_fn_user,
+         _closed_loops_user) = _compose_for(
+            "dsed", _plan, t_start=t_start, t_end=t_end, dt=dt,
+            sensitivities=sensitivities, switch_fn=switch_fn,
+            step_observer=step_observer, b_extra_fn=b_extra_fn,
+            closed_loops=closed_loops)
         # The DSED branch returns here, ~400 lines before the PWL
         # tail that attaches `_builder` / `_preflight`. Attach the
         # preflight report on the way out, so `result._preflight` —
@@ -2879,23 +2851,12 @@ def simulate(
         # Every unsupported combination was already caught by
         # _trbdf2_blockers above (which is also what routes
         # engine='auto' away from here).
-        # ---- controllers on an EXACT cadence ----
-        # Each tick source of the plan is scheduled at its own
-        # t_start + k*T_j, landed like a gate edge; `.tick` (the
-        # loop's unthrottled update) is what the plan holds. An
-        # every-step observer has no grid to ride here.
-        # A control graph with rates runs on its group ticks here.
-        _plan = _plan.for_variable_step()
-        if _plan.every_step:
-            raise _unsupported(
-                "trbdf2", "step_observer",
-                "simulate(engine='auto'): a step_observer needs a "
-                "cadence. This engine has no fixed grid to ride, "
-                "so pass controller_period=<T_ctrl seconds> (the "
-                "rate your controller samples at) and the tick "
-                "instants are scheduled exactly. A ClosedLoop from "
-                "bind_pi_to_switch carries its own period.")
-        switch_fn = _plan.switch_fn
+        (_plan, switch_fn, step_observer, _step_observer_user, _b_extra_fn_user,
+         _closed_loops_user) = _compose_for(
+            "trbdf2", _plan, t_start=t_start, t_end=t_end, dt=dt,
+            sensitivities=sensitivities, switch_fn=switch_fn,
+            step_observer=step_observer, b_extra_fn=b_extra_fn,
+            closed_loops=closed_loops)
 
         _span = float(t_end) - float(t_start)
         # 0 = let the kernel pick: it knows the circuit's fastest
@@ -2922,11 +2883,7 @@ def simulate(
             mode_selection=mode_selection, integrator=integrator)
         _n_sw = builder.graph.num_switches
         if switch_fn is None:
-            # No driver: all-OPEN here (the v2.0 semantics; the
-            # fixed engine's all-CLOSED legacy default is what the
-            # router sends this case to instead — flipping THAT is
-            # its own breaking change, not this one).
-            switch_fn = make_constant_switch_fn(SwitchStateMask(_n_sw))
+            switch_fn = _undriven("trbdf2", builder)
         try:
             if _run_circuit is not None and _kernel_run is None:
                 # add-kernel-simulation-object 11.1: through the kernel object.
@@ -3056,24 +3013,12 @@ def simulate(
     # mypy/pyright: narrow Optional[float] → float.
     assert dt is not None and dt > 0
 
-    # T2.2: snapshot the user's original observer/closed_loops args
-    # so the post-run motor-trace auto-attach can walk them. The
-    # local names get rebound below by the progress / closed_loops
-    # / compose-observer wrappers.
-    _step_observer_user = step_observer
-    _b_extra_fn_user = b_extra_fn
-    _closed_loops_user = closed_loops
-    _switch_fn_user = switch_fn
-
-
-    # Controllers, closed-loop graphs and C blocks from the plan composed
-    # above the dispatch (_control_plan.compose_control; its b_extra was
-    # merged there too): the gates merged into one switch_fn, the graphs
-    # ticking themselves, Python tick sources through the integer-k
-    # scheduler, then the every-step observers.
-    switch_fn = _plan.switch_fn
-    step_observer = _plan.for_fixed_step(float(t_start), float(t_end),
-                                         float(dt))
+    (_plan, switch_fn, step_observer, _step_observer_user, _b_extra_fn_user,
+     _closed_loops_user) = _compose_for(
+        "pwl", _plan, t_start=t_start, t_end=t_end, dt=dt,
+        sensitivities=sensitivities, switch_fn=switch_fn,
+        step_observer=step_observer, b_extra_fn=b_extra_fn,
+        closed_loops=closed_loops)
 
     # Build the PWL cache — LAZY by default (Phase-0 fix #7).
     # A PWM converter visits only a handful of the 2^N switch
@@ -3270,29 +3215,7 @@ def simulate(
     # CONTROLLED switches exist, warn loudly; v2.0 flips the
     # default to all-OPEN and makes this an error.
     if switch_fn is None:
-        n_sw = builder.graph.num_switches
-        try:
-            _, _n_diode, _controlled = _switch_census(
-                builder.graph, builder.pool)
-        except (AttributeError, TypeError):  # test doubles w/o pool
-            _controlled = []
-        if _controlled:
-            import warnings
-            warnings.warn(
-                f"simulate(): no switch_fn was given, but the "
-                f"circuit has {len(_controlled)} controlled "
-                f"switch(es) (indices {list(_controlled)}). They "
-                "default to ALL CLOSED, which short-circuits "
-                "bridge legs (shoot-through). Pass an explicit "
-                "switch_fn / closed_loops that drives these bits. "
-                "In Pulsim v2.0 this becomes an error and the "
-                "default flips to all-OPEN.",
-                stacklevel=2)
-        default_mask = SwitchStateMask(n_sw)
-        for i in range(n_sw):
-            default_mask.set(i, True)
-        # Evaluated in C++: no Python callable in the step loop.
-        switch_fn = make_constant_switch_fn(default_mask)
+        switch_fn = _undriven("pwl", builder, stacklevel=3)
 
     # enable_nonlinear_refresh=None goes through as is: the kernel
     # stamps the Newton devices when the circuit has any, and refuses
@@ -3683,6 +3606,167 @@ def simulate(
 # the function object at import (a caller may wrap pulsim.simulate).
 _SIMULATE_DEFAULTS = {"t_end": simulate.__defaults__[0],
                       "dt": simulate.__defaults__[1], **simulate.__kwdefaults__}
+
+
+def _undriven(engine, builder, stacklevel=2):
+    """The switch_fn of a run given none (Stage A, task 5.2): ONE function,
+    today's three per-engine behaviours kept (DECISIONS 8; one policy is the
+    BREAKING task 11.3). 'trbdf2': all OPEN, silent. 'pwl' / 'dsed': all
+    CLOSED (the v1 legacy), with a warning when the circuit has controlled
+    switches (a bridge leg would shoot through). Each engine calls it where
+    it always decided this: trbdf2 while planning, pwl after the cache hooks,
+    dsed inside its dispatcher (`stacklevel`: the caller's frame depth)."""
+    n_sw = builder.graph.num_switches
+    if engine == "trbdf2":
+        # No driver: all-OPEN here (the v2.0 semantics; the
+        # fixed engine's all-CLOSED legacy default is what the
+        # router sends this case to instead — flipping THAT is
+        # its own breaking change, not this one).
+        return make_constant_switch_fn(SwitchStateMask(n_sw))
+    if engine == "pwl":
+        try:
+            _, _n_diode, _controlled = _switch_census(
+                builder.graph, builder.pool)
+        except (AttributeError, TypeError):  # test doubles w/o pool
+            _controlled = []
+    else:
+        try:
+            from ._pulsim import _switch_census as _census
+            _, _nd, _controlled = _census(
+                builder.graph, builder.pool)
+        except Exception:  # noqa: BLE001
+            _controlled = []
+    if _controlled:
+        import warnings
+        if engine == "pwl":
+            warnings.warn(
+                f"simulate(): no switch_fn was given, but the "
+                f"circuit has {len(_controlled)} controlled "
+                f"switch(es) (indices {list(_controlled)}). They "
+                "default to ALL CLOSED, which short-circuits "
+                "bridge legs (shoot-through). Pass an explicit "
+                "switch_fn / closed_loops that drives these bits. "
+                "In Pulsim v2.0 this becomes an error and the "
+                "default flips to all-OPEN.",
+                stacklevel=stacklevel)
+        else:
+            warnings.warn(
+                f"simulate(engine='dsed'): no switch_fn was given, "
+                f"but the circuit has {len(_controlled)} controlled "
+                f"switch(es) (indices {list(_controlled)}). They "
+                "default to ALL CLOSED, which short-circuits bridge "
+                "legs (shoot-through). Pass an explicit switch_fn.",
+                stacklevel=stacklevel)
+    default_mask = SwitchStateMask(n_sw)
+    for i in range(n_sw):
+        default_mask.set(i, True)
+    if engine == "pwl":
+        # Evaluated in C++: no Python callable in the step loop.
+        return make_constant_switch_fn(default_mask)
+    try:   # native and edge-free: no Python call per step (pwl's default too)
+        from . import _pulsim as _nat   # type: ignore[attr-defined]
+        return _nat.make_constant_switch_fn(default_mask)
+    except (ImportError, AttributeError):
+        return lambda _t: default_mask
+
+
+def _compose(builder, closed_loops, step_observer, controller_period,
+             switch_fn, b_extra_fn, resume_from, control_tick):
+    """ONE composition of what drives the circuit, for every engine (Stage
+    A, task 5; fix-control-tick-semantics): closed loops, observers with a
+    period, C blocks and control graphs from the circuit, the user's
+    switch_fn, and the graphs' driven sources summed into b_extra_fn.
+    Returns ``(control_plan, b_extra_fn)``; `_compose_for` specialises the
+    plan for the engine the run lands on."""
+    if control_tick not in ("label", "state"):
+        raise ValueError(
+            f"simulate(control_tick={control_tick!r}): use 'label' (the "
+            "default) or 'state'")
+    _plan = _compose_control(builder, closed_loops, step_observer,
+                             controller_period, switch_fn,
+                             resume=resume_from is not None,
+                             snapshot=resume_from,
+                             control_tick=control_tick)
+    # A control graph's driven sources reach every engine (above the
+    # dispatch: add-compiled-control-graph).
+    b_extra_fn = _plan.merge_b_extra(b_extra_fn)
+    return _plan, b_extra_fn
+
+
+def _compose_for(engine, _plan, *, t_start, t_end, dt, sensitivities,
+                 switch_fn, step_observer, b_extra_fn, closed_loops):
+    """The control plan for the engine the run landed on (Stage A, task
+    5): its tick sources on the variable-step event queue (trbdf2, dsed)
+    or the fixed grid (pwl), the gates merged into one switch_fn. Returns
+    ``(control, switch_fn, step_observer, user_step_observer,
+    user_b_extra_fn, user_closed_loops)``; the user_* are the callables as
+    passed (pwl only: the motor-trace attachment walks them)."""
+    _step_observer_user = _b_extra_fn_user = _closed_loops_user = None
+    if engine == "dsed":
+        # Controllers tick on the integrator's event queue
+        # (add-unified-event-queue group 3), as on trbdf2.
+        _plan = _plan.for_variable_step("dsed")
+        if _plan.every_step:
+            raise _unsupported(
+                "dsed", "step_observer",
+                "simulate(engine='dsed'): a step_observer needs a cadence: "
+                "this engine has no fixed grid to ride, so pass "
+                "controller_period=<T_ctrl seconds> and the ticks are "
+                "scheduled exactly. A ClosedLoop from bind_pi_to_switch "
+                "carries its own period.")
+        if _plan.ticks and sensitivities is not None:
+            raise _unsupported(
+                "dsed", "sensitivities",
+                "simulate(engine='dsed', sensitivities=...) with controllers: "
+                "the sensitivity run has no control ticks, so the loop would "
+                "run open. Drop sensitivities or the controllers.")
+        if _plan.ticks and float(t_start) != 0.0:
+            raise _unsupported(
+                "dsed", "step_observer",
+                "simulate(engine='dsed', t_start != 0) with controllers: the "
+                "engine runs the gate in its own time from 0, the controller "
+                "in simulate()'s time. Start at t_start=0, or use "
+                "engine='trbdf2'.")
+        switch_fn = _plan.switch_fn
+    elif engine == "trbdf2":
+        # ---- controllers on an EXACT cadence ----
+        # Each tick source of the plan is scheduled at its own
+        # t_start + k*T_j, landed like a gate edge; `.tick` (the
+        # loop's unthrottled update) is what the plan holds. An
+        # every-step observer has no grid to ride here.
+        # A control graph with rates runs on its group ticks here.
+        _plan = _plan.for_variable_step()
+        if _plan.every_step:
+            raise _unsupported(
+                "trbdf2", "step_observer",
+                "simulate(engine='auto'): a step_observer needs a "
+                "cadence. This engine has no fixed grid to ride, "
+                "so pass controller_period=<T_ctrl seconds> (the "
+                "rate your controller samples at) and the tick "
+                "instants are scheduled exactly. A ClosedLoop from "
+                "bind_pi_to_switch carries its own period.")
+        switch_fn = _plan.switch_fn
+    else:
+        # T2.2: snapshot the user's original observer/closed_loops args
+        # so the post-run motor-trace auto-attach can walk them. The
+        # local names get rebound below by the progress / closed_loops
+        # / compose-observer wrappers.
+        _step_observer_user = step_observer
+        _b_extra_fn_user = b_extra_fn
+        _closed_loops_user = closed_loops
+        _switch_fn_user = switch_fn
+
+
+        # Controllers, closed-loop graphs and C blocks from the plan composed
+        # above the dispatch (_control_plan.compose_control; its b_extra was
+        # merged there too): the gates merged into one switch_fn, the graphs
+        # ticking themselves, Python tick sources through the integer-k
+        # scheduler, then the every-step observers.
+        switch_fn = _plan.switch_fn
+        step_observer = _plan.for_fixed_step(float(t_start), float(t_end),
+                                             float(dt))
+    return (_plan, switch_fn, step_observer, _step_observer_user,
+            _b_extra_fn_user, _closed_loops_user)
 
 
 def _route(engine, builder, _dsed, _plan, _opt_values, *, dt, t_start,

@@ -128,7 +128,7 @@ def _calls(fn):
 # re-raise. Each is a guard around a NON-kernel call or a post-run report
 # (never the run itself). Shrink this; never grow it.
 _SWALLOWING_HELPERS = {
-    ("_dsed_dispatch.py", "run_dsed_from_builder"),  # _switch_census, test doubles
+    ("__init__.py", "_undriven"),                    # _switch_census, test doubles
     ("__init__.py", "_trbdf2_blockers"),             # _switch_census, test doubles
     ("__init__.py", "_warn_resolution"),             # state_var_names, test doubles
     ("__init__.py", "_auto_attach_motor_traces"),    # a bundle's attach_to_result
