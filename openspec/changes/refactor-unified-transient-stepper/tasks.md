@@ -48,7 +48,8 @@ at equal times or time-weighted measures, never sample means.
   - Slice 3b (DECISIONS 15): the TR-BDF2 loop cut in place into eight phase lambdas that the legacy loop and the twin `step::run<TrBdf2>(BodyClock, phase_body(...))` both call (internal `PULSIM_TRBDF2_STEPPER_TWIN=1`, not an engine name); the skeleton grew a deciding-body branch (one ATTEMPT per call; `Verdict::Reject` restarts at poll with no rollback; `End`). Identity: see DECISIONS 15. Cost gate met after DECISIONS 16 (both drivers forced inline; default +0.10–0.35 % over the base, twin ≤ 1.0007× default). Open: `trbdf2-next` name / route; the decision (reject, forced accept, chatter guard) still in the body, not in the controller; a skeleton-owned rollback
 - [ ] 6.2 Equality proof: `trbdf2-next` step-identical to `trbdf2` on every harness circuit and every suite circuit that runs on `trbdf2`; runner job added
 - [ ] 6.3 Zero-alloc test for the variable-step stepper (accepted, rejected and Newton-retried steps)
-- [ ] 6.4 Switch `engine='trbdf2'` and `engine='auto'` without `dt` to the stepper; keep `engine='trbdf2-legacy'`
+- [x] 6.4 Switch `engine='trbdf2'` and `engine='auto'` without `dt` to the stepper; keep `engine='trbdf2-legacy'`
+  - Slice 3c (DECISIONS 17): the skeleton driver is the default of `run_transient_trbdf2` (so of every route that reaches it); the old loop is kept only behind the internal `PULSIM_TRBDF2_STEPPER_LEGACY=1`, NOT as a public `trbdf2-legacy` name (orchestrator's brief: no public option). Default byte-identical to the previous default; identity tool at full counts
 - [ ] 6.5 Oracle: matrix equal for `trbdf2` and `trbdf2-legacy`; counter gate equal; ns/step rows 5–9 not above 0.2
 - [ ] 6.6 Docs: `docs/solvers.md`, CHANGELOG (the legacy name and its removal date)
 
@@ -70,7 +71,9 @@ at equal times or time-weighted measures, never sample means.
 ## 8. Switch the fixed engine
 - [ ] 8.1 Equality proof over the whole harness and suite: trajectory hashes, mode record, `commutation_events`, `event_iteration_count`, `dt_retries`, `inductor_guard_actions`
 - [ ] 8.2 Port the five cases of `test_zero_alloc.cpp` to the stepper
-- [ ] 8.3 Switch `engine='pwl'` and `engine='auto'` with `dt`; keep `engine='pwl-legacy'` and the raw `run_transient` binding on the old function
+- [x] 8.3 Switch `engine='pwl'` and `engine='auto'` with `dt`; keep `engine='pwl-legacy'` and the raw `run_transient` binding on the old function
+  - Slice 3c (DECISIONS 17): the skeleton driver is the default of `run_transient` (dynamic AND static path, the raw binding included); the old loop is kept only behind the internal `PULSIM_PWL_STEPPER_LEGACY=1`, no public `pwl-legacy` name (brief). Static path cut in place into four phases on the same `FixedController`. Probes R2 (`StepHooks::on_event`) on both engines; R1 / #31 in the fixed engine's shared phases
+  - OPEN: the cost gate (new default within 0.5 % of the old) is NOT met on pwl: buck +1.4 %, VSI +0.8 %, RLC +0.55 % (static, Shockley and every trbdf2 case within it); cause located (the skeleton driver's register pressure, 253 vs 152 stack reloads), not removed. Tip on `wip/core-p3-stepper-3c`
 - [ ] 8.4 Oracle: goldens bit-identical; counter gate equal; ns/step rows 1–3 not above 0.2; build time within +10 %
 - [ ] 8.5 Docs: `docs/mental-model.md`, `docs/solvers.md`, `AI_GUIDE.md` engine section, CHANGELOG
 

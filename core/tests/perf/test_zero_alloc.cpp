@@ -816,13 +816,14 @@ TEST_CASE("stored-charge kinds (Lauritzen, IGBT tail): allocation count is "
 }
 
 namespace {
-// The fixed engine's twin on the step skeleton is internal: selected by
-// PULSIM_PWL_STEPPER_TWIN=1 (refactor-unified-transient-stepper DECISIONS 13).
+// The fixed engine's skeleton driver is the default since slice 3c; the
+// legacy loop is internal, PULSIM_PWL_STEPPER_LEGACY=1
+// (refactor-unified-transient-stepper DECISIONS 17).
 void set_pwl_twin(bool on) {
 #ifdef _WIN32
-    _putenv_s("PULSIM_PWL_STEPPER_TWIN", on ? "1" : "0");
+    _putenv_s("PULSIM_PWL_STEPPER_LEGACY", on ? "0" : "1");
 #else
-    setenv("PULSIM_PWL_STEPPER_TWIN", on ? "1" : "0", 1);
+    setenv("PULSIM_PWL_STEPPER_LEGACY", on ? "0" : "1", 1);
 #endif
 }
 }  // namespace
@@ -868,13 +869,15 @@ TEST_CASE("fixed engine twin on the step skeleton: the legacy run, its own hooks
                                        switch_fn, {}, false, {}, {}, nullptr,
                                        {}, nullptr, {}, {}, nullptr, &hooks);
         const std::size_t d = g_new_count.load() - b0;
-        set_pwl_twin(false);
+        set_pwl_twin(true);   // back to the default
         return std::pair{d, std::move(r)};
     };
     auto [d_old, r_old] = run(false, 2e-3);
     CHECK(n_acc == 2000);
-    CHECK(n_step == 0);   // the legacy loop never calls the skeleton's hooks
-    CHECK(n_dev == 0);
+    // slice 3c: the hooks live in the shared phases, so the legacy loop
+    // calls them too
+    CHECK(n_step == 2000);
+    CHECK(n_dev == 2000);
     run(true, 2e-3);      // warm-up
     auto [d2, r2] = run(true, 2e-3);
     CHECK(n_acc == 2000);

@@ -589,3 +589,143 @@ says where the implementation departs from them or what it settled.
     verdict would stop the twin where legacy continues (no phase returns
     either), and `BodyClock::frame()` is sized from the proposal before
     `begin` changes `h` (no phase reads the frame).
+
+17. **Slice 3c: the skeleton driver is THE driver on both engines; the
+    static path on the skeleton; probes R2 (2026-11-19).** No number
+    changes by construction: the default now calls the same phase
+    lambdas through `step::run<…>` instead of the old loop.
+
+    Switch. `run_transient` (dynamic AND static path) and
+    `run_transient_trbdf2` call the skeleton driver unless the internal
+    environment variable `PULSIM_PWL_STEPPER_LEGACY=1` /
+    `PULSIM_TRBDF2_STEPPER_LEGACY=1` selects the old loop (read once per
+    run; no option, no binding, no engine name — the brief overrides the
+    design's public `pwl-legacy` / `trbdf2-legacy` names, which stay
+    unbuilt; tasks 6.4 / 8.3 are done without them). The slice-3a/3b
+    `…_STEPPER_TWIN` variables are accepted and ignored (nothing reads
+    them; a script that sets them now compares the skeleton with itself).
+    The skeleton is the dispatch's fall-through on both engines. The
+    identity tools keep their names; `twin(on)` now clears / sets the
+    LEGACY variable.
+
+    Static path (no capacitor / inductor: a cache built at dt = 0, i.e.
+    the raw `run_transient` binding; `simulate()` never reaches it). Its
+    loop body is cut in place into `st_begin(k)`, `st_take()`,
+    `st_after(k)`, `st_record(k)` (nothing to commit). Sample 0 (the first
+    solve, `hooks->start`) runs before the skeleton's steps, as the dynamic
+    path's IC sample; the skeleton runs k = 1 .. n_steps − 1 on the same
+    `FixedController`. The static path never polled cancellation and still
+    does not (`poll` is `true`). Both static drivers are forced inline into
+    `run_transient` (out of line they cost +1.3–1.7 % per step on a 2.3k
+    instruction step: the same closure hops as DECISIONS 16).
+
+    Hooks, in the shared phases (both drivers) on the fixed engine; one
+    test per step without a listener: the start mask for R1 / R2 is copied
+    at the END of the previous step's record (under `hook_mask`), #31
+    `device_state` moved into the record's existing `if (hooks)` before
+    `accepted` (still after the commit; nothing between them changes x or
+    the histories). TR-BDF2 keeps R1 / #31 in the skeleton's `on_step`
+    (its legacy loop does not call them). R2 `StepHooks::on_event(t,
+    x_left, mask_left, x_right, mask_right)`:
+    TR-BDF2 at a gate edge (in `restart_after_gate_event`, after the
+    settle: the committed solve at t under `x_mask`, the settled probe
+    under the new stamp) and at a diode landing that commutated (the
+    landed solve under the step's mask, the cascade's last probe).
+    Fixed engine at the end of a step whose stamp differs from the
+    start's: t = t_prev, x_left the committed state there under the old
+    stamp, x_right the step's end under the new one (a bracket within one
+    dt: pwl solves no right limit at the instant). Not reported (listed in
+    step_hooks.hpp): TR-BDF2 edges with `refresh_after_event` off, a
+    failed probe, entry into a dependent mode; fixed-engine changes that
+    revert inside one step; a seeded start's first step (its stamp is a
+    guess: `mask_start_known` from `stamped_known`, from the reviewer);
+    the static path. Test: `test_switch_state_record.cpp` "Step hooks on
+    the default driver" (fixed / TR-BDF2): every R2 side satisfies its own
+    mask's device laws, gate events sit on (TR-BDF2) or within dt of
+    (fixed) an edge, at least one right side violates the left mask's
+    laws; R1 chains (fixed: always; TR-BDF2: the gate edge's restart
+    commits inside the landing step's commit, so the chain does not break
+    and that step's x_end is the post-edge state — the edge's left limit
+    is R2's); #31 once per R1.
+
+    **Cost gate NOT met on the fixed engine (trbdf2 met).** Instructions
+    retired per accepted step (`.scratch/instr_inproc.py`, min of 3 per
+    run; OLD = the starting tip 67fef260's default, the legacy loop, three
+    runs; NEW = this tip's default, the skeleton).
+
+    | case | OLD (3 runs) | NEW (3 runs) | NEW / OLD (min) |
+    |---|---|---|---|
+    | buck_pwl | 3034 / 3040 / 3042 | 3078 / 3077 / 3077 | 1.0140 |
+    | vsi_pwl | 4698 / 4703 / 4706 | 4736 / 4741 / 4741 | 1.0082 |
+    | vsi_pwl_restart | 4861 / 4868 / 4866 | 4907 / 4905 / 4901 | 1.0083 |
+    | shockbuck_pwl | 18639 / 18643 / 18649 | 18676 / 18677 / 18675 | 1.0020 |
+    | rlc152_pwl | 18395 / 18437 / 18428 | 18496 / 18590 / 18549 | 1.0055 |
+    | static_pwl (raw binding, dt = 0 cache, 4 diodes + switch) | 2301 / 2317 / 2304 | 2304 / 2304 / 2304 | 1.0015 |
+    | buck_trbdf2 | 10860 / 10859 / 10862 | 10863 / 10860 / 10864 | 1.0001 |
+    | bridge_trbdf2 (floating bus) | 12633 / 12627 / 12649 | 12640 / 12638 / 12633 | 1.0004 |
+    | shockbuck_trbdf2 | 72298 / 72286 / 72300 | 72258 / 72274 / 72270 | 0.9996 |
+
+    The legacy loop of the same final build (the `twin` column with the
+    LEGACY variable) reads buck 3045–3047, VSI 4704–4711: the shared-phase
+    hooks cost the legacy loop ~+5–10 per step (one test per step), the
+    skeleton driver itself another ~30.
+
+    What was tried on pwl, each a build measured the same way (buck_pwl
+    NEW, legacy loop of the same build in brackets; OLD 3034–3042):
+    (s1) switch only, drivers out of line, R1/#31 in the skeleton adapters:
+    3064 [3039]; (s3) + `FixedController::advance_whole` (frame times dead,
+    `partial` constant): 3066 [3040], no change; (s4) both drivers forced
+    inline (3b's layout): 3086 [3086] — worse for both, rule 14 (2) holds
+    for pwl; (s5) drivers out of line, hooks moved into the shared phases
+    so the skeleton driver's closure holds only the phases: 3055 [3055];
+    (s6) one hook test per step: 3066 [3045]; (s7) a `whole_steps` fast
+    path in `step_once` (the legacy loop's shape): byte-identical code to
+    s6 (the generic path already folds), reverted with advance_whole.
+    Disassembly (`otool`/`objdump` of the two out-of-line drivers, s6/s7):
+    same size (4298 vs 4234 instructions) and callee set, but the skeleton
+    driver reloads from the stack 253 times against the legacy loop's 152
+    (`ldr x, [sp…]`; ldr total 1032 vs 943): register pressure from the
+    skeleton's live state (clock counter and bound, the body's references,
+    `k_off`), ~20–30 instructions per step — the same signature 3a found.
+    Not removed in this slice. Also: identical code moves by ±0.7 % between
+    builds that change unrelated code (layout), so the pwl gate sits at the
+    noise floor; the honest reading is "skeleton +0.5–1.1 % on buck,
+    +0.6–0.8 % on VSI, ≤ 0.5 % elsewhere". Next: give `FixedController` a
+    loop-shaped `run` overload (k in a register, the bound a const local)
+    or measure with the legacy loop deleted (its presence shapes the
+    allocator, 3b's lesson).
+
+    Engine function sizes (instructions, `nm` + c++filt): `run_transient`
+    body 9252 → 12389 (+34 %: both static drivers now inline in it), the
+    two out-of-line dynamic drivers 4204 / 4089 → 4298 / 4234;
+    `run_transient_trbdf2` 26346 → 26418.
+
+    Not done in this slice: the deletion of the legacy loops (next slice,
+    after CI compiles this on GCC, Clang + libc++ and MSVC; the inline
+    macros are empty on MSVC and their placement on lambdas is compiled by
+    Apple clang only); the decision / rollback in the controller (groups
+    14–15); a public `integrator=` option. Because the pwl cost gate is not
+    met this tip is on `wip/core-p3-stepper-3c`, not on the track branch.
+
+
+    Identity (this tip, macOS clang, local gate): default AND both-legacy
+    byte-identical to the starting tip 67fef260's default on the four
+    compares (goldens, stateful, engines, step sequences);
+    `pwl_twin_identity.py --goldens --reference` 379/379;
+    `trbdf2_twin_identity.py --goldens --extra` 50/50 (resume across the
+    drivers, four ways) and `--reference --modes ',lcp,shadow'` 327/327.
+    Static path (`.scratch/static_identity.py`: rectifier ± switch,
+    `store_every=3`, the discontinuity rule, shadow, lcp, strict (a
+    refusal, same on both), PWM source, cancellation, one step): skeleton
+    vs legacy 11/11 bit for bit, and the new default 11/11 against the
+    starting tip's binary.
+
+    Reviewer (fresh, read-only, opus medium): no divergence of result,
+    record or snapshot from the default switch — `store_every`,
+    cancellation (`k_reached` / `grid_step`), resume across drivers,
+    exceptions (no skeleton rollback, nothing driver-specific after the
+    call), the static cut verbatim (n_steps 0 / 1 identical). Findings
+    fixed: R2 at a seeded start's first step reported a guessed stamp
+    (now `mask_start_known`); R2's unreported cases documented in
+    step_hooks.hpp. Accepted: TR-BDF2's R1 / #31 stay skeleton-only (its
+    legacy loop is silent); the `…_TWIN` variables are silently ignored.

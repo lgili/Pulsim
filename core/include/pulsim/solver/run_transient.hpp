@@ -1576,6 +1576,11 @@ inline SimulationResult run_transient(
     Size k_reached = 0;   // grid index of t_reached (snapshot)
     try {
 
+    // Read once per run, both paths (slice 3c, DECISIONS 17).
+    const bool pwl_stepper_legacy = [] {
+        const char* e = std::getenv("PULSIM_PWL_STEPPER_LEGACY");  // NOLINT(concurrency-mt-unsafe)
+        return e != nullptr && e[0] == '1' && e[1] == '\0';
+    }();
     if (cache.dt() > Real{0}) {
         // ----------- DYNAMIC PATH ---------------------------------------
         //
@@ -1701,19 +1706,17 @@ inline SimulationResult run_transient(
 
         // ---- refactor-unified-transient-stepper slice 3a (DECISIONS 13) --
         // The step is five phases (begin, take, after_solve, commit,
-        // record), each ONE lambda that both drivers call: the legacy loop
-        // below (the default) and the step skeleton's twin
-        // (`step::run<Trapezoidal>(FixedController, PhaseBody)`, selected by
-        // the internal PULSIM_PWL_STEPPER_TWIN=1, never a public option).
+        // record), each ONE lambda that both drivers call: the step
+        // skeleton (`step::run<Trapezoidal>(FixedController, PhaseBody)`,
+        // the default since slice 3c, DECISIONS 17) and the legacy loop,
+        // kept until its deletion slice behind the internal
+        // PULSIM_PWL_STEPPER_LEGACY=1 (never a public option; the slice-3a
+        // PULSIM_PWL_STEPPER_TWIN is accepted and ignored).
         // The step's locals that cross phases live here, (re)set at the
         // program point where the loop body declared them. The step's
         // times are re-read into a const local at the top of each phase:
         // a hoisted, mutable `t` is reloaded after every opaque call (the
         // commutation-record loop runs per diode), a const local is not.
-        const bool pwl_stepper_twin = [] {
-            const char* e = std::getenv("PULSIM_PWL_STEPPER_TWIN");  // NOLINT(concurrency-mt-unsafe)
-            return e != nullptr && e[0] == '1' && e[1] == '\0';
-        }();
         Real t_step = Real{0};
         Real t_prev_step = Real{0};
         Real gate_t = Real{0};
@@ -1731,6 +1734,22 @@ inline SimulationResult run_transient(
         bool restart = false;
         bool committed_be = false;
         Real be_commit_h = kGamma * opts.dt;
+        // The step hooks, called in the shared phases (both drivers; slice
+        // 3c, DECISIONS 17): probes R1 (`StepHooks::step`, the step's start
+        // state and mask), R2 (`on_event`, the stamps on each side of a
+        // commutation) and the device interface's #31 (`device_state` after
+        // the commit). The start mask is copied only with a listener, at
+        // the end of the previous step's record (one test per step without
+        // one); a seeded start's guessed stamp is no R2 left side.
+        const bool hook_step = hooks != nullptr && hooks->has_step();
+        const bool hook_event = hooks != nullptr && hooks->has_event();
+        const bool hook_mask = hook_step || hook_event;
+        topology::SwitchStateMask mask_start;
+        bool mask_start_known = false;
+        if (hook_mask) {
+            mask_start = stamped_mask;
+            mask_start_known = stamped_known;
+        }
         auto commit_backward_euler = [&](Real h_e) {
             history.update_from_state_backward_euler(x, h_e);
             hs.commit(x, h_e, pwl::TrBdf2Stage::BackwardEuler);
@@ -3096,7 +3115,10 @@ inline SimulationResult run_transient(
             // Decimated recording (v2.0 Phase 1): uniform grid at
             // m·dt. Sample 0 (the IC, k = 0) is always recorded
             // above, keeping the parallel arrays aligned.
-            if (hooks) hooks->accepted(t_prev, t, x, stamped_mask);
+            if (hooks) {
+                hooks->device_state(t, x, hs);   // #31: after the commit
+                hooks->accepted(t_prev, t, x, stamped_mask);
+            }
             if (k % opts.store_every == 0) {
                 result.times.push_back(t);
                 result.states.push_back(x);
@@ -3121,20 +3143,25 @@ inline SimulationResult run_transient(
                                   : -1L,
                               opts.on_impulse_error, "pwl", result);
             }
+            if (hook_mask) {
+                if (hook_event && mask_start_known && !(stamped_mask == mask_start)) {
+                    hooks->event(t_prev, x_prev, mask_start, x, stamped_mask);
+                }
+                if (hook_step) hooks->step(t_prev, x_prev, mask_start, t, x, stamped_mask);
+                mask_start = stamped_mask;   // the next step's start
+                mask_start_known = true;
+            }
         };  // step_record
 
-        // The twin: the same phases in the skeleton's order and clock
-        // (grid step k = k_off + 1 .. k_off + n_steps - 1 of the run's
-        // grid). Hooks only the skeleton calls (DECISIONS 13): probes R1
-        // (`StepHooks::step`, the step's start state and mask) and the
-        // device interface's #31 (`device_state` after the commit). Each
-        // driver is one out-of-line function with the phases inlined into
-        // it (DECISIONS 14).
+        // The skeleton driver (the default): the same phases in the
+        // skeleton's order and clock (grid step k = k_off + 1 .. k_off +
+        // n_steps - 1 of the run's grid). Each driver is one out-of-line
+        // function with the phases inlined into it (DECISIONS 14); the
+        // hooks live in the shared phases, so this driver's closure holds
+        // only the phases and the clock (DECISIONS 17: a twin that also
+        // held the hooks spilled ~90 more stack reloads, +1 % per step).
         auto run_twin = [&]() PULSIM_STEP_DRIVER {
-            const bool hook_step = hooks != nullptr && hooks->has_step();
-            topology::SwitchStateMask mask_start;
             auto tw_begin = [&](const step::StepFrame& f) PULSIM_STEP_PHASE {
-                if (hook_step) mask_start = stamped_mask;
                 step_begin(f.k - k_off);
             };
             auto tw_take = [&](const step::StepFrame&) PULSIM_STEP_PHASE {
@@ -3147,13 +3174,9 @@ inline SimulationResult run_transient(
             };
             auto tw_commit = [&](const step::StepFrame&) PULSIM_STEP_PHASE {
                 step_commit();
-                if (hooks != nullptr) hooks->device_state(t_step, x, hs);
             };
             auto tw_record = [&](const step::StepFrame& f) PULSIM_STEP_PHASE {
                 step_record(f.k - k_off);
-                if (hook_step) {
-                    hooks->step(t_prev_step, x_prev, mask_start, t_step, x, stamped_mask);
-                }
             };
             auto tw_poll = [&]() PULSIM_STEP_PHASE { return !step_cancelled(); };
             auto body = step::phase_body(tw_poll, tw_begin, tw_take, tw_after,
@@ -3175,7 +3198,7 @@ inline SimulationResult run_transient(
                 step_record(k);
             }
         };
-        if (pwl_stepper_twin) {
+        if (!pwl_stepper_legacy) {
             run_twin();
         } else {
             run_legacy();
@@ -3205,13 +3228,29 @@ inline SimulationResult run_transient(
                 "record-only port included); give it its dynamic devices or "
                 "the thermal network.");
         }
-        for (Size k = 0; k < n_steps; ++k) {
+        // ---- slice 3c (DECISIONS 17): the static path's step, cut in place
+        // into four phases (begin, take, after_solve, record; nothing to
+        // commit: no history) that both drivers call. The first solve
+        // (k = 0) is the start sample, before either driver's steps, as the
+        // dynamic path's IC sample; the skeleton runs k = 1 .. n_steps - 1
+        // on the dynamic path's FixedController. The static path never
+        // polled cancellation, and still does not (the poll is `true`).
+        const Vector& b_extra_user = b_extra;
+        Real st_t = Real{0};
+        Real st_t_prev = Real{0};
+        Real st_gate_t = Real{0};
+        Size st_iters = 0;
+        bool st_flipped = false;
+        bool st_mask_cycle = false;
+        auto st_begin = [&](Size k) PULSIM_STEP_PHASE {
             const Real t = fixed_grid.at(k_off + k);
+            st_t = t;
             t_reached = t;
             k_reached = k;
             const Real t_prev = k > 0
                 ? fixed_grid.at(k_off + k - 1)
                 : opts.t_start;
+            st_t_prev = t_prev;
             // Sub-step bisection snapshot (Layer 5 V2.2). At
             // k=0 we don't have a prev step; just use the
             // current x as a degenerate snapshot — the
@@ -3239,7 +3278,7 @@ inline SimulationResult run_transient(
             // path — sample k reads the gate at t_{k-1} and the jumping
             // sources at their left limit — so adding a capacitor does
             // not shift the recorded mask by one sample. (k = 0: t.)
-            const Real gate_t = restart_rule && k > 0 ? t_prev : t;
+            st_gate_t = restart_rule && k > 0 ? t_prev : t;
             const Real src_left = k > 0 ? left_by : Real{0};
             b_extra.setZero();
             if (b_extra_fn) {
@@ -3251,11 +3290,17 @@ inline SimulationResult run_transient(
                                                           be_iwave, src_left);
                 b_extra += be_iwave;
             }
-            const Vector& b_extra_user = b_extra;
 
-            Size iters = 0;
-            bool flipped = false;
-            bool mask_cycle = false;
+        };
+        auto st_take = [&]() PULSIM_STEP_PHASE {
+            const Real t = st_t;
+            const Real gate_t = st_gate_t;
+            Size& iters = st_iters;
+            bool& flipped = st_flipped;
+            bool& mask_cycle = st_mask_cycle;
+            iters = 0;
+            flipped = false;
+            mask_cycle = false;
             // Full mask copies (Phase 1: masks can exceed 64 bits; a
             // copy is 2 inline words for <=128 switches — still no
             // heap in the loop).
@@ -3401,6 +3446,10 @@ inline SimulationResult run_transient(
                      .cycle_detected = mask_cycle});
             }
 
+        };
+        auto st_after = [&](Size k) PULSIM_STEP_PHASE {
+            const Real t = st_t;
+            const Real t_prev = st_t_prev;
             // Sub-step bisection on the static path too.
             if (has_diodes && k > 0) {
                 for (std::size_t j = 0; j < diodes.entries().size(); ++j) {
@@ -3454,6 +3503,11 @@ inline SimulationResult run_transient(
                 }
             }
 
+        };
+        auto st_record = [&](Size k) PULSIM_STEP_PHASE {
+            const Real t = st_t;
+            const Real t_prev = st_t_prev;
+            const Size iters = st_iters;
             // The static path's first solve (k = 0) is the start state.
             if (hooks) {
                 if (k == 0) {
@@ -3468,6 +3522,48 @@ inline SimulationResult run_transient(
                 result.event_iteration_count.push_back(iters - 1);
                 result.record_switch_state(stamped_mask);
             }
+        };
+        auto st_run_legacy = [&]() PULSIM_STEP_PHASE {
+            for (Size k = 0; k < n_steps; ++k) {
+                st_begin(k);
+                st_take();
+                st_after(k);
+                st_record(k);
+            }
+        };
+        auto st_run_skeleton = [&]() PULSIM_STEP_PHASE {
+            if (n_steps == 0) return;
+            st_begin(0);
+            st_take();
+            st_after(0);
+            st_record(0);
+            auto sk_poll = []() PULSIM_STEP_PHASE { return true; };
+            auto sk_begin = [&](const step::StepFrame& f) PULSIM_STEP_PHASE {
+                st_begin(f.k - k_off);
+            };
+            auto sk_take = [&](const step::StepFrame&) PULSIM_STEP_PHASE {
+                st_take();
+                return true;   // a failed solve throws (the legacy loop's rule)
+            };
+            auto sk_after = [&](step::StepFrame& f) PULSIM_STEP_PHASE {
+                st_after(f.k - k_off);
+                return true;
+            };
+            auto sk_commit = [](const step::StepFrame&) PULSIM_STEP_PHASE {};
+            auto sk_record = [&](const step::StepFrame& f) PULSIM_STEP_PHASE {
+                st_record(f.k - k_off);
+            };
+            auto body = step::phase_body(sk_poll, sk_begin, sk_take, sk_after,
+                                         sk_commit, sk_record);
+            step::FixedController clock{.clock = fixed_grid,
+                                        .k = k_off + 1,
+                                        .n_steps = k_off + n_steps};
+            (void)step::run<step::Trapezoidal>(clock, body);
+        };
+        if (!pwl_stepper_legacy) {
+            st_run_skeleton();
+        } else {
+            st_run_legacy();
         }
     }
 

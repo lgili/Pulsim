@@ -6,9 +6,10 @@ paths and compare every array bit for bit and every stats key.
     pwl_twin_identity.py --goldens                  # benchmarks/goldens/pwl cases
     pwl_twin_identity.py --reference [--circuits GLOB,...] [--configs pwl,pwl+restart]
 
-The twin is selected by the internal environment variable
-``PULSIM_PWL_STEPPER_TWIN=1`` (read once per run by ``run_transient``; not
-a public option). Bit identity between two code paths is a LOCAL gate
+The twin (the skeleton driver) is the default since slice 3c; the old loop
+is selected by the internal environment variable
+``PULSIM_PWL_STEPPER_LEGACY=1`` (read once per run by ``run_transient``;
+not a public option). Bit identity between two code paths is a LOCAL gate
 (this machine, this build); the CI test compares at 1e-12 of scale.
 Prints ``IDENTICAL <name>`` or ``DIFFER <name>: <first differing key>``;
 exit status 1 when any case differs.
@@ -26,13 +27,15 @@ from pathlib import Path
 
 import numpy as np
 
-ENV = "PULSIM_PWL_STEPPER_TWIN"
+ENV = "PULSIM_PWL_STEPPER_LEGACY"
 
 
 @contextlib.contextmanager
 def twin(on: bool, env: str = ENV):
+    # The skeleton is the default since slice 3c: `on` selects it by
+    # clearing the legacy variable; off sets it.
     old = os.environ.get(env)
-    os.environ[env] = "1" if on else "0"
+    os.environ[env] = "0" if on else "1"
     try:
         yield
     finally:

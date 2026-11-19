@@ -8,8 +8,9 @@ paths and compare every array bit for bit and every stats key.
     trbdf2_twin_identity.py --extra        # examples, stateful, ticks + monitor,
                                            # resume across the paths (4 ways)
 
-The twin is selected by the internal environment variable
-``PULSIM_TRBDF2_STEPPER_TWIN=1`` (read once per run by
+The twin (the skeleton driver) is the default since slice 3c; the old loop
+is selected by the internal environment variable
+``PULSIM_TRBDF2_STEPPER_LEGACY=1`` (read once per run by
 ``run_transient_trbdf2``; not a public option). Bit identity between two
 code paths is a LOCAL gate (this machine, this build); the CI test compares
 at 1e-12 of scale. The comparison is ``pwl_twin_identity``'s.
@@ -31,7 +32,7 @@ ROOT = HERE.parents[1]
 sys.path[:0] = [str(HERE), str(HERE.parent)]
 import pwl_twin_identity as pt  # noqa: E402
 
-ENV = "PULSIM_TRBDF2_STEPPER_TWIN"
+ENV = "PULSIM_TRBDF2_STEPPER_LEGACY"
 
 
 def check(name, fn) -> bool:

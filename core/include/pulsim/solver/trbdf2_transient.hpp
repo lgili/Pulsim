@@ -2079,6 +2079,10 @@ inline SimulationResult run_transient_trbdf2(
             && !reinit.entering(structure, m_probe, false).empty()) {
             return;
         }
+        // probes R2 (slice 3c): the edge's two sides after the settle.
+        if (hooks != nullptr && hooks->has_event() && !(m_probe == x_mask)) {
+            hooks->event(t, x, x_mask, x_trial, m_probe);
+        }
         const Real dtp = last_probe_dt;
         ++st.n_derivative_refreshes;
         post_event_pending = true;
@@ -2396,8 +2400,12 @@ inline SimulationResult run_transient_trbdf2(
     };
 
     try {
-        const bool trbdf2_stepper_twin = [] {
-            const char* e = std::getenv("PULSIM_TRBDF2_STEPPER_TWIN");  // NOLINT(concurrency-mt-unsafe)
+        // The skeleton driver is the default since slice 3c (DECISIONS 17);
+        // the legacy loop stays until its deletion slice behind the internal
+        // PULSIM_TRBDF2_STEPPER_LEGACY=1 (no option; the slice-3b
+        // PULSIM_TRBDF2_STEPPER_TWIN is accepted and ignored).
+        const bool trbdf2_stepper_legacy = [] {
+            const char* e = std::getenv("PULSIM_TRBDF2_STEPPER_LEGACY");  // NOLINT(concurrency-mt-unsafe)
             return e != nullptr && e[0] == '1' && e[1] == '\0';
         }();
         // The attempt's locals that cross phases, (re)set where the loop body
@@ -3672,6 +3680,11 @@ inline SimulationResult run_transient_trbdf2(
                             {t,
                              diodes.entries()[cross_idx].branch_id,
                              diodes.entries()[cross_idx].is_on});
+                        // probes R2: the landing (under the step's mask)
+                        // and the cascade's settled probe.
+                        if (hooks != nullptr && hooks->has_event()) {
+                            hooks->event(t, x, mask_step, x_trial, gates_decided);
+                        }
                     }
                     newton_at_start = false;   // a committed step
                     // a post-event record ahead of this landing goes
@@ -3907,9 +3920,10 @@ inline SimulationResult run_transient_trbdf2(
                 }
             }
         };
-        // The two drivers: the legacy loop (default) and the step skeleton
-        // (`step::run<TrBdf2>`), selected only by the internal
-        // PULSIM_TRBDF2_STEPPER_TWIN=1 (read once per run; no option). BOTH
+        // The two drivers: the step skeleton (`step::run<TrBdf2>`, the
+        // default, the dispatch's fall-through) and the legacy loop, selected
+        // only by the internal PULSIM_TRBDF2_STEPPER_LEGACY=1 (read once per
+        // run; no option). BOTH
         // are forced inline into this function, unlike the fixed engine's
         // (DECISIONS 16): out of line, every engine local a phase touches was
         // reached through the driver's closure and the phase's closure (a
@@ -3962,10 +3976,10 @@ inline SimulationResult run_transient_trbdf2(
             step::BodyClock clock{tb_live, lte_ctrl, t, opts.t_end};
             (void)step::run<step::TrBdf2>(clock, body);
         };
-        if (!trbdf2_stepper_twin) {
-            run_legacy();
-        } else {
+        if (!trbdf2_stepper_legacy) {
             run_twin();
+        } else {
+            run_legacy();
         }
         // A run stopped by should_continue right after an event: the
         // record ends on the committed state, as the snapshot does.
