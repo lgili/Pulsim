@@ -17,7 +17,6 @@ R_s = 0.5 Ω, L_ls = 2 mH, R_r = 0.4 Ω, L_lr = 2 mH, L_m = 60 mH, pp = 2,
 from __future__ import annotations
 
 import math
-import sys
 
 import numpy as np
 import pytest
@@ -256,13 +255,6 @@ def _inverter():
     return b
 
 
-@pytest.mark.xfail(
-    sys.platform == "win32", strict=False,
-    reason="Windows CI: trbdf2 Newton stalls at t = 0.15 with h at h_min "
-           "(residual 2.4e-4 on a stator branch row). The stator flux rows "
-           "compute (2/h)*lambda in full, so their round-off sits above the "
-           "Newton tolerance and depends on the platform; the incremental "
-           "flux rows of add-mna-native-machines remove it.")
 def test_inverter_fed_start_agrees_on_pwl_and_trbdf2():
     sw = _SixStep()
     r1 = p.simulate(_inverter(), t_end=0.15, dt=1e-5, engine="pwl",
