@@ -353,6 +353,19 @@ def test_golden(name, run, names, newton):
     assert not bad, "\n".join(bad[:10])
 
 
+def test_legacy_goldens_hold_under_the_legacy_profile():
+    """The pre-release goldens (goldens/pwl_legacy) stay reachable by explicit
+    values for one release: next_defaults.legacy() reproduces every one."""
+    import next_defaults as nd
+    with warnings.catch_warnings(), nd.legacy():
+        warnings.simplefilter("ignore")
+        rows = [(n, goldens.snapshot(run(), names, newton)) for n, run, names, newton in goldens.cases()]
+    assert len(rows) == len(list(goldens.LEGACY_DIR.glob("*.json")))
+    for n, got in rows:
+        bad = goldens.compare(json.loads((goldens.LEGACY_DIR / f"{n}.json").read_text(encoding="utf-8")), got)
+        assert not bad, (n, bad[:5])
+
+
 def test_golden_catches_one_part_per_million():
     c = BY_ID["rc_charge"]
     golden = json.loads((goldens.GOLDEN_DIR / "analytic__rc_charge.json").read_text(encoding="utf-8"))

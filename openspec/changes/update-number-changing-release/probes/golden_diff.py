@@ -35,6 +35,9 @@ import v1_reader  # noqa: E402
 from analytic import BY_ID  # noqa: E402
 
 OUT = ROOT / "benchmarks" / "RELEASE_GOLDEN_DIFF.md"
+# Farther from the truth but accepted by the orchestrator (DECISIONS 5, R1
+# decision 1): rounding-level moves, regenerated and listed under their own heading.
+ACCEPTED = {"stiff_rlc": "below 1e-8", "back_to_back_diodes_sine": "at machine precision"}
 
 
 def moved(old, new):
@@ -92,7 +95,7 @@ def _null():
 
 def main() -> int:
     warnings.simplefilter("ignore")
-    rows, worse = [], []
+    rows, worse, accepted = [], [], []
     runs = {n: goldens.snapshot(run(), names, newton) for n, run, names, newton in goldens.cases()}
     names = sorted(runs)
     for name in names:
@@ -104,7 +107,11 @@ def main() -> int:
         eo, en, tname = truth_errors(name)
         on_file = json.loads((goldens.GOLDEN_DIR / f"{name}.json").read_text(encoding="utf-8"))
         kept = not goldens.compare(old, on_file)
-        if en > eo:   # farther from the truth: never regenerated (the old golden stays on file)
+        if en > eo and name in ACCEPTED:
+            assert not kept, f"{name}: accepted, so its golden is regenerated"
+            accepted.append(f"| {name} | {tname} | {eo:.3g} | {en:.3g} | {en / eo:.3g}x | {ACCEPTED[name]} |")
+            closer = f"farther ({en / eo:.3g}x), accepted: {ACCEPTED[name]}"
+        elif en > eo:   # farther from the truth: never regenerated (the old golden stays on file)
             closer = f"FARTHER ({en / eo:.3g}x){'; old golden kept' if kept else '; REGENERATED'}"
             worse.append(name)
         else:
@@ -121,6 +128,12 @@ def main() -> int:
          "such a golden is not regenerated (the file keeps the pre-release value) and is reported.", "",
          f"{len(rows)} of {len(names)} goldens changed; {len(worse)} worse against the truth"
          + (f": {', '.join(worse)}." if worse else "."), "",
+         "## Farther from truth, accepted: below 1e-8 / at machine precision", "",
+         "Orchestrator decision (update-number-changing-release DECISIONS 5, R1 decision 1): rounding-level",
+         "moves, not defects; regenerated, and listed here with their numbers.", "",
+         "| golden | truth | old error | new error | factor | why accepted |", "|---|---|---:|---:|---:|---|",
+         *(accepted or ["| (none) | | | | | |"]), "",
+         "## Every changed golden", "",
          "| golden | entry | old | new | truth | old error | new error | verdict |",
          "|---|---|---:|---:|---|---:|---:|---|", *rows]
     OUT.write_text("\n".join(L) + "\n", encoding="utf-8")
