@@ -225,3 +225,90 @@ def test_controllers_that_cannot_continue_the_snapshots_tick_grid_are_refused():
             p.simulate(b2, 60e-5, engine="exact", switch_fn=loop2.switch_fn,
                        closed_loops=[loop2], resume_from=a.final_snapshot)
     assert ei.value.feature == "resume_from"
+
+
+def _rc():
+    """A diode-free RC charge: engine='dsed' runs it on integrator 'auto'."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "in", "gnd", 5.0)
+    b.add_resistor("R", "in", "out", 1e3)
+    b.add_capacitor("C", "out", "gnd", 1e-6)
+    return b
+
+
+def test_a_run_on_a_route_that_keeps_no_snapshot_names_why_at_resume():
+    """'auto' on a diode-free circuit (PEDSimulatorAuto) and a fresh t_start
+    run keep no snapshot: the resume is refused with the cause and the
+    workaround, not as a bare "not valid"."""
+    for kw, word in ((dict(), "integrator='auto'"), (dict(integrator="bdf2"), "integrator='bdf2'"),
+                     (dict(integrator="rk45", t_start=1e-4), "t_start")):
+        a = p.simulate(_rc(), 2e-3, engine="dsed", **kw)
+        assert not a.final_snapshot.valid and word in a.final_snapshot.invalid_reason
+        with pytest.raises(p.UnsupportedError) as ei:
+            p.simulate(_rc(), 4e-3, engine="dsed", resume_from=a.final_snapshot)
+        assert ei.value.feature == "resume_from" and word in str(ei.value)
+    # the workaround named: integrator='rk45' writes one, an unset integrator resumes on it
+    a = p.simulate(_rc(), 2e-3, engine="dsed", integrator="rk45")
+    r = p.simulate(_rc(), 4e-3, engine="dsed", resume_from=a.final_snapshot)
+    u = p.simulate(_rc(), 4e-3, engine="dsed", integrator="rk45")
+    np.testing.assert_allclose(r.final_snapshot.x, u.final_snapshot.x, rtol=1e-12)
+
+
+def test_an_explicit_auto_that_would_not_continue_the_snapshot_is_refused():
+    a = p.simulate(_rc(), 2e-3, engine="dsed", integrator="rk45")
+    with pytest.raises(p.UnsupportedError) as ei:
+        p.simulate(_rc(), 4e-3, engine="dsed", integrator="auto", resume_from=a.final_snapshot)
+    assert ei.value.feature == "resume_from" and "integrator='auto'" in str(ei.value)
+    # where 'auto' itself routes to the event-driven integrator (diodes), it runs
+    s = _run(_ccm, 100e-6)
+    r = _run(_ccm, 200e-6, resume_from=s.final_snapshot, integrator="auto")
+    u = _run(_ccm, 200e-6)
+    np.testing.assert_allclose(r.final_snapshot.x, u.final_snapshot.x, rtol=1e-12, atol=1e-12)
+
+
+def test_the_exact_snapshot_carries_the_circuits_layout_and_refuses_another_circuit():
+    """As the pwl / trbdf2 snapshots: the device-state layout (the linear
+    companions' count: L and C) and its signature; a resume on a circuit with
+    another layout is refused naming the block."""
+    a = _run(_ccm, 100e-6)
+    s = a.final_snapshot
+    assert list(s.dev_layout)[0] == 2 and s.layout_signature != 0
+    b = p.CircuitBuilder()   # the same state count, one capacitor more and one inductor less
+    b.add_voltage_source("Vin", "vin", "gnd", 24.0)
+    b.add_switch("Q1", "vin", "sw", 1e3, 1e-9)
+    b.add_diode("D1", "gnd", "sw", 1e3, 1e-9)
+    b.add_resistor("Rs", "sw", "vout", 1.0)
+    b.add_capacitor("C", "vout", "gnd", 47e-6)
+    b.add_capacitor("C2", "sw", "gnd", 1e-9)
+    b.add_capacitor("C3", "vin", "sw", 1e-9)
+    b.add_resistor("RL", "vout", "gnd", 10.0)
+    fn = p.make_pwm_switch_fn(100e3, 0.5, b.switch_index_of("Q1"), b.graph.num_switches)
+    with pytest.raises(ValueError, match="device-state block"):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            p.simulate(b, 200e-6, switch_fn=fn, engine="dsed", resume_from=s)
+    assert pickle.loads(pickle.dumps(s)).layout_signature == s.layout_signature
+
+
+@pytest.mark.parametrize("make", [_ccm, _dcm], ids=["ccm", "dcm"])
+def test_what_depends_on_the_runs_end_time_today(make):
+    """Pins what the exact kernel reads of t_end (DECISIONS session 25): each
+    mode's eigenpairs are refined and its tier chosen over the run horizon
+    H = max(dt_max, t_end), and the last schedule interval's horizon is capped
+    at t_end. Halving t_end changes the stated defect only: the tier, the
+    refinement and the balancing are the same and the states at the common
+    instants agree (bit-equal on the 81 scoreboard circuits, measured). A
+    split run therefore builds its modes as the uninterrupted one."""
+    u = _run(make, 200e-6)
+    h = _run(make, 100e-6)
+
+    def build(r):
+        return {tuple(m["mask"]): (m["tier"], m["refined"], m["balanced"])
+                for m in r.exact["masks"]}
+    bu, bh = build(u), build(h)
+    assert bh.keys() <= bu.keys() and all(bh[k] == bu[k] for k in bh)
+    tu, th = np.asarray(u.times), np.asarray(h.times)
+    _, iu, ih = np.intersect1d(tu, th, return_indices=True)
+    assert len(ih) > 0.9 * len(th)
+    xu, xh = np.asarray(u.states), np.asarray(h.states)
+    np.testing.assert_allclose(xh[ih], xu[iu], rtol=0, atol=1e-12 * np.abs(xu).max())

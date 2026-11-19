@@ -4549,6 +4549,10 @@ void init_module(py::module_& m) {
             "Deprecated view of one block of ``dev_state`` (the 2.0 field). "
             "Writing it turns the snapshot into a 2.0-style payload.")
         .def_readwrite("valid", &SolverSnapshot::valid)
+        .def_readwrite("invalid_reason", &SolverSnapshot::invalid_reason,
+            "Why the run that produced this snapshot left it invalid, when it "
+            "knows (a route that keeps no snapshot); resume_from refuses it with "
+            "this cause. Empty for a valid snapshot. Not pickled.")
         .def_readwrite("grid_origin", &SolverSnapshot::grid_origin,
             "The fixed-step grid ``t`` sits on: t == grid_origin + "
             "grid_step * grid_dt to rounding (NaN: none). A fixed-step resume "

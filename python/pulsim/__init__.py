@@ -2864,12 +2864,19 @@ def simulate(
     # and an invalid snapshot resumed from zero.
     if resume_from is not None:
         if not getattr(resume_from, "valid", False):
+            _why = getattr(resume_from, "invalid_reason", "")
+            if _why:   # the run that produced it said why it kept none
+                raise _unsupported(
+                    "dsed", "resume_from",
+                    f"simulate(resume_from=...): the snapshot is not valid: {_why}.")
             raise ValueError(
                 "simulate(resume_from=...): the snapshot is not valid — "
                 "it came from a run that produced none (an aborted run, "
-                "or a SolverSnapshot() built by hand and never "
-                "populated). Resuming from it would start from zero "
-                "without saying so.")
+                "a SolverSnapshot() built by hand and never populated, or an "
+                "engine='dsed' run on a route that keeps none: integrator "
+                "'auto' / 'bdf2' or a fresh t_start, whose cause an unpickled "
+                "snapshot no longer carries). Resuming from it would start "
+                "from zero without saying so.")
         _cs = resume_from.controller_state
         if engine != "dsed" and _cs is not None and _cs[0] == 3:
             raise _unsupported(

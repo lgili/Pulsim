@@ -1537,7 +1537,24 @@ void init_module(py::module_& m) {
             using ResumeT = pulsim::dsed::ExactResumeState<pulsim::topology::SwitchStateMask>;
             std::optional<ResumeT> rs;
             const auto n_sw = static_cast<pulsim::Size>(adapter.graph().num_switches());
+            // the circuit's device-state layout, as the pwl / trbdf2 snapshots
+            // carry it (the exact engine runs no stateful device: the linear
+            // companions' count only); a resume refuses another circuit's
+            pulsim::device::DeviceStateLayout layout;
+            layout.count[static_cast<std::size_t>(pulsim::device::StateBlock::LinearCompanion)] =
+                static_cast<std::uint32_t>(adapter.pool().num_dynamic_branches());
             if (resume != nullptr) {
+                if (!resume->dev_layout.empty()) {
+                    const std::string diff = layout.first_difference(resume->layout());
+                    if (!diff.empty() || resume->layout_signature
+                                             != resume->layout().signature(resume->dev_layout.size())) {
+                        throw std::invalid_argument(
+                            "dsed(resume_from=...): the snapshot belongs to a different "
+                            "circuit: " + (diff.empty() ? std::string("its device-state layout "
+                                                                      "is corrupt (signature)")
+                                                        : diff + " (this circuit, then the snapshot)"));
+                    }
+                }
                 if (resume->controller.kind == pulsim::step::ControllerState::Kind::Exact) {
                     rs = ResumeT::unflatten(resume->controller.v);
                     if (rs->x.size() != x0.size()) {
@@ -1583,6 +1600,8 @@ void init_module(py::module_& m) {
                 for (const auto sw : diode_sw) snap.mask.push_back(f.mask.get(sw));
                 snap.controller.kind = pulsim::step::ControllerState::Kind::Exact;
                 snap.controller.v = f.flatten();
+                snap.dev_layout.assign(layout.count.begin(), layout.count.end());
+                snap.layout_signature = layout.signature();
                 snap.tick_origin = sim.tick_origins();
                 snap.tick_next_k = sim.tick_next_k();
                 if (loss) snap.loss_state = loss->save();

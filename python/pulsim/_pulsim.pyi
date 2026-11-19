@@ -2949,6 +2949,14 @@ class SolverSnapshot:
     def igbt_tail_history(self, arg1: collections.abc.Sequence[float]) -> None:
         ...
     @property
+    def invalid_reason(self) -> str:
+        """
+        Why the run that produced this snapshot left it invalid, when it knows (a route that keeps no snapshot); resume_from refuses it with this cause. Empty for a valid snapshot. Not pickled.
+        """
+    @invalid_reason.setter
+    def invalid_reason(self, arg0: str) -> None:
+        ...
+    @property
     def lauritzen_history(self) -> list[float]:
         """
         Deprecated view of one block of ``dev_state`` (the 2.0 field). Writing it turns the snapshot into a 2.0-style payload.

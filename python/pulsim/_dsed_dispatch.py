@@ -490,6 +490,31 @@ def _result_from_native(native_res, t_start: float):
 _EXACT_SNAPSHOT_KIND = 3
 
 
+def _mark_no_snapshot(res, integrator: str, t_start, bridge: str = "") -> None:
+    """A run that keeps no snapshot says why: its final_snapshot stays invalid
+    with the cause and the workaround, which resume_from refuses by name."""
+    from . import _pulsim as _k
+    if bridge:
+        why = (f"engine='dsed' ran this circuit on the {bridge} (the native "
+               "adapter rejected it), which keeps no snapshot")
+    elif integrator in ("auto", "bdf2"):
+        why = (f"engine='dsed' ran this circuit on integrator={integrator!r} "
+               f"({'per-mode RK45/BDF2, PEDSimulatorAuto' if integrator == 'auto' else 'fixed-step BDF2'}"
+               "), which keeps no snapshot; only the event-driven integrator "
+               "writes one. Run the first segment with integrator='rk45' (a "
+               "circuit with diodes, a loss port or control ticks routes there "
+               "by default)")
+    elif t_start:
+        why = (f"engine='dsed' ran a fresh run with t_start={t_start!r} on its "
+               "own clock from 0, so it writes no snapshot (its time would be "
+               "wrong). Run the first segment without t_start")
+    else:
+        return
+    s = _k.SolverSnapshot()
+    s.invalid_reason = why
+    res._set_final_snapshot(s)
+
+
 def _check_resume_snapshot(snap, integrator, t_start) -> None:
     """Refuse by name a snapshot the exact engine cannot continue exactly
     (session 24): another integrator, a shifted clock, a recorder's state,
@@ -747,8 +772,18 @@ def run_dsed_from_builder(
                 "simulate(engine='dsed', resume_from=..., initial_state=...): the "
                 "snapshot is the state; pass one of them.")
         _check_resume_snapshot(resume_from, integrator, t_start)
-        # the snapshot is written and read by the event-driven integrator
-        # only ('auto' becomes 'rk45' as for diodes and the loss port)
+        if integrator == "auto" and not ticks:
+            # diodes and loss ports made it 'rk45' above, ticks do below:
+            # anything else is 'auto' choosing PEDSimulatorAuto, which
+            # cannot continue an event-driven snapshot
+            raise unsupported(
+                "dsed", "resume_from", message=
+                "simulate(engine='dsed', integrator='auto', resume_from=...): on "
+                "this circuit 'auto' chooses the per-mode RK45/BDF2 integrator, "
+                "which cannot continue the event-driven integrator's snapshot. "
+                "Pass integrator='rk45' or leave integrator unset (a resume then "
+                "runs on the integrator that wrote the snapshot).")
+        # unset: the integrator that wrote the snapshot (the event-driven one)
         integrator = "rk45"
     # Device kinds: the kernel's capability table, before any adapter
     # is built (the Python adapter below would extract the LTI system
@@ -1085,6 +1120,8 @@ def run_dsed_from_builder(
                 # a fresh run with t_start runs on the engine's own clock from
                 # 0, not simulate()'s: its snapshot would carry the wrong time
                 res._set_final_snapshot(native_res["final_snapshot"])
+            elif resume_from is None:
+                _mark_no_snapshot(res, opts.integrator, opts.t_start)
             if "device_losses" in native_res:
                 res._set_device_losses(native_res["device_losses"],
                                        native_res["heat_injected"],
@@ -1223,6 +1260,8 @@ def run_dsed_from_builder(
         )
         if mode_auto is not None:
             out.diagnostics = {"mode_selection_auto": mode_auto}
+        _mark_no_snapshot(out, opts.integrator, opts.t_start,
+                          bridge="Python adapter fallback")
         return out
 
     # ---- No fallback. ----
