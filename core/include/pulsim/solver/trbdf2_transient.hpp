@@ -3344,7 +3344,13 @@ inline SimulationResult run_transient_trbdf2(
                     };
                     Real sb_raw = sb;   // the unhalved signal at tb
                     Real sa_raw = sa;
-                    Vector x_ta = x_sig;
+                    // The STATE at ta = t is the committed x (the trials and
+                    // the history start there), not x_sig, which may be a
+                    // probe or a chatter-guard step end 40 us later: an
+                    // interpolated landing from it put 5 mV on a 470 uF
+                    // capacitor in 0.8 ps (-6.6 MA in its slot, the bus
+                    // then -20 V in one step, a floating bridge +1.76 V).
+                    Vector x_ta = x;
                     Vector x_tb = tb < t + h ? x_g : x_1;
                     for (int it = 0; it < 40; ++it) {
                         t_loc = std::clamp(
