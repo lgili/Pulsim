@@ -28,7 +28,12 @@ lc = pulsim.load_yaml_file("net.yaml", allow_native_code=["/opt/mymodels"])
 before the comparison, and a library outside the list is refused by name.
 Without the list every `external_device` entry is refused, and
 `allow_native_code=True` is refused too: a netlist from an untrusted source
-must not choose the code it runs. The cache of compiled C blocks is per user
+must not choose the code it runs. A relative list entry is taken from the
+working directory (not the YAML file's folder). A directory entry admits
+everything under it, subfolders included: list only directories nobody else
+can write (never `/tmp` or a shared download folder). The older
+`wire_c_blocks_from_yaml` helper is a separate, explicit call and is not
+covered by this list. The cache of compiled C blocks is per user
 (mode 0700); a cached library another user owns or can write is rebuilt,
 never loaded.
 

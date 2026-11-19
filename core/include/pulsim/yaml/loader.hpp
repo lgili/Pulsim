@@ -1731,6 +1731,7 @@ struct BlockNames {
             }
         };
         pins(d["pins"]);
+        pins(d["nodes"]);   // external_device
         if (d["phases"] && d["phases"].IsSequence()) {
             for (std::size_t i = 0; i < d["phases"].size(); ++i) {
                 YAML::Node ph = d["phases"][i];

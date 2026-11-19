@@ -46,6 +46,10 @@ public:
     [[nodiscard]] const std::vector<Dev>& devices() const noexcept { return devs_; }
     [[nodiscard]] const Dev& device(const std::string& name) const {
         for (const auto& d : devs_) if (d.name == name) return d;
+        if (!start_) {
+            throw std::invalid_argument("device_output: '" + name
+                                        + "': the run committed no step, so nothing was recorded");
+        }
         std::string have;
         for (const auto& d : devs_) have += (have.empty() ? "" : ", ") + d.name;
         throw std::invalid_argument("device_output: '" + name + "' was not recorded (recorded: "

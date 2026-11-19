@@ -3947,10 +3947,10 @@ void init_module(py::module_& m) {
                 "directories the netlist may load, allow_native_code=[path, ...] "
                 "(a netlist must not choose the native code it runs)");
         }
-        if (py::isinstance<py::str>(a)) {
-            throw py::type_error("allow_native_code must be a list of paths, not one string");
-        }
         const py::module_ os = py::module_::import("os");
+        if (py::isinstance<py::str>(a) || py::isinstance(a, os.attr("PathLike"))) {
+            throw py::type_error("allow_native_code must be a list of paths, not one path");
+        }
         for (const auto& e : a) o.allow_native_code.push_back(os.attr("fspath")(e).cast<std::string>());
         return o;
     };

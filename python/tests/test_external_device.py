@@ -623,6 +623,26 @@ def test_trbdf2_snapshot_resume_carries_the_model_state(libs):
     assert a[-1] == pytest.approx(e0 + float(np.sum(np.diff(t) * 1e-3 * v[1:] ** 2)), rel=1e-12)
 
 
+@pytest.mark.parametrize("kw", [dict(engine="pwl", dt=1e-6),
+                                dict(engine="trbdf2", rtol=1e-7, atol=1e-10)])
+def test_device_output_covers_a_pwm_run_with_gate_edges_and_a_diode(libs, kw):
+    """trbdf2 commits a step, then a gate-edge restart moves t in the same
+    iteration: every committed sample needs its trace row (review #1)."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", 24.0)
+    b.add_mosfet("Q1", "vin", "sw")
+    b.add_diode("D1", "gnd", "sw", 1e3, 1e-9)
+    b.add_inductor("L", "sw", "vout", 100e-6)
+    b.add_capacitor("C", "vout", "gnd", 47e-6)
+    b.add_resistor("RL", "vout", "gnd", 10.0)
+    b.add_external_device("M", ["vout", "gnd"], libs["contract"], "metered_resistor",
+                          {"G": 1e-3}, record=True)
+    fn = p.make_pwm_switch_fn(100e3, 0.5, b.switch_index_of("Q1"), b.graph.num_switches)
+    res = p.simulate(b, switch_fn=fn, t_end=2e-4, **kw)
+    v = np.asarray(res.v("vout"))
+    np.testing.assert_allclose(res.device_output("M", "i(a)"), 1e-3 * v, rtol=0, atol=1e-15)
+
+
 def test_steady_state_refuses_the_model_state_by_name(libs):
     """The period map copies named state blocks only; the external block is
     not one yet, so steady_state refuses instead of restarting the model's
@@ -741,6 +761,9 @@ def test_yaml_external_device_is_refused_without_an_allow_list(libs):
 def test_yaml_allow_native_code_true_is_refused(libs):
     with pytest.raises(ValueError, match="pass the library paths"):
         p.load_yaml_string(_netlist(libs["twins"]), allow_native_code=True)
+    for one in (libs["twins"], pathlib.Path(libs["twins"])):   # a list, not one path
+        with pytest.raises(TypeError, match="not one path"):
+            p.load_yaml_string(_netlist(libs["twins"]), allow_native_code=one)
 
 
 def test_yaml_external_device_loads_a_listed_library_or_directory(libs, tmp_path):
@@ -769,6 +792,25 @@ def test_yaml_external_device_loads_a_listed_library_or_directory(libs, tmp_path
         # the link's directory is not the library's: listing it allows nothing
         with pytest.raises(RuntimeError, match="not in allow_native_code"):
             p.load_yaml_file(str(f), allow_native_code=[tmp_path])
+
+
+def test_yaml_external_device_in_a_subsystem_takes_the_block_nodes(libs):
+    lib = libs["twins"]
+    doc = f"""
+circuit:
+  devices:
+    - {{type: voltage_source, name: V, from: in, to: gnd, V: 5.0}}
+    - {{type: resistor, name: R, from: out, to: gnd, R: 10.0}}
+  subsystems:
+    - name: blk
+      ports: {{p: in, n: out}}
+      devices:
+        - {{type: resistor, name: Rs, from: p, to: a, R: 1.0}}
+        - {{type: external_device, name: D, nodes: [a, n], lib: {lib},
+           model: shockley_twin, params: {{I_S: 1.0e-12}}}}
+"""
+    c = p.load_yaml_string(doc, allow_native_code=[lib]).builder.build()
+    assert c.nodes == ["in", "out", "blk/a"]   # the port n is out, a is scoped
 
 
 def test_yaml_external_device_keys_are_strict(libs):

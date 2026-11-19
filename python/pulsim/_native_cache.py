@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import stat
 import subprocess
 import sys
 import threading
@@ -90,9 +91,9 @@ def compiled(src: str, ext: str, cmd: Sequence[str], key_parts: Sequence[str],
     cache = cache_dir(sub)
     so_path = cache / f"{prefix}_{key}.so"
     if so_path.exists() or so_path.is_symlink():
-        if is_private(so_path):
+        if is_private(so_path) and stat.S_ISREG(so_path.lstat().st_mode):
             return so_path
-        so_path.unlink()            # our directory: we may remove it
+        so_path.unlink()            # our directory: we may remove it (a directory raises)
     tag = f"{os.getpid()}_{threading.get_ident()}"
     src_path = cache / f"{prefix}_{key}_{tag}{ext}"
     tmp_so = cache / f"{prefix}_{key}_{tag}.so.tmp"
@@ -101,6 +102,7 @@ def compiled(src: str, ext: str, cmd: Sequence[str], key_parts: Sequence[str],
     try:
         subprocess.run(full, check=True, capture_output=True, text=True)
     except subprocess.CalledProcessError as exc:
+        tmp_so.unlink(missing_ok=True)
         raise RuntimeError(
             f"{who}: compile failed:\n$ {' '.join(full)}\n{exc.stderr}") from None
     finally:

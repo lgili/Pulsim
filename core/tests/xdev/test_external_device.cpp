@@ -164,6 +164,8 @@ TEST_CASE("xdev: appended block 1 — named outputs, reserved events", "[xdev]")
     CHECK(refusal(PULSIM_XDEV_CONTRACT, "metered_resistor") == std::string{});
     CHECK(has(refusal(PULSIM_XDEV_CONTRACT, "liar_output_name"), "generic reading"));
     CHECK(has(refusal(PULSIM_XDEV_CONTRACT, "liar_events"), "event functions are not supported"));
+    CHECK(refusal(PULSIM_XDEV_CONTRACT, "partial_block") == std::string{});
+    CHECK(xdev::load_model(PULSIM_XDEV_CONTRACT, "partial_block")->d().n_outputs == 0u);
     auto m = xdev::load_model(PULSIM_XDEV_CONTRACT, "metered_resistor");
     REQUIRE(m->d().n_outputs == 2);
     CHECK(std::string(m->d().outputs[0].name) == "energy");

@@ -358,10 +358,12 @@ private:
     /// Deep copy of the validated descriptor: the host never reads the
     /// library's (possibly writable) struct or arrays again.
     void own_() {
-        // only the bytes the LIBRARY's struct has (a later host's struct is
-        // longer than an old library's); fields it lacks stay zero
+        // only the blocks the LIBRARY's struct holds WHOLE (an older library's
+        // is shorter; a size inside block 1 is a partial block, unvalidated,
+        // so it is not read); fields it lacks stay zero
         desc_ = pulsim_xdev_descriptor{};
-        std::memcpy(&desc_, d_, std::min<std::size_t>(d_->struct_size, sizeof desc_));
+        std::memcpy(&desc_, d_, d_->struct_size >= kOutputsDescriptorSize ? sizeof desc_
+                                                                          : kV1DescriptorSize);
         const std::size_t R = R_;
         for (std::uint32_t k = 0; k < d_->n_pins; ++k) pin_s_.emplace_back(d_->pin_names[k]);
         for (const auto& n : pin_s_) pin_p_.push_back(n.c_str());

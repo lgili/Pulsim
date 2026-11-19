@@ -395,6 +395,32 @@
     scatter 1.12–1.27 and are not used). A run without a `record=True`
     device attaches no trace.
 34. **Section 4 (`pulsim.xdev` SymPy) not started** — goals 1–5 took the slice; nothing of section 4 exists.
+35. **Review of cad0720a (fresh-context, read-only) and what changed.**
+    (1) trbdf2 fired `device_state` once per ITERATION (`tw_on_step`), but a
+    step commit followed by a gate-edge or breakpoint restart in the same
+    `tb_commit` stores two samples: the first had no trace row and
+    `device_output` refused every PWM run on trbdf2. Fixed in the shared
+    phase: `device_state_once(t, x)` fires at each of the three commit
+    sites (step, post-event probe, diode landing) and at the iteration end
+    only if that time was not just fired (no double rows). Test: a PWM buck
+    with a diode on pwl and trbdf2. (2) `BlockNames::device` did not scope
+    the `nodes` list: an `external_device` inside a subsystem attached to
+    top-level names. Fixed, tested. (3) A `struct_size` inside block 1 copied
+    an unvalidated `n_outputs` (out-of-bounds read): the host now copies a
+    block only when the library's struct holds it whole (test model
+    `partial_block`). (4) `reading` called `eval` without the const-state
+    guard: routed through `eval_`. (5) an empty trace's message, (8) one
+    `Path` as `allow_native_code` (TypeError like one string), (9) the cache
+    returns only a regular file and removes its temp library after a failed
+    compile — fixed. (6)/(7) documented (relative entries are from the
+    working directory; a directory admits its subfolders — never list a
+    writable shared one). LEFT: (10) the older `wire_c_blocks_from_yaml`
+    still compiles / loads YAML `code`/`file`/`lib` without an allow list
+    (an explicit separate call; documented, not changed). trbdf2's
+    `record_post_event` display samples (not commits) are still refused by
+    `device_output` by name. After the fixes: byte comparisons all
+    IDENTICAL again; buck pwl 28 966 / 30 874 / 30 681, trbdf2 59 893 /
+    59 505 / 59 474 instructions per step (noise); full pytest 5690 passed.
 
 ## Requests to other tracks
 
@@ -403,6 +429,22 @@
   until then #5 refuses. (b) `t` in `pulsim_xdev_ctx` is always 0: the refresh
   signature carries no time; a time-dependent external law needs the solve's t
   passed to `NonlinearRefreshFn` (or `pwl::StepCtx`).
+
+## Hand-off (2026-11-20, slice 4)
+
+- Open, in order: **3.3 events** (#29 lists the four loop pieces: a generic
+  event-signal source on `StatefulHistories`, the pwl split, the trbdf2
+  Illinois signal, accept after the landing) — needs the stepper owners;
+  **3.2's steady-state copy** (`steady_state._snapshot_like` must copy the
+  `external_device` block; `periodic_steady_state` needs read/set of it);
+  1.6's `code=` free function; `wire_c_blocks_from_yaml` behind the same
+  allow list (#35 (10)); section 4 (SymPy, not started); section 5.
+- `device_output` refuses trbdf2's post-event display samples; a caller who
+  wants a dense reading should drop them (they are not committed states).
+- Verified on this tip (macOS arm64 only): xdev / yaml / layer5_v3 / step /
+  record pass on Eigen 5 and 3.4.0; full pytest, `-m reference`,
+  reference_status (REFERENCE_STATUS.md unchanged), openspec --strict,
+  `ruff check python/`, stubs --check. Full ctest, Linux, Windows not run.
 
 ## Hand-off (2026-11-20, slice 3)
 

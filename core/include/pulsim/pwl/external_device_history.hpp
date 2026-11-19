@@ -111,7 +111,7 @@ public:
         const std::size_t R = d.inst->rows(), NP = d.inst->model().d().n_pins;
         const Real* st = cells.data() + d.off + 3 * R;
         gather_(d, x);
-        d.inst->eval(d.x.data(), st, d.o, t);
+        eval_(d, t, st);
         Real p = Real{0};
         for (std::size_t r = 0; r < NP; ++r) {
             dst[r] = d.o.f[r] + cells[d.off + R + r];
@@ -357,9 +357,9 @@ private:
     /// One evaluation in a run. A stateful model's committed state is
     /// compared after the call (n_state reals; nothing for n_state = 0): a
     /// write through the const ctx->state is refused by name, always on.
-    void eval_(const Device& d, Real t) const {
+    void eval_(const Device& d, Real t, const Real* st = nullptr) const {
         const std::size_t NS = d.inst->n_state();
-        const Real* st = state_(d);
+        if (st == nullptr) st = state_(d);
         if (NS) std::copy(st, st + NS, d.scratch.begin());
         d.inst->eval(d.x.data(), st, d.o, t);
         if (NS && std::memcmp(st, d.scratch.data(), NS * sizeof(Real)) != 0) {

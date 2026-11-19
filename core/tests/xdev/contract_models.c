@@ -286,14 +286,19 @@ static const pulsim_xdev_descriptor MODELS[] = {
 };
 
 #ifdef PULSIM_XDEV_DESCRIPTOR_OUTPUTS_SIZE
-#define DESC_OUT(nm, nout, outs, ofn, nev)                                                     \
-    {PULSIM_XDEV_ABI_VERSION, (uint32_t)sizeof(pulsim_xdev_descriptor), (nm), 2, 0, 1, 1, 4, 0, \
+#define DESC_OUT_SZ(sz, nm, nout, outs, ofn, nev)                                              \
+    {PULSIM_XDEV_ABI_VERSION, (uint32_t)(sz), (nm), 2, 0, 1, 1, 4, 0,                           \
      0, SMOOTH | PASSIVE, PINS, FG, FR, FC, NULL, NULL, LO, HI, MONO, good, NULL, NULL, NULL,    \
      meter_init, meter_accept, {NULL, NULL, NULL, NULL}, (nout), (nev), (outs), (ofn)}
+#define DESC_OUT(nm, nout, outs, ofn, nev) \
+    DESC_OUT_SZ(sizeof(pulsim_xdev_descriptor), nm, nout, outs, ofn, nev)
 static const pulsim_xdev_descriptor OUT_MODELS[] = {
     DESC_OUT("metered_resistor", 2, METER_OUT, meter_outputs, 0),
     DESC_OUT("liar_output_name", 1, BAD_OUT, meter_outputs, 0),
     DESC_OUT("liar_events", 0, NULL, NULL, 1), /* event functions: not supported yet */
+    /* struct_size inside block 1: the partial block is not read (n_outputs
+       would index a NULL outputs) */
+    DESC_OUT_SZ(PULSIM_XDEV_DESCRIPTOR_V1_SIZE + 4, "partial_block", 3, NULL, NULL, 0),
 };
 #define N_OUT_MODELS (sizeof OUT_MODELS / sizeof OUT_MODELS[0])
 #else
