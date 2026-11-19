@@ -2,6 +2,7 @@
 classifier (`pulsim.exact_route`, `result.exact['segments']`) and `engine='exact'` as the
 canonical name of the event-driven exact engine, with 'dsed' its alias."""
 
+import functools
 import warnings
 
 import numpy as np
@@ -234,39 +235,52 @@ def _paralleled_bridges(n):
 
 
 @pytest.mark.parametrize("mode", [None, "lcp"])
-def test_ten_paralleled_bridges_are_refused_not_returned(mode):
-    """Ten three-phase bridges paralleled on one bus. The mode at rest once had no exact step
-    (add-complementarity-mode-selection DECISIONS #25); later a cluster mode was refused as
-    inaccurate eigenpairs. Since the Pade tier is judged by its own error (exact engine 7), every
-    mode has a propagator, and the run is refused by the diode-law check instead: an ON diode
-    carries -0.3 A near 0.87 ms. That wrong mode is a tier-1 mode, reached through a mode
-    selection that goes wrong on tier-1 modes alone (next test): a selection defect the
-    propagator change exposed, not a Pade error (add-exact-propagator-strategy DECISIONS,
-    exact engine 7). Either refusal is acceptable here; a returned waveform is not."""
-    from pulsim._dsed_dispatch import DiodeModeInconsistentError
+def test_ten_paralleled_bridges_agree_with_pwl(mode):
+    """Ten three-phase bridges paralleled on one bus, the bus held to ground by 1 Mohm. Slice 7
+    refused this run (an ON diode at -0.30 A, 0.87 ms) and blamed the mode selection; the cause
+    was the reduction: G_aa's condition (1 kS diodes against the 1 uS tie) cost the plain Schur
+    complement 0.55 of A's -100 /s bus entry, so the trajectory drifted (2e-4 V at 0.1 ms) and
+    the predicate of Dt0a read 3e-5 V of noise, keeping it ON 4.6 us past its current zero.
+    The double-double refined reduction (exact engine 8) runs it on either selection, within
+    the 5-bank test's 1e-3 V of pwl+split."""
     kw = {} if mode is None else {"mode_selection": mode}
+    t_end = 0.02
+    tg = np.linspace(0.0, t_end, 2001)
+
+    def bus(r):
+        return np.interp(tg, r.times, np.asarray(r.v("p")) - np.asarray(r.v("n")))
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        try:
-            p.simulate(_paralleled_bridges(10), t_end=0.02, engine="exact", **kw)
-        except DiodeModeInconsistentError:
-            return                                   # measured: Db0b ON at -0.30 A, 0.87 ms
-        except p.UnsupportedError as e:
-            assert (e.engine, e.feature) == ("dsed", "cost")   # a mode with no exact step
-            return
-    pytest.fail("ten paralleled bridges returned a waveform")
+        r = p.simulate(_paralleled_bridges(10), t_end=t_end, engine="exact", **kw)
+        ref = _ten_bridges_pwl()
+    assert np.abs(bus(r) - np.interp(tg, *ref)).max() <= 1e-3
 
 
-def test_ten_paralleled_bridges_are_refused_over_the_first_300_us_too():
-    """The deviation behind the refusal above is early: with the law check off (a probe, not a
-    test) the bus is 0.13 V off pwl+split (dt 5e-8, converged to 4e-7 V) at 0.3 ms, every visited
-    mode tier 1. With the check on, a 0.3 ms run is refused at 0.23 ms (Db9c ON at -0.20 A):
-    the check judges against the run's own peaks, so the 20 ms run meets it later, at 0.87 ms."""
-    from pulsim._dsed_dispatch import DiodeModeInconsistentError
+@functools.cache
+def _ten_bridges_pwl():
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        with pytest.raises(DiodeModeInconsistentError):
-            p.simulate(_paralleled_bridges(10), t_end=3e-4, engine="exact")
+        q = p.simulate(_paralleled_bridges(10), t_end=0.02, engine="pwl", dt=1e-7,
+                       discontinuity_restart=True, enable_substep_state_correction=True)
+    return np.asarray(q.times), np.asarray(q.v("p")) - np.asarray(q.v("n"))
+
+
+def test_ten_paralleled_bridges_first_mode_matches_a_50_digit_exponential():
+    """The first mode (every bank: Dt_a, Db_b, Dt_c ON) held from rest to 0.1 ms, against the
+    exponential (mpmath, 50 digits) of the augmented system built from the circuit's KCL written
+    out by hand (states i_L and the bus; n = R_g·sum(i)), not from the reduction under test: bus 11.725547151164887 V,
+    i(L0a) 0.12972284951463489 A. The plain reduction was 2.1e-4 V / 5.5e-6 A off; the ON
+    diode Dt0a must read v = i/g_on from the recovery map (was 3e-5 V off)."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(_paralleled_bridges(10), t_end=1e-4, engine="exact")
+    bus = float(np.asarray(r.v("p"))[-1] - np.asarray(r.v("n"))[-1])
+    il = float(np.asarray(r.i("L0a"))[-1])
+    assert r.times[-1] == pytest.approx(1e-4, abs=1e-15)
+    assert bus == pytest.approx(11.725547151164887, abs=1e-7)
+    assert il == pytest.approx(0.12972284951463489, abs=1e-8)
+    vd = float(np.asarray(r.v("x0a"))[-1] - np.asarray(r.v("p"))[-1])
+    assert vd == pytest.approx(il / GON, abs=1e-8)
 
 
 @pytest.mark.parametrize("engine", ["pwl", "trbdf2", "auto"])

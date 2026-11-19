@@ -35,6 +35,7 @@
 #include "pulsim/topology/switch_state.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <atomic>
 #include <bit>
 #include <chrono>
@@ -386,6 +387,140 @@ public:
         // same arithmetic as `solve(-(b_constant + b_extra))`, on the
         // solver's thread-local workspace (review ZA-1).
         seg.solver->solve_neg_sum(seg.b_constant, b_extra, x);
+    }
+
+    /// The reduction's solves, refined in double-double (exact engine 8).
+    /// A bus held to ground by 1 MΩ against 1 kS diodes gives G_aa a
+    /// condition ~1e10 or more, and G_sa·G_aa⁻¹·G_as − G_ss then cancels
+    /// node voltages of ~R_g·i down to the bus row (~1/R): plain double
+    /// lost 0.55 of A's −100 /s bus entry with ten rectifier banks (bus
+    /// 2e-4 V off at 0.1 ms, a diode predicate 3e-5 V off, a reversed
+    /// diode kept ON for 4.6 µs). Every solve is refined with compensated
+    /// residuals (fma + TwoSum, Dot2: as if in twice the working precision)
+    /// and the solution kept as hi + lo; the products with G_sa are summed
+    /// the same way and rounded once. A column whose refinement does not
+    /// converge keeps its plain solve. The stamped G itself is rounded
+    /// data: the result is accurate for that G, not for the netlist.
+    /// A mode whose refined operators all lie within 1e-12 of the plain
+    /// ones (relative to each row's largest entry) keeps the plain ones,
+    /// bit for bit.
+    /// `solve(r, x)` applies the plain G_aa⁻¹ (the sparse LU, or the general
+    /// path's SVD inverse when G_aa has full rank there).
+    template <class Solve>
+    static void refine_schur_(const sparse::Matrix& Gaa, const sparse::Matrix& Gas,
+                              const sparse::Matrix& Gsa, const sparse::Matrix& Gss,
+                              const Vector& ba, const Vector& bs, Solve&& solve,
+                              DenseMatrix& X, Vector& xb, DenseMatrix& Ginv,
+                              DenseMatrix& S, Vector& Sb, DenseMatrix& GsaGinv) {
+        const auto na = Gaa.rows();
+        const auto ns = Gsa.rows();
+        // s + c += a·b, product and sum both error-free
+        const auto acc = [](Real& s, Real& c, Real a, Real b) {
+            const Real p = a * b;
+            const Real pe = std::fma(a, b, -p);
+            const Real t = s + p;
+            const Real bp = t - s;
+            c += (s - (t - bp)) + (p - bp) + pe;
+            s = t;
+        };
+        Vector s(na), c(na), rho(na), d;
+        // x = G_aa⁻¹·r as hi + lo, starting from the plain solve in hi
+        const auto refine = [&](const Vector& r, Vector& hi, Vector& lo) {
+            lo.setZero(na);
+            const Vector plain = hi;
+            bool converged = false;
+            Real last = std::numeric_limits<Real>::infinity();
+            for (int it = 0; it < 10; ++it) {
+                s = r;
+                c.setZero();
+                for (Eigen::Index k = 0; k < Gaa.outerSize(); ++k) {
+                    for (sparse::Matrix::InnerIterator e(Gaa, k); e; ++e) {
+                        acc(s[e.row()], c[e.row()], -e.value(), hi[k]);
+                        acc(s[e.row()], c[e.row()], -e.value(), lo[k]);
+                    }
+                }
+                rho = s + c;
+                solve(rho, d);
+                const Real dn = d.cwiseAbs().maxCoeff();
+                if (!(dn < Real{0.5} * last)) break;   // stalled: keep what we have
+                last = dn;
+                for (Eigen::Index i = 0; i < na; ++i) {  // (hi, lo) += d
+                    const Real t = hi[i] + d[i];
+                    const Real bp = t - hi[i];
+                    const Real e = (hi[i] - (t - bp)) + (d[i] - bp) + lo[i];
+                    hi[i] = t + e;
+                    lo[i] = e - (hi[i] - t);
+                }
+                constexpr Real u = std::numeric_limits<Real>::epsilon();
+                if (!(dn > Real{4} * u * u * hi.cwiseAbs().maxCoeff())) {
+                    converged = true;
+                    break;
+                }
+            }
+            if (!converged) {   // never trade the plain column for an unconverged one
+                hi = plain;
+                lo.setZero(na);
+            }
+        };
+        const DenseMatrix Gss_d = DenseMatrix(Gss);
+        Vector ps(ns), pc(ns);
+        // out += G_sa·(hi + lo), summed error-free, rounded once
+        const auto product = [&](const Vector& hi, const Vector& lo, Vector& out) {
+            ps = out;
+            pc.setZero();
+            for (Eigen::Index k = 0; k < Gsa.outerSize(); ++k) {
+                for (sparse::Matrix::InnerIterator e(Gsa, k); e; ++e) {
+                    acc(ps[e.row()], pc[e.row()], e.value(), hi[k]);
+                    acc(ps[e.row()], pc[e.row()], e.value(), lo[k]);
+                }
+            }
+            out = ps + pc;
+        };
+        DenseMatrix Xr(na, X.cols()), Gr(na, na), Sr(ns, S.cols()), Pr(ns, na);
+        Vector xbr, Sbr, hi, lo, col, r;
+        for (Eigen::Index j = 0; j < X.cols(); ++j) {
+            r.setZero(na);
+            for (sparse::Matrix::InnerIterator e(Gas, j); e; ++e) r[e.row()] = e.value();
+            hi = X.col(j);
+            refine(r, hi, lo);
+            Xr.col(j) = hi + lo;
+            col = -Gss_d.col(j);
+            product(hi, lo, col);
+            Sr.col(j) = col;
+        }
+        hi = xb;
+        refine(ba, hi, lo);
+        xbr = hi + lo;
+        Sbr = -bs;
+        product(hi, lo, Sbr);
+        for (Eigen::Index j = 0; j < na; ++j) {
+            r.setZero(na);
+            r[j] = Real{1};
+            hi = Ginv.col(j);
+            refine(r, hi, lo);
+            Gr.col(j) = hi + lo;
+            col.setZero(ns);
+            product(hi, lo, col);
+            Pr.col(j) = col;
+        }
+        // the plain operators stay unless some row moved past 1e-12 of its scale
+        const auto moved = [](const auto& a, const auto& b) {
+            for (Eigen::Index i = 0; i < a.rows(); ++i) {
+                const Real sc = b.row(i).cwiseAbs().maxCoeff();
+                if ((a.row(i) - b.row(i)).cwiseAbs().maxCoeff() > Real{1e-12} * sc) return true;
+            }
+            return false;
+        };
+        if (!(moved(S, Sr) || moved(Sb, Sbr) || moved(GsaGinv, Pr) || moved(X, Xr)
+              || moved(xb, xbr) || moved(Ginv, Gr))) {
+            return;
+        }
+        X = std::move(Xr);
+        xb = std::move(xbr);
+        Ginv = std::move(Gr);
+        S = std::move(Sr);
+        Sb = std::move(Sbr);
+        GsaGinv = std::move(Pr);
     }
 
     // -------------------------------------------------------------
@@ -859,12 +994,21 @@ public:
             const int d = static_cast<int>(W.cols());
             // f(x, u) = Af·x + Fs·u_s + Fa·u_a
             DenseMatrix Af(ns, ns), Fs(ns, ns), Fa(ns, na);
+            DenseMatrix PGas = P * Gas;
             if (ns > 0) {
-                Af = mlu.solve(Gsa * P * Gas - Gss);
+                DenseMatrix S = Gsa * PGas - Gss, GsaP = Gsa * P;
+                if (d == 0 && na > 0) {   // regular G_aa: the solves refined as above
+                    Vector xb = Vector::Zero(na), Sb = Vector::Zero(ns);
+                    refine_schur_(Gaa.sparseView(), Gas.sparseView(), Gsa.sparseView(),
+                                  Gss.sparseView(), Vector::Zero(na), Vector::Zero(ns),
+                                  [&](const Vector& r, Vector& o) { o = P * r; },
+                                  PGas, xb, P, S, Sb, GsaP);
+                }
+                Af = mlu.solve(S);
                 Fs = -mlu.inverse();
-                Fa = mlu.solve(Gsa * P);
+                Fa = mlu.solve(GsaP);
             }
-            DenseMatrix Rax = -P * Gas, Ras = DenseMatrix::Zero(na, ns), Raa = -P;
+            DenseMatrix Rax = -PGas, Ras = DenseMatrix::Zero(na, ns), Raa = -P;
             DenseMatrix K(d, ns);
             Vector kc = Vector::Zero(d);
             const Vector u_const = Tg.transpose() * b_orig;
@@ -1362,7 +1506,10 @@ public:
                     return general();
                 }
             }
-            const DenseMatrix Gsa_Ginv = Gsa_sp * Ginv;
+            DenseMatrix Gsa_Ginv = Gsa_sp * Ginv;
+            refine_schur_(Gaa_sp, Gas_sp, Gsa_sp, Gss_sp, b_a_v, b_s,
+                          [&](const Vector& r, Vector& o) { solver->solve(r, o); },
+                          Ginv_Gas, Ginv_ba, Ginv, Schur_G, Schur_b, Gsa_Ginv);
             for (int j = 0; j < n_alg; ++j) {
                 B.col(alg_rows[j]) = Gsa_Ginv.col(j);
             }
