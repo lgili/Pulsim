@@ -5,9 +5,10 @@ library you build: Pulsim stamps it like a built-in device on the `pwl` and
 `trbdf2` engines, in the DC operating point (`start_from_dc_op`,
 `compute_dc_operating_point`) and in the kernel AC sweep. Status: stages 1–3
 of `add-external-device-abi` (C ABI, checks, Python call, time, DC, AC),
-internal unknowns and model state, named outputs, and a YAML type behind an
-allow list. Not yet: event functions (zero crossings located by the engine),
-inline `code=`, equations-to-C (`pulsim.xdev`), OSDI.
+internal unknowns and model state, named outputs, a YAML type behind an
+allow list, inline `code=` (`pulsim.add_external_device`) and equations to C
+(`pulsim.xdev`, SymPy). Not yet: event functions (zero crossings located by
+the engine), OSDI.
 
 ## Loading a library runs native code
 
@@ -169,6 +170,117 @@ with `UnsupportedError`. The exact engine admits no Newton device at all: it
 propagates each topology mode in closed form, which a law known only through
 `f`, `q` and their Jacobians at sampled points cannot give.
 The test models in `core/tests/xdev/` are illustrations, not part models.
+
+`pulsim.add_external_device(builder, name, nodes, *, lib=None, code=None,
+lang="c", model=None, params=None, check_jacobian=True, record=False)` does
+the same from a library path or from source: `code=` is a whole C (or C++,
+`lang="cpp"`) translation unit against `pulsim_xdev.h`, compiled through the
+per-user native cache (the C block's: a private directory, mode 0700, a
+cached library someone else owns or can write is rebuilt, never loaded).
+`model` may be left out when the library holds one model.
+`check_jacobian=False` skips the registration checks.
+
+## Equations to C (`pulsim.xdev`)
+
+Needs SymPy (`pip install pulsim[codegen]`) and a C compiler (`$CC`, `cc`,
+`gcc` or `clang`); each missing piece is a clear error naming what to
+install; a refused law or name is `xdev.XdevError` (a `ValueError`).
+Windows: the native cache drives a gcc/clang-style command line
+only (no MSVC yet).
+
+```python
+import sympy as sp
+import pulsim as p
+from pulsim import xdev
+
+a, k = xdev.pins("anode", "cathode")
+I_S, n, V_T, G_min, i_lim = xdev.params(          # (default, unit[, lo, hi])
+    I_S=(1e-12, "A", 1e-30, 1.0), n=(1.0, "", 0.1, 10.0),
+    V_T=(0.025852, "V", 1e-3, 1.0), G_min=(1e-12, "S", 0.0, 1.0),
+    i_lim=(1e6, "A", 1e-6, 1e12))
+vte = n * V_T
+v_lim = vte * sp.log(i_lim / I_S + 1)
+e_lim = sp.exp(v_lim / vte)
+u = a - k
+i = sp.Piecewise((I_S * (e_lim - 1) + I_S * e_lim / vte * (u - v_lim), u > v_lim),
+                 (I_S * (sp.exp(u / vte) - 1), True)) + G_min * u
+dev = xdev.compile("sympy_diode", pins=[a, k], f=[i, -i])   # q defaults to 0
+
+b = p.CircuitBuilder()
+b.add_sine_voltage_source("V", "in", "gnd", 0.0, 20.0, 1e3)
+b.add_resistor("Rs", "in", "a", 1.0)
+dev.add_to(b, "D", "a", "out")           # params by name: dev.add_to(..., I_S=2e-12)
+b.add_capacitor("C", "out", "gnd", 10e-6)
+b.add_resistor("R", "out", "gnd", 100.0)
+res = p.simulate(b, t_end=2e-3, dt=1e-6, device_path="interface")
+```
+
+This is the built-in `add_shockley_diode` law written out; the two runs
+agree to 1.6e-14 of the voltage scale (macOS arm64; the C uses `expm1`
+where the built-in writes `exp − 1`). The full script, with the comparison
+and the scans below, is `examples/scripts/run_xdev_sympy_diode.py`.
+
+What `compile` does: `sympy.diff` of every row by every unknown; the
+structurally non-zero derivatives are the fixed Jacobian pattern; common
+sub-expressions are shared (`cse`); `exp(z) − 1` → `expm1(z)` and
+`log(1 + z)` → `log1p(z)`; plain C99 (no VLAs, no extensions, no
+`M_PI`, numbers as literals, FMA contraction off under clang so
+`c·x0 − c·x1` is 0 at `x0 = x1`), compiled with `-std=c99`; the generated
+source is deterministic (the same law gives the same bytes, so the cache
+hits) and pure (no mutable statics; the registration's purity and
+reentrancy probes run on it). The generated C of the test laws compiles
+with `-std=c99 -pedantic -Wall -Wextra -Werror` on clang and gcc 15.
+
+- `xdev.internal("i")`: an internal unknown (one more row in `f` and `q`);
+  the saturable inductor is `f = [i, −i, v_from − v_to]`,
+  `q = [0, 0, −λ(i)]`.
+- `xdev.state("E", init=0)` with `compile(..., update={E: E + xdev.h·G·v²})`:
+  a committed state (`init` at the start, `update` after each accepted step;
+  the law may read it, it has no Jacobian column). `outputs={"energy": (E,
+  "J")}`: named outputs, read with `res.device_output(name, key)` for a
+  device added with `record=True`.
+- `probe={unknown: (lo, hi)}`: the box the registration checks sample
+  (default `(−1, 1)` per unknown).
+- Parameters and states are found in the expressions, in declaration
+  order; a symbol that is not one of the model's is refused by name.
+
+**Smoothness lint.** `Piecewise`, `Abs`, `sign`, `Max`, `Min`,
+`Heaviside`, `floor` (and `ceiling`, `frac`, `Mod`) **of an unknown** are
+refused with the offending sub-expression. A function of parameters only
+(`Abs(G)·v`, `Piecewise((…, BV > 0), (0, True))`) is no kink in the
+unknowns and is accepted. A `Piecewise` is accepted as C¹ — and the model
+keeps its SMOOTH claim — when it has two pieces, its condition is one
+relational that SymPy solves for one unknown, and the two pieces agree in
+value and in gradient on that boundary (proved with `simplify`): the
+tangent continuation above is such a case. Anything else (three pieces, an
+`And`, a boundary SymPy cannot solve, a proof `simplify` cannot close) is
+refused: the proof is conservative. `allow_nonsmooth=True` accepts the law;
+the model then does not claim SMOOTH, the non-smooth functions are written
+as `Piecewise`, and the Jacobian is the derivative of the branch the value
+takes (one-sided at a kink, which the registration check accepts for a
+model without the claim). Two kinks at the same point may take opposite
+sides there (SymPy orders `Max`'s arguments canonically).
+
+**Monotonicity.** The lint sees constructs, not rounding. A law written
+with a cancellation — `coth(u) − 1/u` without its series — is smooth on
+paper and non-monotone in doubles near 0. `xdev.scan_monotone(dev, pin, lo,
+hi)` evaluates `f[row]` (default: that pin's own row) on a fine grid plus a
+geometric run to 1e-15 of the width on each side of 0 and returns the
+intervals where it decreases by more than a few ulps of `f`, and the points
+where it is not finite: for that Langevin law it reports intervals within
+|u| < 7e-8 and the NaN at 0; for the diode above, none. It works on any
+library model too (`xdev.load(lib, model)`, no SymPy). (SymPy's C printer
+writes `coth` as an `exp` ratio, a second cancellation; `pulsim.xdev`
+prints `1/tanh`.)
+
+**Trust.** Generated code is still native code, compiled and loaded into
+your process. Names that reach the C (model, pins, parameters, states,
+outputs) must match `[A-Za-z][A-Za-z0-9_]*` (≤ 63 characters) and not be C
+keywords (nor `near` / `far`); units are ≤ 32 characters of letters,
+digits, space and `_ . / * ^ ( ) % + -`; expressions reach the C only
+through SymPy's printer from SymPy objects (no user text is pasted); the
+compiler runs from an argument list, never a shell; the cache rules above
+apply unchanged.
 
 ## YAML
 

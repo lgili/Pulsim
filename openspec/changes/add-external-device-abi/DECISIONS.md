@@ -422,6 +422,119 @@
     IDENTICAL again; buck pwl 28 966 / 30 874 / 30 681, trbdf2 59 893 /
     59 505 / 59 474 instructions per step (noise); full pytest 5690 passed.
 
+## Slice 5 — equations to C (`pulsim.xdev`), the free function (2026-11-19, real clock)
+
+Python only: no C++ header, `bindings.cpp` or C header changed; the extension
+of 7e2860eb was not rebuilt. Full ctest not run on this tip.
+
+36. **cc37304a applied by hand, not merged.** A merge of
+    `origin/feat/core-integration` brings C++ (bindings.cpp, solver headers)
+    and would make this worktree's installed extension stale for the tests;
+    the PR's test fix (`os.replace` of a new file with the flipped byte and the
+    same size / mtime, never `write_bytes` into the loaded library) and its
+    doc sentence were applied with `git apply` (b5918521).
+37. **Handles and determinism.** `xdev.pins / internal / params / state` return
+    `sympy.Dummy` subclasses (unique per declaration; attributes `xkind`,
+    `meta` — never `kind`, which is SymPy's own `Basic.kind`). No user name is
+    ever printed into the C: before emission every handle is replaced by a
+    plain symbol `x[i]` / `p[j]` / `s[k]` / `h`, so SymPy's canonical term order
+    (which for a Dummy depends on its process-global index) cannot reach the
+    text. Parameters and states are found in the expressions and ordered by
+    declaration. Test: the same law in another process that first makes 1000
+    Dummies gives a byte-identical source (sha256), and the same library path.
+38. **The lint and a C¹ Piecewise (the decision).** A `Piecewise` whose
+    conditions involve an unknown is accepted as C¹ — and the model keeps
+    SMOOTH — only when it has two pieces, its condition is ONE relational
+    (`<`, `<=`, `>`, `>=`) that `sympy.solve` solves for one unknown with a
+    single solution, and `simplify` proves the pieces' difference and every
+    component of its gradient zero on that boundary. Everything else is
+    refused (three pieces, `And`, an unsolvable boundary, a proof `simplify`
+    cannot close): conservative, never optimistic. A non-smooth construct
+    of parameters / states only (`Abs(G)`, `Piecewise((…, BV > 0), (0, True))`)
+    is no kink in the unknowns and is accepted. The built-in Shockley's
+    tangent continuation passes (the proof uses `exp(log z) = z`). Also
+    refused besides the brief's list: `ceiling`, `frac`, `Mod`, `DiracDelta`.
+39. **allow_nonsmooth.** `Abs / sign / Max / Min / Heaviside` are rewritten as
+    `Piecewise` before differentiation, so value and Jacobian take the same
+    branch (`floor` / `ceiling`: derivative 0); the model does not claim
+    SMOOTH and the host's one-sided check accepts it (test: a law with two
+    kinks registers with `check_contract=True`, runs, and declares one side's
+    slope AT each kink). LIMIT, documented: two kinks at the SAME point can
+    take opposite sides at the tie (SymPy orders `Max`'s arguments
+    canonically: `Max(u, 0)` picks the 0 branch at u = 0, `Abs(u)` the u
+    branch) — the first test law had both at u = 0 and the centre probe
+    refused it (0.25e-3 declared, neither side). No general fix: "forward in
+    x_j" has no meaning for an expression of several unknowns.
+40. **expm1 / log1p by pattern, not SymPy's optimizer.** `sympy.codegen.
+    rewriting.log1p_opt` factors the log's argument: `log(1 + (a − b)²)` came
+    out as `log(a² − 2ab + b² + 1)` (a cancellation it introduced), and
+    `expm1_opt` also tries `factor()`. Replaced by two plain rewrites
+    (`c·exp(z) − c` in one Add → `c·expm1(z)`; `log(1 + z)` → `log1p(z)`).
+41. **Printer.** Numbers only: no `M_PI` / `M_E` (not C99; glibc hides them
+    under `-std=c99`), integers ≥ 2³¹ as double literals, an infinity / NaN in
+    the law refused; `coth` / `csch` / `sech` as `1/tanh` etc. — SymPy's C
+    printer writes `coth` as `(eˣ + e⁻ˣ)/(eˣ − e⁻ˣ)`, a cancellation of its own
+    (the raw Langevin law's decreasing region was |u| < 8.7e-6 with it,
+    |u| < 6.5e-8 with `1/tanh`). Piecewise as one line of nested ternaries.
+    `#pragma STDC FP_CONTRACT OFF` under `__clang__`: clang contracted
+    `1e-9·x0 − 1e-9·x1` into an FMA, so f ≠ 0 at x0 = x1 (1.6e-27) and the
+    registration's off-axis line refused the model; gcc's `-std=c99` does
+    not contract and warns on the pragma, hence the guard. Declarations
+    before statements (also clean under `-Wdeclaration-after-statement`).
+    NOT regrouped: SymPy distributes a NUMBER over a sum (`1e-9·(a − k)` →
+    `1e-9·a − 1e-9·k`), which an MNA stamp does as well; a law whose
+    accuracy needs the difference first should multiply by a parameter.
+42. **Measured (macOS arm64, Apple clang).** Generated C against mpmath
+    (lambdify, 30 digits) of the declared law and its SymPy derivatives,
+    1000 random points: worst pure-relative error on non-zero entries
+    4.7e-15 (Shockley, box widened to [−2, 2] V past v_lim = 1.07 V),
+    2.2e-16 (saturable inductor), 1.3e-14 (mixed law with expm1, log1p, an
+    internal unknown and charges); the test's bound is 1e-13 relative with a
+    floor of 1e-13 of the entry's scale over the points (libm differs between
+    platforms; a printer / CSE / pattern bug is O(1)). SymPy Shockley against
+    the built-in on pwl (20 V half-wave rectifier, 2 ms, dt 1 µs): 9.1e-14
+    of the voltage scale; saturable inductor against the hand-written twin
+    (`satind_twin`) 4.9e-15 and against the built-in 4.9e-15; the gate is 1e-12 on this machine,
+    1e-9 elsewhere (the existing twin tests' convention). State + outputs
+    against `metered_resistor`: `energy` and `p_law` equal to rtol 1e-12.
+    The generated C of the five test laws compiles with `-std=c99 -pedantic
+    -Wall -Wextra -Werror -Wdeclaration-after-statement` (and `-Wconversion
+    -Wshadow` by hand) on Apple clang and Homebrew gcc 15: zero warnings.
+43. **`scan_monotone(dev, pin, lo, hi, *, row, at, params, n=4001)`**:
+    `f[row]` (default the unknown's own row) on a uniform grid plus a
+    geometric run to 1e-15 of the width on each side of 0; a decrease counts
+    when it exceeds 4 ulps of f; grid points within 1e-9 relative of a
+    neighbour are dropped (linspace and the geometric run met within one ulp
+    at ±0.1 and ±0.01 and reported a one-ulp "decrease"). It evaluates the
+    library's own `eval` through ctypes (the descriptor's version-1 layout is
+    frozen by the header), so it works on any library model
+    (`xdev.load(lib, model)`, no SymPy); a model with `create` is refused.
+44. **Optional extra.** `codegen = ["sympy>=1.12"]`; SymPy also in `dev`, which
+    is how the project already carries optional test deps (PyYAML is in both
+    `lib` and `dev`; CI installs `.[dev]` on the three OS, `.[dev,fast]` in
+    the examples job). Codegen tests skip without SymPy / a compiler locally
+    and FAIL on CI; they skip on win32 (the native cache drives a gcc/clang
+    command line only). Missing SymPy → `ImportError` naming
+    `pip install pulsim[codegen]`; no compiler → `RuntimeError` naming what
+    was looked for.
+45. **1.6 free function.** `pulsim.add_external_device(builder, name, nodes,
+    *, lib=None, code=None, lang="c", model=None, params=None,
+    check_jacobian=True, record=False)` (pure Python, in `xdev.py`, re-exported):
+    `model` added — the brief's signature had no way to pick one of several
+    models; left out, the library's only model is used (several → refused
+    with their names). `check_jacobian` maps to `check_contract`. `code=` is
+    a whole translation unit (C99 or C++17) compiled through
+    `_native_cache` with `-I get_include()`. The stub file is unchanged
+    (`_pulsim.pyi` covers the extension only).
+46a. **Typed refusal.** Every refusal of `pulsim.xdev` is `xdev.XdevError`
+    (`ValueError` + `PulsimError`, like `OptionsError`): the untyped-raise
+    ratchet of `test_simulation_object.py` (≤ 562 `raise ValueError`) counted
+    the module's 28 and was not raised.
+46. **Not in this slice.** Generated models declare no monotone pairs and no
+    PASSIVE / RECIPROCAL claims (only SMOOTH, when proved), no `validate`, no
+    time (`ctx->t`) in the law; no MSVC command line in the cache. No C++
+    change was needed: no request to other tracks.
+
 ## Requests to other tracks
 
 - **Stepper track** (DONE in slice 3, #17/#18 — kept for the record): (a) the DC operating point needs the stateful fold (an

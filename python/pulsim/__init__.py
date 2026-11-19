@@ -386,6 +386,10 @@ from .losses import (
 from .c_block import (
     add_c_block, CBlockHandle, CBLOCK_ABI, wire_c_blocks_from_yaml)
 from .c_export import export_c, CExport
+# External devices: equations to C (SymPy, the `codegen` extra) and the free
+# function add_external_device(builder, ..., lib= | code=).
+from . import xdev as xdev  # noqa: F401  (re-export submodule)
+from .xdev import add_external_device
 # Records the true per-step switch mask at simulate-time so closed-loop
 # loss/thermal summaries don't re-evaluate a stateful switch_fn post-hoc.
 from ._result_views import SwitchMaskRecorder
@@ -527,6 +531,7 @@ __all__ = [
     "ResolutionWarning",
     "ai_guide",
     "get_include",
+    "add_external_device",
     "Circuit",
     "CircuitBuilder",
     "Parameter",

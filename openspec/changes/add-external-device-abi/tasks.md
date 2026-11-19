@@ -4,8 +4,10 @@
 - [x] 1.3 Loader and registration checks (version, size, pattern bounds and duplicates, parameter bounds, `validate`, finite outputs, Jacobian against central differences at 16 points); each refusal names the device and the reason
 - [x] 1.4 Non-finite `eval` output during a run → Newton failure naming the device
 - [x] 1.5 (DECISIONS #32: factored, a non-private cached library is rebuilt) `python/pulsim/_native_cache.py`: the C block's compile cache moved to a per-user directory (mode 0700, ownership check); `c_block.py` uses it; test that a foreign-owned cached file is rebuilt, and that the existing C block tests pass
-- [~] 1.6 (`components()` entry with library path and FNV-1a hash done, #31; the `pulsim.add_external_device(..., code=)` free function is not — `CircuitBuilder.add_external_device` stays the entry) `pulsim.add_external_device(builder, name, nodes, *, lib=None, code=None, lang="c", params=None, check_jacobian=True)`; binding, stubs; `components()` entry with library path and hash
+- [x] 1.6 (`components()` entry with hash, #31; the free function in slice 5, pure Python in `xdev.py` with an added `model=` selector, no binding / stub change — DECISIONS #45) `pulsim.add_external_device(builder, name, nodes, *, lib=None, code=None, lang="c", params=None, check_jacobian=True)`; binding, stubs; `components()` entry with library path and hash
 - [x] 1.7 (DECISIONS #30) YAML type `external_device` (`lib`, `model`, `nodes`, `params`); refused unless the load call lists the library or its directory in `allow_native_code=[...]` (symlinks followed before the comparison; a library outside the list refused by name; `allow_native_code=True` refused with a message asking for the paths); strict keys from the field table; inline `code` out of this slice
+
+Slice 5 notes (DECISIONS #36-#46): Python only (no C++ / bindings / C header change, extension not rebuilt); cc37304a's test fix applied by hand (a merge would have made the extension stale); section 4 done — `pulsim.xdev` (SymPy handles, pattern, CSE, own expm1/log1p rewrites, C99 printer fixes: no M_PI, `1/tanh` for coth, FMA contraction off under clang), the lint (C¹ two-piece Piecewise proved symbolically), `scan_monotone`, the `codegen` extra; 1.6's free function with `code=`; docs section + `examples/scripts/run_xdev_sympy_diode.py` with its claims. Still open: 3.3 events, 3.2's steady-state copy, `wire_c_blocks_from_yaml` allow list, section 5; MSVC in the native cache.
 
 Slice 4 notes (DECISIONS #24-#35): merged feat/core-integration b28f1e57; the Lauritzen twin with an internal charge (3.1, 1.5e-11) and the junction capacitor (2.2, 2.8e-15 once the test matches the built-in's 1e-12 S node G_min); kernel-owned state verified across rejected trbdf2 steps and snapshot / resume, steady state refuses by name (3.2 partial); named outputs as an appended descriptor block read behind `struct_size`, `res.device_output(name, key)` for devices added with `record=True` (3.4); YAML `external_device` behind an `allow_native_code=[paths]` allow list (1.7); `components()` with library hash (1.6 part); the native cache factored into `_native_cache.py`, a non-private cached library rebuilt (1.5). Still open: 3.3 events (needs a generic event-signal source in the loops, #29), the steady-state copy of the external block, 1.6's `code=`, section 4 (not started), section 5.
 
@@ -32,11 +34,11 @@ Slice 1 notes (DECISIONS.md): 1.1 header is `core/include/pulsim/xdev/pulsim_xde
 - [~] 3.5 (kind-table row + conformance cell `ExternalDevice`: pwl, trbdf2, DC, ac_sweep yes; dsed, bdf1 refused — DECISIONS #18/#20/#23) Conformance rows (`add-engine-conformance-matrix`): `external_device` × {pwl ok, trbdf2 ok, dsed refused, DC ok, AC ok}
 
 ## 4. Equations to C (`pulsim.xdev`)
-- [ ] 4.1 `pins`, `internal`, `params`, `state`; `compile(name, pins, f, q, ...)` → SymPy differentiation, pattern, CSE, C99 with `expm1` / `log1p`, descriptor, compile, load
-- [ ] 4.2 Smoothness lint: `Piecewise`, `Abs`, `sign`, `Max`, `Min`, `Heaviside`, `floor` refused with the sub-expression unless `allow_nonsmooth=True`
-- [ ] 4.3 Test: generated C against `lambdify` at 1000 random points within 1e-13; SymPy-declared Shockley against the built-in within 1e-12
-- [ ] 4.4 `xdev.scan_monotone(dev, pin, lo, hi)`; test on a law with a deliberate cancellation (`coth x − 1/x` without a series) reports the non-monotone region
-- [ ] 4.5 Optional extra `pulsim[codegen]`; a clear error when SymPy or the compiler is missing
+- [x] 4.1 (DECISIONS #37, #40, #41; plus `outputs=`, `probe=`, `update=` for states) `pins`, `internal`, `params`, `state`; `compile(name, pins, f, q, ...)` → SymPy differentiation, pattern, CSE, C99 with `expm1` / `log1p`, descriptor, compile, load
+- [x] 4.2 (a two-piece Piecewise proved C¹ keeps SMOOTH; `allow_nonsmooth` → one-sided Jacobian — DECISIONS #38, #39) Smoothness lint: `Piecewise`, `Abs`, `sign`, `Max`, `Min`, `Heaviside`, `floor` refused with the sub-expression unless `allow_nonsmooth=True`
+- [x] 4.3 (worst 1.3e-14 relative against mpmath; Shockley 9.1e-14 of scale vs built-in; saturable inductor twin 4.9e-15; DECISIONS #42) Test: generated C against `lambdify` at 1000 random points within 1e-13; SymPy-declared Shockley against the built-in within 1e-12
+- [x] 4.4 (raw Langevin: decreasing within |u| < 6.5e-8, NaN at 0 — DECISIONS #43) `xdev.scan_monotone(dev, pin, lo, hi)`; test on a law with a deliberate cancellation (`coth x − 1/x` without a series) reports the non-monotone region
+- [x] 4.5 (SymPy in `dev` too: CI runs the tests; skip on win32 — DECISIONS #44) Optional extra `pulsim[codegen]`; a clear error when SymPy or the compiler is missing
 
 ## 5. OSDI host
 - [ ] 5.1 Confirm the OSDI descriptor layout and its licence against the project rule; record both in `design.md`
@@ -44,7 +46,7 @@ Slice 1 notes (DECISIONS.md): 1.1 header is `core/include/pulsim/xdev/pulsim_xde
 - [ ] 5.3 Test: a Verilog-A diode compiled by the user's tool chain, same circuit in ngspice and Pulsim, within 1e-6 (skipped when the compiler is absent)
 
 ## 6. Documentation
-- [~] 6.1 (all done except `AI_GUIDE.md`, which got only the two YAML signatures: it is at its 32 KiB cap) `docs/external-devices.md` (the row convention, purity of `eval`, the 1e-12 smoothness requirement, trust boundary), `docs/c-block.md` (cache location; C block versus external device), `AI_GUIDE.md`, `docs/known-limitations.md` and `KNOWN_LIMITATIONS.md` (no sandbox, no external PWL devices, OSDI coverage), `CHANGELOG.md` (cache move)
+- [~] 6.1 (all done except `AI_GUIDE.md`, which got only the two YAML signatures: it is at its 32 KiB cap; slice 5 added the `pulsim.xdev` section, the free function and a CHANGELOG entry) `docs/external-devices.md` (the row convention, purity of `eval`, the 1e-12 smoothness requirement, trust boundary), `docs/c-block.md` (cache location; C block versus external device), `AI_GUIDE.md`, `docs/known-limitations.md` and `KNOWN_LIMITATIONS.md` (no sandbox, no external PWL devices, OSDI coverage), `CHANGELOG.md` (cache move)
 
 ## 7. Verification
 - [ ] 7.1 `ruff check`, `pytest`, `ctest`, `openspec validate --all --strict`, stub check
