@@ -11,6 +11,9 @@ A bit-exact hash of floating-point output is never the key.
 
     goldens.py                    # compare, print the failures
     goldens.py --update-goldens   # rewrite benchmarks/goldens/pwl/*.json
+    goldens.py --legacy [...]     # the same under next_defaults.legacy(), against
+                                  # benchmarks/goldens/pwl_legacy/ (the pre-release
+                                  # goldens, checkable for the legacy period)
 """
 
 from __future__ import annotations
@@ -31,6 +34,7 @@ import v1_reader  # noqa: E402
 from analytic import BY_ID  # noqa: E402
 
 GOLDEN_DIR = ROOT / "goldens" / "pwl"
+LEGACY_DIR = ROOT / "goldens" / "pwl_legacy"   # the pre-release defaults (next_defaults.legacy())
 N_CHECKPOINTS = 8
 RTOL_LINEAR, RTOL_NEWTON = 1e-9, 1e-6
 
@@ -126,13 +130,19 @@ def compare(golden: dict, got: dict) -> list:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--update-goldens", action="store_true")
+    ap.add_argument("--legacy", action="store_true")
     args = ap.parse_args(argv)
     warnings.simplefilter("ignore")
-    GOLDEN_DIR.mkdir(parents=True, exist_ok=True)
+    import contextlib
+
+    import next_defaults as nd
+    gdir = LEGACY_DIR if args.legacy else GOLDEN_DIR
+    gdir.mkdir(parents=True, exist_ok=True)
     fails = 0
-    for name, run, names, newton in cases():
-        got = snapshot(run(), names, newton)
-        path = GOLDEN_DIR / f"{name}.json"
+    with nd.legacy() if args.legacy else contextlib.nullcontext():
+        rows = [(name, snapshot(run(), names, newton)) for name, run, names, newton in cases()]
+    for name, got in rows:
+        path = gdir / f"{name}.json"
         if args.update_goldens:
             got["generated_on"] = f"{platform.system()}-{platform.machine()}"
             path.write_text(json.dumps(got, indent=1) + "\n", encoding="utf-8")
