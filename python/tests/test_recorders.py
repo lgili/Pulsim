@@ -4,6 +4,7 @@ rectified sine with commutations inside the window, the floating-bus
 bridge's mpmath average (benchmarks/tools/bridge_ground_truth.py), and
 pulsim.time_average on the same samples."""
 import math
+import os
 
 import numpy as np
 import pytest
@@ -11,6 +12,14 @@ import pytest
 import pulsim as p
 
 from .test_bridge_ground_truth import TRUTH, _bridge
+
+
+def _skip_legacy_trbdf2(eng):
+    """The in-loop feed needs the accepted-step hook, which only the
+    skeleton driver fires: the internal legacy trbdf2 loop (until its
+    deletion) has none, so its recorders take the stored-array pass."""
+    if eng == "trbdf2" and os.environ.get("PULSIM_TRBDF2_STEPPER_LEGACY") == "1":
+        pytest.skip("PULSIM_TRBDF2_STEPPER_LEGACY=1: no step hook in the legacy loop")
 
 V, R, C = 10.0, 1e3, 1e-6
 TAU = R * C
@@ -51,6 +60,7 @@ RC_BOUND = {"pwl": V * 1e-6 / TAU, "trbdf2": 2e-5 * V, "exact": 2e-5 * V}
 
 @pytest.mark.parametrize("eng", sorted(RUNS))
 def test_rc_charge_window_clipped_mid_step(eng):
+    _skip_legacy_trbdf2(eng)
     rec = p.Recorder("rc", ["v(out)", "v(in,out)/1e3"], windows=[(A, B)])
     res = p.simulate(_rc(), t_end=3e-3, recorders=[rec], **RUNS[eng])
     r = res.recorded["rc"]
@@ -244,6 +254,7 @@ def test_in_loop_feeding_equals_the_stored_array_pass(eng, case):
     post-event probe as an extra sample where the in-loop record starts the
     next line from the same settled state as an event row: the rectifier's
     windows differ there by ~5e-10 relative."""
+    _skip_legacy_trbdf2(eng)
     from pulsim._recorders import record_result
     fac, te, probes, win, per, off = _CASES[case]
     rec = p.Recorder("r", probes, windows=win, period=per, offset=off)
@@ -343,6 +354,7 @@ def test_event_rows_against_the_bridge_truth(eng):
     instant), 'within_dt' (a bracket: the left limit at event_t, the end of
     the first step under the new mode at event_t_right; pwl always, trbdf2
     where its settle did not report). Never a fabricated right limit."""
+    _skip_legacy_trbdf2(eng)
     from .test_bridge_ground_truth import EVENTS
     kw = dict(_LOOP_RUNS, exact=dict(engine="exact"))[eng]
     rec = p.Recorder("e", ["i(Ls)", "v(dp,dn)"], keep="none")
