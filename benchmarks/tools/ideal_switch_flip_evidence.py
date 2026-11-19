@@ -10,7 +10,15 @@ variants of each cell:
   a netlist that gives its values (the v1 reader always does);
 * ``lcp``      ``mode_selection='lcp'`` (only on a circuit with a PWL diode:
   without one the default selection has nothing to decide);
-* ``branch+lcp`` both.
+* ``branch+lcp`` both;
+* ``ideal``    every ``add_switch`` / ``add_diode`` an IDEAL branch-form element:
+  ``R_on = 0`` and ``V_f = 0`` (the netlist's ``g_off`` and ``V_th`` kept).
+  That is another circuit, so its cells are graded against a reference
+  regenerated for it by the harness's own tool (``differential_runner.
+  reference``: trbdf2 at rtol 1e-8, else pwl dt/4 when converged), run under
+  the same substitution; a circuit whose ideal twin has no reference is
+  ``not comparable`` with the reason;
+* ``ideal+lcp`` the ideal twin with ``mode_selection='lcp'``.
 
 Each cell is graded on the strict gate against the circuit's one reference,
 exactly as reference_status.py grades it. Written to
@@ -30,6 +38,7 @@ import fnmatch
 import json
 import statistics
 import sys
+import time
 import warnings
 from pathlib import Path
 
@@ -42,8 +51,11 @@ import pulsim  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "IDEAL_SWITCH_FLIP_EVIDENCE.md"
-VARIANTS = ("default", "branch", "lcp", "branch+lcp")
-RANK = {"agree": 0, "unverified": 0, "disagree": 1, "refused": 2, "error": 3}
+VARIANTS = ("default", "branch", "lcp", "branch+lcp", "ideal", "ideal+lcp")
+# the structural refusals of an ideal circuit, by name (UnsupportedError.feature)
+STRUCTURAL = ("ideal_voltage_loop", "floating_node", "dependent_states", "impulse")
+RANK = {"agree": 0, "unverified": 0, "disagree": 1, "refused": 2, "error": 3,
+        "not comparable": 3}
 
 
 @contextlib.contextmanager
@@ -72,11 +84,51 @@ def branch_form():
         cb.add_switch, cb.add_diode = sw, di
 
 
+@contextlib.contextmanager
+def ideal_form():
+    """add_switch / add_diode build IDEAL branch-form elements: R_on = 0,
+    V_f = 0; the netlist's g_off and V_th are kept."""
+    cb = pulsim.CircuitBuilder
+    sw, di = cb.add_switch, cb.add_diode
+
+    def add_switch(self, name, a, b, g_on=1e3, g_off=1e-9, *args, **kw):
+        if args or kw:
+            return sw(self, name, a, b, g_on, g_off, *args, **kw)
+        return self.add_ideal_switch(name, a, b, 0.0, g_off)
+
+    def add_diode(self, name, a, c, g_on=None, g_off=None, V_th=0.0, V_f=0.0, *args, **kw):
+        if kw.get("form", "conductance") != "conductance" or args:
+            return di(self, name, a, c, g_on, g_off, V_th, V_f, *args, **kw)
+        kw.pop("form", None)
+        return di(self, name, a, c, None, 1e-9 if g_off is None else g_off,
+                  V_th, 0.0, form="branch", R_on=0.0, **kw)
+
+    cb.add_switch, cb.add_diode = add_switch, add_diode
+    try:
+        yield
+    finally:
+        cb.add_switch, cb.add_diode = sw, di
+
+
+def _run_cell(case, eng):
+    """dr.run_cell, keeping the refusal's feature name."""
+    t0 = time.perf_counter()
+    try:
+        res = case.run(eng)
+        return "ran", res, time.perf_counter() - t0, None, None
+    except dr.REFUSAL as ex:
+        return ("refused", None, time.perf_counter() - t0, f"{type(ex).__name__}: {ex}"[:300],
+                getattr(ex, "feature", None))
+    except Exception as ex:  # noqa: BLE001 - classified, never swallowed
+        return ("error", None, time.perf_counter() - t0, f"{type(ex).__name__}: {ex}"[:300],
+                getattr(ex, "feature", None))
+
+
 def _has_pwl_diode(case):
     return any(c.get("type") == "diode" and "is" not in c for c in case._components)
 
 
-def run(patterns):
+def run(patterns, want=VARIANTS):
     triage = dr.load_triage()
     out = []
     for rel, entry in sorted(triage.items()):
@@ -89,30 +141,43 @@ def run(patterns):
         cols = dr.observables_of(case)
         tols = {e: entry.get("tol", {}).get(e, dr.default_tol(e, switched)) for e in dr.ENGINES}
         ref_name, ref = dr.reference(case, cols, min(tols.values()))
+        variants = [v for v in VARIANTS if v in want]
+        iref_name, iref, iwhy = None, None, None
+        if any(v.startswith("ideal") for v in variants):
+            try:
+                with ideal_form():
+                    iref_name, iref = dr.reference(case, cols, min(tols.values()))
+                if iref is None:
+                    iwhy = "no converged reference for the ideal twin (trbdf2 failed, pwl dt/4 off)"
+            except Exception as ex:  # noqa: BLE001 - the reason is the table entry
+                iwhy = f"ideal twin has no reference: {type(ex).__name__}: {ex}"[:200]
         diode = _has_pwl_diode(case)
         for cfg, (eng, kw) in rs.CONFIGS.items():
-            for var in VARIANTS:
+            for var in variants:
                 rec = dict(circuit=rel, config=cfg, variant=var, tol=tols[eng])
                 if "lcp" in var and not diode:
                     rec.update(outcome="n/a", message="no PWL diode: nothing to select")
                     out.append(rec)
                     continue
                 k = dict(kw, **({"mode_selection": "lcp"} if "lcp" in var else {}))
-                ctx = branch_form() if var.startswith("branch") else contextlib.nullcontext()
+                ctx = (branch_form() if var.startswith("branch") else
+                       ideal_form() if var.startswith("ideal") else contextlib.nullcontext())
+                rf, rfn = (iref, iref_name) if var.startswith("ideal") else (ref, ref_name)
                 with ctx, rs.extra_kwargs(k):
-                    kind, res, wall, msg = dr.run_cell(case, eng)
-                rec.update(wall_s=wall, message=msg)
+                    kind, res, wall, msg, feat = _run_cell(case, eng)
+                rec.update(wall_s=wall, message=msg, feature=feat, reference=rfn)
                 if kind != "ran":
                     rec["outcome"] = kind
-                elif ref is None:
-                    rec.update(outcome="error", message="no converged reference")
+                elif rf is None:
+                    rec.update(outcome="not comparable" if var.startswith("ideal") else "error",
+                               message=iwhy if var.startswith("ideal") else "no converged reference")
                 else:
-                    dr.classify(rec, res, case, cols, ref, tols[eng],
+                    dr.classify(rec, res, case, cols, rf, tols[eng],
                                 case.dt if eng == "pwl" else None)
                     dr.mark_suspect(rec, entry)
                 out.append({k2: v for k2, v in rec.items()
                             if k2 in ("circuit", "config", "variant", "tol", "outcome",
-                                      "err_rms", "wall_s", "message")})
+                                      "err_rms", "wall_s", "message", "feature", "reference")})
                 print(f"{rec['outcome']:9s} {cfg:12s} {var:11s} {rel} {rec.get('err_rms', '')}",
                       flush=True)
     return out
@@ -120,8 +185,8 @@ def run(patterns):
 
 def _cmp(a, b):
     """better / same / worse / refused of cell b against cell a."""
-    if b["outcome"] == "n/a":
-        return "n/a"
+    if b["outcome"] in ("n/a", "not comparable"):
+        return b["outcome"]
     if b["outcome"] in ("refused", "error") and a["outcome"] not in ("refused", "error"):
         return b["outcome"]
     ra, rb = RANK.get(a["outcome"], 3), RANK.get(b["outcome"], 3)
@@ -175,7 +240,7 @@ def render(recs):
                 if var == "default":
                     continue
                 c = _cmp(d, r)
-                if c == "n/a":
+                if c in ("n/a", "not comparable"):
                     continue
                 key = "new" if c in ("refused", "error") else ("same" if c.startswith("same") else c)
                 cmp[key] += 1
@@ -214,7 +279,69 @@ def render(recs):
                  f"| {rs._e(r) if 'err_rms' in r else ''} |")
     if not better:
         L.append("| (none) | | | | | | |")
+    L += _render_ideal(by, circuits, cfgs)
     return "\n".join(L) + "\n"
+
+
+def _render_ideal(by, circuits, cfgs):
+    """The R_on = 0 section: what the release decides the flip on."""
+    if not any(v.startswith("ideal") for (_, _, v) in by):
+        return []
+    L = ["", "## The ideal switch (R_on = 0, V_f = 0)", "",
+         "Each `ideal` cell is graded against the ideal twin's own reference (the harness's",
+         "`reference()` run under the same substitution), then compared with the `default`",
+         "cell of the same configuration (graded against the original reference) as above.",
+         "`not comparable`: the ideal twin has no converged reference. Structural refusals",
+         "are counted by `UnsupportedError.feature`.", "",
+         "| configuration | variant | better | same | worse | refused | error | not comparable "
+         "| " + " | ".join(STRUCTURAL) + " | other refusal | median wall ratio |",
+         "|---|---|---:|---:|---:|---:|---:|---:|" + "---:|" * len(STRUCTURAL) + "---:|---:|"]
+    for cfg in cfgs:
+        for var in ("ideal", "ideal+lcp"):
+            n = dict.fromkeys(("better", "same", "worse", "refused", "error", "not comparable"), 0)
+            feats = dict.fromkeys(STRUCTURAL, 0)
+            other, ratios, rows = 0, [], 0
+            for c in circuits:
+                r, d = by.get((c, cfg, var)), by.get((c, cfg, "default"))
+                if r is None or d is None or r["outcome"] == "n/a":
+                    continue
+                rows += 1
+                k = _cmp(d, r)
+                k = "same" if k.startswith("same") else k
+                if r["outcome"] in ("refused", "error"):
+                    k = r["outcome"]
+                    if r.get("feature") in feats:
+                        feats[r["feature"]] += 1
+                    else:
+                        other += 1
+                n[k] = n.get(k, 0) + 1
+                if (d.get("wall_s") and r.get("wall_s") and r["outcome"] in ("agree", "disagree")
+                        and d["outcome"] in ("agree", "disagree", "unverified")):
+                    ratios.append(r["wall_s"] / d["wall_s"])
+            if not rows:
+                continue
+            ratio = f"{statistics.median(ratios):.3f}" if ratios else ""
+            L.append(f"| {cfg} | {var} | {n['better']} | {n['same']} | {n['worse']} | {n['refused']} "
+                     f"| {n['error']} | {n['not comparable']} | "
+                     + " | ".join(str(feats[f]) for f in STRUCTURAL) + f" | {other} | {ratio} |")
+    L += ["", "### Every ideal cell that is worse, refused, errors or is not comparable", "",
+          "| circuit | config | variant | default | ideal | err default | err ideal | feature | cause |",
+          "|---|---|---|---|---|---:|---:|---|---|"]
+    for c in circuits:
+        for cfg in cfgs:
+            for var in ("ideal", "ideal+lcp"):
+                r, d = by.get((c, cfg, var)), by.get((c, cfg, "default"))
+                if r is None or d is None or r["outcome"] == "n/a":
+                    continue
+                k = _cmp(d, r)
+                if k in ("worse", "refused", "error", "not comparable") or r["outcome"] in (
+                        "refused", "error"):
+                    msg = (r.get("message") or "").replace("|", "/").replace("\n", " ")[:140]
+                    L.append(f"| {c.removeprefix('circuits/')} | {cfg} | {var} | {d['outcome']} "
+                             f"| {r['outcome']} | {rs._e(d) if 'err_rms' in d else ''} "
+                             f"| {rs._e(r) if 'err_rms' in r else ''} | {r.get('feature') or ''} "
+                             f"| {msg} |")
+    return L
 
 
 def main(argv=None) -> int:
@@ -223,16 +350,22 @@ def main(argv=None) -> int:
     ap.add_argument("--json")
     ap.add_argument("--from-json")
     ap.add_argument("--out", default=str(OUT))
+    ap.add_argument("--variants", default=",".join(VARIANTS))
+    ap.add_argument("--merge", help="earlier --json whose cells the new run does not replace")
     a = ap.parse_args(argv)
     warnings.simplefilter("ignore")
     if a.from_json:
         recs = json.loads(Path(a.from_json).read_text(encoding="utf-8"))
     else:
         pats = [p if p.startswith("circuits/") else f"circuits/{p}" for p in a.circuits.split(",")]
-        recs = run(pats)
+        recs = run(pats, tuple(a.variants.split(",")))
+        if a.merge:
+            have = {(r["circuit"], r["config"], r["variant"]) for r in recs}
+            recs += [r for r in json.loads(Path(a.merge).read_text(encoding="utf-8"))
+                     if (r["circuit"], r["config"], r["variant"]) not in have]
         if a.json:
-            Path(a.json).write_text(json.dumps(recs, indent=1))
-    Path(a.out).write_text(render(recs))
+            Path(a.json).write_text(json.dumps(recs, indent=1), encoding="utf-8")
+    Path(a.out).write_text(render(recs), encoding="utf-8")
     return 0
 
 

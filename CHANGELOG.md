@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Integration batch 14a: event queue 3, device interface 3, unified stepper 2, ideal switch 5, TR-BDF2 track 8 merged
+
+* **Changed** the `SolverSnapshot` pickle is version 5, one layout with
+  17 fields: the controllers'-state marker (12), the fixed-step grid
+  (13), the step controller's block or None (14) and the tick phase
+  (`tick_origin`, `tick_next_k`; 15-16). It replaces four version-4
+  layouts written on parallel branches; all of them (13, 14 and 15
+  fields; the two 15-field forms told apart by field 12, a bool or a
+  tuple), version 3 (12, 13 fields) and Pulsim 2.0 tuples still load.
+  A malformed tuple raises `RuntimeError("SolverSnapshot: malformed
+  pickle state ...")` instead of a pybind cast error.
+* **Fixed** a NaN duty on a carrier PWM (`make_carrier_pwm_fn`, the
+  control graph's PWM gate) turned the switch ON for the whole period
+  since the gate moved onto `CarrierPwm`; it holds the switch (both
+  switches of a leg) OFF again.
+
 ### Integration batch 13: device interface slice 2, IR node domains, TR-BDF2 tracks 7–8, exact engine 4, ideal switch 4, permeance domain merged
 
 * **Changed** the `SolverSnapshot` pickle is version 4 with 14 fields:
@@ -28,6 +44,71 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   was silent.
 * **Fixed** a trbdf2 run ended by a final sliver inside an SDIRK step left
   the derivative-free stage history in its final snapshot.
+
+### Event queue, phase 3 (add-unified-event-queue)
+
+* **Added** controllers on `engine='dsed'`: `closed_loops`, a
+  `step_observer` with a period and rated control graphs tick on the
+  exact engine's event queue (from `t_start=0`; every-step observers are
+  refused). cl_boost_pi, cl_buck_pi and cl_buck_aggressive_pi now agree.
+* **Added** `pulsim.control.Monitor(fn, period)`: a read-only periodic
+  observer; trbdf2 and dsed runs are bit-identical with or without it.
+* **Added** `pulsim.DutyRegister`, `make_carrier_pwm_fn` and
+  `make_edge_list_fn`. The control graph's PWM gate is now a carrier
+  modulator on a duty register (results unchanged).
+* **Changed** a run's `final_snapshot` carries each tick source's grid
+  origin and next index (`tick_origin`, `tick_next_k`; pickle version
+  4, version 3 still loads). A trbdf2 resume between two ticks of a
+  control graph now continues on the graph's grid instead of being
+  refused; a plain Python tick source resumed on pwl keeps the run's
+  grid instead of restarting it at `t_start`.
+
+### Unified device interface, slice 3: the dual device path
+
+* **Added** `simulate(..., device_path='interface')` (and
+  `compute_dc_op(..., device_path=)`, kernel `SimulationOptions.device_path`
+  / `DevicePath`): every Newton kind runs through ONE law on the device
+  interface (`device/laws.hpp`) instead of its hand-written stamp. The
+  default stays `'legacy'`, bit-identical. Ported: smooth / Shockley
+  diode, MOSFET and IGBT level 1 (steady state), the nonlinear capacitor
+  (junction, VDMOS C_gd, table) and the saturable inductor (atan, table,
+  Jiles–Atherton) on `pwl`, `trbdf2` and the DC operating point; agreement
+  with `'legacy'` within 1e-12 of scale on the fixed-step engine. On a
+  transient engine a circuit with a kind not ported yet (Lauritzen diode,
+  IGBT tail, MNA PMSM, induction machine) refuses `'interface'` by name
+  (the DC operating point stamps only the static kinds, all ported);
+  `engine='dsed'` refuses it. The closed-form laws give parameter
+  derivatives by AD (∂f/∂p, ∂q/∂p); the table and Jiles–Atherton laws have
+  none (`param_tangent`).
+* **Added** the step controller's snapshot block
+  (`SolverSnapshot.controller_state` → `(kind, values)`, the unified
+  stepper's `step::ControllerState`; pickle version 4 gains a 15th field,
+  written only when the block is filled): empty until the stepper fills
+  it (a resume restarts the controller, as before); version-4 pickles of
+  13 and 14 fields and version 3 (12 and 13 fields) still load.
+
+### Unified device interface, slice 2: one stateful-kind registry, exact resume
+
+* **Fixed** a fixed-step run split by `resume_from=` was not the continuous
+  run bit for bit: the resumed time grid restarted at the split time, so
+  sample times moved by ~1e-20 s and a gate edge landed a rounding apart
+  (states then within 8e-12 of scale). The snapshot carries its grid
+  (`grid_origin`, `grid_step`, `grid_dt`); an `engine='pwl'` resume with
+  the same `dt` continues it and is bit-identical (states, times, final
+  device state), split between edges or on one. Pickle version 4; version
+  3 and Pulsim 2.0 pickles load and resume as before (restarted grid).
+* **Fixed** a TR-BDF2 snapshot taken exactly on a gate edge made a
+  fixed-step resume ring and abort at the next edge (its `x` is the
+  pre-edge solve, its device derivatives the post-edge ones). The snapshot
+  says so (`post_edge_derivatives`) and `engine='pwl'` refuses it by name;
+  `engine='trbdf2'` resumes from it.
+* **Changed** (internal) the five stateful Newton kinds are one
+  compile-time list (`pwl::StatefulKinds`, concept `device::StatefulKind`);
+  the drivers, the Newton refresh, the in-run rollback and the snapshot
+  iterate it, and the rollback is one flat vector that includes each
+  device's TR-BDF2 stage scratch. `device/device.hpp` adds the `Device` contract
+  (one law over the scalar, `Params<S>` for parameter sensitivities),
+  unused by the engines yet. Results bit-identical.
 
 ### Integration batch 12: unified device interface 1–3, in-kernel event losses, IR scopes, TR-BDF2 track 6, event queue, control graph 4, PWL IGBT / thyristor, exact engine session 6 merged
 
@@ -90,6 +171,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   device's TR-BDF2 stage scratch. `device/device.hpp` adds the `Device` contract
   (one law over the scalar, `Params<S>` for parameter sensitivities),
   unused by the engines yet. Results bit-identical.
+
 
 ### Unified device interface, steps 1–3: one history fold, one kernel-built refresh, one device-state vector
 

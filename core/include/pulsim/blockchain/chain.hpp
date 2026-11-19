@@ -26,6 +26,7 @@
 #pragma once
 
 #include "pulsim/blockchain/blocks.hpp"
+#include "pulsim/events/modulator.hpp"
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/pwm_phase.hpp"
 #include "pulsim/numeric/types.hpp"
@@ -36,6 +37,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -343,6 +345,7 @@ public:
         group0_used_ = std::any_of(blocks_.begin(), blocks_.end(),
             [](const Block& b) { return b.group == 0; });
         compiled_ = true;
+        sync_duties();
     }
 
     /// Consumer/producer pairs whose schedule order differs from their
@@ -448,6 +451,7 @@ public:
         last_t_ = s.last_t;
         t0_ = s.t0;
         solver_dt_ = s.solver_dt;
+        sync_duties();
     }
 
 
@@ -588,6 +592,7 @@ public:
         if (s >= 0 && static_cast<Size>(s) < pub_.size()) {
             pub_[static_cast<Size>(s)] = value;
         }
+        sync_duties();
     }
 
     /// Exact protocol (the variable-step engine lands a step on every
@@ -681,6 +686,7 @@ public:
         std::fill(pub_.begin(), pub_.end(), Real{0});
         n_calls_ = 0;
         if (!dt_given_) solver_dt_ = Real{0};
+        sync_duties();
     }
 
     /// Evaluate the graph once at (t, x) with block step `dt`.
@@ -698,6 +704,7 @@ public:
         }
         ++n_evals_;
         n_block_evals_ += static_cast<std::uint64_t>(order_.size());
+        sync_duties();
         if (!recordings_.empty()) {
             recording_times_.push_back(t);
             for (auto& rec : recordings_) {
@@ -782,6 +789,15 @@ public:
 
     void set_channel(const std::string& name, Real value) {
         ctx_.put(slot(name), value);   // "" -> no-op
+        sync_duties();
+    }
+
+    /// A duty register holding what slot `s`'s sinks see, kept current
+    /// by every call that can change it (Immediate latch). The chain owns
+    /// it; a CarrierPwm built on it must not outlive the chain.
+    [[nodiscard]] const events::DutyRegister* duty_register(Index s) {
+        duties_.push_back({s, events::DutyRegister{sink_value(s)}});
+        return &duties_.back().second;
     }
 
     /// Value of slot `s` (sinks resolved to a slot at build time).
@@ -832,6 +848,10 @@ private:
         return Real{1e-9} * g.period;
     }
 
+    void sync_duties() noexcept {
+        for (auto& [s, reg] : duties_) reg.value = sink_value(s);
+    }
+
     void publish(const Group& g) {
         for (Index s : g.out_slots) {
             pub_[static_cast<Size>(s)] = ctx_.sig[static_cast<Size>(s)];
@@ -871,7 +891,10 @@ private:
                 if (g.delay == Delay::OneSample) publish(g);
             }
         }
-        if (!any) return;
+        if (!any) {
+            sync_duties();   // a pending publication may have landed
+            return;
+        }
         if (every_call) ++groups_[0].n_ticks;
         ctx_.t = has_rates() ? tx : record_t;
         ctx_.x = x;
@@ -904,6 +927,7 @@ private:
                 g.pending_at = tau[gi] + g.delay_time;
             }
         }
+        sync_duties();
         if (!recordings_.empty()) {
             recording_times_.push_back(record_t);
             for (auto& rec : recordings_) {
@@ -980,6 +1004,7 @@ private:
     std::vector<char> due_;
     std::vector<char> delayed_;
     std::vector<Real> pub_;
+    std::deque<std::pair<Index, events::DutyRegister>> duties_;   // PWM legs
     std::vector<Sink> sinks_;
     std::uint64_t n_calls_ = 0;
     Real last_t_ = Real{0};
@@ -1035,25 +1060,31 @@ make_chain_switch_fn(BlockChain& chain, Size num_switches,
 }
 
 
-/// A PWM gate whose duty is a graph signal (what its sinks see): bit
-/// `idx` is ON while the carrier position u < duty - tol, the comparison
-/// of pulsim.control.pwm_on operation for operation (grid-exact snap of
-/// pwm_phase::cycle_position). Runs in C++, no GIL. The chain must
-/// outlive the gate.
+/// A PWM gate whose duty is a graph signal (what its sinks see): one
+/// events::CarrierPwm per leg, reading a DutyRegister the chain keeps
+/// equal to the signal (BlockChain::duty_register). Bit `idx` is ON while
+/// the carrier position u < duty - tol, the comparison of
+/// pulsim.control.pwm_on operation for operation. Runs in C++, no GIL.
+/// The chain must outlive the gate.
 struct ChainPwmGate {
-    struct Leg { Index slot; Index idx; Real period; Real phase; };
-    BlockChain* chain = nullptr;
     Size num_switches = 0;
-    std::vector<Leg> legs;
+    std::vector<events::CarrierPwm> legs;   // one switch each, distinct bits
+
+    /// Leg on switch `idx` whose duty is what slot `slot`'s sinks see.
+    void add_leg(BlockChain& chain, Index slot, Index idx, Real period, Real phase) {
+        for (const auto& l : legs) {
+            if (l.hs == idx) {
+                throw std::invalid_argument(
+                    "make_pwm_gate: switch bit " + std::to_string(idx)
+                    + " is driven by two legs");
+            }
+        }
+        legs.push_back(events::CarrierPwm{period, phase, chain.duty_register(slot), idx});
+    }
 
     [[nodiscard]] topology::SwitchStateMask operator()(Real t) const {
         topology::SwitchStateMask mask{num_switches};
-        for (const auto& l : legs) {
-            const auto p = pwm_phase::cycle_position(t, l.phase, l.period);
-            if (p.u < chain->sink_value(l.slot) - p.tol) {
-                mask.set(static_cast<Size>(l.idx), true);
-            }
-        }
+        for (const auto& l : legs) l.apply(t, mask);
         return mask;
     }
 
@@ -1063,11 +1094,7 @@ struct ChainPwmGate {
     /// every observer call (a loop ticks through its observer).
     [[nodiscard]] Real next_edge_after(Real t) const {
         Real best = std::numeric_limits<Real>::infinity();
-        for (const auto& l : legs) {
-            const std::array<Real, 1> thr{chain->sink_value(l.slot)};
-            best = std::min(best, pwm_phase::next_constant_crossing(
-                                      t, l.phase, l.period, thr));
-        }
+        for (const auto& l : legs) best = std::min(best, l.next_edge(t));
         return best;
     }
 };

@@ -65,6 +65,9 @@ struct ModeStructure {
     /// only consistent state for a diode across a stiff loop, and lets the
     /// diode law re-decide; a diode that comes back is refused there).
     std::vector<Index> loop_diodes;
+    /// Per loop diode: every element of its loop in loop order, the diode
+    /// first ("D2 -> S1 -> V1"), for the refusal message.
+    std::vector<std::string> loop_texts;
 };
 
 class BranchStructureChecker {
@@ -216,8 +219,39 @@ private:
         // (1) loops of closed ideal elements and zero-impedance branches.
         {
             UF uf(n);
+            // the spanning forest, kept so a loop's elements can be listed
+            std::vector<std::vector<std::pair<Index, Index>>> adj(
+                static_cast<std::size_t>(n));   // (neighbour, branch id)
+            auto unite = [&](const E& e) {
+                if (!uf.unite(e.a, e.c)) return false;
+                adj[static_cast<std::size_t>(e.a)].push_back({e.c, e.b});
+                adj[static_cast<std::size_t>(e.c)].push_back({e.a, e.b});
+                return true;
+            };
+            // e closes a loop: e itself, then the forest path from e.c back to e.a
+            auto loop_text = [&](const E& e) {
+                std::vector<Index> prev(static_cast<std::size_t>(n), -2), via(
+                    static_cast<std::size_t>(n), -1);
+                std::vector<Index> q{e.c};
+                prev[static_cast<std::size_t>(e.c)] = -1;
+                for (std::size_t h = 0; h < q.size(); ++h) {
+                    for (const auto [w, b] : adj[static_cast<std::size_t>(q[h])]) {
+                        if (prev[static_cast<std::size_t>(w)] != -2) continue;
+                        prev[static_cast<std::size_t>(w)] = q[h];
+                        via[static_cast<std::size_t>(w)] = b;
+                        q.push_back(w);
+                    }
+                }
+                std::string t(graph_.branch_name(e.b));
+                for (Index v = e.a; v != e.c && prev[static_cast<std::size_t>(v)] >= -1;
+                     v = prev[static_cast<std::size_t>(v)]) {
+                    t += " -> ";
+                    t += graph_.branch_name(via[static_cast<std::size_t>(v)]);
+                }
+                return t;
+            };
             for (const auto& e : edges) {
-                if (e.r == Role::ZeroImp) uf.unite(e.a, e.c);
+                if (e.r == Role::ZeroImp) unite(e);
             }
             // Switches first, so a loop that a diode closes blames the diode.
             const auto is_diode = [&](Index b) {
@@ -226,9 +260,10 @@ private:
             for (int pass = 0; pass < 2; ++pass)
             for (const auto& e : edges) {
                 if (e.r != Role::Ideal || is_diode(e.b) != (pass == 1)) continue;
-                if (uf.unite(e.a, e.c)) continue;
+                if (unite(e)) continue;
                 if (pass == 1) {
                     out.loop_diodes.push_back(e.b);
+                    out.loop_texts.push_back(loop_text(e));
                     continue;
                 }
                 throw UnsupportedError(
@@ -237,11 +272,11 @@ private:
                     std::format(
                         "engine '{}': in mode {} the closed ideal element '{}' "
                         "(R_on = 0) closes a loop of voltage sources and "
-                        "closed ideal switches{}: its current is undefined. "
-                        "Give it R_on > 0 (a shoot-through gate pattern is "
-                        "the usual cause).",
+                        "closed ideal switches{} (loop: {}): its current is "
+                        "undefined. Give it R_on > 0 (a shoot-through gate "
+                        "pattern is the usual cause).",
                         engine_, mode, graph_.branch_name(e.b),
-                        dynamic ? "" : " (inductors are shorts at DC)"));
+                        dynamic ? "" : " (inductors are shorts at DC)", loop_text(e)));
             }
         }
         // (2) islands with no path to ground behind open ideal elements.

@@ -275,6 +275,8 @@ struct ModeSelection {
     int ties = 0;             // still tied after widening: decided OFF
     int widenings = 0;        // re-solves at a widened step
     int released = 0;         // hysteresis ports released (D8)
+    int shorted_held = 0;     // ideal ports shorted by a loop, gap zero within tol_w: held OFF
+    int shorted_released = 0; // of those, released to the LCP (the others forward-bias them)
     int first_pass_ties = 0;  // ports tied at h_e (before widening)
     int leak_pins = 0;        // remaining ties ON because their current pins an island (D5)
     int pin_judgements = 0;   // events where the pins went to the judge (or its absence)
@@ -441,6 +443,8 @@ public:
                     if (!pivot_to_coords_(anchor_)) { status = LcpStatus::PivotCap; break; }
                 }
                 status = solve_with_hysteresis_(ports, sc, h, piv, out.released);
+                out.shorted_held += shorted_held_;
+                out.shorted_released += shorted_released_;
                 if (pass == 0 || (status != LcpStatus::Solution && status != LcpStatus::Trivial))
                     break;
                 const Real tol_w = tol * sc.vscale;
@@ -574,6 +578,7 @@ private:
     LcpStatus solve_with_hysteresis_(const std::vector<DiodePort>& ports,
                                      const CircuitScale& sc, Real h,
                                      int& pivots, int& released) {
+        shorted_held_ = shorted_released_ = 0;
         const auto k = static_cast<Eigen::Index>(ports.size());
         const Real tol_w0 = tol * sc.vscale;
         held_.assign(ports.size(), 0);
@@ -591,6 +596,7 @@ private:
             if (!held_[ju] && p.R_on == Real{0} && !coord_[ju] &&
                 std::abs(H_(j, j)) * sc.iscale <= tol_w0 && q_[j] >= -tol_w0) {
                 held_[ju] = short_[ju] = 1;
+                ++shorted_held_;
             }
         }
         // impedance scale: currents are compared in volts (prototype)
@@ -654,6 +660,7 @@ private:
                 // a shorted ideal port the others forward-bias: back to the LCP
                 if (short_[ju] && held_[ju] && wg_[j] < -tol_w0) {
                     held_[ju] = short_[ju] = 0;
+                    ++shorted_released_;
                     release = true;
                     continue;
                 }
@@ -721,7 +728,7 @@ private:
     std::vector<char> held_, short_, coord_, fixed_, pin_, anchor_;
     const std::vector<char>* prev_ = nullptr;
     std::vector<Eigen::Index> free_, idx_, oth_;
-    int enum_ = 0, nonunique_ = 0;
+    int enum_ = 0, nonunique_ = 0, shorted_held_ = 0, shorted_released_ = 0;
 };
 
 }  // namespace pulsim::events

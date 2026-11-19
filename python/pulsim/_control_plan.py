@@ -254,8 +254,10 @@ def compose_control(builder, closed_loops, step_observer, controller_period,
         if period is None:
             period = getattr(step_observer, "period", None)
         if period is not None:
+            # a Monitor stays itself: its flag tells the engines it reads only
             plan.ticks.append(
-                (getattr(step_observer, "tick", step_observer),
+                (step_observer if _monitor(step_observer)
+                 else getattr(step_observer, "tick", step_observer),
                  float(period)))
             plan.tick_graph.append(None)
         else:
@@ -292,6 +294,17 @@ def compose_control(builder, closed_loops, step_observer, controller_period,
                 f"simulate(): controller period {period!r} must be a "
                 "positive finite number of seconds")
     return plan
+
+
+def _monitor(obs) -> bool:
+    """A declared read-only tick (pulsim.control.Monitor)."""
+    return bool(getattr(obs, "_pulsim_monitor", False))
+
+
+def monitor_flags(ticks) -> list:
+    """Per tick source: True for a Monitor (engines neither land on it nor
+    re-sample the gate after it)."""
+    return [_monitor(f) for f, _p in ticks]
 
 
 def _helper(obs) -> bool:

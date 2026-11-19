@@ -107,3 +107,17 @@ machine (`-j2`, `nice`).
 - [ ] 14.1 `ComplementarityPort` and the `ComplementarityDevice` concept; `SwitchedDiode` implements it in both forms
 - [ ] 14.2 The mode selector reads the ports from the registry; no device restates the law
 - [ ] 14.3 Tests: the ports of a conductance-form diode (`g_on = 1e3`, `g_off = 1e-9`, `V_f = 0.7`) are `R_on = 1e-3`, `g_off = 1e-9`, `V_f = 0.7`; the sparsity pattern of every mask is unchanged by the concept
+
+<!-- Slice 3, 2026-11-18: the dual path (DECISIONS #23). Steps 5–7 run
+     behind device_path='interface'; the hand stamps stay the default and
+     are deleted at the release (items 5.1–7.5 "delete …" wait for it). -->
+
+## 15. Dual path (DECISIONS #23)
+- [x] 15.1 `device::DevicePath`; kernel `SimulationOptions::device_path`, `TrBdf2Options::device_path`, `dc_device_refresh(pool, enable, path)`; Python `simulate(device_path=)`, `compute_dc_op(device_path=)`; `engine='dsed'` refuses `'interface'`
+- [x] 15.2 `Device` contract: optional per-instance `Aux` (law variant, table, Jiles–Atherton base state), increment form in `stamp_fq`, internal-row commit rule (`q̇_n ← −f`), `kHasQ` / `kHasF`
+- [x] 15.3 Laws (`device/laws.hpp`): smooth / Shockley diode, MOSFET L1, IGBT L1 (steady state) — the model's own `current<S, P>` body; nonlinear capacitor (junction, VDMOS C_gd, table); saturable inductor (atan, table, Jiles–Atherton)
+- [x] 15.4 Sparse adapters (`pwl/interface_stamps.hpp`): stamp, commit, stage capture per ported kind, compile-time structural pattern; `StatefulHistories::set_path` refuses an unported kind by name
+- [x] 15.5 Gates: `test_device_path_equivalence.py` (pwl ≤ 1e-12 of scale, trbdf2 ≤ 10·rtol at common accepted times, DC ≤ 1e-12); `test_device_laws.cpp` (every law variant — junction / VDMOS / table Coss, atan / table / Jiles–Atherton inductor — stamps, commits and captures the stage point to a few ulp of the hand path; ∂/∂p against central differences; `param_tangent` false for table and Jiles–Atherton); registry-driven cells in `test_engine_conformance.py`
+- [ ] 15.6 Port the Lauritzen diode, the IGBT tail, the MNA PMSM and the induction machine (the PMSM / IM after the machines agent's incremental stator rows land)
+- [ ] 15.7 Speed within 3 % on every case (`perf2.py`-style interleaved; see DEVICE_PATH_EVIDENCE.md)
+- [ ] 15.8 At the release: flip the default, delete the hand stamps (list in DECISIONS #25)

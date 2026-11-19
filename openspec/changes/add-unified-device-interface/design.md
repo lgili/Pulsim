@@ -685,3 +685,18 @@ factorising, runs (DECISIONS #22).
   `seed_params` seeds in the order `Params::map` constructs the members,
   which must be declaration order (braced init, as in the tests).
   Nothing integrates the sensitivities yet.
+
+## Controller-state block (slice 3, 2026-11-18)
+
+For `refactor-unified-transient-stepper` (DECISIONS #24).
+`SolverSnapshot::controller` is the stepper's `step::ControllerState`
+(`solver/step/controllers.hpp`): `kind` (0 None, 1 Fixed, 2 Lte) and a
+flat `std::vector<Real> v` in the writing controller's layout — for
+`LteController::save`: `[h, h_mem_gate[0], h_mem_gate[1],
+pending_gate_slot, diode_slot (−1 = none), gate_parity, h_mem_diode...]`.
+Pickled as the 15th field `(kind, v)` of a version-4 pickle, only when
+filled (an empty block writes the 14-field version 4); older pickles load
+with an empty block, and an engine resuming from an empty block restarts
+its controller exactly as today. A layout change is the controller's
+(`load` refuses a size it does not read); the pickle carries the vector
+as is.

@@ -82,6 +82,10 @@ public:
     [[nodiscard]] const std::vector<Real>& q_gamma() const noexcept {
         return q_gamma_;
     }
+    /// The interface path's stage capture writes it through the law.
+    [[nodiscard]] std::vector<Real>& mutable_q_gamma() noexcept {
+        return q_gamma_;
+    }
 
     /// Commit a TR-BDF2 step under the BDF2 rule its second stage used
     /// (`h_full` = the whole step) — never re-derived from C(v)dv/dt,

@@ -279,6 +279,8 @@ def test_a_dev_state_without_its_layout_is_refused():
 
 def test_a_newer_pickle_version_is_refused_by_version():
     snap = SolverSnapshot.__new__(SolverSnapshot)
+    with pytest.raises(RuntimeError, match="pickle version 6"):
+        snap.__setstate__(("SolverSnapshot", 6, 0.0))
     with pytest.raises(RuntimeError, match="pickle version 5"):
         snap.__setstate__(("SolverSnapshot", 5, 0.0))
     with pytest.raises(RuntimeError, match="pickle version 3"):
@@ -288,17 +290,11 @@ def test_a_newer_pickle_version_is_refused_by_version():
 
 
 def test_a_version_3_pickle_loads_and_resumes_on_a_restarted_grid():
-    """Version 3 = version 4 without the grid field: it loads, and resumes
+    """Version 3 = version 5 without the grid field: it loads, and resumes
     exactly as the same snapshot without a grid."""
     snap = _pwl(4.2e-5).final_snapshot
     v4 = snap.__getstate__()
-    # 14 fields: version 3's 13 (the controllers'-state marker at 12, batch
-    # 12) + the grid (13). The slice's own 13-field version 4 (grid at 12,
-    # no marker) still loads, grid included.
-    assert v4[1] == 4 and len(v4) == 14 and v4[12] is False
-    v4_13 = SolverSnapshot.__new__(SolverSnapshot)
-    v4_13.__setstate__(tuple(v4[:12]) + (v4[13],))
-    assert v4_13.grid_origin == snap.grid_origin and v4_13._control_state is None
+    assert v4[1] == 5 and len(v4) == 17
     old = SolverSnapshot.__new__(SolverSnapshot)
     old.__setstate__(("SolverSnapshot", 3) + tuple(v4[2:12]))
     assert np.isnan(old.grid_origin) and not old.post_edge_derivatives

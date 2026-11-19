@@ -77,8 +77,8 @@ public:
                     .I_H        = p.I_H,
                     .ideal      = var >= 0 && pool.branch_R_on(branch.id) == Real{0},
                 });
-                if (p.gate != models::SwitchedDiode::Gate::None) ++num_gated_;
                 any_ideal_ = any_ideal_ || diodes_.back().ideal;
+                if (p.gate != models::SwitchedDiode::Gate::None) ++num_gated_;
             }
             ++switch_idx;
         }

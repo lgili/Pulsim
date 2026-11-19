@@ -366,3 +366,18 @@ TEST_CASE("a periodic source with an origin resumes on the original grid",
     CHECK_THROWS_AS(bad.add_periodic(Kind::ControlTick, Rate{T, 0.0, kInf}),
                     std::invalid_argument);
 }
+
+TEST_CASE("a periodic source reports its grid origin and next k for a snapshot",
+          "[event_queue]") {
+    EventQueue q;
+    const auto a = q.add_periodic(Kind::ControlTick, Rate{1e-4, 2e-5});
+    const auto b = q.add_periodic(Kind::ControlTick, Rate{3e-4, 0.0, 0.0});
+    q.start(1e-3, 2e-3);                 // a: origin NaN = t0; b: origin 0
+    CHECK(q.grid_origin(a) == 1e-3);
+    CHECK(q.grid_origin(b) == 0.0);
+    CHECK(q.next_k(a) == 0);
+    CHECK(q.next_k(b) == 4);             // first 0 + k*3e-4 >= 1e-3
+    (void)q.take_due(1.2e-3, 1e-12);     // b's k = 4 at 1.2e-3 (a's 1.02e-3 too)
+    CHECK(q.next_k(b) == 5);
+    CHECK(q.next_k(a) == 1);
+}
