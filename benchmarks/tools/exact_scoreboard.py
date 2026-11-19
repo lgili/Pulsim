@@ -350,9 +350,10 @@ def render(previous=None):
             if all(fin.values()):
                 a, b = fin["rtol"][0], fin["pwl+restart"][0]
                 bad, good = (a, b) if a["exact"] > b["exact"] else (b, a)
+                verdict = (f"{'trbdf2' if bad is a else 'pwl+restart'} converges to a wrong waveform"
+                           if bad["exact"] > 1e-3 else "both finest runs are within 1e-3 of the ideal truth")
                 L += [f"- {rel.removeprefix('circuits/')}: the finest {bad['run']} is {bad['exact']:.2g} from "
-                      f"the ideal truth, the finest {good['run']} {good['exact']:.2g}: "
-                      f"{'trbdf2' if bad is a else 'pwl+restart'} converges to a wrong waveform."]
+                      f"the ideal truth, the finest {good['run']} {good['exact']:.2g}: {verdict}."]
         L += ["", "| circuit | run | exact | worst column | departs at [s] | truth event |", "|---|---|---:|---|---:|---|"]
         for rel, rows in twin.items():
             for x in rows:
