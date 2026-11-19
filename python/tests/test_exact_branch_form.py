@@ -338,3 +338,32 @@ def test_the_periodic_steady_state_refuses_an_ideal_diode_by_name():
         p.periodic_steady_state(b, period=1e-5, switch_fn=sf)
     assert ei.value.feature == "branch_form" and ei.value.device.startswith("D")
 
+
+def test_an_ideal_body_diode_across_its_closed_switch_does_not_chatter(tmp_path):
+    """examples/phase_shift_full_bridge.yaml with every switch and diode ideal (branch,
+    R_on = 0) and C_oss / C_j across them: D_LS_B sits across its closed switch LS_B,
+    v_D = 0 structurally and every ON candidate is a loop; its turn-on predicate is held
+    while that holds. It chattered at 66 ns (32 commutations in 2e-10 s) before."""
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[2]
+    s = (root / "examples" / "phase_shift_full_bridge.yaml").read_text(encoding="utf-8")
+    s = s.replace("      g_on: 1.0e3\n      g_off: 1.0e-9\n",
+                  "      form: branch\n      R_on: 0.0\n      g_off: 1.0e-9\n")
+    caps = [("HS_A", "vbus", "mid_a", 300e-12), ("LS_A", "mid_a", "gnd", 300e-12),
+            ("HS_B", "vbus", "mid_b", 300e-12), ("LS_B", "mid_b", "gnd", 300e-12),
+            ("D1", "sec_pos", "rect_pos", 100e-12), ("D2", "sec_neg", "rect_pos", 100e-12),
+            ("D3", "rect_neg", "sec_pos", 100e-12), ("D4", "rect_neg", "sec_neg", 100e-12)]
+    add = "".join(f"    - type: capacitor\n      name: C_{n}\n      from: {a}\n      to: {c}\n"
+                  f"      C: {v!r}\n" for n, a, c, v in caps)
+    s2 = s.replace("      R: 1.0e-3\n\nsimulation:", "      R: 1.0e-3\n" + add + "\nsimulation:")
+    assert s2 != s and "form: branch" in s2
+    f = tmp_path / "psfb_ideal.yaml"
+    f.write_text(s2, encoding="utf-8")
+    lc = p.load_yaml_file(str(f))
+    si = lc.builder.switch_index_of
+    fn = p.make_phase_shift_full_bridge_fn(100e3, np.pi / 2, si("HS_A"), si("LS_A"), si("HS_B"),
+                                           si("LS_B"), len(lc.switch_names), 100e-9)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(lc, t_end=2e-5, engine="exact", switch_fn=fn, rtol=1e-9, atol=1e-12)
+    assert np.asarray(r.times)[-1] == pytest.approx(2e-5, rel=1e-12)

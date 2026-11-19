@@ -267,12 +267,6 @@ struct SchedulerDiode {
     /// a turn-on's zero current tied with the OFF side and the voltage doubler's
     /// D2 chattered.
     [[nodiscard]] bool reads_current() const noexcept { return var >= 0 && R_on == Real{0}; }
-    /// Amperes per unit of the ON law signal: the ideal diode's signal is its
-    /// current (1), a branch diode with R_on reads volts across R_on (its census
-    /// g_on is 1, not 1/R_on), a conductance diode volts across 1/g_on.
-    [[nodiscard]] Real on_amps_per_unit() const noexcept {
-        return var < 0 ? g_on : R_on > Real{0} ? Real{1} / R_on : Real{1};
-    }
 
     [[nodiscard]] models::SwitchedDiode::Params params() const noexcept {
         return {.g_on = g_on, .g_off = g_off, .V_th = V_th, .V_f = V_f};
@@ -1823,7 +1817,7 @@ public:
                 // broken inside it is one no decision of this engine can resolve
                 band[k * nd + j] = std::max(zb, signal_bound_(d, t, x, Real{0}, Real{0}));
                 const bool on = m.get(d.switch_idx);
-                const Real i = on ? d.on_amps_per_unit() * (vd - d.V_f) : d.g_off * vd;
+                const Real i = on ? d.g_on * (vd - d.V_f) : d.g_off * vd;
                 ipk[j] = std::max(ipk[j], std::abs(i));
                 if (!on) vpk[j] = std::max(vpk[j], std::abs(vd));
             }
@@ -1838,7 +1832,7 @@ public:
                 const bool on = rows[k].m->get(d.switch_idx);
                 const Real vd = v[k * nd + j];
                 const bool b = on
-                    ? d.on_amps_per_unit() * (vd - d.V_f) < -std::max(law_rel_ * ipk[j], band[k * nd + j] * d.on_amps_per_unit())
+                    ? d.g_on * (vd - d.V_f) < -std::max(law_rel_ * ipk[j], band[k * nd + j] * d.g_on)
                     : vd > thr + std::max(law_rel_ * vp, band[k * nd + j]);
                 if (b) {   // the earliest row (samples precede left limits in rows)
                     ++bad;
@@ -1849,7 +1843,7 @@ public:
             const bool on = rows[first].m->get(d.switch_idx);
             const Real vd = v[first * nd + j];
             const std::string what = on
-                ? "ON while carrying " + sci_(d.on_amps_per_unit() * (vd - d.V_f)) + " A"
+                ? "ON while carrying " + sci_(d.g_on * (vd - d.V_f)) + " A"
                 : "OFF while forward-biased by " + sci_(vd) + " V";
             throw DiodeLawViolation(
                 d.label, result.times[rows[first].k],
@@ -2650,7 +2644,7 @@ private:
                     // a non-finite state (an unstable mode over 1e4·h_e) is a violation
                     const bool bad = breaks_law_(dd, mode[j] != 0, t + d, x_tmp_);
                     // reported in volts: ON -> −i·zs, OFF -> v − V_on
-                    const Real viol = mode[j] ? dd.on_amps_per_unit() * sig * zs : sig;
+                    const Real viol = mode[j] ? dd.g_on * sig * zs : sig;
                     const Real v_eff = std::isfinite(viol) ? viol
                                                            : std::numeric_limits<Real>::infinity();
                     worst_all = std::max(worst_all, v_eff);

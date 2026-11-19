@@ -567,3 +567,34 @@ The fixes above were checked by test_exact_branch_form.py (16), test_branch_form
 
 ### Hand-off (session 19)
 Pushed to wip/core-a-ideal-diode-dsed only (not the PR branch): the bar on this tip is not run. Next: chain_j.sh j2 (install the ext from .scratch/build-ext first; the installed .so may be a debug build), fix, push to feat/core-a-complementarity with "full ctest not run on this tip"; then the PSFB predicate suppression; then posing the capacitor–source loop; then LCP-first.
+
+## Session 20 (exact engine 19): the bar on the ideal-diode tip, the body diode across its closed switch (2026-11-19)
+
+### The bar on 53d5eb9d (61d4b4cd + the record threshold, j2)
+Release extension rebuilt and installed. Full pytest 5638 passed / 0 failed (109 skipped, 8 xfailed); `-m reference` 382; reference_status exit 0, REFERENCE_STATUS.md unchanged: pwl 81/27/1/0/0, pwl+restart 89/19/1/0/0, pwl+split 91/17/1/0/0, trbdf2 106/2/1/0/0, dsed 100/0/0/9/0; ruff clean; goldens ALL IDENTICAL; bit-identity 34/36 default and shadow (bridge1_vf07/dsed t, x only, as at a2528225); scoreboard dsed 81/81 < 1e-3, none worse than j1; banks 1 / 9 / 10: 2.541e-5, 5.843e-4, 2.117e-4 V (12 refused by name); fuzz 10 banks 11/11, engine fuzz 21/21; truths unchanged (bridge −4.089e-10 V, ten banks −1.387e-9 V, orbit 6.681e-11 V); dsed / layer4_v3 / mode C++ 136 / 29 / 35 cases on Eigen 5 and 3.4.0 (with the j2 scheduler: the on_amps_per_unit helper, since reverted).
+
+### Flip on dsed (final working tree, j4)
+default 100 agree / 9 refused; branch 99 agree / 9 refused (the PR's NewtonStatic ShockleyDiode / MosfetLevel1 refusals) / 1 error; ideal 83 agree / 15 refused / 2 disagree (rl_step 3.8e-3, inductor_chain_step 6.2e-3, tol 1e-3) / 9 not comparable. Against a47468bf (i2): voltage_doubler error → agree (the R_on > 0 read path); **diode_clamp_overvoltage agree → error**: `Dclamp ON while carrying −3.75e-3 A at 2.534 ms, 5867 samples` (R_on = 1/g_on = 5 mΩ, branch form). It is the 61d4b4cd read change (R_on > 0 branch diodes read v_D across their nodes), not the unit fix: it stays with the law check's decision restored, and with the census g_on replaced by 1/R_on for those diodes (both tried). The branch cells are therefore 53 of 54 agreeing, not 54. Ideal refusals by name: source_capacitor_loop (diode_rectifier, diode_bridge_rectifier, half_wave_rectifier_sine, voltage_doubler, three_phase_diode_rectifier), ideal_voltage_loop at the DC start (ll10, ll13, ll15), and the PR's NewtonStatic ones.
+
+### Units (reviewer's item)
+A branch diode with R_on > 0 carried the census's g_on = 1 while reading volts: its ON signal was volts against ampere bands and the law check printed volts as "A". Fixed at the source in `dsed_bindings.cpp`: such a diode gets g_on = 1/R_on in its predicate params and in its SchedulerDiode (it IS the conductance diode); an ideal diode keeps g_on = 1 (its signal is its current). scheduler.hpp is back to 61d4b4cd (the helper of 53d5eb9d is not needed). The record threshold (1e-9 of the circuit scale per direction) is stated in the exact result's docstring and known-limitations, with a boundary test.
+
+### Ideal-twin table (`.scratch/s24/twins.py`, event-time error = the truth's located roots, not its start / schedule breaks, against the nearest dsed event)
+| twin | settle exact | lcp exact | truth roots | max \|Δt_event\| |
+|---|---|---|---|---|
+| boost_switching_complex | 2.753e-11 | 2.753e-11 | 1 | 4.43e-9 s |
+| flyback_converter | 2.116e-6 | 2.102e-6 | 199 | 5.93e-11 s |
+| full_bridge_dc | 0 | 0 | 0 | — |
+| ll07_boost_vcswitch | 2.363e-9 | 2.363e-9 | 1 | 2.2e-14 s |
+| t_type_3level_halfbridge | 7.2e-15 | refused (mode_selection with integrator='auto') | 0 | — |
+| vcswitch_resistor | 2.0e-9 | refused (same) | 0 | — |
+| diode_rectifier | refused source_capacitor_loop | same | — | — |
+
+### 4a: an OFF ideal diode across a closed ideal path
+`dsed_bindings.cpp`: the turn-on predicate of an ideal diode returns −1 while (a) its ON candidate puts it in the structural pass's `loop_diodes` (BranchStructureChecker on the current mask with its bit set) and (b) |v_D| ≤ 1e-9·vscale (a loop through a source is a real bias: the law decides, refused by name as before). The node pair's own rounding scale was too small a bound (v_D reached 2.4e-14 V at mid_b and crossed). Test: the PSFB example, every device ideal, C_oss / C_j, to 20 µs (chattered at 66 ns before). PSFB ideal ("all", rtol 1e-9) to 2 ms: next obstacle CHATTER of rectifier D3 at 2.5 µs (default ceiling) / 32.5 µs (dt 1e-7), not across a closed path. With t_end = 1e-7 the run ends and the law check refuses D1 OFF forward-biased by 48 V at 20 ns (also on the pre-4a build): a wrong mode at the first rectifier commutation behind C_j.
+
+### Not verified on the final tree
+Full pytest, -m reference, reference_status, goldens / bit-identity, C++ targets were run on 53d5eb9d (j2), NOT on the final tree (bindings change + scheduler revert); on the final tree only test_exact_branch_form / test_branch_form_switch / test_engine_conformance (443 passed), the dsed subset (336 passed, j3 build) and the flip. Conductance-form circuits do not reach the changed code (R_on > 0 / ideal branch diodes only).
+
+### Hand-off (session 20)
+Pushed to wip/core-a-ideal-diode-dsed only. Next: (1) diode_clamp_overvoltage branch error (R_on = 5 mΩ ON with −3.75 mA for 5867 samples since 61d4b4cd: compare v_D and the turn-OFF predicate with the conductance twin, which agrees); (2) the bar on this tip (`.scratch/s24/chain_j.sh`), then push to feat/core-a-complementarity; (3) PSFB ideal: D1 at 20 ns, D3 chatter; (4) source_capacitor_loop posed; (5) LCP-first.
