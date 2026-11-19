@@ -2479,6 +2479,7 @@ inline SimulationResult run_transient_trbdf2(
         std::array<Vector, 4> ed_y;   // stages 1–4 (stage 5 is the output)
         std::vector<pwl::HistoryEntry> ed_hist;
         bool ed_land = false;   // the pending landing was an ESDIRK step
+        bool ed_forced = false;  // this SDIRK step was forced by kE (slots of another mode)
         // The five stages of one ESDIRK4(3) step on the factor of h/2
         // (G + C/(γh)): stage s is backward Euler of γh from the pseudo
         // previous state ψ_s (the entries' state slots, derivative slots 0),
@@ -2942,6 +2943,7 @@ inline SimulationResult run_transient_trbdf2(
                 // O(h) error. Such a step, and every restart, is the shared
                 // SDIRK(2,2) step (backward-Euler stages, no slot read): its
                 // commit leaves slots consistent with this mode (item (v)).
+                ed_forced = !sdirk;
                 if (!sdirk && mask_step == x_mask) return ed_take();
                 if (!sdirk) {
                     sdirk = true;
@@ -3188,7 +3190,10 @@ inline SimulationResult run_transient_trbdf2(
             // h_lo), and every step sat at h_chatter as a forced accept.
             // ESDIRK: always (its embedded R̂(−∞) = −3/20 reads a damped
             // stiff mode as error).
-            if (((kE && !sdirk) || opts.filter_error_estimate
+            // and the SDIRK step it forces after a mode change: raw, its
+            // first-order estimate reads the damped jump as error at any h
+            // (the reject cascade of the turn-off restart, above)
+            if (((kE && (!sdirk || ed_forced)) || opts.filter_error_estimate
                  || (sdirk && sdirk_event && !reinit_step)
                  || t - chatter_exhaust_t <= Real{1e3} * h_chatter)
                 && !nl_effective
