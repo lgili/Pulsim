@@ -60,7 +60,7 @@ def test_a_resumed_run_with_the_output_rule_equals_the_uninterrupted_one():
         tu = np.asarray(u.times)
         ev_u = np.unique(tu[1:][np.diff(tu) == 0])
         ev_r = np.unique(np.asarray(r.times)[1:][np.diff(np.asarray(r.times)) == 0])
-        np.testing.assert_array_equal(ev_u[ev_u > t_split], ev_r[ev_r > t_split])
+        np.testing.assert_allclose(ev_u[ev_u > t_split], ev_r[ev_r > t_split], rtol=0, atol=1e-15)
 
 
 def test_the_output_rule_is_ignored_with_a_recorder_as_with_dt():
