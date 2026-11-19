@@ -1313,7 +1313,13 @@ private:
             // LCP's companion model sees the impulse; it confirms or repairs.
             // (A freewheel diode with g_off = 0 stayed OFF and the inductor's
             // current was cut, ΔW = ½·L·i², at every gate-off.)
-            else if (reinit_log_size_() > reinit_mark_) { c = 0; worst_j = -1; }
+            // At a located diode event (settle_decisions_) the constraint's jump is
+            // the root's error, not an impulse (bridge3_overlap: a cut-set record of
+            // 1.5e-18 J sent the LCP to the held state, which kept Dbb ON).
+            else if (!settle_decisions_ && reinit_log_size_() > reinit_mark_) {
+                c = 0;
+                worst_j = -1;
+            }
         }
         if (c < 0) { ++g.unchecked; return; }
         ++g.checks;
@@ -1738,9 +1744,12 @@ private:
         // fixed-point iteration run_transient does per step, done
         // here only at events.
         MaskT final_mask = new_mask;
+        settle_decisions_ = ptype == PredicateType::DiodeOn
+                            || ptype == PredicateType::DiodeOff;
         decide_modes_(t_event, x, final_mask,
                       effective_gates_(new_mask, prev_bits), prev_bits,
                       old_mask, result);
+        settle_decisions_ = false;
 
         // Consistent reinitialization (Phase-3 item 2). The event
         // deposits x off the new mode's slow manifold — a µA of
@@ -1814,6 +1823,39 @@ private:
         }
     }
 
+    /// Decisions at an event are taken on the candidate mode's slow
+    /// manifold: x carried exactly through the current mode's parasitic
+    /// transient (exact_settle_length over the run's step dt_max_), inside
+    /// which no predicate is read. A diode left OFF at its located current
+    /// zero keeps the root's residual ε in its inductor, which g_off reads
+    /// as ε/g_off volts (kV at µA) for ~L·g_off: its sign is rounding. The
+    /// settle is zero-duration for the run (the carried state is not
+    /// moved; the event projection removes the same modes): the returned
+    /// time t + δ is the one the settled state is read at. Returns x and t
+    /// when the mode has no parasitic cluster.
+    /// Only at an event located as a diode predicate's zero
+    /// (settle_decisions_): there the transient's amplitude is the root's
+    /// error. At a time event (gate edge, t = 0) it is the physics: a
+    /// buck's inductor current forced into g_off at gate-off is what turns
+    /// the freewheel diode ON.
+    const Vector& settled_(Real t, const Vector& x, Vector& out, Real& ts) {
+        ts = t;
+        if (!settle_decisions_) return x;
+        if constexpr (HasExactStep<System>) {
+            if constexpr (requires { system_.exact_settle_length(Real{}); }) {
+                if (system_.has_exact_step()) {
+                    const Real d = system_.exact_settle_length(dt_max_);
+                    if (d > Real{0}) {
+                        advance_(t, x, d, out);
+                        ts = t + d;
+                        return out;
+                    }
+                }
+            }
+        }
+        return x;
+    }
+
     /// Iterate the diode configuration to a fixed point at one
     /// instant, Gauss–Seidel (the mask follows each flip). Returns the
     /// settled mask (already set on the system). Budget-bounded; on
@@ -1828,7 +1870,10 @@ private:
     MaskT settle_diode_cascade_(Real t, const Vector& x)
         requires HasNodePairVoltage<System> {
         MaskT mask = system_.current_mask();
-        const Real tol = zero_band_tol_(t, x);
+        Real ts = t;
+        const Vector* xs = &settled_(t, x, x_set_, ts);
+        MaskT xs_mask = mask;
+        const Real tol = zero_band_tol_(ts, *xs);
         const int kMaxRounds = settle_round_cap_;
         for (int round = 0; round < kMaxRounds; ++round) {
             ++settle_rounds_;
@@ -1836,8 +1881,12 @@ private:
             for (const auto& d : diodes_) {
                 const bool on =
                     diode_bits_.get(d.switch_idx);
+                if (mask != xs_mask) {
+                    xs = &settled_(t, x, x_set_, ts);
+                    xs_mask = mask;
+                }
                 const Real v_d = system_.node_pair_voltage(
-                    d.from, d.to, t, x);
+                    d.from, d.to, ts, *xs);
                 const auto prm = d.params();
                 const bool by_value =
                     models::SwitchedDiode::decide(on, v_d, prm);
@@ -1921,15 +1970,17 @@ private:
             if (system_.has_exact_step()) {
                 on = false;
                 const auto prm = d.params();
+                Real t0 = t;
+                const Vector& x0 = settled_(t, x, x_off_, t0);
                 for (int k = 0; k <= 12; ++k) {
                     const Real delta =
                         dt_max_ * std::pow(Real{10}, Real(k - 12));
-                    advance_(t, x, delta, x_tmp_);
+                    advance_(t0, x0, delta, x_tmp_);
                     const Real sig =
                         models::SwitchedDiode::crossing_signal(
                             false,
                             system_.node_pair_voltage(
-                                d.from, d.to, t + delta, x_tmp_),
+                                d.from, d.to, t0 + delta, x_tmp_),
                             prm);
                     if (sig > tol) {
                         on = true;
@@ -2203,6 +2254,8 @@ private:
     Real last_fired_t_ = std::numeric_limits<Real>::quiet_NaN();
     // Exact-path workspaces: a step reuses them (no allocation).
     mutable Vector x_new_, x_evt_, x_tmp_;
+    Vector x_set_, x_off_;     // settled_: the cascade's and the OFF probe's
+    bool settle_decisions_ = false;   // fire_event_: a located diode event
     std::vector<Vector> scan_x_;
 };
 

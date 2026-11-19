@@ -754,6 +754,23 @@ inline void exact_fast_samples(const ExactLTI& e, Real t_e, Real h,
     }
 }
 
+/// The settle length of a mode for decisions at an event: the parasitic
+/// cluster is the modes whose time constant is below kParasiticFraction of
+/// the run's resolved time scale `t_res`; δ = kSettleTau time constants of
+/// the slowest of them (e^-40 ≈ 4e-18). 0 when the cluster is empty.
+inline constexpr Real kParasiticFraction = Real{1e-6};
+inline constexpr Real kSettleTau = Real{40};
+[[nodiscard]] inline Real exact_settle_length(const ExactLTI& e, Real t_res) {
+    if (!e.valid || !(t_res > Real{0})) return Real{0};
+    const Real r_cut = Real{1} / (kParasiticFraction * t_res);
+    Real r_lo = std::numeric_limits<Real>::infinity();
+    for (Eigen::Index i = 0; i < e.lambda.size(); ++i) {
+        const Real r = -e.lambda[i].real();
+        if (r > r_cut) r_lo = std::min(r_lo, r);
+    }
+    return std::isfinite(r_lo) ? kSettleTau / r_lo : Real{0};
+}
+
 /// Slow-manifold projection (event_projection.hpp) with the cached
 /// tier-1 basis: modes with Re λ < −fast_threshold go to their
 /// quasi-static value −w/λ. False when tier 1 is not available.

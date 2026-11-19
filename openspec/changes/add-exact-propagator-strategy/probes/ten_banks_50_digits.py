@@ -5,7 +5,8 @@
 # (n = R_g * sum(i)), not taken from the reduction under test; mpmath expm of the augmented system.
 # usage: python3 ten_banks_50_digits.py N [t_end=1e-4] [log10 R_g = 6]
 #   N = 10 prints: truth vc(1e-4) = 11.725547151164887... iL0a = 0.12972284951463489...
-import sys, mpmath as mp
+import sys
+import mpmath as mp
 mp.mp.dps=50
 n=int(sys.argv[1]); te=mp.mpf(sys.argv[2]) if len(sys.argv)>2 else mp.mpf("1e-4")
 gon,goff=mp.mpf(1000),mp.mpf("1e-9"); L=mp.mpf("0.2e-3"); C=mp.mpf("2e-3"); R=mp.mpf(5); Rg=mp.mpf(10)**int(sys.argv[3]) if len(sys.argv)>3 else mp.mpf(10)**6

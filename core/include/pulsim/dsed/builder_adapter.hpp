@@ -422,6 +422,13 @@ public:
         pulsim::dsed::exact_fast_samples(current_entry_->exact, t_e, h, out);
     }
 
+    /// The current mode's settle length for decisions (exact_settle_length).
+    [[nodiscard]] Real exact_settle_length(Real t_res) const {
+        ensure_current_resolved_();
+        ensure_exact_built_(*current_entry_);
+        return pulsim::dsed::exact_settle_length(current_entry_->exact, t_res);
+    }
+
     /// The tier-1 bound's longest step (D2); the scheduler sets its
     /// dt_max. Changing it rebuilds the propagators lazily.
     void set_max_step(Real h) {
