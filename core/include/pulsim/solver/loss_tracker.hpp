@@ -66,6 +66,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace pulsim::solver {
@@ -390,6 +391,21 @@ public:
                 break;
             }
         }
+    }
+
+    /// The heat queued since the last call, per deposit node, counted as
+    /// injected now: an engine that delivers it itself (the exact engine: the
+    /// conduction heat in closed form along the step, an event's energy as an
+    /// impulse at its instant) takes it in place of advance() / inject().
+    [[nodiscard]] std::vector<std::pair<Index, Real>> take_heat() {
+        std::vector<std::pair<Index, Real>> out;
+        for (const auto& q : queue_) {
+            if (q.e == Real{0}) continue;
+            injected_.add(q.e);
+            out.emplace_back(q.node, q.e);
+        }
+        queue_.clear();
+        return out;
     }
 
     /// The queued energy becomes the power of the next step, of length

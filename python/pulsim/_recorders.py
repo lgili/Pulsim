@@ -10,16 +10,20 @@ stored a right limit.
 
 FEEDING MODES (``Recording.feeding``, ``result.recorder_feed``):
 
-* ``'in-loop'`` — pwl and trbdf2 through the kernel Simulation object:
-  the recorders are fed from the engine's step hooks while it runs
-  (``core/include/pulsim/record/loop_feed.hpp``), so they see every
+* ``'in-loop'`` — pwl and trbdf2 through the kernel Simulation object,
+  and the exact engine's event-driven integrator (``dsed/
+  loop_feed_adapter.hpp``: full MNA states, events at their exact
+  instants): the recorders are fed from the engine's step hooks while it
+  runs (``core/include/pulsim/record/loop_feed.hpp``), so they see every
   accepted step whatever ``store_every`` keeps. Readings must be functions
   of the state vector alone: ``v()``, ``i()`` of a state column or a
   resistor, ``p()`` of those.
 * ``'stored-arrays'`` — a kernel-side pass over the stored result
-  (``pulsim._pulsim._record_pass``): the exact engine (its stored right
-  limits are exact), routes that bypass the object, other readings. With
-  ``store_every > 1`` such a run is refused (the arrays would alias).
+  (``pulsim._pulsim._record_pass``): the exact engine's routes without step
+  hooks (``integrator='auto'`` / ``'bdf2'``), its junction temperature loop,
+  a fresh exact run with ``t_start``, routes that bypass the object, other
+  readings. With ``store_every > 1`` such a run is refused (the arrays
+  would alias).
 
 The arithmetic is the kernel recorder's (``record/recorder.hpp``): windows
 clipped exactly, each step the straight line from its start (the right
@@ -577,12 +581,43 @@ def _resume_state(plan):
     return st
 
 
+class ExactFeedSlot:
+    """``attach_loop_feed``'s ``sim`` on the exact engine: it holds the feed
+    the event-driven integrator drives (``run_ped_native_builder(loop_feed=)``
+    binds the circuit and attaches it to the scheduler's hooks)."""
+
+    def __init__(self, builder):
+        self.builder = builder
+        self.feed = None
+
+    def set_loop_feed(self, feed) -> None:
+        self.feed = feed
+
+    def clear_loop_feed(self) -> None:
+        self.feed = None
+
+
+def exact_feed_refused(why: str) -> None:
+    """The exact engine did not attach the feed (it says why): the stored
+    pass, or the refusal when the record must continue a snapshot's."""
+    plan = _LOOP_PLAN.get()
+    if plan is not None and isinstance(plan.sim, ExactFeedSlot):
+        plan.feed = None
+        plan.why_not = f"engine 'dsed' did not feed the recorders in its loop: {why}"
+
+
 def attach_loop_feed(sim, engine: str) -> None:
-    """Called by simulate()'s Simulation routes (pwl, trbdf2) before the
-    run: when recorders are declared and every reading is a function of the
-    state, feed them from the run's step hooks."""
+    """Called by simulate()'s Simulation routes (pwl, trbdf2) and the exact
+    engine's event-driven integrator (``engine='dsed'``) before the run: when
+    recorders are declared and every reading is a function of the state,
+    feed them from the run's step hooks."""
     plan = _LOOP_PLAN.get()
     if plan is None:
+        return
+    if engine == "dsed" and plan.t_start and plan.resume is None:
+        # a fresh exact run with t_start runs on the engine's clock from 0
+        plan.why_not = ("a fresh exact-engine run with t_start runs on its own "
+                        "clock from 0")
         return
     from . import _pulsim
     builder = sim.builder
@@ -633,6 +668,18 @@ def attach_loop_feed(sim, engine: str) -> None:
     plan.feed = feed
 
 
+def _exact_rows(d: dict, exact: bool) -> dict:
+    """The exact engine's event rows are its exact limits at the instant
+    (the feed writes them as 'settled'; dsed/loop_feed_adapter.hpp gives it
+    every event row the stored arrays have, both limits read as they read
+    them: resolution 'exact', as the stored pass says)."""
+    if exact:
+        r = np.asarray(d["event_resolution"]).copy()
+        r[r == _RESOLUTION.index("settled")] = _RESOLUTION.index("exact")
+        d["event_resolution"] = r
+    return d
+
+
 def simulate_with_recorders(simulate: Callable[..., Any], kw: dict,
                             recorders) -> Any:
     recs = _normalise(recorders)
@@ -660,6 +707,7 @@ def simulate_with_recorders(simulate: Callable[..., Any], kw: dict,
         plan.why_not = (f"{int(feed.n_dropped)} event report(s) of the engine "
                         "could not be placed in the record")
         feed = None
+    exact = isinstance(plan.sim, ExactFeedSlot)
     if feed is not None and feed.n_steps > plan.n_steps0:   # fed by THIS run
         snap = getattr(res, "final_snapshot", None)
         if snap is not None:
@@ -676,8 +724,8 @@ def simulate_with_recorders(simulate: Callable[..., Any], kw: dict,
             "n_dropped": int(feed.n_dropped)}
         if plan.resumed is not None:
             res.recorder_feed["resume"] = plan.resumed
-        res.recorded = {r.name: _checked(r, feed.result(k), t[0], t[-1],
-                                         "in-loop")
+        res.recorded = {r.name: _checked(r, _exact_rows(feed.result(k), exact),
+                                         t[0], t[-1], "in-loop")
                         for k, r in enumerate(recs)}
         return res
     if plan.resume is not None and list(
