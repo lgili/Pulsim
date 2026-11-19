@@ -175,3 +175,26 @@ def test_events_keep_both_limits_and_order():
     assert np.abs(t1[np.searchsorted(t1, ev).clip(0, t1.size - 1)] - ev).max() <= 1e-15
     # the rule moves samples, not decisions: the gate edges are the same
     assert np.asarray(r0.event_times).size >= 60
+
+
+@pytest.mark.parametrize("case", ["buck", "vsi"])
+def test_the_loss_port_does_not_depend_on_the_output_grid(case):
+    """The exact engine's loss integrals are exact per interval: cutting the
+    intervals by the rule leaves every energy and commutation count where it
+    was (batch 14n measured <= 1.8e-13 relative; asserted at 1e-10 for the
+    platforms: event instants are located by root search)."""
+    from .test_exact_loss_port import E_OFF, E_ON, _buck, _vsi_case
+    make, t_end = {"buck": (_buck, 202.5e-6), "vsi": (_vsi_case, 2.03e-3)}[case]
+    runs = []
+    for kw in ({}, {"output_rtol": 1e-5}):
+        b, fn, names = make()
+        for n in names:
+            b.set_device_losses(n, Tj=125.0, E_on=E_ON, E_off=E_OFF)
+        runs.append(pulsim.simulate(b, t_end, switch_fn=fn, engine="exact", **kw))
+    off, on = runs
+    assert len(on.times) > 2 * len(off.times)        # the rule really cut the steps
+    for n in names:
+        a, c = off.device_energy(n), on.device_energy(n)
+        assert (a["n_on"], a["n_off"]) == (c["n_on"], c["n_off"]), n
+        for k in ("E_on", "E_off", "E_cond_electrical", "E_impulse"):
+            assert c[k] == pytest.approx(a[k], rel=1e-10, abs=1e-18), (n, k)
