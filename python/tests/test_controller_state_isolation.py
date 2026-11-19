@@ -217,14 +217,15 @@ def test_a_pickled_snapshot_of_an_opaque_controller_is_refused():
         ch.add("f", p.PythonBlock(opaque), inputs=dict(x="node:out"),
                output="y", rate=p.Rate(1e-4))
     obs = ch.make_step_observer(b)
-    first = p.simulate(b, 1e-3, dt=DT, step_observer=obs)
-    snap = pickle.loads(pickle.dumps(first.final_snapshot))
-    with pytest.raises(p.UnsupportedError) as e:
-        p.simulate(b, 2e-3, dt=DT, step_observer=obs, resume_from=snap)
-    assert e.value.feature == "controller_state" and "pickled" in str(e.value)
-    # without controllers the pickled snapshot still resumes
+    # Q is driven: an undriven switch is refused since the release
     sw = p.make_pwm_switch_fn(10e3, 0.5, b.switch_index_of("Q"),
                               b.graph.num_switches)
+    first = p.simulate(b, 1e-3, dt=DT, step_observer=obs, switch_fn=sw)
+    snap = pickle.loads(pickle.dumps(first.final_snapshot))
+    with pytest.raises(p.UnsupportedError) as e:
+        p.simulate(b, 2e-3, dt=DT, step_observer=obs, switch_fn=sw, resume_from=snap)
+    assert e.value.feature == "controller_state" and "pickled" in str(e.value)
+    # without controllers the pickled snapshot still resumes
     p.simulate(b, 2e-3, dt=DT, switch_fn=sw, resume_from=snap)
 
 
