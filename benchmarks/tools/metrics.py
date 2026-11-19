@@ -128,15 +128,17 @@ def err_exact(t, y, cand, *, span: float, gap=None, exclude_t0: bool = True) -> 
         raise ValueError("times must be non-decreasing")
     e = exact_dev(y, cand)
     c = np.zeros(t.size)
-    if gap is not None and np.all(np.isfinite(e)):
+    if gap is not None:
         rows = np.arange(t.size)
         d = np.abs(cand - np.asarray(y, dtype=float)[:, None])
         k = np.nanargmin(np.where(np.isnan(d), np.inf, d), axis=1)
         g = np.where(np.isnan(gap), np.inf, gap)
         g = np.where(g <= 4 * np.spacing(np.abs(t))[:, None], 0.0, g)   # below the float time's own resolution
-        kc = np.argmin(g, axis=1)                   # the segment holding t_i
+        # the segment holding t_i (several at an exact event time: the one nearest the match)
+        near = np.abs(cand - cand[rows, k][:, None])
+        kc = np.argmin(np.where(g == g.min(axis=1, keepdims=True), np.nan_to_num(near, nan=np.inf), np.inf), axis=1)
         jump = cand[rows, kc] - cand[rows, k]
-        c = np.where(k != kc, np.nan_to_num(jump * jump * g[rows, k], posinf=np.inf), 0.0)
+        c = np.where((k != kc) & np.isfinite(e), np.nan_to_num(jump * jump * g[rows, k], posinf=np.inf), 0.0)
     if exclude_t0:
         k0 = int(np.searchsorted(t, t[0], side="right"))
         t, e, c = t[k0:], e[k0:], c[k0:]

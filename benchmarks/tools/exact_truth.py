@@ -1533,8 +1533,8 @@ class Solver:
         """x at float times ts on an expm segment: stepped in time order,
         one expm(H h) per distinct exact gap h (an engine grid has few)."""
         import numpy as np
-        key = (id(seg), ts.tobytes())
-        if getattr(self, "_xs_key", None) == key:
+        key = ts.tobytes()
+        if getattr(self, "_xs_seg", None) is seg and self._xs_key == key:
             return self._xs_val
         out = [None] * len(ts)
         y, tp, cache = None, None, {}
@@ -1549,7 +1549,7 @@ class Solver:
                 y = cache[h] * y
             tp = tq
             out[q] = seg.dyn.X * y
-        self._xs_key, self._xs_val = key, out
+        self._xs_seg, self._xs_key, self._xs_val = seg, key, out
         return out
 
     def _wave_part(self, waves, seg, x):

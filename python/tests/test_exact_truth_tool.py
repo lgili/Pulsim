@@ -187,3 +187,12 @@ def test_err_exact_time_weights():
     assert metrics.err_exact(t, y, cand, span=1.0) == 0.0
     nan2 = np.c_[np.zeros(t.size), np.full(t.size, np.nan)]
     assert metrics.err_exact(t, np.full(t.size, 1.0), nan2, span=1.0) == pytest.approx(1.0)
+
+
+def test_err_exact_timing_charge_survives_a_bad_first_sample():
+    """A non-finite initial sample (not graded) must not switch the charge off."""
+    t = np.array([0.0, 1.0, 2.0, 3.0])
+    cand = np.array([[0.0, np.nan], [0.0, 1.0], [0.0, np.nan], [0.0, np.nan]])
+    gap = np.array([[0.0, np.nan], [0.0, 0.5], [0.0, np.nan], [0.0, np.nan]])
+    y = np.array([np.nan, 1.0, 0.0, 0.0])            # sample 1 matches a branch 0.5 away
+    assert metrics.err_exact(t, y, cand, span=1.0, gap=gap) == pytest.approx(np.sqrt(0.5 / 2.0))
