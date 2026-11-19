@@ -291,7 +291,7 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | scr_halfwave_r | 1.46e-16 | 0.0271 ✗ | 1.47e-16 | 1.3e-11 | refused |
 | halfwave_rl | 9.65e-06 | 1.44e-06 | 1.44e-06 | 3.76e-06 | 5.69e-09 |
 | hard_switched_rc | 0.01 ✗ | 4.92e-05 | 4.92e-05 | 2.22e-06 | 7.58e-14 |
-| buck_ccm | 0.000256 | 1.23e-08 | 1.23e-08 | 3.37e-07 | 3.92e-15 |
+| buck_ccm | 0.000256 | 1.23e-08 | 1.23e-08 | 3.37e-07 | 3.84e-15 |
 | buck_dcm | 0.000538 | 5.32e-08 | 1.87e-08 | 5.62e-07 | 7.34e-10 |
 | im_locked_rotor | 1.35e-06 | 1.35e-06 | 1.35e-06 | 8.23e-06 | refused |
 | im_free_acceleration | 9.62e-05 | 6e-06 | 6e-06 | 4.25e-05 | refused |

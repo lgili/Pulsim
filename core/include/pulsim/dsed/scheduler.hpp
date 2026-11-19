@@ -60,7 +60,6 @@
 #include <string_view>
 #include <type_traits>
 #include <cstdio>
-#include <cstdlib>
 #include <utility>
 #include <vector>
 
@@ -1396,7 +1395,6 @@ private:
         if constexpr (requires { system_.port_scale_full(Vector{}); })
             scale = system_.port_scale_full(Vector{}).vscale;
         const Real tol_w = Real{1e-6} * scale;
-        left_.clear();
         for (int pass = 0; pass <= 4; ++pass) {
             const Real band = tie_band_(t, x);
             std::string flipped;
@@ -1410,26 +1408,11 @@ private:
                 const Real v_d = system_.node_pair_voltage(d.from, d.to, t, x);
                 const auto prm = d.params();
                 const bool by_value = models::SwitchedDiode::decide(on, v_d, prm);
-                const Real sig = models::SwitchedDiode::crossing_signal(on, v_d, prm);
-                if (!on && std::find(left_.begin(), left_.end(), d.switch_idx) != left_.end()) {
-                    // turned OFF here by its own ON trajectory: its OFF value reads the
-                    // floating bus's rounding (+9.5e-6 V behind 1 MΩ); flipping it back
-                    // cycled Db0c of two banks to the four-round refusal (11.67 ms)
+                if (by_value == on
+                    || std::abs(models::SwitchedDiode::crossing_signal(on, v_d, prm)) <= tol)
                     continue;
-                } else if (on && sig <= Real{0} && std::abs(sig) <= tol) {
-                    // an ON diode at or just past its current zero: its own ON
-                    // trajectory decides (on_mode_direction_), as in the settle;
-                    // no predicate fires for a start past the band. Two banks: the
-                    // LCP kept Db0a ON at −2e-10 A, falling (−0.015 A at 18.35 ms).
-                    if (on_mode_direction_(t, x, d) >= 0) continue;
-                    left_.push_back(d.switch_idx);
-                } else if (by_value == on || std::abs(sig) <= tol) {
-                    continue;
-                } else if (zero_band_on_(t, x, d, mask, tol, by_value) == on) {
-                    // confirmed on the OFF-mode trajectory, as the settle confirms a flip
-                    continue;
-                }
-                if (dbg_mode_() & 64) std::fprintf(stderr, "RES t=%.12e pass=%d %s on=%d sig=%.3e tol=%.3e\n", t, pass, d.label.c_str(), int(on), sig, tol);
+                // confirmed on the OFF-mode trajectory, as the settle confirms a flip
+                if (zero_band_on_(t, x, d, mask, tol, by_value) == on) continue;
                 if (pass == 4) { flipped = d.label; break; }
                 diode_bits_.set(d.switch_idx, !on);
                 flipped = d.label;
@@ -1566,7 +1549,6 @@ private:
                 if (track) settle_x0_ = x;
                 mask = settle_diode_cascade_(t, x);
                 project_(t, x);
-                leaving_idx_ = -1;   // projected: its value law reads the OFF mode's own state
                 bool changed = false;
                 for (int pass = 0; pass < 4; ++pass) {
                     const MaskT m2 = settle_diode_cascade_(t, x);
@@ -1701,16 +1683,6 @@ private:
         const MaskT old_mask = system_.current_mask();
         const MaskT prev_bits = diode_bits_;
         if (ptype == PredicateType::GateEdge) last_time_event_t_ = t_event;   // next_time_event_
-        if constexpr (HasNodePairVoltage<System>) {
-            leaving_idx_ = -1;
-            if (has_diodes_ && aux_index >= 0 && ptype == PredicateType::DiodeOff
-                && (dbg_mode_() & 1)) {
-                const bool lv = on_mode_leaves_(t_event, x, aux_index);
-                if (dbg_mode_() & 4) std::fprintf(stderr, "DBG leave t=%.12e aux=%d leaves=%d\n", t_event, aux_index, int(lv));
-                if (!lv) return;   // a touch, not a commutation
-                if (dbg_mode_() & 8) leaving_idx_ = aux_index;
-            }
-        }
 
         // Notify switch_fn of non-gate (diode/ZCD) events so it can
         // latch the post-event mode for the remainder of this cycle.
@@ -1864,7 +1836,6 @@ private:
             for (const auto& d : diodes_) {
                 const bool on =
                     diode_bits_.get(d.switch_idx);
-                if (static_cast<int>(d.switch_idx) == leaving_idx_) continue;
                 const Real v_d = system_.node_pair_voltage(
                     d.from, d.to, t, x);
                 const auto prm = d.params();
@@ -1878,19 +1849,7 @@ private:
                 // into volts of v_D (1e-18 A → 1e-9 V at 1 nS), so the
                 // value law alone can flip a diode the ON mode then
                 // flips back.
-                // An ON diode at its current zero (in the band) is decided by
-                // where its ON mode takes the current, as at its own located
-                // zero (on_mode_leaves_); the OFF probe reads its residual
-                // through g_off. Two banks: Db0a kept ON at −2e-10 A while its
-                // current fell (−0.015 A at 18.35 ms, law-check refusal).
-                if ((dbg_mode_() & 32) && std::abs(models::SwitchedDiode::crossing_signal(on, v_d, prm)) < 1e-6)
-                    std::fprintf(stderr, "CAS t=%.12e %s on=%d sig=%.3e tol=%.3e\n", t, d.label.c_str(), int(on), models::SwitchedDiode::crossing_signal(on, v_d, prm), tol);
-                const int dir = on && in_band && (dbg_mode_() & 2)
-                    && models::SwitchedDiode::crossing_signal(on, v_d, prm) <= Real{0}
-                    ? on_mode_direction_(t, x, d) : 0;
-                if ((dbg_mode_() & 4) && on && in_band) std::fprintf(stderr, "DBG band t=%.12e %s dir=%d\n", t, d.label.c_str(), dir);
-                const bool next = dir != 0 ? dir > 0
-                    : (in_band || by_value != on)
+                const bool next = (in_band || by_value != on)
                     ? zero_band_on_(t, x, d, mask, tol,
                                     in_band ? false : by_value)
                     : on;
@@ -1926,56 +1885,6 @@ private:
         return mask;
     }
 
-    /// The complementarity condition at a located zero of an ON diode's
-    /// current: the diode leaves iff the ON mode's own trajectory takes the
-    /// current negative (the sign of its first non-vanishing derivative),
-    /// read as the change of v_D − V_f from the root over δ = 1e-12·dt_max,
-    /// 1e-11·dt_max, …, dt_max; the first δ past the zero band decides. Not
-    /// the OFF mode's value at the root: the root finder leaves ~1e-6 A on
-    /// one side of the zero, which g_off reads as kV (1933 V at 1 nS)
-    /// until the L·g_off transient (ps) relaxes, so that value is the side
-    /// the root landed on (ten banks perturbed at 1e-15: 1 run in 11 kept a
-    /// diode ON to −0.21 A). A change that never leaves the band: leaves.
-    /// −1 when the ON mode (the system's current mask, `d` ON in it) takes
-    /// the current down, +1 up, 0 when it never leaves the band or there is
-    /// no exact step.
-    [[nodiscard]] int on_mode_direction_(Real t, const Vector& x, const SchedulerDiode& d)
-        requires HasNodePairVoltage<System> {
-        if constexpr (HasExactStep<System>) {
-            if (!system_.has_exact_step()) return 0;
-            const Real tol = tie_band_(t, x);
-            const Real s0 = system_.node_pair_voltage(d.from, d.to, t, x);
-            // A rung counts once the next one confirms it: same sign, grown ≥ 3×
-            // over the decade (a derivative grows 10×, 100×, …). The recovered
-            // v_D carries ~1e-8 V of rounding (ten banks, refined reduction),
-            // which a lone rung past the band read as the direction.
-            Real prev = Real{0};
-            for (int k = 0; k <= 12; ++k) {
-                const Real delta = dt_max_ * std::pow(Real{10}, Real(k - 12));
-                advance_(t, x, delta, x_tmp_);
-                const Real ds = system_.node_pair_voltage(d.from, d.to, t + delta, x_tmp_) - s0;
-                if (dbg_mode_() & 16) std::fprintf(stderr, "  dir %s k=%d s0=%.3e ds=%.3e tol=%.3e\n", d.label.c_str(), k, s0, ds, tol);
-                // the side the ON trajectory reaches: a signal that jumped
-                // below zero (a PWM corner: −0.5 A) and recovers is still
-                // reverse current, not a touch
-                if (std::abs(prev) > tol && ds * prev > Real{0}
-                    && std::abs(ds) >= Real{3} * std::abs(prev))
-                    return s0 + ds > Real{0} ? 1 : -1;
-                prev = ds;
-            }
-            if (std::abs(prev) > tol) return s0 + prev > Real{0} ? 1 : -1;
-        }
-        (void)t; (void)x; (void)d;
-        return 0;
-    }
-    [[nodiscard]] bool on_mode_leaves_(Real t, const Vector& x, int aux_index)
-        requires HasNodePairVoltage<System> {
-        for (const auto& d : diodes_)
-            if (static_cast<int>(d.switch_idx) == aux_index) return on_mode_direction_(t, x, d) <= 0;
-        return true;
-    }
-
-    static int dbg_mode_() { static const int m = [] { const char* e = std::getenv("PULSIM_LEAVE"); return e ? std::atoi(e) : 11; }(); return m; }
     /// The zero band: rounding level of the circuit's voltages.
     [[nodiscard]] Real zero_band_tol_(Real t, const Vector& x) const {
         Real vs = Real{0};
@@ -2291,10 +2200,6 @@ private:
     // The predicate that fired the last predicate event, and when: only
     // it is skipped as "just fired" at a step starting at that instant.
     int last_fired_index_ = -1;
-    // a diode leaving at its own located zero (on_mode_leaves_): the event's
-    // first settle read skips its value law, which reads the root's side
-    int leaving_idx_ = -1;
-    std::vector<Size> left_;   // resettle: diodes its ON-trajectory rule turned OFF
     Real last_fired_t_ = std::numeric_limits<Real>::quiet_NaN();
     // Exact-path workspaces: a step reuses them (no allocation).
     mutable Vector x_new_, x_evt_, x_tmp_;
