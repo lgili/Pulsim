@@ -75,6 +75,24 @@ def test_bridge_behind_an_ideal_transformer_is_passive_nonreciprocal():
     assert _vpn(r_lcp)[-1] == pytest.approx(_vpn(ref)[-1], abs=1e-7)
 
 
+def test_the_guard_off_refuses_the_settle_s_wrong_mode_by_name():
+    # End to end through the guard's refusal path (review s16): where the settle's mode breaks a
+    # law on its own trajectory and the complementarity selection decides otherwise (this bridge:
+    # first at the D1/D4 tie, 5.981 ms; D4 at 21.79 ms is a real error), the guard off must refuse
+    # by name rather than continue the settle's mode.
+    import pulsim._dsed_dispatch as DD
+    saved = DD.MODE_GUARD
+    DD.MODE_GUARD = False
+    try:
+        with pytest.raises(p.UnsupportedError, match="mode guard off") as e:
+            _run(_bridge_behind_ideal_transformer(), "dsed")
+    finally:
+        DD.MODE_GUARD = saved
+    assert (e.value.engine, e.value.feature, e.value.kind) == ("dsed", "consistent_mode", "Diode")
+    assert e.value.device.split()[0] in ("D1", "D4")   # 'D1 (branch #3)'
+    assert "5.98" in str(e.value)
+
+
 def test_plain_rectifier_is_passive_reciprocal():
     b = p.CircuitBuilder()
     b.add_sine_voltage_source("V", "a", "gnd", 0.0, 10.0, 50.0)
