@@ -58,7 +58,8 @@ That union is pybind11's `float`, as in the stub.
   and `add_diode` are two-state branches: conductance `g_on` (or
   `1/R_on`) on, `g_off` off; `add_diode(V_f=)` adds a series drop
   while on. Each owns a switch-mask bit. Controlled switches follow
-  `switch_fn(t) -> SwitchStateMask`; diodes self-commutate. Smooth
+  `switch_fn(t) -> SwitchStateMask` (none: `undriven='refuse'|'open'|
+  'closed'`); diodes self-commutate. Smooth
   devices (`add_shockley_diode`, `add_mosfet_level1`,
   `add_power_mosfet`, saturable magnetics) are solved with Newton;
   `add_nonlinear_diode` is retired. Gate transients:
@@ -76,10 +77,10 @@ That union is pybind11's `float`, as in the stub.
 | `'exact'` (alias `'dsed'`) | variable, event-driven; refuses Newton devices and floating subnets (tie a star neutral, 1 MOhm) | cross-checks of PWL circuits |
 
 - `res.engine_used` says which engine ran; `res.engine_route_reason`
-  says why, when `auto` did not take the variable-step engine.
-- **Pass `dt`** when a `switch_fn` drives the circuit, when you need a
-  uniform grid, or when you compare runs bit for bit. Every on-time
-  must be a whole number of steps, and every edge on the grid (3.2).
+  says why `auto` routed to `pwl`.
+- **Pass `dt`** when a `switch_fn` drives the circuit, for a uniform
+  grid, or to compare runs bit for bit. Every on-time must be a whole
+  number of steps, every edge on the grid (3.2).
 - **Omit `dt`** for passive, source-driven and diode-commutated
   circuits (trap 13), and as the second engine in a cross-check.
   Step ceiling `min(span/1000, period/20)`; `rtol` bounds the true

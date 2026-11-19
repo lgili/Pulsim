@@ -146,16 +146,12 @@ def _refused(b, fn=None, **kw):
     return ei.value
 
 
-@pytest.mark.parametrize("what", ["junction", "table", "sine", "bdf2", "t_start"])
+# a junction / heat node runs (the temperature loop, test_exact_junction_loop)
+@pytest.mark.parametrize("what", ["table", "sine", "bdf2"])
 def test_what_the_exact_port_cannot_honour_is_refused_by_name(what):
     b, fn, _ = _buck()
     kw = {}
-    if what == "junction":
-        b.add_voltage_source("Vamb", "amb", "gnd", 25.0)
-        b.add_resistor("Rth", "tj", "amb", 1.0)
-        b.add_capacitor("Cth", "tj", "amb", 1e-3)
-        b.set_device_losses("Q1", junction="tj", E_on=E_ON)
-    elif what == "table":
+    if what == "table":
         b.set_device_losses("Q1", Tj=25.0, conduction="table",
                             V_on=p.ConductionTable([10.0], [25.0, 125.0], [1.0, 1.2]))
     else:
@@ -171,7 +167,31 @@ def test_what_the_exact_port_cannot_honour_is_refused_by_name(what):
             b.set_device_losses("Q1", Tj=25.0, E_on=E_ON)
             fn = p.make_pwm_switch_fn(10e3, 0.5, 0, 1)
             kw["integrator"] = "bdf2"
-        else:
-            kw["t_start"] = 1e-5
     e = _refused(b, fn, **kw)
     assert (e.engine, e.feature, e.device) == ("dsed", "device_losses", "Q1")
+
+
+def test_a_fresh_t_start_run_books_the_zero_start_ledgers_relabelled():
+    """A fresh exact run with t_start is the run from 0 relabelled by t_start
+    (the engine's clock runs from 0; its times are shifted): its loss ledgers
+    are the zero-start run's and its loss events sit t_start later (session
+    26; it was refused by name before)."""
+    t0 = 1e-5
+    runs = []
+    for kw in ({}, {"t_start": t0}):
+        b, fn, names = _buck()
+        for n in names:
+            b.set_device_losses(n, Tj=25.0, E_on=E_ON, E_off=E_ON)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            runs.append(p.simulate(b, 1e-4 + kw.get("t_start", 0.0), switch_fn=fn,
+                                   engine="dsed", **kw))
+    a, c = runs
+    for n in names:
+        ea, ec = a.device_energy(n), c.device_energy(n)
+        for key, v in ea.items():
+            assert ec[key] == pytest.approx(v, rel=1e-12, abs=1e-30), (n, key)
+        la, lc = a.loss_events(n), c.loss_events(n)
+        assert len(la) == len(lc) > 0
+        np.testing.assert_allclose(lc["t"], la["t"] + t0, rtol=0, atol=1e-18)
+        np.testing.assert_allclose(lc["E"], la["E"], rtol=1e-12, atol=0)

@@ -48,6 +48,8 @@
 #include "pulsim/dsed/scheduler_auto.hpp"
 #include "pulsim/dsed/period_integrals.hpp"
 #include "pulsim/dsed/loss_port.hpp"
+#include "pulsim/dsed/loop_feed_adapter.hpp"
+#include "pulsim/record/loop_feed.hpp"
 #include "pulsim/dsed/periodic_orbit.hpp"
 #include "pulsim/dsed/design_batch.hpp"
 #include "pulsim/dsed/period_thermal.hpp"
@@ -58,6 +60,7 @@
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/cache.hpp"
+#include "pulsim/solver/result.hpp"
 #include "pulsim/dsed/time_eps.hpp"
 #include "pulsim/events/mode_selector.hpp"
 #include "pulsim/sources/native_pwm_switch_fn.hpp"
@@ -1321,7 +1324,12 @@ void init_module(py::module_& m) {
            std::vector<Real> tick_offsets,
            std::vector<py::object> tick_fns,
            std::vector<bool> tick_monitors,
-           Real output_rtol, std::size_t output_cap) {
+           Real output_rtol, std::size_t output_cap,
+           const pulsim::solver::SolverSnapshot* resume,
+           std::vector<Real> tick_origins,
+           std::vector<std::uint64_t> tick_next_k,
+           py::object loop_feed,
+           Real t_offset) {
             PySwitchFnSSM sf(std::move(switch_fn_obj));
             // add-unified-event-queue group 3: control ticks on the
             // scheduler's queue; each gets the full MNA state.
@@ -1358,6 +1366,7 @@ void init_module(py::module_& m) {
             // cascade settles instantaneous consequences (a buck's
             // freewheel diode at gate-off).
             std::vector<pulsim::dsed::SchedulerDiode> sched_diodes;
+            std::vector<pulsim::Size> diode_sw;   // census order (the snapshot's mask)
             pulsim::topology::SwitchStateMask diode_owned{0};
             {
                 pulsim::pwl::DiodeEventState census(
@@ -1378,6 +1387,7 @@ void init_module(py::module_& m) {
                         shorted.reset();   // compute_lti_state_space refuses it by name
                     }
                     for (const auto& d : census.entries()) {
+                        diode_sw.push_back(d.switch_idx);
                         std::string label =
                             pulsim::pwl::branch_label(
                                 adapter.graph(), d.branch_id);
@@ -1489,6 +1499,9 @@ void init_module(py::module_& m) {
                 for (std::size_t j = 0; j < tick_periods.size(); ++j) {
                     plan.rates.push_back(pulsim::events::Rate{
                         tick_periods[j], tick_offsets.empty() ? Real{0} : tick_offsets[j]});
+                    // a resume continues the first run's grid (its origin and index)
+                    if (j < tick_origins.size()) plan.rates.back().origin = tick_origins[j];
+                    if (j < tick_next_k.size()) plan.rates.back().k0 = tick_next_k[j];
                 }
                 plan.monitor = tick_monitors;   // empty = every rate a ControlTick
                 plan.fn = [&adapter, &tick_cbs](std::uint32_t j, const pulsim::events::TickInfo&,
@@ -1525,23 +1538,126 @@ void init_module(py::module_& m) {
                 loss.emplace(adapter);
                 loss->attach(loss_hooks);
                 sim.set_hooks(&loss_hooks);
+                if (loss->has_heat()) {   // the junction loop: the step's heat into the state
+                    sim.set_state_kick([&loss](pulsim::Vector& x, pulsim::Vector* xl) {
+                        return loss->kick(x, xl);
+                    });
+                }
+            }
+            // add-probes-and-recorders R5 / 0b.11: the recorders fed in the loop
+            // (record::LoopFeed through dsed/loop_feed_adapter.hpp: full MNA
+            // states, events at their exact instants). Not with the junction
+            // loop: its kick moves the state after the step's hooks, so the
+            // feed's sample would miss the step's heat (the stored arrays have it)
+            std::optional<pulsim::dsed::ExactFeedAdapter<NativeAdapter>> feed_ad;
+            std::string feed_refused;
+            if (!loop_feed.is_none()) {
+                if (loss && loss->has_heat()) {
+                    feed_refused = "the junction temperature loop corrects the state after "
+                                   "each step's hooks (dsed/loss_port.hpp kick), so an in-loop "
+                                   "sample would miss the step's heat";
+                } else {
+                    auto& f = loop_feed.cast<pulsim::record::LoopFeed&>();
+                    f.set_circuit(adapter.graph(), adapter.pool());
+                    feed_ad.emplace(adapter, f.hooks(),
+                                    resume != nullptr ? resume->t : Real{0});
+                    feed_ad->attach(loss_hooks);
+                    sim.set_hooks(&loss_hooks);
+                }
+            }
+            // session 24: resume at a snapshot's committed instant
+            using ResumeT = pulsim::dsed::ExactResumeState<pulsim::topology::SwitchStateMask>;
+            std::optional<ResumeT> rs;
+            const auto n_sw = static_cast<pulsim::Size>(adapter.graph().num_switches());
+            // the circuit's device-state layout, as the pwl / trbdf2 snapshots
+            // carry it (the exact engine runs no stateful device: the linear
+            // companions' count only); a resume refuses another circuit's
+            pulsim::device::DeviceStateLayout layout;
+            layout.count[static_cast<std::size_t>(pulsim::device::StateBlock::LinearCompanion)] =
+                static_cast<std::uint32_t>(adapter.pool().num_dynamic_branches());
+            if (resume != nullptr) {
+                if (!resume->dev_layout.empty()) {
+                    const std::string diff = layout.first_difference(resume->layout());
+                    if (!diff.empty() || resume->layout_signature
+                                             != resume->layout().signature(resume->dev_layout.size())) {
+                        throw std::invalid_argument(
+                            "dsed(resume_from=...): the snapshot belongs to a different "
+                            "circuit: " + (diff.empty() ? std::string("its device-state layout "
+                                                                      "is corrupt (signature)")
+                                                        : diff + " (this circuit, then the snapshot)"));
+                    }
+                }
+                if (resume->controller.kind == pulsim::step::ControllerState::Kind::Exact) {
+                    rs = ResumeT::unflatten(resume->controller.v);
+                    if (rs->x.size() != x0.size()) {
+                        throw std::invalid_argument(
+                            "dsed(resume_from=...): the snapshot belongs to a different "
+                            "circuit: its exact-engine state has "
+                            + std::to_string(rs->x.size()) + " entries, this circuit's "
+                            + std::to_string(x0.size()));
+                    }
+                } else {   // another engine's snapshot: x0 is its state, reduced
+                    rs.emplace();
+                    rs->t = resume->t;
+                    rs->x = x0;
+                    rs->decide = true;
+                }
+                if (resume->stamped_mask.size() != n_sw) {
+                    throw std::invalid_argument(
+                        "dsed(resume_from=...): the snapshot's stamped mask has "
+                        + std::to_string(resume->stamped_mask.size())
+                        + " bits, this circuit has " + std::to_string(n_sw)
+                        + " switch-kind branches");
+                }
+                pulsim::topology::SwitchStateMask m(n_sw);
+                for (pulsim::Size i = 0; i < n_sw; ++i) m.set(i, resume->stamped_mask[i]);
+                rs->mask = m;
+                rs->diode_bits = m;   // only the owned bits are read
+                if (loss && !resume->loss_state.empty()) loss->restore(resume->loss_state);
             }
             // Release the GIL during simulate(); the C++ scheduler
             // only re-acquires it at gate edges to call switch_fn.
             py::gil_scoped_release release;
-            auto res = sim.simulate(x0, t_end);
+            auto res = sim.simulate(x0, t_end, rs ? &*rs : nullptr);
             py::gil_scoped_acquire acquire;
             auto d = ped_result_to_dict(res, event_log);
+            {   // the end instant as a snapshot (pickle version 5; field 14 kind Exact)
+                const auto& f = sim.final_state();
+                pulsim::solver::SolverSnapshot snap;
+                snap.t = f.t;
+                if (!(adapter.current_mask() == f.mask)) adapter.set_mask(f.mask);
+                snap.x = adapter.recover_full(f.t, f.x);
+                snap.stamped_mask.resize(n_sw);
+                for (pulsim::Size i = 0; i < n_sw; ++i) snap.stamped_mask[i] = f.mask.get(i);
+                for (const auto sw : diode_sw) snap.mask.push_back(f.mask.get(sw));
+                snap.controller.kind = pulsim::step::ControllerState::Kind::Exact;
+                snap.controller.v = f.flatten();
+                snap.dev_layout.assign(layout.count.begin(), layout.count.end());
+                snap.layout_signature = layout.signature();
+                snap.tick_origin = sim.tick_origins();
+                snap.tick_next_k = sim.tick_next_k();
+                if (loss) snap.loss_state = loss->save();
+                snap.valid = true;
+                d["final_snapshot"] = py::cast(std::move(snap));
+            }
             if (loss) {
                 struct {
                     std::vector<pulsim::thermal::DeviceLossRecord> device_losses;
                     Real heat_injected = 0, heat_pending = 0;
                 } out;
                 loss->write(out);
+                // a fresh run with t_start runs on the engine's clock from 0 and
+                // its times are relabelled by t_start: so are its loss events
+                if (t_offset != Real{0}) {
+                    for (auto& r : out.device_losses) {
+                        for (auto& e : r.events) e.t += t_offset;
+                    }
+                }
                 d["device_losses"] = py::cast(out.device_losses);
                 d["heat_injected"] = out.heat_injected;
                 d["heat_pending"] = out.heat_pending;
             }
+            if (!feed_refused.empty()) d["loop_feed_refused"] = feed_refused;
             if (!tick_cbs.empty()) d["control_tick_counts"] = sim.tick_counts();
             if (output_rtol > Real{0}) {
                 d["n_output_capped"] = sim.n_output_capped();
@@ -1603,6 +1719,11 @@ void init_module(py::module_& m) {
         py::arg("tick_monitors") = std::vector<bool>{},
         py::arg("output_rtol") = Real{0},
         py::arg("output_cap") = std::size_t{4096},
+        py::arg("resume") = static_cast<const pulsim::solver::SolverSnapshot*>(nullptr),
+        py::arg("tick_origins") = std::vector<Real>{},
+        py::arg("tick_next_k") = std::vector<std::uint64_t>{},
+        py::arg("loop_feed") = py::none(),
+        py::arg("t_offset") = Real{0},
         "Bridge.11 — native PEDSimulator (DOPRI5) over a "
         "NativeCircuitBuilderAdapter. RHS / b_vector / A_matrix all "
         "execute in C++ without GIL roundtrips; the only Python "
@@ -1660,7 +1781,8 @@ void init_module(py::module_& m) {
            Real h_bdf2,
            Real stiffness_threshold,
            std::size_t store_every,
-           bool event_log) {
+           bool event_log,
+           const pulsim::solver::SolverSnapshot* resume) {
             // no loss tracking here: an adapter built with loss_port refuses by name
             pulsim::refuse_device_losses(adapter.pool(), "dsed");
             PySwitchFnSSM sf(std::move(switch_fn_obj));
@@ -1672,10 +1794,59 @@ void init_module(py::module_& m) {
                 adapter, std::move(sf), std::move(ctrl),
                 std::move(det), dt_init, dt_max, h_bdf2,
                 store_every);
+            // task 20.2 (session 26): snapshot / resume on this integrator too
+            using AutoT = pulsim::dsed::AutoResumeState<pulsim::topology::SwitchStateMask>;
+            const auto n_sw = static_cast<pulsim::Size>(adapter.graph().num_switches());
+            pulsim::device::DeviceStateLayout layout;
+            layout.count[static_cast<std::size_t>(pulsim::device::StateBlock::LinearCompanion)] =
+                static_cast<std::uint32_t>(adapter.pool().num_dynamic_branches());
+            std::optional<AutoT> rs;
+            if (resume != nullptr) {
+                if (resume->controller.kind != pulsim::step::ControllerState::Kind::Exact) {
+                    throw std::invalid_argument(
+                        "dsed(integrator='auto', resume_from=...): only an exact-engine "
+                        "snapshot of this integrator continues here");
+                }
+                if (!resume->dev_layout.empty()) {
+                    const std::string diff = layout.first_difference(resume->layout());
+                    if (!diff.empty() || resume->layout_signature
+                                             != resume->layout().signature(resume->dev_layout.size())) {
+                        throw std::invalid_argument(
+                            "dsed(resume_from=...): the snapshot belongs to a different "
+                            "circuit: " + (diff.empty() ? std::string("its device-state layout "
+                                                                      "is corrupt (signature)")
+                                                        : diff + " (this circuit, then the snapshot)"));
+                    }
+                }
+                rs = AutoT::unflatten(resume->controller.v);
+                if (rs->x.size() != x0.size() || resume->stamped_mask.size() != n_sw) {
+                    throw std::invalid_argument(
+                        "dsed(resume_from=...): the snapshot belongs to a different circuit "
+                        "(its state or switch count differs)");
+                }
+                pulsim::topology::SwitchStateMask m(n_sw);
+                for (pulsim::Size i = 0; i < n_sw; ++i) m.set(i, resume->stamped_mask[i]);
+                rs->mask = m;
+            }
             py::gil_scoped_release release;
-            auto res = sim.simulate(x0, t_end);
+            auto res = sim.simulate(x0, t_end, rs ? &*rs : nullptr);
             py::gil_scoped_acquire acquire;
             auto d = ped_result_auto_to_dict(res, event_log);
+            {   // the end instant as a snapshot (field 14 kind Exact, AutoResumeState)
+                const auto& f = sim.final_state();
+                pulsim::solver::SolverSnapshot snap;
+                snap.t = f.t;
+                if (!(adapter.current_mask() == f.mask)) adapter.set_mask(f.mask);
+                snap.x = adapter.recover_full(f.t, f.x);
+                snap.stamped_mask.resize(n_sw);
+                for (pulsim::Size i = 0; i < n_sw; ++i) snap.stamped_mask[i] = f.mask.get(i);
+                snap.controller.kind = pulsim::step::ControllerState::Kind::Exact;
+                snap.controller.v = f.flatten();
+                snap.dev_layout.assign(layout.count.begin(), layout.count.end());
+                snap.layout_signature = layout.signature();
+                snap.valid = true;
+                d["final_snapshot"] = py::cast(std::move(snap));
+            }
             d["exact"] = exact_report_dict(adapter, 0);
             d["states_full"] = reconstruct_full_states(adapter, res);
             reconstruct_right_limits(adapter, res, d);
@@ -1694,6 +1865,7 @@ void init_module(py::module_& m) {
         py::arg("stiffness_threshold") = Real{10.0},
         py::arg("store_every")          = std::size_t{1},
         py::arg("event_log") = true,
+        py::arg("resume") = static_cast<const pulsim::solver::SolverSnapshot*>(nullptr),
         "Bridge.11 — native PEDSimulatorAuto over a "
         "NativeCircuitBuilderAdapter (per-mode RK45↔BDF2 dispatch).");
 

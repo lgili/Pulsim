@@ -51,6 +51,14 @@ def test_one_single_per_option_and_the_full_profile():
         assert full["kw"] == nd.profile_kwargs(eng) and full["form"] is True
 
 
+def test_plan_defaults_set_and_restore_the_library_defaults():
+    from pulsim import _plan
+    assert (_plan.DEFAULT_UNDRIVEN, _plan.UNIFORM_ENGINE_RULES) == (None, False)  # today
+    with nd.plan_defaults():
+        assert _plan.DEFAULT_UNDRIVEN == "refuse" and _plan.UNIFORM_ENGINE_RULES is True
+    assert (_plan.DEFAULT_UNDRIVEN, _plan.UNIFORM_ENGINE_RULES) == (None, False)
+
+
 def test_builder_form_patches_and_restores():
     before = pulsim.CircuitBuilder.add_switch
     with nd.builder_form():

@@ -71,7 +71,7 @@ struct OptionSpec {
 /// the order refusals are listed in). Python reads it through
 /// `pulsim._pulsim.run_option_table()`; a test asserts its names equal
 /// simulate()'s parameters.
-inline constexpr std::array<OptionSpec, 51> kRunOptionTable{{
+inline constexpr std::array<OptionSpec, 52> kRunOptionTable{{
     {"engine", kEvery, Unset::Always, "'auto'", ""},
     {"rtol", kTrBdf2 | kExact, Unset::None, "1e-5 (trbdf2), 1e-6 (exact)",
      "rtol bounds a variable step's error estimate; a fixed step has none"},
@@ -156,8 +156,7 @@ inline constexpr std::array<OptionSpec, 51> kRunOptionTable{{
      "whatever it was closing (an electro-thermal loop, usually) would "
      "silently stay open"},
     {"controller_period", kEvery, Unset::Always, "None", ""},
-    {"resume_from", kPwl | kTrBdf2, Unset::None, "None",
-     "resume_from needs a snapshot the exact engine does not keep"},
+    {"resume_from", kEvery, Unset::Always, "None", ""},
     {"solver", kEvery, Unset::Always, "None", ""},
     {"sensitivities", kExact, Unset::None, "None",
      "sensitivities are computed on the exact path only"},
@@ -168,9 +167,12 @@ inline constexpr std::array<OptionSpec, 51> kRunOptionTable{{
     // are chosen by rule (a dt, store_every or recorders keep today's samples)
     {"output_rtol", kExact, Unset::None, "None (today's samples)",
      "output_rtol is the exact engine's output-grid rule"},
+    // Every engine: the policy for controlled switches nothing drives,
+    // decided above the dispatch (pulsim._undriven_policy, task 11.3).
+    {"undriven", kEvery, Unset::Always, "None (each engine's own)", ""},
     // Every engine: a kernel recorder pass over the stored arrays, composed
-    // above the dispatch (pulsim._recorders); store_every > 1 and
-    // resume_from are refused with it there, by name.
+    // above the dispatch (pulsim._recorders); a resume_from continues the
+    // record from the snapshot's recorder state (task 0b.7).
     {"recorders", kEvery, Unset::Always, "None", ""},
     {"control_tick", kEvery, Unset::Always, "'label'", ""},
     {"device_path", kPwl | kTrBdf2, Unset::Legacy, "'legacy'",

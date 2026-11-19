@@ -76,21 +76,25 @@ ENGINES = ("pwl", "trbdf2", "dsed")
 
 
 def configs() -> dict:
-    """name -> dict(engine, kw, form, group, option, route, profile)."""
+    """name -> dict(engine, kw, form, group, option, route, profile, plan).
+
+    ``plan``: the full profile also sets next_defaults.PLAN (the ``pulsim._plan``
+    library defaults the release flips) for the cell."""
     C = {k: dict(engine=e, kw=dict(kw), form=False, group="a") for k, (e, kw) in rs.CONFIGS.items()}
     for eng in ENGINES:
         for k, e in {**nd.PROFILE[eng], **nd.BUILDER}.items():
             C[f"{eng}:{e.short}"] = dict(engine=eng, kw={} if k == "form" else {k: e.value},
                                          form=k == "form", group="b", option=k)
-        C[f"{eng}+next"] = dict(engine=eng, kw=nd.profile_kwargs(eng), form=True, group="c")
+        C[f"{eng}+next"] = dict(engine=eng, kw=nd.profile_kwargs(eng), form=True, group="c", plan=True)
     _, kw, _ = nd.EXTRA["esdirk43"]
     C["trbdf2+esdirk43"] = dict(engine="trbdf2", kw=dict(kw), form=False, group="extra")
     C["trbdf2+next+esdirk43"] = dict(engine="trbdf2", kw={**nd.profile_kwargs("trbdf2"), **kw},
-                                     form=True, group="extra")
+                                     form=True, group="extra", plan=True)
     C["auto"] = dict(engine="auto", kw={}, form=False, group="d")
     # the release route alone (today's options) isolates the route from the options
     C["auto:route"] = dict(engine="auto", kw={}, form=False, group="b", option="route", route=True)
-    C["auto+next"] = dict(engine="auto", kw={}, form=True, group="d", route=True, profile=True)
+    C["auto+next"] = dict(engine="auto", kw={}, form=True, group="d", route=True, profile=True,
+                        plan=True)
     return C
 
 
@@ -176,7 +180,7 @@ def run_cell(case, name):
     spec = CONFIGS[name]
     info, t0 = {}, time.perf_counter()
     try:
-        with warnings.catch_warnings(), nd.builder_form(spec["form"]):
+        with warnings.catch_warnings(), nd.builder_form(spec["form"]), nd.plan_defaults(spec.get("plan", False)):
             warnings.simplefilter("ignore")
             if spec.get("route"):
                 b1, sw1, obs = case.build()     # one build: a closed loop's sw and observer share a PI
@@ -270,7 +274,7 @@ def analytic_worker(unit, names, emit):
                 save_unit(d)
                 emit(f"DONE {name}")
                 continue
-            with warnings.catch_warnings(), nd.builder_form(spec["form"]):
+            with warnings.catch_warnings(), nd.builder_form(spec["form"]), nd.plan_defaults(spec.get("plan", False)):
                 warnings.simplefilter("ignore")
                 kw = spec["kw"]
                 if spec.get("route"):
@@ -496,7 +500,7 @@ def render():
     L += [f"| {e} | `{k}` | `{x.value!r}` | `{x.change}` | {x.decision} |" for e, k, x in nd.table()]
     L += ["", "Not applied (not expressible through the harness on this tree):", ""]
     L += [f"- {e}: {w} (`{c}`): {y}" for e, w, c, y in nd.NOT_APPLIED]
-    L += ["", f"## Counts, differential matrix ({len(diff)} circuits)", "",
+    L += ["", "## Counts, differential matrix", "", f"{len(diff)} circuits.",
           "Graded as `REFERENCE_STATUS.md` (strict gate, harness tolerances, suspect -> unverified).",
           "`timeout`: the cell passed the per-cell limit and was killed.", "",
           "| configuration | group | " + " | ".join(KINDS) + " | cells | wall (s) |",
@@ -511,7 +515,7 @@ def render():
     L += ["", f"Configuration (a) reproduces REFERENCE_STATUS.md's strict counts: **{'yes' if ok else 'NO'}**"
           f" (read from that file: {exp}).", ""]
     if ana:
-        L += [f"## Counts, analytic set ({len(ana)} cases; closed-form truth, frozen ceilings)", "",
+        L += ["## Counts, analytic set", "", f"{len(ana)} cases; closed-form truth, frozen ceilings.", "",
               "| configuration | " + " | ".join(KINDS) + " |", "|---|" + "---:|" * len(KINDS)]
         for n in CONFIGS:
             cnt, tot = _counts(ana, n)
@@ -595,9 +599,24 @@ def render():
 
 
 def blockers(allu, rows):
+    import subprocess
+    head = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--short=8", "HEAD"], capture_output=True,
+                          text=True, encoding="utf-8", check=True).stdout.strip()
     L = ["# Next-defaults rehearsal", "",
-         "Rehearsal of the number-changing release on `feat/core-integration` fe75ee01 (method and",
-         "tables below the blocker list).", "",
+         f"Rehearsal of the number-changing release, rendered on `{head}` from the cell cache of `run`",
+         "(method and tables below the blocker list; where the cells and the pytest blast radius ran: `## Notes`).", ""]
+    if not any("output_rtol" in d for d in nd.PROFILE.values()):
+        L += ["The profile at this head has no `output_rtol` (the exact engine's output-grid rule is not",
+              "integrated yet): `auto+next` runs the exact engine without dt at its default output",
+              "ceiling, so its strict counts were expected to stay where the previous rehearsal put them",
+              "(agree / disagree / error 80 / 28 / 1). Measured here: "
+              + " / ".join(str(sum(u["cells"].get("auto+next", {}).get("outcome") == o for n, u in allu.items()
+                                   if not n.startswith("analytic:"))) for o in ("agree", "disagree", "error"))
+              + " (`engine='auto'` today: "
+              + " / ".join(str(sum(u["cells"].get("auto", {}).get("outcome") == o for n, u in allu.items()
+                                   if not n.startswith("analytic:"))) for o in ("agree", "disagree", "error"))
+              + ").", ""]
+    L += [
          "## Ranked blocker list", "",
          "### 1. Cells worse under the profile than under today's default, by class",
          "", "The first three classes (fails, samples wrong, disagree without a truth) are engine",
@@ -617,8 +636,10 @@ def blockers(allu, rows):
                 L.append(f"{i}. {len(grp)} cells ({', '.join(sorted({x[1] for x in grp}))}). "
                          + (f"Largest `exact` (RMS of the samples against the truth) {max(exs):.2g}. "
                             if exs else "") +
-                         ("On `auto` the exact engine runs without dt: 10 us default output ceiling; "
-                          "the strict gate interpolates linearly between those samples. "
+                         (("On `auto` the exact engine runs without dt: "
+                           + (f"the `output_rtol` = {nd.PROFILE['dsed']['output_rtol'].value!r} output grid; "
+                              if "output_rtol" in nd.PROFILE["dsed"] else "10 us default output ceiling; ")
+                           + "the strict gate interpolates linearly between those samples. ")
                           if all(x[1] == "auto" for x in grp) else "") +
                          "Circuits (today -> profile): "
                          + "; ".join(f"`{x[0].removeprefix('circuits/')}` {x[2]['outcome']} {_err(x[2])} -> "
@@ -646,31 +667,30 @@ def blockers(allu, rows):
         L.append("(none)")
     L += suite_refusals()
     better = collections.Counter((e, bs) for e in rows for (u, v, a, b, r, bs) in rows[e] if v == "better")
-    L += ["", f"### 2. Accepted changes of number ({sum(better.values())} cells better under the profile)", "",
-          "By engine and basis: " + ", ".join(f"{e} {bs} {n}" for (e, bs), n in sorted(better.items()))
+    L += ["", "### 2. Accepted changes of number", "",
+          f"{sum(better.values())} cells better under the profile. By engine and basis: " + ", ".join(f"{e} {bs} {n}" for (e, bs), n in sorted(better.items()))
           + ". Each is listed in 'Better under the full profile' below with its basis; the CHANGELOG",
           "migration note of the release cites them.", ""]
-    L += ["### 3. Owner decisions (add-kernel-simulation-object DECISIONS 23, branch "
-          "feat/core-p3-simulation-object; undriven switches first)", "",
-          "1. No `switch_fn` (measured on fe75ee01): pwl all CLOSED + a warning (v(o) = 0.999 V), "
-          "trbdf2 refuses (`UnsupportedError`, 'the two engines' undriven-switch defaults "
-          "differ'), dsed all CLOSED + a warning, `auto` without dt refuses (ValueError). Under "
-          "the release route `auto` would send it to dsed: CLOSED with a warning instead of a "
-          "refusal. One policy (task 11.3 there). Repro: "
-          "`b = pulsim.CircuitBuilder(); b.add_voltage_source('V', 'a', '0', 1.0); "
+    L += ["### 3. The per-engine blocks (add-kernel-simulation-object DECISIONS 23, decided in DECISIONS 26)", "",
+          "Decided by the orchestrator (2026-11-19) behind options whose default is today's; the release "
+          "values are `next_defaults.PLAN`, applied above by the full-profile cells and by the pytest blast "
+          "radius (`update-number-changing-release` DECISIONS 3-4):",
+          "1. No `switch_fn`: one policy, `simulate(undriven=)`; the release default `'refuse'` "
+          "(`_plan.DEFAULT_UNDRIVEN`) refuses an undriven controlled switch by name on every engine and "
+          "through `auto`. Repro: `b = pulsim.CircuitBuilder(); b.add_voltage_source('V', 'a', '0', 1.0); "
           "b.add_switch('S', 'a', 'o', 1e3, 1e-9); b.add_resistor('R', 'o', '0', 1.0)`, then "
-          "`pulsim.simulate(b, 1e-5, 1e-7, engine=e)` for e in pwl / trbdf2 / dsed.",
-          "2. `mmc_arms` / `on_cache` compose on the run's own cache (pwl only).",
-          "3. `progress` / `live_stream` wired after (1) on pwl.",
-          "4. `resume_from` continues time on pwl / trbdf2 only (dsed refuses it).",
-          "5. `mode_selection='auto'`: resolved while routing on pwl / trbdf2, in the "
-          "dispatcher on dsed; on trbdf2 it is the settle (no 'auto' rule there).",
-          "6. `on_impulse='error'`: pwl refuses at the event, dsed after the run, trbdf2 never records.",
-          "7. Option value checks in Python for pwl only.",
-          "8. `sweep()`'s recipe read once while planning.",
-          "", "Also open for the owner: one voltage-sanity check (task 6.2 there); the composite "
-          "diode drop's release (its DECISIONS OQ6); the TR-BDF2 step grid (factor-reuse 5.6: "
-          "accuracy sign-off).", ""]
+          "`pulsim.simulate(b, 1e-5, 1e-7, engine=e, undriven='refuse')` for e in pwl / trbdf2 / dsed.",
+          "2. `mmc_arms` / `on_cache`, `progress` / `live_stream`, the exact loss port: kept per engine "
+          "(engine-inherent), refused by name elsewhere (option table).",
+          "3. `resume_from`: pwl / trbdf2 continue the snapshot's clock (`plan.resolved_from['t_start']`); "
+          "the exact engine resumes on its own absolute clock.",
+          "4. `mode_selection='auto'`: resolved in one place (`_route`) for every engine; on trbdf2 it is "
+          "the settle (no 'auto' rule there).",
+          "5. Count checks and `on_impulse`: one rule per option on every engine under "
+          "`_plan.UNIFORM_ENGINE_RULES` (the release value); open: the exact engine refuses "
+          "`on_impulse='error'` after the run, not at the event.",
+          "", "Also open for the owner: the composite diode drop's release (its DECISIONS OQ6); the "
+          "TR-BDF2 step grid (factor-reuse 5.6: accuracy sign-off).", ""]
     return "\n".join(L) + "\n"
 
 
@@ -692,6 +712,14 @@ SUITE_ROOTS = (
     ("requires discontinuity_restart", "enable_substep_state_correction",
      "a caller that sets `discontinuity_restart=False` is refused once the split defaults on: the split's "
      "default must follow the rule's"),
+    ("the sensitivity run keeps its own grid", "output_rtol",
+     "the exact engine's sensitivity run refuses `output_rtol` by name (it keeps its own grid): with "
+     "`output_rtol` in the profile every exact `sensitivities=` call without dt is refused. Engine work "
+     "(the rule on the sensitivity run) or the profile leaves `output_rtol` off when `sensitivities=` is set"),
+    ("have no driver", "_plan.DEFAULT_UNDRIVEN",
+     "a test that relies on an undriven controlled switch (all closed today on pwl and the exact engine) "
+     "is refused by name once `undriven='refuse'` is the default: it passes `undriven='closed'` or "
+     "drives the switch (update-number-changing-release DECISIONS 4)"),
 )
 
 
@@ -700,10 +728,12 @@ def suite_refusals():
         return ["", "### 1b. Refusals in the test suite: pytest under the profile not run", ""]
     fails = json.loads(PYTEST_SUMMARY.read_text(encoding="utf-8"))["failures"]
     L = ["", "### 1b. Refusals the profile raises in `python/tests` (engine fixes or owner decisions)", ""]
-    for i, (pat, opt, what) in enumerate(SUITE_ROOTS, 1):
+    n = 0
+    for pat, opt, what in SUITE_ROOTS:
         hit = [f["nodeid"] for f in fails if pat in f["msg"]]
         if hit:
-            L.append(f"{i}. {len(hit)} test{'s' * (len(hit) > 1)}, option `{opt}`: {what}. Repro: `{hit[0]}` under "
+            n += 1
+            L.append(f"{n}. {len(hit)} test{'s' * (len(hit) > 1)}, option `{opt}`: {what}. Repro: `{hit[0]}` under "
                      "`-p next_defaults_pytest`.")
     return L
 

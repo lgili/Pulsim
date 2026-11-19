@@ -2278,10 +2278,23 @@ def _mode_auto_record(chosen, reason, warn=False):
                     "reason": reason}
 
 
-def _resolve_mode_auto(builder, engine, max_event_iterations):
-    """'auto' on engine 'pwl' / 'trbdf2': 'lcp' wherever it applies, the
-    settle (None) where 'lcp' would refuse; the reason recorded."""
+def _resolve_mode_auto(builder, engine, max_event_iterations,
+                       sensitivities=None):
+    """mode_selection='auto', resolved in ONE place (`_route`, every engine;
+    DECISIONS 26): 'lcp' wherever it applies, the settle (None) where 'lcp'
+    would refuse; the reason recorded. The rule per engine: pwl asks the
+    kernel (`_lcp_circuit_refusal`: no PWL diode, a gated or Newton device)
+    and the max_event_iterations=0 warning; trbdf2 has no 'auto' rule yet;
+    the exact engine takes 'lcp' when the circuit has a PWL diode (its
+    capability table refuses Newton devices before the run) and the settle
+    with sensitivities= (the sensitivity run differentiates the settle)."""
     from . import _pulsim as _k  # type: ignore[import-not-found]
+    if engine == "dsed":
+        if sensitivities is not None:
+            return _mode_auto_record(None, "sensitivities")
+        _, n_diodes, _ = _k._switch_census(builder.graph, builder.pool)
+        return (_mode_auto_record("lcp", None) if n_diodes
+                else _mode_auto_record(None, "no_diodes"))
     if engine == "trbdf2":
         return _mode_auto_record(None, "engine 'trbdf2' (no 'auto' rule there yet)")
     reason, device = _k._lcp_circuit_refusal(builder.graph, builder.pool)
@@ -2349,6 +2362,7 @@ def simulate(
     sensitivities: "Optional[Sequence[str]]" = None,
     mode_selection: Optional[str] = None,
     allow_implicit_segments: Optional[bool] = None,
+    undriven: Optional[str] = None,
     recorders=None,
     output_rtol: Optional[float] = None,
 ) -> SimulationResult:
@@ -2605,6 +2619,21 @@ def simulate(
         ``integrator='bdf2'`` (deprecated) is numeric throughout and is not
         refused. On other engines passing it raises :class:`UnsupportedError`.
 
+    undriven
+        Controlled switches that nothing drives (no ``switch_fn``, no
+        closed loop's gate). ``None`` (default): today's per-engine
+        behaviour — ``pwl`` and ``'exact'`` run them all CLOSED with a
+        warning (the exact engine's ``sensitivities=`` run refuses),
+        ``'trbdf2'`` refuses them by name, ``'auto'`` without ``dt``
+        refuses, with ``dt`` it is ``pwl``. The policy applies when nothing
+        drives any switch (a partial drive is the drive's). ``'refuse'``:
+        :class:`UnsupportedError` (``feature='switch_fn'``) naming every
+        undriven switch, on every engine. ``'open'`` / ``'closed'``: they
+        run OPEN / CLOSED on every engine and through ``'auto'`` (which
+        may then take ``trbdf2``), with one entry in
+        ``result.diagnostics['undriven']`` instead of a warning. The
+        number-changing release makes ``'refuse'`` the default.
+
     resolution_diagnostics
         ``engine='pwl'`` only, default OFF (it costs 5-14 %): ``True``
         records ``res.resolution`` (a per-step truncation estimate of
@@ -2622,9 +2651,11 @@ def simulate(
         per-period statistics (time-weighted, clipped exactly at the
         window edges), kept samples (every / every n-th / none) and both
         limits at events (exact engine). Read ``res.recorded[name]``
-        (:class:`pulsim.Recording`). Fed today by a kernel-side pass over
-        the stored arrays, so ``store_every > 1`` and ``resume_from``
-        are refused with recorders, by name. Without it nothing changes.
+        (:class:`pulsim.Recording`). Fed in the loop where the engine
+        allows it, otherwise by a kernel-side pass over the stored arrays
+        (``res.recorder_feed["why"]``; ``store_every > 1`` is refused by
+        name there). ``resume_from`` continues the record from the
+        snapshot's recorder state. Without it nothing changes.
 
     output_rtol
         ``engine='exact'`` only, default ``None`` (today's samples: one per
@@ -2702,7 +2733,7 @@ def simulate(
         inductor_freeze_di_max, inductor_abs_clamp, progress, initial_state,
         should_continue, closed_loops, live_stream, mmc_arms, on_cache,
         controller_period, resume_from, control_tick, solver, sensitivities,
-        mode_selection, allow_implicit_segments, recorders, output_rtol)))
+        mode_selection, allow_implicit_segments, undriven, recorders, output_rtol)))
     return _finalize(_ENGINES[plan.engine](plan), plan)
 
 
@@ -2712,15 +2743,23 @@ _SIMULATE_DEFAULTS = {"t_end": simulate.__defaults__[0],
                       "dt": simulate.__defaults__[1], **simulate.__kwdefaults__}
 
 
-def _undriven(engine, builder, stacklevel=2):
-    """The switch_fn of a run given none (Stage A, task 5.2): ONE function,
-    today's three per-engine behaviours kept (DECISIONS 8; one policy is the
-    BREAKING task 11.3). 'trbdf2': all OPEN, silent. 'pwl' / 'dsed': all
+def _undriven(engine, builder, stacklevel=2, policy=None):
+    """The switch_fn of a run given none (Stage A, task 5.2): ONE function.
+    ``policy`` 'open' / 'closed' (simulate(undriven=...), decided by
+    `_undriven_policy` above the dispatch): that constant mask on every
+    engine, silent (the plan carries the one diagnostic). ``policy`` None:
+    today's three per-engine behaviours (DECISIONS 8 / 23.1). 'trbdf2': all
+    OPEN, silent. 'pwl' / 'dsed': all
     CLOSED (the v1 legacy), with a warning when the circuit has controlled
     switches (a bridge leg would shoot through). Each engine calls it where
     it always decided this: trbdf2 while planning, pwl after the cache hooks,
     dsed inside its dispatcher (`stacklevel`: the caller's frame depth)."""
     n_sw = builder.graph.num_switches
+    if policy is not None:
+        mask = SwitchStateMask(n_sw)
+        for i in range(n_sw if policy == "closed" else 0):
+            mask.set(i, True)
+        return make_constant_switch_fn(mask)   # native: no Python call per step
     if engine == "trbdf2":
         # No driver: all-OPEN here (the v2.0 semantics; the
         # fixed engine's all-CLOSED legacy default is what the
@@ -2774,6 +2813,74 @@ def _undriven(engine, builder, stacklevel=2):
         return lambda _t: default_mask
 
 
+def _undriven_policy(builder, policy, engine):
+    """simulate(undriven='refuse' | 'open' | 'closed') when nothing drives
+    the switches (task 11.3, DECISIONS 26): None when the circuit has no
+    controlled switch (diode bits are the solver's), else ``(policy,
+    names)``; 'refuse' raises, naming every undriven switch. Above the
+    route: the same answer on every engine and through 'auto'."""
+    try:
+        _, _nd, controlled = _switch_census(builder.graph, builder.pool)
+    except (AttributeError, TypeError):  # test doubles w/o pool
+        return None
+    if not controlled:
+        return None
+    by_bit = {}
+    g = builder.graph
+    for br in range(g.num_branches):
+        name = g.branch_name(br)
+        try:
+            by_bit[builder.switch_index_of(name)] = name
+        except IndexError:   # not a switching branch
+            pass
+    names = tuple(by_bit.get(i, f"#{i}") for i in controlled)
+    if policy == "refuse":
+        raise _unsupported(
+            engine, "switch_fn",
+            f"simulate(undriven='refuse'): {len(names)} controlled switch(es) "
+            f"have no driver: {', '.join(names)}. Drive them with switch_fn= "
+            "(e.g. make_pwm_switch_fn) or closed_loops=, or pass "
+            "undriven='open' / 'closed' to run them in that state.",
+            device=names[0])
+    return policy, names
+
+
+def _uniform_checks(engine, store_every, max_event_iterations, max_dt_halvings,
+                    on_impulse, integrator):
+    """_plan.UNIFORM_ENGINE_RULES (the number-changing release, DECISIONS
+    26), right after the route: (1) the count checks with ONE message on
+    every engine that reads the count — pwl all three, trbdf2
+    max_event_iterations (the exact engine refuses all three by name in
+    `_route`) — before pwl's mmc_arms combinations (today pwl's own block
+    checks them after those, trbdf2's kernel words its own message); (2)
+    on_impulse='warn' / 'error' refused by name where the run cannot detect
+    an impulse: the exact engine's integrator='bdf2' (numeric throughout, no
+    projection, no record). The messages are pwl's (its block keeps them
+    inline: simulate()'s fixed overhead)."""
+    if engine == "pwl" and store_every is not None and int(store_every) < 1:
+        raise _options_error("store_every",
+            f"simulate(store_every={store_every}): must be >= 1 "
+            "(1 records every step)")
+    if engine != "dsed" and max_event_iterations is not None \
+            and int(max_event_iterations) < 0:
+        raise _options_error("max_event_iterations",
+            f"simulate(max_event_iterations={max_event_iterations}"
+            "): must be >= 0 (0 disables event iteration)")
+    if engine == "pwl" and max_dt_halvings is not None and int(max_dt_halvings) < 0:
+        raise _options_error("max_dt_halvings",
+            f"simulate(max_dt_halvings={max_dt_halvings}): must "
+            "be >= 0 (0 disables the retry)")
+    if engine == "dsed" and on_impulse != "record" and integrator == "bdf2":
+        raise _unsupported(
+            "dsed", "on_impulse",
+            f"simulate(engine='dsed', integrator='bdf2', on_impulse="
+            f"{on_impulse!r}): the deprecated bdf2 integrator is numeric "
+            "throughout and never projects a dependent state, so an impulsive "
+            "re-initialisation is neither recorded nor refused. Drop "
+            "integrator='bdf2' (the exact integrators record it), or "
+            "on_impulse.")
+
+
 def _compose(builder, closed_loops, step_observer, controller_period,
              switch_fn, b_extra_fn, resume_from, control_tick):
     """ONE composition of what drives the circuit, for every engine (Stage
@@ -2798,7 +2905,8 @@ def _compose(builder, closed_loops, step_observer, controller_period,
 
 
 def _compose_for(engine, _plan, *, t_start, t_end, dt, sensitivities,
-                 switch_fn, step_observer, b_extra_fn, closed_loops):
+                 switch_fn, step_observer, b_extra_fn, closed_loops,
+                 resume_from=None):
     """The control plan for the engine the run landed on (Stage A, task
     5): its tick sources on the variable-step event queue (trbdf2, dsed)
     or the fixed grid (pwl), the gates merged into one switch_fn. Returns
@@ -2818,13 +2926,25 @@ def _compose_for(engine, _plan, *, t_start, t_end, dt, sensitivities,
                 "controller_period=<T_ctrl seconds> and the ticks are "
                 "scheduled exactly. A ClosedLoop from bind_pi_to_switch "
                 "carries its own period.")
-        if _plan.ticks and sensitivities is not None:
+        if sensitivities is not None and resume_from is not None:
             raise _unsupported(
-                "dsed", "sensitivities",
-                "simulate(engine='dsed', sensitivities=...) with controllers: "
-                "the sensitivity run has no control ticks, so the loop would "
-                "run open. Drop sensitivities or the controllers.")
-        if _plan.ticks and float(t_start) != 0.0:
+                "dsed", "resume_from",
+                "simulate(engine='dsed', sensitivities=..., resume_from=...): the "
+                "sensitivity run starts from t = 0 and carries no snapshot. Drop "
+                "one of them.")
+        if (resume_from is not None and _plan.ticks
+                and len(_resume_tick_origins(resume_from, len(_plan.ticks)))
+                != len(_plan.ticks)):
+            # without the first run's grid the ticks would restart at the
+            # snapshot's t: the controllers would leave their grid silently
+            raise _unsupported(
+                "dsed", "resume_from",
+                f"simulate(engine='dsed', resume_from=...): this run has "
+                f"{len(_plan.ticks)} control tick source(s) and the snapshot "
+                f"carries the grid of {len(list(resume_from.tick_origin))}: the "
+                "ticks cannot continue the first run's grid. Resume with the "
+                "controllers of the run that wrote the snapshot.")
+        if _plan.ticks and float(t_start) != 0.0 and resume_from is None:
             raise _unsupported(
                 "dsed", "step_observer",
                 "simulate(engine='dsed', t_start != 0) with controllers: the "
@@ -2884,7 +3004,7 @@ def _route(
     _engine_asked, device_path, enable_nonlinear_refresh,
     max_newton_iterations, tol_newton_dx, tol_newton_res,
     enable_newton_line_search, enable_newton_lm, newton_roundoff_budget,
-    should_continue,
+    should_continue, _undriven_plan,
 ):
     """The route (add-kernel-simulation-object Stage A, task 4): the engine
     the run lands on and why, from the option x engine table
@@ -2918,8 +3038,7 @@ def _route(
             "enable_newton_line_search": enable_newton_line_search,
             "enable_newton_lm": enable_newton_lm,
             "newton_roundoff_budget": newton_roundoff_budget,
-            "should_continue": should_continue,
-            "resume_from": resume_from})
+            "should_continue": should_continue})
         if _offending:
             raise _unsupported(
                 "dsed", _offending[0],
@@ -2930,6 +3049,9 @@ def _route(
                 "engine='pwl' for these features, or drop the "
                 "kwarg(s) if the open-loop behaviour is intended. "
             )
+        if mode_selection == "auto":   # the one place, as below
+            mode_selection, _mode_auto = _resolve_mode_auto(
+                builder, engine, None, _opt_values["sensitivities"])
         return engine, [], mode_selection, _mode_auto
     _route_reasons: "list[str]" = []
     if engine in ("auto", "trbdf2"):
@@ -2949,7 +3071,8 @@ def _route(
             resolution_diagnostics=resolution_diagnostics,
             inductor_freeze_di_max=inductor_freeze_di_max,
             inductor_abs_clamp=inductor_abs_clamp,
-            switch_fn=switch_fn, opt_values=_opt_values)
+            switch_fn=switch_fn, opt_values=_opt_values,
+            undriven=_undriven_plan)
         # the tick sources trbdf2 registers (for_variable_step's count)
         _tick_origins = _resume_tick_origins(resume_from, len(_plan.ticks) + len(
             _plan.rate_ticks) + len(getattr(_plan.c_graph, "_rate_ticks", None) or []))
@@ -3114,7 +3237,7 @@ def _plan_run(
     inductor_freeze_di_max, inductor_abs_clamp, progress, initial_state,
     should_continue, closed_loops, live_stream, mmc_arms, on_cache,
     controller_period, resume_from, control_tick, solver, sensitivities,
-    mode_selection, allow_implicit_segments, recorders, output_rtol,
+    mode_selection, allow_implicit_segments, undriven, recorders, output_rtol,
 ):
     """simulate()'s keywords resolved, above the engine dispatch
     (add-kernel-simulation-object Stage A): every statement here applies
@@ -3133,7 +3256,7 @@ def _plan_run(
         inductor_freeze_di_max, inductor_abs_clamp, progress, initial_state,
         should_continue, closed_loops, live_stream, mmc_arms, on_cache,
         controller_period, resume_from, control_tick, solver, sensitivities,
-        mode_selection, allow_implicit_segments, recorders, output_rtol))
+        mode_selection, allow_implicit_segments, undriven, recorders, output_rtol))
     # ---- LoadedCircuit (YAML) + the run window. ----
     # Above everything else, so every engine sees the same t_end / dt.
     # A YAML whose run settings did not load (no top-level
@@ -3301,6 +3424,10 @@ def _plan_run(
     if on_impulse not in ("record", "warn", "error"):
         raise ValueError(f"simulate(on_impulse={on_impulse!r}): expected "
                          "'record', 'warn' or 'error'")
+    if undriven is not None and undriven not in ("refuse", "open", "closed"):
+        raise _options_error("undriven", (
+            f"simulate(undriven={undriven!r}): expected None (each engine's "
+            "own behaviour), 'refuse', 'open' or 'closed'"))
     # add-unified-device-interface (dual path): which code stamps the
     # Newton kinds; 'interface' refuses an unported kind by name.
     if device_path not in ("legacy", "interface"):
@@ -3335,9 +3462,7 @@ def _plan_run(
         raise ValueError(
             f"simulate(): mode_selection={mode_selection!r}; expected "
             "None, 'legacy', 'shadow', 'lcp' or 'auto'.")
-    _mode_auto = None
-    if mode_selection == "auto" and sensitivities is not None:
-        mode_selection, _mode_auto = _mode_auto_record(None, "sensitivities")
+    _mode_auto = None   # mode_selection='auto' is resolved in _route
     if newton_roundoff_budget is not None and (
             isinstance(newton_roundoff_budget, bool)
             or int(newton_roundoff_budget) != newton_roundoff_budget
@@ -3413,19 +3538,28 @@ def _plan_run(
     # and an invalid snapshot resumed from zero.
     if resume_from is not None:
         if not getattr(resume_from, "valid", False):
+            _why = getattr(resume_from, "invalid_reason", "")
+            if _why:   # the run that produced it said why it kept none
+                raise _unsupported(
+                    "dsed", "resume_from",
+                    f"simulate(resume_from=...): the snapshot is not valid: {_why}.")
             raise ValueError(
                 "simulate(resume_from=...): the snapshot is not valid — "
                 "it came from a run that produced none (an aborted run, "
-                "or a SolverSnapshot() built by hand and never "
-                "populated). Resuming from it would start from zero "
-                "without saying so.")
-        if engine == "dsed":
+                "a SolverSnapshot() built by hand and never populated, or an "
+                "engine='dsed' run on a route that keeps none: integrator "
+                "'bdf2' or a fresh t_start, whose cause an unpickled "
+                "snapshot no longer carries). Resuming from it would start "
+                "from zero without saying so.")
+        _cs = resume_from.controller_state
+        if engine != "dsed" and _cs is not None and _cs[0] == 3:
             raise _unsupported(
-                "dsed", "resume_from",
-                'simulate(engine="dsed"): resume_from is not supported '
-                "by the event-driven engine, which has no snapshot of "
-                'its own; use engine="pwl" (exact resume) or '
-                'engine="trbdf2" / "auto" (resume to tolerance).')
+                engine, "resume_from",
+                f"simulate(engine={engine!r}, resume_from=...): the snapshot was "
+                "written by the exact engine, whose state has no companion "
+                "history (the trapezoidal i_C / v_L this engine's step needs), so "
+                "it does not map one to one onto this engine's state. Resume with "
+                "engine='dsed'.")
     _ic_from_builder = False
     # A snapshot IS the state: builder ICs (i0=/c0=) must not be
     # synthesised alongside it, or the engines re-seed the stateful
@@ -3451,6 +3585,14 @@ def _plan_run(
     _plan, b_extra_fn = _compose(builder, closed_loops, step_observer,
                                  controller_period, switch_fn, b_extra_fn,
                                  resume_from, control_tick)
+    # ---- undriven= (task 11.3): ONE policy for controlled switches nothing
+    # drives, above the route, so 'auto' and every engine see it. None (and
+    # _plan.DEFAULT_UNDRIVEN None) keeps each engine's own (DECISIONS 23.1).
+    _undriven_plan = None
+    if _plan.switch_fn is None and (
+            undriven is not None or _planning.DEFAULT_UNDRIVEN is not None):
+        _undriven_plan = _undriven_policy(
+            builder, undriven or _planning.DEFAULT_UNDRIVEN, engine)
 
     # ---- Parameter sensitivities: the exact path only. Above the
     # dispatch (planned for every engine), so every engine refuses or
@@ -3472,15 +3614,21 @@ def _plan_run(
             "settle; a mode chosen by the complementarity problem has no "
             "derivative here. Drop mode_selection.")
 
-    # (engine 'dsed' refuses resume_from above, so this is the other two)
+    # (engine 'dsed' resumes on its own absolute clock: t_end is absolute there)
     if engine != "dsed" and resume_from is not None and t_start == 0.0:
         # Resuming means TIME continues too: a sine source
         # restarted from phase zero makes the second segment see a
         # different waveform than the run it claims to continue
         # (caught by a rectifier whose resumed half disagreed with
         # the continuous run). An explicit t_start still wins.
+        # The ONE clock rule of a resume (DECISIONS 26): pwl and trbdf2 start
+        # at the snapshot's t when t_start is left at 0.0 (an explicit
+        # t_start wins: the snapshot's state at that clock); the exact engine
+        # resumes on its own absolute clock (t_end absolute), so its plan
+        # keeps t_start ('default'). plan.resolved_from says which.
         try:
             t_start = float(resume_from.t)
+            _resolved.mark("t_start", "resume_from")
         except AttributeError:  # pragma: no cover — duck-typed
             pass
 
@@ -3499,7 +3647,10 @@ def _plan_run(
         max_event_iterations, _engine_asked, device_path,
         enable_nonlinear_refresh, max_newton_iterations, tol_newton_dx,
         tol_newton_res, enable_newton_line_search, enable_newton_lm,
-        newton_roundoff_budget, should_continue)))
+        newton_roundoff_budget, should_continue, _undriven_plan)))
+    if _planning.UNIFORM_ENGINE_RULES:   # the release's uniform rules (DECISIONS 26)
+        _uniform_checks(engine, store_every, max_event_iterations,
+                        max_dt_halvings, on_impulse, integrator)
     if engine == "pwl":
         # ---- engine='pwl' from here on ----
         # mypy/pyright: narrow Optional[float] → float.
@@ -3509,7 +3660,7 @@ def _plan_run(
         engine, _plan, t_start=t_start, t_end=t_end, dt=dt,
         sensitivities=sensitivities, switch_fn=switch_fn,
         step_observer=step_observer, b_extra_fn=b_extra_fn,
-        closed_loops=closed_loops)
+        closed_loops=closed_loops, resume_from=resume_from)
     if engine == "dsed":
         # ---- engine='dsed': the exact step (run by _run_dsed). ----
         # For engine='dsed', `integrator` ∈ {'auto', 'rk45', 'bdf2', None}.
@@ -3562,7 +3713,8 @@ def _plan_run(
             mode_selection=mode_selection, integrator=integrator)
         _n_sw = builder.graph.num_switches
         if switch_fn is None:
-            switch_fn = _undriven("trbdf2", builder)
+            switch_fn = (_undriven("trbdf2", builder) if _undriven_plan is None
+                         else _undriven("trbdf2", builder, 2, _undriven_plan[0]))
         step = _planning.new(_planning.VariableStep, (
             dt, rtol, atol, dt_init, integrator, _tro))
     else:
@@ -3734,7 +3886,8 @@ def _plan_run(
             _step_observer_user, _b_extra_fn_user,       # user_step_observer, ...
             _closed_loops_user, mmc_arms, on_cache, live_stream, progress)),
         device_path, _device_path,        # device_path, device_path_enum
-        voltage_sanity_factor, auto_regularize, _resolved))  # ..., resolved_from
+        voltage_sanity_factor, auto_regularize, _resolved,  # ..., resolved_from
+        _undriven_plan))
 
 
 def _run_dsed(plan):
@@ -3764,12 +3917,18 @@ def _run_dsed(plan):
                 "simulate(engine='exact', sensitivities=..., output_rtol=...): the "
                 "sensitivity run keeps its own grid. Drop output_rtol, or pass dt.")
         from .sensitivity import simulate_sensitivities
+        if switch_fn is None and plan.undriven is not None:
+            from .sensitivity import _ConstSchedule  # an edge oracle (inf)
+            switch_fn = _ConstSchedule(builder.graph.num_switches,
+                                       plan.undriven[0] == "closed")
         _dsed_res = simulate_sensitivities(
             builder, t_end, sensitivities=sensitivities, dt=dt,
             t_start=t_start, switch_fn=switch_fn,
             initial_state=None if _ic_from_builder else initial_state,
             ic_from_builder=_ic_from_builder, dt_init=dt_init,
-            b_extra_fn=b_extra_fn, integrator=integrator)
+            b_extra_fn=b_extra_fn, integrator=integrator,
+            ticks=[(f, p, o) for (f, p), o in zip(
+                _plan.ticks, _plan.tick_offsets or [0.0] * len(_plan.ticks))])
         if _mode_auto is not None:
             _diag = getattr(_dsed_res, "diagnostics", None)
             if isinstance(_diag, dict):
@@ -3803,7 +3962,13 @@ def _run_dsed(plan):
             output_rtol=s.output_rtol,
             ticks=[(f, p, o) for (f, p), o in zip(
                 _plan.ticks, _plan.tick_offsets or [0.0] * len(_plan.ticks))],
+            resume_from=i.resume_from,
+            tick_origins=_resume_tick_origins(i.resume_from, len(_plan.ticks)),
+            tick_next_k=_resume_tick_next_k(i.resume_from, len(_plan.ticks)),
+            undriven=plan.undriven[0] if plan.undriven is not None else None,
+            mode_auto=_mode_auto,
         )
+        _save_control_state(_plan.graphs, _dsed_res)   # the snapshot's controllers
     return _planning.new(_planning.RunOutcome, (
         _dsed_res, builder, switch_fn, b_extra_fn, None, None, None, None,
         None))
@@ -4008,7 +4173,9 @@ def _run_pwl(plan):
     # CONTROLLED switches exist, warn loudly; v2.0 flips the
     # default to all-OPEN and makes this an error.
     if switch_fn is None:
-        switch_fn = _undriven("pwl", builder, stacklevel=4)
+        switch_fn = (_undriven("pwl", builder, stacklevel=4)
+                     if plan.undriven is None
+                     else _undriven("pwl", builder, 4, plan.undriven[0]))
 
     # enable_nonlinear_refresh=None goes through as is: the kernel
     # stamps the Newton devices when the circuit has any, and refuses
@@ -4264,9 +4431,12 @@ def _finalize(out, plan):
                 f"{'an inductor cut-set' if cut else 'a capacitor loop'}); "
                 f"re-initialising them moves {r0.lambda_:.6g} "
                 f"{'V*s' if cut else 'C'} and removes {r0.dW:.6g} J.",
-                device=dev)
+                device=dev, kind=(_impulse_kind(builder, dev)
+                                  if _planning.UNIFORM_ENGINE_RULES else ""))
         if on_impulse == "warn":
             _warn_impulses(res)
+        if plan.undriven is not None:
+            _note_undriven(res, plan.undriven)
         return res
     if engine == "trbdf2":
         res._builder = builder
@@ -4303,6 +4473,8 @@ def _finalize(out, plan):
         if on_impulse == "warn":
             _warn_impulses(res)
         _save_control_state(_plan.graphs, res)
+        if plan.undriven is not None:
+            _note_undriven(res, plan.undriven)
         return res
     # Close the progress bar with a newline if we were in bar mode.
     if progress is True or (isinstance(progress, str)
@@ -4399,28 +4571,11 @@ def _finalize(out, plan):
     # throughout. The current guards cannot see it: they watch i_L,
     # which stays believable. Check the voltage against what the
     # circuit's own sources can account for.
-    # The try covers ONLY the kernel call. Wrapping the warn() too
-    # meant that under `-W error` — where a warning IS an exception —
-    # the detector produced no signal at all: not the warning, and
-    # not the attribute either. A user who asked for warnings to be
-    # fatal is the last one who should be silently spared this.
-    _volt = None
-    try:
-        _k = _pulsim_module
-        _volt = _k.find_implausible_voltage(
-            builder.graph, builder.pool, res,
-            _ro.DEFAULTS["voltage_sanity_factor"]
-            if voltage_sanity_factor is None
-            else float(voltage_sanity_factor))
-    except Exception:  # pragma: no cover — never break a good run
-        _volt = None
-    if _volt is not None and _volt.node >= 0:
-        import warnings
-        res._implausible_voltage = _volt
-        warnings.warn(
-            "simulate(): " + _k.describe_implausible_voltage(
-                builder.graph, builder.pool, _volt),
-            stacklevel=3)
+    # ONE voltage check on every engine (task 6.2): the same function as
+    # the trbdf2 / exact sections above, at the same frame depth, so the
+    # warning names the same caller line. (Its try covers ONLY the kernel
+    # call: under `-W error` the warning must still raise.)
+    _auto_check_voltage_sanity(res, builder, voltage_sanity_factor)
 
     # A retried step integrated its interval more finely than the
     # caller asked for. That is a change in ACCURACY, and the record
@@ -4499,7 +4654,29 @@ def _finalize(out, plan):
     if _mmc_finalize is not None and len(res.states) > 0:
         _mmc_finalize(res.times[-1], res.states[-1])
     _save_control_state(_plan.graphs, res)
+    if plan.undriven is not None:
+        _note_undriven(res, plan.undriven)
     return res
+
+
+def _impulse_kind(builder, dev):
+    """The device kind an impulse refusal names (pwl / trbdf2: the kernel's
+    `stored_kind_name`); '' when the record names a node, not a device."""
+    try:
+        return builder.pool.kind_of(builder.branch_id_of(dev)).name
+    except IndexError:
+        return ""
+
+
+def _note_undriven(res, undriven):
+    """simulate(undriven='open' | 'closed') applied: the one diagnostic,
+    ``result.diagnostics['undriven']`` (the same keys on every engine)."""
+    pol, names = undriven
+    try:
+        res.diagnostics = {**(getattr(res, "diagnostics", None) or {}),
+                           "undriven": {"policy": pol, "switches": list(names)}}
+    except AttributeError:  # pragma: no cover - a result without attributes
+        pass
 
 
 def _resume_tick_origins(resume_from, n: int) -> "list[float]":
@@ -4790,7 +4967,8 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
                       enable_substep_state_correction,
                       inductor_freeze_di_max, inductor_abs_clamp,
                       switch_fn, discontinuity_restart=None,
-                      resolution_diagnostics=None, opt_values=None):
+                      resolution_diagnostics=None, opt_values=None,
+                      undriven=None):
     """Why the variable-step engine cannot serve this run.
 
     Returns a list of human-readable reasons — empty means it can.
@@ -4867,9 +5045,10 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
             not float(getattr(_cl, "period", 0.0) or 0.0) > 0.0
             for _cl in closed_loops):
         why.append(_blk("closed_loops", "closed_loops whose handles carry no period"))
-    if switch_fn is None and not closed_loops:
+    if switch_fn is None and not closed_loops and undriven is None:
         # (A ClosedLoop brings its own switch_fn, so the circuit is
-        # driven even when the caller passed none.)
+        # driven even when the caller passed none. An undriven= policy
+        # that applied, `undriven`, is the same on both engines.)
         # The two engines disagree on what an undriven controlled
         # switch means (fixed: all-CLOSED + warning, the v1 legacy;
         # variable: all-OPEN). Route to the one whose answer the
@@ -4890,7 +5069,11 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
 
 
 def _auto_check_voltage_sanity(res, builder, factor):
-    """Run the implausible-voltage detector on any result.
+    """Run the implausible-voltage detector on any result: the ONE check,
+    called from `_finalize` for pwl, trbdf2 and the exact engine
+    (add-kernel-simulation-object task 6.2). The try covers ONLY the
+    kernel call: wrapping the warn() too meant that under `-W error` the
+    detector produced no signal at all.
 
     Extracted so `engine='auto'` gets the same guard the pwl tail
     applies: the detector reads the recorded trace, not the

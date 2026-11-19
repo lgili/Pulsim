@@ -35,6 +35,7 @@ struct StepResetPair {
     BlockStepFn step;
     BlockResetFn reset;
     BlockStepFn update{};   // phase-2 state transition (non-feedthrough blocks)
+    BlockAdFn ad{};         // the law on the AD scalar (tick_jacobian), may be empty
 };
 
 
@@ -45,26 +46,38 @@ struct StepResetPair {
 inline StepResetPair make_gain_step(BlockChain& chain, std::shared_ptr<Gain> blk,
                                         InputRef x,
                                         std::string out_channel) {
-    auto step = [blk, x = chain.in(std::move(x)), out_channel = chain.out(out_channel)]
+    const InputRef xr = chain.in(std::move(x));
+    const Index o = chain.out(out_channel);
+    auto step = [blk, x = xr, out_channel = o]
                    (ChainContext& ctx) {
         ctx.put(out_channel, blk->update(resolve(x, ctx)));
     };
+    auto ad = [blk, xr, o](AdTick& c) {
+        const AdReal k = c.param("k", blk->k);
+        c.put(o, pl_gain(k, c.in(xr, "x")));
+    };
     chain.capture(blk);
     auto reset = [blk]() { blk->reset(); };
-    return {std::move(step), std::move(reset)};
+    return {std::move(step), std::move(reset), {}, std::move(ad)};
 }
 
 inline StepResetPair make_subtract_step(BlockChain& chain, std::shared_ptr<Subtract> blk,
                                             InputRef a, InputRef b,
                                             std::string out_channel) {
-    auto step = [blk, a = chain.in(std::move(a)), b = chain.in(std::move(b)),
-                    out_channel = chain.out(out_channel)]
+    const InputRef ar = chain.in(std::move(a));
+    const InputRef br = chain.in(std::move(b));
+    const Index o = chain.out(out_channel);
+    auto step = [blk, a = ar, b = br, out_channel = o]
                    (ChainContext& ctx) {
         ctx.put(out_channel, blk->update(resolve(a, ctx), resolve(b, ctx)));
     };
+    auto ad = [ar, br, o](AdTick& c) {
+        const AdReal va = c.in(ar, "a");
+        c.put(o, pl_subtract(va, c.in(br, "b")));
+    };
     chain.capture(blk);
     auto reset = [blk]() { blk->reset(); };
-    return {std::move(step), std::move(reset)};
+    return {std::move(step), std::move(reset), {}, std::move(ad)};
 }
 
 inline StepResetPair make_sum_step(BlockChain& chain, std::shared_ptr<Sum> blk,
@@ -104,16 +117,32 @@ inline StepResetPair make_pi_controller_step(BlockChain& chain,
     InputRef setpoint, InputRef measured, InputRef dt_ref,
     std::string out_channel) {
 
-    auto step = [blk, setpoint = chain.in(std::move(setpoint)),
-                    measured = chain.in(std::move(measured)),
-                    dt_ref = chain.in(std::move(dt_ref)),
-                    out_channel = chain.out(out_channel)]
+    const InputRef sr = chain.in(std::move(setpoint));
+    const InputRef mr = chain.in(std::move(measured));
+    const InputRef dr = chain.in(std::move(dt_ref));
+    const Index o = chain.out(out_channel);
+    auto step = [blk, setpoint = sr, measured = mr, dt_ref = dr, out_channel = o]
                    (ChainContext& ctx) {
         ctx.put(out_channel, blk->update( resolve(setpoint, ctx), resolve(measured, ctx), resolve(dt_ref, ctx)));
     };
+    // pulsim.control.PIController's names (integrator_state, prev_error)
+    auto ad = [blk, sr, mr, dr, o](AdTick& c) {
+        AdReal integ = c.state("integrator_state", blk->integral);
+        AdReal prev = c.state("prev_error", blk->prev_error);
+        const AdReal kp = c.param("Kp", blk->Kp);
+        const AdReal ki = c.param("Ki", blk->Ki);
+        const AdReal lo = c.param("output_min", blk->output_min);
+        const AdReal hi = c.param("output_max", blk->output_max);
+        const AdReal sp = c.in(sr, "setpoint");
+        const AdReal m = c.in(mr, "measured");
+        const AdReal u = pl_pi(kp, ki, lo, hi, &integ, &prev, sp, m, c.in(dr, "dt"));
+        c.state_after("integrator_state", integ);
+        c.state_after("prev_error", prev);
+        c.put(o, u);
+    };
     chain.capture(blk);
     auto reset = [blk]() { blk->reset(); };
-    return {std::move(step), std::move(reset)};
+    return {std::move(step), std::move(reset), {}, std::move(ad)};
 }
 
 inline StepResetPair make_pid_controller_step(BlockChain& chain,
@@ -182,14 +211,20 @@ inline StepResetPair make_differentiator_step(BlockChain& chain,
 inline StepResetPair make_limiter_step(BlockChain& chain, std::shared_ptr<Limiter> blk,
                                            InputRef x,
                                            std::string out_channel) {
-    auto step = [blk, x = chain.in(std::move(x)),
-                    out_channel = chain.out(out_channel)]
+    const InputRef xr = chain.in(std::move(x));
+    const Index o = chain.out(out_channel);
+    auto step = [blk, x = xr, out_channel = o]
                    (ChainContext& ctx) {
         ctx.put(out_channel, blk->update(resolve(x, ctx)));
     };
+    auto ad = [blk, xr, o](AdTick& c) {   // pulsim.control.Limiter's names
+        const AdReal lo = c.param("output_min", blk->min_v);
+        const AdReal hi = c.param("output_max", blk->max_v);
+        c.put(o, pl_limiter(lo, hi, c.in(xr, "x")));
+    };
     chain.capture(blk);
     auto reset = [blk]() { blk->reset(); };
-    return {std::move(step), std::move(reset)};
+    return {std::move(step), std::move(reset), {}, std::move(ad)};
 }
 
 inline StepResetPair make_moving_average_step(BlockChain& chain,

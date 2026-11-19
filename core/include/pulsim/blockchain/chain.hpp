@@ -25,6 +25,7 @@
 
 #pragma once
 
+#include "pulsim/ad/ad_scalar.hpp"
 #include "pulsim/blockchain/blocks.hpp"
 #include "pulsim/events/modulator.hpp"
 #include "pulsim/numeric/dense.hpp"
@@ -132,6 +133,101 @@ struct ChainContext {
     return Real{0};
 }
 
+
+// =============================================================================
+// The tick map on the AD scalar (the tick Jacobian)
+// =============================================================================
+//
+// A block may register, next to its step, the same law evaluated on
+// ad::ADRealN<1> (forward mode, one tangent direction per pass). Every
+// independent quantity of a tick has a name: a block state
+// "<block>.<state>", a block parameter or constant input
+// "<block>.<field>", a probed state entry "x[<i>]", a signal slot
+// "sig:<channel>". A pass seeds one name (or none: the discovery pass);
+// BlockChain::tick_jacobian runs one pass per column. Nothing here runs
+// on the plain double tick.
+
+using AdReal = ad::ADRealN<1>;
+
+struct AdTick {
+    std::vector<AdReal> sig;
+    Real t = Real{0};
+    Real dt = Real{0};
+    const Vector* x = nullptr;
+    std::string seed;                       // "" = no tangent
+    const std::string* block = nullptr;     // the block being evaluated
+    // filled on every pass, in evaluation order
+    std::vector<std::string> state_names;   // states read (pre-tick)
+    std::vector<std::string> state_out_names;
+    std::vector<AdReal> state_out;          // states written (post-tick)
+    std::vector<std::string> param_names;   // parameters / constant inputs
+    std::vector<Index> probes;              // state entries read
+
+    [[nodiscard]] AdReal var(const std::string& name, Real v) const {
+        return name == seed ? AdReal{v, {Real{1}}} : AdReal{v};
+    }
+    [[nodiscard]] std::string named(const std::string& field) const {
+        return *block + "." + field;
+    }
+    /// A parameter of the block being evaluated.
+    [[nodiscard]] AdReal param(const std::string& field, Real v) {
+        param_names.push_back(named(field));
+        return var(param_names.back(), v);
+    }
+    /// A state of the block (its value before the tick).
+    [[nodiscard]] AdReal state(const std::string& field, Real v) {
+        state_names.push_back(named(field));
+        return var(state_names.back(), v);
+    }
+    /// The state's value after the tick.
+    void state_after(const std::string& field, const AdReal& v) {
+        state_out_names.push_back(named(field));
+        state_out.push_back(v);
+    }
+    /// An input; a constant input is the parameter "<block>.<name>".
+    [[nodiscard]] AdReal in(const InputRef& r, const std::string& name) {
+        switch (r.kind) {
+            case InputRef::Kind::Const:   return param(name, r.const_value);
+            case InputRef::Kind::Channel:
+                return r.slot >= 0 ? sig[static_cast<Size>(r.slot)] : AdReal{};
+            case InputRef::Kind::Node:
+                if (x && r.node_idx >= 0 && r.node_idx < static_cast<Index>(x->size())) {
+                    probes.push_back(r.node_idx);
+                    return var("x[" + std::to_string(r.node_idx) + "]", (*x)[r.node_idx]);
+                }
+                return AdReal{};
+            case InputRef::Kind::Time:    return AdReal{t};
+            case InputRef::Kind::Dt:      return AdReal{dt};
+        }
+        return AdReal{};
+    }
+    void put(Index s, const AdReal& v) {
+        if (s >= 0) sig[static_cast<Size>(s)] = v;
+    }
+};
+
+using BlockAdFn = std::function<void(AdTick&)>;
+
+/// One comparison of a law taken on the tick (block_laws.h PL_LT ...):
+/// the operands, the side taken and whether it depends on any column
+/// (a comparison of constants is no kink of the map).
+struct TickKink {
+    std::string block, law;
+    Real a = Real{0}, b = Real{0};
+    bool side = false;
+    bool live = false;
+};
+
+/// The Jacobian of one tick: rows = the states after the tick (in
+/// evaluation order) then every signal slot ("sig:<channel>");
+/// columns = the states before it, the slots, the probed state entries
+/// ("x[i]"), then the requested parameters. Row-major.
+struct TickJacobian {
+    std::vector<std::string> rows, cols;
+    std::vector<Real> values;     // the rows' values after the tick
+    std::vector<Real> J;          // rows.size() x cols.size()
+    std::vector<TickKink> kinks;
+};
 
 using BlockStepFn = std::function<void(ChainContext&)>;
 using BlockResetFn = std::function<void()>;
@@ -886,6 +982,140 @@ public:
         }
     }
 
+    /// The AD law of the most recently added block (see AdTick).
+    void set_last_ad(BlockAdFn f) {
+        if (blocks_.empty()) return;
+        ad_fns_.resize(blocks_.size());
+        ad_fns_.back() = std::move(f);
+    }
+
+    /// The exact Jacobian of one tick of rate group `g` at (t, x) from the
+    /// state the graph holds now (TickJacobian); `params` are names of
+    /// block parameters or constant inputs ("<block>.<field>"). Every
+    /// block of the group must have an AD law, and the group a zero
+    /// compute delay (its sinks see this tick's signals). `commit` then
+    /// runs the group's own (double) tick at (t, x) — the blocks and the
+    /// publication a queue tick runs, without counters or recordings —
+    /// and checks that the AD pass computed the same values bit for bit.
+    TickJacobian tick_jacobian(int g, Real t, const Vector& x,
+                               const std::vector<std::string>& params,
+                               bool commit) {
+        compile();
+        if (g < 1 || static_cast<Size>(g) >= groups_.size()) {
+            throw std::invalid_argument("tick_jacobian: no rate group " + std::to_string(g));
+        }
+        if (groups_[static_cast<Size>(g)].delay != Delay::Zero) {
+            throw std::invalid_argument(
+                "tick_jacobian: rate group " + std::to_string(g) + " has a compute "
+                "delay; its sinks see an earlier tick's signals (not derived)");
+        }
+        ad_fns_.resize(blocks_.size());
+        std::vector<Size> run;
+        for (Size i : order_) {
+            if (blocks_[i].group != g) continue;
+            if (!ad_fns_[i]) {
+                throw std::invalid_argument(
+                    "tick_jacobian: block '" + blocks_[i].name + "' (" +
+                    (blocks_[i].kind.empty() ? std::string("?") : blocks_[i].kind) +
+                    ") has no derivative of its law");
+            }
+            run.push_back(i);
+        }
+        const Real dt = groups_[static_cast<Size>(g)].period;
+        const Size ns = ctx_.sig.size();
+        TickJacobian res;
+        struct Sink final : pl_kink_sink<AdReal> {
+            std::vector<TickKink>* out = nullptr;
+            const std::string* block = nullptr;
+            bool first = true;
+            Size k = 0;
+            void note(const AdReal& a, const AdReal& b, bool side, const char* law) override {
+                const bool live = a.deriv(0) != b.deriv(0);
+                if (first) {
+                    out->push_back(TickKink{*block, law, a.value(), b.value(), side, live});
+                } else if (k < out->size()) {
+                    (*out)[k].live = (*out)[k].live || live;
+                }
+                ++k;
+            }
+        } sink;
+        sink.out = &res.kinks;
+        struct Install {
+            pl_kink_sink<AdReal>* old;
+            explicit Install(pl_kink_sink<AdReal>* s) : old(pl_kink_sink<AdReal>::current()) {
+                pl_kink_sink<AdReal>::current() = s;
+            }
+            ~Install() { pl_kink_sink<AdReal>::current() = old; }
+            Install(const Install&) = delete;
+            Install& operator=(const Install&) = delete;
+        } install(&sink);
+        auto pass = [&](const std::string& seed) {
+            AdTick c;
+            c.seed = seed;
+            c.sig.resize(ns);
+            for (Size s = 0; s < ns; ++s) c.sig[s] = c.var("sig:" + slot_names_[s], ctx_.sig[s]);
+            c.t = t;
+            c.dt = dt;
+            c.x = &x;
+            sink.k = 0;
+            for (Size i : run) {
+                c.block = &blocks_[i].name;
+                sink.block = c.block;
+                ad_fns_[i](c);
+            }
+            sink.first = false;
+            return c;
+        };
+        const AdTick d = pass(std::string{});   // discovery: names, values
+        for (const auto& n : d.state_names) res.cols.push_back(n);
+        for (Size s = 0; s < ns; ++s) res.cols.push_back("sig:" + slot_names_[s]);
+        for (Index p : d.probes) {
+            const std::string n = "x[" + std::to_string(p) + "]";
+            if (std::find(res.cols.begin(), res.cols.end(), n) == res.cols.end()) res.cols.push_back(n);
+        }
+        for (const auto& p : params) {
+            if (std::find(d.param_names.begin(), d.param_names.end(), p) == d.param_names.end()) {
+                std::string have;
+                for (const auto& q : d.param_names) have += (have.empty() ? "" : ", ") + q;
+                throw std::invalid_argument("tick_jacobian: '" + p + "' is not a parameter or "
+                                            "constant input of rate group " + std::to_string(g) +
+                                            " (have: " + have + ")");
+            }
+            res.cols.push_back(p);
+        }
+        res.rows = d.state_out_names;
+        for (Size s = 0; s < ns; ++s) res.rows.push_back("sig:" + slot_names_[s]);
+        const Size nr = res.rows.size(), nc = res.cols.size(), nso = d.state_out.size();
+        for (const auto& v : d.state_out) res.values.push_back(v.value());
+        for (Size s = 0; s < ns; ++s) res.values.push_back(d.sig[s].value());
+        res.J.assign(nr * nc, Real{0});
+        for (Size j = 0; j < nc; ++j) {
+            const AdTick c = pass(res.cols[j]);
+            for (Size r = 0; r < nso; ++r) res.J[r * nc + j] = c.state_out[r].deriv(0);
+            for (Size s = 0; s < ns; ++s) res.J[(nso + s) * nc + j] = c.sig[s].deriv(0);
+        }
+        if (commit) {
+            ctx_.t = t;
+            ctx_.dt = dt;
+            ctx_.x = &x;
+            ctx_.b_extra = &b_extra_map_;
+            for (Size i : run) blocks_[i].step(ctx_);
+            for (Size i : run) {
+                if (blocks_[i].update) blocks_[i].update(ctx_);
+            }
+            publish(groups_[static_cast<Size>(g)]);
+            sync_duties();
+            for (Size s = 0; s < ns; ++s) {
+                const Real a = d.sig[s].value(), b = ctx_.sig[s];
+                if (!(a == b || (std::isnan(a) && std::isnan(b)))) {
+                    throw std::logic_error("tick_jacobian: the AD law of signal '" +
+                                           slot_names_[s] + "' differs from the tick's");
+                }
+            }
+        }
+        return res;
+    }
+
     [[nodiscard]] std::uint64_t n_evals() const noexcept { return n_evals_; }
     [[nodiscard]] std::uint64_t n_block_evals() const noexcept {
         return n_block_evals_;
@@ -1256,6 +1486,7 @@ private:
     std::vector<Block> blocks_;
     Block pending_;
     std::vector<Size> order_;
+    std::vector<BlockAdFn> ad_fns_;   // per block, may be empty (tick_jacobian)
     std::vector<std::string> reorders_;
     bool compiled_ = false;
     bool has_update_ = false;
@@ -1345,6 +1576,7 @@ make_chain_switch_fn(BlockChain& chain, Size num_switches,
 struct ChainPwmGate {
     Size num_switches = 0;
     std::vector<events::CarrierPwm> legs;   // one switch each, distinct bits
+    std::vector<Index> leg_slots;           // the duty slot of each leg
 
     /// Leg on switch `idx` whose duty is what slot `slot`'s sinks see.
     void add_leg(BlockChain& chain, Index slot, Index idx, Real period, Real phase) {
@@ -1356,6 +1588,7 @@ struct ChainPwmGate {
             }
         }
         legs.push_back(events::CarrierPwm{period, phase, chain.duty_register(slot), idx});
+        leg_slots.push_back(slot);
     }
 
     [[nodiscard]] topology::SwitchStateMask operator()(Real t) const {

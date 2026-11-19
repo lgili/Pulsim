@@ -495,6 +495,111 @@ def _result_from_native(native_res, t_start: float):
     return res
 
 
+# The snapshot's controller block of the exact engine (step::ControllerState
+# kind Exact): the reduced state, the schedule position and the step memory.
+_EXACT_SNAPSHOT_KIND = 3
+
+
+def _mark_no_snapshot(res, integrator: str, t_start, bridge: str = "") -> None:
+    """A run that keeps no snapshot says why: its final_snapshot stays invalid
+    with the cause and the workaround, which resume_from refuses by name."""
+    from . import _pulsim as _k
+    if bridge:
+        why = (f"engine='dsed' ran this circuit on the {bridge} (the native "
+               "adapter rejected it), which keeps no snapshot")
+    elif integrator == "bdf2":
+        why = ("engine='dsed' ran this circuit on integrator='bdf2' (fixed-step "
+               "BDF2), which keeps no snapshot; the event-driven and the 'auto' "
+               "integrators write one. Run the first segment without "
+               "integrator='bdf2'")
+    elif t_start:
+        why = (f"engine='dsed' ran a fresh run with t_start={t_start!r} on its "
+               "own clock from 0, so it writes no snapshot (its time would be "
+               "wrong). Run the first segment without t_start")
+    else:
+        return
+    s = _k.SolverSnapshot()
+    s.invalid_reason = why
+    res._set_final_snapshot(s)
+
+
+_AUTO_SNAPSHOT_TAG = 101.0   # dsed/scheduler_auto.hpp AutoResumeState::kTag
+
+
+def _auto_snapshot(snap) -> bool:
+    """Whether an exact-engine snapshot was written by integrator='auto'."""
+    cs = snap.controller_state
+    return (cs is not None and cs[0] == _EXACT_SNAPSHOT_KIND and len(cs[1]) > 0
+            and float(cs[1][0]) == _AUTO_SNAPSHOT_TAG)
+
+
+def _check_resume_snapshot(snap, integrator, t_start) -> None:
+    """Refuse by name a snapshot the exact engine cannot continue exactly
+    (session 24): another integrator, a shifted clock, or another engine's
+    device histories it has no state for. A recorder's state (field 18) is
+    continued by the in-loop feed (session 26), or refused by
+    simulate(recorders=...) when this run cannot feed it."""
+    if integrator == "bdf2":
+        raise unsupported(
+            "dsed", "resume_from", message=
+            "simulate(engine='dsed', integrator='bdf2', resume_from=...): the "
+            "snapshot is written and read by the event-driven integrator only. "
+            "Drop integrator='bdf2'.")
+    if t_start and float(t_start) != float(snap.t):
+        raise unsupported(
+            "dsed", "resume_from", message=
+            f"simulate(engine='dsed', resume_from=..., t_start={t_start!r}): the "
+            f"exact engine resumes on its own clock at the snapshot's instant "
+            f"({snap.t!r} s); a different t_start would relabel time. Drop t_start.")
+    cs = snap.controller_state
+    if cs is not None and cs[0] == _EXACT_SNAPSHOT_KIND:
+        return
+    if not len(snap.stamped_mask):
+        raise unsupported(
+            "dsed", "resume_from", message=
+            "simulate(engine='dsed', resume_from=...): the snapshot does not say "
+            "which mask its state was solved under (no stamped_mask: a hand-built "
+            "or pre-v3 snapshot), so its state cannot be read as one mode's.")
+    layout = list(getattr(snap, "dev_layout", []) or [])
+    if any(int(n) for n in layout[1:]):
+        raise unsupported(
+            "dsed", "resume_from", message=
+            "simulate(engine='dsed', resume_from=...): the snapshot carries "
+            "stateful-device histories (saturable inductor, Coss, IGBT tail, ...) "
+            "the exact engine has no state for. Resume on the engine that wrote it.")
+
+
+def _resume_state(snap, native_adapter, mask, builder, n_state):
+    """The reduced state the resumed run starts from: its own (C++ reads the
+    snapshot's payload; zeros of the right size here), or another engine's
+    full state reduced under its stamped mask — refused by name when that is
+    not one state of the mode (a full state off the mode's constraints)."""
+    import numpy as np
+    cs = snap.controller_state
+    if cs is not None and cs[0] == _EXACT_SNAPSHOT_KIND:
+        return np.zeros(n_state, dtype=float)
+    x_full = np.asarray(snap.x, dtype=float)
+    n_mna = builder.pool.state_size(builder.graph)
+    if x_full.shape != (n_mna,):
+        raise unsupported(
+            "dsed", "resume_from", message=
+            f"simulate(engine='dsed', resume_from=...): the snapshot's state has "
+            f"{x_full.shape[0]} entries, this circuit's full state {n_mna}: it "
+            "belongs to a different circuit.")
+    native_adapter.set_mask(mask)
+    x0, adj = native_adapter.reduced_state_from_full(x_full)
+    nn = builder.graph.num_nodes
+    scale = max(1.0, float(np.abs(x_full[:nn]).max(initial=0.0)))
+    if adj > 1e-9 * scale:
+        raise unsupported(
+            "dsed", "resume_from", message=
+            f"simulate(engine='dsed', resume_from=...): the snapshot's state is "
+            f"not one state of its mode on this engine (a capacitor voltage moves "
+            f"by {adj:.3g} V when read as the mode's reduced state). Resume on "
+            "the engine that wrote it.")
+    return np.asarray(x0, dtype=float)
+
+
 def _has_edge_oracle(sf) -> bool:
     """Whether the DSED scheduler can ask ``sf`` for its next gate edge."""
     if isinstance(sf, (NativePwm2Switch, NativeMultiMaskPwm)):
@@ -558,8 +663,29 @@ def run_dsed_from_builder(
     allow_implicit_segments: bool = True,
     ticks: Optional[Any] = None,
     output_rtol: Optional[float] = None,
+    resume_from: Optional[Any] = None,
+    tick_origins: Optional[Any] = None,
+    tick_next_k: Optional[Any] = None,
+    undriven: Optional[str] = None,
+    mode_auto: Optional[dict] = None,
 ):
     """Run a PED simulation from a :class:`pulsim.CircuitBuilder`.
+
+    ``resume_from`` (a ``SolverSnapshot``): continue at its committed
+    instant on the run's own clock (``t_end`` absolute). A snapshot of this
+    engine (controller kind 3) carries the reduced state, the mode and the
+    schedule position; another engine's is reduced from its full state under
+    its stamped mask, refused by name where that is not one state of the
+    mode, and its modes are decided at t as at a start.
+
+    ``mode_auto``: the record of ``mode_selection='auto'`` as simulate()'s
+    plan resolved it (`_resolve_mode_auto`, the one place); ``mode_selection``
+    then arrives as 'lcp' or None (a caller that passes 'auto' itself gets
+    the same rule applied here).
+
+    ``undriven`` ('open' / 'closed', from ``simulate(undriven=...)``): the
+    mask of the controlled switches when ``switch_fn`` is None, without the
+    all-closed warning (the plan holds the one diagnostic).
 
     ``ticks`` (``[(fn, period, offset), ...]``): control ticks scheduled
     by the event-driven integrator's event queue, ``fn(t, x_full)`` at
@@ -599,7 +725,9 @@ def run_dsed_from_builder(
     ``opts.integrator``, and the NotImplementedError disappears.
     """
     import numpy as np
-    mode_auto = None   # mode_selection='auto' resolved: its record
+    if mode_selection == "auto":   # not through simulate(): the plan's rule, here
+        from . import _resolve_mode_auto
+        mode_selection, mode_auto = _resolve_mode_auto(builder, "dsed", None)
 
     # ------------------------------------------------------------------
     # v2.0 Phase 3 — structural refusal, BEFORE any work happens.
@@ -658,12 +786,8 @@ def run_dsed_from_builder(
                 f"simulate(engine='dsed', integrator='bdf2'): the loss port of "
                 f"{_loss_names[0]!r} (set_device_losses) is read on the "
                 "event-driven integrator only. Drop integrator='bdf2'.")
-        if t_start:
-            raise unsupported(
-                "dsed", "device_losses", device=_loss_names[0], message=
-                f"simulate(engine='dsed', t_start={t_start!r}): the loss port of "
-                f"{_loss_names[0]!r} records its events on the run's own clock "
-                "from 0. Drop t_start, or use engine='pwl' / 'trbdf2'.")
+        # a fresh t_start run is the 0-start run relabelled by t_start (the
+        # engine's clock runs from 0): its loss events are shifted with it
         integrator = "rk45"
     # update-number-changing-release: the output-grid rule cuts the
     # event-driven integrator's exact steps; 'auto' becomes 'rk45' as for
@@ -676,6 +800,40 @@ def run_dsed_from_builder(
                 "output-grid rule cuts the event-driven integrator's exact steps. "
                 "Drop integrator='bdf2', or drop output_rtol.")
         integrator = "rk45"
+    if resume_from is not None:
+        if initial_state is not None:
+            raise unsupported(
+                "dsed", "resume_from", message=
+                "simulate(engine='dsed', resume_from=..., initial_state=...): the "
+                "snapshot is the state; pass one of them.")
+        _check_resume_snapshot(resume_from, integrator, t_start)
+        if _auto_snapshot(resume_from):
+            # task 20.2: written by PEDSimulatorAuto, continued by it only
+            if integrator not in (None, "auto") or ticks:
+                raise unsupported(
+                    "dsed", "resume_from", message=
+                    "simulate(engine='dsed', resume_from=...): the snapshot was "
+                    "written by integrator='auto' (the per-mode RK45/BDF2 "
+                    "integrator), and this run would take the event-driven one "
+                    f"(integrator={integrator!r}"
+                    f"{' from output_rtol' if output_rtol else ''}"
+                    f"{', control ticks' if ticks else ''}"
+                    "), which cannot continue its step history. Resume with the "
+                    "first segment's options.")
+            integrator = "auto"
+        elif integrator == "auto" and not ticks:
+            # diodes and loss ports made it 'rk45' above, ticks do below:
+            # anything else is 'auto' choosing PEDSimulatorAuto, which
+            # cannot continue an event-driven snapshot
+            raise unsupported(
+                "dsed", "resume_from", message=
+                "simulate(engine='dsed', integrator='auto', resume_from=...): on "
+                "this circuit 'auto' chooses the per-mode RK45/BDF2 integrator, "
+                "which cannot continue the event-driven integrator's snapshot. "
+                "Pass integrator='rk45' or leave integrator unset (a resume then "
+                "runs on the integrator that wrote the snapshot).")
+        else:   # unset: the integrator that wrote the snapshot (the event-driven one)
+            integrator = "rk45"
     # Device kinds: the kernel's capability table, before any adapter
     # is built (the Python adapter below would extract the LTI system
     # with every Newton device silently ABSENT). The native adapter
@@ -736,7 +894,8 @@ def run_dsed_from_builder(
     sf = opts.switch_fn
     if sf is None:
         from . import _undriven
-        sf = _undriven("dsed", builder, stacklevel=5)
+        sf = (_undriven("dsed", builder, stacklevel=5) if undriven is None
+              else _undriven("dsed", builder, 5, undriven))
 
     adapter = CircuitBuilderAdapter(
         builder=builder, cache=cache, switch_fn=sf,
@@ -778,6 +937,10 @@ def run_dsed_from_builder(
     # (floating cap, nonlinear device, etc.) surfaces NOW with the
     # bridge-fallback message rather than mid-simulation.
     initial_mask = sf(opts.t_start)
+    if resume_from is not None:
+        initial_mask = SwitchStateMask(builder.graph.num_switches)
+        for _i, _b in enumerate(resume_from.stamped_mask):
+            initial_mask.set(_i, bool(_b))
     adapter.set_mask(initial_mask)
     try:
         for _k in range(builder.graph.num_switches + 1):
@@ -850,6 +1013,8 @@ def run_dsed_from_builder(
         x0 = np.zeros(n_state, dtype=float)
 
     t_window = float(t_end) - float(opts.t_start)
+    if resume_from is not None:   # the run's own clock: t_end is absolute
+        t_window = float(t_end) - float(resume_from.t)
     if t_window <= 0:
         raise ValueError(
             f"simulate(engine='dsed'): t_end ({t_end}) must be > "
@@ -913,16 +1078,14 @@ def run_dsed_from_builder(
                 native_adapter.set_mask(initial_mask)
                 x0, ic_adjustment = native_adapter.reduced_initial_state(
                     builder)
+            resume_kw = {}
+            if resume_from is not None:
+                x0 = _resume_state(resume_from, native_adapter, initial_mask,
+                                   builder, n_state)
+                resume_kw = {"resume": resume_from,
+                             "tick_origins": list(tick_origins or []),
+                             "tick_next_k": list(tick_next_k or [])}
             shadow_kw = {}
-            if mode_selection == "auto":
-                # 'lcp' where it applies (diodes), else the settle. A diode
-                # circuit always reaches here on rk45: 'auto' became 'rk45'
-                # and 'bdf2' was refused above (the census of _n_diodes).
-                from . import _mode_auto_record
-                if _n_diodes == 0:
-                    mode_selection, mode_auto = _mode_auto_record(None, "no_diodes")
-                else:
-                    mode_selection, mode_auto = _mode_auto_record("lcp", None)
             if mode_selection in ("shadow", "lcp") and (
                     opts.integrator != "rk45" or _n_diodes == 0):
                 raise unsupported(
@@ -942,12 +1105,20 @@ def run_dsed_from_builder(
                 if mode_selection == "shadow":
                     shadow_kw["mode_shadow_h_e"] = h_e
             if opts.integrator == "rk45":
+                # add-probes-and-recorders R5: the recorders in the loop
+                from . import _recorders as _rec
+                feed_slot = _rec.ExactFeedSlot(builder)
+                _rec.attach_loop_feed(feed_slot, "dsed")
                 native_res = run_ped_b11(
-                    native_adapter, sf, x0, t_window,
+                    native_adapter, sf, x0,
+                    float(t_end) if resume_from is not None else t_window,
+                    **resume_kw,
                     rtol=opts.rtol, atol=opts.atol,
                     dt_init=opts.dt_init, dt_max=opts.dt_max,
                     store_every=opts.store_every, event_log=False,
                     settle_round_cap=SETTLE_ROUND_CAP, diode_law_rel=DIODE_LAW_REL,
+                    loop_feed=feed_slot.feed,
+                    t_offset=float(opts.t_start or 0.0) if resume_from is None else 0.0,
                     **shadow_kw,
                     **({"output_rtol": float(output_rtol)} if output_rtol else {}),
                     **({"tick_fns": [f for f, _p, _o in ticks],
@@ -956,6 +1127,8 @@ def run_dsed_from_builder(
                         "tick_monitors": [bool(getattr(f, "_pulsim_monitor", False))
                                           for f, _p, _o in ticks]}
                        if ticks else {}))
+                if "loop_feed_refused" in native_res:
+                    _rec.exact_feed_refused(native_res["loop_feed_refused"])
             elif opts.integrator == "bdf2":
                 native_res = run_bdf2_b11(
                     native_adapter, sf, x0, t_window,
@@ -963,13 +1136,23 @@ def run_dsed_from_builder(
                     store_every=opts.store_every, event_log=False)
             else:  # 'auto'
                 native_res = run_auto_b11(
-                    native_adapter, sf, x0, t_window,
+                    native_adapter, sf, x0,
+                    float(t_end) if resume_from is not None else t_window,
                     rtol=opts.rtol, atol=opts.atol,
                     dt_init=opts.dt_init, dt_max=opts.dt_max,
                     h_bdf2=opts.h_bdf2,
                     stiffness_threshold=opts.stiffness_threshold,
-                    store_every=opts.store_every, event_log=False)
-            res = _result_from_native(native_res, opts.t_start)
+                    store_every=opts.store_every, event_log=False,
+                    **({"resume": resume_from} if resume_from is not None else {}))
+            res = _result_from_native(
+                native_res, 0.0 if resume_from is not None else opts.t_start)
+            if "final_snapshot" in native_res and (
+                    resume_from is not None or not opts.t_start):
+                # a fresh run with t_start runs on the engine's own clock from
+                # 0, not simulate()'s: its snapshot would carry the wrong time
+                res._set_final_snapshot(native_res["final_snapshot"])
+            elif resume_from is None:
+                _mark_no_snapshot(res, opts.integrator, opts.t_start)
             if "device_losses" in native_res:
                 res._set_device_losses(native_res["device_losses"],
                                        native_res["heat_injected"],
@@ -1009,7 +1192,7 @@ def run_dsed_from_builder(
                     "simulate(engine='dsed'): control ticks run on the native "
                     f"adapter only, which rejected this circuit ({e}). Use "
                     "engine='pwl' or 'trbdf2'.") from e
-            if _n_diodes > 0 or _loss_names or (
+            if _n_diodes > 0 or _loss_names or resume_from is not None or (
                     not adapter_rejected and not allow_implicit_segments
                     and opts.integrator != "bdf2"):
                 raise
@@ -1026,6 +1209,12 @@ def run_dsed_from_builder(
             "simulate(engine='dsed', output_rtol=...): the output-grid rule runs "
             "on the native adapter only, which is not available for this circuit. "
             "Drop output_rtol, or pass dt.")
+    if resume_from is not None:
+        raise unsupported(
+            "dsed", "resume_from", message=
+            "simulate(engine='dsed', resume_from=...): the snapshot is read by "
+            "the native adapter only, which rejected this circuit. Use "
+            "engine='pwl' or 'trbdf2'.")
     if full_x0 is not None and ambiguous:
         x0 = full_x0          # the non-native bridges read it as reduced, as before
     elif full_x0 is not None:
@@ -1033,10 +1222,6 @@ def run_dsed_from_builder(
             f"simulate(engine='dsed'): initial_state has shape {full_x0.shape}, "
             f"expected ({n_state},); a full-MNA vector is accepted only on the "
             "native adapter.")
-    if mode_selection == "auto":
-        from . import _mode_auto_record
-        mode_selection, mode_auto = _mode_auto_record(
-            None, "no_diodes")  # only reached without diodes (re-raised above)
     if mode_selection in ("shadow", "lcp"):
         raise unsupported(
             "dsed", "mode_selection", message=
@@ -1108,6 +1293,8 @@ def run_dsed_from_builder(
         )
         if mode_auto is not None:
             out.diagnostics = {"mode_selection_auto": mode_auto}
+        _mark_no_snapshot(out, opts.integrator, opts.t_start,
+                          bridge="Python adapter fallback")
         return out
 
     # ---- No fallback. ----
