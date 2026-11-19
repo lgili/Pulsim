@@ -544,5 +544,5 @@ Slice 2 (this branch, after 2b18f11a):
   on trbdf2 (no duplicate).
 - Open: cost targets (0b.10: a current-window fast path, a leaner feed
   step); R5 (exact engine in the loop); 4.2 delegation, 8.3 `live_stream`
-  over `RingSink`, 1.4 result reference page; Eigen 3.4.0 for this slice's
-  C++ (not run).
+  over `RingSink`, 1.4 result reference page. Eigen 3.4.0: record / perf / step / thermal targets 29/29 at 98419f48.
+
