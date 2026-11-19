@@ -102,6 +102,7 @@ struct DeviceLossRecord {
     double E_off = 0.0;
     double E_cond_electrical = 0.0;  ///< ∫v·i over the run (always)
     double E_cond_table = 0.0;       ///< ∫V_on(|i|,Tj)|i| (with a V_on table)
+    double E_impulse = 0.0;          ///< impulsive re-initialisation energy booked to it
     std::size_t n_on = 0;
     std::size_t n_off = 0;
 };

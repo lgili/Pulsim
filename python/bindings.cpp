@@ -616,6 +616,7 @@ void init_module(py::module_& m) {
         .def_readonly("E_cond_electrical",
                       &thermal::DeviceLossRecord::E_cond_electrical)
         .def_readonly("E_cond_table", &thermal::DeviceLossRecord::E_cond_table)
+        .def_readonly("E_impulse", &thermal::DeviceLossRecord::E_impulse)
         .def_readonly("n_on", &thermal::DeviceLossRecord::n_on)
         .def_readonly("n_off", &thermal::DeviceLossRecord::n_off);
     m.def("_commutation_points",
@@ -4543,7 +4544,8 @@ void init_module(py::module_& m) {
                 //   or None, 12 the controllers'-state marker, 13 the grid
                 //   (origin, step, dt, post_edge_derivatives), 14 the step
                 //   controller (kind, values) or None, 15 tick_origin,
-                //   16 tick_next_k.
+                //   16 tick_next_k, 17 the loss tracker's state (in-kernel
+                //   event losses; 17-field version-5 tuples still load).
                 // Version 4 had four layouts on parallel branches (13, 14
                 // or 15 fields; field 12 a bool or a tuple); all still load.
                 const auto& L = s.legacy;
@@ -4573,7 +4575,7 @@ void init_module(py::module_& m) {
                         : py::object(py::make_tuple(
                               static_cast<int>(s.controller.kind),
                               s.controller.v)),
-                    s.tick_origin, s.tick_next_k);
+                    s.tick_origin, s.tick_next_k, s.loss_state);
             },
             [](py::tuple t) {
               try {
@@ -4584,13 +4586,13 @@ void init_module(py::module_& m) {
                     if (t[0].cast<std::string>() != "SolverSnapshot"
                         || !((ver == 3 && (n == 12 || n == 13))
                              || (ver == 4 && n >= 13 && n <= 15)
-                             || (ver == 5 && n == 17))) {
+                             || (ver == 5 && (n == 17 || n == 18)))) {
                         throw std::runtime_error(
                             "SolverSnapshot: pickle version "
                             + std::to_string(ver) + " with "
                             + std::to_string(n)
                             + " fields; this Pulsim reads version 3 "
-                              "(12 or 13 fields), 4 (13 to 15) and 5 (17)");
+                              "(12 or 13 fields), 4 (13 to 15) and 5 (17 or 18)");
                     }
                     // Where each block sits (npos = absent). Version 4's
                     // variants differ in field 12: a bool there is the
@@ -4658,6 +4660,9 @@ void init_module(py::module_& m) {
                                 "SolverSnapshot: tick_origin and tick_next_k "
                                 "differ in length");
                         }
+                    }
+                    if (ver == 5 && n == 18) {
+                        s.loss_state = t[17].cast<std::vector<Real>>();
                     }
                     s.t = t[2].cast<Real>();
                     s.x = t[3].cast<Vector>();

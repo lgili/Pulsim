@@ -25,13 +25,16 @@
 // same samples. A nonlinear probe (v*i) is linear between its own samples,
 // as it is when time_average is applied to the product trace.
 //
-// Feeding (the loops are frozen until the unified stepper lands):
-//   * `sample(t, readings)` once per accepted step, `event(readings)` after
-//     it when the feeder has the right limit at that instant;
-//   * Python: a kernel-side pass over the stored result arrays
-//     (`feed_table`), on every engine;
-//   * C++: `attach(StepHooks&, ...)` feeds a recorder in-loop from the
-//     engines' existing accepted-step hook (state columns only).
+// Feeding:
+//   * `sample(t, readings)` once per accepted step; `event(readings)` after
+//     it when the feeder has the right limit at that instant (resolution
+//     Exact or Settled: the next line starts from it); `event_bracket` when
+//     it only brackets the commutation within one step (WithinDt);
+//   * in-loop from the step hooks: `record/loop_feed.hpp` (`LoopFeed`, the
+//     route of Python's simulate() on pwl / trbdf2), or `attach` below
+//     (accepted-step hook, state columns, no events);
+//   * a kernel-side pass over stored arrays (`feed_table`): the exact
+//     engine and the Python fallback.
 // Nothing allocates per sample after `reserve` (period windows and kept
 // rows are pre-sized); an event row allocates (events are not per step).
 
@@ -174,6 +177,16 @@ public:
         }
     }
 
+    /// Pre-size the event rows for `n_events` events.
+    void reserve_events(Size n_events) {
+        const Size np = probes_.size();
+        event_t_.reserve(n_events);
+        event_t_right_.reserve(n_events);
+        event_resolution_.reserve(n_events);
+        event_left_.reserve(n_events * np);
+        event_right_.reserve(n_events * np);
+    }
+
     /// The left limit at `t`: the end of an accepted step.
     void sample(Real t, std::span<const Real> readings) {
         require_bound(readings);
@@ -195,16 +208,31 @@ public:
         ++n_samples_;
     }
 
+    /// How an event row's right value was obtained: the engine's exact
+    /// right limit, its settled post-event state at the instant, or a
+    /// bracket within one step (`event_bracket`).
+    enum class Resolution : std::uint8_t { Exact = 0, Settled = 1, WithinDt = 2 };
     /// The right limit at the last sample's instant (after its settle):
     /// the next step starts from it.
-    void event(std::span<const Real> readings_right) {
+    void event(std::span<const Real> readings_right, Resolution res = Resolution::Exact) {
         require_bound(readings_right);
         if (n_samples_ == 0) throw std::logic_error("recorder: event before any sample");
         eval_into(readings_right, right_);
-        event_t_.push_back(t_prev_);
-        event_left_.insert(event_left_.end(), left_.begin(), left_.end());
-        event_right_.insert(event_right_.end(), right_.begin(), right_.end());
+        push_event(t_prev_, res);
         start_ = right_;
+    }
+
+    /// A commutation the feeder only BRACKETS: the left limit is the last
+    /// sample (at t_prev), `readings_right` the state at `t_right` > t_prev
+    /// under the new mode (the fixed engine: the end of the first step
+    /// under the new stamp). Reported as an event row with resolution
+    /// `WithinDt`; the record's line is not changed (no right limit at the
+    /// instant is fabricated). Call it before the sample at `t_right`.
+    void event_bracket(Real t_right, std::span<const Real> readings_right) {
+        require_bound(readings_right);
+        if (n_samples_ == 0) throw std::logic_error("recorder: event before any sample");
+        eval_into(readings_right, right_);
+        push_event(t_right, Resolution::WithinDt);
     }
 
     /// End of the run: a requested time at the last sample takes its value
@@ -214,7 +242,7 @@ public:
         if (spec_.keep != RecorderSpec::Keep::Times) return;
         const auto& ts = spec_.sample_times;
         while (n_samples_ > 0 && next_time_ < ts.size() &&
-               (ts[next_time_] == t_prev_ || near(ts[next_time_], t_prev_))) {
+               (ts[next_time_] == t_prev_ || close_to(ts[next_time_], t_prev_))) {
             keep_row(ts[next_time_], start_, false);
             ++next_time_;
         }
@@ -250,6 +278,12 @@ public:
     [[nodiscard]] const std::vector<Real>& event_times() const noexcept { return event_t_; }
     [[nodiscard]] const std::vector<Real>& event_left() const noexcept { return event_left_; }
     [[nodiscard]] const std::vector<Real>& event_right() const noexcept { return event_right_; }
+    /// Per event row: where the right value was taken (`t_right == t` but
+    /// for a bracket) and how (`Resolution`).
+    [[nodiscard]] const std::vector<Real>& event_t_right() const noexcept { return event_t_right_; }
+    [[nodiscard]] const std::vector<std::uint8_t>& event_resolution() const noexcept {
+        return event_resolution_;
+    }
     /// Declared windows: `[w * n_probes() + p]`.
     [[nodiscard]] const std::vector<WindowStat>& windows() const noexcept { return declared_; }
     /// Period windows k = 0, 1, ... (complete or not): `[k * n_probes() + p]`.
@@ -265,11 +299,20 @@ private:
     Real t_prev_ = 0;
     Size n_samples_ = 0;
     std::vector<Real> times_, values_;
-    std::vector<Real> event_t_, event_left_, event_right_;
+    std::vector<Real> event_t_, event_left_, event_right_, event_t_right_;
+    std::vector<std::uint8_t> event_resolution_;
     std::vector<WindowStat> declared_, periodic_;
     std::vector<std::uint8_t> interpolated_;
     Size next_time_ = 0, unreached_ = 0;
     streaming::LiveRing* ring_ = nullptr;
+
+    void push_event(Real t_right, Resolution res) {
+        event_t_.push_back(t_prev_);
+        event_t_right_.push_back(t_right);
+        event_resolution_.push_back(static_cast<std::uint8_t>(res));
+        event_left_.insert(event_left_.end(), left_.begin(), left_.end());
+        event_right_.insert(event_right_.end(), right_.begin(), right_.end());
+    }
 
     void keep_row(Real t, const std::vector<Real>& v, bool interp = false) {
         times_.push_back(t);
@@ -283,12 +326,12 @@ private:
     // waits for the next sample or flush(), which know whether t is an event.
     void emit_times(Real t) {
         const auto& ts = spec_.sample_times;
-        while (next_time_ < ts.size() && ts[next_time_] < t && !near(ts[next_time_], t)) {
+        while (next_time_ < ts.size() && ts[next_time_] < t && !close_to(ts[next_time_], t)) {
             const Real tau = ts[next_time_++];
             if (n_samples_ == 0 || tau < t_prev_) {
-                if (!(n_samples_ > 0 && near(tau, t_prev_))) { ++unreached_; continue; }
+                if (!(n_samples_ > 0 && close_to(tau, t_prev_))) { ++unreached_; continue; }
             }
-            if (tau == t_prev_ || near(tau, t_prev_)) {
+            if (tau == t_prev_ || close_to(tau, t_prev_)) {
                 keep_row(tau, start_, false);
                 continue;
             }
@@ -340,13 +383,13 @@ private:
     // run that ended at 0.3, and a period edge one ulp before an event
     // would start on the left limit. Pieces arrive in time order, so an
     // edge snaps to the first sample near it before any piece uses it.
-    static bool near(Real a, Real b) noexcept {
+    static bool close_to(Real a, Real b) noexcept {
         return std::abs(a - b) <= 4 * std::numeric_limits<Real>::epsilon() *
                                       std::max(std::abs(a), std::abs(b));
     }
     static void snap(Real& edge, Real ta, Real tb) noexcept {
-        if (edge != ta && near(edge, ta)) edge = ta;
-        else if (edge != tb && near(edge, tb)) edge = tb;
+        if (edge != ta && close_to(edge, ta)) edge = ta;
+        else if (edge != tb && close_to(edge, tb)) edge = tb;
     }
 
     // The piece (ta, tb] runs from start_ (at ta) to left_ (at tb).

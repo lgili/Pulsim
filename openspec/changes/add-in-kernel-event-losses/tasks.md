@@ -17,7 +17,7 @@
 - [x] 2.11 No-losses identity: a circuit without `set_device_losses` is bit-identical to the build before this change
 
 ## 3. Other engines, YAML, parts
-- [ ] 3.1 Hook on the commutation callback of `add-unified-event-queue`; `trbdf2` pulse deposition without refining the thermal kink
+- [x] 3.1 Hook on the commutation callback of `add-unified-event-queue`; `trbdf2` pulse deposition without refining the thermal kink (the shared LossTracker at the trbdf2 commit / landing / gate-edge sites and its event limits; DECISIONS 13)
 - [x] 3.2 `dsed` state-jump deposition and conduction heat between events, or the conformance refusal (refusal by name, DECISIONS 8)
 - [ ] 3.3 Engine agreement test: closed-loop mean `T_j` within 0.2 K across `pwl`, `trbdf2`, `dsed`; parity at fixed `Tj` within 1e-6 on the variable-step engines
 - [x] 3.4 Conformance rows (`add-engine-conformance-matrix`): `device_losses[event]`, `device_losses[conduction]` × {pwl, trbdf2, dsed}; no silent cell (pwl honours; trbdf2, dsed, bdf1, auto refuse by name: `test_device_losses_cell`, DECISIONS 8)

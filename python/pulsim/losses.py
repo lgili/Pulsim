@@ -1698,8 +1698,9 @@ def device_loss_summary(
       A branch-form element with ``R_on > 0`` is reported as a conductance
       switch (``g_on = 1/R_on``) and gets the impulsive keys only when
       energy was booked to it. When a device with a kernel loss port has
-      impulsive energy booked to it, that energy is not in the port's
-      junction: ``impulse_in_junction=False`` and a ``RuntimeWarning``.
+      impulsive energy booked to it, the kernel deposited that energy in
+      the port's junction too (``impulse_in_junction=True``; the port's
+      ``device_energy(...)["E_impulse"]``).
     * **shockley_diode** (``add_shockley_diode``) — the current is the
       kernel's exponential law at the recorded ``v_D``
       (``pulsim._diode_state.shockley_current``, the parameters
@@ -2408,21 +2409,14 @@ def device_loss_summary(
                 entry["E_impulse_total"] = E_imp
                 entry["n_impulses"] = int(imp.get("n_impulses", 0))
                 entry["P_impulse_avg"] = E_imp / T if T > 0 else 0.0
-        # A loss port (set_device_losses) heats its junction in the kernel
-        # with the table energies only. shortcut: reported, not wired; the
-        # wiring is the in-kernel event-losses track.
+        # A loss port (set_device_losses) books the impulsive energy of the
+        # records caused by its device into its junction in the kernel
+        # (E_impulse of device_energy; add-in-kernel-event-losses item 3).
         names = getattr(builder, "_device_loss_names", None)
         ported = set(names()) if callable(names) else set()
-        hot = [e for e in summary if e.get("name") in ported and e.get("E_impulse_total")]
-        for entry in hot:
-            entry["impulse_in_junction"] = False
-        if hot:
-            warnings.warn(
-                "device_loss_summary: the impulsive energy (E_impulse_total) of "
-                + ", ".join(repr(e["name"]) for e in hot)
-                + " is not in its loss port's heat_injected or junction temperature "
-                "(known limitation: the kernel's loss port takes the table energies "
-                "only).", RuntimeWarning, stacklevel=2)
+        for entry in summary:
+            if entry.get("name") in ported and entry.get("E_impulse_total"):
+                entry["impulse_in_junction"] = True
         for name, imp in impulses.items():
             warnings.warn(
                 f"device_loss_summary: {imp['E_impulse_total']:.6g} J of impulsive "

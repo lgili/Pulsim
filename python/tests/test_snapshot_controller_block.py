@@ -5,7 +5,7 @@ Version 4 grew four layouts on parallel branches: the PR's 14 fields
 13 / 14 / 15 fields (grid at 12, marker at 13, the step controller's
 ``step::ControllerState`` block at 14), and the event queue's 15 fields
 (marker at 12, tick phase at 13-14). Version 5 is the one layout that
-carries all of them, always written (17 fields): marker 12, grid 13,
+carries all of them, always written (18 fields): marker 12, grid 13,
 controller block 14 (or None), tick_origin 15, tick_next_k 16. Every
 older form still loads; the two 15-field version-4 variants are told
 apart by field 12 (a bool = the marker, a tuple = the grid)."""
@@ -50,7 +50,7 @@ def _grid(s):
 def test_version_5_writes_every_block():
     s = _snap()
     state = s.__getstate__()
-    assert state[:2] == ("SolverSnapshot", 5) and len(state) == 17
+    assert state[:2] == ("SolverSnapshot", 5) and len(state) == 18
     assert state[12] is False and len(state[13]) == 4
     assert state[14] is None and s.controller_state is None
     back = pickle.loads(pickle.dumps(s))

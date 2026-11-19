@@ -13,6 +13,7 @@
 
 #include "pulsim/ir/circuit.hpp"
 #include "pulsim/sim/options.hpp"
+#include "pulsim/record/loop_feed.hpp"
 #include "pulsim/sim/simulation.hpp"
 #include "switch_fn_adapter.hpp"
 
@@ -502,6 +503,15 @@ void init_module(py::module_& m) {
             },
             py::arg("fn"),
             "pwl: runs at every tick instant before the ticks.")
+        .def("set_loop_feed",
+            [](py::object self, py::object feed) {
+                // add-probes-and-recorders 0b.6: the recorders' hooks; the
+                // object holds the feed so the hooks outlive every run
+                auto& f = feed.cast<record::LoopFeed&>();
+                self.attr("_held_feed") = feed;
+                self.cast<sim::Simulation&>().set_hooks(&f.hooks());
+            },
+            py::arg("feed"))
         .def("set_live_ring", &sim::Simulation::set_live_ring,
              py::arg("ring"))
         .def_property_readonly("cache", &sim::Simulation::cache,

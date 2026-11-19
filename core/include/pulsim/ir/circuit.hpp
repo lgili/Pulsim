@@ -704,6 +704,31 @@ private:
             for (const auto& g : mg) { s.idx(g.branch); v.real(g.area); v.real(g.length); }
         }
 
+        // add-in-kernel-event-losses: the loss ports, hashed only when
+        // present (a circuit without one keeps its hashes). Names and the
+        // heat path are structure; temperatures and tables are values.
+        if (const auto& dl = dd.lowered.pool().device_losses(); !dl.empty()) {
+            s.word(0x6c6f7373706f7274ULL);  // "lossport", then the count
+            s.word(dl.size());
+            auto vec = [&v](const std::vector<double>& a) {
+                v.word(a.size());
+                for (const double x : a) v.real(x);
+            };
+            for (const auto& x : dl) {
+                s.str(x.device); s.str(x.junction); s.str(x.heat_node);
+                s.word(static_cast<std::uint64_t>(x.conduction));
+                v.real(x.tj);
+                for (const auto* e : {x.e_on.get(), x.e_off.get()}) {
+                    s.word(e != nullptr);
+                    if (e != nullptr) {
+                        vec(e->v_axis()); vec(e->i_axis()); vec(e->tj_axis()); vec(e->energy());
+                    }
+                }
+                s.word(x.v_on != nullptr);
+                if (x.v_on) { vec(x.v_on->i_axis()); vec(x.v_on->tj_axis()); vec(x.v_on->v_on()); }
+            }
+        }
+
         using AK = builder::CircuitBuilder::AliasKind;
         for (const auto& [name, t] : dd.lowered.aliases()) {
             d->aliases.push_back(Alias{name, t.kind == AK::Node, t.target});

@@ -741,8 +741,8 @@ def device_thermal_summary(
       impulsive re-initialisation energy as a constant offset
       (``P_impulse_avg``, :func:`pulsim.losses.impulse_losses`); its entry
       carries ``form='branch'`` and ``P_impulse_avg``. A kernel loss port
-      (``set_device_losses``) does not carry that energy into its own
-      junction (``device_loss_summary`` warns).
+      (``set_device_losses``) carries that energy into its own junction
+      (``device_energy(...)["E_impulse"]``).
     """
     if not thermal_specs:
         return []

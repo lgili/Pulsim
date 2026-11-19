@@ -52,6 +52,7 @@
 #include "pulsim/pwl/nonlinear_refresh_diode.hpp"
 #include "pulsim/pwl/nonlinear_solve.hpp"
 #include "pulsim/pwl/device_pool.hpp"
+#include "pulsim/record/loop_feed.hpp"
 #include "pulsim/record/recorder.hpp"
 #include "pulsim/solver/run_transient.hpp"
 #include "pulsim/topology/graph.hpp"
@@ -739,6 +740,94 @@ TEST_CASE("fixed engine: a recorder fed in-loop from the step hooks does not all
         }
         CHECK(r2.periods()[10 * 2].avg() == Approx(table.periods()[10 * 2].avg()).epsilon(1e-12));
     }
+}
+
+TEST_CASE("fixed engine: LoopFeed in-loop with store_every: the full run's statistics, no per-step allocation",
+          "[v2][perf][zero_alloc][record]") {
+    // add-probes-and-recorders 0b.6: the recorders fed from StepHooks::step
+    // / on_event see every accepted step whatever store_every keeps, so a
+    // decimated run's windows, periods and event rows equal the full run's
+    // (the same step sequence: a pure observer); statistics-only keeps no row.
+    SwitchedRC f;
+    f.cache->build_lazy(Real{1e-6});
+    solver::SimulationOptions opts;
+    opts.t_start = 0.0;
+    opts.dt = 1e-6;
+    opts.resolution_diagnostics = false;
+    solver::SwitchScheduleFn switch_fn = [](Real t) {
+        SwitchStateMask m(2);
+        const auto k = static_cast<int>(t / 1e-6 + 0.5);
+        m.set(0, (k / 10) % 2 != 0);
+        return m;
+    };
+    auto make_feed = [](record::RecorderSpec::Keep keep) {
+        record::RecorderSpec spec;
+        spec.keep = keep;
+        spec.windows = {{1.05e-4, 1.8995e-3}};
+        spec.period = 2e-5;
+        spec.offset = 0.5e-6;
+        std::vector<record::Recorder> recs;
+        recs.emplace_back(std::vector<record::Probe>{record::Probe::compile("v(vout)"),
+                                                     record::Probe::compile("v(vin) - v(vout)")},
+                          spec);
+        record::StateReading vin, vout;
+        vin.a.cols = {0};
+        vin.a.coef = {1.0};
+        vout.a.cols = {1};
+        vout.a.coef = {1.0};
+        auto feed = std::make_unique<record::LoopFeed>(
+            std::vector<std::string>{"v(vin)", "v(vout)"},
+            std::vector<record::StateReading>{vin, vout}, std::move(recs));
+        feed->reserve(0, 4e-3, 512);
+        feed->attach_own(true);
+        return feed;
+    };
+    auto run = [&](Real t_end, Size store_every, record::LoopFeed& feed) {
+        opts.t_end = t_end;
+        opts.store_every = store_every;
+        const std::size_t b0 = g_new_count.load();
+        auto r = solver::run_transient(*f.cache, f.g, f.pool, opts, switch_fn, {}, false,
+                                       {}, {}, nullptr, {}, nullptr, {}, {}, nullptr,
+                                       &feed.hooks());
+        return std::pair{g_new_count.load() - b0, std::move(r)};
+    };
+    using Keep = record::RecorderSpec::Keep;
+    { auto warm = make_feed(Keep::None); (void)run(2e-3, 1, *warm); }   // lazy masks
+    auto f2 = make_feed(Keep::None), f4 = make_feed(Keep::None);
+    auto [d2, res2] = run(2e-3, 10, *f2);
+    auto [d4, res4] = run(4e-3, 10, *f4);
+    INFO("operator-new: 2000 steps " << d2 << ", 4000 steps " << d4);
+    if (kCountsMeaningful) {
+        CHECK(d4 <= d2 + 2);
+    }
+    const auto& r4 = f4->recorders().front();
+    CHECK(r4.values().capacity() == 0);      // statistics only: no row kept
+    CHECK(r4.times().capacity() == 0);
+    CHECK(r4.event_times().capacity() == 512);   // reserved, never regrown
+    CHECK(res4.times.size() == 401);         // store_every = 10 kept 1 in 10
+    CHECK(f4->n_steps() == 4000);            // the feed saw every step
+    CHECK(f4->n_events() == r4.event_times().size());
+    CHECK(f4->n_events() >= 300);            // the switch toggles every 10 steps
+    for (Size k = 0; k < r4.event_times().size(); ++k) {
+        CHECK(r4.event_resolution()[k] == static_cast<std::uint8_t>(record::Recorder::Resolution::WithinDt));
+        CHECK(r4.event_t_right()[k] == Approx(r4.event_times()[k] + 1e-6).epsilon(1e-9));
+    }
+    // the full run (store_every = 1) gives the same statistics, bit for bit
+    auto full = make_feed(Keep::None);
+    (void)run(4e-3, 1, *full);
+    const auto& rf = full->recorders().front();
+    REQUIRE(rf.windows().size() == r4.windows().size());
+    for (Size p = 0; p < rf.windows().size(); ++p) {
+        CHECK(rf.windows()[p].integral == r4.windows()[p].integral);
+        CHECK(rf.windows()[p].sq3 == r4.windows()[p].sq3);
+        CHECK(rf.windows()[p].max == r4.windows()[p].max);
+    }
+    REQUIRE(rf.periods().size() == r4.periods().size());
+    for (Size k = 0; k < rf.periods().size(); ++k) {
+        CHECK(rf.periods()[k].integral == r4.periods()[k].integral);
+    }
+    CHECK(rf.event_times() == r4.event_times());
+    CHECK(rf.event_right() == r4.event_right());
 }
 
 TEST_CASE("fixed engine: a tick instant within 1e-9*dt of t_end does not fire",

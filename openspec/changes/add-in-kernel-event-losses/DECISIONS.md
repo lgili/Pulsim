@@ -141,11 +141,83 @@ and pss: dt honoured, rtol / atol refused; trbdf2 pss: rtol honoured,
 integrator refused on pss and transient). Unknown keywords were already
 a TypeError from simulate.
 
+## 13. trbdf2: one tracker, the integrator's quadrature, the engine's limits
+
+The trbdf2 engine runs the same `LossTracker` as pwl (decision 8's plan):
+`advance(h)` at each attempt's stage-1 solve, `inject` at the end of
+`accumulate_sources` (every solve: stages, probes, landings, records),
+`accept_step` at the three commit sites, `event` beside `hooks->event` at
+the two sites that report left / right limits (gate-edge settle, diode
+landing). Conduction per committed step uses the integrator's weights:
+TR-BDF2 `(w, w, d)` at `(0, γh, h)`, `w = 1/(2(2-γ))`; SDIRK(2,2)
+`(1-γs, γs)` at `(γs h, h)`; the trapezoid on landings and committed
+probes. The event is read by `thermal::commutation_point` on the two
+limits, with the same table call as pwl; the first step under the right
+side starts its quadrature from the right limit, so the flip is not read
+again; a flip no event reported falls back to the step ends (pwl's rule).
+The heat owed is consumed in proportion to the committed length (a
+landing shorter than the attempt keeps the rest, rescaled by the next
+`advance`). pwl's `accept()` is unchanged (its numbers byte-identical).
+Reviewer (fresh context): an event re-reported at a coincident gate edge
+after a landing (stale left mask) was booked twice — skipped now; a
+pending event whose right side was never committed is taken back
+(`unbook_`).
+
+Truth (closed-form RL chopper, `test_device_losses_variable_step.py`,
+40 commutations per device, E = k·v·i tables), relative error:
+
+| run | S1 event | S1 cond | D1 event | D1 cond |
+|---|---|---|---|---|
+| pwl dt 1e-7 | -1.29e-4 | -1.82e-4 | -2.06e-4 | -2.37e-4 |
+| pwl dt 2.5e-8 | -3.21e-5 | -4.52e-5 | -5.17e-5 | -5.93e-5 |
+| trbdf2 default (h_max = span/1000) | +1.50e-6 | +7.68e-6 | -7.5e-8 | +6.66e-5 |
+| trbdf2 rtol 1e-6 | +1.27e-6 | +5.93e-6 | -3.0e-7 | +6.63e-5 |
+| trbdf2 rtol 1e-6, dt (h_max) 2.5e-7 | | +4.73e-7 | | +4.12e-6 |
+
+pwl is first order at the edges (ratio 4.0 per dt/4); trbdf2's conduction
+error is set by h_max, not rtol, here (second order: 16× per h_max/4).
+
+## 14. Impulsive energy is a loss of the element that carried it
+
+`impulses(result.reinit_records)` after each `reinit.record` (pwl and
+trbdf2) books `dW` to the device named by `cause` (`E_impulse`) and to its
+junction. The step that carried it conducts its end power only (as
+`device_loss_summary` reads the pulse step): its quadrature read the
+impulse's mean current against the voltage it collapsed (the capacitor
+loop's port read -38.6 µJ, the junction cooled). An E_on table AND an
+impulse on one commutation are two categories (table: not drawn from the
+circuit; impulse: drawn); a table measured with the device's own Coss
+would count that discharge twice if the circuit also models Coss as an
+ideal capacitor — documented, not detected. The summary's and simulate()'s
+warnings are gone (`impulse_in_junction=True`).
+
+## 15. Resume carries the tracker (pickle field 17)
+
+`SolverSnapshot::loss_state` = `LossTracker::save()`: heat owed (queue and
+the current power), ledgers (Neumaier pairs), each device's last reading,
+its pending event and its events. A resume restores it in place of
+`begin()`, so the resumed result's records are the uninterrupted run's.
+Pickle version 5 gains field 17 (18 fields); 17-field tuples still load.
+Loss ports are hashed in the circuit IR when present (structure: names,
+nodes, conduction kind, which tables; values: Tj and the table arrays).
+
 ## Not done / known gaps
 
-Task 3.1-3.3 (variable-step hooks), 4.x (electrical feedback), 5.1
-(summaries reading kernel records), 6.2 (tutorial). A resumed run drops
-the step in flight; the IR and content hash omit loss ports; a device
-that flips twice inside one split step records no event; a cancelled
-run (`analysis::Cancelled`) carries no records (the exception has no
-result).
+The exact engine (`dsed` / `exact`) still refuses a loss port (its exact
+quadratic-form conduction integral and the event booking from its exact
+limits are not wired; `scheduler.hpp` untouched). Task 3.3's dsed column,
+4.x (electrical feedback), 5.1 (summaries reading kernel records), 6.2
+(tutorial). A device that flips twice inside one pwl split step records no
+event; a cancelled run (`analysis::Cancelled`) carries no records.
+
+Hand-off for the exact engine (not started): the scheduler reports only
+`hook_accepted_(t0, t, x_left, mask)` (`dsed/scheduler.hpp:525`, `:713`);
+the right limit is the post-`fire_event_` state there. The smallest entry
+point is an `on_event`-style call beside `fire_event_` with
+(t, x_pre_event, mask_before, x, current_mask). A PWL device's conduction
+on an LTI segment is `g·∫(w·x)² − g·V_f·∫w·x`, which
+`period_integrals.hpp` already computes exactly for linear observables
+(`PeriodObservable`, the augmented exponential); the heat input needs a
+piecewise-constant source the propagator integrates exactly.
+Not measured: a hard-switched half-bridge with output capacitances (the
+requested energy-balance case); the capacitor loop is the balance test.
