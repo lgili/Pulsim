@@ -58,9 +58,19 @@ def test_fixed_engine_finite_difference_is_wrong():
     """Measured (proposal): -9.3, -9.5, -12.9, +2.0, -0.46 at relative
     steps 1e-6 .. 1e-2. Pinned loosely: some step is off by more than
     100 %, and the errors change sign with the step."""
-    err = _fd_errors("pwl", (1e-5, 1e-4, 1e-3, 1e-2), dt=ref.T / 100)
+    # legacy subject: the restart-less fixed step (commutations on the grid)
+    err = _fd_errors("pwl", (1e-5, 1e-4, 1e-3, 1e-2), dt=ref.T / 100,
+                     discontinuity_restart=False)
     assert np.abs(err).max() > 1.0
     assert err.min() < 0 < err.max() or np.abs(err).min() > 0.1
+
+
+def test_fixed_engine_finite_difference_with_the_restart_rule():
+    """Since the release the restart rule lands the diode commutation off
+    the grid: measured -1.7e-5, -1.6e-5, +1.5e-5 at relative steps
+    1e-5 .. 1e-3 (3.1e-3 at 1e-2: the central difference's truncation)."""
+    err = _fd_errors("pwl", (1e-5, 1e-4, 1e-3), dt=ref.T / 100)
+    assert np.abs(err).max() < 1e-4
 
 
 def test_trbdf2_finite_difference_is_close_but_not_exact():
