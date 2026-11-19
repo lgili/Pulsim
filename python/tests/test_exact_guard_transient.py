@@ -67,6 +67,29 @@ def test_a_g_off_zero_freewheel_diode_takes_the_inductor_current(mode, series):
         assert i[k] == pytest.approx(_i_closed_form(t[k], series), rel=1e-7, abs=1e-12)
 
 
+def test_a_trial_cut_set_does_not_annihilate_the_freewheel_current():
+    # At gate-off the settle's first trial is the all-OFF cut-set (i_L -> 0); the
+    # re-settle may then turn D ON on that projection's 1e-18 A residue, a sign
+    # left to rounding (Windows CI at R = 10; here R a few ulp off 10: 6 of these 12
+    # failed a gate-off on macOS). The settled mode kept the trial's i_L = 0, no record.
+    for m in (1 - 2**-53, 1 + 1e-14, 1 - 1e-14, 1 + 3e-15, 1 - 3e-15, 1 + 7e-15,
+              1 - 7e-15, 1 + 2e-14, 1 - 2e-14, 1 + 5e-14, 1 - 5e-14, 1 + 1e-13):
+        b = p.CircuitBuilder()
+        b.add_voltage_source("V", "vin", "gnd", 10.0)
+        b.add_switch("S", "vin", "a", 1e6, 0.0)
+        b.add_resistor("R", "a", "b", 10.0 * m)
+        b.add_inductor("L", "b", "gnd", 1e-3)
+        b.add_diode("D", "gnd", "a", 1e3, 0.0, 0.0)
+        fn = p.make_pwm_switch_fn(1e3, 0.5, b.switch_index_of("S"), b.graph.num_switches)
+        r = p.simulate(b, 3e-3, engine="exact", dt=1e-6, switch_fn=fn)
+        assert len(r.reinit_records) == 0
+        t, i = np.asarray(r.times), np.asarray(r.i("L"))
+        for tq in (9e-4, 1.9e-3, 2.9e-3):   # 0.4 ms after each gate-off
+            k = int(np.argmin(np.abs(t - tq)))
+            # R moves the closed form by ~1e-13 relative: far inside rel=1e-7
+            assert i[k] == pytest.approx(_i_closed_form(t[k], None), rel=1e-7), (m, tq)
+
+
 def test_the_forward_converter_rectifier_follows_the_transformer(monkeypatch):
     monkeypatch.syspath_prepend(str(ROOT / "benchmarks" / "tools"))
     pytest.importorskip("yaml")
