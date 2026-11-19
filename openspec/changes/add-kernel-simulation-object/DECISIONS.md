@@ -214,3 +214,66 @@
     per simulate() call (`.scratch/opcount.py`, 6-branch buck): pwl 2462
     vs 2398 at 656b894f (+64, above the DECISIONS 13 gate of "not above
     base"; not investigated), trbdf2 3028 vs 3159.
+
+19. **The +64 bytecodes on pwl (18) were the object route's own cost, not
+    a merge item; removed, not re-based.** Counted per line with
+    `.scratch/opcount.py` (sys.settrace opcode events; 6-branch buck) on
+    656b894f and 3835a4ac and diffed by line text: the base's
+    `_validate_engine_kwargs` work and option attribute writes were gone,
+    but the object route added `_opt_values`, two `refused()` calls (the
+    second inside `_trbdf2_blockers`, which built its own 13-entry dict),
+    the `_run_on_simulation` setter probes and a 5-clause `_via_sim`
+    boolean. Fixes, all behaviour-free: `_trbdf2_blockers` reads
+    simulate()'s `_opt_values` through the pseudo-engine row
+    `_ro.TRBDF2_ROUTE` (the 13 routing rows only: `mode_selection` on a
+    dt-less 'auto' run stays a refusal, not a route; tested);
+    `refused()` skips its comprehension when no non-falsy row is set;
+    `_run_on_simulation` returns before the setter probes when `kw` has
+    only its three base keys; `_via_sim` is an `if`; the pwl integrator
+    check tests the (usually None) integrator first. Result: pwl 2394
+    (base 2398), trbdf2 3012 (base 3159), after the hooks change below.
+    The count stays a local tool: it depends on the interpreter version,
+    so no CI test asserts it (STATE.md CI lessons).
+
+20. **`mmc_arms` and `on_cache` run on the object: one cache, numbering
+    checked once.** The object is built first for a hooked run (on the
+    same `RunOptions`; mmc's `max_dt_halvings = 0` is set before them),
+    and `builder` / `cache` become `Simulation.builder` /
+    `Simulation.cache`, so the MMC driver's and the hook's
+    `refactor_parametric` reach the pool the run solves. The C++ chain
+    fast path keeps that cache and builder when a hook took it (a hook
+    that returns None leaves the chain observer in place; tested bit for
+    bit against the hook-free run). The hooks resolve ids on the CALLER's
+    builder: `_check_run_numbering` compares node count, names and the
+    caller's branch records + names against the run's builder (ties may
+    only append) and refuses by keyword otherwise; a `Circuit` caller is
+    its own lowering. `on_cache` receives `_OnCacheView`: the run's cache
+    with `build` / `build_lazy` refused by name (they re-key every factor
+    on another dt); `refactor_parametric` is kind-checked in C++. What
+    cannot be made safe and is not: a hook that writes through the
+    caller's builder (`b.pool.update_*`) changes a builder no run reads,
+    on either route since add-immutable-circuit-ir; documented in the
+    view's docstring, not detectable without a pool fingerprint. Options
+    are now validated before the hooks run (a refused option no longer
+    calls the user's hook first). Oracle: every simulate() result of
+    test_mmc_thevenin, test_mmc_arm_builder,
+    test_bidirectional_electrothermal and the MMC example (26) is
+    byte-identical to 656b894f (`.scratch/hooks_bitid.py`); golden /
+    stateful / engine / option compares identical.
+    Still off the object: `sweep()`'s recipe replay (`_PWL_RECIPE`) and
+    the exact engine (16).
+
+21. **Two behaviour notes of 19/20 (from the fresh-context review).**
+    (a) simulate()'s broad handlers around `builder.initial_state()` and
+    `state_var_names()` now catch `AttributeError` only, and the one
+    around `_switch_census` `(AttributeError, TypeError)`: they existed
+    for builder stand-ins (test doubles, older binaries). A real builder
+    raising anything else there is a kernel error and now reaches the
+    caller instead of being swallowed (the ICs one would have run the
+    circuit from zero). Only the `_run_circuit is None` stand-in path can
+    see the difference; no in-repo caller does.
+    (b) On the paths that still build their own cache (`_kernel_run`,
+    `sweep()`'s replay, stand-ins), the cache is now built after the mmc
+    refusals and the count checks (it used to be built before them): a
+    run with a bad option AND a circuit whose cache cannot be built now
+    reports the option. The view also refuses `share_symbolic`.

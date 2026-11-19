@@ -2036,13 +2036,14 @@ class _OnCacheView:
     """What simulate(on_cache=hook) hands the hook: the run's own cache
     (its refactors reach the pool the run solves; refactor_parametric
     checks the branch's kind), minus the calls that would desynchronise it
-    from the run: build / build_lazy re-key every factor on another dt.
+    from the run: build / build_lazy re-key every factor on another dt,
+    share_symbolic swaps its symbolic analysis.
     Writes through the caller's builder never reach a run (the run solves
     its own copy, add-immutable-circuit-ir): resolve ids there, write here.
     """
 
     __slots__ = ("_cache",)
-    _REFUSED = frozenset(("build", "build_lazy"))
+    _REFUSED = frozenset(("build", "build_lazy", "share_symbolic"))
 
     def __init__(self, cache):
         self._cache = cache
@@ -2053,7 +2054,9 @@ class _OnCacheView:
                 f"simulate(on_cache=...): the hook called cache.{name}(), "
                 "which would rebuild the run's factors on another step "
                 "and desynchronise them from the run; refused")
-        return getattr(self._cache, name)
+        # (object.__getattribute__: an unset slot, as in copy.copy, is an
+        # AttributeError, not a recursion)
+        return getattr(object.__getattribute__(self, "_cache"), name)
 
 
 def _check_run_numbering(caller, run, keyword):
@@ -3526,7 +3529,7 @@ def simulate(
         try:
             _, _n_diode, _controlled = _switch_census(
                 builder.graph, builder.pool)
-        except AttributeError:  # test doubles w/o pool
+        except (AttributeError, TypeError):  # test doubles w/o pool
             _controlled = []
         if _controlled:
             import warnings
