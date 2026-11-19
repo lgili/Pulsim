@@ -159,7 +159,7 @@ public:
         // weight of the constraint residual K·x − k.
         struct BoundRow {
             std::vector<Index> supp;
-            Vector wg, mu;
+            Vector wg, mu, cp;
             Real cpd = Real{0};
         };
         mutable std::map<std::pair<Index, Index>, BoundRow> bound_rows;
@@ -384,7 +384,14 @@ public:
             const Real m = e.state_mass.size() == ns ? e.state_mass[static_cast<Size>(j)] : Real{1};
             dx += m * x[j] * x[j];
         }
-        out[1] = br.cpd * std::sqrt(dx);
+        // shortcut: componentwise Σ|c_P,j||x_j| (the pushed tip's form, on the
+        // projected row), not the normwise ‖c_P·D⁻¹‖‖D·x‖ the stated e strictly
+        // supports: that one reads |c| ≈ 1/(2 g_off) on a phase whose diodes are
+        // both OFF (i_L ≈ 2e-7 A, ‖D·x‖ ≈ 8) as e·2.6e11 = 9 V and hid a 0.45 V
+        // forward bias (ten / five banks, session 21). Upgrade when the propagator
+        // states a per-component error.
+        out[1] = br.cp.size() == x.size() ? br.cp.cwiseAbs().dot(x.cwiseAbs())
+                                          : br.cpd * std::sqrt(dx);
         if (br.mu.size() > 0) {
             constexpr Real u = std::numeric_limits<Real>::epsilon() / Real{2};
             const Real g = static_cast<Real>(x.size() + 1) * u;
@@ -467,6 +474,7 @@ public:
             q += cp[j] * cp[j] / m;
         }
         br.cpd = std::sqrt(q);
+        br.cp = cp;
         return e.bound_rows.emplace(key, std::move(br)).first->second;
     }
 
