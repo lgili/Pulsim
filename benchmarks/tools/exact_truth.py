@@ -1883,7 +1883,12 @@ def truth(path, form="conductance", dps=(30, 60), out_dir=TRUTH_DIR, write=True,
         except Unsupported as ex:
             return dict(rec, supported=False, why=str(ex))
         except RuntimeError as ex:
+            if dps[0] < 45:
+                # the order-0 sign test sits at 10^-(dps/2) of the terms' scale: a
+                # g_off spike (1e7 V on a 0.05 V signal) needs more digits
+                return truth(path, form, tuple(d + 15 for d in dps), out_dir, write, verbose, store)
             return dict(rec, supported=False, why=f"mode selection failed: {str(ex)[:200]}")
+    rec["dps"] = list(dps)
     rec["wall_s"] = round(time.time() - t0, 1)
     lo, hi = sols[dps[0]], sols[dps[-1]]
     mp.mp.dps = dps[-1]
@@ -2035,7 +2040,7 @@ def report(out=REPORT, truth_dir=TRUTH_DIR, dps=50):
           "the gate measure (`metrics.err_rms`) of the EXACT waveform sampled on the netlist's",
           "uniform dt grid (no event samples) against the truth: what a perfect fixed-step trace",
           "scores; a pwl cell near it disagrees through the measure, not the engine. `prec`: max",
-          "difference of the 30- and 60-digit runs on the netlist grid, relative to the column's",
+          "difference of the 30- and 60-digit runs (45 / 90 where 30 cannot select the mode) on the netlist grid, relative to the column's",
           "peak. `modes`: events at which more than one mode is consistent (followed: the one",
           "with the fewest flips); `weak`: events where only a mode with a device pinned at its",
           "boundary (v = 0 identically) is consistent.", "",
