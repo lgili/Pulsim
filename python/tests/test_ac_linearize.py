@@ -151,10 +151,10 @@ def test_branch_form_switch_and_shockley_diode_in_one_sweep():
     # and the Newton linearisation at the DC point (batch 14l) together: RC
     # through a CLOSED IDEAL switch (R_on = 0, its own current row) into a
     # Shockley diode whose exponential term carries exactly 1 A at the bias
-    I_S, n, Gm, R, C, I = 1e-12, 1.0, 1e-12, 1.0, 1e-3, 1.0
-    v0 = n * VT * np.log1p(I / I_S)              # I_S·(e^{v0/nV_T} − 1) = I
+    I_S, n, Gm, R, C, I_b = 1e-12, 1.0, 1e-12, 1.0, 1e-3, 1.0
+    v0 = n * VT * np.log1p(I_b / I_S)              # I_S·(e^{v0/nV_T} − 1) = I_b
     b = p.CircuitBuilder()
-    b.add_voltage_source("V", "in", "gnd", v0 + R * (I + v0 * Gm))
+    b.add_voltage_source("V", "in", "gnd", v0 + R * (I_b + v0 * Gm))
     b.add_switch("S", "in", "m", form="branch", R_on=0.0, g_off=1e-9)
     b.add_resistor("R", "m", "a", R)
     b.add_shockley_diode("D", "a", "gnd", I_S=I_S, n=n, V_T=VT, G_min=Gm)
@@ -163,7 +163,7 @@ def test_branch_form_switch_and_shockley_diode_in_one_sweep():
     m.set(b.switch_index_of("S"), True)
     H = p.run_mna_sweep(b, output_idx=b.node_id_of("a"), freqs=F,
                         v_in_branch_id=b.branch_id_of("V"), mask=m).H
-    g = 1.0 / (n * VT / (I + I_S)) + Gm          # small-signal conductance
+    g = 1.0 / (n * VT / (I_b + I_S)) + Gm          # small-signal conductance
     exact = 1 / (1 + R * (g + 1j * W * C))       # 1/(1+jωRC) loaded by g
     assert _rel(H, exact) < 1e-9, (H, exact, _rel(H, exact))
     # the open switch leaves the diode alone at its zero-bias point
