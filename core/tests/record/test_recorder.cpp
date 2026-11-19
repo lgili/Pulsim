@@ -537,8 +537,11 @@ TEST_CASE("recorder: period windows equal the same windows declared (fast path o
                 INFO("offset " << off << " window " << k << " probe " << p);
                 CHECK(x.t0 == y.t0);
                 CHECK(x.t1 == y.t1);
-                CHECK(x.integral == Catch::Approx(y.integral).epsilon(1e-12).margin(1e-300));
-                CHECK(x.sq3 == Catch::Approx(y.sq3).epsilon(1e-12).margin(1e-300));
+                // margin: 1e-12 of the window's scale (|v| <= 4 over T; sq3 = 3 int v^2), not of a
+                // near-zero integral of the zero-mean probe (no 1e-12 bound on a
+                // cancelled sum across two summation orders: CI lesson)
+                CHECK(x.integral == Catch::Approx(y.integral).epsilon(1e-12).margin(1e-12 * 4 * T));
+                CHECK(x.sq3 == Catch::Approx(y.sq3).epsilon(1e-12).margin(1e-12 * 48 * T));
                 CHECK(x.min == Catch::Approx(y.min).epsilon(1e-12).margin(1e-300));
                 CHECK(x.max == Catch::Approx(y.max).epsilon(1e-12).margin(1e-300));
                 CHECK((x.t_min == y.t_min || (std::isnan(x.t_min) && std::isnan(y.t_min))));
