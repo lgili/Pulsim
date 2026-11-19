@@ -408,3 +408,27 @@ def test_stream_delivers_the_recorders_kept_rows(eng):
     res2 = p.simulate(_rectifier(), t_end=10e-3, recorders=[rec], **RUNS[eng])
     t2, _ = st.get_new_samples()
     np.testing.assert_array_equal(t2, res2.recorded["bus"].times)
+
+
+@pytest.mark.parametrize("eng", ["pwl", "trbdf2"])
+def test_stream_after_a_dropped_event_report_keeps_the_loop_rows(eng, monkeypatch):
+    # An event report the loop feed could not place (n_dropped > 0) sends
+    # the record to the stored-array pass; the rows the loop already pushed
+    # into the stream stay its rows, pushed once (no second pass into a new
+    # ring). No real run drops a report here, so the feed reports one.
+    monkeypatch.setattr(p._pulsim._LoopFeed, "n_dropped", property(lambda self: 1))
+    st = p.NativeLiveStream(capacity=200_000, decimate=1)
+    rec = p.Recorder("bus", ["v(dp,dn)"], keep="every", stream=st)
+    res = p.simulate(_rectifier(), t_end=10e-3, recorders=[rec], **RUNS[eng])
+    assert res.recorder_feed["mode"] == "stored-arrays", res.recorder_feed
+    assert "could not be placed" in res.recorder_feed["why"]
+    r = res.recorded["bus"]
+    assert r.feeding == "stored-arrays"
+    t_s, x_s = st.get_new_samples()
+    # what the loop pushed while the engine ran, once: the start and one row
+    # per accepted step (this run has no event inside a step), which are
+    # the stored samples the fallback record reads
+    np.testing.assert_array_equal(t_s, np.asarray(res.times))
+    np.testing.assert_allclose(x_s[:, 0], r["v(dp,dn)"], rtol=1e-12, atol=1e-12)
+    again = st.get_new_samples()
+    assert again is None or again[0].size == 0

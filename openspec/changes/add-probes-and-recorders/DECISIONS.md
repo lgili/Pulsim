@@ -562,6 +562,152 @@ counts (the caller sizes it; the in-loop test covers None and Decimate).
   compare, not by a committed test); time_average sums step by step
   (CHANGELOG note).
 
+## 24. Cost of a recorder fed in the loop, second pass (0b.10, slice 6, 2026-11-19)
+
+- **Method.** As 22: instructions retired, min of 3, A/B interleaved
+  against the merged-base build (b0f7822c's extension with this tree's
+  Python). The C++ side alone: the buck through `sim::Simulation`
+  (`.scratch/bench/engine_bench.cpp`) with ablations (an empty hooks object,
+  a do-nothing step sink, a do-nothing batch sink, pieces of the feed
+  compiled out); the feed alone: a real run's hook calls recorded and
+  replayed (`replay_b.cpp`). Not committed.
+- **Where the instructions went, at the merged base** (C++ only, per
+  accepted step, one probe keep='every'): pwl +413 = loop side ~124 (the
+  `std::function` step hop, `device_state` / `accepted` tests, the start
+  copy) + feed ~290 (recorder row ~110, the jump test and state copy ~80,
+  readings and branches ~100); trbdf2 +501 = loop side ~110 + the event
+  cycle: TR-BDF2 reports nearly every event (799 of 827) BEFORE the hook
+  step that covers it (`t_last < t_ev < t`), so every third hook step went
+  through the general path (~1.3k instructions each with the event row:
+  `vector::insert` of a few values, `require_bound` three times, the
+  out-of-line `eval`, the Eigen state assign).
+- **Changes.**
+  1. `StepHooks` step sink (`set_step_sink`): one plain function pointer,
+     told when the step is contiguous (starts bit for bit where the previous
+     call ended: `x_start` / `mask_start` nullptr), and optionally batched:
+     contiguous steps under one mask are copied into a 128-row buffer sized
+     at `start()` and handed over at a mask change, an event, a non-
+     contiguous step, when full and at `flush_steps()` (both loops call it
+     after `run_twin`). The common append is inlined into the loop, the
+     rest (`step_other`) out of line. `on_step` functions keep their
+     signature and run first.
+  2. Loops: run-invariant `hook_ds` / `hook_acc`; a `hook_contig` flag
+     (pwl: every step but the first; TR-BDF2: unless an attempt in between
+     fired no hook, `t == t_start`); TR-BDF2 copies the start only for an
+     `on_step` function or a non-contiguous step.
+  3. `LoopFeed`: the sink takes contiguous steps without a jump test
+     (`xs == nullptr`) and, on the fixed engine with only unit / linear
+     readings, batches (readings of a block, then `Recorder::sample_block`:
+     columns written per probe, the line moved from the last row). Not on
+     TR-BDF2: a batch of ~3 rows cost more than the calls it saved
+     (measured: +78 per step). The general path gained the two TR-BDF2
+     event steps as straight-line branches (the same operations, without
+     the general path's tests).
+  4. `Recorder`: `sample_row(t, const Real*)` (the feed's bound row),
+     statistics and keep modes other than every / none out of line
+     (`sample_slow`), `event()` through the plain-probe table,
+     `push_event` by `push_back` (a third of `insert`'s cost for a few
+     values), `save_size()` so `LoopFeed::save` reserves once.
+- **Identity.** Recorder outputs on the 12 cases bit-identical to the
+  merged base (kept rows, event rows, windows, periods, counters, the
+  snapshot's recorder state); recorder on vs off: the same step sequence
+  on all 12. Goldens 21/21, stateful 40/40, engines 35/35, steps 28/28,
+  pwl_identity 390/390, trbdf2_identity 371/371 identical. No recorder:
+  buck pwl 3097.0 -> 3102.0 (+0.16 %), vsi pwl 4762.3 -> 4777.7
+  (+0.32 %), buck trbdf2 11055.5 -> 11045.8 (-0.09 %), bridge trbdf2
+  12840.1 -> 12797.3 (-0.33 %).
+- **Cost after** (Python level, `simulate(recorders=...)`, per accepted
+  step; base = no recorder 3102 pwl / 11046 trbdf2):
+
+  | buck | merged base | this slice |
+  |---|---|---|
+  | pwl, 1 probe keep='every' | 3573 (+15.4 %) | 3362 (+8.5 %) |
+  | pwl, 1 probe period 1e-4 | 3587 (+15.9 %) | 3433 (+10.7 %) |
+  | pwl, 16 probes keep='every' | 4626 | 4161 |
+  | pwl keep='every', 4x length | +454 (+14.8 %) | +225 (+7.3 %) |
+  | trbdf2, 1 probe keep='every' | 11760 (+6.4 %) | 11622 (+5.2 %) |
+  | trbdf2, 1 probe period 1e-4 | 11798 (+6.8 %) | 11691 (+5.8 %) |
+  | trbdf2, 16 probes keep='every' | 14228 | 13904 |
+  | trbdf2 keep='every', 4x length | +591 (+5.9 %) | +437 (+4.4 %) |
+
+  C++ alone (engine_bench): pwl +413 -> +206, trbdf2 +501 -> +370. Each
+  extra plain probe at 4x: pwl 41, trbdf2 80.
+- **Targets still NOT met** (+5 % pwl, +3 % trbdf2). What remains, one
+  probe keep='every':
+  - pwl (+206 C++ per step, + ~20 Python per kept row): the loop side
+    ~145 (ablations: the inlined batch append 87 — a 7-double row copy,
+    the mask compare, the buffer bookkeeping; the event test's mask
+    compare 32 — this existed before; the rest layout), the feed and the
+    recorder ~60 per row (readings, column writes, the 447 bracket rows
+    through the general path ~22). To go further the loop would have to
+    stop copying the state per step (the recorder would read the engine's
+    own stored arrays after the run, i.e. the stored pass), or skip the
+    mask comparisons that decide the event rows.
+  - trbdf2 (+370 per engine step): the loop side 112 (the sink call per
+    hook step, the event `std::function`, the engine's own bookkeeping),
+    the sink step ~150 per fast hook step (register saves of the sink
+    function, mask compare, readings, the row push, the state copy), the
+    event cycle ~330 per event (one event per three hook steps: report,
+    the left sample, the event row, the next sample); Python ~600k per
+    run (~180 per step at 3299 steps: `_checked` + `Recording` 249k,
+    `attach_loop_feed` 239k, `feed.result` 138k, `_refuse` 47k,
+    `_spec_signature` 41k).
+- **Function sizes** (arm64 instructions, the buck bench binary):
+  `run_transient` 10807 -> 10844, `run_transient_trbdf2` 26789 -> 27337
+  (the inlined batch append at each `tw_on_step` instantiation).
+- **Event right sides at diode landings (R2 reviewer item).** A PWL
+  diode's right side is its law under the settled mode at the settled
+  state: proved against the analytic value — a bridge rectifier on
+  TR-BDF2 with zero off conductance reads exactly 0.0 on the right of
+  every turn-off (reverse current ~1e-6 A on the left) and never reverse
+  current on the right (`test_diode_right_side_is_exactly_zero_after_turn_off`).
+  No code change was needed for it. Left recorded, with the missing piece
+  named:
+  - a CAPACITOR's right current at a landing is the settled probe's
+    companion current `g_eq(h_probe)(v_r - v_l) - i_l`; with h_probe at
+    femtoseconds it carries `2C·eps·|v|/h_probe` of roundoff (seen 1e-8 A
+    of KCL residual on the rectifier, scale 0.5 A). The exact right current
+    is the KCL of the right-side mode at fixed capacitor voltages and
+    inductor currents: a consistent-current solve at the event instant
+    (capacitors as voltage sources, inductors as current sources) that the
+    engine does not perform; the feed has no node incidence to do it
+    itself. Changing the value would also change the 12-case recorder set
+    (buck i(C)), which this slice holds bit-identical.
+  - Coss (and every stateful device's) right side uses the left committed
+    rate: the stateful histories are committed at step ends, not at the
+    post-event probe, so a Coss charge step's closed form (i = C(v)·dv/dt
+    of the right mode) has no committed rate to read at the instant. The
+    missing piece is the device-state law evaluated at the probe (a
+    `device_state` call after the settle with the probe's step), on the
+    stepper side.
+- **Committed tests for the fast step (reviewer item of 23).**
+  `LoopFeed: the fast step through a jump, a mask change and a restore
+  mid-window equals the recorder fed by hand` (both engines' conventions:
+  the fixed engine's batches and bracket, TR-BDF2's sink step and settled
+  event inside the next hook step; five jumps, eight mode changes, a
+  save / restore into a new feed at t = 1.16 inside the period window
+  [1.0, 1.25]); and on the Python side, the stream after a dropped event
+  report (the feed's `n_dropped` forced to 1: the record falls back to the
+  stored pass and the stream holds the loop's rows once,
+  `test_stream_after_a_dropped_event_report_keeps_the_loop_rows`). No real
+  run in the suite drops a report, so it is forced.
+
+- **Fresh-context review** (opus, read-only, diff from 447ee802): the
+  no-recorder path byte-identical by construction (every new local is read
+  only inside a hook call; `flush_steps` with nothing held returns at
+  once); no view read after the state moved (pwl: `x_prev = x` only at the
+  step's begin and `mask_start` set right after the hook; TR-BDF2: every
+  write of `x` / `x_mask` is followed by `tw_on_step` in the same attempt,
+  and an accepted attempt with `t == t_start` clears the flag); no recorded
+  value changed (each fast branch traced against the general path).
+  Fixed: a comment said a run that throws drops its held rows (they stay
+  held until the next `start()`); `set_step_sink` now flushes rows held
+  for the sink it replaces (a null batch function could be called);
+  a recorder that streams turns batching off (its rows reached the ring up
+  to 128 steps late). Left: `LoopFeed::stream_to` after `attach` keeps
+  batching (the C++ route; correct, rows later); the `save_size` check is
+  an `assert` (gone in release; covered by a debug run of four keep modes).
+
 ## Requests to the stepper track
 
 - **R1.** One per-accepted-step call for all engines, after commit:
@@ -685,3 +831,24 @@ Slice 2 (this branch, after 2b18f11a):
 - Verified on this tip: pytest full, `-m reference`, REFERENCE_STATUS.md
   unchanged, ruff, openspec --strict, stubs --check; record + perf + step
   targets on Eigen 3.4.0 (record + perf on Eigen 5). Full ctest NOT run.
+
+
+## Hand-off (slice 6, 2026-11-19)
+
+- Done: 0b.10 second pass (24: step sink, batches on the fixed engine, the
+  TR-BDF2 event steps straight-line; targets still NOT met: keep='every'
+  +8.5 % pwl, +5.2 % trbdf2); the diode right side proved exact against
+  the analytic 0 after turn-off; committed tests for the fast step (jump,
+  mask change, restore mid-window, both engines) and for the stream after
+  a dropped event report (forced).
+- Loop-file hunks: `run_transient.hpp` (run-invariant `hook_ds` /
+  `hook_acc`, `hook_contig` passed to `hooks->step`, `flush_steps` after
+  `run_twin`); `trbdf2_transient.hpp` (`hook_ds` hoisted, `hook_fns` /
+  `hook_contig` in `run_twin`, `flush_steps` after it).
+- Open: 0b.10 remainder (24: the per-step state copy and mask compares in
+  the loop, the sink call, ~600k instructions of Python per run on
+  trbdf2); the capacitor right side at a diode landing (a consistent-
+  current solve at the event instant) and the Coss right side (the
+  device-state law at the post-event probe) — both stepper-side;
+  `pl_integral*` delegation; R5 (exact engine in the loop).
+- Full ctest NOT run on this tip.

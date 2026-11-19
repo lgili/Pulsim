@@ -631,8 +631,9 @@ inline SimulationResult run_transient_trbdf2(
     // #31 device_state once per committed time: every commit site fires it,
     // and the iteration's end (tw_on_step) only if its last commit did not
     Real ds_t = std::numeric_limits<Real>::quiet_NaN();
+    const bool hook_ds = hooks != nullptr && hooks->has_device_state();   // run-invariant
     auto device_state_once = [&](Real tc, const Vector& xc) {
-        if (hooks == nullptr || tc == ds_t) return;
+        if (!hook_ds || tc == ds_t) return;
         ds_t = tc;
         hooks->device_state(tc, xc, hs);
     };
@@ -4057,21 +4058,35 @@ inline SimulationResult run_transient_trbdf2(
         // state is copied only with a listener.
         auto run_twin = [&]() PULSIM_STEP_PHASE {
             const bool hook_step = hooks != nullptr && hooks->has_step();
+            // probes 0b.10: between a step hook and the next attempt's begin
+            // nothing moves x or the mask, so the next step is contiguous for
+            // the step sink unless an attempt in between fired no hook (a
+            // zero-time cascade, a retake at the same t); the start is copied
+            // only for `on_step` functions or a non-contiguous step.
+            const bool hook_fns = hooks != nullptr && hooks->has_step_fns();
+            bool hook_contig = false;
             Vector x_start;
             SwitchStateMask mask_start;
             Real t_start = Real{0};
             auto tw_begin = [&]() PULSIM_STEP_PHASE {
                 t_start = t;
-                if (hook_step) {
+                if (hook_fns || (hook_step && !hook_contig)) {
                     x_start = x;
                     mask_start = x_mask;
                 }
                 tb_begin();
             };
             auto tw_on_step = [&]() PULSIM_STEP_PHASE {
-                if (hooks == nullptr || t == t_start) return;
+                if (hooks == nullptr) return;
+                if (t == t_start) {
+                    hook_contig = false;
+                    return;
+                }
                 device_state_once(t, x);
-                if (hook_step) hooks->step(t_start, x_start, mask_start, t, x, x_mask);
+                if (hook_step) {
+                    hooks->step(t_start, x_start, mask_start, t, x, x_mask, hook_contig);
+                    hook_contig = true;
+                }
             };
             step::BodyClock clock{tb_live, lte_ctrl, t, opts.t_end};
             if (esdirk) {
@@ -4099,6 +4114,7 @@ inline SimulationResult run_transient_trbdf2(
             (void)step::run<step::TrBdf2>(clock, body);
         };
         run_twin();
+        if (hooks != nullptr) hooks->flush_steps();   // the step sink's batched steps
         // A run stopped by should_continue right after an event: the
         // record ends on the committed state, as the snapshot does.
         drop_superseded_event_sample(-std::numeric_limits<Real>::infinity());

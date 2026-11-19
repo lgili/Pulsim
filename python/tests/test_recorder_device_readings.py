@@ -266,3 +266,41 @@ def test_device_readings_on_esdirk43_agree_with_trbdf2():
         print(f"{q}: esdirk43 - trbdf2 = {(e['esdirk43'][q] - e['trbdf2'][q]) / supplied:.2e} "
               "of the supplied energy", file=sys.stderr)
         assert abs(e["esdirk43"][q] - e["trbdf2"][q]) <= 2e-4 * supplied, q
+
+
+def test_diode_right_side_is_exactly_zero_after_turn_off():
+    # Analytic value of an event row's right side (DECISIONS 24): a PWL
+    # diode with zero off conductance carries exactly 0 A once off, so on
+    # the right of every turn-off the row reads 0.0 bit for bit (the right
+    # side is read under the settled mode, from the settled state). A
+    # bridge rectifier on TR-BDF2 (settled event rows at the landings).
+    t_end = 40e-3
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("Vac", "s", "gnd", 0.0, 100.0, 50.0)
+    diodes = (("D1", "s", "dp"), ("D2", "gnd", "dp"), ("D3", "dn", "s"), ("D4", "dn", "gnd"))
+    for nm, an, ca in diodes:
+        b.add_diode(nm, an, ca, 1e3, 0.0)
+    b.add_capacitor("Cf", "dp", "dn", 100e-6)
+    b.add_resistor("RL", "dp", "dn", 100.0)
+    b.add_resistor("Rtie", "dn", "gnd", 1e6)
+    probes = [f"i({nm})" for nm, _, _ in diodes]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        res = p.simulate(b, t_end, **_RUNS["trbdf2"], recorders=[p.Recorder("r", probes)])
+    assert res.recorder_feed["mode"] == "in-loop", res.recorder_feed
+    a = res.recorded["r"]
+    settled = a.event_resolution == "settled"
+    assert np.count_nonzero(settled) >= 8
+    n_off = 0
+    for q in probes:
+        left, right = a.event_left[q][settled], a.event_right[q][settled]
+        # a diode the settle turned off: it carried reverse current on the
+        # left (the step that crossed zero; ~1e-6 A here, far above the
+        # 1e-13 A roundoff an off diode reads), and reads exactly 0 on the right
+        off = left < -1e-9
+        n_off += int(np.count_nonzero(off))
+        assert np.all(right[off] == 0.0), (q, a.event_t[settled][off], right[off])
+        # no row reads reverse current on the right: a conducting diode
+        # carries forward current, an off one exactly none
+        assert np.all(right >= 0.0), (q, right[right < 0])
+    assert n_off >= 4
