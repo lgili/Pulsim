@@ -86,7 +86,7 @@ engine accepts a keyword and ignores it. The defaults are
 | `t_start` | yes | yes | yes | 0.0 |
 | `switch_fn` | yes | yes | yes | None |
 | `b_extra_fn` | yes | yes | yes | None |
-| `step_observer` | yes | yes | refused | None |
+| `step_observer` | yes | yes | yes | None |
 | `start_from_dc_op` | yes | refused | refused | False |
 | `enable_nonlinear_refresh` | yes | yes | refused | None (stamp the Newton devices when there are any) |
 | `max_newton_iterations` | yes | yes | refused | 50 |
@@ -110,17 +110,18 @@ engine accepts a keyword and ignores it. The defaults are
 | `progress` | yes | refused | yes | False |
 | `initial_state` | yes | yes | yes | None (the circuit's ICs) |
 | `should_continue` | yes | yes | refused | None |
-| `closed_loops` | yes | yes | refused | None |
+| `closed_loops` | yes | yes | yes | None |
 | `live_stream` | yes | refused | refused | None |
 | `mmc_arms` | yes | refused | refused | None |
 | `on_cache` | yes | refused | refused | None |
-| `controller_period` | yes | yes | refused | None |
+| `controller_period` | yes | yes | yes | None |
 | `resume_from` | yes | yes | refused | None |
 | `solver` | yes | yes | yes | None |
 | `sensitivities` | refused | refused | yes | None |
 | `mode_selection` | yes | refused | yes | None ('legacy') |
 | `allow_implicit_segments` | refused | refused | yes | None |
-| `control_tick` | yes | yes | refused | 'label' |
+| `control_tick` | yes | yes | yes | 'label' |
+| `device_path` | yes | yes | refused | 'legacy' |
 | `t_end` | yes | yes | yes | required |
 | `dt` | yes | yes | yes | None (pwl: required; trbdf2: kernel ceiling; exact: 1e-5) |
 <!-- option-capabilities:end -->
@@ -171,8 +172,9 @@ energies. `I_H > 0` chops an inductive current into `R_off` (a voltage
 Circuit-level limits, also raised as `UnsupportedError` (with `feature`
 set): coupled inductors (`add_transformer`, `add_inductor_coupling`) on
 `dsed` and `bdf1`; PWL diodes with `integrator='bdf2'` on `dsed`;
-capacitor loops (parallel capacitors) on `dsed`; C blocks, controllers
-(`step_observer`, `closed_loops`), `start_from_dc_op`, `store_every`,
+capacitor loops (parallel capacitors) on `dsed`; C blocks, an every-step
+`step_observer` (no `controller_period`), `device_path='interface'`,
+`start_from_dc_op`, `store_every`,
 `live_stream`, `max_dt_halvings`, `mmc_arms`, `on_cache`, the inductor
 guards, `enable_substep_state_correction` and `discontinuity_restart` on
 `dsed`; the fixed-step keywords (`discontinuity_restart` among them) on
@@ -236,8 +238,16 @@ event where the signal jumps.
 |---|---|---|
 | Only `engine="pwl"` reads loss tables inside the run; `trbdf2`, `dsed`, `bdf1` and `auto` without `dt=` (with `dt=` it routes to `pwl` and honours the port) refuse a circuit with a loss port by name (`UnsupportedError`, feature `device_losses`, the device). | Conformance cell `test_device_losses_cell`. The variable-step hook waits for the unified event queue (task 3.1). | `engine="pwl"`, or the post-hoc `device_loss_summary` / the periodic-orbit evaluator on the other engines. |
 | The event energy is not drawn from the circuit: the PWL switch is ideal, the table energy only heats the junction. | By design, as in PLECS and PSIM. | Model the transition (`add_power_mosfet`) when the electrical side must see it. |
+| An impulsive re-initialisation booked to a device with a loss port (`E_impulse_total`, an ideal switch closing a capacitor loop) is not in `heat_injected` / `T_j`, and the port's electrical conduction integral across the impulse step is not physical; `simulate()` warns. | Capacitor loop (1 µF at 10 V onto 3 µF at 2 V): 24 µJ dissipated, the port reads −38.6 µJ and the junction cools to 24.96 °C. | Add `losses.impulse_losses(...)` to the thermal network by hand. |
 | `T_j` does not feed back into the device (`V_f`, `g_on` stay fixed). | Task 4.1 (optional) not done. | Re-run with `V_f` / `g_on` at the settled `T_j`. |
 | A resumed run (`resume_from=`) drops the heat of the step in flight, and a loss port is not part of the circuit's IR or content hash. | One step's heat at the resume point. | Run the thermal transient in one piece. |
+
+## Node domains
+
+| Limitation | Measured | Workaround |
+|---|---|---|
+| Result traces carry no unit. `Circuit.unit_of(node)` knows it (`degC` on a thermal node, `rad/s` / `rad` on a PMSM's speed / angle node); `SimulationResult` does not. | — | `circuit.unit_of(name)` when labelling a plot. |
+| Only declared tags, PMSM speed/angle pins, the induction machine's speed pin and the magnetic (winding / permeance) pins set a domain. A DC machine's `omega_node`, the mechanical helpers and user-built mechanical networks stay electrical unless declared. | DC machine with `omega_node` declared mechanical: `node_domain` reads `mechanical`, samples bit-identical to the untagged run. | `builder.node(name, "mechanical")` before `build()`. |
 
 ## Devices
 
@@ -295,6 +305,16 @@ event where the signal jumps.
 | **YAML has no `rac:` ladder or `transmission_line` type.** `rac:` on an inductor is refused by name; `esr`, `esl`, `c_par` are read. Other unknown per-device keys are still ignored without a warning. | — | Build ladders and lines from Python. |
 | One ESR value (no frequency dependence), single-pair line (no coupled three-phase cable). The DC-bias capacitance is `odd_charge_table` only: no `fit_mlcc_dc_bias`, no YAML, and it is a Newton device (`pwl` / `trbdf2`). | — | Read ESR at the switching frequency; fit `R_ac(f)` of windings with `fit_rac_ladder`; integrate the datasheet C(V) curve into knots yourself. |
 | **A winding with an `rac=` ladder cannot be coupled.** `add_inductor_coupling` refuses it with `UnsupportedError` (feature `rac`): coupling the main inductor alone would leave the cells' flux uncoupled. | — | Couple windings built with `esr=`, or use `add_transformer`. |
+
+## Magnetic networks
+
+| Limitation | Measured | Workaround |
+|---|---|---|
+| **No fringing and no core-shape library.** `add_air_gap` is `P = μ₀·A/l` on the given area; every section takes its own area, length and permeability. Shipped parameters are synthetic. | — | Enlarge the gap area by your fringing factor; enter the sections of the core yourself. |
+| **Rate-dependent loss is eddy loss only, and not validated against measurement.** `add_magnetic_resistance` gives `R_m·(dΦ/dt)²`; the hysteretic permeance, the excess-loss element and the loss fitter are not shipped (YAML `hysteretic_permeance` / `excess_loss` are refused by name). | — | `add_hysteretic_core_inductor` for one flux path; Steinmetz / iGSE after the run. |
+| **DC operating point: a saturable permeance on a node reached only through permeances is refused by name** (its flux row needs the Newton DC refresh). Linear permeances get flux rows (per node, or per group joined by magnetic resistances and winding ports); the DC flux is solved from zero. | — | Start the transient from zero or from `initial_state=` (tutorial 09). |
+| `set_initial` ignores a saturable permeance (it records capacitor and inductor values only), without a warning. | — | Write its MMF into `initial_state` at its node. |
+| A saturable permeance runs on `pwl` and `trbdf2` only; `dsed`, `bdf1` and the AC sweep refuse it by name. | — | Linear permeances run on every engine. |
 
 ## Found by the examples audit (2026-11-13)
 

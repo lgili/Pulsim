@@ -801,6 +801,7 @@ def _diode_turn_offs(trace, times: np.ndarray,
                      t_rr: float = _DEFAULT_T_RR,
                      other_flip: "Optional[np.ndarray]" = None,
                      i_peak: "Optional[float]" = None,
+                     controlled: bool = False,
                      ) -> List[Dict[str, float]]:
     """Turn-off instants of one diode, read from its recorded
     conduction-state trace (``pulsim._diode_state``).
@@ -846,12 +847,13 @@ def _diode_turn_offs(trace, times: np.ndarray,
     that carries the turn-off unless a sample follows it within ``t_rr``)
     is longer than ``t_rr``: the solver then says
     nothing about how ``v_D`` rose inside that step, and V_R (hence
-    E_rr) depends on the step size. The one exception is a FORCED
-    turn-off (another bit of the recorded mask flips on the same step,
-    ``other_flip[k]``, and ``I_F >= 0.1 · I_F_peak``) whose blocking
-    voltage is flat
-    after the step: there the voltage jumped at the turn-off and any
-    reading inside the step is the plateau. :func:`device_loss_summary`
+    E_rr) depends on the step size. The exception is a turn-off whose
+    blocking voltage is flat after the step, when it is FORCED (another
+    bit of the recorded mask flips on the same step, ``other_flip[k]``,
+    and ``I_F >= 0.1 · I_F_peak``: the voltage jumped at the turn-off and
+    any reading inside the step is the plateau) or ``controlled`` (an
+    error-controlled trace, trbdf2: its step after the turn-off record
+    would have shrunk on a ring; a fixed step can alias one). :func:`device_loss_summary`
     counts and warns about the unresolved ones.
 
     ``Q_F`` exists for the stretches that are not a
@@ -933,13 +935,16 @@ def _diode_turn_offs(trace, times: np.ndarray,
         # The step that holds t_eval: a short sample right after the
         # turn-off (trbdf2's post-event record) does not resolve a long
         # step that follows it, unless that step is flat (the sample before
-        # it already holds the post-jump plateau). shortcut: at a natural
-        # turn-off a ring across that long step with equal ends (the aliased
-        # "plateau" above) passes as flat; before the record existed the
-        # short step alone passed it, so this is no wider than it was.
-        # Upgrade: test the long step against the ring period.
+        # it already holds the post-jump plateau). A fixed step can alias a
+        # ring into equal ends (the "plateau" above): there only a forced
+        # turn-off passes. On trbdf2 (`controlled`) the step passed a local
+        # error test. shortcut: that test is weak exactly here (after a
+        # turn-off record on a linear circuit the step is the L-stable SDIRK
+        # step with a filtered estimate, which damps a ring much faster than
+        # the step instead of reporting it); upgrade: compare the step with
+        # the ring period of the post-turn-off mode.
         k_e = min(max(int(np.searchsorted(t, t_eval)), k), max(end - 1, k))
-        flat_after = k_e > k and abs(float(v[k_e] - v[k_e - 1])) <= (
+        flat_after = (controlled or forced) and k_e > k and abs(float(v[k_e] - v[k_e - 1])) <= (
             _RR_FLAT_RTOL * max(abs(float(v[k_e])), abs(float(v[k_e - 1])))
             + flat_atol)
         unresolved = (float(t[k_e] - t[k_e - 1]) > t_rr * (1.0 + 1e-9)
@@ -1579,6 +1584,74 @@ def _warn_ideal_skipped(desc) -> None:
             "summary).", UserWarning, stacklevel=3)
 
 
+def _impulse_cause(builder, result, rec) -> str:
+    """The switch a re-initialisation record is booked to: the record's own
+    ``cause`` (pwl / trbdf2: the gated element whose change entered the
+    mode), else the record's switching element whose recorded state changed
+    on the record's step (gated before diode), else its first element."""
+    cause = getattr(rec, "cause", "") or ""
+    if cause:
+        return cause
+    devices = list(getattr(rec, "devices", []) or [])
+    try:
+        states = np.asarray(result.switch_states, dtype=bool)
+        times = np.asarray(result.times, dtype=float)
+    except (AttributeError, TypeError, ValueError):  # no record: fall back
+        states = times = None
+    if states is not None and states.ndim == 2 and len(times) > 1:
+        k = int(getattr(rec, "sample", -1))
+        if k < 1:
+            k = int(np.searchsorted(times, float(rec.t), side="right"))
+        k = min(max(k, 1), len(times) - 1)
+        changed = []
+        for name in devices:
+            try:
+                bit = int(builder.switch_index_of(name))
+            except (IndexError, KeyError, ValueError):  # not a switch-kind branch
+                continue
+            if 0 <= bit < states.shape[1] and states[k, bit] != states[k - 1, bit]:
+                changed.append(name)
+        if changed:
+            gated = [n for n in changed if n not in _diode_names(builder)]
+            return (gated or changed)[0]
+    return devices[0] if devices else ""
+
+
+def _diode_names(builder) -> set:
+    try:
+        return {d.get("name", "") for d in builder.components() if d.get("kind") == "diode"}
+    except AttributeError:  # a builder without components()
+        return set()
+
+
+def impulse_losses(builder, result, *, t_from: Optional[float] = None,
+                   t_to: Optional[float] = None) -> Dict[str, Dict[str, Any]]:
+    """Impulsive re-initialisation energy per causing switch
+    (add-branch-form-ideal-switch D4 / task 6.4).
+
+    A mode with dependent states (a capacitor loop closed, an inductor
+    cut-set opened by ideal elements) re-initialises them: the record
+    ``result.reinit_records[k].dW`` is the energy that leaves the circuit at
+    that instant (1 uF at 10 V closed onto 3 uF at 2 V through an ideal
+    switch: 24 uJ). No resistor or switch conduction integral carries it.
+    Returns ``{switch name: {"E_impulse_total", "n_impulses", "records"}}``;
+    a record counts when its step starts inside ``[t_from, t_to)`` (the rule
+    of the switching events). Engines without records give ``{}``.
+    """
+    out: Dict[str, Dict[str, Any]] = {}
+    lo = -np.inf if t_from is None else float(t_from)
+    hi = np.inf if t_to is None else float(t_to)
+    for rec in getattr(result, "reinit_records", None) or []:
+        if not (lo <= float(rec.t) < hi):
+            continue
+        name = _impulse_cause(builder, result, rec)
+        e = out.setdefault(name, {"E_impulse_total": 0.0, "n_impulses": 0, "records": []})
+        e["E_impulse_total"] += float(rec.dW)
+        e["n_impulses"] += 1
+        e["records"].append(rec)
+    return out
+
+
 def device_loss_summary(
     builder,
     result,
@@ -1843,6 +1916,17 @@ def device_loss_summary(
     known_names = {c.get("name") for c in comps_by_bid.values()
                      if c.get("name")}
     known_bids = set(comps_by_bid)
+    magnetic_resistances = set()
+    if getattr(builder, "magnetic_nodes", None) is not None and builder.magnetic_nodes():
+        for c in comps_by_bid.values():
+            nm = c.get("name")
+            if c.get("kind") != "resistor" or not nm:
+                continue
+            try:
+                builder.magnetic_element(nm)
+            except KeyError:
+                continue
+            magnetic_resistances.add(nm)
 
     def _build_spec_lookup(
         specs: Optional[Mapping[Any, Mapping[str, Any]]],
@@ -2042,6 +2126,19 @@ def device_loss_summary(
                 continue
             stats = _conduction_stats(_branch_v(states_w, nodes), 1.0 / R,
                                       times_w, _branch_v(states_s_w, nodes))
+            if name and name in magnetic_resistances:
+                # add-permeance-magnetic-domain: F = R_m*dPhi/dt, so the
+                # "current" statistics are the flux rate [V] and P_avg is
+                # the in-loop core loss R_m*(dPhi/dt)^2.
+                summary.append({
+                    "branch_id": int(bid),
+                    "kind": "magnetic_resistance",
+                    "category": "core_loss",
+                    "name": name,
+                    "R_m": R,
+                    **stats,
+                })
+                continue
             summary.append({
                 "branch_id": int(bid),
                 "kind": "resistor",
@@ -2187,7 +2284,8 @@ def device_loss_summary(
                 t_rr = _recovery_time(d_spec, name)
                 offs = _diode_turn_offs(
                     d_trace, times, t_rr=t_rr, other_flip=d_flip,
-                    i_peak=None if win.whole else entry["i_peak"])
+                    i_peak=None if win.whole else entry["i_peak"],
+                    controlled=getattr(result, "engine_used", None) == "trbdf2")
                 if not win.whole:
                     offs = [ev for ev in offs
                             if win.a <= ev["t_off"] < win.b]
@@ -2283,6 +2381,24 @@ def device_loss_summary(
             continue
 
         # Other kinds (sources, capacitors, ...) — skip silently.
+
+    # Impulsive re-initialisation energy (task 6.4): its own category,
+    # booked to the switch that entered the dependent mode. Not part of
+    # E_total (the ideal element's v·i is 0 on both sides of the pulse).
+    impulses = impulse_losses(builder, result, t_from=t_from, t_to=t_to)
+    if getattr(result, "reinit_records", None):
+        for entry in summary:
+            if entry.get("kind") in ("switch", "diode"):
+                imp = impulses.pop(entry.get("name", ""), None) or {}
+                E_imp = float(imp.get("E_impulse_total", 0.0))
+                entry["E_impulse_total"] = E_imp
+                entry["n_impulses"] = int(imp.get("n_impulses", 0))
+                entry["P_impulse_avg"] = E_imp / T if T > 0 else 0.0
+        for name, imp in impulses.items():
+            warnings.warn(
+                f"device_loss_summary: {imp['E_impulse_total']:.6g} J of impulsive "
+                f"re-initialisation booked to {name!r}, which has no entry here.",
+                RuntimeWarning, stacklevel=2)
 
     # The window every statistic above was taken over: from the first
     # SOLVED sample (t[1] on a run seeded with initial_state / i0= /

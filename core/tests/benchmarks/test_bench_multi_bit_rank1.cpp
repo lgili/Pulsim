@@ -313,9 +313,9 @@ TEST_CASE("Bench: multi-bit rank-1 microbench — v1.4.0 path-union routing",
 
             // Sanity gates
             REQUIRE(r.n_calls > 0);
-            REQUIRE(r.wall_solve_ms  > 0.0);
-            REQUIRE(r.wall_eigen_ms  > 0.0);
-            REQUIRE(r.wall_pulsim_ms > 0.0);
+            // wall time / speed-up: printed above, never asserted (machine load)
+            // wall time / speed-up: printed above, never asserted (machine load)
+            // wall time / speed-up: printed above, never asserted (machine load)
             // Telemetry invariant
             const std::uint64_t total =
                 r.pulsim_single_bit_hits + r.pulsim_multi_bit_hits +

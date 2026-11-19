@@ -25,6 +25,7 @@ E3  A bridge whose DC side floats aborted with "factorize failed
 
 from __future__ import annotations
 
+import re
 import warnings
 
 import numpy as np
@@ -473,3 +474,111 @@ def test_floating_bridge_with_choke_holds_no_diode():
     assert r._trbdf2_stats["n_forced_accepts"] == 0
     bus = float(r.v("dq")[-1] - r.v("dn")[-1])
     assert bus == pytest.approx(329.0959, abs=1e-3)
+
+
+# ---------------------------------------------------------------------
+# Conditioning floor: a capacitor between two OFF diodes
+# ---------------------------------------------------------------------
+
+def _buck_with_island(island, c_f=1e-6, g_off_island=1e-9, periods=20):
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", 24.0)
+    b.add_switch("S", "vin", "sw", 1e3, 1e-9)
+    b.add_diode("D1", "gnd", "sw", 1e3, 1e-9)
+    b.add_inductor("L", "sw", "vout", 100e-6)
+    b.add_capacitor("C", "vout", "gnd", 47e-6)
+    b.add_resistor("RL", "vout", "gnd", 20.0)
+    if island:
+        b.add_diode("Dx", "x", "gnd", 1e3, g_off_island)
+        b.add_diode("Dy", "gnd", "y", 1e3, g_off_island)
+        b.add_capacitor("Cf", "x", "y", c_f)
+    t0, n, k = 2e-6, b.graph.num_switches, b.switch_index_of("S")
+
+    def pwm(t):  # phase from t0: an edge falls on t_end (a final sliver)
+        m = p.SwitchStateMask(n)
+        ph = (t - t0) / T_SW
+        m.set(k, bool(t >= t0 - 1e-13
+                      and ph - np.floor(ph + 1e-9) < 0.3 - 1e-9))
+        return m
+    return b, pwm, t0 + periods * T_SW
+
+
+def test_tight_atol_stops_at_the_conditioning_floor():
+    """Before: at rtol 1e-10 / atol 1e-13 the controller chased the
+    L*g_off mode at t = 0 down to the island's conditioning floor and
+    aborted with "refactorize failed (numerically singular)". Now the
+    floor is learned (8.1e-13 s here) and the buck matches the run
+    without the island. The edge at t_end leaves a final sliver below
+    the floor; it ends the run instead of aborting."""
+    kw = dict(engine="trbdf2", rtol=1e-10, atol=1e-13)
+    b, pwm, t_end = _buck_with_island(True)
+    r = p.simulate(b, t_end=t_end, switch_fn=pwm, **kw)
+    b0, pwm0, _ = _buck_with_island(False)
+    r0 = p.simulate(b0, t_end=t_end, switch_fn=pwm0, **kw)
+    st = r._trbdf2_stats
+    assert st["n_conditioning_rejects"] >= 1
+    # 8.1e-13 s measured; where the floor sits follows the pivot order (Eigen)
+    assert 0.0 < st["h_conditioning_floor"] < 1e-10
+    t, t0 = np.asarray(r.times), np.asarray(r0.times)
+    dv = np.interp(t, t0, np.asarray(r0.v("vout"))) - np.asarray(r.v("vout"))
+    assert np.abs(dv).max() < 5e-5          # 3.1e-6 V measured
+    # the 9.5e-15 s sliver; an edge landed exactly on t_end leaves none
+    assert 0.0 <= t_end - t[-1] < 1e-12
+
+
+def test_an_unresolvable_island_is_refused_by_name():
+    """C = 1 mF behind g_off = 1e-12: no step up to the ceiling factors.
+    Before: the probe ladder hit its cap and raised a bare RuntimeError.
+    Now a typed SimulationAborted names the node and the fix."""
+    b, pwm, t_end = _buck_with_island(True, c_f=1e-3, g_off_island=1e-12)
+    with pytest.raises(p.SimulationAborted) as ei:
+        p.simulate(b, t_end=t_end, engine="trbdf2", switch_fn=pwm)
+    msg = str(ei.value)
+    # x or y: which island node shows the zero pivot follows the ordering
+    assert "numerically singular" in msg and re.search(r"node [xy]\b", msg)
+    assert "give it a DC path" in msg
+
+
+# ---------------------------------------------------------------------
+# Shipped examples: refused by name, or completed with a sane step count
+# ---------------------------------------------------------------------
+
+_EXAMPLES = __import__("pathlib").Path(__file__).resolve().parents[2] / "examples"
+
+
+def test_example_flyback_grind_is_refused_by_name():
+    """examples/flyback.yaml (doc gates): the switch node has no
+    capacitance, so with Q1, its body diode and D_cl all OFF the leakage
+    drives it through g_off alone (tau ~ 3e-14 s). Before: 10 M steps to
+    max_steps at t = 68 us. Now refused after one 200,000-step window
+    (0.40-0.80 M samples recorded, about 1-2 s), naming the nodes."""
+    lc = p.load_yaml_file(str(_EXAMPLES / "flyback.yaml"))
+    si, n = lc.builder.switch_index_of, len(lc.switch_names)
+    fn = p.make_pwm_switch_fn(frequency=100e3, duty=0.5,
+                              switch_idx=si("Q1"), num_switches=n)
+    with pytest.raises(p.SimulationAborted) as ei:
+        p.simulate(lc, engine="trbdf2", switch_fn=fn)
+    msg = str(ei.value)
+    assert "controller is grinding" in msg and "sw" in msg
+    assert "Coss" in msg and "engine='pwl'" in msg
+    assert len(ei.value.partial.times) < 1_100_000
+
+
+def test_example_psfb_completes_with_a_bounded_step_count():
+    """examples/phase_shift_full_bridge.yaml (phi = pi/2, 100 ns dead
+    time): each chatter break pinned h at h_chatter = 2e-12 s for 1000
+    forced accepts (3.65 M steps, 3.37 M forced). The estimate is now
+    filtered in that window: 147 k steps. Mean V_out over 1.0-1.2 ms
+    22.816 V against the exact-route truth 22.851 V."""
+    lc = p.load_yaml_file(str(_EXAMPLES / "phase_shift_full_bridge.yaml"))
+    si, n = lc.builder.switch_index_of, len(lc.switch_names)
+    fn = p.make_phase_shift_full_bridge_fn(
+        100e3, np.pi / 2, si("HS_A"), si("LS_A"), si("HS_B"), si("LS_B"),
+        n, 100e-9)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(lc, engine="trbdf2", switch_fn=fn)
+    assert r._trbdf2_stats["n_accept"] < 200_000
+    t = np.asarray(r.times)
+    v = np.asarray(r.v("vout")) - np.asarray(r.v("rect_neg"))
+    assert p.time_average(t, v, 1.0e-3, 1.2e-3) == pytest.approx(22.851, abs=0.2)

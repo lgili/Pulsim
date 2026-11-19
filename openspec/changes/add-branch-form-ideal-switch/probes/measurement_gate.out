@@ -1,8 +1,15 @@
 pulsim from /Users/lgili/pulsim_wt/phase0/python/pulsim/__init__.py
-inverter  pwl     conductance  ns/step      1791  (median of 7, spread 0.0069-0.0090 s)  {'unknowns': 12, 'steps': 4000, 'event_rounds': 251, 'switch_fn_calls': 4000, 'segment_searches': 492, 'rollback_snapshots': 4000}
-inverter  pwl     branch       ns/step      1922  (median of 7, spread 0.0074-0.0139 s)  {'unknowns': 24, 'steps': 4000, 'event_rounds': 251, 'switch_fn_calls': 4000, 'segment_searches': 492, 'rollback_snapshots': 4000}
-inverter  pwl     branch / conductance = 1.073
-buck      pwl     conductance  ns/step       668  (median of 7, spread 0.0102-0.0236 s)  {'unknowns': 5, 'steps': 20000, 'event_rounds': 399, 'switch_fn_calls': 20000, 'segment_searches': 799, 'rollback_snapshots': 20000}
-buck      pwl     branch       ns/step       680  (median of 7, spread 0.0107-0.0197 s)  {'unknowns': 7, 'steps': 20000, 'event_rounds': 399, 'switch_fn_calls': 20000, 'segment_searches': 799, 'rollback_snapshots': 20000}
-buck      pwl     branch / conductance = 1.018
-7.3 gate (12-switch inverter, pwl): 1.073 <= 1.5 -> flip allowed
+inverter  pwl     conductance  ns/step      4024  (median of 7, spread 0.0093-0.0206 s)  {'unknowns': 12, 'steps': 4000, 'event_rounds': 251, 'switch_fn_calls': 4000, 'segment_searches': 492, 'rollback_snapshots': 4000}
+inverter  pwl     branch       ns/step      3426  (median of 7, spread 0.0078-0.0235 s)  {'unknowns': 24, 'steps': 4000, 'event_rounds': 251, 'switch_fn_calls': 4000, 'segment_searches': 492, 'rollback_snapshots': 4000}
+inverter  pwl     branch / conductance = 0.851
+inverter  trbdf2  conductance  ns/step     26574  (median of 7, spread 0.0914-0.1577 s)  {'unknowns': 12, 'steps': 4373, 'event_rounds': 0}
+inverter  trbdf2  branch       ns/step     26743  (median of 7, spread 0.0746-0.1833 s)  {'unknowns': 24, 'steps': 4373, 'event_rounds': 0}
+inverter  trbdf2  branch / conductance = 1.006
+buck      pwl     conductance  ns/step       846  (median of 7, spread 0.0106-0.0264 s)  {'unknowns': 5, 'steps': 20000, 'event_rounds': 399, 'switch_fn_calls': 20000, 'segment_searches': 799, 'rollback_snapshots': 20000}
+buck      pwl     branch       ns/step      1237  (median of 7, spread 0.0195-0.0359 s)  {'unknowns': 7, 'steps': 20000, 'event_rounds': 399, 'switch_fn_calls': 20000, 'segment_searches': 799, 'rollback_snapshots': 20000}
+buck      pwl     branch / conductance = 1.462
+buck      trbdf2  conductance  ns/step      6081  (median of 7, spread 0.1089-0.2638 s)  {'unknowns': 5, 'steps': 20525, 'event_rounds': 0}
+buck      trbdf2  branch       ns/step      6245  (median of 7, spread 0.1057-0.1421 s)  {'unknowns': 7, 'steps': 20525, 'event_rounds': 0}
+buck      trbdf2  branch / conductance = 1.027
+7.2 (12-switch inverter, trbdf2): 1.006
+7.3 gate (12-switch inverter, pwl): 0.851 <= 1.5 -> flip allowed

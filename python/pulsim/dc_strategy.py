@@ -191,6 +191,7 @@ def compute_dc_op(builder,
                     verbose: bool = False,
                     report: Optional[list] = None,
                     should_continue=None,
+                    device_path: str = "legacy",
                     ) -> np.ndarray:
     """Compute the DC operating point of a circuit.
 
@@ -233,6 +234,10 @@ def compute_dc_op(builder,
     report
         If a list is passed, the kernel's ``DCSolveReport`` is
         appended to it, so you can see which rung answered.
+    device_path
+        ``"legacy"`` (default): the hand-written Newton stamps;
+        ``"interface"``: every Newton kind's law on the device interface
+        (same answer to rounding; for the release that makes it default).
 
     Returns
     -------
@@ -346,6 +351,11 @@ def compute_dc_op(builder,
 
     from . import _pulsim as _k  # type: ignore[import-not-found]
 
+    if device_path not in ("legacy", "interface"):
+        from . import _options_error
+        raise _options_error("device_path",
+                             f"compute_dc_op(device_path={device_path!r}): "
+                             "expected 'legacy' or 'interface'")
     if mask is None:
         mask = _k.SwitchStateMask(builder.graph.num_switches)
 
@@ -367,6 +377,7 @@ def compute_dc_op(builder,
             t_eval=float(t_eval),
             enable_nonlinear_refresh=enable_nonlinear_refresh,
             should_continue=should_continue,
+            device_path=getattr(_k.DevicePath, device_path.capitalize()),
             **({} if gmin is None else {"gmin": float(gmin)}))
     except Exception as exc:
         if _is_kernel_cancellation(exc):

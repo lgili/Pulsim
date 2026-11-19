@@ -196,13 +196,17 @@ public:
     /// A control tick at t_start + k*period (pwl: the first grid point at
     /// or after it; trbdf2: landed exactly).
     /// `offset` shifts the grid: ticks at t_start + offset + k*period.
-    void add_tick(Real period, TickFn fn, Real offset = Real{0}) {
+    /// `monitor`: a `Kind::Monitor` (trbdf2 neither lands on it nor
+    /// re-samples the gate after it; pwl ticks it on its grid as any tick).
+    void add_tick(Real period, TickFn fn, Real offset = Real{0},
+                  bool monitor = false) {
         if (!(period > Real{0})) {
             throw OptionsError("tick", std::format(
                 "Simulation.add_tick: period must be positive, got {}", period));
         }
         tick_periods_.push_back(period);
         tick_offsets_.push_back(offset);
+        tick_monitors_.push_back(monitor ? 1 : 0);
         ticks_.push_back(std::move(fn));
     }
     /// pwl: runs on every tick instant before the ticks (a composed control
@@ -300,6 +304,18 @@ public:
         // a continuation keeps the original run's grid.
         const Real origin = t_cursor_ == opts_.t_start
                 ? std::numeric_limits<Real>::quiet_NaN() : opts_.t_start;
+        // A snapshot with one tick grid per tick source (the run that wrote
+        // it had the same ticks) keeps that grid and its next index:
+        // simulate()'s _resume_tick_origins / _resume_tick_next_k rule.
+        std::vector<Real> origins;
+        std::vector<std::uint64_t> next_k;
+        if (resume != nullptr && !ticks_.empty()
+            && resume->tick_origin.size() == ticks_.size()) {
+            origins = resume->tick_origin;
+            if (resume->tick_next_k.size() == ticks_.size()) {
+                next_k = resume->tick_next_k;
+            }
+        }
         const bool dc_op = opts_.start_from_dc_op && !ran_
                 && (resume == nullptr || dc_with_resume_);
         solver::SimulationResult res;
@@ -309,8 +325,10 @@ public:
             so.t_end = t;
             events::TickPlan tp;
             for (std::size_t j = 0; j < tick_periods_.size(); ++j) {
-                tp.rates.push_back(
-                    events::Rate{tick_periods_[j], tick_offsets_[j], origin});
+                events::Rate r{tick_periods_[j], tick_offsets_[j],
+                               origins.empty() ? origin : origins[j]};
+                if (!next_k.empty()) r.k0 = next_k[j];
+                tp.rates.push_back(r);
             }
             tp.fn = [this](std::uint32_t j, const events::TickInfo&, Real tt,
                            const Vector& x) { ticks_[j](tt, x); };
@@ -339,6 +357,9 @@ public:
             to.observer_periods = tick_periods_;
             to.observer_offsets = tick_offsets_;
             to.observer_origin = origin;
+            to.observer_monitors = tick_monitors_;
+            to.observer_origins = std::move(origins);
+            to.observer_next_k = std::move(next_k);
             std::function<void(Size, Real, const Vector&)> tick_fn;
             if (!ticks_.empty()) {
                 tick_fn = [this](Size j, Real tt, const Vector& x) {
@@ -494,6 +515,7 @@ private:
     solver::ShouldContinueFn cancel_;
     std::vector<Real> tick_periods_;
     std::vector<Real> tick_offsets_;
+    std::vector<char> tick_monitors_;
     std::vector<TickFn> ticks_;
     solver::StepObserverFn tick_before_;
     std::shared_ptr<streaming::LiveRing> live_ring_;

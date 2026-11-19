@@ -72,6 +72,7 @@ from ._pulsim import (  # type: ignore[import-not-found]
     # Cache + simulation.
     PwlStateSpaceCache,
     SimulationOptions,
+    DevicePath,
     SimulationResult,
     CommutationEvent,
     PreflightFinding,
@@ -90,6 +91,9 @@ from ._pulsim import (  # type: ignore[import-not-found]
     load_yaml_file,
     # Source helpers (Layer 2 V5+).
     make_pwm_switch_fn,
+    DutyRegister,
+    make_carrier_pwm_fn,
+    make_edge_list_fn,
     make_phase_control_fn,
     make_constant_switch_fn,
     make_dead_time_pwm_pair_fn,
@@ -525,6 +529,7 @@ __all__ = [
     "thermal_voltage",
     "PwlStateSpaceCache",
     "SimulationOptions",
+    "DevicePath",
     "SimulationResult",
     "CommutationEvent",
     "PreflightFinding",
@@ -540,6 +545,9 @@ __all__ = [
     "NativeMultiMaskPwm",
     "wire_chain_from_yaml",
     "make_pwm_switch_fn",
+    "DutyRegister",
+    "make_carrier_pwm_fn",
+    "make_edge_list_fn",
     "make_phase_control_fn",
     "make_constant_switch_fn",
     "make_dead_time_pwm_pair_fn",
@@ -1595,6 +1603,53 @@ def _result_currents(self, *, skip_unsupported: bool = True
     return out
 
 
+def _magnetic_segment(self, name: str, what: str):
+    """(element, F trace) of a permeance-type magnetic element."""
+    builder = getattr(self, "_builder", None)
+    if builder is None:
+        raise RuntimeError(
+            f"SimulationResult.{what} requires the result to carry a "
+            "_builder reference; use pulsim.simulate(...).")
+    el = builder.magnetic_element(name)
+    if el["kind"] not in ("permeance", "saturable_permeance"):
+        raise ValueError(
+            f"{what}({name!r}): '{name}' is a {el['kind']}; flux, B and H are "
+            "defined for a permeance, an air gap or a saturable permeance.")
+    return el, self.v(el["m_a"]) - self.v(el["m_b"])
+
+
+def _result_flux(self, name: str):
+    """Flux Phi [Wb] through the permeance-type element ``name`` (a
+    permeance, an air gap or a saturable permeance), per sample: P*F, or
+    the element's law Phi(F) (add-permeance-magnetic-domain)."""
+    import numpy as _np
+    el, F = _magnetic_segment(self, name, "flux")
+    if el["kind"] == "permeance":
+        return el["P"] * F
+    law = el["law"]
+    return _np.array([law.charge(float(f)) for f in F])
+
+
+def _result_b_field(self, name: str):
+    """Flux density B = Phi/area [T] of an air gap or a saturable
+    permeance (elements built from geometry)."""
+    el, _ = _magnetic_segment(self, name, "b_field")
+    if el["area"] is None:
+        raise ValueError(f"b_field({name!r}): '{name}' has no area (built "
+                         "from a permeance value, not from geometry).")
+    return _result_flux(self, name) / el["area"]
+
+
+def _result_h_field(self, name: str):
+    """Field H = F/length [A/m] of an air gap or a saturable permeance
+    (elements built from geometry)."""
+    el, F = _magnetic_segment(self, name, "h_field")
+    if el["length"] is None:
+        raise ValueError(f"h_field({name!r}): '{name}' has no length (built "
+                         "from a permeance value, not from geometry).")
+    return F / el["length"]
+
+
 # Monkey-patch the methods onto the C++-bound SimulationResult class.
 # We can't subclass it cleanly because run_transient returns the
 # concrete C++ type, but the type itself accepts attribute injection
@@ -1616,6 +1671,12 @@ SimulationResult.power = _result_power  # type: ignore[attr-defined]
 SimulationResult.signal = _result_signal      # type: ignore[attr-defined]
 SimulationResult.signals = _result_signals    # type: ignore[attr-defined]
 SimulationResult.currents = _result_currents  # type: ignore[attr-defined]
+SimulationResult.flux = _result_flux          # type: ignore[attr-defined]
+SimulationResult.b_field = _result_b_field    # type: ignore[attr-defined]
+SimulationResult.h_field = _result_h_field    # type: ignore[attr-defined]
+_PEDRes.flux = _result_flux                    # type: ignore[attr-defined]
+_PEDRes.b_field = _result_b_field              # type: ignore[attr-defined]
+_PEDRes.h_field = _result_h_field              # type: ignore[attr-defined]
 
 
 def _result_plot(self, *signals, save=None, show=None, **kwargs):
@@ -1867,6 +1928,33 @@ def _warn_impulses(res) -> None:
         UserWarning, stacklevel=3)
 
 
+def _warn_impulse_heat(res, builder) -> None:
+    """A loss port (set_device_losses) heats its junction with the table
+    energies only: an impulsive re-initialisation booked to the same device
+    (E_impulse_total, losses.impulse_losses) is not in heat_injected / T_j.
+    shortcut: warned, not wired; owner: the in-kernel event-losses track."""
+    if not getattr(res, "reinit_records", None):
+        return
+    names = getattr(builder, "_device_loss_names", None)
+    ported = set(names()) if callable(names) else set()
+    if not ported:
+        return
+    from .losses import impulse_losses
+    hit = {n: v["E_impulse_total"] for n, v in impulse_losses(builder, res).items()
+           if n in ported}
+    if hit:
+        import warnings
+        who = ", ".join(f"'{n}' ({e:.6g} J)" for n, e in hit.items())
+        warnings.warn(
+            f"simulate(): the loss port(s) of {who} do not carry their impulsive "
+            "re-initialisation energy (E_impulse_total), and their conduction "
+            "integral across the impulse step is not physical (it can be "
+            "negative): heat_injected and the junction temperature are wrong "
+            "around an impulse. Add losses.impulse_losses(...) to the thermal "
+            "network yourself.",
+            UserWarning, stacklevel=3)
+
+
 def _carry_jumps(fn, parts):
     """Give a composed b_extra_fn the declared jumps of its parts.
 
@@ -2041,6 +2129,7 @@ def simulate(
     discontinuity_restart: Optional[bool] = None,
     resolution_diagnostics: Optional[bool] = None,
     on_impulse: str = "record",
+    device_path: str = "legacy",
     inductor_freeze_di_max: Optional[float] = None,
     inductor_abs_clamp: Optional[float] = None,
     progress: "bool | int | str" = False,
@@ -2243,8 +2332,8 @@ def simulate(
         or IGBT raises :class:`UnsupportedError` (it would simulate
         them as open circuits).
     closed_loops, step_observer, controller_period
-        Controllers, on ``pwl`` and ``trbdf2`` (``dsed`` refuses
-        them). Each ``ClosedLoop`` (``period``) and a
+        Controllers, on ``pwl``, ``trbdf2`` and ``dsed`` (``dsed``: from
+        ``t_start=0``; every-step observers refused). Each ``ClosedLoop`` (``period``) and a
         ``step_observer`` with ``controller_period`` (or a ``.period``)
         is a tick source: source j runs at ``t_start + k*T_j``,
         ``ceil(span / T_j)`` times, sources due at one instant in
@@ -2496,6 +2585,13 @@ def simulate(
     if on_impulse not in ("record", "warn", "error"):
         raise ValueError(f"simulate(on_impulse={on_impulse!r}): expected "
                          "'record', 'warn' or 'error'")
+    # add-unified-device-interface (dual path): which code stamps the
+    # Newton kinds; 'interface' refuses an unported kind by name.
+    if device_path not in ("legacy", "interface"):
+        raise _options_error("device_path",
+                             f"simulate(device_path={device_path!r}): "
+                             "expected 'legacy' or 'interface'")
+    _device_path = getattr(DevicePath, device_path.capitalize())
     _dsed = _dsed_dispatch_module
     _dsed._validate_engine_kwargs(
         engine=engine,
@@ -2626,11 +2722,12 @@ def simulate(
     # ---- Controllers: one composition for every engine ----
     # (fix-control-tick-semantics). Above the dispatch so its refusals
     # (controller_period without an observer, a bad period) hold on
-    # every engine; dsed refuses closed_loops / step_observer itself.
+    # every engine; dsed ticks them on its event queue.
     if control_tick not in ("label", "state"):
         raise ValueError(
             f"simulate(control_tick={control_tick!r}): use 'label' (the "
             "default) or 'state'")
+    from ._control_plan import monitor_flags as _monitor_flags
     _plan = _compose_control(builder, closed_loops, step_observer,
                              controller_period, switch_fn,
                              resume=resume_from is not None,
@@ -2675,9 +2772,11 @@ def simulate(
         # The option x engine table (sim::kRunOptionTable): every keyword
         # the exact engine cannot honour, plus C blocks (they drive the
         # circuit through b_extra, which this engine does not consume).
+        # Controllers (closed_loops, controller_period, a periodic
+        # step_observer, control_tick) tick on its event queue: rows.
         _offending = _ro.refused("dsed", {
             **_opt_values, "c_blocks": bool(_c_blocks_of(builder)),
-            "step_observer": step_observer,
+            "device_path": device_path,
             "enable_nonlinear_refresh": enable_nonlinear_refresh,
             "max_newton_iterations": max_newton_iterations,
             "max_event_iterations": max_event_iterations,
@@ -2687,9 +2786,7 @@ def simulate(
             "enable_newton_lm": enable_newton_lm,
             "newton_roundoff_budget": newton_roundoff_budget,
             "should_continue": should_continue,
-            "closed_loops": closed_loops,
-            "controller_period": controller_period,
-            "resume_from": resume_from, "control_tick": control_tick})
+            "resume_from": resume_from})
         if _offending:
             raise _unsupported(
                 "dsed", _offending[0],
@@ -2699,9 +2796,32 @@ def simulate(
                 "converter would simulate OPEN-loop). Use "
                 "engine='pwl' for these features, or drop the "
                 "kwarg(s) if the open-loop behaviour is intended. "
-                "Observer/closed-loop support inside DSED is tracked "
-                "for v2.0 (event-synchronised controller cadence)."
             )
+        # Controllers tick on the integrator's event queue
+        # (add-unified-event-queue group 3), as on trbdf2.
+        _plan = _plan.for_variable_step("dsed")
+        if _plan.every_step:
+            raise _unsupported(
+                "dsed", "step_observer",
+                "simulate(engine='dsed'): a step_observer needs a cadence: "
+                "this engine has no fixed grid to ride, so pass "
+                "controller_period=<T_ctrl seconds> and the ticks are "
+                "scheduled exactly. A ClosedLoop from bind_pi_to_switch "
+                "carries its own period.")
+        if _plan.ticks and sensitivities is not None:
+            raise _unsupported(
+                "dsed", "sensitivities",
+                "simulate(engine='dsed', sensitivities=...) with controllers: "
+                "the sensitivity run has no control ticks, so the loop would "
+                "run open. Drop sensitivities or the controllers.")
+        if _plan.ticks and float(t_start) != 0.0:
+            raise _unsupported(
+                "dsed", "step_observer",
+                "simulate(engine='dsed', t_start != 0) with controllers: the "
+                "engine runs the gate in its own time from 0, the controller "
+                "in simulate()'s time. Start at t_start=0, or use "
+                "engine='trbdf2'.")
+        switch_fn = _plan.switch_fn
         # The DSED branch returns here, ~400 lines before the PWL
         # tail that attaches `_builder` / `_preflight`. Attach the
         # preflight report on the way out, so `result._preflight` —
@@ -2736,6 +2856,8 @@ def simulate(
                 progress=progress,
                 mode_selection=mode_selection,
                 allow_implicit_segments=bool(allow_implicit_segments),
+                ticks=[(f, p, o) for (f, p), o in zip(
+                    _plan.ticks, _plan.tick_offsets or [0.0] * len(_plan.ticks))],
             )
         try:
             _dsed_res._preflight = _preflight_report
@@ -2810,15 +2932,22 @@ def simulate(
             inductor_freeze_di_max=inductor_freeze_di_max,
             inductor_abs_clamp=inductor_abs_clamp,
             switch_fn=switch_fn)
+        # the tick sources trbdf2 registers (for_variable_step's count)
+        _tick_origins = _resume_tick_origins(resume_from, len(_plan.ticks) + len(
+            _plan.rate_ticks) + len(getattr(_plan.c_graph, "_rate_ticks", None) or []))
         if resume_from is not None and any(
-                _off_tick_grid(_g._cxx_chain, t_start) for _g in _plan.graphs):
-            # trbdf2 ticks at t_start + k*T: a graph resumed between two
-            # of its ticks would tick off its own grid (G26)
+                _off_tick_grid(_g._cxx_chain, t_start, _tick_origins)
+                for _g in _plan.graphs):
+            # without the snapshot's tick origins trbdf2 ticks at t_start +
+            # k*T: a graph resumed between two of its ticks would tick off
+            # its own grid (G26)
             _rb = _Blocker(
                 "resume_from: a control graph resumes between two of its "
-                "ticks and the variable-step engine schedules ticks at "
-                "t_start + k*T (off the graph's grid); resume on a tick "
-                "instant, or use engine='pwl'")
+                "ticks and the snapshot carries no tick grid for this run's "
+                "controllers (pickled before version 4, built by hand, or "
+                "from a run with other controllers), so the variable-step "
+                "engine would schedule ticks at t_start + k*T, off the "
+                "graph's grid; resume on a tick instant, or use engine='pwl'")
             _rb.feature = "resume_from"
             _route_reasons = [*_route_reasons, _rb]
         if engine == "trbdf2":
@@ -3000,7 +3129,7 @@ def simulate(
             enable_newton_line_search=enable_newton_line_search,
             enable_newton_lm=enable_newton_lm,
             newton_roundoff_budget=newton_roundoff_budget,
-            on_impulse=on_impulse)
+            on_impulse=on_impulse, device_path=device_path)
         _n_sw = builder.graph.num_switches
         if switch_fn is None:
             # No driver: all-OPEN here (the v2.0 semantics; the
@@ -3021,10 +3150,11 @@ def simulate(
                     _sim.set_cancel(should_continue)
                 if resume_from is not None:
                     _sim.restore(resume_from, False)  # simulate()'s t_start wins
-                for (_f, _p), _o in zip(_plan.ticks, _plan.tick_offsets
-                                        or [0.0] * len(_plan.ticks),
-                                        strict=True):
-                    _sim.add_tick(_p, _f, _o)
+                for (_f, _p), _o, _m in zip(
+                        _plan.ticks,
+                        _plan.tick_offsets or [0.0] * len(_plan.ticks),
+                        _monitor_flags(_plan.ticks), strict=True):
+                    _sim.add_tick(_p, _f, _o, _m)
                 res = _pulsim_module._run_simulation(_sim)
                 _stats = _sim.trbdf2_stats
                 builder = _sim.builder  # the pool the run stamped state into
@@ -3052,6 +3182,11 @@ def simulate(
                     observer_periods=[_p for _, _p in _plan.ticks],
                     observers=[_f for _f, _ in _plan.ticks],
                     observer_offsets=list(_plan.tick_offsets),
+                    observer_monitors=_monitor_flags(_plan.ticks),
+                    observer_origins=_resume_tick_origins(resume_from,
+                                                          len(_plan.ticks)),
+                    observer_next_k=_resume_tick_next_k(resume_from,
+                                                        len(_plan.ticks)),
                     # None: the kernel stamps the Newton devices itself.
                     enable_nonlinear_refresh=enable_nonlinear_refresh,
                     max_newton_iterations=_to["max_newton_iterations"],
@@ -3061,6 +3196,7 @@ def simulate(
                     enable_newton_lm=_to["enable_newton_lm"],
                     newton_roundoff_budget=_to["newton_roundoff_budget"],
                     on_impulse_error=_to["on_impulse_error"],
+                    device_path=_device_path,
                 )
         except SimulationAborted as _aborted:
             try:
@@ -3075,6 +3211,18 @@ def simulate(
                 _partial._trbdf2_stats = {}
             except AttributeError:  # pragma: no cover
                 pass
+            if "controller is grinding" in str(_aborted):
+                _nodes = _inductor_only_nodes(builder)
+                if _nodes:
+                    _aborted.args = (str(_aborted) + (
+                        f". Node(s) {', '.join(_nodes)} have no capacitance "
+                        "and no resistor: while every switch and diode on "
+                        "them is OFF, an inductor drives them through g_off "
+                        "alone (a mode of tau = L*g_off, femtoseconds), which "
+                        "this engine's error estimate reads as error at any "
+                        "step. Give the node a capacitance (a MOSFET's Coss, a "
+                        "snubber) or use engine='pwl' with a fixed dt."),
+                    ) + tuple(_aborted.args[1:])
             raise
         res._builder = builder
         res._preflight = _preflight_report
@@ -3283,6 +3431,7 @@ def simulate(
         enable_substep_state_correction=enable_substep_state_correction,
         discontinuity_restart=discontinuity_restart, on_impulse=on_impulse,
         mode_selection=mode_selection, mode_guard=_PWL_MODE_GUARD,
+        device_path=device_path,
         control_tick=control_tick,
         resolution_diagnostics=resolution_diagnostics,
         inductor_freeze_di_max=inductor_freeze_di_max,
@@ -3478,6 +3627,11 @@ def simulate(
             kwargs["resume_from"] = resume_from
         # Python tick sources: scheduled by the kernel's event queue.
         kwargs.update(_plan.fixed_tick_kwargs())
+        _origins = _resume_tick_origins(resume_from,
+                                        len(kwargs.get("tick_periods", ())))
+        if _origins:   # a resume keeps the run's tick grid
+            kwargs["tick_origins"] = _origins
+            kwargs["tick_next_ks"] = _resume_tick_next_k(resume_from, len(_origins))
         if _PWL_RECIPE.get() is not None:  # sweep(circuit, ...) replays it
             _PWL_RECIPE.get().update(
                 opts=opts, dt=dt, kwargs=dict(kwargs), mmc=bool(mmc_arms),
@@ -3701,19 +3855,41 @@ def simulate(
     # the trace it was solved against.
     if _mmc_finalize is not None and len(res.states) > 0:
         _mmc_finalize(res.times[-1], res.states[-1])
+    _warn_impulse_heat(res, builder)
     _save_control_state(_plan.graphs, res)
     return res
 
 
-def _off_tick_grid(cxx, t_start: float) -> bool:
-    """A resumed graph whose rate groups do not all tick on t_start +
-    offset + k*period (what trbdf2's event queue schedules): some group
+def _resume_tick_origins(resume_from, n: int) -> "list[float]":
+    """The snapshot's per-source tick-grid origins when it has one per
+    tick source of this run (the run that wrote it had the same
+    controllers), else [] (each source's grid then starts at t_start)."""
+    if resume_from is None or n == 0:
+        return []
+    origins = list(getattr(resume_from, "tick_origin", None) or [])
+    return [float(o) for o in origins] if len(origins) == n else []
+
+
+def _resume_tick_next_k(resume_from, n: int) -> "list[int]":
+    """The snapshot's first unfired tick index per source (as
+    _resume_tick_origins), else [] (the index is recomputed from t_start)."""
+    if resume_from is None or n == 0:
+        return []
+    ks = list(getattr(resume_from, "tick_next_k", None) or [])
+    return [int(k) for k in ks] if len(ks) == n else []
+
+
+def _off_tick_grid(cxx, t_start: float, origins=()) -> bool:
+    """A resumed graph whose rate groups do not all tick on origin +
+    offset + k*period (what trbdf2's event queue schedules; origin is the
+    snapshot's when every source shares one, else t_start): some group
     would leave its grid."""
     if not cxx.n_calls:
         return False
+    origin = origins[0] if origins and len(set(origins)) == 1 else t_start
     for gi, due in enumerate(cxx.next_due_per_group(), start=1):
         period = float(cxx.group_period(gi))
-        q = (float(due) - t_start - float(cxx.group_offset(gi))) / period
+        q = (float(due) - origin - float(cxx.group_offset(gi))) / period
         if abs(q - round(q)) > 1e-9 * max(1.0, abs(q)):
             return True
     return False
@@ -3910,6 +4086,27 @@ def _floating_subnets(builder) -> list:
             groups.setdefault(r, []).append(i)
     return sorted([g.node_name(i) or f"#{i}" for i in grp]
                   for grp in groups.values() if storage.intersection(grp))
+
+
+def _inductor_only_nodes(builder) -> list:
+    """Names of nodes whose only non-switch branches are inductors: while
+    every switch/diode on them is OFF, their voltage is set by g_off alone
+    (an L*g_off mode). Best effort: [] when the builder cannot be read."""
+    try:
+        g = builder.graph
+        comps = builder.components()
+    except AttributeError:  # pragma: no cover
+        return []
+    kinds: dict = {}
+    for c in comps:
+        k = str(c.get("kind", ""))
+        if k in ("switch", "diode") or k.endswith("switch"):
+            continue
+        for nd in c.get("nodes", ()):
+            if nd >= 0:
+                kinds.setdefault(nd, set()).add(k)
+    return [g.node_name(nd) or f"#{nd}" for nd, ks in sorted(kinds.items())
+            if ks == {"inductor"}]
 
 
 class _Blocker(str):

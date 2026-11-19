@@ -48,7 +48,6 @@ const char* unset_name(sim::Unset u) {
         case sim::Unset::NoneOrZero: return "none_or_zero";
         case sim::Unset::Legacy: return "legacy";
         case sim::Unset::Integrator: return "integrator";
-        case sim::Unset::Label: return "label";
     }
     return "?";
 }
@@ -225,6 +224,16 @@ void init_module(py::module_& m) {
                 o.control_tick_state = parse_enum<bool>(v,
                     {{"label", false}, {"state", true}}, "control_tick");
             })
+        .def_property("device_path",
+            [](const RunOptions& o) {
+                return std::string(o.device_path == device::DevicePath::Interface
+                                       ? "interface" : "legacy");
+            },
+            [](RunOptions& o, const std::string& v) {
+                o.device_path = parse_enum<device::DevicePath>(v,
+                    {{"legacy", device::DevicePath::Legacy},
+                     {"interface", device::DevicePath::Interface}}, "device_path");
+            })
         .def_readwrite("max_dt_halvings", &RunOptions::max_dt_halvings)
         .def_readwrite("store_every", &RunOptions::store_every)
         .def_readwrite("start_from_dc_op", &RunOptions::start_from_dc_op)
@@ -361,6 +370,11 @@ void init_module(py::module_& m) {
             } else if (key == "control_tick") {
                 o.control_tick_state = parse_enum<bool>(v.cast<std::string>(),
                     {{"label", false}, {"state", true}}, "control_tick");
+            } else if (key == "device_path") {
+                o.device_path = parse_enum<device::DevicePath>(
+                    v.cast<std::string>(),
+                    {{"legacy", device::DevicePath::Legacy},
+                     {"interface", device::DevicePath::Interface}}, "device_path");
             } else {
                 throw py::type_error("RunOptions has no field '"
                                      + std::string(key) + "'");
@@ -467,11 +481,16 @@ void init_module(py::module_& m) {
             },
             py::arg("step_observer"))
         .def("add_tick",
-            [](sim::Simulation& s, Real period, py::object fn, Real offset) {
-                s.add_tick(period, pulsim_bindings_common::step_fn(fn), offset);
+            [](sim::Simulation& s, Real period, py::object fn, Real offset,
+               bool monitor) {
+                s.add_tick(period, pulsim_bindings_common::step_fn(fn), offset,
+                           monitor);
             },
             py::arg("period"), py::arg("fn"), py::arg("offset") = 0.0,
-            py::keep_alive<1, 3>())
+            py::arg("monitor") = false, py::keep_alive<1, 3>(),
+            "A tick at t_start + offset + k*period. monitor=True: a "
+            "Kind::Monitor (trbdf2 neither lands on it nor re-samples the "
+            "gate after it; pwl ticks it on its grid as any tick).")
         .def("set_tick_before",
             [](py::object self, py::object fn) {
                 // Holds the callable (replacing the previous one): the

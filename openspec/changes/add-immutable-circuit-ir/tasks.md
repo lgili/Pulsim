@@ -63,12 +63,12 @@ lands).
 - [x] 8.4 Oracle: `test_subsystems.py` unchanged; the 302-branch subsystem circuit has identical `components()` names and results; round trip preserves the tree
 
 ## 9. Domains
-- [ ] 9.1 `ir::Domain`; `builder.node(name, domain)`; YAML node entries with `domain`
-- [ ] 9.2 Pin domain tables per kind; connection check; per-domain reference check in the preflight; units on probes
-- [ ] 9.3 Tag the MNA PMSM's mechanical nodes (own PR)
-- [ ] 9.4 Tag the thermal helpers' nodes (own PR)
-- [ ] 9.5 Oracle: untagged circuits bit-identical; PMSM and electro-thermal tests unchanged; a thermal pin on an electrical node is refused by name
-- [ ] 9.6 Docs: domains page; `docs/known-limitations.md`
+- [x] 9.1 `ir::Domain`; `builder.node(name, domain)`; YAML node entries with `domain`
+- [x] 9.2 Pin domain tables per kind; connection check; per-domain reference check in the preflight; units on probes — two classes (electrical-only kinds, pairwise-generic kinds), not a row per kind; units via `Circuit.unit_of`, result traces carry none yet (DECISIONS 22, known-limitations)
+- [x] 9.3 Tag the MNA PMSM's mechanical nodes (own PR) — implied by its typed pins; done in this branch, not a separate PR (DECISIONS 22)
+- [x] 9.4 Tag the thermal helpers' nodes (own PR) — done in this branch, not a separate PR (DECISIONS 22)
+- [x] 9.5 Oracle: untagged circuits bit-identical; PMSM and electro-thermal tests unchanged; a thermal pin on an electrical node is refused by name
+- [x] 9.6 Docs: domains page; `docs/known-limitations.md`
 
 ## 10. Structure sharing
 - [x] 10.1 `SymbolicPlan` held by structure hash and reused by `with_params` (requires `update-linear-time-assembly`; skipped with a note otherwise)

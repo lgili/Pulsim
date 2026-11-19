@@ -50,6 +50,7 @@ if(PULSIM_BUILD_TESTS)
         tests/dsed/test_trbdf2_stage_coeffs.cpp
         tests/dsed/test_exact_lti.cpp
         tests/dsed/test_convergence_failure.cpp  # typed give-up sites
+        tests/dsed/test_exact_queue_ticks.cpp  # ticks, monitors, step hooks on the queue
         tests/dsed/test_event_projection.cpp
         tests/dsed/test_scheduler_auto.cpp  # Gate 4.D — auto-dispatch RK45↔BDF2 per mode
         tests/dsed/test_period_integrals.cpp  # period map, M, closed-form integrals
@@ -100,6 +101,23 @@ if(PULSIM_BUILD_TESTS)
         pulsim_apply_target_defaults(pulsim_core_sim_tests)
     endif()
     catch_discover_tests(pulsim_core_sim_tests)
+
+    # refactor-unified-transient-stepper — the stepper's stage tables,
+    # controllers and policies (core/include/pulsim/solver/step/).
+    add_executable(pulsim_core_step_tests
+        tests/step/test_integrators.cpp
+        tests/step/test_controllers.cpp
+        tests/step/test_stepper.cpp
+    )
+    target_link_libraries(pulsim_core_step_tests
+        PRIVATE
+            pulsim::core
+            Catch2::Catch2WithMain
+    )
+    if(COMMAND pulsim_apply_target_defaults)
+        pulsim_apply_target_defaults(pulsim_core_step_tests)
+    endif()
+    catch_discover_tests(pulsim_core_step_tests)
 
     # add-in-kernel-event-losses group 1 — the kernel loss tables
     # (core/include/pulsim/thermal/loss_table.hpp), header-only.
@@ -197,6 +215,7 @@ if(PULSIM_BUILD_TESTS)
         tests/layer2/test_gapped_core.cpp               # Phase 4 C.4
         tests/layer2/test_jiles_atherton_core.cpp       # Phase 4 C.4 (JA in loop)
         tests/layer2/test_controlled_sources.cpp        # add-controlled-source-set
+        tests/layer2/test_permeance.cpp                 # add-permeance-magnetic-domain
     )
     target_link_libraries(pulsim_core_layer2_tests
         PRIVATE
@@ -446,6 +465,8 @@ if(PULSIM_BUILD_TESTS)
     add_executable(pulsim_core_layer5_v3_tests
         tests/layer5_v3/test_main.cpp
         tests/layer5_v3/test_snapshot_restore.cpp
+        tests/layer5_v3/test_device_interface.cpp
+        tests/layer5_v3/test_device_laws.cpp
         tests/layer5_v3/test_substep_correction.cpp
         tests/layer5_v3/test_resolution_diagnostics.cpp
     )

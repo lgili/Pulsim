@@ -148,3 +148,27 @@ TEST_CASE("GateSet composes by index and refuses a doubly driven switch",
                               .next_edge_after(t)));
     }
 }
+
+TEST_CASE("EdgeList: a bit holds its last edge, edges come out sorted",
+          "[event_queue][gate_source]") {
+    const EdgeList g{{{3e-6, 0, false}, {1e-6, 0, true}, {2e-6, 1, true},
+                      {3e-6, 0, true}}};
+    g.check("e");
+    CHECK(g.owned_bits() == std::vector<Index>{0, 1});
+    SwitchStateMask m(2);
+    g.apply(0.0, m);
+    CHECK((!m.get(0) && !m.get(1)));
+    g.apply(1e-6, m);
+    CHECK((m.get(0) && !m.get(1)));
+    g.apply(3e-6, m);
+    CHECK((m.get(0) && m.get(1)));      // the last edge of an instant wins
+    CHECK(g.next_edge(0.0) == 1e-6);
+    CHECK(g.next_edge(2e-6) == 3e-6);
+    CHECK(std::isinf(g.next_edge(3e-6)));
+    GateSet set(1);
+    CHECK_THROWS_AS(set.add(EdgeList{{{1e-6, 2, true}}}, "far"),
+                    std::invalid_argument);
+    CHECK_THROWS_AS(set.add(EdgeList{{{std::numeric_limits<Real>::quiet_NaN(), 0,
+                                       true}}}, "nan"),
+                    std::invalid_argument);
+}

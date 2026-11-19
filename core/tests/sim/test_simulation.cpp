@@ -81,6 +81,14 @@ TEST_CASE("RunOptions resolves to the drivers' defaults", "[sim][options]") {
     o.max_event_iterations = 0;
     REQUIRE(sim::to_simulation_options(o).max_event_iterations == 0);
     REQUIRE_THROWS_AS(sim::to_trbdf2_options(o), UnsupportedError);
+    // device_path reaches both drivers; the exact engine refuses it by name.
+    o.max_event_iterations.reset();
+    o.device_path = device::DevicePath::Interface;
+    REQUIRE(sim::to_simulation_options(o).device_path == device::DevicePath::Interface);
+    REQUIRE(sim::to_trbdf2_options(o).device_path == device::DevicePath::Interface);
+    const auto refused = sim::option_refusals(sim::requested_options(o),
+                                              sim::Engine::Dsed);
+    REQUIRE(refused == std::vector<std::string_view>{"device_path"});
 }
 
 TEST_CASE("Simulation matches the fixed-step driver bit for bit with no "

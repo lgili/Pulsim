@@ -41,8 +41,6 @@ def is_requested(name: str, value: Any, engine: str = "") -> bool:
         return int(value) != 0
     if kind == "legacy":
         return value != "legacy"
-    if kind == "label":
-        return value != "label"
     if kind == "integrator":
         # The fixed engine's own integrator names ask nothing of it.
         return not (engine == "pwl" and value in ("kernel", "default"))

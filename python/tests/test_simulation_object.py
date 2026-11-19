@@ -19,9 +19,21 @@ def _rc():
     return b
 
 
+# simulate() keywords that are not a row of sim::kRunOptionTable, each with
+# the reason. Everything else MUST be a row (honoured or refused by name per
+# engine): this test is what keeps the table honest.
+_NOT_A_ROW = {
+    "builder": "the circuit itself, not a run option",
+}
+
+
 def test_the_table_covers_every_simulate_parameter():
-    params = set(inspect.signature(p.simulate).parameters) - {"builder"}
-    assert set(ro.TABLE) - {"c_blocks"} == params
+    params = set(inspect.signature(p.simulate).parameters)
+    rows = set(ro.TABLE) - {"c_blocks"}  # c_blocks: a circuit feature
+    missing = params - rows - set(_NOT_A_ROW)
+    assert not missing, f"simulate() keyword(s) with no table row: {missing}"
+    assert rows <= params, f"table rows that are no keyword: {rows - params}"
+    assert not set(_NOT_A_ROW) & rows
 
 
 def test_option_capabilities_is_the_table():
@@ -89,7 +101,7 @@ _ASK = {
     "inductor_abs_clamp": 1e3, "progress": True,
     "should_continue": lambda: True, "on_cache": lambda cache: None,
     "sensitivities": ["R.R"], "mode_selection": "lcp",
-    "allow_implicit_segments": True, "control_tick": "state",
+    "allow_implicit_segments": True, "device_path": "interface",
 }
 # Cells exercised elsewhere (they need a controller, a stream, an MMC arm or
 # a snapshot to be built): test_closed_loop*, test_live*, test_mmc*,
@@ -317,3 +329,39 @@ def _dsed_only():
     return {n for n, r in ro.TABLE.items() if n != "c_blocks"
             and r["unset"] != "always" and {"pwl", "trbdf2"} <= set(r["engines"])
             and "dsed" not in r["engines"]}
+
+
+def test_simulation_object_reads_device_path_monitors_and_the_tick_grid():
+    """Integration batch 14a on the object: device_path reaches both
+    drivers; a Monitor neither lands a step nor re-samples the gate (run
+    identical without it); a resume keeps the snapshot's tick grid."""
+    b = _buck()
+    for engine, dt in (("pwl", 2e-7), ("trbdf2", None)):
+        ref = p.simulate(b, t_end=1e-4, dt=dt, engine=engine,
+                         switch_fn=_gate(), device_path="interface")
+        o = p.RunOptions(t_end=1e-4, dt=dt, engine=engine)
+        o.device_path = "interface"
+        sim = p.Simulation(b.build(), o)
+        sim.set_switch_fn(_gate())
+        assert np.array_equal(np.asarray(ref.states),
+                              np.asarray(sim.run().states)), engine
+    plain = p.Simulation(b.build(), p.RunOptions(t_end=1e-4, engine="trbdf2"))
+    plain.set_switch_fn(_gate())
+    seen = []
+    mon = p.Simulation(b.build(), p.RunOptions(t_end=1e-4, engine="trbdf2"))
+    mon.set_switch_fn(_gate())
+    mon.add_tick(3e-6, lambda t, x: seen.append(t), 0.0, True)
+    assert np.array_equal(np.asarray(plain.run().states),
+                          np.asarray(mon.run().states))
+    assert len(seen) >= 30
+    # Split at a tick instant: the continuation fires each tick once.
+    dt = 2.0 ** -20
+    T = 16 * dt
+    hits = []
+    s = p.Simulation(b.build(), p.RunOptions(t_end=128 * dt, dt=dt, engine="pwl"))
+    s.set_switch_fn(_gate())
+    s.add_tick(T, lambda t, x: hits.append(t))
+    s.run_until(64 * dt)
+    assert list(s.snapshot().tick_origin) == [0.0]
+    s.run()
+    assert hits == [k * T for k in range(8)]

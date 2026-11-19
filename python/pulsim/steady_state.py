@@ -85,6 +85,12 @@ class SteadyStateResult:
     pattern: "list[int]" = field(default_factory=list)
 
 
+# The device-state blocks (SolverSnapshot.dev_layout_names) the fields
+# below and ``history`` cover.
+_COPIED_BLOCKS = frozenset({
+    "linear_companion", "saturable_inductor", "nonlinear_capacitor",
+    "lauritzen_diode", "igbt_tail", "pmsm_mna"})
+
 # Snapshot fields that belong to devices whose state is NOT a linear
 # companion pair: (field, reals per device, name). Widths match the
 # histories' to_flat() layouts in core/include/pulsim/pwl/.
@@ -117,6 +123,15 @@ def _snapshot_like(base, history):
     engines' size-checked from_flat()s."""
     from ._pulsim import SolverSnapshot  # type: ignore
 
+    # Only the blocks named below are copied: a device-state block added
+    # later must be added here too, or its state would restart silently.
+    for name, n in zip(getattr(base, "dev_layout_names", ()),
+                       getattr(base, "dev_layout", ())):
+        if n and name not in _COPIED_BLOCKS:
+            raise NotImplementedError(
+                f"steady_state: the snapshot carries {n} device(s) of the "
+                f"state block {name!r}, which the period map does not copy "
+                "yet (python/pulsim/steady_state.py, _snapshot_like)")
     s = SolverSnapshot()
     s.t = float(base.t)
     s.x = np.asarray(base.x).copy()
@@ -128,6 +143,10 @@ def _snapshot_like(base, history):
     # An unfinished discontinuity_restart window (the steps after an
     # edge just before the boundary) is part of the period map's state.
     s.restart_steps_left = int(getattr(base, "restart_steps_left", 0))
+    # A TR-BDF2 snapshot on a gate edge keeps its refusal by the fixed
+    # engine (the grid is not copied: the history differs, so it restarts).
+    s.post_edge_derivatives = bool(getattr(base, "post_edge_derivatives",
+                                           False))
     for attr, _w, _n in _STATEFUL_FIELDS:
         setattr(s, attr, [float(v) for v in getattr(base, attr, ())])
     s.valid = True
@@ -261,8 +280,13 @@ def steady_state(builder, *, period: float, dt: float | None = None,
               "(measured: +0.38 A of DC inductor current in the first "
               "period). Settle with a transient run instead, and use "
               "its final_snapshot as the starting point of the next.")
-    base = run_period(base_in)
     h0 = np.asarray(list(base_in.history), dtype=float)
+    # The probes resume from hand-built snapshots, which carry no
+    # step-controller memory; on the variable-step engine the base run
+    # must start the same way or the columns difference two step
+    # sequences (refactor-unified-transient-stepper DECISIONS 8).
+    base = run_period(_snapshot_like(base_in, h0)
+                      if kw.get("engine") == "trbdf2" else base_in)
     c = np.asarray(list(base.final_snapshot.history), dtype=float)
     n = c.size
     if n == 0:

@@ -52,9 +52,8 @@ enum class Unset : std::uint8_t {
     Falsy,       // None, False, 0, empty
     NoneOrOne,   // store_every: 1 records every step
     NoneOrZero,  // max_dt_halvings: 0 asks for no retry, which no engine lacks
-    Legacy,      // mode_selection: None / 'legacy' is every engine's settle
+    Legacy,      // mode_selection / device_path: None / 'legacy' is the default
     Integrator,  // None; on pwl also 'kernel' / 'default' (its own integrator)
-    Label,       // control_tick: None / 'label' is every engine's tick time
 };
 
 struct OptionSpec {
@@ -72,7 +71,7 @@ struct OptionSpec {
 /// the order refusals are listed in). Python reads it through
 /// `pulsim._pulsim.run_option_table()`; a test asserts its names equal
 /// simulate()'s parameters.
-inline constexpr std::array<OptionSpec, 48> kRunOptionTable{{
+inline constexpr std::array<OptionSpec, 49> kRunOptionTable{{
     {"engine", kEvery, Unset::Always, "'auto'", ""},
     {"rtol", kTrBdf2 | kExact, Unset::None, "1e-5 (trbdf2), 1e-6 (exact)",
      "rtol bounds a variable step's error estimate; a fixed step has none"},
@@ -90,8 +89,10 @@ inline constexpr std::array<OptionSpec, 48> kRunOptionTable{{
     {"t_start", kEvery, Unset::Always, "0.0", ""},
     {"switch_fn", kEvery, Unset::Always, "None", ""},
     {"b_extra_fn", kEvery, Unset::Always, "None", ""},
-    {"step_observer", kPwl | kTrBdf2, Unset::None, "None",
-     "step_observer runs a Python controller between steps"},
+    // Controllers run on every engine (the exact engine ticks them on its
+    // event queue). An every-step step_observer on a variable-step engine
+    // is refused by its own message (it needs a controller_period).
+    {"step_observer", kEvery, Unset::Always, "None", ""},
     {"start_from_dc_op", kPwl, Unset::Falsy, "False",
      "start_from_dc_op is a fixed-step entry point"},
     {"enable_nonlinear_refresh", kPwl | kTrBdf2, Unset::None,
@@ -140,8 +141,7 @@ inline constexpr std::array<OptionSpec, 48> kRunOptionTable{{
     {"initial_state", kEvery, Unset::Always, "None (the circuit's ICs)", ""},
     {"should_continue", kPwl | kTrBdf2, Unset::None, "None",
      "should_continue is a cancellation hook the exact engine does not poll"},
-    {"closed_loops", kPwl | kTrBdf2, Unset::Falsy, "None",
-     "closed_loops run Python controllers between steps"},
+    {"closed_loops", kEvery, Unset::Always, "None", ""},
     {"live_stream", kPwl, Unset::None, "None",
      "live_stream needs the fixed-step kernel's per-step ring push"},
     {"mmc_arms", kPwl, Unset::Falsy, "None",
@@ -151,8 +151,7 @@ inline constexpr std::array<OptionSpec, 48> kRunOptionTable{{
      "other engines have no such cache, so the hook would never fire and "
      "whatever it was closing (an electro-thermal loop, usually) would "
      "silently stay open"},
-    {"controller_period", kPwl | kTrBdf2, Unset::None, "None",
-     "controller_period is the cadence of a step_observer"},
+    {"controller_period", kEvery, Unset::Always, "None", ""},
     {"resume_from", kPwl | kTrBdf2, Unset::None, "None",
      "resume_from needs a snapshot the exact engine does not keep"},
     {"solver", kEvery, Unset::Always, "None", ""},
@@ -162,9 +161,10 @@ inline constexpr std::array<OptionSpec, 48> kRunOptionTable{{
      "mode_selection='shadow' / 'lcp' needs a settle hook this engine lacks"},
     {"allow_implicit_segments", kExact, Unset::None, "None",
      "allow_implicit_segments governs the exact engine's numeric segments"},
-    {"control_tick", kPwl | kTrBdf2, Unset::Label, "'label'",
-     "control_tick='state' changes when a controller reads the state; the "
-     "exact engine runs no controller"},
+    {"control_tick", kEvery, Unset::Always, "'label'", ""},
+    {"device_path", kPwl | kTrBdf2, Unset::Legacy, "'legacy'",
+     "device_path selects which code stamps the Newton devices; the exact "
+     "engine stamps its own"},
     // simulate()'s signature also has `dt` and `t_end` (every engine; the
     // run window) — rows so the table covers every parameter.
     {"t_end", kEvery, Unset::Always, "required", ""},
@@ -228,6 +228,9 @@ struct RunOptions {
     std::optional<bool> resolution_diagnostics;
     std::optional<Real> inductor_freeze_di_max, inductor_abs_clamp;
 
+    /// Which code stamps the Newton kinds (add-unified-device-interface).
+    device::DevicePath device_path = device::DevicePath::Legacy;
+
     // Every engine.
     bool auto_regularize = true;
     std::optional<Real> voltage_sanity_factor;
@@ -274,6 +277,7 @@ requested_options(const RunOptions& o) {
     on(o.inductor_abs_clamp.has_value(), "inductor_abs_clamp");
     on(o.mode_selection != ModeSelection::Legacy, "mode_selection");
     on(o.control_tick_state, "control_tick");
+    on(o.device_path != device::DevicePath::Legacy, "device_path");
     // Keep table order (the order refusals are listed in).
     std::vector<std::string_view> ordered;
     for (const auto& spec : kRunOptionTable) {
@@ -340,6 +344,7 @@ to_simulation_options(const RunOptions& o) {
     s.on_impulse_error = o.on_impulse == OnImpulse::Error;
     s.mode_selection = static_cast<int>(o.mode_selection);
     s.mode_guard = o.mode_guard;
+    s.device_path = o.device_path;
     if (o.resolution_diagnostics) {
         s.resolution_diagnostics = *o.resolution_diagnostics;
     }
@@ -394,6 +399,7 @@ to_trbdf2_options(const RunOptions& o) {
         s.newton_roundoff_budget = *o.newton_roundoff_budget;
     }
     s.on_impulse_error = o.on_impulse == OnImpulse::Error;
+    s.device_path = o.device_path;
     return s;
 }
 

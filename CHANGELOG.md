@@ -99,6 +99,110 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   values `simulate()` always used (they were 1e-4 / 1e-6). Migration: set
   them explicitly for the old step density.
 
+### Integration batch 14a: event queue 3, device interface 3, unified stepper 2, ideal switch 5, TR-BDF2 track 8 merged
+
+* **Changed** the `SolverSnapshot` pickle is version 5, one layout with
+  17 fields: the controllers'-state marker (12), the fixed-step grid
+  (13), the step controller's block or None (14) and the tick phase
+  (`tick_origin`, `tick_next_k`; 15-16). It replaces four version-4
+  layouts written on parallel branches; all of them (13, 14 and 15
+  fields; the two 15-field forms told apart by field 12, a bool or a
+  tuple), version 3 (12, 13 fields) and Pulsim 2.0 tuples still load.
+  A malformed tuple raises `RuntimeError("SolverSnapshot: malformed
+  pickle state ...")` instead of a pybind cast error.
+* **Fixed** a NaN duty on a carrier PWM (`make_carrier_pwm_fn`, the
+  control graph's PWM gate) turned the switch ON for the whole period
+  since the gate moved onto `CarrierPwm`; it holds the switch (both
+  switches of a leg) OFF again.
+
+### Integration batch 13: device interface slice 2, IR node domains, TR-BDF2 tracks 7–8, exact engine 4, ideal switch 4, permeance domain merged
+
+* **Changed** the `SolverSnapshot` pickle is version 4 with 14 fields:
+  version 3's 13 (the controllers'-state marker) plus the fixed-step grid.
+  Version 3 (12 or 13 fields), the device-interface slice's own 13-field
+  version 4 and Pulsim 2.0 pickles load.
+* **Fixed** the IR's node domains did not know the permeance domain: every
+  winding / permeance node read `electrical, V`, a diode on a core node
+  built silently and `node(n, "magnetic")` was refused as reserved. Flux
+  nodes are now the magnetic domain (MMF, `A`); a winding still joins an
+  electrical and a magnetic pair; a semiconductor pin on a magnetic node
+  is refused by name; `node(n, "magnetic")` marks a flux node.
+* **Fixed** the induction machine's speed node read `electrical`; it is
+  mechanical (`rad/s`), as the PMSM's.
+* **Added** a warning when an impulsive re-initialisation is booked to a
+  device with a loss port: its energy (`E_impulse_total`) is not in
+  `heat_injected` or the junction temperature, and the port's conduction
+  integral across the impulse step is not physical (a capacitor loop read
+  −38.6 µJ and cooled the junction below ambient). Known limitation; it
+  was silent.
+* **Fixed** a trbdf2 run ended by a final sliver inside an SDIRK step left
+  the derivative-free stage history in its final snapshot.
+
+### Event queue, phase 3 (add-unified-event-queue)
+
+* **Added** controllers on `engine='dsed'`: `closed_loops`, a
+  `step_observer` with a period and rated control graphs tick on the
+  exact engine's event queue (from `t_start=0`; every-step observers are
+  refused). cl_boost_pi, cl_buck_pi and cl_buck_aggressive_pi now agree.
+* **Added** `pulsim.control.Monitor(fn, period)`: a read-only periodic
+  observer; trbdf2 and dsed runs are bit-identical with or without it.
+* **Added** `pulsim.DutyRegister`, `make_carrier_pwm_fn` and
+  `make_edge_list_fn`. The control graph's PWM gate is now a carrier
+  modulator on a duty register (results unchanged).
+* **Changed** a run's `final_snapshot` carries each tick source's grid
+  origin and next index (`tick_origin`, `tick_next_k`; pickle version
+  4, version 3 still loads). A trbdf2 resume between two ticks of a
+  control graph now continues on the graph's grid instead of being
+  refused; a plain Python tick source resumed on pwl keeps the run's
+  grid instead of restarting it at `t_start`.
+
+### Unified device interface, slice 3: the dual device path
+
+* **Added** `simulate(..., device_path='interface')` (and
+  `compute_dc_op(..., device_path=)`, kernel `SimulationOptions.device_path`
+  / `DevicePath`): every Newton kind runs through ONE law on the device
+  interface (`device/laws.hpp`) instead of its hand-written stamp. The
+  default stays `'legacy'`, bit-identical. Ported: smooth / Shockley
+  diode, MOSFET and IGBT level 1 (steady state), the nonlinear capacitor
+  (junction, VDMOS C_gd, table) and the saturable inductor (atan, table,
+  Jiles–Atherton) on `pwl`, `trbdf2` and the DC operating point; agreement
+  with `'legacy'` within 1e-12 of scale on the fixed-step engine. On a
+  transient engine a circuit with a kind not ported yet (Lauritzen diode,
+  IGBT tail, MNA PMSM, induction machine) refuses `'interface'` by name
+  (the DC operating point stamps only the static kinds, all ported);
+  `engine='dsed'` refuses it. The closed-form laws give parameter
+  derivatives by AD (∂f/∂p, ∂q/∂p); the table and Jiles–Atherton laws have
+  none (`param_tangent`).
+* **Added** the step controller's snapshot block
+  (`SolverSnapshot.controller_state` → `(kind, values)`, the unified
+  stepper's `step::ControllerState`; pickle version 4 gains a 15th field,
+  written only when the block is filled): empty until the stepper fills
+  it (a resume restarts the controller, as before); version-4 pickles of
+  13 and 14 fields and version 3 (12 and 13 fields) still load.
+
+### Unified device interface, slice 2: one stateful-kind registry, exact resume
+
+* **Fixed** a fixed-step run split by `resume_from=` was not the continuous
+  run bit for bit: the resumed time grid restarted at the split time, so
+  sample times moved by ~1e-20 s and a gate edge landed a rounding apart
+  (states then within 8e-12 of scale). The snapshot carries its grid
+  (`grid_origin`, `grid_step`, `grid_dt`); an `engine='pwl'` resume with
+  the same `dt` continues it and is bit-identical (states, times, final
+  device state), split between edges or on one. Pickle version 4; version
+  3 and Pulsim 2.0 pickles load and resume as before (restarted grid).
+* **Fixed** a TR-BDF2 snapshot taken exactly on a gate edge made a
+  fixed-step resume ring and abort at the next edge (its `x` is the
+  pre-edge solve, its device derivatives the post-edge ones). The snapshot
+  says so (`post_edge_derivatives`) and `engine='pwl'` refuses it by name;
+  `engine='trbdf2'` resumes from it.
+* **Changed** (internal) the five stateful Newton kinds are one
+  compile-time list (`pwl::StatefulKinds`, concept `device::StatefulKind`);
+  the drivers, the Newton refresh, the in-run rollback and the snapshot
+  iterate it, and the rollback is one flat vector that includes each
+  device's TR-BDF2 stage scratch. `device/device.hpp` adds the `Device` contract
+  (one law over the scalar, `Params<S>` for parameter sensitivities),
+  unused by the engines yet. Results bit-identical.
+
 ### Integration batch 12: unified device interface 1–3, in-kernel event losses, IR scopes, TR-BDF2 track 6, event queue, control graph 4, PWL IGBT / thyristor, exact engine session 6 merged
 
 * **Fixed** `periodic_steady_state` by shooting ran a thyristor / TRIAC
@@ -134,6 +238,33 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 * **Fixed** `periodic_steady_state` by shooting (pwl / trbdf2) ran a
   circuit with a loss port and dropped each period's turn-on and its
   last step's heat; it now refuses the port by name.
+
+### Unified device interface, slice 2: one stateful-kind registry, exact resume
+
+* **Fixed** a fixed-step run split by `resume_from=` was not the continuous
+  run bit for bit: the resumed time grid restarted at the split time, so
+  sample times moved by ~1e-20 s and a gate edge landed a rounding apart
+  (states then within 8e-12 of scale). The snapshot carries its grid
+  (`grid_origin`, `grid_step`, `grid_dt`); an `engine='pwl'` resume with
+  the same `dt` continues it and is bit-identical (states, times, final
+  device state), split between edges or on one. Pickle version 4 (14
+  fields: version 3's 13, the controllers'-state marker included, plus
+  the grid); version 3 (12 or 13 fields), the slice's own 13-field
+  version 4 and Pulsim 2.0 pickles load and resume as before (restarted
+  grid).
+* **Fixed** a TR-BDF2 snapshot taken exactly on a gate edge made a
+  fixed-step resume ring and abort at the next edge (its `x` is the
+  pre-edge solve, its device derivatives the post-edge ones). The snapshot
+  says so (`post_edge_derivatives`) and `engine='pwl'` refuses it by name;
+  `engine='trbdf2'` resumes from it.
+* **Changed** (internal) the five stateful Newton kinds are one
+  compile-time list (`pwl::StatefulKinds`, concept `device::StatefulKind`);
+  the drivers, the Newton refresh, the in-run rollback and the snapshot
+  iterate it, and the rollback is one flat vector that includes each
+  device's TR-BDF2 stage scratch. `device/device.hpp` adds the `Device` contract
+  (one law over the scalar, `Params<S>` for parameter sensitivities),
+  unused by the engines yet. Results bit-identical.
+
 
 ### Unified device interface, steps 1–3: one history fold, one kernel-built refresh, one device-state vector
 
@@ -353,6 +484,37 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   unit VCCS into a 1 F capacitor (was refused).
 * **Added** two analytic reference cases, `im_locked_rotor` and
   `im_free_acceleration` (`dsed` refused).
+
+### Magnetic networks in permeance form (add-permeance-magnetic-domain)
+
+* **Added** a magnetic domain in gyrator–capacitor form: node potential
+  = MMF, branch current = flux rate. `add_winding` (gyrator `g = 1/N`),
+  `add_permeance`, `add_air_gap` (`P = μ₀·A/l`),
+  `add_magnetic_resistance` (in-loop eddy loss `R_m·(dΦ/dt)²`) and
+  `add_saturable_permeance` (area, length, `mu_r`, `B_sat`, or
+  `table=`). No new device kinds: they are the gyrator, capacitor,
+  resistor and nonlinear capacitor, and inherit those kinds' engine
+  support (a saturable permeance runs on `pwl` / `trbdf2` and is
+  refused by name elsewhere), IR and conformance cells. The nonlinear capacitor gained
+  the odd `ChargeLaw.tanh` law (the `GappedCore` material law).
+* **Added** `res.flux(name)`, `res.b_field(name)`, `res.h_field(name)`;
+  magnetic resistances in `device_loss_summary` under `core_loss`;
+  `builder.magnetic_element(name)` and `builder.magnetic_nodes()`; YAML
+  types `winding`, `permeance`, `air_gap`, `magnetic_resistance`,
+  `saturable_permeance` (strict keys); `hysteretic_permeance` and
+  `excess_loss` are refused by name until the unified device interface.
+* **Added** DC flux rows: a magnetic node reached only through
+  permeances, or a group of magnetic nodes joined only by magnetic
+  resistances and winding ports, gets `Σ P·ΔF = 0` (from zero flux)
+  instead of the conductance floor, so a gapped core under DC bias has
+  an operating point. A saturable
+  permeance on such a node is refused by name at DC.
+* **Added** the preflight rule: a magnetic island without a node on
+  `gnd` is refused (no tie resistor). Circuits without magnetic nodes
+  assemble, hash and run exactly as before.
+* **Docs**: tutorial 09 (three-limb transformer under unbalanced load,
+  integrated coupled inductor); two analytic reference circuits
+  (`gapped_core_rl`, `three_limb_zero_seq`).
 
 ### Integration batch 11: circuit IR YAML, TR-BDF2 ideal switch, pwl complementarity, exact step 3, control graph G23, optimisation slice 6 merged
 
@@ -790,6 +952,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Circuit IR slice 3 (add-immutable-circuit-ir)
 
+* **Added** node domains (group 9). `builder.node(name, "thermal")`
+  (or `"mechanical"`; YAML `nodes: [{name: tj, domain: thermal}]`) tags
+  a node; a PMSM's speed and angle nodes are mechanical by their pins.
+  A domain spreads along domain-generic devices (resistor, capacitor,
+  source, ...): a case node behind a thermal junction is thermal.
+  `build()` refuses a semiconductor pin on a thermal or mechanical node,
+  and a generic pair joining two nodes of decided, different domains,
+  naming device, pin and node.
+  `Circuit.node_domain(n)` / `unit_of(n)` (V, degC, rad/s, rad); a
+  preflight finding names its domain (`finding.domain`). The thermal
+  helpers (`add_foster_network`, `add_cauer_thermal_network`,
+  `add_shared_heatsink`) tag their nodes. Results are unchanged bit for
+  bit; an untagged circuit hashes as before. Docs: `docs/domains.md`.
+  **Migration:** a circuit that wired a thermal helper's node (or a
+  PMSM's speed / angle node) to a semiconductor pin, or through a
+  generic device to a node a semiconductor makes electrical, is now
+  refused at `build()`.
+* **Changed** a parameter's infinite `lo` / `hi` is stored as no bound
+  (so the circuit writes and pickles); a NaN bound is refused. The
+  expression functions `min` / `max` return the first operand on a tie
+  (Python's rule; `fmin` left a signed zero to the libm).
 * **Added** scopes (group 8). A subsystem instance is a scope of the
   circuit: `Circuit.scopes()` lists the tree (`path`, `name`, `kind` =
   the `define_subsystem` definition, `parent`), `Circuit.scope_of(name)`

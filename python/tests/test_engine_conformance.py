@@ -826,6 +826,27 @@ def test_mode_guard_diagnostics_on_pwl_and_dsed(engine):
     assert "mode_guard" not in r.diagnostics
 
 
+@pytest.mark.parametrize("engine", ("pwl", "trbdf2", "dsed"))
+def test_lcp_agrees_with_the_default_settle_on_every_engine(engine):
+    # add-complementarity-mode-selection 6.3: one cell per engine. trbdf2
+    # skips while its settle refuses by name (hook 4.2: it calls
+    # pwl::select_site at its settle site); the cell runs once it lands.
+    r0 = _sim(engine, _half_wave())
+    try:
+        r1 = _sim(engine, _half_wave(), mode_selection="lcp")
+    except p.UnsupportedError as e:
+        if (e.engine, e.feature) == ("trbdf2", "mode_selection"):
+            pytest.skip("trbdf2 settle hook (task 4.2) not landed")
+        raise
+    ms = r1.diagnostics["mode_selection"]
+    assert ms["errors"] == 0 and ms["capped"] == 0 and ms.get("inconsistent", 0) == 0
+
+    def avg(r):     # time-weighted, exactly clipped to [0, 2 ms]
+        t, v = np.asarray(r.times), np.asarray(r.v("o"))
+        return float(np.trapezoid(v, t)) / (t[-1] - t[0])
+    assert avg(r1) == pytest.approx(avg(r0), rel=1e-6)    # pwl, dsed: 0.0 measured
+
+
 @pytest.mark.parametrize("engine", ("dsed", "exact"))
 def test_c_blocks_refused(engine):
     # trbdf2 runs C blocks since task 9.3 (test_c_block_engines.py)
@@ -917,12 +938,16 @@ def test_loops_at_two_rates_on_trbdf2():
     assert (len(lb.duty_history), len(mon)) == (20, 200)
 
 
-def test_closed_loop_refused_on_dsed():
+def test_two_closed_loops_on_dsed():
+    # add-unified-event-queue group 3: the exact engine's queue ticks them
     b = _two_bucks()
     la = _loop(b, "outa", "Qa", 20e3)
-    with pytest.raises(p.UnsupportedError) as ei:
-        _sim("dsed", b, closed_loops=[la])
-    assert ei.value.feature == "closed_loops"
+    lb = _loop(b, "outb", "Qb", 2e3)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(b, 10e-3, closed_loops=[la, lb], engine="dsed")
+    assert (len(la.duty_history), len(lb.duty_history)) == (200, 20)
+    assert list(r.control_tick_counts) == [200, 20]
 
 
 def test_resume_from_refused_on_dsed():
@@ -1029,8 +1054,30 @@ def _pm(on):
     return b
 
 
+def _tail(on):
+    # An IGBT switched off by its gate: the tail charge (tau_tail, k_tail)
+    # keeps conducting after cutoff and slows the collector's rise. The
+    # control is the same IGBT with no tail, so presence proves the TAIL
+    # stamp runs (not merely the IGBT).
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "in", "gnd", 10.0)
+    b.add_pulse_voltage_source("Vg", "g", "gnd", 0.0, 15.0, 0.0, 1e-4,
+                               2e-4, 2e-6, 2e-6)
+    b.add_resistor("R", "in", "o", 100.0)
+    b.add_capacitor("C", "o", "gnd", 100e-9)
+    if on:
+        b.add_igbt_level1("Qd", "o", "gnd", "g", tau_tail=1e-5, k_tail=0.5)
+    else:
+        b.add_igbt_level1("Qd", "o", "gnd", "g")
+    return b
+
+
 # name -> (cell, kinds it is made of)
 VARIANT_CELLS = {
+    "IgbtLevel1[tail]": (
+        (_tail, "o", "Qd", 4e-4, 2e-7, False),
+        ("IgbtLevel1", "Capacitor", "Resistor", "VoltageSource",
+         "PulseVoltageSource")),
     "NonlinearCapacitor[table]": (
         (_law_cap(lambda: p.ChargeLaw.table(p.ChargeTable.from_capacitance(
             [-1.0, 0.0, 5.0, 10.0, 20.0], [1.2e-6, 1e-6, 5e-7, 3e-7, 2e-7]))),
@@ -1048,6 +1095,28 @@ VARIANT_CELLS = {
 def _composite_supported(kinds, column):
     caps = p.engine_capabilities()
     return all(caps[kd][column] for kd in kinds)
+
+
+# Every stateful Newton kind of the kernel's list (pwl::StatefulKinds,
+# device/kind.hpp) -> the conformance cell that runs it on every engine.
+STATEFUL_CELLS = {
+    "nonlinear_capacitor": "NonlinearCapacitor",
+    "lauritzen_diode": "LauritzenDiode",
+    "pmsm_mna": "PmsmMna",
+    "igbt_tail": "IgbtLevel1[tail]",
+    "saturable_inductor": "SaturableInductor",
+}
+
+
+def test_every_stateful_kind_has_a_conformance_cell():
+    kinds = k._stateful_kinds()
+    assert set(kinds) == set(STATEFUL_CELLS), (
+        "a stateful kind without a conformance cell (add it to "
+        "STATEFUL_CELLS and give it a cell)")
+    for name, cell in STATEFUL_CELLS.items():
+        assert cell in CELLS or cell in VARIANT_CELLS, cell
+        # the kind-table row whose engine column the cell is checked against
+        assert kinds[name] == cell.split("[")[0], (name, kinds[name])
 
 
 @pytest.mark.parametrize("engine", ENGINES)
@@ -1068,6 +1137,85 @@ def test_charge_law_and_power_mosfet_refused_by_the_ac_sweep(name):
             [1e2, 1e4], b.node_id_of("o"), b.node_id_of("o"))
     assert ei.value.engine == "ac_sweep"
     assert ei.value.device == cell[2]
+
+
+# ---------------------------------------------------------------------
+# add-permeance-magnetic-domain (task 5.4): the magnetic elements are
+# composites of existing kinds (winding = Gyrator, permeance / air gap =
+# Capacitor, magnetic resistance = Resistor, saturable permeance =
+# NonlinearCapacitor with the tanh law), so they add no table row. Their
+# cells: run and agree with pwl where every kind they are made of runs,
+# refused by name (the device) elsewhere.
+# ---------------------------------------------------------------------
+
+def _magnetic(saturable):
+    def build(on):
+        b = p.CircuitBuilder()
+        b.add_voltage_source("V", "in", "gnd", 10.0)
+        b.add_resistor("R1", "in", "o", 1.0)
+        b.add_resistor("R2", "o", "gnd", 1e3)
+        if on:
+            b.add_winding("Wd", "o", "gnd", "m1", "gnd", 25)
+            b.add_magnetic_resistance("Rm", "m1", "m2", 0.625)  # 1 kOhm across
+            if saturable:
+                b.add_saturable_permeance("Core", "m2", "m3", 76e-6, 72e-3,
+                                          mu_r=2000.0, B_sat=0.35)
+            else:
+                b.add_permeance("Core", "m2", "m3", 2.653e-6)
+            b.add_air_gap("Gap", "m3", "gnd", 76e-6, 0.5e-3)
+        return b
+    return build
+
+
+MAGNETIC_CELLS = {
+    "magnetic[linear]": (
+        (_magnetic(False), "o", "Core", 5e-4, 1e-7, False),
+        ("Gyrator", "Capacitor", "Resistor")),
+    "magnetic[saturable_permeance]": (
+        (_magnetic(True), "o", "Core", 5e-4, 2e-8, False),
+        ("Gyrator", "Capacitor", "NonlinearCapacitor", "Resistor")),
+}
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize("name", list(MAGNETIC_CELLS))
+def test_magnetic_element_cells(name, engine):
+    cell, kinds = MAGNETIC_CELLS[name]
+    _check_cell(name, cell, engine, _composite_supported(kinds, engine))
+
+
+MU0_CONF = 4e-7 * np.pi
+
+
+def test_linear_magnetic_cell_on_the_ac_sweep():
+    # Seen from the winding, series magnetic elements are parallel
+    # electrical ones: R_m -> N²/R_m, permeance P -> inductance N²·P.
+    assert _composite_supported(MAGNETIC_CELLS["magnetic[linear]"][1], "ac_sweep")
+
+    def H(b):
+        r = k.run_mna_sweep_kernel(
+            b.graph, b.pool, p.SwitchStateMask(b.graph.num_switches),
+            [1e2, 1e3, 1e4], b.node_id_of("o"), b.node_id_of("o"))
+        return np.asarray(r.H, dtype=complex)
+
+    e = _magnetic(False)(False)
+    e.add_resistor("Req", "o", "gnd", 25 ** 2 / 0.625)
+    e.add_inductor("Lc", "o", "gnd", 25 ** 2 * 2.653e-6)
+    e.add_inductor("Lg", "o", "gnd", 25 ** 2 * MU0_CONF * 76e-6 / 0.5e-3)
+    got, want = H(_magnetic(False)(True)), H(e)
+    assert np.max(np.abs(got - want)) < 1e-9 * np.max(np.abs(want))
+
+
+def test_saturable_permeance_refused_by_the_ac_sweep():
+    cell, kinds = MAGNETIC_CELLS["magnetic[saturable_permeance]"]
+    assert not _composite_supported(kinds, "ac_sweep")
+    b = cell[0](True)
+    with pytest.raises(p.UnsupportedError) as ei:
+        k.run_mna_sweep_kernel(
+            b.graph, b.pool, p.SwitchStateMask(b.graph.num_switches),
+            [1e2, 1e4], b.node_id_of("o"), b.node_id_of("o"))
+    assert ei.value.engine == "ac_sweep"
+    assert ei.value.device == "Core"
 
 
 @pytest.mark.parametrize("engine", ("pwl", "trbdf2", "dsed"))
@@ -1226,12 +1374,19 @@ def test_control_rate_offset_honoured_on_trbdf2():
 
 
 @pytest.mark.parametrize("engine", ("dsed", "exact"))
-def test_control_rate_refused_on_dsed(engine):
+def test_control_rate_offset_honoured_on_dsed(engine):
     b = _rc()
-    ch = _rated_chain(b, p.Rate(1e-4))
+    ch = _rated_chain(b, p.Rate(period=1e-4, offset=2e-5))
+    _sim(engine, b, step_observer=ch.make_step_observer(b))
+    assert ch.tick_counts == [20]     # ceil((2e-3 - offset) / 1e-4)
+
+
+def test_control_rate_delay_time_refused_on_dsed():
+    b = _rc()
+    ch = _rated_chain(b, p.Rate(period=1e-4, compute_delay=2e-5))
     with pytest.raises(p.UnsupportedError) as ei:
-        _sim(engine, b, step_observer=ch.make_step_observer(b))
-    assert (ei.value.engine, ei.value.feature) == ("dsed", "step_observer")
+        _sim("dsed", b, step_observer=ch.make_step_observer(b))
+    assert (ei.value.engine, ei.value.feature) == ("dsed", "compute_delay")
 
 
 # add-exact-propagator-strategy group 13: engine='exact' is the canonical name of the event-driven
@@ -1419,3 +1574,90 @@ def test_gated_doc_block_equals_the_kernel_table():
         cells = [c.strip() for c in ln.strip("|").split("|")]
         doc_table[cells[0]] = {c: v == "yes" for c, v in zip(cols, cells[1:])}
     assert doc_table == k._gated_capabilities()
+
+
+# ---- the device path (add-unified-device-interface DECISIONS #23) --------
+# Generated from the registry: every Newton kind (and Newton variant) cell,
+# on every Newton engine, either runs on device_path='interface' and agrees
+# with the hand stamps, or refuses by name; which one is the kernel's
+# registry (`_device_path_ported`), so a ported kind without a passing cell
+# and a refusal the registry does not predict both fail.
+_NEWTON_PORTED, _BLOCKS_PORTED = k._device_path_ported()
+_BLOCK_OF = {cell: blk for blk, cell in STATEFUL_CELLS.items()}
+_PATH_CELLS = {n: c for n, c in CELLS.items() if n in _NEWTON_PORTED}
+_PATH_CELLS.update({n: v[0] for n, v in VARIANT_CELLS.items()
+                    if n.split("[")[0] in _NEWTON_PORTED})
+
+
+def _sat_law(add):
+    """The saturable inductor under another law, driven by a sine so the
+    current reverses (the hysteretic core runs both branches)."""
+    def build(on):
+        b = p.CircuitBuilder()
+        b.add_sine_voltage_source("V", "in", "gnd", 0.0, 10.0, 5e3, 0.0)
+        b.add_resistor("R1", "in", "o", 10.0)
+        b.add_resistor("R2", "o", "gnd", 1e3)
+        if on:
+            add(b)
+        return b
+    return build
+
+
+# Path-only cells: the table and Jiles-Atherton inductor laws (the device
+# path's adapters choose the law per instance; the engine cells above run
+# the atan law only).
+_PATH_CELLS.update({
+    "SaturableInductor[table]": (_sat_law(lambda b: b.add_saturable_inductor_table(
+        "Ld", "o", "gnd", [0.0, 0.2, 0.5, 1.0, 2.0],
+        [0.0, 2e-4, 4e-4, 5e-4, 6e-4])), "o", "Ld", 4e-4, 5e-8, False),
+    "SaturableInductor[ja]": (_sat_law(lambda b: b.add_hysteretic_core_inductor(
+        "Ld", "o", "gnd", 100.0, 1e-4, 0.1, 0.0, 4.0e5, 50.0, 5e-5, 0.2,
+        30.0)), "o", "Ld", 4e-4, 5e-8, False),
+})
+_BLOCK_OF.update({"SaturableInductor[table]": "saturable_inductor",
+                  "SaturableInductor[ja]": "saturable_inductor"})
+
+
+def _run_path(cell, engine, path):
+    build, node, _dev, t_end, dt, sw = cell
+    b = build(True)
+    kw = dict(dt=dt) if engine == "pwl" else {}
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(b, t_end, engine=engine, switch_fn=_switch_fn(b, sw),
+                       device_path=path, **kw)
+    return np.asarray(r.times, float), np.asarray(r.v(node), float)
+
+
+def test_every_newton_kind_has_a_device_path_cell():
+    assert set(_NEWTON_PORTED) <= set(_PATH_CELLS)
+    assert set(_BLOCKS_PORTED) == set(STATEFUL_CELLS)
+
+
+@pytest.mark.parametrize("engine", ["pwl", "trbdf2"])
+@pytest.mark.parametrize("name", sorted(_PATH_CELLS))
+def test_device_path_cell(name, engine):
+    cell = _PATH_CELLS[name]
+    base = name.split("[")[0]
+    block = _BLOCK_OF.get(name)
+    ported = _NEWTON_PORTED[base] and _BLOCKS_PORTED.get(block, True)
+    try:
+        ta, va = _run_path(cell, engine, "legacy")
+    except p.UnsupportedError:
+        pytest.skip(f"{name} is not on {engine} (kind table)")
+    try:
+        ti, vi = _run_path(cell, engine, "interface")
+    except ValueError as e:
+        assert not ported, f"{name} on {engine}: refused but ported: {e}"
+        assert "not on the device interface yet" in str(e)
+        assert base in str(e) or (block is not None and block in str(e)), e
+        return
+    assert ported, f"{name} on {engine}: ran on 'interface' but not ported"
+    span = float(np.max(va) - np.min(va)) or float(np.max(np.abs(va))) or 1.0
+    if engine == "pwl":
+        assert np.array_equal(ta, ti)
+        err = float(np.max(np.abs(vi - va)))
+        assert err <= 1e-12 * span, f"{name}: {err:.3g} vs span {span:.3g}"
+    else:
+        err = float(np.max(np.abs(np.interp(ta, ti, vi) - va)))
+        assert err <= TOL * span, f"{name}: {err:.3g} vs span {span:.3g}"

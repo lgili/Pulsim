@@ -135,7 +135,7 @@ def _loop(b, freq):
         switch="Q", freq=freq)
 
 
-_ENGINES = [("pwl", {"dt": 1e-6}), ("trbdf2", {})]
+_ENGINES = [("pwl", {"dt": 1e-6}), ("trbdf2", {}), ("dsed", {})]
 
 
 @pytest.mark.parametrize("engine,kw", _ENGINES)
@@ -161,12 +161,6 @@ def test_two_rates_tick_40_and_400_times(engine, kw):
                        controller_period=50e-6, **kw)
     assert (len(lp.duty_history), len(calls)) == (40, 400)
     assert list(r.control_tick_counts) == [40, 400]
-
-
-def test_dsed_refuses_a_closed_loop():
-    b = _buck()
-    with pytest.raises(p.UnsupportedError):
-        p.simulate(b, 1e-3, engine="dsed", closed_loops=[_loop(b, 10e3)])
 
 
 # ---------------------------------------------------------------------------

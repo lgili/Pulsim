@@ -73,6 +73,7 @@ __all__ = [
     "InverseParkTransform",
     # Synchronization (Phase A.1)
     "PLL",
+    "Monitor",
     # Routing (Phase A.1)
     "SignalMux",
     "SignalDemux",
@@ -1243,6 +1244,37 @@ class ClosedLoop:
     #: point at or after it (exact when T_ctrl is a multiple of dt).
     #: That makes `pi.update(dt=T_PWM)` true rather than nominal.
     period: float = 0.0
+
+
+class Monitor:
+    """A periodic observer that only READS: ``fn(t, x)`` every ``period``
+    seconds, passed as ``simulate(step_observer=Monitor(fn, period))``.
+
+    Declaring it a monitor (add-unified-event-queue, the ``Monitor`` event
+    kind) promises that ``fn`` changes nothing the circuit sees, and the
+    engines hold it to that: on ``trbdf2`` and ``dsed`` its instants do
+    not end a step, do not re-sample the gate and do not cap the step, so
+    the run is bit-identical to the same run without it; ``fn`` gets the
+    first accepted step at or after each instant (``t`` is that step's
+    time). On ``dsed`` a circuit without diodes needs
+    ``integrator='rk45'`` (refused otherwise: the Monitor would move it
+    off the 'auto' integrator). On ``pwl`` it ticks like any controller
+    (the grid decides).
+    An observer that writes a duty or a source must not be a Monitor.
+    """
+
+    _pulsim_monitor = True
+
+    def __init__(self, fn: Callable[[float, object], None], period: float):
+        if not (float(period) > 0.0):
+            raise ValueError(f"Monitor: period must be > 0 s; got {period!r}")
+        self.fn = fn
+        self.period = float(period)
+
+    def __call__(self, t: float, x: object) -> None:
+        self.fn(t, x)
+
+    tick = __call__
 
 
 class _TickHistory(Sequence):

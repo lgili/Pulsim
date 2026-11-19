@@ -76,7 +76,7 @@ unchanged.
 
 ## 11. Stage B — simulate() on the facade
 - [ ] 11.1 `simulate()` builds `RunOptions` and calls `Simulation` for runs with no Python callback; then for every run through `add_gate` / `add_tick` / `add_source_term` adapters
-  - Done: `'pwl'` and `'trbdf2'` runs go through `Simulation` (callbacks included: `set_switch_fn`, `add_tick`, `set_source_term`, `set_step_observer`, `set_tick_before`, live ring, resume), goldens identical (DECISIONS 14). Open: `mmc_arms` / `on_cache`, `sweep()`'s replay, the C++ chain fast path, and the exact engine.
+  - Done: `'pwl'` and `'trbdf2'` runs go through `Simulation` (callbacks included: `set_switch_fn`, `add_tick` (monitors too), `set_source_term`, `set_step_observer`, `set_tick_before`, live ring, resume with the v5 tick grid), goldens identical (DECISIONS 14, 15). Open: `mmc_arms` / `on_cache`, `sweep()`'s replay, the C++ chain fast path, and the exact engine (DECISIONS 16).
 - [ ] 11.2 Oracle: goldens bit-identical; warning set unchanged; fixed overhead not above 0.2; a native-schedule run holds no GIL (thread sweep scales as in audit row 23)
 - [ ] 11.3 One undriven-switch policy on every engine (**BREAKING**), per the owner's answer; migration note; tests for `Refuse`, `Open`, `Closed`
 

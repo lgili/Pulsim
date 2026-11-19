@@ -34,9 +34,11 @@
 #include "pulsim/device/device_state.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/solver/state_trajectory.hpp"
+#include "pulsim/solver/step/controllers.hpp"
 #include "pulsim/thermal/device_losses.hpp"
 #include "pulsim/topology/switch_state.hpp"
 
+#include <limits>
 #include <algorithm>
 #include <cstdint>
 #include <memory>
@@ -69,6 +71,11 @@ struct ReinitRecord {
     Real dW = 0;                     ///< energy removed [J], >= 0
     Real projection_gap = 0;         ///< max |x_proj - x(t+h)| over states
     long sample = -1;                ///< stored sample of the pulse, or -1
+    /// The switch the impulsive energy is booked to (task 6.4): the gated
+    /// element of the structure whose state changed on the step, else any
+    /// gated element that changed (a gate forcing a diode into the mode),
+    /// else the structure's first element. Empty: not attributed.
+    std::string cause;
 };
 
 /// add-complementarity-mode-selection on pwl: one decision site where the
@@ -97,10 +104,14 @@ struct ModeReport {
     Size ties = 0, widenings = 0, leak_pins = 0, pin_judgements = 0;
     Size capped = 0;               ///< tie passes shortened to the mode's next event (#24)
     Size unfixed = 0, enumerations = 0, nonunique_modes = 0, released = 0;
+    Size shorted_held = 0, shorted_released = 0;   ///< ideal ports shorted by a loop (#34)
     Size settle_rounds_total = 0;  ///< 'lcp': 0 (the settle never runs)
     Size mask_cycles = 0;          ///< 'lcp': 0
     Size inconsistent = 0;         ///< 'lcp': selected modes the site's solve violates (D6 step 4)
     Size port_solves = 0;
+    Size port_matrices = 0;        ///< port matrices Z built (one per (mask, dt); reused after)
+    Size quiet_sites = 0;          ///< 'lcp': sites whose start mode was kept (its solve reused)
+    Size cached_sites = 0;         ///< 'lcp': sites decided by the LCP's last answer from that start mask
     Size errors = 0;
     std::string last_error;
     std::string passivity, passivity_device, passivity_kind;
@@ -200,6 +211,13 @@ struct InductorGuardAction {
 /// segment restarts from h_init.
 struct SolverSnapshot {
     Real t = Real{0};
+    /// Per control-tick source of the run, in registration order: its
+    /// grid's origin and the index of its next instant (add-unified-
+    /// event-queue). A resume passes the origins back, so the ticks stay
+    /// on the run's grid. Empty: no ticks, or a snapshot older than pickle
+    /// version 4.
+    std::vector<Real> tick_origin;
+    std::vector<std::uint64_t> tick_next_k;
     /// MNA unknowns at `t`.
     Vector x;
     /// Every device state the run carries (add-unified-device-interface
@@ -288,16 +306,37 @@ private:
         case device::StateBlock::NonlinearCapacitor: return legacy.coss_history;
         case device::StateBlock::LauritzenDiode: return legacy.lauritzen_history;
         case device::StateBlock::IgbtTail: return legacy.igbt_tail_history;
-        case device::StateBlock::PmsmMna: break;
+        case device::StateBlock::PmsmMna: return legacy.pmsm_history;
         }
-        return legacy.pmsm_history;
+        // A block appended after 2.0 has no named field: never alias one.
+        throw std::logic_error(
+            "SolverSnapshot: this device-state block has no 2.0 named field");
     }
 
 public:
+    /// The fixed-step grid `t` sits on, t == grid_origin + grid_step ·
+    /// grid_dt to rounding (NaN: none — a variable-step or hand-built
+    /// snapshot). A fixed-step resume with the same dt continues it, so
+    /// the resumed trace is the continuous run's bit for bit.
+    Real grid_origin = std::numeric_limits<Real>::quiet_NaN();
+    Size grid_step = 0;
+    Real grid_dt = std::numeric_limits<Real>::quiet_NaN();
+    /// Set by the variable-step engine when the run ended exactly on a
+    /// gate edge after replacing the device derivative slots: `x` is the
+    /// pre-edge solve, the slots the post-edge ones. The fixed engine
+    /// refuses to resume from it (it rings and fails at the next edge).
+    bool post_edge_derivatives = false;
     /// Restart steps still owed (discontinuity_restart): the rule takes
     /// the step of a discontinuity and the next two as SDIRK(2,2)
     /// steps, so a run stopped inside that window resumes it. 0 = none.
     Size restart_steps_left = 0;
+    /// The step-size controller's state at `t`
+    /// (refactor-unified-transient-stepper task 12): the variable-step
+    /// engine's step memory. Empty (`Kind::None`) from the fixed engine,
+    /// an older snapshot or a pickle older than version 5 (or than the
+    /// device interface's 15-field version 4): the resumed controller starts
+    /// from its initial step (exact in state, to tolerance in trajectory).
+    step::ControllerState controller;
     /// The controllers' state at `t` (control graphs, C blocks), owned
     /// by the language binding that ran them; the solver never reads it
     /// and a copy of the snapshot shares it.

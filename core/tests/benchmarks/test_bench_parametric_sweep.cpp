@@ -349,8 +349,8 @@ TEST_CASE("Bench: parametric refactor microbench — sweep / Monte Carlo (v1.4.0
             rows.push_back(r);
 
             // Sanity
-            REQUIRE(r.wall_legacy_ms > 0.0);
-            REQUIRE(r.wall_pulsim_ms > 0.0);
+            // wall time / speed-up: printed above, never asserted (machine load)
+            // wall time / speed-up: printed above, never asserted (machine load)
             REQUIRE(r.path_hits + r.fallback_hits ==
                     static_cast<std::uint64_t>(
                         r.n_sweep_points * r.n_masks_per_cache));

@@ -134,3 +134,62 @@
     the direct one (43.7 vs 44.2 us per call through a builder; 39.8 vs
     42.8 us through a Circuit).
 
+15. **Integration batch 14a merged (656b894f); every new keyword is a row.**
+    `device_path` is row 49 (pwl, trbdf2; `Unset::Legacy`; a
+    `RunOptions` field passed to both drivers). The exact engine now runs
+    controllers on its event queue, so `step_observer`, `closed_loops`,
+    `controller_period` and `control_tick` became `kEvery` /
+    `Unset::Always` (no engine refuses them by the table; an every-step
+    observer on a variable-step engine keeps its own refusal, feature
+    `step_observer`); `Unset::Label` had no row left and was deleted.
+    Monitors are `add_tick(..., monitor=True)` (trbdf2 reads them; pwl
+    ignores the flag, as `run_transient` does). The object's resume reads
+    the v5 snapshot's `tick_origin` / `tick_next_k` when it has one per
+    tick source (simulate()'s `_resume_tick_origins` rule), on a
+    `restore` and on a continuation alike; the pickle itself is the
+    binding's (`SolverSnapshot`), so the object writes v5 / 17 fields.
+    `test_the_table_covers_every_simulate_parameter` now names its
+    exclusions (`_NOT_A_ROW = {"builder"}`) and fails on a keyword in
+    neither. `mode_selection='auto'` and the exact-route options are not
+    in 656b894f's `simulate()`; they become rows when they land (12).
+
+16. **The exact engine is not on the object yet (hand-off).** Its run is
+    composed in two places: `_dsed_dispatch.run_dsed_from_builder`
+    (integrator routing by diode count and ticks, the shadow/guard event
+    step `_shadow_h_e`, IC mapping, the default mask, the poll warning,
+    the bridge fallbacks) and `python/dsed_bindings.cpp`
+    (`run_*_native_builder`: diode predicates, ticks, the mode guard,
+    `EdgeSearch` / `poll_window`, the full-state reconstruction). Putting
+    it on `sim::Simulation` byte-identically means moving the binding's
+    composition into a core header (`dsed/builder_run.hpp`) that the
+    binding and the object both call, then porting the dispatch's rules.
+    Not started here: `dsed_bindings.cpp` is being edited on
+    `feat/core-a-complementarity` (11 commits ahead), and moving ~400 of
+    its lines now would hand that track a large conflict. Do it right
+    after that branch is integrated. The object keeps refusing
+    `engine='exact'` by name (DECISIONS 7).
+
+17. **`mmc_arms` / `on_cache` on the object: the open question is the
+    pool.** Both hooks take the run's cache before the run (`Simulation
+    .cache` gives it: built on first use, kept). But the object stamps
+    into its OWN builder's pool (`circuit.to_builder()`), while
+    `make_mmc_thevenin_driver(mmc_arms, _caller_builder, cache, ...)` and
+    the electro-thermal `on_cache` hooks read and refactor through the
+    caller's builder. On the direct path the cache is built on that same
+    builder, so their writes reach the solve; through the object they
+    would reach a different pool. Checked for `mmc_arms`: its driver
+    writes only through `cache.refactor_parametric` (mmc_thevenin.py
+    ~line 201, "the caller's builder is not touched"), so it can move
+    first; the `on_cache` hooks are user code and the shipped ones are
+    unchecked. The successor must route their pool access through
+    `sim.builder` (or prove they only touch the cache) before `_via_sim` drops its `not mmc_arms and on_cache is
+    None` clause, then compare `test_mmc*`, `test_electrothermal*` and
+    the goldens bit for bit. `mmc_arms` also needs `max_dt_halvings = 0`
+    in the `RunOptions` (set before the object is built: the refusals
+    above it stay as they are).
+    Trap for that change: the C++ chain fast path (`cxx_chain`, decided
+    after the hooks) calls `run_transient_with_chain` on the LOCAL
+    builder's graph and pool; a cache taken from a pre-built object
+    belongs to the object's builder, so that path must keep its own
+    cache (or the chain must move onto the object) before `mmc_arms`
+    goes through `Simulation`.

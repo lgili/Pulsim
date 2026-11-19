@@ -528,8 +528,10 @@ its layout `dev_layout` (instance count per block; the block names are
 `SolverSnapshot.dev_layout_names`: `linear_companion`,
 `saturable_inductor`, `nonlinear_capacitor`, `lauritzen_diode`,
 `igbt_tail`, `pmsm_mna`) and `layout_signature`, and the solver-owned
-mode bits `mask` (which switched diodes conduct). Snapshots pickle
-(version 3); pickles written by Pulsim 2.0 still load and resume.
+mode bits `mask` (which switched diodes conduct). A fixed-step snapshot
+also carries its time grid (`grid_origin`, `grid_step`, `grid_dt`).
+Snapshots pickle (version 4); version-3 pickles and those written by
+Pulsim 2.0 still load and resume (on a restarted grid, see below).
 
 The 2.0 fields remain as views of the blocks (soft-deprecated: no
 warning yet; to be removed after one release): `history`
@@ -541,18 +543,22 @@ direction and sub-step count), `coss_history` (3), `lauritzen_history`
 `diode_on` (= `mask`). Writing a view turns the snapshot into a
 2.0-style payload that a resume converts field by field.
 
-* `engine='pwl'`: a two-segment run reproduces the continuous one up to
-  the first gate edge after the split, then within 1e-11 of each state's
-  scale (measured 8e-12): the resumed run's time grid starts from the
-  split time, so an edge can land one rounding apart. Not bit for bit.
+* `engine='pwl'`: a two-segment run with the same `dt` is the continuous
+  run bit for bit (states, times and final device state), split between
+  gate edges or exactly on one: the resumed run continues the snapshot's
+  time grid. A snapshot without a grid (version 3, 2.0, hand-built, or
+  TR-BDF2's) restarts the grid at its `t`, and an edge can then land one
+  rounding apart (within 1e-11 of each state's scale, measured 8e-12).
 * `engine='trbdf2'` / `'auto'` fills a snapshot and resumes from one to
   the run's own tolerance — the step controller's state (last accepted
   `h`, the LTE history) is not carried, so the resumed segment restarts
-  from `h_init`. A TR-BDF2 snapshot resumes on the fixed engine (from its `x`, device
-  state and mode bits),
-  except one taken where the TR-BDF2 run ended exactly on a gate edge:
-  its `x` is the pre-edge solve, and the fixed engine resumed from it can
-  abort at the next edge (seen with a Coss across the switch).
+  from `h_init`. A TR-BDF2 snapshot resumes on the fixed engine (from its
+  `x`, device state and mode bits), except one taken where the TR-BDF2
+  run ended exactly on a gate edge (`post_edge_derivatives` is True): its
+  `x` is the pre-edge solve but its device derivatives are already the
+  post-edge ones, and the fixed engine refuses it by name (started from
+  that pair it rang and aborted at the next edge). TR-BDF2 resumes from
+  it.
 * `engine='dsed'` has no snapshot of its own and refuses `resume_from=`
   by name.
 * An invalid snapshot, or one whose device layout does not match the
