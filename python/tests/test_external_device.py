@@ -689,7 +689,11 @@ def test_trbdf2_snapshot_resume_carries_the_model_state(libs):
 
 
 @pytest.mark.parametrize("kw", [dict(engine="pwl", dt=1e-6),
-                                dict(engine="trbdf2", rtol=1e-7, atol=1e-10)])
+                                dict(engine="trbdf2", rtol=1e-7, atol=1e-10),
+                                # integration 14k: device_state per committed time
+                                # through the ESDIRK landings and forced SDIRK steps
+                                dict(engine="trbdf2", rtol=1e-7, atol=1e-10,
+                                     integrator="esdirk43")])
 def test_device_output_covers_a_pwm_run_with_gate_edges_and_a_diode(libs, kw):
     """trbdf2 commits a step, then a gate-edge restart moves t in the same
     iteration: every committed sample needs its trace row (review #1)."""
@@ -705,6 +709,7 @@ def test_device_output_covers_a_pwm_run_with_gate_edges_and_a_diode(libs, kw):
     fn = p.make_pwm_switch_fn(100e3, 0.5, b.switch_index_of("Q1"), b.graph.num_switches)
     res = p.simulate(b, switch_fn=fn, t_end=2e-4, **kw)
     v = np.asarray(res.v("vout"))
+    assert np.all(np.diff(np.asarray(res.times)) > 0)
     np.testing.assert_allclose(res.device_output("M", "i(a)"), 1e-3 * v, rtol=0, atol=1e-15)
 
 

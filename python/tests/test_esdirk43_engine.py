@@ -2,6 +2,8 @@
 task group 3): the variable-step engine takes its steps with ESDIRK4(3)6L[2]SA
 through the same phases; refused by name where it cannot run."""
 
+import warnings
+
 import numpy as np
 import pytest
 
@@ -332,3 +334,27 @@ def test_stateful_kinds_through_diode_events_agree_with_a_fine_trbdf2():
     # ~4e-6 (a 1 ns ceiling moves it 5.9e-6 / 4.1e-6); TR-BDF2 at its own
     # steps: 3.2e-5 / 3.6e-5 from the 1 ns run
     assert dv <= 2e-5 and di <= 2e-5
+
+
+def test_an_opaque_switch_fn_runs_and_agrees_with_declared_edges_and_trbdf2():
+    """Integration 14k: an opaque Python gate (no declared edges: the kernel
+    samples it, events/sampled_gate.hpp) on integrator='esdirk43' finds the
+    same gate events as the declared-edge run and the same end state; TR-BDF2
+    converges to it (measured: opaque vs declared 2.5e-9 V, vs TR-BDF2 at
+    rtol 1e-10 2.1e-7 V; TR-BDF2 at rtol 1e-8 is itself 1.3e-6 V away)."""
+    from .test_trbdf2_resume_at_gate_edge import T, _buck
+
+    def run(oracle, integ, rtol):
+        b, f = _buck(oracle)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            return p.simulate(b, t_end=8 * T, engine="trbdf2", switch_fn=f, integrator=integ,
+                              rtol=rtol, atol=rtol * 1e-3)
+
+    opaque, declared = run(False, "esdirk43", 1e-8), run(True, "esdirk43", 1e-8)
+    ref = run(True, None, 1e-10)
+    assert (opaque._trbdf2_stats["n_gate_events"]
+            == declared._trbdf2_stats["n_gate_events"] > 10)
+    x = np.asarray(opaque.states)[-1]
+    assert np.max(np.abs(x - np.asarray(declared.states)[-1])) < 1e-7
+    assert np.max(np.abs(x - np.asarray(ref.states)[-1])) < 2e-6
