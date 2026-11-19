@@ -185,10 +185,13 @@ public:
     /// w1·p(x1) (the integrator's stage weights, Σw = 1; xg may be null
     /// when wg = 0). The start is the last accepted end, or the right
     /// limit of an event() whose mask this step carries.
+    /// `e_exact` (one per device, in set_device_losses order): the step's
+    /// exact ∫v·i, which replaces the quadrature (the exact engine, whose
+    /// impulses are at event instants: they never replace a step's energy).
     void accept_step(Real t0, Real t1, const Vector& x1,
                      const topology::SwitchStateMask& mask, const Vector* xg,
-                     Real w0, Real wg, Real w1) {
-        accept_step_<1>(t0, t1, x1, mask, {xg}, {wg}, w0, w1);
+                     Real w0, Real wg, Real w1, const Real* e_exact = nullptr) {
+        accept_step_<1>(t0, t1, x1, mask, {xg}, {wg}, w0, w1, e_exact);
     }
     /// The same with N interior points (ESDIRK4(3): the stages Y1..Y4 at
     /// weights b2..b5; w0 = b1 on the start, w1 = b6 on x1 = Y5).
@@ -205,7 +208,8 @@ private:
     void accept_step_(Real t0, Real t1, const Vector& x1,
                       const topology::SwitchStateMask& mask,
                       const std::array<const Vector*, N>& xs,
-                      const std::array<Real, N>& ws, Real w0, Real w1) {
+                      const std::array<Real, N>& ws, Real w0, Real w1,
+                      const Real* e_exact = nullptr) {
         const Real h = t1 - t0;
         // the power E/h_now_ reached the network over h of this step: a
         // committed step shorter than the attempt (a landing) keeps the rest
@@ -216,7 +220,8 @@ private:
             n.e -= e;
         }
         if (frac == Real{1}) now_.clear();
-        for (auto& d : devs_) {
+        for (std::size_t di = 0; di < devs_.size(); ++di) {
+            auto& d = devs_[di];
             const bool on1 = mask.get(static_cast<Size>(d.law.bit));
             if (d.ev_pending && t0 >= d.ev_t) {
                 // the first step after an event: under its right side it
@@ -251,7 +256,9 @@ private:
             };
             std::array<Real, N> vs{}, is{}, tjs{};
             for (std::size_t k = 0; k < N; ++k) read_k(k, vs[k], is[k], tjs[k]);
-            if (same) {
+            if (e_exact != nullptr) {
+                e_el = e_exact[di];
+            } else if (same) {
                 if constexpr (N == 1) {   // TR-BDF2 / SDIRK: one expression, as before
                     e_el = h * (w0 * d.v * d.i + ws[0] * vs[0] * is[0] + w1 * v1 * i1);
                 } else {
@@ -288,7 +295,7 @@ private:
                 if (d.spec.conduction == thermal::ConductionHeat::Table) heat = e_t;
             }
             if (d.spec.conduction == thermal::ConductionHeat::Electrical) heat = e_el;
-            d.last = {h, e_el, e_t, false};
+            d.last = {h, e_el, e_t, e_exact != nullptr};
             // a flip no event() reported: the reading rule on the step's ends
             if (!same) heat += book_(d, t0, on1, d.v, d.i, v1, i1, tj0);
             if (d.node >= 0) add_(queue_, d.node, heat);

@@ -17,10 +17,14 @@ benchmark:
     model: rl_step
     observable: V(out)
     ignore_initial_samples: 1
+    # exact: the closed form of the netlist as built (the source's 1 ns edge
+    # included): the ideal twin's reference (ideal_switch_flip_evidence)
+    exact: true
     params:
-      v0: 3.333333          # V(0+) = V_in · L2/(L1+L2) = 5 · 2/3
+      v0: 3.3333333333333335   # V(0+) = V_in · L2/(L1+L2) = 5 · 2/3 (the double)
       r: 100.0
       l: 30e-3              # L_eq for τ
+      t_rise: 1e-9
 # Series chain of 2 inductors driven by a pulse source through R.
 # Tests multiple inductor state variables (i_L1 = i_L2 in series)
 # and the analytical step shape applied to L2's voltage share.

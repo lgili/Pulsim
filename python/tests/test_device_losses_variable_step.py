@@ -114,6 +114,8 @@ def _run(engine, **kw):
     # event sites (add-high-order-stiff-integrator)
     pytest.param("trbdf2", dict(rtol=1e-6, atol=1e-9, dt=2.5e-7, integrator="esdirk43"),
                  2e-5, 2.5e-5, id="esdirk43"),
+    # the exact engine: the event limits and ∫v·i in closed form (measured 2e-15)
+    ("dsed", {}, 1e-12, 1e-12),
 ])
 def test_event_and_conduction_energy_converge_to_the_closed_form_truth(engine, kw, tol_ev, tol_cond):
     ev, cond = _truth()
