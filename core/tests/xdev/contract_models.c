@@ -171,6 +171,12 @@ static int32_t CALL meter_accept(const pulsim_xdev_ctx *c, const double *x, doub
     s[0] += h * G * V * V; /* energy absorbed (rectangle rule) */
     return 0;
 }
+static int32_t CALL accept_via_ctx(const pulsim_xdev_ctx *c, const double *x, double h,
+                                   double *s) {
+    (void)s; /* updates the COMMITTED state through const ctx->state instead */
+    ((double *)c->state)[0] += h * (1 + G * V * V);
+    return 0;
+}
 static int32_t CALL state_overrun(const pulsim_xdev_ctx *c, const double *x, double h, double *s) {
     meter_accept(c, x, h, s);
     s[1] = 1; /* declared n_state = 1 */
@@ -206,6 +212,8 @@ static const pulsim_xdev_descriptor MODELS[] = {
     DESC("energy_meter", good, SMOOTH | PASSIVE, 0, 4, 0, NULL, NULL, 1, meter_init, meter_accept,
          PULSIM_XDEV_ABI_VERSION),
     PLAIN("liar_writes_x", liar_writes_x, SMOOTH, 0),
+    DESC("liar_state_via_ctx", good, SMOOTH, 0, 4, 0, NULL, NULL, 1, meter_init, accept_via_ctx,
+         PULSIM_XDEV_ABI_VERSION),
     PLAIN("liar_writes_p", liar_writes_p, SMOOTH, 0),
     PLAIN("liar_offaxis", liar_offaxis, 0, 0),
     DESC("tiny_cap_outside", tiny_cap_outside, SMOOTH | PASSIVE, 0, 4, 4, QR, QC, 0, NULL, NULL,

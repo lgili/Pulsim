@@ -61,6 +61,7 @@ TEST_CASE("xdev: every lie inside the probe box is refused by name", "[xdev]") {
         {"liar_writes_x", "wrote through its const x"},
         {"liar_writes_p", "wrote through its const ctx->p"},
         {"liar_offaxis", "off the axes"},
+        {"liar_state_via_ctx", "wrote through a const input"},
     };
     for (const auto& c : cases) {
         INFO(c.model);

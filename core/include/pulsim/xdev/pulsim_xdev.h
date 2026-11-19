@@ -3,9 +3,12 @@
  *
  * THIS FILE IS THE STABLE CONTRACT. It compiles as C99 and as C++. A model
  * library built against version 1 keeps loading in every later Pulsim that
- * speaks version 1: fields are only ever APPENDED to the structs below
- * (before `reserved`'s successors), and the host reads a field only when
- * `struct_size` says the library's struct has it. Nothing else is stable:
+ * speaks version 1: fields are only ever APPENDED to the end of
+ * pulsim_xdev_descriptor and pulsim_xdev_ctx (after `reserved` / `instance`),
+ * and the host reads a field only when `struct_size` says the library's
+ * struct has it. The ARRAY ELEMENT structs pulsim_xdev_field and
+ * pulsim_xdev_monotone carry no size and are FROZEN: a new member there is
+ * a new array pointer appended to the descriptor. Nothing else is stable:
  * the C++ helper (pulsim/xdev/adapter.hpp) and the kernel's host code may
  * change in any release; a library that uses the helper is still bound only
  * by this header, because the helper compiles INTO the library.

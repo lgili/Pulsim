@@ -182,6 +182,31 @@
     falls back to `eval` for every older library). The reserved slots stay
     NULL-only.
 
+16. **Second reviewer (fresh context, read-only) — fixed**: (1) a rebuilt
+    library after its last user was released could still be the old image
+    (glibc never unloads a library with STB_GNU_UNIQUE symbols) — the
+    registry now keeps each path's identity after expiry and refuses a
+    changed file while `dlopen(RTLD_NOLOAD)` still finds the old image;
+    (2) the registry key is the `weakly_canonical` path (`.`/`..`/symlinks);
+    (3) registration passed `ctx->state` aliased to the output state, so a
+    model updating state through the const `ctx->state` passed and froze in
+    a run — now a separate committed buffer, compared after init/accept
+    (`liar_state_via_ctx` refused); (4) off-axis lines no longer judge SMOOTH
+    (uniform grid; axis lines refine around 0) — a jump skips the interval;
+    (5) off-axis resolution capped (2000·min(‖dir‖₁, 4) points); (7) the
+    element structs `pulsim_xdev_field` / `pulsim_xdev_monotone` are declared
+    FROZEN in the header (no size field: growth = a new appended array
+    pointer); the descriptor copy reads min(struct_size, sizeof) bytes;
+    (9) an unresolvable path throws instead of falling back to the relative
+    name. **Open (noted, not fixed)**: debug_jacobian refuses an honest
+    NON-smooth model when a central difference straddles its kink (accept a
+    one-sided difference when SMOOTH is not claimed); during a run the const
+    inputs are guarded only under debug_jacobian (a model writing through
+    them conditionally, outside the box, is not seen); a model memoising in
+    its `instance` passes purity yet is thread-unsafe; same-size same-mtime
+    rebuilds; Windows paths beyond MAX_PATH (no `\\?\` prefix); the
+    one-sum finiteness test refuses a finite sum that overflows.
+
 ## Requests to other tracks
 
 - **Stepper track**: (a) the DC operating point needs the stateful fold (an

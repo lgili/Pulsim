@@ -126,8 +126,14 @@ public:
                                 + "': not an existing file (a library is loaded only "
                                   "from the path you name, never searched for)");
         }
+        // canonical: '.', '..', symlinks and (where the OS folds it) case
+        // resolve to one registry key per file
         auto a = std::filesystem::absolute(p, ec);
-        if (ec) return given;
+        if (!ec) a = std::filesystem::weakly_canonical(a, ec);
+        if (ec) {
+            throw ContractError("external device library '" + given
+                                + "': cannot resolve an absolute path (" + ec.message() + ")");
+        }
         a.make_preferred();   // LoadLibraryExW with SEARCH_DLL_LOAD_DIR wants backslashes
         const auto u = a.u8string();
         return std::string(u.begin(), u.end());
@@ -148,28 +154,50 @@ private:
     pulsim_xdev_get_fn get_ = nullptr;
 };
 
-/// The process's one Library per path. dlopen of a path already open
-/// returns the image already mapped (macOS by path, glibc by inode), so a
-/// library REBUILT at the same path while an earlier load is alive would
-/// silently run the old code: refused by name instead. Once every circuit
-/// using it is gone the library is closed and a rebuild loads normally.
+/// The process's one Library per (canonical) path. dlopen of a path already
+/// open returns the image already mapped (macOS by path, glibc by inode),
+/// so a library REBUILT at the same path while an earlier load is alive
+/// would silently run the old code: refused by name instead. The identity
+/// is remembered after the last user is gone too: if the system kept the
+/// old image mapped (glibc never unloads a library with STB_GNU_UNIQUE
+/// symbols, which C++ template statics produce), loading the rebuild is
+/// refused as well; if the old image is gone, the new build loads.
+/// Not seen: a rebuild with the same size and the same modification time
+/// (1-second timestamps, reproducible builds).
 [[nodiscard]] inline std::shared_ptr<const Library> open_library(const std::string& given) {
+    struct Entry {
+        std::weak_ptr<const Library> lib;
+        Library::FileId id;
+    };
     static std::mutex m;
-    static std::map<std::string, std::weak_ptr<const Library>> live;
+    static std::map<std::string, Entry> seen;
     const std::string path = Library::absolute_file(given);
+    const auto now = Library::identity_of(path);
     const std::lock_guard<std::mutex> lock(m);
-    if (auto lib = live[path].lock()) {
-        if (lib->identity() != Library::identity_of(path)) {
+    const auto it = seen.find(path);
+    if (it != seen.end() && it->second.id != now) {
+        bool mapped = static_cast<bool>(it->second.lib.lock());
+#if !defined(_WIN32)
+        if (!mapped) {   // released by Pulsim; did the system unload it?
+            if (void* h = dlopen(path.c_str(), RTLD_NOW | RTLD_NOLOAD)) {
+                dlclose(h);
+                mapped = true;
+            }
+        }
+#endif
+        if (mapped) {
             throw ContractError("external device library '" + path
                                 + "' changed on disk since it was loaded in this process "
-                                  "(size or modification time): the loader would keep running "
-                                  "the old code. Release every circuit using it, or restart "
-                                  "the process, to load the new build");
+                                  "(size or modification time) and the old build is still "
+                                  "mapped: the loader would keep running the old code. "
+                                  "Release every circuit using it, or restart the process");
         }
-        return lib;
+    }
+    if (it != seen.end()) {
+        if (auto lib = it->second.lib.lock()) return lib;
     }
     auto lib = std::make_shared<const Library>(path);
-    live[path] = lib;
+    seen[path] = Entry{lib, lib->identity()};
     return lib;
 }
 
@@ -277,7 +305,10 @@ private:
     /// Deep copy of the validated descriptor: the host never reads the
     /// library's (possibly writable) struct or arrays again.
     void own_() {
-        desc_ = *d_;
+        // only the bytes the LIBRARY's struct has (a later host's struct is
+        // longer than an old library's); fields it lacks stay zero
+        desc_ = pulsim_xdev_descriptor{};
+        std::memcpy(&desc_, d_, std::min<std::size_t>(d_->struct_size, sizeof desc_));
         const std::size_t R = R_;
         for (std::uint32_t k = 0; k < d_->n_pins; ++k) pin_s_.emplace_back(d_->pin_names[k]);
         for (const auto& n : pin_s_) pin_p_.push_back(n.c_str());

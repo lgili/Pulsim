@@ -24,6 +24,7 @@
 
 #include "pulsim/xdev/host.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -277,8 +278,7 @@ inline void check_contract(const Instance& in) {
     // The axis lines all pass through the centre's other coordinates; a
     // Jacobian wrong only where several unknowns move together is caught
     // here: the directional derivative J·w against the secant of f and q
-    // along x(τ) = centre + τ·w, τ in [-1, 1] (inside the box), and SMOOTH
-    // against jumps of J·w.
+    // along x(τ) = centre + τ·w, τ in [-1, 1] (inside the box).
     if (R > 1) {
         std::vector<std::vector<Real>> dirs(2, std::vector<Real>(R));
         for (std::size_t k = 0; k < R; ++k) {
@@ -296,7 +296,8 @@ inline void check_contract(const Instance& in) {
             // [1, -1]) moves no faster per point than one unknown on its axis
             Real l1 = 0;
             for (Real v : dirs[n]) l1 += std::abs(v);
-            const int kN = static_cast<int>(std::ceil(2000 * std::max(l1, Real{1})));
+            // capped: memory and time stay bounded for a large R
+            const int kN = static_cast<int>(std::ceil(2000 * std::clamp(l1, Real{1}, Real{4})));
             F.assign((kN + 1) * R, 0);
             Q.assign((kN + 1) * R, 0);
             tau.assign(kN + 1, 0);
@@ -324,13 +325,10 @@ inline void check_contract(const Instance& in) {
                     for (int i = 1; i <= kN; ++i) {
                         const Real ta = T[(i - 1) * R + r], tb = T[i * R + r];
                         const Real va = V[(i - 1) * R + r], vb = V[i * R + r];
+                        // SMOOTH is judged on the axis lines only (they refine
+                        // around 0; a uniform grid here would call a steep
+                        // honest law a kink); a jump just skips the interval
                         const bool jump = std::abs(tb - ta) > Real{0.05} * sc;
-                        if (jump && (d.claims & PULSIM_XDEV_CLAIM_SMOOTH)) {
-                            in.refuse_(std::string("claims SMOOTH but the derivative of ") + nm + "["
-                                       + std::to_string(r) + "] along direction "
-                                       + Instance::vec(w.data(), R) + " jumps " + num(ta) + " -> "
-                                       + num(tb) + " at tau = " + num(tau[i]) + " (not C1)");
-                        }
                         if (jump) continue;
                         const Real dt = tau[i] - tau[i - 1];
                         const Real secant = (vb - va) / dt;
@@ -366,7 +364,13 @@ inline void check_contract(const Instance& in) {
     if (d.accept) {
         std::vector<Real> st(NS + dc::kCanary, dc::canary());
         for (std::size_t k = 0; k < NS; ++k) st[k] = 0;
-        const pulsim_xdev_ctx c = in.ctx_(st.data());
+        // ctx->state is the committed state, a SEPARATE buffer as in a run
+        // (the output is the host's scratch copy): a model updating its
+        // state through the const ctx->state would pass an aliased check
+        // and stay frozen in a run
+        const std::vector<Real> committed(NS + dc::kCanary, Real{0});
+        const auto committed0 = committed;
+        const pulsim_xdev_ctx c = in.ctx_(committed.data());
         const std::vector<Real> x0 = centre, p0 = in.params();
         if (d.init && d.init(&c, centre.data(), st.data()) != PULSIM_XDEV_OK) {
             in.refuse_("init returned an error status at the probe centre");
@@ -374,8 +378,9 @@ inline void check_contract(const Instance& in) {
         if (d.accept(&c, centre.data(), Real{1e-6}, st.data()) != PULSIM_XDEV_OK) {
             in.refuse_("accept returned an error status at the probe centre");
         }
-        if (centre != x0 || in.params() != p0) {
-            in.refuse_("init/accept wrote through a const input (x or ctx->p)");
+        if (centre != x0 || in.params() != p0
+            || std::memcmp(committed.data(), committed0.data(), committed.size() * sizeof(Real)) != 0) {
+            in.refuse_("init/accept wrote through a const input (x, ctx->p or ctx->state)");
         }
         for (std::size_t k = 0; k < st.size(); ++k) {
             if (k >= NS && !dc::is_canary(st[k])) {

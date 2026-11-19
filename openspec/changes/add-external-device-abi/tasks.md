@@ -7,6 +7,8 @@
 - [ ] 1.6 `pulsim.add_external_device(builder, name, nodes, *, lib=None, code=None, lang="c", params=None, check_jacobian=True)`; binding, stubs; `components()` entry with library path and hash
 - [ ] 1.7 YAML type `external_device` (`lib` or `code`, `nodes`, `params`); refused without `allow_native_code=True`; strict keys from the field table
 
+Slice 2 notes (DECISIONS #11-#16): header layout asserted (LP64 / LLP64 / 32-bit) and compiled on three compilers in C99/C11/C17/C++17/20/23; the wheel ships `pulsim_xdev.h` (`pulsim.get_include()`); the test model libraries build in every configuration (CI's wheel build included) and the Python twin tests fail instead of skipping on CI (NOT yet seen on CI); cost ≤ 1.17× on both twins (the old 1.5-2.1× was the probe); hand-Jacobian path in the adapter; no batch entry (decided, #15); reviewer items closed (const-input guards, off-axis lines, rebuilt-library refusal, debug floor, aliased state at registration). Still open: 1.5, 1.7 (YAML opt-in), an `examples/` model, 2.1 DC / 2.3 AC (blocked on the stepper request), #16's open list.
+
 Slice 1 notes (DECISIONS.md): 1.1 header is `core/include/pulsim/xdev/pulsim_xdev.h` (+ `adapter.hpp`), test models in `core/tests/xdev/` (no `examples/` model yet); 1.2 the kind is `pwl::ExternalDeviceHistory` in `StatefulKinds` (no loop edit); 1.6 is `CircuitBuilder.add_external_device(name, nodes, lib, model, params, *, check_contract, debug_jacobian)` — no `code=`, no `components()` hash yet; 1.5 and 1.7 open (YAML not wired: a netlist cannot load code).
 
 ## 2. Acceptance: stateless devices
@@ -14,7 +16,7 @@ Slice 1 notes (DECISIONS.md): 1.1 header is `core/include/pulsim/xdev/pulsim_xde
 - [ ] 2.2 External junction capacitor (`q` only, `C0 = 2 nF`, `V0 = 25 V`, `m = 0.5`): equals `add_nonlinear_capacitor` within 1e-12 on `pwl`; charge at 400 V = 312.31 nC
 - [ ] 2.3 AC: external Shockley at 1 A → small-signal resistance `n·V_T/(I + I_S)` within 1e-9
 - [x] 2.4 Negative tests: wrong `abi_version`; pattern index out of range; a Jacobian entry scaled by 1.01; a parameter outside its bounds; `eval` returning NaN — each refused or reported with the device name
-- [ ] 2.5 Sweep on 8 threads with an external device is bit-identical to the serial run
+- [x] 2.5 Sweep on 8 threads with an external device is bit-identical to the serial run (`test_threaded_sweep_with_an_external_device_equals_the_serial_run`, thread backend, 8 workers registering concurrently)
 
 - [x] 2.6 Twin of the saturable inductor (internal row, flux q) on pwl (6e-16) and trbdf2; snapshot / resume bit-identical with model state (`energy_meter`)
 

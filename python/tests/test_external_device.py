@@ -248,8 +248,13 @@ def test_a_library_rebuilt_while_loaded_is_refused_not_silently_stale(libs, tmp_
     with pytest.raises(ValueError, match="changed on disk since it was loaded"):
         b.add_external_device("Y", ["a", "gnd"], str(lib), "good_resistor")
     del keep, b
-    gc.collect()   # the last user gone: the library closes, the new file loads
-    p.CircuitBuilder().add_external_device("Z", ["a", "gnd"], str(lib), "good_resistor")
+    gc.collect()   # the last user gone: Pulsim closes the library
+    # the new build loads only if the system really unloaded the old image;
+    # otherwise it is refused again, never silently stale
+    try:
+        p.CircuitBuilder().add_external_device("Z", ["a", "gnd"], str(lib), "good_resistor")
+    except ValueError as exc:
+        assert "still mapped" in str(exc)
 
 
 def test_get_include_holds_the_stable_header():
