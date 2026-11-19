@@ -381,3 +381,27 @@ TEST_CASE("a periodic source reports its grid origin and next k for a snapshot",
     CHECK(q.next_k(b) == 5);
     CHECK(q.next_k(a) == 1);
 }
+
+TEST_CASE("a closed_end rate fires at t_end too; a resume does not repeat it",
+          "[event_queue]") {
+    Rate closed{0.25};
+    closed.closed_end = true;
+    EventQueue q;
+    const auto a = q.add_periodic(Kind::ControlTick, closed);
+    const auto b = q.add_periodic(Kind::ControlTick, Rate{0.25});
+    q.start(0.0, 1.0);
+    drain(q);
+    CHECK(q.taken(a) == 5);   // 0, .25, .5, .75 and 1.0
+    CHECK(q.taken(b) == 4);   // the default stays half-open
+    // the resumed run on the same grid starts past it
+    Rate resumed = closed;
+    resumed.origin = 0.0;
+    resumed.k0 = q.next_k(a);
+    EventQueue r;
+    const auto c = r.add_periodic(Kind::ControlTick, resumed);
+    r.start(1.0, 2.0, 1e-12);
+    const auto ev = drain(r, 1e-12);
+    CHECK(r.taken(c) == 4);   // 1.25, 1.5, 1.75, 2.0
+    REQUIRE(!ev.empty());
+    CHECK(ev.front().t == 1.25);
+}

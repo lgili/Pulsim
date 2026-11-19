@@ -546,9 +546,9 @@ class CircuitBuilder:
         """
         Add a binary switched diode (V2's SwitchedDiode). g_on/g_off in siemens. V_f: forward drop while ON (PSIM's diode voltage drop), in volts: v = V_f + i/g_on; must be finite and >= 0. V_th: turn-on threshold in volts, effectively max(V_th, V_f) when V_f > 0; V_th > V_f is a hysteresis band. OFF is plain g_off.
         """
-    def add_external_device(self, name: str, nodes: collections.abc.Sequence[str], lib: str, model: str, params: typing.Any = None, *, check_contract: bool = True, debug_jacobian: bool = False) -> CircuitBuilder:
+    def add_external_device(self, name: str, nodes: collections.abc.Sequence[str], lib: str, model: str, params: typing.Any = None, *, check_contract: bool = True, debug_jacobian: bool = False, record: bool = False) -> CircuitBuilder:
         """
-        Add an instance of an EXTERNAL device model (add-external-device-abi): `lib` is a shared library built against pulsim_xdev.h; loading it runs arbitrary native code with your privileges (no sandbox). `nodes` are its pins in the model's order; `params` maps field names to a value or (value, unit) (the unit must equal the declared one). The model's contract (Jacobian, finiteness, KCL, declared claims) is checked here and refused by name; `debug_jacobian=True` re-checks the Jacobian at every evaluation of the run.
+        Add an instance of an EXTERNAL device model (add-external-device-abi): `lib` is a shared library built against pulsim_xdev.h; loading it runs arbitrary native code with your privileges (no sandbox). `nodes` are its pins in the model's order; `params` maps field names to a value or (value, unit) (the unit must equal the declared one). The model's contract (Jacobian, finiteness, KCL, declared claims) is checked here and refused by name; `debug_jacobian=True` re-checks the Jacobian at every evaluation of the run. `record=True` traces the device's readings at every accepted step of a pwl / trbdf2 run: res.device_output(name, key) with key 'i(<pin>)', 'power' or one of the model's named outputs.
         """
     def add_gapped_core_inductor(self, name: str, n_pos: str, n_neg: str, N: float, Ae: float, le: float, lg: float, mu_r0: float = 2000.0, B_sat: float = 0.35, knots: int = 128) -> CircuitBuilder:
         """
@@ -2056,6 +2056,10 @@ class SimulationResult:
         """
         Adapter use only: fill an empty result from arrays (times, states, the per-sample mask, re-initialisation dicts).
         """
+    def _set_device_losses(self, records: collections.abc.Sequence[DeviceLossRecord], heat_injected: float, heat_pending: float) -> None:
+        """
+        The exact engine's loss records (dsed loss port).
+        """
     def _set_run_info(self, engine: str, grid: GridKind, stats: dict[typing.Any, typing.Any]) -> None:
         """
         Adapter use only: set the grid kind and the run statistics.
@@ -2072,6 +2076,15 @@ class SimulationResult:
         the integral of the engines' dense output (linear between samples,
         from the right limit where one is stored) divided by ``t1 - t0``,
         windows clipped exactly. Correct on any grid, unlike ``.mean()``.
+        """
+    def device_output(self, name: str, key: str):
+        """
+        ``key`` of the external device ``name`` at every stored sample:
+        ``'i(<pin>)'`` (the current INTO the device at that pin, its law's
+        ``f`` plus the committed ``dq/dt``), ``'power'`` (the sum of pin voltage
+        times pin current) or one of the model's named outputs (evaluated with
+        the state committed at that step). The device must be added with
+        ``record=True`` and the run must go through pwl or trbdf2.
         """
     def empty(self) -> bool:
         """
@@ -3856,7 +3869,7 @@ class _NativeCircuitBuilderAdapter:
         """
         Continuous-time A matrix for the active mask.
         """
-    def __init__(self, builder: CircuitBuilder, cache: PwlStateSpaceCache, b_extra_fn: typing.Any = None) -> None:
+    def __init__(self, builder: CircuitBuilder, cache: PwlStateSpaceCache, b_extra_fn: typing.Any = None, loss_port: bool = False) -> None:
         ...
     def _mode_select_at(self, mask: SwitchStateMask, t: float, x_full: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"], h_e: float, tol: float = 1e-09) -> dict[typing.Any, typing.Any]:
         """
@@ -4215,6 +4228,23 @@ class RunOptions:
     @voltage_sanity_factor.setter
     def voltage_sanity_factor(self, arg0: float | None) -> None:
         ...
+class _XdevTrace:
+    @staticmethod
+    def wanted(builder: CircuitBuilder) -> bool:
+        ...
+    def __init__(self) -> None:
+        ...
+    def columns(self, name: str) -> list[str]:
+        ...
+    def names(self) -> list[str]:
+        ...
+    def start_row(self, name: str, x0: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"], t0: float) -> list[float]:
+        ...
+    def values(self, name: str) -> typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, n]"]:
+        ...
+    @property
+    def times(self) -> typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"]:
+        ...
 class Simulation:
     """
     The kernel object that is a simulation: Simulation(circuit, options) plans the run (preflight on a private copy, routing, the option x engine refusals, the device capability check, the Newton stamps); attach gate sources, ticks and source terms; run() or run_until(t) + snapshot() / restore(). Engines 'pwl' and 'trbdf2'; the exact engine is refused (pulsim.simulate composes it). C blocks / graph-driven sources are refused (simulate composes them).
@@ -4255,6 +4285,8 @@ class Simulation:
         """
         pwl: runs at every tick instant before the ticks.
         """
+    def set_xdev_trace(self, trace: typing.Any) -> None:
+        ...
     def snapshot(self) -> SolverSnapshot:
         ...
     @property
@@ -4407,9 +4439,9 @@ def _record_pass(probes: collections.abc.Sequence[str], keep: str, every_n: int,
     """
     Kernel recorder pass over stored arrays (add-probes-and-recorders); use pulsim.simulate(..., recorders=[...]).
     """
-def _require_supported(graph: Graph, pool: DevicePool, engine: str) -> None:
+def _require_supported(graph: Graph, pool: DevicePool, engine: str, loss_port: bool = False) -> None:
     """
-    Raise UnsupportedError for the first branch `engine` cannot simulate (the capability table's column).
+    Raise UnsupportedError for the first branch `engine` cannot simulate (the capability table's column). loss_port: the caller is the dsed event-driven run, which honours a loss port.
     """
 def _run_options_kw(t_end: float, dt: float | None, engine: str, t_start: float, **kwargs) -> RunOptions:
     ...
@@ -4501,13 +4533,13 @@ def ja_replay(N: float, Ae: float, le: float, lg: float, Ms: float, a: float, al
     """
     Replay the in-loop Jiles-Atherton device on a current trace with the kernel's own integrator; returns (H, M, B) arrays.
     """
-def load_yaml_file(path: str) -> LoadedCircuit:
+def load_yaml_file(path: str, *, allow_native_code: typing.Any = None) -> LoadedCircuit:
     """
-    Parse a YAML circuit description from disk. Returns LoadedCircuit(builder, options); errors and warnings name the path. Same key checks as `load_yaml_string`.
+    Parse a YAML circuit description from disk. Returns LoadedCircuit(builder, options); errors and warnings name the path. Same key checks as `load_yaml_string`; a relative `lib:` of an `external_device` is taken from the file's folder.
     """
-def load_yaml_string(yaml_text: str) -> LoadedCircuit:
+def load_yaml_string(yaml_text: str, *, allow_native_code: typing.Any = None) -> LoadedCircuit:
     """
-    Parse a YAML circuit description from an in-memory string. Returns LoadedCircuit(builder, options). Warns on unknown top-level / `circuit:` / `simulation:` keys; refuses a `simulation:` block indented under `circuit:`.
+    Parse a YAML circuit description from an in-memory string. Returns LoadedCircuit(builder, options). Warns on unknown top-level / `circuit:` / `simulation:` keys; refuses a `simulation:` block indented under `circuit:`. `allow_native_code`: the shared libraries (paths or directories, symlinks followed) an `external_device` entry may load; without it every such entry is refused (a relative `lib:` is taken from the working directory).
     """
 def make_carrier_pwm_fn(period: float, duty: DutyRegister, switch_idx: int, num_switches: int, low_side: int = -1, dead_time: float = 0.0, phase: float = 0.0) -> SwitchSchedule:
     """
@@ -4603,7 +4635,7 @@ def run_transient_bdf1(builder: CircuitBuilder, opts: SimulationOptions, switch_
     """
     BDF1 (implicit Euler) transient simulation. Use when the trapezoidal path rings on stiff problems — BDF1 is L-stable (adds artificial damping that kills numerical oscillation). Slower than trap because it assembles + factors per step; intended for ROBUSTNESS over speed.
     """
-def run_transient_trbdf2(cache: PwlStateSpaceCache, graph: Graph, pool: DevicePool, t_start: float, t_end: float, rtol: float, atol: float, h_init: float, h_max: float, switch_fn: typing.Any, b_extra_fn: typing.Any = None, initial_state: typing.Any = None, max_event_iterations: int | None = None, should_continue: collections.abc.Callable[[], bool] | None = None, observer_period: float = 0.0, step_observer: typing.Any = None, enable_nonlinear_refresh: bool | None = None, max_newton_iterations: int | None = None, tol_newton_dx: float = -1.0, tol_newton_res: float = -1.0, enable_newton_line_search: bool = False, enable_newton_lm: bool = False, resume_from: typing.Any = None, observer_periods: collections.abc.Sequence[float] = [], observers: collections.abc.Sequence[typing.Any] = [], newton_roundoff_budget: int | None = None, on_impulse_error: bool = False, observer_offsets: collections.abc.Sequence[float] = [], observer_origin: float = ..., observer_monitors: collections.abc.Sequence[bool] = [], observer_origins: collections.abc.Sequence[float] = [], observer_next_k: collections.abc.Sequence[int] = [], device_path: DevicePath = DevicePath.Legacy, mode_selection: int = 0) -> tuple[SimulationResult, dict[typing.Any, typing.Any]]:
+def run_transient_trbdf2(cache: PwlStateSpaceCache, graph: Graph, pool: DevicePool, t_start: float, t_end: float, rtol: float, atol: float, h_init: float, h_max: float, switch_fn: typing.Any, b_extra_fn: typing.Any = None, initial_state: typing.Any = None, max_event_iterations: int | None = None, should_continue: collections.abc.Callable[[], bool] | None = None, observer_period: float = 0.0, step_observer: typing.Any = None, enable_nonlinear_refresh: bool | None = None, max_newton_iterations: int | None = None, tol_newton_dx: float = -1.0, tol_newton_res: float = -1.0, enable_newton_line_search: bool = False, enable_newton_lm: bool = False, resume_from: typing.Any = None, observer_periods: collections.abc.Sequence[float] = [], observers: collections.abc.Sequence[typing.Any] = [], newton_roundoff_budget: int | None = None, on_impulse_error: bool = False, observer_offsets: collections.abc.Sequence[float] = [], observer_origin: float = ..., observer_monitors: collections.abc.Sequence[bool] = [], observer_origins: collections.abc.Sequence[float] = [], observer_next_k: collections.abc.Sequence[int] = [], device_path: DevicePath = DevicePath.Legacy, mode_selection: int = 0, integrator: int = 0) -> tuple[SimulationResult, dict[typing.Any, typing.Any]]:
     """
     Variable-step TR-BDF2 transient (engine='auto'): L-stable, 2nd order, LTE-controlled step, gate edges landed by bisection, diode crossings localized by Illinois. Returns (SimulationResult, stats dict). `observers[j]` ticks at t_start + observer_offsets[j] + k*observer_periods[j] (ceil((span - offset_j)/T_j) times, index order when coincident; offsets default to 0); observer_origin (NaN = t_start) moves the grid's origin, so a resumed run ticks where the uninterrupted one would; stats['control_tick_counts'] counts each.
     """

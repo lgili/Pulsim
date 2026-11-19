@@ -115,7 +115,15 @@ For hot loops, a Numba-jitted function works too (see
 `code` is the **body** of the step function. In scope: `in`, `out`,
 `n_in`, `n_out`, `t`, `dt`, `state`. Pulsim wraps it in the ABI,
 compiles it once with the system compiler, and caches the result (keyed
-by source + flags), so repeat runs don't recompile.
+by source + flags), so repeat runs don't recompile. The cache is per user
+(`pulsim._native_cache`): `~/Library/Caches/pulsim/cblock` (macOS),
+`$XDG_CACHE_HOME` or `~/.cache/pulsim/cblock` (Linux),
+`%LOCALAPPDATA%\pulsim\cblock` (Windows), mode 0700. A cached library
+another user owns, that others can write, or that is a symlink is deleted
+and rebuilt, never loaded; a cache directory that is not yours and private
+is refused. A C block is sampled, explicit code (ZOH outputs); an implicit
+device the Newton solver iterates on is an external device
+(`docs/external-devices.md`).
 
 ```python
 # C
@@ -372,7 +380,7 @@ together.
   firings.
 - Compiled `lib=` / `code=` blocks are one C call per block step; numpy
   buffers are passed by pointer (no copy).
-- The inline cache means a given source compiles once per machine.
+- The inline cache means a given source compiles once per user and machine.
 
 ---
 

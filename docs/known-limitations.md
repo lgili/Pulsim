@@ -59,7 +59,7 @@ unless called with `allow_non_passive=True`.
 | PulseCurrentSource | Source | yes | yes | yes | yes | yes |
 | PwlCurrentSource | Source | yes | yes | yes | yes | yes |
 | InductionMachineMna | NewtonStateful | yes | yes | no | no | no |
-| ExternalDevice | NewtonStateful | yes | yes | no | no | no |
+| ExternalDevice | NewtonStateful | yes | yes | no | no | yes |
 <!-- engine-capabilities:end -->
 
 ## Option capability matrix
@@ -81,7 +81,7 @@ engine accepts a keyword and ignores it. The defaults are
 | `rtol` | refused | yes | yes | 1e-5 (trbdf2), 1e-6 (exact) |
 | `atol` | refused | yes | yes | 1e-8 (trbdf2), 1e-9 (exact) |
 | `dt_init` | refused | yes | yes | kernel's choice (trbdf2), 1e-9 (exact) |
-| `integrator` | refused | refused | yes | 'auto' (exact) |
+| `integrator` | refused | yes | yes | 'auto' (exact), TR-BDF2 (trbdf2) |
 | `stiffness_threshold` | refused | refused | yes | 10.0 |
 | `h_bdf2` | refused | refused | yes | 1e-6 |
 | `t_start` | yes | yes | yes | 0.0 |
@@ -142,7 +142,9 @@ whose ideal elements (`R_on = 0` or `g_off = 0`) make a state dependent
 `discontinuity_restart=True` and on `trbdf2` (always: three SDIRK(2,2)
 steps after the entry), and an impulsive entry is recorded in
 `res.reinit_records` (`on_impulse='error'` refuses it with
-`feature='impulse'`); on `pwl` without the rule, and on `trbdf2` with a
+`feature='impulse'`; on `dsed` a jump is recorded only above 1e-9 of the
+circuit's current or voltage scale, so a tiny cut in a circuit with a
+very large current scale is projected without a record); on `pwl` without the rule, and on `trbdf2` with a
 Coss, Lauritzen, IGBT-tail, PMSM or saturable-inductor history, it is
 refused with `feature='dependent_states'`; a node bounded only by open ideal elements with
 `g_off = 0` is refused with `feature='floating_node'`, a loop of closed
@@ -152,7 +154,7 @@ ideal elements and voltage sources with `feature='ideal_voltage_loop'`.
 | Form | pwl | trbdf2 | dsed | bdf1 | ac_sweep |
 |---|---|---|---|---|---|
 | Switch | yes | yes | yes | no | no |
-| Diode | yes | yes | no | no | no |
+| Diode | yes | yes | yes | no | no |
 <!-- branch-form-capabilities:end -->
 
 The gated PWL devices are a form of the Diode row with their own column
@@ -239,7 +241,7 @@ event where the signal jumps.
 
 | Limitation | Measured | Workaround |
 |---|---|---|
-| `engine="pwl"` and `engine="trbdf2"` read loss tables inside the run; `dsed` / `exact`, `bdf1` and `auto` when it resolves to `dsed` refuse a circuit with a loss port by name (`UnsupportedError`, feature `device_losses`, the device). | Conformance cell `test_device_losses_cell`. | `engine="pwl"` or `"trbdf2"`, or the post-hoc `device_loss_summary` / the periodic-orbit evaluator on the exact engine. |
+| `engine="pwl"` and `engine="trbdf2"` read loss tables inside the run. `dsed` / `exact` reads them at a fixed `Tj=` (switching energy at each event, conduction as the exact ∫v·i of each mode, impulsive energy booked to the switch) and refuses by name a junction or heat node (no temperature loop), a `V_on` conduction table, time-varying sources, `integrator='bdf2'`, `t_start` and `resume_from`; `bdf1` refuses every loss port (`UnsupportedError`, feature `device_losses`, the device). | Conformance cell `test_device_losses_cell`. | `engine="pwl"` or `"trbdf2"`, or the post-hoc `device_loss_summary` / the periodic-orbit evaluator on the exact engine. |
 | The event energy is not drawn from the circuit: the PWL switch is ideal, the table energy only heats the junction. | By design, as in PLECS and PSIM. | Model the transition (`add_power_mosfet`) when the electrical side must see it. |
 | `T_j` does not feed back into the device (`V_f`, `g_on` stay fixed). | Task 4.1 (optional) not done. | Re-run with `V_f` / `g_on` at the settled `T_j`. |
 
@@ -254,6 +256,7 @@ event where the signal jumps.
 
 | Limitation | Measured | Workaround |
 |---|---|---|
+| **External devices (`add_external_device`) are refused by the exact engine (`dsed`) and `bdf1`.** `dsed` propagates each topology mode in closed form and admits no Newton device; a law known only through `f`, `q` and their Jacobians at sampled points has no closed-form propagator. No sandbox: a model library is native code. Event functions (`n_events > 0`) are refused: no engine locates an external zero crossing yet. A YAML `external_device` loads only a library listed in `allow_native_code=[...]`; inline `code:` is not accepted. | `UnsupportedError(kind='ExternalDevice')` on `dsed` / `bdf1`. | `pwl`, `trbdf2`, the DC operating point and the kernel AC sweep run it (`docs/external-devices.md`). |
 | **`add_nonlinear_diode` is retired.** Its law `logistic(κ(v − V_F0))·(v − V_F0)/R_d` sources power for `0 < v < V_F0`. It now raises `RetiredDeviceError` unless called with `allow_non_passive=True` (YAML: `allow_non_passive: true`). | Default parameters, 0.636 V forced: −1.3923 A. 20 V / 1 kHz sine clamp through 10 Ω: `pwl` at `dt = 1 µs` aborts; `trbdf2` RMS 9.634 V against 10.01 V for the PWL and Shockley diodes. | `add_diode(..., V_f=)` or `add_shockley_diode`. |
 
 ## Switching helpers

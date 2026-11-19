@@ -22,6 +22,11 @@ import pulsim as p
 EPS = np.finfo(float).eps
 _RUNS = {"pwl": dict(engine="pwl", dt=1e-6),
          "trbdf2": dict(engine="trbdf2", rtol=1e-7, atol=1e-10)}
+# the companion readings on integrator='esdirk43' too (the KCL and charge
+# tests; the per-kind tests keep _RUNS). Before the interpolated-landing fix
+# the per-sample KCL check failed on esdirk43 at exactly those landings
+# (7e-5 of scale on the buck, 7e-6 on the rectifier): it exercises them.
+_RUNS_C = {**_RUNS, "esdirk43": dict(_RUNS["trbdf2"], integrator="esdirk43")}
 A, B = 0.21e-3 + 1.234e-9, 0.87e-3 + 4.321e-9   # mid-step on every grid
 
 
@@ -69,11 +74,11 @@ def _run(fac, eng, probes, **rec):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         res = p.simulate(b, t_end, recorders=[p.Recorder("r", probes, **rec)],
-                         **_RUNS[eng], **extra)
+                         **_RUNS_C[eng], **extra)
     return res, kcl, caps
 
 
-@pytest.mark.parametrize("eng", sorted(_RUNS))
+@pytest.mark.parametrize("eng", sorted(_RUNS_C))
 @pytest.mark.parametrize("circ", sorted(_CIRCUITS))
 def test_kcl_holds_at_every_recorded_sample(circ, eng):
     _, _, _, kcl, caps = _CIRCUITS[circ]()
@@ -101,7 +106,7 @@ def test_kcl_holds_at_every_recorded_sample(circ, eng):
             assert np.all(np.abs(se) <= 1e-9 * scale + floor / 1e-15), (node, se)
 
 
-@pytest.mark.parametrize("eng", sorted(_RUNS))
+@pytest.mark.parametrize("eng", sorted(_RUNS_C))
 @pytest.mark.parametrize("circ", ["rc", "buck", "rectifier"])
 def test_capacitor_charge_over_mid_step_windows(circ, eng):
     _, _, t_end, _, caps = _CIRCUITS[circ]()
@@ -239,3 +244,25 @@ def test_vcvs_and_current_source_readings(eng):
     np.testing.assert_allclose(a["i(Ra)"][1:], a["i(I1)"][1:], rtol=1e-9)
     np.testing.assert_allclose(a["i(E1)"], -a["i(Ro)"], rtol=1e-9, atol=1e-15)
     np.testing.assert_allclose(a["p(E1)"], -a["p(Ro)"], rtol=1e-9, atol=1e-15)
+
+
+def test_device_readings_on_esdirk43_agree_with_trbdf2():
+    # every reading, the capacitor's companion current included (its KCL:
+    # test_kcl_holds_at_every_recorded_sample), in the loop on
+    # integrator='esdirk43'; the window energies agree with the TR-BDF2 run's
+    probes = list(_BUCK_P)
+    e = {}
+    for integ, extra in (("trbdf2", {}), ("esdirk43", {"integrator": "esdirk43"})):
+        b, fn, t_end, _, _ = _buck()
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            res = p.simulate(b, t_end, switch_fn=fn, **_RUNS["trbdf2"], **extra,
+                             recorders=[p.Recorder("e", probes, keep="none", windows=[(A, B)])])
+        assert res.recorder_feed["mode"] == "in-loop", res.recorder_feed
+        e[integ] = {q: res.recorded["e"].windows[q]["integral"][0] for q in probes}
+    supplied = -e["trbdf2"]["p(V)"]
+    for q in probes:
+        # both runs at rtol 1e-7; seen <= 2e-5 of the supplied energy
+        print(f"{q}: esdirk43 - trbdf2 = {(e['esdirk43'][q] - e['trbdf2'][q]) / supplied:.2e} "
+              "of the supplied energy", file=sys.stderr)
+        assert abs(e["esdirk43"][q] - e["trbdf2"][q]) <= 2e-4 * supplied, q

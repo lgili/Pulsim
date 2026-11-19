@@ -503,3 +503,32 @@ def test_flip_evidence_resumes_per_circuit(tmp_path, monkeypatch):
     more, _, _ = ev.run(pat, ("default", "auto"), tmp_path)
     assert {r["variant"] for r in more} == {"default", "auto"}
     assert [r for r in more if r["variant"] == "default"] == recs
+
+
+def test_a_pulse_driven_rl_step_is_graded_against_its_ramp_closed_form():
+    """rl_step / inductor_chain_step have no switch: their ideal twin is the circuit itself,
+    and the converged ladder's reference (pwl+restart dt/32) drew the source's 1 ns edge as a
+    ramp over one of its own steps: the exact engine (1e-11 of the closed form) was graded a
+    disagreement (3.8e-3, 6.2e-3). Their reference is now the closed form of the ramp,
+    declared exact in the circuit's validation block (exact engine session 22)."""
+    import ideal_switch_flip_evidence as ev
+
+    for rel, v0, tau in (("circuits/linear/rl_step.yaml", 10.0, 10e-3 / 100),
+                         ("circuits/magnetics/inductor_chain_step.yaml", 5.0 * 20 / 30, 30e-3 / 100)):
+        case = v1_reader.load(BENCH / rel)
+        cols = dr.observables_of(case)
+        t, ys, _ = ev.analytic_reference(case, cols)
+        y = ys[cols[0]]
+        # the ramp's closed form at t_r (v0 to O(t_r/tau)), the step's tail after it
+        k = int(np.searchsorted(t, 1e-9))
+        assert t[k] == 1e-9 and y[k] == pytest.approx(-v0 * (tau / 1e-9) * math.expm1(-1e-9 / tau), rel=1e-12)
+        assert y[k] == pytest.approx(v0, rel=1e-5)
+        assert y[-1] == pytest.approx(v0 * (tau / 1e-9) * math.expm1(1e-9 / tau) * math.exp(-t[-1] / tau),
+                                      rel=1e-12)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            res = case.run("dsed")
+        rec = dr.classify({}, res, case, cols, (t, ys, None), 1e-3)
+        # 2e-8: the gate's own measure, the engine's samples (1e-7 s apart, tau = 1e-4 s)
+        # interpolated linearly onto the union grid; at its samples dsed is 2e-12 V off
+        assert rec["outcome"] == "agree" and rec["err_rms"] < 1e-7

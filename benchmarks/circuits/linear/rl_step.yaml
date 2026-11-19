@@ -13,10 +13,14 @@ benchmark:
     model: rl_step
     observable: V(out)
     ignore_initial_samples: 1
+    # exact: the closed form of the netlist as built (the source's 1 ns edge
+    # included): the ideal twin's reference (ideal_switch_flip_evidence)
+    exact: true
     params:
       v0: 10.0
       r: 100
       l: 10m
+      t_rise: 1e-9
 simulation:
   tstop: 1e-3
   dt: 1e-6

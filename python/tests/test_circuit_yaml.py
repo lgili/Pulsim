@@ -72,9 +72,10 @@ def test_external_device_is_refused_by_yaml_both_ways():
     c = build(True).build()
     with pytest.raises(ValueError, match="not written to YAML"):
         c.to_yaml()
+    # reading one needs the library listed in allow_native_code=[...]
     doc = ("circuit:\n  devices:\n    - {name: X, type: external_device, "
-           "pins: [a, gnd]}\n")
-    with pytest.raises(Exception, match="external_device"):
+           "nodes: [a, gnd], lib: x.so, model: m}\n")
+    with pytest.raises(Exception, match="allow_native_code"):
         p.load_yaml_string(doc)
 
 

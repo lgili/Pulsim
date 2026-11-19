@@ -65,7 +65,10 @@ def test_resume_continues_the_step_sequence(k_after):
 
 
 def test_an_explicit_h_init_still_wins():
-    first = _run(1e-4)
+    # 10.2 T, between edges: a split AT an edge (10 T) lands that edge with
+    # an h_min first step instead (test_trbdf2_resume_at_gate_edge.py; it
+    # took 1e-9 here before, 1.0e-4 V off the uninterrupted run, 3.5e-7 now)
+    first = _run(1.02e-4)
     resumed = _run(2e-4, resume_from=first.final_snapshot, dt_init=1e-9)
     tr = np.asarray(resumed.times)
     assert tr[1] - tr[0] == pytest.approx(1e-9, rel=1e-6)

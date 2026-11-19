@@ -42,12 +42,20 @@ if(PULSIM_BUILD_XDEV_TEST_MODELS)
     target_include_directories(pulsim_xdev_contract PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     # no C_STANDARD_REQUIRED: MSVC has no C99 switch (its default C is a superset)
     set_target_properties(pulsim_xdev_contract PROPERTIES C_STANDARD 99)
+    # The same models built against the stable header AS IT WAS at c90fc07f
+    # (a frozen copy, first on the include path): an old library must keep
+    # loading and running in every later host (append-only ABI).
+    add_library(pulsim_xdev_contract_v1 MODULE tests/xdev/contract_models.c)
+    target_include_directories(pulsim_xdev_contract_v1 PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/xdev/abi_v1_c90fc07f)
+    set_target_properties(pulsim_xdev_contract_v1 PROPERTIES C_STANDARD 99)
     # "$<0:>" stops multi-config generators (Visual Studio) adding Release/
-    set_target_properties(pulsim_xdev_twins pulsim_xdev_contract PROPERTIES
+    set_target_properties(pulsim_xdev_twins pulsim_xdev_contract pulsim_xdev_contract_v1 PROPERTIES
         C_VISIBILITY_PRESET hidden CXX_VISIBILITY_PRESET hidden
         LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/xdev_test_models$<0:>")
     if(NOT WIN32)
         target_link_libraries(pulsim_xdev_contract PRIVATE m)
+        target_link_libraries(pulsim_xdev_contract_v1 PRIVATE m)
     endif()
 endif()
 
@@ -102,6 +110,7 @@ if(PULSIM_BUILD_TESTS)
         tests/modes/test_mode_selector.cpp
         tests/modes/test_event_queue.cpp  # add-unified-event-queue
         tests/modes/test_gate_source.cpp  # add-unified-event-queue
+        tests/modes/test_locate.cpp  # add-unified-event-queue 8.1 / 8.2
         tests/modes/test_pwl_mode_ports.cpp
     )
     target_link_libraries(pulsim_core_mode_tests

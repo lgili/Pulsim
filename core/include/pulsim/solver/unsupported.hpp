@@ -100,8 +100,9 @@ inline void refuse_device_losses(const pwl::DevicePool& pool,
         std::format(
             "engine '{}' cannot honour the loss port of '{}' "
             "(set_device_losses): the commutation energy and the junction "
-            "temperature are read inside the time loops of engine='pwl' "
-            "and 'trbdf2' only. Use one of them, or post-process with "
+            "temperature are read inside the time loops of engine='pwl', "
+            "'trbdf2' and the event-driven run of 'dsed' only. Use one of "
+            "them, or post-process with "
             "device_loss_summary.", engine, s.device));
 }
 
@@ -132,10 +133,15 @@ inline void require_gated_supported(const topology::Graph& graph,
 }
 
 /// Throw `UnsupportedError` for the first branch engine `e` cannot run.
+/// `loss_port`: the caller runs the exact engine's loss tracking (the dsed
+/// event-driven run, python/dsed_bindings.cpp); every other dsed caller
+/// (period maps, steady state, design batches) still refuses the port.
 inline void require_supported(const topology::Graph& graph,
-                              const pwl::DevicePool& pool, pwl::Engine e) {
+                              const pwl::DevicePool& pool, pwl::Engine e,
+                              bool loss_port = false) {
     require_branch_form_supported(graph, pool, e);
-    if (e != pwl::Engine::FixedTrap && e != pwl::Engine::TrBdf2)
+    if (e != pwl::Engine::FixedTrap && e != pwl::Engine::TrBdf2
+        && !(loss_port && e == pwl::Engine::Dsed))
         refuse_device_losses(pool, pwl::engine_name(e));
     require_gated_supported(graph, pool, e);
     const auto b = find_unsupported(graph, pool, e);

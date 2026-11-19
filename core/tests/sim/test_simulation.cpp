@@ -89,6 +89,13 @@ TEST_CASE("RunOptions resolves to the drivers' defaults", "[sim][options]") {
     const auto refused = sim::option_refusals(sim::requested_options(o),
                                               sim::Engine::Dsed);
     REQUIRE(refused == std::vector<std::string_view>{"device_path"});
+    // integrator='esdirk43' reaches the variable step; the fixed clock refuses it.
+    o.device_path = device::DevicePath::Legacy;
+    o.integrator_esdirk43 = true;
+    REQUIRE(sim::to_trbdf2_options(o).integrator == 1);
+    REQUIRE(sim::option_refusals(sim::requested_options(o), sim::Engine::FixedTrap)
+            == std::vector<std::string_view>{"integrator"});
+    REQUIRE(sim::option_refusals(sim::requested_options(o), sim::Engine::TrBdf2).empty());
 }
 
 TEST_CASE("Simulation matches the fixed-step driver bit for bit with no "

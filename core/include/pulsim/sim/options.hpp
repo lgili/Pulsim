@@ -80,8 +80,12 @@ inline constexpr std::array<OptionSpec, 50> kRunOptionTable{{
     {"dt_init", kTrBdf2 | kExact, Unset::None,
      "kernel's choice (trbdf2), 1e-9 (exact)",
      "dt_init is a variable-step controller's first step"},
-    {"integrator", kExact, Unset::Integrator, "'auto' (exact)",
-     "integrator selects an exact-engine integrator"},
+    // 'esdirk43' on trbdf2 (add-high-order-stiff-integrator); the exact
+    // engine's names there and 'esdirk43' on the exact engine are refused by
+    // simulate() by value.
+    {"integrator", kTrBdf2 | kExact, Unset::Integrator,
+     "'auto' (exact), TR-BDF2 (trbdf2)",
+     "integrator selects a variable-step integrator; a fixed step has its own"},
     {"stiffness_threshold", kExact, Unset::None, "10.0",
      "stiffness_threshold tunes the exact engine's RK45/BDF2 dispatch"},
     {"h_bdf2", kExact, Unset::None, "1e-6",
@@ -215,6 +219,8 @@ struct RunOptions {
     std::optional<Size> max_event_iterations;
     bool strict_event_iterations = false;
     ModeSelection mode_selection = ModeSelection::Legacy;
+    /// integrator='esdirk43' on trbdf2 (add-high-order-stiff-integrator).
+    bool integrator_esdirk43 = false;
     OnImpulse on_impulse = OnImpulse::Record;
     /// A/B switch of the fixed engine's mode guard (not a user option).
     bool mode_guard = true;
@@ -278,6 +284,7 @@ requested_options(const RunOptions& o) {
     on(o.resolution_diagnostics.value_or(false), "resolution_diagnostics");
     on(o.inductor_freeze_di_max.has_value(), "inductor_freeze_di_max");
     on(o.inductor_abs_clamp.has_value(), "inductor_abs_clamp");
+    on(o.integrator_esdirk43, "integrator");
     on(o.mode_selection != ModeSelection::Legacy, "mode_selection");
     on(o.control_tick_state, "control_tick");
     on(o.device_path != device::DevicePath::Legacy, "device_path");
@@ -404,6 +411,7 @@ to_trbdf2_options(const RunOptions& o) {
     s.on_impulse_error = o.on_impulse == OnImpulse::Error;
     s.device_path = o.device_path;
     s.mode_selection = static_cast<int>(o.mode_selection);
+    s.integrator = o.integrator_esdirk43 ? 1 : 0;
     return s;
 }
 

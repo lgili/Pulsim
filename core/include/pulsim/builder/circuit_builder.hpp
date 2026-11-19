@@ -2518,12 +2518,14 @@ public:
     /// the model's pin order. The model's contract is CHECKED here
     /// (`xdev::check_contract`, refusals name the device) unless `check`
     /// is false; `debug_jacobian` re-checks the Jacobian at every
-    /// evaluation of the run. Branches: `name` (pin 0 → pin 1), carrying
+    /// evaluation of the run; `record` traces its readings (pin currents,
+    /// power, named outputs) at every accepted step (res.device_output).
+    /// Branches: `name` (pin 0 → pin 1), carrying
     /// internal unknown 0 if any; `name#k` for internal unknown k ≥ 1.
     CircuitBuilder& add_external_device(
         std::string_view name, const std::vector<std::string>& nodes,
         std::shared_ptr<const xdev::Model> model, std::vector<Real> params,
-        bool check = true, bool debug_jacobian = false) {
+        bool check = true, bool debug_jacobian = false, bool record = false) {
         auto inst = std::make_shared<const xdev::Instance>(
             std::string(name), std::move(model), std::move(params), debug_jacobian);
         const auto& d = inst->model().d();
@@ -2536,6 +2538,7 @@ public:
         if (check) xdev::check_contract(*inst);
         pwl::DevicePool::ExternalDeviceParams p;
         p.inst = inst;
+        p.record = record;
         for (const auto& n : nodes) p.pins.push_back(resolve_node_(n));
         const std::size_t nb = std::max<std::size_t>(1, d.n_internal);
         for (std::size_t k = 0; k < nb; ++k) {

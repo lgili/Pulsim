@@ -336,7 +336,13 @@ def _exact_result(
     (add-probes-and-recorders D3: one result type on every engine).
 
     ``times``, ``states``, ``switch_states`` and ``reinit_records`` are
-    the kernel result's own fields. ``states`` is the reconstructed
+    the kernel result's own fields. A ``reinit_records`` entry is written
+    for each eigen-direction of a projection whose residual exceeds 1e-9 of
+    the circuit's scale along it (each state counted at least at the
+    circuit's vscale for a capacitor or iscale for an inductor): a located
+    zero of an ideal diode's current writes none, and neither does a real
+    cut-set jump below that bound (1e-7 A cut in a circuit carrying 1e4 A is
+    projected silently, dW ~ 5e-18 J). ``states`` is the reconstructed
     full-MNA trajectory (node voltages, then source and inductor branch
     currents: the pwl engine's row layout) when the kernel returned one,
     else the reduced integrator state. The exact-engine extras are
@@ -630,11 +636,30 @@ def run_dsed_from_builder(
                 f"integrator='bdf2' (the default routes correctly) "
                 f"or use engine='pwl'.")
         integrator = "rk45"
+    # add-in-kernel-event-losses 3.2: a loss port runs on the event-driven
+    # integrator only (its step hooks feed solver::LossTracker); 'auto'
+    # becomes 'rk45' as for diodes, an explicit 'bdf2' is refused by name.
+    _loss_names = list(getattr(builder, "_device_loss_names", lambda: [])())
+    if _loss_names:
+        if integrator == "bdf2":
+            raise unsupported(
+                "dsed", "device_losses", device=_loss_names[0], message=
+                f"simulate(engine='dsed', integrator='bdf2'): the loss port of "
+                f"{_loss_names[0]!r} (set_device_losses) is read on the "
+                "event-driven integrator only. Drop integrator='bdf2'.")
+        if t_start:
+            raise unsupported(
+                "dsed", "device_losses", device=_loss_names[0], message=
+                f"simulate(engine='dsed', t_start={t_start!r}): the loss port of "
+                f"{_loss_names[0]!r} records its events on the run's own clock "
+                "from 0. Drop t_start, or use engine='pwl' / 'trbdf2'.")
+        integrator = "rk45"
     # Device kinds: the kernel's capability table, before any adapter
     # is built (the Python adapter below would extract the LTI system
     # with every Newton device silently ABSENT). The native adapter
     # repeats the check for C++ callers.
-    _kern._require_supported(builder.graph, builder.pool, "dsed")
+    _kern._require_supported(builder.graph, builder.pool, "dsed",
+                             loss_port=bool(_loss_names))
     ticks = list(ticks or [])
     if ticks:
         if integrator not in (None, "auto", "rk45"):
@@ -754,7 +779,29 @@ def run_dsed_from_builder(
     initial_mask = sf(opts.t_start)
     adapter.set_mask(initial_mask)
     try:
-        _ = adapter.A_matrix()
+        for _k in range(builder.graph.num_switches + 1):
+            try:
+                _ = adapter.A_matrix()
+                break
+            except ValueError as e:
+                # the start mask's diode bits are not a decision: an ideal diode ON
+                # in a loop of sources there starts OFF; the scheduler decides it
+                # (or refuses the loop by name) at t_start
+                feature = getattr(e, "feature", None)
+                if _k == builder.graph.num_switches:
+                    raise
+                if feature == "ideal_voltage_loop" and getattr(e, "kind", None) == "Diode":
+                    initial_mask.set(builder.switch_index_of(e.device), False)
+                elif feature == "source_capacitor_loop" and _k == 0:
+                    # it names the source, not the diode: every diode starts OFF
+                    from ._pulsim import StoredKind  # type: ignore[import-not-found]
+                    g = builder.graph
+                    for b in range(g.num_branches):
+                        if builder.pool.kind_of(b) == StoredKind.Diode:
+                            initial_mask.set(builder.switch_index_of(g.branch_name(b)), False)
+                else:
+                    raise
+                adapter.set_mask(initial_mask)
     except NotImplementedError as e:
         # a reduction numerically singular on a node group: the floating-island
         # refusal of the native run (DECISIONS #27), named here at the start
@@ -837,7 +884,8 @@ def run_dsed_from_builder(
             adapter_rejected = True
             native_adapter = NativeAdapterCls(
                 builder, cache,
-                b_extra_fn if b_extra_fn is not None else None)
+                b_extra_fn if b_extra_fn is not None else None,
+                loss_port=bool(_loss_names))
             adapter_rejected = False
             # 13.2: engine='exact' refuses a segment with no exact step
             native_adapter.set_refuse_implicit(not allow_implicit_segments)
@@ -920,6 +968,10 @@ def run_dsed_from_builder(
                     stiffness_threshold=opts.stiffness_threshold,
                     store_every=opts.store_every, event_log=False)
             res = _result_from_native(native_res, opts.t_start)
+            if "device_losses" in native_res:
+                res._set_device_losses(native_res["device_losses"],
+                                       native_res["heat_injected"],
+                                       native_res["heat_pending"])
             res.initial_condition_adjustment = ic_adjustment
             res.control_tick_counts = [int(n) for n in native_res.get(
                 "control_tick_counts", ())]
@@ -955,8 +1007,9 @@ def run_dsed_from_builder(
                     "simulate(engine='dsed'): control ticks run on the native "
                     f"adapter only, which rejected this circuit ({e}). Use "
                     "engine='pwl' or 'trbdf2'.") from e
-            if _n_diodes > 0 or (not adapter_rejected and not allow_implicit_segments
-                                 and opts.integrator != "bdf2"):
+            if _n_diodes > 0 or _loss_names or (
+                    not adapter_rejected and not allow_implicit_segments
+                    and opts.integrator != "bdf2"):
                 raise
 
     if ticks:

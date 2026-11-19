@@ -65,6 +65,11 @@ lib = [
 opt = [
     "pymoo>=0.6",
 ]
+# Equations to C for external devices (`pulsim.xdev.compile`): SymPy
+# differentiates the law and prints the C99 model.
+codegen = [
+    "sympy>=1.13",
+]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
@@ -86,6 +91,9 @@ dev = [
     "mypy==2.4.1",
     # 50-digit matrix-exponential references (test_dsed_exact_propagator.py).
     "mpmath>=1.3",
+    # pulsim.xdev codegen tests (the `codegen` extra); they fail, not skip,
+    # on CI without it.
+    "sympy>=1.13",
 ]
 docs = [
     "mkdocs>=1.6,<2.0",

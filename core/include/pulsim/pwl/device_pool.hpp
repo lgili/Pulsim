@@ -145,6 +145,7 @@ public:
         std::shared_ptr<const xdev::Instance> inst;
         std::vector<Index> pins;       ///< node index per pin
         std::vector<Index> branches;   ///< [0] = the device's branch; one per internal unknown
+        bool record = false;           ///< its readings are traced in a run (res.device_output)
     };
 
     struct SwitchParams {
@@ -1575,7 +1576,9 @@ inline constexpr auto kKindCaps = std::to_array<KindCaps>({
     {"InductionMachineMna", SolveClass::NewtonStateful, kNewtonEngines},
     // add-external-device-abi: Newton through its own law on pwl / trbdf2;
     // the exact engine and the AC sweep refuse it by name (never linearised).
-    {"ExternalDevice",     SolveClass::NewtonStateful, kNewtonEngines},
+    // ac_sweep: linearised at the DC operating point (∂f/∂x, ∂q/∂x)
+    {"ExternalDevice",     SolveClass::NewtonStateful,
+     kNewtonEngines | engine_bit(Engine::AcSweep)},
 });
 /// add-branch-form-ideal-switch D7 / task 4.3: the BRANCH form of the
 /// Switch and Diode kinds (a form, not a kind: one row each, by the
@@ -1599,7 +1602,8 @@ inline constexpr auto kBranchFormCaps = std::to_array<FormCaps>({
                                engine_bit(Engine::Dsed))},
     {"Diode", DevicePool::StoredKind::Diode,
      static_cast<std::uint8_t>(engine_bit(Engine::FixedTrap) |
-                               engine_bit(Engine::TrBdf2))},
+                               engine_bit(Engine::TrBdf2) |
+                               engine_bit(Engine::Dsed))},
 });
 
 /// add-pwl-igbt-and-thyristor: the GATED forms of the Diode kind (IGBT /

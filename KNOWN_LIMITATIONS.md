@@ -30,8 +30,9 @@ can pick it up without re-discovering the context.
 
 `CircuitBuilder.set_device_losses` (add-in-kernel-event-losses) reads
 `E_on` / `E_off` / `V_on` tables inside the `pwl` time loop and heats a
-thermal node. `trbdf2`, `dsed`, `bdf1` and `auto` without `dt=` refuse a loss port by
-name until the unified event queue gives them one commutation hook. `periodic_steady_state` by shooting (pwl / trbdf2)
+thermal node; `trbdf2` does too. `dsed` books the energies at a fixed `Tj=`
+and refuses a junction / heat node, a `V_on` table and time-varying sources by
+name; `bdf1` refuses a loss port by name. `periodic_steady_state` by shooting (pwl / trbdf2)
 refuses one too: each period is a fresh run. The
 event energy is not drawn from the circuit, `T_j` does not change the
 device, and a resumed run drops the heat still pending at the split
@@ -562,6 +563,12 @@ The gate of `bind_pi_to_switch` declares its edges (G23).
   resume_from=half.final_snapshot)` resumes the circuit from `half` and
   the controller from the other run (found by the batch-11 review, not
   yet reproduced in a test). Resume only from the run just made.
+- **External devices: no sandbox, no events, no PWL modes.** A model
+  library is native code with your privileges (a YAML netlist loads only a
+  library listed in `allow_native_code=[...]`). A model declaring event
+  functions is refused (no engine locates an external zero crossing yet);
+  external devices are Newton devices only (no PWL switching kind) and the
+  exact engine and `bdf1` refuse them. OSDI / Verilog-A is not hosted.
 
 ### TR-BDF2 still refactors on every new step size
 

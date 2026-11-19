@@ -44,8 +44,8 @@ jobs:
         # `_pulsim` bindings. The repository's `python-tests` job already
         # pins gcc-13 for the same reason; we mirror that choice here.
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          sudo apt-get -o Acquire::Retries=5 update
+          sudo apt-get -o Acquire::Retries=5 install -y \
             cmake ninja-build gcc-13 g++-13 \
             libeigen3-dev librsvg2-bin
 

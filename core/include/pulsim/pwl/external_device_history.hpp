@@ -54,6 +54,7 @@ public:
         /// Each pattern entry's offset into J_nl's value array, validated
         /// before every use (-1: not resolved yet).
         mutable std::vector<std::ptrdiff_t> fslot, qslot;
+        bool record = false;     ///< traced by xdev::OutputTrace (res.device_output)
     };
 
     void init(const topology::Graph& graph, const DevicePool& pool) {
@@ -64,6 +65,7 @@ public:
             Device d;
             d.inst = p.inst;
             d.at = p.pins;
+            d.record = p.record;
             const std::size_t ni = p.inst->model().d().n_internal;
             for (std::size_t k = 0; k < ni; ++k) {
                 d.at.push_back(pool.branch_var_id_for_inductor(p.branches[k], graph));
@@ -80,6 +82,7 @@ public:
         }
         // consistent start at x = 0: q_n = q(0), model state from init(0)
         for (auto& d : devices_) start_(d, nullptr);
+        start_cells_ = cells_;
     }
 
     [[nodiscard]] bool empty() const noexcept { return devices_.empty(); }
@@ -90,18 +93,82 @@ public:
 
     void seed_from_dc_op(const Vector& x) {
         for (auto& d : devices_) start_(d, &x);
+        start_cells_ = cells_;
     }
+
+    /// The generic readings of device k (add-unified-device-interface step
+    /// 9's convention) at x with the committed cells — or, `at_start`, the
+    /// cells the run started from (init / DC seed / restored snapshot):
+    /// dst = [i_pin[0..n_pins) (f + committed q̇, current INTO the device),
+    /// power = Σ v_pin·i_pin, the model's named outputs]. Read-only.
+    [[nodiscard]] std::size_t reading_width(std::size_t k) const {
+        const auto& md = devices_[k].inst->model().d();
+        return md.n_pins + 1 + md.n_outputs;
+    }
+    void reading(std::size_t k, const Vector& x, Real t, bool at_start, Real* dst) const {
+        const Device& d = devices_[k];
+        const std::vector<Real>& cells = at_start ? start_cells_ : cells_;
+        const std::size_t R = d.inst->rows(), NP = d.inst->model().d().n_pins;
+        const Real* st = cells.data() + d.off + 3 * R;
+        gather_(d, x);
+        eval_(d, t, st);
+        Real p = Real{0};
+        for (std::size_t r = 0; r < NP; ++r) {
+            dst[r] = d.o.f[r] + cells[d.off + R + r];
+            p += d.x[r] * dst[r];
+        }
+        dst[NP] = p;
+        d.inst->outputs(d.x.data(), st, dst + NP + 1, t);
+    }
+
+    /// The time every later evaluation hands the model (ctx->t): the
+    /// driver's step context, whose `t` each solve sets. Unbound: 0.
+    void bind_time(const Real* t) noexcept { t_ = t; }
+    /// The time of the evaluations before a binding (init at the run's
+    /// start, the DC solve, the AC linearisation): t_start / t_eval.
+    void set_start_time(Real t) noexcept { t0_ = t; }
 
     /// The Newton contribution of every device under (h, stage).
     Real stamp(const Vector& x, sparse::Matrix& J_nl, Vector& f_nl, Real h,
                TrBdf2Stage st) const {
-        const device::StepCtx c{Real{0}, formula_of_(st), h};
+        return stamp_(x, J_nl, f_nl, device::StepCtx{time_(), formula_of_(st), h});
+    }
+
+    /// The DC operating point's stamp (Formula::Dc): f(x) and ∂f/∂x, the
+    /// storage terms dropped (q̇ = 0), at the time `t`.
+    Real stamp_dc(const Vector& x, sparse::Matrix& J_nl, Vector& f_nl, Real t) const {
+        return stamp_(x, J_nl, f_nl, device::StepCtx{t, device::Formula::Dc, Real{0}});
+    }
+
+    /// The small-signal model at x: G += ∂f/∂x, E += ∂q/∂x (the AC sweep's
+    /// jω·E + G), on the active rows and columns.
+    void linearise(const Vector& x, sparse::Matrix& G, sparse::Matrix& E, Real t) const {
+        for (const auto& d : devices_) {
+            const std::size_t NP = d.inst->model().d().n_pins;
+            gather_(d, x);
+            eval_(d, t);
+            const auto& md = d.inst->model().d();
+            auto on = [&](std::size_t r) { return r >= NP || stamping::node_is_active(d.at[r]); };
+            for (std::uint32_t k = 0; k < md.nnz_f; ++k) {
+                const auto r = md.f_rows[k], col = md.f_cols[k];
+                if (on(r) && on(col)) G.coeffRef(d.at[r], d.at[col]) += d.o.df[k];
+            }
+            for (std::uint32_t k = 0; k < md.nnz_q; ++k) {
+                const auto r = md.q_rows[k], col = md.q_cols[k];
+                if (on(r) && on(col)) E.coeffRef(d.at[r], d.at[col]) += d.o.dq[k];
+            }
+        }
+    }
+
+private:
+    Real stamp_(const Vector& x, sparse::Matrix& J_nl, Vector& f_nl,
+                const device::StepCtx& c) const {
         const Real a = device::formula_a(c);
         Real worst = Real{0};
         for (const auto& d : devices_) {
             const std::size_t R = d.inst->rows(), NP = d.inst->model().d().n_pins;
             gather_(d, x);
-            d.inst->eval(d.x.data(), state_(d), d.o);
+            eval_(d, c.t);
             const auto& md = d.inst->model().d();
             const Real* qn = &cells_[d.off];
             const Real* qd = qn + R;
@@ -130,6 +197,7 @@ public:
         return worst;
     }
 
+public:
     /// J(r, c) through a cached value offset: valid only while the slot
     /// still holds (r, c) in the matrix's CURRENT pattern (checked: inside
     /// column c's stored range and row index r), else coeffRef resolves it
@@ -147,13 +215,47 @@ public:
         return v;
     }
 
-    void commit(const Vector& x, Real h, TrBdf2Stage st) {
-        const device::StepCtx c{Real{0}, formula_of_(st), h};
+    // ---- the stage form (βh, ψ) of integrator='esdirk43' ----
+    // Every row is a q row (q_n, q̇_n): pin rows q̇ = the committed formula
+    // derivative, internal rows q̇ = −f. A stage is backward Euler of βh
+    // from q_n = ψ.
+    [[nodiscard]] std::size_t stage_rows() const noexcept {
+        std::size_t n = 0;
+        for (const auto& d : devices_) n += d.inst->rows();
+        return n;
+    }
+    void stage_start(Real hh, Real* q0, Real* hqd0) const {
+        for (const auto& d : devices_) {
+            const std::size_t R = d.inst->rows();
+            for (std::size_t r = 0; r < R; ++r) {
+                *q0++ = cells_[d.off + r];
+                *hqd0++ = hh * cells_[d.off + R + r];
+            }
+        }
+    }
+    void stage_base(const Real* psi, const Real* /*dpsi*/) {
+        for (const auto& d : devices_) {
+            for (std::size_t r = 0; r < d.inst->rows(); ++r) cells_[d.off + r] = *psi++;
+        }
+    }
+    void stage_increment(const Vector& x, const Real* psi, Real* dq) const {
+        for (const auto& d : devices_) {
+            gather_(d, x);
+            eval_(d, time_());
+            for (std::size_t r = 0; r < d.inst->rows(); ++r) *dq++ = d.o.q[r] - *psi++;
+        }
+    }
+    void stage_clear() noexcept {}
+
+    /// `h_accept` (> 0): the step the model's accept() advances when the
+    /// formula's h is a stage's (esdirk43 commits backward Euler of γh).
+    void commit(const Vector& x, Real h, TrBdf2Stage st, Real h_accept = Real{-1}) {
+        const device::StepCtx c{time_(), formula_of_(st), h};
         const Real a = device::formula_a(c);
         for (auto& d : devices_) {
             const std::size_t R = d.inst->rows(), NP = d.inst->model().d().n_pins;
             gather_(d, x);
-            d.inst->eval(d.x.data(), state_(d), d.o);
+            eval_(d, c.t);
             Real* qn = &cells_[d.off];
             Real* qd = qn + R;
             const Real* qg = qd + R;
@@ -163,7 +265,9 @@ public:
                 qn[r] = d.o.q[r];
                 qd[r] = dot;
             }
-            accept_(d, h);
+            d.inst->verify_params_unchanged();
+            gather_(d, x);   // accept sees x even if eval wrote into its copy
+            accept_(d, h_accept > Real{0} ? h_accept : h);
         }
     }
 
@@ -171,7 +275,7 @@ public:
         for (auto& d : devices_) {
             const std::size_t R = d.inst->rows();
             gather_(d, xg);
-            d.inst->eval(d.x.data(), state_(d), d.o);
+            eval_(d, time_());
             std::copy(d.o.q.begin(), d.o.q.end(), cells_.begin() + static_cast<std::ptrdiff_t>(d.off + 2 * R));
         }
     }
@@ -180,7 +284,7 @@ public:
     void extrapolate_previous(const Vector& x1, Real c) {
         for (auto& d : devices_) {
             gather_(d, x1);
-            d.inst->eval(d.x.data(), state_(d), d.o);
+            eval_(d, time_());
             for (std::size_t r = 0; r < d.inst->rows(); ++r) {
                 cells_[d.off + r] += c * (d.o.q[r] - cells_[d.off + r]);
             }
@@ -194,7 +298,7 @@ public:
         for (auto& d : devices_) {
             const std::size_t R = d.inst->rows(), NP = d.inst->model().d().n_pins;
             gather_(d, x_probe);
-            d.inst->eval(d.x.data(), state_(d), d.o);
+            eval_(d, time_());
             for (std::size_t r = 0; r < R; ++r) {
                 Real& dot = cells_[d.off + R + r];
                 if (r >= NP) dot = -d.o.f[r];
@@ -212,6 +316,7 @@ public:
                 + std::to_string(flat.size()) + " — the snapshot belongs to a different circuit");
         }
         cells_ = flat;
+        start_cells_ = cells_;
     }
 
 private:
@@ -241,7 +346,7 @@ private:
                 return md.init(&c, d.x.data(), s);
             }, "init");
         }
-        d.inst->eval(d.x.data(), state_(d), d.o);
+        eval_(d, time_());
         for (std::size_t r = 0; r < R; ++r) {
             cells_[d.off + r] = d.o.q[r];
             cells_[d.off + R + r] = r >= NP ? -d.o.f[r] : Real{0};
@@ -265,7 +370,7 @@ private:
         std::copy(st, st + NS, d.scratch.begin());
         const Real guard = Real{-7.25e-301};
         d.scratch[NS] = guard;
-        const pulsim_xdev_ctx c = d.inst->ctx_(st);
+        const pulsim_xdev_ctx c = d.inst->ctx_(st, time_());
         if (fn(c, d.scratch.data()) != PULSIM_XDEV_OK) {
             d.inst->refuse_(std::string(what) + " returned an error status");
         }
@@ -282,8 +387,26 @@ private:
         std::copy(d.scratch.begin(), d.scratch.begin() + static_cast<std::ptrdiff_t>(NS), st);
     }
 
+    [[nodiscard]] Real time_() const noexcept { return t_ ? *t_ : t0_; }
+    /// One evaluation in a run. A stateful model's committed state is
+    /// compared after the call (n_state reals; nothing for n_state = 0): a
+    /// write through the const ctx->state is refused by name, always on.
+    void eval_(const Device& d, Real t, const Real* st = nullptr) const {
+        const std::size_t NS = d.inst->n_state();
+        if (st == nullptr) st = state_(d);
+        if (NS) std::copy(st, st + NS, d.scratch.begin());
+        d.inst->eval(d.x.data(), st, d.o, t);
+        if (NS && std::memcmp(st, d.scratch.data(), NS * sizeof(Real)) != 0) {
+            d.inst->refuse_("eval wrote through its const ctx->state (the committed state) "
+                            "during the run");
+        }
+    }
+
     std::vector<Device> devices_;
     std::vector<Real> cells_;
+    std::vector<Real> start_cells_;   ///< the cells the run started from (readings at t_start)
+    const Real* t_ = nullptr;
+    Real t0_ = Real{0};
 };
 
 }  // namespace pulsim::pwl

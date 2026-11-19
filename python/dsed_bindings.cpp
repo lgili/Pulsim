@@ -32,6 +32,7 @@
 #include <pybind11/stl.h>
 
 #include <array>
+#include <memory>
 #include <cstddef>
 #include <unordered_map>
 #include <utility>
@@ -46,6 +47,7 @@
 #include "pulsim/dsed/scheduler_bdf2.hpp"
 #include "pulsim/dsed/scheduler_auto.hpp"
 #include "pulsim/dsed/period_integrals.hpp"
+#include "pulsim/dsed/loss_port.hpp"
 #include "pulsim/dsed/periodic_orbit.hpp"
 #include "pulsim/dsed/design_batch.hpp"
 #include "pulsim/dsed/period_thermal.hpp"
@@ -1119,7 +1121,7 @@ void init_module(py::module_& m) {
         .def(py::init([](
                 const pulsim::builder::CircuitBuilder& builder,
                 pulsim::pwl::PwlStateSpaceCache& cache,
-                py::object b_extra_fn) {
+                py::object b_extra_fn, bool loss_port) {
                 std::function<Vector(Real)> cpp_b_extra;
                 if (!b_extra_fn.is_none()) {
                     // Wrap the Python callable into std::function. The
@@ -1133,11 +1135,13 @@ void init_module(py::module_& m) {
                 }
                 return std::make_unique<NativeAdapter>(
                     builder.graph(), builder.pool(), cache,
-                    std::move(cpp_b_extra));
+                    std::move(cpp_b_extra), loss_port);
             }),
             py::arg("builder"),
             py::arg("cache"),
             py::arg("b_extra_fn") = py::none(),
+            // the loss port is honoured by run_ped_native_builder only
+            py::arg("loss_port") = false,
             // the adapter holds the builder's graph/pool and the cache by reference
             py::keep_alive<1, 2>(), py::keep_alive<1, 3>())
         .def("set_refuse_implicit", &NativeAdapter::set_refuse_implicit,
@@ -1359,6 +1363,19 @@ void init_module(py::module_& m) {
                     adapter.graph(), adapter.pool());
                 if (census.num_diodes() > 0) {
                     diode_owned = census.diode_owned_bits();
+                    // An OFF ideal diode across a path of closed ideal elements
+                    // (a body diode across its closed switch) has v_D = 0
+                    // structurally and every ON candidate is a loop: its turn-on
+                    // predicate is held below zero while that holds (it crossed
+                    // on rounding: the PSFB's D_LS_B chattered 32 times in 2e-10 s).
+                    std::shared_ptr<pulsim::pwl::BranchStructureChecker> shorted;
+                    try {
+                        shorted = std::make_shared<pulsim::pwl::BranchStructureChecker>(
+                            adapter.graph(), adapter.pool(), "dsed");
+                        if (!shorted->active()) shorted.reset();
+                    } catch (const std::exception&) {
+                        shorted.reset();   // compute_lti_state_space refuses it by name
+                    }
                     for (const auto& d : census.entries()) {
                         std::string label =
                             pulsim::pwl::branch_label(
@@ -1366,11 +1383,42 @@ void init_module(py::module_& m) {
                         const NativeAdapter* ad = &adapter;
                         const pulsim::Index from = d.from;
                         const pulsim::Index to = d.to;
+                        // a branch-form diode's ON law is its solved current, R_on = 0
+                        // or not (SchedulerDiode::reads_current): V_f + i with the
+                        // census's g_on = 1, so the signal and its bands are amperes
+                        const pulsim::Index var = d.var;
+                        const Real R_on_b = d.var >= 0
+                            ? adapter.pool().branch_R_on(d.branch_id) : Real{0};
                         const auto prm = d.params();
+                        const auto chk = var >= 0 && R_on_b == Real{0} ? shorted : nullptr;
+                        const pulsim::Size sw = d.switch_idx;
                         pred.add_predicate(pulsim::dsed::EventPredicate{
                             .name = label + " turns ON",
-                            .fn = [ad, from, to, prm](
+                            .fn = [ad, from, to, prm, chk, sw](
                                       Real t, const Vector& x) {
+                                if (chk) {
+                                    auto m = ad->current_mask();
+                                    m.set(sw, true);
+                                    try {
+                                        // the bit closes a loop iff it adds one: a new loop
+                                        // passes through the added branch, whichever diode
+                                        // the checker blames (the PSFB's D3 across D1, D2,
+                                        // D4 ON was not blamed: D4 was, and D3 chattered)
+                                        const std::size_t with = chk->check(m, true).loop_diodes.size();
+                                        m.set(sw, false);
+                                        const std::size_t without = chk->check(m, true).loop_diodes.size();
+                                        // a loop through a source is a real bias: the law
+                                        // decides (refused by name as ideal_voltage_loop);
+                                        // the projection's rounding (2e-14 V at mid_b) is
+                                        // not bounded by the node pair's own scale
+                                        if (with > without
+                                            && std::abs(ad->node_pair_voltage(from, to, t, x))
+                                                   <= Real{1e-9} * ad->port_scale(t, x).vscale)
+                                            return Real{-1};
+                                    } catch (const std::exception&) {
+                                        // a floating node of the candidate: the law decides
+                                    }
+                                }
                                 return pulsim::models::SwitchedDiode::
                                     crossing_signal(
                                         false,
@@ -1388,13 +1436,19 @@ void init_module(py::module_& m) {
                         });
                         pred.add_predicate(pulsim::dsed::EventPredicate{
                             .name = label + " turns OFF",
-                            .fn = [ad, from, to, prm](
+                            // an ideal (branch-form) diode's ON law reads its
+                            // solved current: V_f + i (g_on = 1, the census's
+                            // law_voltage)
+                            .fn = [ad, from, to, var, prm](
                                       Real t, const Vector& x) {
                                 return pulsim::models::SwitchedDiode::
                                     crossing_signal(
                                         true,
-                                        ad->node_pair_voltage(
-                                            from, to, t, x),
+                                        var >= 0
+                                            ? prm.V_f + ad->node_pair_voltage(
+                                                  var, -1, t, x)
+                                            : ad->node_pair_voltage(
+                                                  from, to, t, x),
                                         prm);
                             },
                             .type = pulsim::dsed::PredicateType::DiodeOff,
@@ -1408,8 +1462,8 @@ void init_module(py::module_& m) {
                         sched_diodes.push_back(
                             pulsim::dsed::SchedulerDiode{
                                 d.switch_idx, d.from, d.to,
-                                d.g_on, d.g_off, d.V_th, d.V_f,
-                                std::move(label)});
+                                prm.g_on, d.g_off, d.V_th, d.V_f,
+                                std::move(label), d.var, R_on_b});
                     }
                 }
             }
@@ -1462,12 +1516,30 @@ void init_module(py::module_& m) {
                 for (const auto& dd : census.entries())
                     diode_names.push_back(pulsim::pwl::branch_label(adapter.graph(), dd.branch_id));
             }
+            // add-in-kernel-event-losses 3.2: the loss port on the step hooks
+            std::optional<pulsim::dsed::ExactLossPort<NativeAdapter>> loss;
+            pulsim::events::StepHooks loss_hooks;
+            if (!adapter.pool().device_losses().empty()) {
+                loss.emplace(adapter);
+                loss->attach(loss_hooks);
+                sim.set_hooks(&loss_hooks);
+            }
             // Release the GIL during simulate(); the C++ scheduler
             // only re-acquires it at gate edges to call switch_fn.
             py::gil_scoped_release release;
             auto res = sim.simulate(x0, t_end);
             py::gil_scoped_acquire acquire;
             auto d = ped_result_to_dict(res, event_log);
+            if (loss) {
+                struct {
+                    std::vector<pulsim::thermal::DeviceLossRecord> device_losses;
+                    Real heat_injected = 0, heat_pending = 0;
+                } out;
+                loss->write(out);
+                d["device_losses"] = py::cast(out.device_losses);
+                d["heat_injected"] = out.heat_injected;
+                d["heat_pending"] = out.heat_pending;
+            }
             if (!tick_cbs.empty()) d["control_tick_counts"] = sim.tick_counts();
             d["exact"] = exact_report_dict(adapter, res.n_predicate_evals);
             if (mode_shadow_h_e > Real{0}) {
@@ -1542,6 +1614,8 @@ void init_module(py::module_& m) {
            Real h_fixed,
            std::size_t store_every,
            bool event_log) {
+            // no loss tracking here: an adapter built with loss_port refuses by name
+            pulsim::refuse_device_losses(adapter.pool(), "dsed");
             PySwitchFnSSM sf(std::move(switch_fn_obj));
             sf.set_width(static_cast<pulsim::Size>(adapter.graph().num_switches()));
             sf.set_poll(poll_window(h_fixed));
@@ -1579,6 +1653,8 @@ void init_module(py::module_& m) {
            Real stiffness_threshold,
            std::size_t store_every,
            bool event_log) {
+            // no loss tracking here: an adapter built with loss_port refuses by name
+            pulsim::refuse_device_losses(adapter.pool(), "dsed");
             PySwitchFnSSM sf(std::move(switch_fn_obj));
             sf.set_width(static_cast<pulsim::Size>(adapter.graph().num_switches()));
             sf.set_poll(poll_window(dt_max));
@@ -1738,6 +1814,8 @@ void init_module(py::module_& m) {
            Real period, py::list observables,
            std::vector<std::pair<int, int>> pairs, bool monodromy,
            Real rtol, Real atol, Real mode_guard_h_e) {
+            // no loss tracking here: an adapter built with loss_port refuses by name
+            pulsim::refuse_device_losses(adapter.pool(), "dsed");
             if (adapter.has_dynamic_sources()) {
                 throw py::value_error(
                     "dsed_period_map: time-varying sources are not "
@@ -1783,6 +1861,8 @@ void init_module(py::module_& m) {
            std::vector<std::pair<int, int>> pairs, Real rtol,
            int max_period_runs, int n_relax, Real run_rtol, Real run_atol,
            Real mode_guard_h_e) {
+            // no loss tracking here: an adapter built with loss_port refuses by name
+            pulsim::refuse_device_losses(adapter.pool(), "dsed");
             if (adapter.has_dynamic_sources()) {
                 throw py::value_error(
                     "dsed_periodic_orbit: time-varying sources are not "

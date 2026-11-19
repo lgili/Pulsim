@@ -55,6 +55,7 @@
 #include "pulsim/pwl/saturable_inductor_history.hpp"
 #include "pulsim/solver/loss_tracker.hpp"
 #include "pulsim/events/event_queue.hpp"
+#include "pulsim/events/mode_set.hpp"
 #include "pulsim/events/step_hooks.hpp"
 #include "pulsim/solver/options.hpp"
 #include "pulsim/solver/result.hpp"
@@ -470,7 +471,10 @@ inline SimulationResult run_transient(
         }
         // t0_tol = the take tolerance: a tick a previous run left out at
         // its t_end (within tick_tol of it) is a resumed run's first.
-        tick_queue.start(opts.t_start, opts.t_end - tick_tol, tick_tol);
+        // A closed_end rate's instant at t_end fires at the last observer
+        // call (labelled t_end, as every tick: the state there is x_{n-1}).
+        tick_queue.start(opts.t_start, opts.t_end - tick_tol, tick_tol,
+                         opts.t_end + tick_tol);
         result.control_tick_counts.assign(ticks->rates.size(), 0);
     }
     const StepObserverFn step_observer = !has_ticks ? StepObserverFn{} :
@@ -576,6 +580,7 @@ inline SimulationResult run_transient(
     // `initial_state` so the first Newton refresh does not see zeros;
     // resume WINS over a builder-IC seed: the snapshot is the state.
     pwl::StatefulHistories hs;
+    hs.get<pwl::ExternalDeviceHistory>().set_start_time(opts.t_start);   // ctx->t of init
     hs.init(graph, pool);
     hs.set_path(opts.device_path, graph, pool, "run_transient");
     if (initial_state != nullptr) hs.seed_from_dc_op(x);
@@ -586,7 +591,7 @@ inline SimulationResult run_transient(
     // (run_event_iteration), including the dt-retry sub-steps, the
     // commutation split and the SDIRK stages of discontinuity_restart
     // (BackwardEuler over the γ·h each stage advances).
-    pwl::StepCtx step_ctx{opts.dt, pwl::TrBdf2Stage::Trapezoidal};
+    pwl::StepCtx step_ctx{opts.dt, pwl::TrBdf2Stage::Trapezoidal, opts.t_start};
 
     // The Newton refresh is built by the kernel (add-unified-device-
     // interface step 2): the static stamps (with no callback from the
@@ -793,6 +798,8 @@ inline SimulationResult run_transient(
         x = std::move(dc.x);
         history.seed_from_dc_op(x);
         hs.get<pwl::PmsmMnaHistory>().seed_from_dc_op(x);   // λ, i, θ at the held DC point (D19)
+        // the external devices' charges and model state at the DC point
+        hs.get<pwl::ExternalDeviceHistory>().seed_from_dc_op(x);
         seed_held_machine_capacitors(graph, pool, dc.mask, opts.t_start, x,
                                      hs.get<pwl::PmsmMnaHistory>(), history);
         initial_mask = dc.mask;
@@ -1446,8 +1453,7 @@ inline SimulationResult run_transient(
     const bool may_roll_back = dt_retry_can_help ||
         opts.discontinuity_restart || opts.enable_substep_state_correction;
     // Event-iteration cycle scratch, hoisted (reset per iteration).
-    std::array<topology::SwitchStateMask, 64> masks_seen{};
-    Size n_masks_seen = 0;
+    events::MaskCycle<64> masks_seen;
     // `switch_fn` once per distinct solve time within an outer step:
     // the observer runs before the first read, so a schedule that is a
     // function of t and of observer-written state sees the same masks.
@@ -1576,11 +1582,6 @@ inline SimulationResult run_transient(
     Size k_reached = 0;   // grid index of t_reached (snapshot)
     try {
 
-    // Read once per run, both paths (slice 3c, DECISIONS 17).
-    const bool pwl_stepper_legacy = [] {
-        const char* e = std::getenv("PULSIM_PWL_STEPPER_LEGACY");  // NOLINT(concurrency-mt-unsafe)
-        return e != nullptr && e[0] == '1' && e[1] == '\0';
-    }();
     if (cache.dt() > Real{0}) {
         // ----------- DYNAMIC PATH ---------------------------------------
         //
@@ -1712,12 +1713,9 @@ inline SimulationResult run_transient(
 
         // ---- refactor-unified-transient-stepper slice 3a (DECISIONS 13) --
         // The step is five phases (begin, take, after_solve, commit,
-        // record), each ONE lambda that both drivers call: the step
-        // skeleton (`step::run<Trapezoidal>(FixedController, PhaseBody)`,
-        // the default since slice 3c, DECISIONS 17) and the legacy loop,
-        // kept until its deletion slice behind the internal
-        // PULSIM_PWL_STEPPER_LEGACY=1 (never a public option; the slice-3a
-        // PULSIM_PWL_STEPPER_TWIN is accepted and ignored).
+        // record), each ONE lambda that the step skeleton calls
+        // (`step::run<Trapezoidal>(FixedController, IndexPhaseBody)`; the
+        // only driver since the legacy loop's deletion, DECISIONS 19).
         // The step's locals that cross phases live here, (re)set at the
         // program point where the loop body declared them. The step's
         // times are re-read into a const local at the top of each phase:
@@ -1740,8 +1738,8 @@ inline SimulationResult run_transient(
         bool restart = false;
         bool committed_be = false;
         Real be_commit_h = kGamma * opts.dt;
-        // The step hooks, called in the shared phases (both drivers; slice
-        // 3c, DECISIONS 17): probes R1 (`StepHooks::step`, the step's start
+        // The step hooks, called in the shared phases (slice 3c,
+        // DECISIONS 17): probes R1 (`StepHooks::step`, the step's start
         // state and mask), R2 (`on_event`, the stamps on each side of a
         // commutation) and the device interface's #31 (`device_state` after
         // the commit). The start mask is copied only with a listener, at
@@ -1840,6 +1838,7 @@ inline SimulationResult run_transient(
                                 // not an event.
                                 const auto& m = gate_at(e);
                                 if (!(m == gate_mask)) {
+                                    ++result.n_gate_events;
                                     if (e < t_prev + snap) {
                                         gate_t = e;
                                     } else {
@@ -1847,6 +1846,10 @@ inline SimulationResult run_transient(
                                     }
                                     gate_mask = m;
                                 }
+                            } else {
+                                // taken by the sample at t (no gate read
+                                // here: it would be a counted switch_fn call)
+                                ++result.n_gate_events;
                             }
                             edge_from = e;
                             e = next_edge_fn(e);
@@ -1854,6 +1857,9 @@ inline SimulationResult run_transient(
                         }
                         ev_overflow = ev_overflow || e < t - snap;
                     }
+                    // an edge exactly on the grid point t: the next step's
+                    // oracle query (strictly after t) skips it
+                    if (edge_next == t) ++result.n_gate_events;
                 }
                 if (has_jump_sources) {
                     Real e = sources::next_source_jump_after(pool, graph, t_prev);
@@ -1884,7 +1890,9 @@ inline SimulationResult run_transient(
                 std::sort(ev_t.begin(), ev_t.begin() + n_ev);
                 // Events closer than `snap` merge into the earlier one,
                 // which samples the gate at the cluster's last event (a
-                // dead-time pair < snap apart lands both edges).
+                // dead-time pair < snap apart lands both edges). The
+                // unresolved count is of every step event merged here:
+                // gate edges, source and declared b_extra_fn jumps alike.
                 Size m = 0;
                 for (Size q = 0; q < n_ev; ++q) {
                     if (m == 0 || ev_t[q] - ev_t[m - 1] >= snap) {
@@ -1892,6 +1900,7 @@ inline SimulationResult run_transient(
                         ++m;
                     } else {
                         ev_s[m - 1] = ev_t[q];
+                        ++result.n_gate_events_unresolved;
                     }
                 }
                 n_ev = m;
@@ -1963,7 +1972,7 @@ inline SimulationResult run_transient(
             // Full mask copies (Phase 1: masks can exceed 64 bits; a
             // copy is 2 inline words for <=128 switches — still no
             // heap in the loop).
-            n_masks_seen = 0;
+            masks_seen.reset();
 
             // add-newton-roundoff-acceptance: a dynamic-path Newton
             // solve that exhausts its budget at row roundoff is
@@ -2025,6 +2034,7 @@ inline SimulationResult run_transient(
             // for_dt (= 2γh); the devices are told the interval and the rule.
             step_ctx = backward_euler ? step::BackwardEuler::on_factor(for_dt).ctx()
                                       : step::Trapezoidal::stage(for_dt).ctx();
+            step_ctx.t = at_t;   // the external devices' ctx->t
             iters = 0;
             flipped = false;
             // NOT reset: a mask cycle in ANY sub-step of a retry is a
@@ -2033,7 +2043,7 @@ inline SimulationResult run_transient(
             // `event_iteration_breaches` — and would let
             // `strict_event_iterations` be violated in silence, which
             // is the opposite of what that flag is for.
-            n_masks_seen = 0;
+            masks_seen.reset();
             // Diode on-bits consistent with the most recent solve
             // (captured BEFORE update_from_state advances them) —
             // restored on breach so x and the diode state agree
@@ -2067,6 +2077,9 @@ inline SimulationResult run_transient(
                 flipped = false;
                 return;
             }
+            // The settle loop stays a do-while here: events::settle (or a
+            // counted variant) in this loop cost 1.0-1.8 % instructions per
+            // step (add-unified-event-queue DECISIONS 15).
             do {
                 auto mask = gate_at(restart_rule ? gate_t : at_t);
                 if (has_diodes) {
@@ -2080,12 +2093,7 @@ inline SimulationResult run_transient(
                 // A release back onto a mask already solved this step is the
                 // loop forward-biasing the diode: refuse rather than let the
                 // cycle detector turn it into a breach (review H1).
-                if (released && !nl_refresh_effective &&
-                    std::find(masks_seen.begin(),
-                              masks_seen.begin() +
-                                  static_cast<std::ptrdiff_t>(n_masks_seen),
-                              mask) != masks_seen.begin() +
-                                  static_cast<std::ptrdiff_t>(n_masks_seen)) {
+                if (released && !nl_refresh_effective && masks_seen.seen(mask)) {
                     const Index d = loop_released.back();
                     throw UnsupportedError(
                         "pwl", "ideal_voltage_loop",
@@ -2109,25 +2117,14 @@ inline SimulationResult run_transient(
                 // different iterate can legitimately converge
                 // (adversarial-review finding P0-R3); there the
                 // iteration budget alone bounds the cost.
-                if (!nl_refresh_effective) {
-                    // A cycle of THIS call: `mask_cycle` stays set from an
-                    // earlier stage or sub-step of the outer step, and
-                    // breaking on it skipped this stage's solve (x stayed
-                    // at the earlier stage's time, committed as this one).
-                    bool cycle_here = false;
-                    for (Size ms = 0; ms < n_masks_seen; ++ms) {
-                        if (masks_seen[ms] == mask) {
-                            cycle_here = true;
-                            break;
-                        }
-                    }
-                    if (cycle_here) {
-                        mask_cycle = true;
-                        break;
-                    }
-                    if (n_masks_seen < masks_seen.size()) {
-                        masks_seen[n_masks_seen++] = mask;
-                    }
+                // A cycle of THIS call (`masks_seen` is reset per call):
+                // `mask_cycle` stays set from an earlier stage or sub-step
+                // of the outer step, and breaking on it skipped this
+                // stage's solve (x stayed at the earlier stage's time,
+                // committed as this one).
+                if (!nl_refresh_effective && masks_seen.repeat(mask)) {
+                    mask_cycle = true;
+                    break;
                 }
                 if (nl_refresh_effective) {
                     if (for_dt == opts.dt && !newton_only_rows) {
@@ -2196,7 +2193,7 @@ inline SimulationResult run_transient(
                 if (has_diodes) {
                     diodes.snapshot_on_bits_into(last_solved_bits);
                 }
-                flipped = !single && has_diodes && diodes.update_from_state_floored(x);
+                flipped = !single && has_diodes && events::redecide(diodes, x);
                 ++iters;
             } while (flipped && iters < max_iters);
             if (mode_site) {
@@ -3160,13 +3157,13 @@ inline SimulationResult run_transient(
             }
         };  // step_record
 
-        // The skeleton driver (the default): the loop's own phases in the
+        // The driver, the step skeleton: the loop's own phases in the
         // skeleton's order and clock (the run's step k = 1 .. n_steps - 1;
-        // the clock's k0 = k_off puts them on the run's grid). Each driver
-        // is one out-of-line function with the phases inlined into it
+        // the clock's k0 = k_off puts them on the run's grid). It is one
+        // out-of-line function with the phases inlined into it
         // (DECISIONS 14). The body is built HERE, outside the driver, so
-        // the driver reaches the phases through memory as the legacy loop
-        // does: built inside it, its references were nine values live
+        // the driver reaches the phases through memory as the deleted loop
+        // did: built inside it, its references were nine values live
         // across the loop that spilled (+0.8-1.4 % per step, DECISIONS 18).
         auto body = step::index_phase_body(step_cancelled, step_begin, step_take,
                                            step_after_solve, step_commit, step_record);
@@ -3176,23 +3173,7 @@ inline SimulationResult run_transient(
                                         .n_steps = n_steps};
             (void)step::run<step::Trapezoidal>(clock, body);
         };
-        auto run_legacy = [&]() PULSIM_STEP_DRIVER {
-            for (Size k = 1; k < n_steps; ++k) {
-                if (step_cancelled()) {
-                    break;
-                }
-                step_begin(k);
-                step_take();
-                step_after_solve();
-                step_commit();
-                step_record(k);
-            }
-        };
-        if (!pwl_stepper_legacy) {
-            run_twin();
-        } else {
-            run_legacy();
-        }
+        run_twin();
         if (diag && rd_steps > 0) {
             rd.unestimated_fraction =
                 static_cast<Real>(rd_unest) / static_cast<Real>(rd_steps);
@@ -3220,8 +3201,8 @@ inline SimulationResult run_transient(
         }
         // ---- slice 3c (DECISIONS 17): the static path's step, cut in place
         // into four phases (begin, take, after_solve, record; nothing to
-        // commit: no history) that both drivers call. The first solve
-        // (k = 0) is the start sample, before either driver's steps, as the
+        // commit: no history) that the skeleton calls. The first solve
+        // (k = 0) is the start sample, before the skeleton's steps, as the
         // dynamic path's IC sample; the skeleton runs k = 1 .. n_steps - 1
         // on the dynamic path's FixedController. The static path never
         // polled cancellation, and still does not (the poll is `true`).
@@ -3284,6 +3265,7 @@ inline SimulationResult run_transient(
         };
         auto st_take = [&]() PULSIM_STEP_PHASE {
             const Real t = st_t;
+            step_ctx.t = t;   // the external devices' ctx->t (this path solves at t)
             const Real gate_t = st_gate_t;
             Size& iters = st_iters;
             bool& flipped = st_flipped;
@@ -3294,7 +3276,7 @@ inline SimulationResult run_transient(
             // Full mask copies (Phase 1: masks can exceed 64 bits; a
             // copy is 2 inline words for <=128 switches — still no
             // heap in the loop).
-            n_masks_seen = 0;
+            masks_seen.reset();
 
             // One step of `for_dt` ending at `at_t`: solve, let the
             // PWL diodes re-decide from the result, re-solve until
@@ -3341,17 +3323,9 @@ inline SimulationResult run_transient(
                 // different iterate can legitimately converge
                 // (adversarial-review finding P0-R3); there the
                 // iteration budget alone bounds the cost.
-                if (!nl_refresh_effective) {
-                    for (Size ms = 0; ms < n_masks_seen; ++ms) {
-                        if (masks_seen[ms] == mask) {
-                            mask_cycle = true;
-                            break;
-                        }
-                    }
-                    if (mask_cycle) break;
-                    if (n_masks_seen < masks_seen.size()) {
-                        masks_seen[n_masks_seen++] = mask;
-                    }
+                if (!nl_refresh_effective && masks_seen.repeat(mask)) {
+                    mask_cycle = true;
+                    break;
                 }
                 if (nl_refresh_effective) {
                     const auto& seg = nominal_segment(mask);
@@ -3371,8 +3345,7 @@ inline SimulationResult run_transient(
                 if (has_diodes) {
                     diodes.snapshot_on_bits_into(last_solved_bits);
                 }
-                flipped = has_diodes &&
-                          diodes.update_from_state_floored(x);
+                flipped = has_diodes && events::redecide(diodes, x);
                 ++iters;
             } while (flipped && iters < max_iters);
             if (mode_site_s && opts.mode_selection != 2) {
@@ -3513,14 +3486,6 @@ inline SimulationResult run_transient(
                 result.record_switch_state(stamped_mask);
             }
         };
-        auto st_run_legacy = [&]() PULSIM_STEP_PHASE {
-            for (Size k = 0; k < n_steps; ++k) {
-                st_begin(k);
-                st_take();
-                st_after(k);
-                st_record(k);
-            }
-        };
         auto st_run_skeleton = [&]() PULSIM_STEP_PHASE {
             if (n_steps == 0) return;
             st_begin(0);
@@ -3533,7 +3498,7 @@ inline SimulationResult run_transient(
             };
             auto sk_take = [&](const step::StepFrame&) PULSIM_STEP_PHASE {
                 st_take();
-                return true;   // a failed solve throws (the legacy loop's rule)
+                return true;   // a failed solve throws
             };
             auto sk_after = [&](step::StepFrame& f) PULSIM_STEP_PHASE {
                 st_after(f.k);
@@ -3550,11 +3515,7 @@ inline SimulationResult run_transient(
                                         .n_steps = n_steps};
             (void)step::run<step::Trapezoidal>(clock, body);
         };
-        if (!pwl_stepper_legacy) {
-            st_run_skeleton();
-        } else {
-            st_run_legacy();
-        }
+        st_run_skeleton();
     }
 
     }  // try

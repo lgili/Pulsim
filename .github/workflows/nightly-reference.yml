@@ -28,8 +28,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake ninja-build libeigen3-dev gcc-13 g++-13 ngspice
+          sudo apt-get -o Acquire::Retries=5 update
+          sudo apt-get -o Acquire::Retries=5 install -y cmake ninja-build libeigen3-dev gcc-13 g++-13 ngspice
           python -m pip install --upgrade pip
           pip install pytest numpy scipy
 

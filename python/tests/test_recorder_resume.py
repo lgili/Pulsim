@@ -1,8 +1,9 @@
 """Recorder state across final_snapshot / resume_from (task 0b.7).
 
 A run split at a mid-window instant and resumed gives the uninterrupted
-run's record: kept rows, event rows, declared windows and periods (bit for
-bit on pwl on this machine, to rtol on trbdf2 — two code paths). A
+run's record: kept rows, event rows, declared windows and periods (to
+1e-9 on pwl — bit for bit on macOS, but CI compares no bits — and to rtol
+on trbdf2, whose resumed controller takes its own steps). A
 snapshot without recorder state starts the recorders at the resume instant
 and says so; a window that began before it is never reported complete.
 """
@@ -10,7 +11,6 @@ and says so; a window that began before it is never reported complete.
 from __future__ import annotations
 
 import pickle
-import platform
 import sys
 import warnings
 
@@ -39,26 +39,30 @@ def _sim(t_end, **kw):
         return p.simulate(b, t_end, switch_fn=fn, **kw)
 
 
-def _compare(a, b, exact):
-    # pwl: bit for bit (kept rows, event rows, windows, periods). trbdf2:
-    # the resumed controller takes its own steps (two rows fewer here), so
-    # the statistics agree to the run's accuracy and the rows are not paired
+def _compare(a, b, paired):
+    # pwl: the resumed steps are the uninterrupted ones, rows paired, to
+    # 1e-9 (bit for bit on macOS; no bit-equality in CI tests). trbdf2: the
+    # resumed controller takes its own steps (two rows fewer here), so the
+    # statistics agree to the run's accuracy and the rows are not paired
+    close = dict(rtol=1e-9, atol=0.0, equal_nan=True)
     worst = 0.0
     for name in ("rows", "stats"):
         ra, rb = a.recorded[name], b.recorded[name]
-        if exact:
-            assert np.array_equal(ra.times, rb.times), name
-            assert np.array_equal(ra.event_t, rb.event_t), name
+        if paired:
+            np.testing.assert_allclose(ra.times, rb.times, rtol=1e-12, atol=0.0)
+            np.testing.assert_allclose(ra.event_t, rb.event_t, rtol=1e-12, atol=0.0)
         for q in ra.windows:
-            if exact:
-                assert np.array_equal(ra[q], rb[q]), (name, q)
+            if paired:
+                sc = max(float(np.max(np.abs(ra[q]), initial=0.0)), 1e-30)
+                np.testing.assert_allclose(ra[q], rb[q], rtol=1e-9, atol=1e-9 * sc,
+                                           err_msg=f"{name} {q}")
             for group in ("windows", "periods"):
                 ga, gb = getattr(ra, group)[q], getattr(rb, group)[q]
                 for f in ga:
                     x, y = np.asarray(ga[f]), np.asarray(gb[f])
                     assert x.shape == y.shape, (name, q, group, f)
-                    if exact:
-                        assert np.array_equal(x, y, equal_nan=True), (name, q, group, f)
+                    if paired:
+                        np.testing.assert_allclose(x, y, **close, err_msg=f"{name} {q} {group} {f}")
                     elif x.size:
                         sc = max(np.max(np.abs(x)), 1e-30)
                         worst = max(worst, float(np.max(np.abs(x - y))) / sc)
@@ -79,13 +83,10 @@ def test_resumed_record_equals_the_uninterrupted_one(eng):
     assert np.isfinite(second.recorded["stats"].windows["v(out)"]["avg"][0])
     # in the first part the window is open: reported NaN, not a partial value
     assert np.isnan(first.recorded["stats"].windows["v(out)"]["avg"][0])
-    # bit for bit is a same-machine identity (pwl: the resumed steps are the
-    # uninterrupted ones); trbdf2's controller restarts from the snapshot
-    exact = eng == "pwl" and platform.system() == "Darwin"
-    worst = _compare(whole, second, exact)
+    worst = _compare(whole, second, eng == "pwl")
     print(f"{eng}: worst relative difference of the statistics {worst:.2e}",
           file=sys.stderr)
-    assert worst <= (0.0 if exact else 1e-4), worst
+    assert worst <= 1e-4, worst
 
 
 @pytest.mark.parametrize("eng", sorted(_RUNS))

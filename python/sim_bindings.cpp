@@ -15,6 +15,7 @@
 #include "pulsim/sim/options.hpp"
 #include "pulsim/record/loop_feed.hpp"
 #include "pulsim/sim/simulation.hpp"
+#include "pulsim/xdev/output_trace.hpp"
 #include "switch_fn_adapter.hpp"
 
 #include <limits>
@@ -92,6 +93,7 @@ py::dict trbdf2_dict(const solver::TrBdf2Options& o) {
     d["newton_roundoff_budget"] = o.newton_roundoff_budget;
     d["on_impulse_error"] = o.on_impulse_error;
     d["mode_selection"] = o.mode_selection;
+    d["integrator"] = o.integrator;
     return d;
 }
 
@@ -364,6 +366,9 @@ void init_module(py::module_& m) {
                     {{"legacy", sim::ModeSelection::Legacy},
                      {"shadow", sim::ModeSelection::Shadow},
                      {"lcp", sim::ModeSelection::Lcp}}, "mode_selection");
+            } else if (key == "integrator") {
+                o.integrator_esdirk43 = parse_enum<bool>(v.cast<std::string>(),
+                    {{"esdirk43", true}}, "integrator");
             } else if (key == "on_impulse") {
                 o.on_impulse = parse_enum<sim::OnImpulse>(v.cast<std::string>(),
                     {{"record", sim::OnImpulse::Record},
@@ -423,6 +428,38 @@ void init_module(py::module_& m) {
           py::arg("options"),
           "The variable-step driver's options resolved from a RunOptions, as "
           "a dict (sim::to_trbdf2_options).");
+
+    // add-external-device-abi 3.4: the readings of record=True external
+    // devices at every accepted step (res.device_output).
+    py::class_<xdev::OutputTrace>(m, "_XdevTrace")
+        .def(py::init<>())
+        .def_static("wanted",
+            [](const builder::CircuitBuilder& b) {
+                for (const Index br : b.pool().external_device_branches()) {
+                    if (b.pool().external_device_params(br).record) return true;
+                }
+                return false;
+            }, py::arg("builder"))
+        .def_property_readonly("times", [](const xdev::OutputTrace& tr) {
+            return Eigen::Map<const Vector>(tr.times().data(),
+                                            static_cast<Eigen::Index>(tr.times().size()));
+        })
+        .def("names", [](const xdev::OutputTrace& tr) {
+            std::vector<std::string> n;
+            for (const auto& d : tr.devices()) n.push_back(d.name);
+            return n;
+        })
+        .def("columns", [](const xdev::OutputTrace& tr, const std::string& name) {
+            return tr.device(name).columns;
+        }, py::arg("name"))
+        .def("values", [](const xdev::OutputTrace& tr, const std::string& name) {
+            const auto& d = tr.device(name);
+            const auto w = static_cast<Eigen::Index>(d.columns.size());
+            using M = Eigen::Matrix<Real, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
+            return M(Eigen::Map<const M>(d.rows.data(), w ? static_cast<Eigen::Index>(d.rows.size()) / w : 0, w));
+        }, py::arg("name"))
+        .def("start_row", &xdev::OutputTrace::start_row, py::arg("name"), py::arg("x0"),
+             py::arg("t0"));
 
     py::class_<sim::Simulation>(m, "Simulation", py::dynamic_attr(),
         "The kernel object that is a simulation: Simulation(circuit, "
@@ -512,6 +549,9 @@ void init_module(py::module_& m) {
                 f.set_circuit(s.builder().graph(), s.builder().pool());
                 self.attr("_held_feed") = feed;
                 s.set_hooks(&f.hooks());
+                if (py::hasattr(self, "_held_xdev_trace")) {
+                    self.attr("_held_xdev_trace").cast<xdev::OutputTrace&>().attach(f.hooks());
+                }
             },
             py::arg("feed"))
         .def("clear_loop_feed",
@@ -521,6 +561,24 @@ void init_module(py::module_& m) {
                 self.cast<sim::Simulation&>().set_hooks(nullptr);
                 self.attr("_held_feed") = py::none();
             })
+        .def("set_xdev_trace",
+            [](py::object self, py::object trace) {
+                // on the recorders' hooks when they are set (one hook set per
+                // run), else on the trace's own; the object holds the trace
+                if (py::hasattr(self, "_held_xdev_trace")) {
+                    throw py::value_error("set_xdev_trace: this Simulation already has one");
+                }
+                auto& tr = trace.cast<xdev::OutputTrace&>();
+                self.attr("_held_xdev_trace") = trace;
+                // clear_loop_feed leaves _held_feed = None
+                if (py::hasattr(self, "_held_feed") && !self.attr("_held_feed").is_none()) {
+                    tr.attach(self.attr("_held_feed").cast<record::LoopFeed&>().hooks());
+                } else {
+                    tr.attach(tr.hooks());
+                    self.cast<sim::Simulation&>().set_hooks(&tr.hooks());
+                }
+            },
+            py::arg("trace"))
         .def("set_live_ring", &sim::Simulation::set_live_ring,
              py::arg("ring"))
         .def_property_readonly("cache", &sim::Simulation::cache,

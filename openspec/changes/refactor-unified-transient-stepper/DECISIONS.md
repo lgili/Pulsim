@@ -861,3 +861,128 @@ says where the implementation departs from them or what it settled.
     compiled by Apple clang only: Linux / Windows unverified). Their
     deletion is prepared on `wip/core-p3-stepper-delete-legacy` if it
     exists (not for integration until the orchestrator says so).
+
+19. **Deletion of both legacy loops, prepared (2026-11-19; NOT for
+    integration until CI has compiled the skeleton's inline macros on GCC,
+    Clang + libc++ and MSVC).** Branch `wip/core-p3-stepper-delete-legacy`
+    on top of the slice-3c tip (DECISIONS 18).
+
+    Deleted: the fixed engine's `run_legacy` (dynamic) and `st_run_legacy`
+    (static), the TR-BDF2 `run_legacy`, both environment reads
+    (`PULSIM_PWL_STEPPER_LEGACY`, `PULSIM_TRBDF2_STEPPER_LEGACY`; a script
+    that still sets them now runs the skeleton), and the two Python twin
+    tests (`test_pwl_stepper_twin.py`, `test_trbdf2_stepper_twin.py`: with
+    one driver they compared it with itself). Kept, owed to the integration
+    of this branch: the identity tools `pwl_twin_identity.py` /
+    `trbdf2_twin_identity.py` (they now compare the skeleton with itself;
+    delete or repoint them), the zero-alloc case's `set_pwl_twin` (sets a
+    variable nothing reads; the case still holds, both iterations run the
+    skeleton; NOT recompiled on this branch).
+
+    Identity, with no twin left: the default of this branch against the
+    stored OLD baselines (67fef260's default): byte-identical on the four compares (goldens, stateful, engines, step sequences); `pytest -m reference` 377 passed; full pytest on the branch tree 5535 passed / 108 skipped / 8 xfailed (the 25 twin tests gone; one skip more than expected, not yet identified). Cost
+    (instructions per step, OLD vs this branch, min of 3): buck_pwl 3035.8 → 3050.5 (1.0048), vsi_pwl 4700.9 → 4714.3 (1.0029), vsi_pwl_restart 4865.2 → 4881.3 (1.0033), shockbuck_pwl 1.0009, rlc152_pwl 0.9996, static_pwl 1.0009, buck_trbdf2 0.9994, bridge_trbdf2 1.0000, shockbuck_trbdf2 0.9997 — the same as the 3c tip with the loops kept (one build; no shake build of this branch).
+
+20. **Slice 3d: both legacy loops deleted; the identity gate is a stored
+    baseline (2026-11-19).** Branch `feat/core-p3-stepper-3d` from the PR
+    head 39450607 (CI green there on GCC 13, Clang + libc++, MSVC,
+    macOS), `wip/core-p3-stepper-delete-legacy` (1e8d9ad1, DECISIONS 19)
+    merged on top with no conflict.
+
+    The identity tools. `pwl_twin_identity.py` / `trbdf2_twin_identity.py`
+    toggled the deleted variables, so they compared the skeleton with
+    itself. Repointed, not deleted (they hold the case lists and the
+    fingerprint): renamed `benchmarks/tools/pwl_identity.py` /
+    `trbdf2_identity.py`, `record DIR` at the base commit writes a SHA-256
+    of every array (dtype, shape, bytes) and the repr of every other public
+    result attribute per case, `compare DIR` at the tip checks them (a
+    refusal is recorded as its type and message). Cases: goldens, the
+    reference set × pwl / pwl+restart / pwl+split, the static path's eleven
+    cases (new `--static`, the slice-3c static identity set), trbdf2
+    goldens, reference × '' / lcp / shadow, the extra set (stateful
+    rectifiers, turn-off cases, ticks + monitor, examples, a resume at two
+    split points: one case each, the four twin combinations are gone).
+    The zero-alloc case "fixed engine on the step skeleton" no longer sets
+    the variable and no longer compares a run with itself (it compared the
+    skeleton with itself since 1e8d9ad1); it keeps the hook counts, the R1
+    start-state check and the no-per-step-allocation bound.
+
+    Dead code found by the deletion: none in code. `PULSIM_STEP_DRIVER`
+    stays (the fixed engine's driver is still out of line, DECISIONS 14 /
+    18); `PhaseBody` stays (the static path builds one); every phase is
+    still called. Comments that described two drivers were fixed
+    (`stepper.hpp` macro rationale and the two body comments,
+    `run_transient.hpp` hooks / driver / static-path comments,
+    `trbdf2_transient.hpp` phase and hook comments, `StepHooks::step` "skeleton
+    only (the fixed engine's twin today)"). Left as they are, to keep the
+    other tracks' merges easy: the lambda names `run_twin` (both engines)
+    and `st_run_skeleton`. No behaviour moved (the reject / forced-accept /
+    chatter decisions stay in the body: task groups 14–15).
+
+    Identity (macOS clang, Eigen 5, pybind11 3.0.1, LOCAL gate), one
+    baseline set recorded with the PR head's own build BEFORE the merge:
+    byte-identical on goldens (with their counters), stateful (incl. the
+    four `everything_*` cells), engines (35), step sequences (28),
+    `pwl_identity.py --goldens --reference --static` 390/390 (52 goldens
+    + 109 × pwl / pwl+restart / pwl+split + 11 static) and
+    `trbdf2_identity.py --goldens --reference --extra --modes ',lcp,shadow'`
+    371/371 (refusals included: 152 cases record the same refusal). The
+    tools' own determinism was checked first: the PR head's build against
+    its own baseline, 63/63, 44/44, 108/108 (a reference subset) and
+    327/327.
+
+    Cost, instructions retired per accepted step, default path
+    (`.scratch/ab2.sh` + `instr_inproc.py`: the two builds interleaved in
+    separate processes, each round the min of 3 calls; three rounds):
+    | case | PR head 39450607 | tip | ratio (min/min) |
+    | buck_pwl | 3091/3087/3092 | 3088/3090/3096 | 1.0003 |
+    | vsi_pwl | 4766/4774/4775 | 4766/4766/4770 | 1.0000 |
+    | vsi_pwl_restart | 4927/4930/4938 | 4926/4925/4933 | 0.9996 |
+    | static_pwl | 2296/2297/2296 | 2301/2300/2300 | 1.0017 |
+    | buck_trbdf2 | 10990/10988/10994 | 11000/11001/11003 | 1.0010 |
+    | bridge_trbdf2 | 12769/12781/12780 | 12800/12813/12791 | 1.0017 |
+    All within the 0.5 % gate. Function sizes (arm64 instructions, `nm`
+    distance): `run_transient` body 12197 → 10743 and its out-of-line
+    drivers 4158 + 4090 → 4090 (the legacy driver gone);
+    `run_transient_trbdf2` 25071 → 16665 (it carried both inlined
+    drivers).
+
+    Reviewer (fresh, read-only, opus medium) on the deletion: no
+    behaviour difference in any of the three drivers (loop bounds,
+    cancellation — the static path never polled and still does not —,
+    call order, post-loop code). The one side effect in exactly one driver
+    was the skeleton's (TR-BDF2 `device_state` / `step` hooks), so nothing
+    a caller relied on went. Latent: the legacy TR-BDF2 loop `continue`d
+    on `Abort` / `Retry` where the skeleton stops; no phase returns them
+    today. Stale comments it listed are fixed above; the zero-alloc case
+    and the identity tools were the tests that had lost their meaning.
+    The TR-BDF2 ticks + monitor circuit that only the twin test ran is in
+    `trbdf2_identity.py --extra`; `test_monitor_kind.py` and
+    `test_tick_phase_resume.py` run monitors / ticks on trbdf2.
+
+    Verification of this tip (extension rebuilt with the pinned pybind11
+    3.1 for the stub check; the byte compares and the cost above ran on a
+    pybind11 3.0.1 build of both sides): full pytest 5602 passed / 107
+    skipped / 8 xfailed (PR head per STATE: 5626 / 108 / 8; the deleted
+    twin tests were 24 passed + 1 skipped); `pytest -m reference` 382;
+    `reference_status` exit 0, REFERENCE_STATUS.md unchanged; examples
+    (`test_examples_claims.py`, PULSIM_RUN_EXAMPLES=1) 136; openspec strict
+    78/78; stubs `--check` and ruff clean. C++ targets step (32 cases),
+    dsed (136), perf (13; the edited case alone 6 assertions), sim (8),
+    layer4_v3 (29), layer5_v2 (37), layer5_v3 (33): all pass on Eigen 5.0.1
+    AND Eigen 3.4.0. Not built: the other targets that include the loop
+    headers (layer2, layer4*, layer5, layer5_v1, layer5_v4, showcases,
+    sources, builder, yaml, thermal, benchmarks); full ctest not run on
+    this tip (integration tree).
+
+    Hunks left in the two loop files against 39450607 (deletions and
+    comments only): run_transient.hpp -1576 (env read), -1706 (comment),
+    -1734 (comment), -3153 (comment), -3169 (legacy driver + dispatch),
+    -3213 (comment), -3506 (static legacy driver), -3526 (comment), -3543
+    (static dispatch); trbdf2_transient.hpp -2400 (env read + comment),
+    -2431 (comment), -3920 (legacy driver + comments), -3976 (dispatch).
+
+    Owed to the integration: the PR head moved to b28f1e57 while this
+    slice ran; its `python/tests/test_recorders.py:21-22` skips trbdf2
+    in-loop feeds under PULSIM_TRBDF2_STEPPER_LEGACY=1, a variable nothing
+    reads after this slice: delete those two lines when merging.

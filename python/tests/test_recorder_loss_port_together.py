@@ -16,7 +16,6 @@ import pytest
 import pulsim as p
 
 from .test_device_losses_variable_step import T_END, _rl_chopper
-from .test_recorders import _skip_legacy_trbdf2
 
 _RUNS = {"pwl": dict(engine="pwl", dt=1e-7),
          "trbdf2": dict(engine="trbdf2", rtol=1e-6, atol=1e-9)}
@@ -56,7 +55,6 @@ def _same_losses(a, b):
 
 @pytest.mark.parametrize("eng", sorted(_RUNS))
 def test_recorder_and_loss_port_observe_each_other_not(eng):
-    _skip_legacy_trbdf2(eng)
     rec_only = _run(False, True, eng)
     port_only = _run(True, False, eng)
     both = _run(True, True, eng)
@@ -72,7 +70,6 @@ def test_recorder_and_loss_port_observe_each_other_not(eng):
 def test_a_recorder_leaves_a_heat_injecting_port_untouched(eng):
     """With a junction the port feeds heat into the circuit: the recorder
     still changes nothing (states, losses, heat)."""
-    _skip_legacy_trbdf2(eng)
     port_only = _run(True, False, eng, thermal=(5.0, 1e-4))
     both = _run(True, True, eng, thermal=(5.0, 1e-4))
     assert both.recorder_feed["mode"] == "in-loop"

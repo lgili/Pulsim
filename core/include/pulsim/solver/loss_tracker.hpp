@@ -53,6 +53,7 @@
 #include "pulsim/topology/graph.hpp"
 #include "pulsim/topology/switch_state.hpp"
 
+#include <array>
 #include <format>
 #include <stdexcept>
 #include <string>
@@ -184,9 +185,31 @@ public:
     /// w1·p(x1) (the integrator's stage weights, Σw = 1; xg may be null
     /// when wg = 0). The start is the last accepted end, or the right
     /// limit of an event() whose mask this step carries.
+    /// `e_exact` (one per device, in set_device_losses order): the step's
+    /// exact ∫v·i, which replaces the quadrature (the exact engine, whose
+    /// impulses are at event instants: they never replace a step's energy).
     void accept_step(Real t0, Real t1, const Vector& x1,
                      const topology::SwitchStateMask& mask, const Vector* xg,
-                     Real w0, Real wg, Real w1) {
+                     Real w0, Real wg, Real w1, const Real* e_exact = nullptr) {
+        accept_step_<1>(t0, t1, x1, mask, {xg}, {wg}, w0, w1, e_exact);
+    }
+    /// The same with N interior points (ESDIRK4(3): the stages Y1..Y4 at
+    /// weights b2..b5; w0 = b1 on the start, w1 = b6 on x1 = Y5).
+    template <std::size_t N>
+    void accept_step(Real t0, Real t1, const Vector& x1,
+                     const topology::SwitchStateMask& mask,
+                     const std::array<const Vector*, N>& xs,
+                     const std::array<Real, N>& ws, Real w0, Real w1) {
+        accept_step_<N>(t0, t1, x1, mask, xs, ws, w0, w1);
+    }
+
+private:
+    template <std::size_t N>
+    void accept_step_(Real t0, Real t1, const Vector& x1,
+                      const topology::SwitchStateMask& mask,
+                      const std::array<const Vector*, N>& xs,
+                      const std::array<Real, N>& ws, Real w0, Real w1,
+                      const Real* e_exact = nullptr) {
         const Real h = t1 - t0;
         // the power E/h_now_ reached the network over h of this step: a
         // committed step shorter than the attempt (a landing) keeps the rest
@@ -197,7 +220,8 @@ public:
             n.e -= e;
         }
         if (frac == Real{1}) now_.clear();
-        for (auto& d : devs_) {
+        for (std::size_t di = 0; di < devs_.size(); ++di) {
+            auto& d = devs_[di];
             const bool on1 = mask.get(static_cast<Size>(d.law.bit));
             if (d.ev_pending && t0 >= d.ev_t) {
                 // the first step after an event: under its right side it
@@ -219,16 +243,29 @@ public:
             const Real tj1 = d.node >= 0 && d.spec.closed_loop()
                 ? stamping::read_node_voltage(x1, d.node) : tj0;
             Real e_el, e_t = 0;
-            Real vg = 0, ig = 0, tjg = tj0;
             const bool same = on1 == d.on;
-            if (same && xg != nullptr && wg != Real{0}) {
-                vg = v_of_(d, *xg);
-                ig = i_of_(d, *xg, on1);
-                if (d.node >= 0 && d.spec.closed_loop())
-                    tjg = stamping::read_node_voltage(*xg, d.node);
-            }
-            if (same) {
-                e_el = h * (w0 * d.v * d.i + wg * vg * ig + w1 * v1 * i1);
+            // interior point k: (v, i, T_j) when it is read
+            auto read_k = [&](std::size_t k, Real& vk, Real& ik, Real& tjk) {
+                vk = 0, ik = 0, tjk = tj0;
+                if (same && xs[k] != nullptr && ws[k] != Real{0}) {
+                    vk = v_of_(d, *xs[k]);
+                    ik = i_of_(d, *xs[k], on1);
+                    if (d.node >= 0 && d.spec.closed_loop())
+                        tjk = stamping::read_node_voltage(*xs[k], d.node);
+                }
+            };
+            std::array<Real, N> vs{}, is{}, tjs{};
+            for (std::size_t k = 0; k < N; ++k) read_k(k, vs[k], is[k], tjs[k]);
+            if (e_exact != nullptr) {
+                e_el = e_exact[di];
+            } else if (same) {
+                if constexpr (N == 1) {   // TR-BDF2 / SDIRK: one expression, as before
+                    e_el = h * (w0 * d.v * d.i + ws[0] * vs[0] * is[0] + w1 * v1 * i1);
+                } else {
+                    Real s = w0 * d.v * d.i;
+                    for (std::size_t k = 0; k < N; ++k) s += ws[k] * vs[k] * is[k];
+                    e_el = h * (s + w1 * v1 * i1);
+                }
             } else {
                 e_el = h * (d.v * d.i + v1 * i1) / Real{2};
             }
@@ -239,8 +276,18 @@ public:
                 const Real a = d.on ? c(std::abs(d.i), tj0) * std::abs(d.i) : 0;
                 const Real z = on1 ? c(std::abs(i1), tj1) * std::abs(i1) : 0;
                 if (same) {
-                    const Real g = on1 && wg != Real{0} ? c(std::abs(ig), tjg) * std::abs(ig) : 0;
-                    e_t = h * (w0 * a + wg * g + w1 * z);
+                    auto g_k = [&](std::size_t k) {
+                        return on1 && ws[k] != Real{0}
+                            ? c(std::abs(is[k]), tjs[k]) * std::abs(is[k]) : Real{0};
+                    };
+                    if constexpr (N == 1) {
+                        const Real g = g_k(0);
+                        e_t = h * (w0 * a + ws[0] * g + w1 * z);
+                    } else {
+                        Real s = w0 * a;
+                        for (std::size_t k = 0; k < N; ++k) s += ws[k] * g_k(k);
+                        e_t = h * (s + w1 * z);
+                    }
                 } else {
                     e_t = h * (a + z) / Real{2};
                 }
@@ -248,7 +295,7 @@ public:
                 if (d.spec.conduction == thermal::ConductionHeat::Table) heat = e_t;
             }
             if (d.spec.conduction == thermal::ConductionHeat::Electrical) heat = e_el;
-            d.last = {h, e_el, e_t, false};
+            d.last = {h, e_el, e_t, e_exact != nullptr};
             // a flip no event() reported: the reading rule on the step's ends
             if (!same) heat += book_(d, t0, on1, d.v, d.i, v1, i1, tj0);
             if (d.node >= 0) add_(queue_, d.node, heat);
@@ -259,6 +306,7 @@ public:
         }
     }
 
+public:
     /// A commutation at t between the engine's left limit (x_l under m_l)
     /// and right limit (x_r under m_r): every tracked device whose bit
     /// differs is booked by the reading rule on the two limits.

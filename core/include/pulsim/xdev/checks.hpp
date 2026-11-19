@@ -24,6 +24,9 @@
 
 #include "pulsim/xdev/host.hpp"
 
+#include <atomic>
+#include <exception>
+#include <thread>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -50,6 +53,69 @@ inline bool is_canary(double v) {
     return b == 0x7ff4dead5eedbeefULL;
 }
 }  // namespace detail_checks
+
+/// eval must be reentrant (the header's contract: the host calls it from
+/// several threads). Four threads evaluate the probes concurrently, each in
+/// its own order, and every result must equal the serial one to the bit. A
+/// probe, not a proof: a race that does not fire here is not excluded.
+inline void reentrant_(const Instance& in, const std::vector<std::vector<Real>>& probes,
+                       const std::vector<Real>& state0) {
+    const std::size_t n = probes.size();
+    std::vector<EvalOut> serial(n);
+    for (std::size_t k = 0; k < n; ++k) {
+        in.size(serial[k]);
+        in.eval(probes[k].data(), state0.data(), serial[k]);
+    }
+    std::atomic<long> bad{-1};
+    std::vector<std::exception_ptr> err(4);
+    auto work = [&](std::size_t seed) {
+      try {
+        EvalOut o;
+        in.size(o);
+        for (int rep = 0; rep < 40 && bad.load() < 0; ++rep) {
+            for (std::size_t j = 0; j < n; ++j) {
+                const std::size_t k = (j * (2 * seed + 1) + seed + rep) % n;
+                const pulsim_xdev_ctx c = in.ctx_(state0.data());
+                if (in.call_(c, probes[k].data(), o.f.data(), o.q.data(), o.df.data(), o.dq.data())
+                        != PULSIM_XDEV_OK
+                    || std::memcmp(o.f.data(), serial[k].f.data(), o.f.size() * sizeof(Real)) != 0
+                    || std::memcmp(o.q.data(), serial[k].q.data(), o.q.size() * sizeof(Real)) != 0
+                    || std::memcmp(o.df.data(), serial[k].df.data(), o.df.size() * sizeof(Real)) != 0
+                    || std::memcmp(o.dq.data(), serial[k].dq.data(), o.dq.size() * sizeof(Real)) != 0) {
+                    bad.store(static_cast<long>(k));
+                    return;
+                }
+            }
+        }
+      } catch (...) {
+        // a refusal (or bad_alloc) inside a thread must not terminate the
+        // process: carried out and rethrown after the join
+        err[seed] = std::current_exception();
+        bad.store(0);
+      }
+    };
+    std::vector<std::thread> pool;
+    try {
+        for (std::size_t s = 0; s < 4; ++s) pool.emplace_back(work, s);
+    } catch (...) {
+        // a thread that could not start: join the started ones first (a
+        // joinable std::thread destroyed by the unwind calls std::terminate)
+        bad.store(0);
+        for (auto& th : pool) th.join();
+        throw;
+    }
+    for (auto& th : pool) th.join();
+    for (const auto& e : err) {
+        if (e) std::rethrow_exception(e);
+    }
+    if (bad.load() >= 0) {
+        in.refuse_("eval is not reentrant: concurrent calls at x = "
+                   + Instance::vec(probes[static_cast<std::size_t>(bad.load())].data(), in.rows())
+                   + " returned a different result than a serial call (state shared between "
+                     "calls: a cache in the instance or a static); the host calls eval from "
+                     "several threads");
+    }
+}
 
 inline void check_contract(const Instance& in) {
     namespace dc = detail_checks;
@@ -101,6 +167,26 @@ inline void check_contract(const Instance& in) {
         same("q", q, o.q);
         same("df", df, o.df);
         same("dq", dq, o.dq);
+    };
+    // the result at x may not depend on WHICH x came before (a memo in the
+    // instance or a static keyed badly): x_a, x_b, x_a again must repeat x_a
+    auto interleaved = [&](const std::vector<Real>& xa, const std::vector<Real>& xb) {
+        EvalOut ra, rb, rc;
+        in.size(ra);
+        in.size(rb);
+        in.size(rc);
+        in.eval(xa.data(), state0.data(), ra);
+        in.eval(xb.data(), state0.data(), rb);
+        in.eval(xa.data(), state0.data(), rc);
+        auto differ = [](const std::vector<Real>& u, const std::vector<Real>& v) {
+            return std::memcmp(u.data(), v.data(), u.size() * sizeof(Real)) != 0;
+        };
+        if (differ(ra.f, rc.f) || differ(ra.q, rc.q) || differ(ra.df, rc.df) || differ(ra.dq, rc.dq)) {
+            in.refuse_("eval is not pure: at x = " + Instance::vec(xa.data(), R)
+                       + " it returned a different result after a call at x = "
+                       + Instance::vec(xb.data(), R)
+                       + " (a result cached in the instance or a static)");
+        }
     };
 
     auto kcl = [&](const std::vector<Real>& x, const EvalOut& o) {
@@ -169,8 +255,10 @@ inline void check_contract(const Instance& in) {
         kcl(x, o);
         passive(x, o);
         reciprocal(x, o);
+        if (!probes.empty()) interleaved(x, probes.back());
         probes.push_back(std::move(x));
     }
+    reentrant_(in, probes, state0);
 
     // ---- lines: the Jacobian between probes, smoothness, monotonicity -----
     for (std::size_t c = 0; c < R; ++c) {
@@ -394,6 +482,19 @@ inline void check_contract(const Instance& in) {
         for (const auto& x : probes) {
             in.eval(x.data(), st.data(), o);
             in.check_jacobian_at(x.data(), st.data(), o, "registration check (accepted state)");
+        }
+    }
+
+    // ---- named outputs: finite (Instance::outputs refuses) and pure --------
+    if (d.n_outputs > 0) {
+        std::vector<Real> a(d.n_outputs), b(d.n_outputs);
+        for (const auto& x : probes) {
+            in.outputs(x.data(), state0.data(), a.data());
+            in.outputs(x.data(), state0.data(), b.data());
+            if (std::memcmp(a.data(), b.data(), a.size() * sizeof(Real)) != 0) {
+                in.refuse_("outputs_fn is not a pure function of (x, ctx): two calls at x = "
+                           + Instance::vec(x.data(), in.rows()) + " differ");
+            }
         }
     }
 }

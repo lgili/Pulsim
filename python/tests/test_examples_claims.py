@@ -56,6 +56,20 @@ F = r"([-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)"
 # script -> [(regex with ONE group, (lo, hi))]. Reference for each value
 # in the script's own docstring (analytic formula or settled setpoint).
 SCRIPTS = {
+    # an external device (C model built by the script): closed-form steady state
+    "run_external_self_heating_resistor.py": [
+        (r"cold current: " + F, near(100.0, 1e-6)),
+        (r"settled temperature rise: " + F, near(42.841847, 1e-5)),
+        (r"settled current: " + F, near(85.68369, 1e-4)),
+    ],
+    # a SymPy-declared diode compiled to C (pulsim.xdev): the built-in's law,
+    # and the monotonicity scan's two verdicts (docstring of the script)
+    "run_xdev_sympy_diode.py": [
+        (r"max relative difference against the built-in diode: " + F, below(1e-9)),
+        (r"diode law non-monotone intervals: (\d+)", near(0, 0)),
+        (r"raw Langevin non-monotone intervals: (\d+)", above(0.5)),
+        (r"all within \|u\| < " + F, below(1e-6)),
+    ],
     "run_buck_closed_loop.py": [
         (r"pre-step .*?mean=" + F, near(12.0, 0.05)),
         (r"post-step .*?mean=" + F, near(14.0, 0.05)),
