@@ -183,12 +183,11 @@ def test_unhonourable_options_are_refused_by_name(kw, match):
 
 
 @pytest.mark.parametrize("rec,match", [
-    (p.Recorder("x", ["i(C1)"]), r"i\(C1\) of a capacitor"),
     (p.Recorder("x", ["v(out)"], keep="times"), "times"),
     (p.Recorder("x", ["v(out)"], keep="times", times=(0.5e-3, 2e-3)),
      "inside"),
     (p.Recorder("x", ["v(out"]), "probe"),
-    (p.Recorder("x", ["v(out)"], windows=[(0.5e-3, 2e-3)]), r"windows\[0\]"),
+    (p.Recorder("x", ["v(out)"], windows=[(1.5e-3, 2e-3)]), r"windows\[0\]"),
     (p.Recorder("x", ["v(out)"], keep="some"), "keep"),
     (p.Recorder("x", ["v(out)"], period=-1.0), "period"),
     (p.Recorder("x", ["v(out)"], period=1e-4, offset=float("nan")),
@@ -310,14 +309,16 @@ def test_store_every_gives_the_full_runs_statistics():
 
 
 def test_store_every_without_in_loop_feeding_is_refused_by_name():
-    # a Shockley diode's current is a law of the voltage, not a state column
+    # a VCCS has no in-loop current law (the stored pass reads it)
     b = p.CircuitBuilder()
     b.add_voltage_source("V1", "in", "gnd", 1.0)
-    b.add_resistor("R1", "in", "a", 10.0)
-    b.add_shockley_diode("D1", "a", "gnd")
-    with pytest.raises(ValueError, match=r"store_every=2.*could not be fed in the loop"):
+    b.add_resistor("R1", "in", "gnd", 10.0)
+    b.add_vccs("G1", "in", "gnd", "a", "gnd", 0.1)
+    b.add_resistor("R2", "a", "gnd", 10.0)
+    with pytest.raises(ValueError, match=r"store_every=2.*could not be fed in the "
+                       r"loop.*i\(G1\).*no in-loop current law"):
         p.simulate(b, t_end=1e-5, dt=1e-6, engine="pwl", store_every=2,
-                   recorders=[p.Recorder("x", ["i(D1)"])])
+                   recorders=[p.Recorder("x", ["i(G1)"])])
 
 
 # the 11 commutations' (i_L, v_C) at the event, from

@@ -224,6 +224,12 @@ struct SolverSnapshot {
     /// (LossTracker::save): pending heat, ledgers, events. Empty: no loss
     /// port, or a snapshot without the field (pickle field 17).
     std::vector<Real> loss_state;
+    /// add-probes-and-recorders 0b.7: the in-loop recorders' run state
+    /// (record::LoopFeed::save) and the signature of the recorders that
+    /// wrote it. Empty: no recorder fed in the loop, or a snapshot without
+    /// the field (pickle field 18).
+    std::vector<Real> recorder_state;
+    std::string recorder_spec;
     /// MNA unknowns at `t`.
     Vector x;
     /// Every device state the run carries (add-unified-device-interface

@@ -146,8 +146,11 @@ void init_module(py::module_& m) {
           "Kernel recorder pass over stored arrays (add-probes-and-recorders); "
           "use pulsim.simulate(..., recorders=[...]).");
 
+    // (a cols, a coef, a div, product, b cols, b coef, b div, device branch
+    // or -1, device power, constant source current)
     using ReadingSpec = std::tuple<std::vector<pulsim::Index>, std::vector<Real>, Real, bool,
-                                   std::vector<pulsim::Index>, std::vector<Real>, Real>;
+                                   std::vector<pulsim::Index>, std::vector<Real>, Real,
+                                   pulsim::Index, bool, Real>;
     using RecSpec = std::tuple<std::vector<std::string>, std::string, Size,
                                std::vector<std::pair<Real, Real>>, Real, Real, std::vector<Real>>;
     py::class_<rec::LoopFeed>(m, "_LoopFeed",
@@ -157,11 +160,14 @@ void init_module(py::module_& m) {
                          const std::vector<ReadingSpec>& readings,
                          const std::vector<RecSpec>& specs) {
                  std::vector<rec::StateReading> rs;
-                 for (const auto& [ca, wa, da, prod, cb, wb, db] : readings) {
+                 for (const auto& [ca, wa, da, prod, cb, wb, db, dev, dev_p, dev_v] : readings) {
                      rec::StateReading r;
                      r.a = linear(ca, wa, da);
                      r.product = prod;
                      r.b = linear(cb, wb, db);
+                     r.dev.branch = dev;
+                     r.dev.power = dev_p;
+                     r.dev.value = dev_v;
                      rs.push_back(std::move(r));
                  }
                  std::vector<rec::Recorder> recs;
@@ -176,6 +182,10 @@ void init_module(py::module_& m) {
         .def("arm", &rec::LoopFeed::attach_own, py::arg("bracket_events"),
              "Register on the feed's own hooks; Simulation.set_loop_feed passes them.")
         .def("finish", &rec::LoopFeed::finish)
+        .def("save", &rec::LoopFeed::save, "The feed's run state (snapshot field 18).")
+        .def("restore", [](rec::LoopFeed& f, const std::vector<Real>& s) { f.restore(s); },
+             py::arg("state"), "Continue from save()'s output.")
+        .def_property_readonly("restored", &rec::LoopFeed::restored)
         .def_property_readonly("armed", &rec::LoopFeed::attached)
         .def_property_readonly("n_steps", &rec::LoopFeed::n_steps)
         .def_property_readonly("n_jumps", &rec::LoopFeed::n_jumps)

@@ -2836,7 +2836,7 @@ class SolverSnapshot:
     `initial_state=` restores only the MNA vector and then INVENTS the companion history from it (a capacitor gets i_prev = 0, an inductor v_prev = 0), so resuming from it does NOT reproduce the run — a continuous 2T RLC and a T-then-resume differ by 2.3e-4 where a true resume is ~1e-15. A snapshot carries what was missing: the trapezoidal companion history, the state of every stateful device (saturable / gapped / hysteretic inductors, charge-based Coss, Lauritzen diodes, IGBT tails, MNA PMSMs) and the solver-owned diode bits. Pass it as simulate(resume_from=...): exact on engine='pwl', to tolerance on engine='trbdf2'. Pickles.
     """
     valid: bool
-    def __getstate__(self) -> tuple[str, int, float, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"], list[float], list[int], int, list[bool], list[bool], int, bool, typing.Any, typing.Any, tuple[float, int, float, bool], typing.Any, list[float], list[int], list[float]]:
+    def __getstate__(self) -> tuple[str, int, float, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"], list[float], list[int], int, list[bool], list[bool], int, bool, typing.Any, typing.Any, tuple[float, int, float, bool], typing.Any, list[float], list[int], list[float], typing.Any]:
         ...
     def __init__(self) -> None:
         ...
@@ -2967,6 +2967,22 @@ class SolverSnapshot:
         """
     @post_edge_derivatives.setter
     def post_edge_derivatives(self, arg0: bool) -> None:
+        ...
+    @property
+    def recorder_spec(self) -> str:
+        """
+        Signature of the recorders that wrote recorder_state.
+        """
+    @recorder_spec.setter
+    def recorder_spec(self, arg0: str) -> None:
+        ...
+    @property
+    def recorder_state(self) -> list[float]:
+        """
+        The in-loop recorders' state at the snapshot (pickle field 18; simulate(recorders=..., resume_from=) continues them). Empty: no recorder fed in the loop, or an older snapshot.
+        """
+    @recorder_state.setter
+    def recorder_state(self, arg0: collections.abc.Sequence[float]) -> None:
         ...
     @property
     def restart_pending(self) -> bool:
@@ -4211,6 +4227,8 @@ class Simulation:
         """
         A tick at t_start + offset + k*period. monitor=True: a Kind::Monitor (trbdf2 neither lands on it nor re-samples the gate after it; pwl ticks it on its grid as any tick).
         """
+    def clear_loop_feed(self) -> None:
+        ...
     def restore(self, snapshot: SolverSnapshot, at_snapshot_time: bool = True) -> None:
         ...
     def run(self) -> SimulationResult:
@@ -4267,7 +4285,7 @@ class _LoopFeed:
     """
     In-loop recorder feed (add-probes-and-recorders 0b.6); use pulsim.simulate(..., recorders=[...]).
     """
-    def __init__(self, reading_names: collections.abc.Sequence[str], readings: collections.abc.Sequence[tuple[collections.abc.Sequence[int], collections.abc.Sequence[float], float, bool, collections.abc.Sequence[int], collections.abc.Sequence[float], float]], recorders: collections.abc.Sequence[tuple[collections.abc.Sequence[str], str, int, collections.abc.Sequence[tuple[float, float]], float, float, collections.abc.Sequence[float]]]) -> None:
+    def __init__(self, reading_names: collections.abc.Sequence[str], readings: collections.abc.Sequence[tuple[collections.abc.Sequence[int], collections.abc.Sequence[float], float, bool, collections.abc.Sequence[int], collections.abc.Sequence[float], float, int, bool, float]], recorders: collections.abc.Sequence[tuple[collections.abc.Sequence[str], str, int, collections.abc.Sequence[tuple[float, float]], float, float, collections.abc.Sequence[float]]]) -> None:
         ...
     def arm(self, bracket_events: bool) -> None:
         """
@@ -4277,8 +4295,16 @@ class _LoopFeed:
         ...
     def reserve(self, n_samples: int, t_last: float, n_events: int = 0) -> None:
         ...
+    def restore(self, state: collections.abc.Sequence[float]) -> None:
+        """
+        Continue from save()'s output.
+        """
     def result(self, k: int) -> dict[typing.Any, typing.Any]:
         ...
+    def save(self) -> list[float]:
+        """
+        The feed's run state (snapshot field 18).
+        """
     @property
     def armed(self) -> bool:
         ...
@@ -4293,6 +4319,9 @@ class _LoopFeed:
         ...
     @property
     def n_steps(self) -> int:
+        ...
+    @property
+    def restored(self) -> bool:
         ...
 def _branch_form_capabilities() -> dict[typing.Any, typing.Any]:
     """

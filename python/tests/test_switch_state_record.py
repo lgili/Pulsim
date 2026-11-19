@@ -251,7 +251,7 @@ def test_snapshot_without_stamped_mask_flags_row_zero():
           int(snap.restart_steps_left))
     # version 5: tag, version, 9 fields, the controllers-state marker
     # (G26), the grid, the controller block, the tick phase (2)
-    assert len(snap.__getstate__()) == 18
+    assert len(snap.__getstate__()) == 19
     again = pickle.loads(pickle.dumps(snap))
     assert list(again.stamped_mask) == list(snap.stamped_mask)
     pre = type(snap).__new__(type(snap))   # an 11-field pickle still loads

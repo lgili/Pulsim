@@ -245,7 +245,7 @@ def test_a_twelve_field_version_3_pickle_still_loads():
                       ).final_snapshot
     st = snap.__getstate__()
     # version 5: the marker is field 12, the grid field 13
-    assert st[:2] == ("SolverSnapshot", 5) and len(st) == 18 and st[12] is False
+    assert st[:2] == ("SolverSnapshot", 5) and len(st) == 19 and st[12] is False
     v3 = ("SolverSnapshot", 3) + tuple(st[2:12])
     old = type(snap).__new__(type(snap))
     old.__setstate__(v3)

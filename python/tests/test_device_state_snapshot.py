@@ -297,7 +297,7 @@ def test_a_version_3_pickle_loads_and_resumes_on_a_restarted_grid():
     exactly as the same snapshot without a grid."""
     snap = _pwl(4.2e-5).final_snapshot
     v4 = snap.__getstate__()
-    assert v4[1] == 5 and len(v4) == 18
+    assert v4[1] == 5 and len(v4) == 19
     # version 5 before field 17 (the loss tracker's state) still loads
     v17 = SolverSnapshot.__new__(SolverSnapshot)
     v17.__setstate__(tuple(v4[:17]))
@@ -323,7 +323,7 @@ def test_every_pickle_layout_resumes_the_stored_charge_kinds_on_both_paths(path)
     assert list(snap.lauritzen_history)[0] != 0.0     # charge really stored
     assert list(snap.igbt_tail_history)[0] != 0.0
     v5 = snap.__getstate__()
-    assert v5[1] == 5 and len(v5) == 18
+    assert v5[1] == 5 and len(v5) == 19
     old = (snap.t, list(snap.x), list(snap.history), list(snap.diode_on),
            list(snap.saturable_history), list(snap.coss_history),
            list(snap.lauritzen_history), list(snap.igbt_tail_history),
@@ -335,7 +335,8 @@ def test_every_pickle_layout_resumes_the_stored_charge_kinds_on_both_paths(path)
     core, marker, grid = tuple(v5[2:12]), v5[12], v5[13]
     v4 = ("SolverSnapshot", 4) + core
     with_grid = [v4 + (grid,), v4 + (marker, grid), v4 + (grid, marker),
-                 v4 + (grid, marker, None), v4 + (marker, grid, None), v5]
+                 v4 + (grid, marker, None), v4 + (marker, grid, None),
+                 v5[:17], v5[:18], v5]
     no_grid = [("SolverSnapshot", 3) + core,
                ("SolverSnapshot", 3) + core + (marker,),
                old, old[:11], old[:10]]
