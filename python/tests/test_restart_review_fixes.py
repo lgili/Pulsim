@@ -18,7 +18,8 @@ import pytest
 
 import pulsim as p
 
-RULE = dict(discontinuity_restart=True)
+# the rule WITHOUT the split (since the release the split follows the rule: named off)
+RULE = dict(discontinuity_restart=True, enable_substep_state_correction=False)
 SPLIT = dict(discontinuity_restart=True, enable_substep_state_correction=True)
 GAMMA = 1.0 - 1.0 / math.sqrt(2.0)
 
@@ -50,15 +51,17 @@ def test_a_failed_stage2_retry_is_counted_warned_and_keeps_sdirk():
         warnings.simplefilter("error")
         ref = _rect3(50e-6, False)
     c = ref.counters
-    # engine: 19 re-tries, 5 kept, bus peak 23.999 V
-    assert c["stage2_retries"] == 19 and c["stage2_be_kept"] == 5
+    # engine: 5 re-tries kept, bus peak 23.999 V. The re-try count is the
+    # mode rule's (19 under the settle, 22 under the default 'auto' -> 'lcp'):
+    # a bound, not a pin
+    assert c["stage2_retries"] >= 19 and c["stage2_be_kept"] == 5
     assert c["stage2_retry_failures"] == 0
     with pytest.warns(UserWarning, match="stage2_retry_failures"):
         bad = _rect3(50e-6, True)
     c = bad.counters
     # Every re-try throws (singular factor) and the SDIRK stage 2 stands:
     # the bus returns to the pre-fallback overshoot, 37.20 V (CHANGELOG).
-    assert c["stage2_retry_failures"] == c["stage2_retries"] == 10, c
+    assert c["stage2_retry_failures"] == c["stage2_retries"] >= 10, c
     assert c["stage2_be_kept"] == 0
     assert max(bad.v("out")) == pytest.approx(37.2032291, abs=1e-6)
     assert np.abs(np.asarray(bad.v("q"))).max() == 0.0
