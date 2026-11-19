@@ -34,6 +34,7 @@
 
 #include "pulsim/analysis/cancellation.hpp"
 #include "pulsim/analysis/mna_sweep.hpp"
+#include "pulsim/pwl/device_readings.hpp"
 #include "pulsim/blockchain/blocks.hpp"
 #include "pulsim/blockchain/block_adapters.hpp"
 #include "pulsim/blockchain/chain.hpp"
@@ -5385,6 +5386,42 @@ void init_module(py::module_& m) {
         "freqs/H arrays.\n"
         "Optional `should_continue` is invoked between frequency\n"
         "points; raises pulsim.Cancelled when it returns False.");
+
+    // add-unified-device-interface 9.2: a static Newton branch's current and
+    // absorbed power at each stored state, from its device law (the reading
+    // the in-loop recorders take; `pwl::static_reading`).
+    m.def("static_device_readings",
+        [](const topology::Graph& graph, const pwl::DevicePool& pool,
+           py::array_t<double, py::array::c_style | py::array::forcecast> states,
+           Index branch_id) -> py::object {
+            // an IGBT with a tail: its current is i_ss plus the tail's delta,
+            // which needs the stored charge (not in the states)
+            if (pool.is_registered(branch_id)
+                && pool.kind_of(branch_id) == pwl::DevicePool::StoredKind::IgbtLevel1
+                && models::IgbtLevel1::has_tail(pool.igbt_level1_params(branch_id))) {
+                return py::none();
+            }
+            const auto s = states.unchecked<2>();
+            const auto n_rows = s.shape(0), n_cols = s.shape(1);
+            py::array_t<double> cur(n_rows), pw(n_rows);
+            auto c = cur.mutable_unchecked<1>();
+            auto w = pw.mutable_unchecked<1>();
+            Vector x(n_cols);
+            for (py::ssize_t r = 0; r < n_rows; ++r) {
+                for (py::ssize_t k = 0; k < n_cols; ++k) x[k] = s(r, k);
+                pwl::DeviceReading d;
+                if (!pwl::static_reading(graph, pool, x, branch_id, d)) return py::none();
+                c(r) = d.i_pin[0];
+                w(r) = d.power;
+            }
+            return py::make_tuple(std::move(cur), std::move(pw));
+        },
+        py::arg("graph"), py::arg("pool"), py::arg("states"), py::arg("branch_id"),
+        "The current INTO the first pin and the absorbed power of a static "
+        "Newton branch (smooth / Shockley diode, level-1 MOSFET / IGBT "
+        "without the tail's delta) at each row of `states`, from its device "
+        "law. None when the branch is not a static Newton branch, or is an "
+        "IGBT with a tail (its delta needs the stored charge).");
 
     // ---- Control blocks (Phase A.1 in kernel) ----------------------------
     //

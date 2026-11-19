@@ -1708,6 +1708,12 @@ def device_loss_summary(
       ``i_rms``, ``i_peak``, ``P_avg`` / ``E_total`` (``v_D · i_D``)
       and the law's ``I_S``, ``n``, ``V_T``, ``BV``. Its current
       matches a 1 mOhm sense resistor in series to 3e-12 A.
+    * **mosfet_level1**, **igbt_level1** (without a tail),
+      **nonlinear_diode** — the current is the kernel's device law at
+      each stored state (``static_device_readings``). Reports ``i_avg``,
+      ``i_rms``, ``i_peak``, ``P_avg`` / ``E_total`` (``v · i`` across the
+      drain-source / collector-emitter / anode-cathode pins). A tailed
+      IGBT, a Lauritzen diode and a nonlinear capacitor are not listed.
 
     By default every figure covers the whole run, start-up included.
     ``t_from`` / ``t_to`` restrict it to a window: on a 230 V bridge
@@ -2190,6 +2196,41 @@ def device_loss_summary(
                 "i_rms": _time_weighted_rms(i_D, times_w, i_D_s),
                 "i_peak": float(max(np.abs(i_D).max(),
                                     np.abs(i_D_s).max()))
+                if i_D.size else 0.0,
+                "P_avg": (float(E) / T if times.size > 1 and T > 0
+                          else float((v_D * i_D).mean())),
+                "E_total": float(E),
+            })
+            continue
+
+        if kind in ("mosfet_level1", "igbt_level1", "nonlinear_diode"):
+            # add-unified-device-interface 9.3: the static Newton kinds'
+            # current from the kernel's device law at each stored state
+            # (and right limit), integrated as the Shockley diode's above.
+            # An IGBT with a tail is skipped (its delta needs the stored
+            # charge): no entry rather than a wrong one.
+            from . import _pulsim as _kmod
+            nodes = desc.get("nodes", (None, None))
+            rd = _kmod.static_device_readings(builder.graph, builder.pool,
+                                              states, int(bid))
+            rd_s = _kmod.static_device_readings(builder.graph, builder.pool,
+                                                states_s, int(bid))
+            if rd is None or rd_s is None or nodes[0] is None or nodes[1] is None:
+                continue
+            v_D, v_D_s = win.cont(_branch_v(states, nodes), _branch_v(states_s, nodes))
+            i_D, i_D_s = win.cont(np.asarray(rd[0], float), np.asarray(rd_s[0], float))
+            if times.size > 1 and T > 0:
+                i_avg = _views.pl_integral(times_w, i_D, i_D_s) / T
+                E = _views.pl_integral_product(times_w, v_D, i_D, v_D_s, i_D_s)
+            else:
+                i_avg, E = float(i_D.mean()), 0.0
+            summary.append({
+                "branch_id": int(bid),
+                "kind": kind,
+                "name": name,
+                "i_avg": float(i_avg),
+                "i_rms": _time_weighted_rms(i_D, times_w, i_D_s),
+                "i_peak": float(max(np.abs(i_D).max(), np.abs(i_D_s).max()))
                 if i_D.size else 0.0,
                 "P_avg": (float(E) / T if times.size > 1 and T > 0
                           else float((v_D * i_D).mean())),

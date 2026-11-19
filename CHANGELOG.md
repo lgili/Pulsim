@@ -6,6 +6,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### `res.i` and the loss summaries read the Newton devices' laws
+
+`res.i(name)` of a level-1 MOSFET, a level-1 IGBT without a tail and a
+smooth (`add_nonlinear_diode`) diode now returns the kernel's device law
+at each stored state (new binding `static_device_readings`) instead of
+raising; `device_loss_summary` and `device_thermal_summary` list them.
+Against a 1 mOhm sense resistor the current agrees to 2e-12 of its peak
+and the energy to 4e-13 on `pwl` and `trbdf2` (the Shockley diode and the
+saturable inductor, already covered, too). Still raising, with the
+sense-resistor recipe: the Lauritzen diode, the nonlinear capacitor, an
+IGBT with a tail and `add_power_mosfet`. Existing `res.i` numbers are
+unchanged.
+
 ### The kernel AC sweep linearises the Newton devices
 
 * **Added** `run_mna_sweep(freqs=, v_in_branch_id=)` linearises the smooth,

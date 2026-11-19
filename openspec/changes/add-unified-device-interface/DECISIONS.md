@@ -1151,3 +1151,24 @@
     inductor at 1e-12 A (L_0 to 1e-9) match. Gates: closed form 1e-9
     (1e-6 for the central-difference kinds, 1e-10 Lauritzen), transient
     1e-3.
+
+59. **Generic outputs (tasks 9.2-9.5) without the 9.1 loop recording.**
+    `res.i` reads the kernel law for the static kinds through a new
+    read-only binding, `static_device_readings(graph, pool, states,
+    branch_id)`, which runs `pwl::static_reading` (the law the in-loop
+    recorders read) on each stored state. No loop file is touched. The
+    Python ladder stays for the kinds it already covered, so no existing
+    `res.i` number moves (baseline identical); deleting it is 9.1's job.
+    Uncovered, still raising with the 1 mOhm recipe: the Lauritzen diode
+    and the IGBT tail (the law needs the stored charge, a local unknown
+    the states do not hold), the nonlinear capacitor (its current is
+    dq/dt, a step quantity), and the `power_mosfet` composite (its kind is
+    not a pool device). Row 0 of a zero start is not a solve: the smooth
+    diode's non-passive law reads -1.2e-5 A at v = 0 there, so the test
+    compares from row 1. The loss summary integrates the product of the
+    piecewise-linear v and i, so its reference uses the same quadrature
+    (the trapezoid of v·i differs by 1.6e-4 on the MOSFET case). Measured
+    against the sense resistor, max |i − i_Rs| / peak and the energy
+    error: MOSFET 2e-13 / 4e-15, IGBT 1.7e-12 / 2e-13, smooth diode
+    1.7e-12 / 3e-13, Shockley 1.5e-12 / 3e-13, saturable L 1.1e-12 /
+    5e-14 (worst of pwl and trbdf2).

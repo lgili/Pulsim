@@ -1161,6 +1161,9 @@ def _result_i(self, name: str, t=None, *, port=None):
     |                            | breakdown branch when ``BV > 0``): the  |
     |                            | kernel's law, ``add_shockley_diode``    |
     |                            | parameters                              |
+    | ``mosfet_level1``,         | the kernel's device law at each stored  |
+    | ``igbt_level1`` (no tail), | state (``static_device_readings``):     |
+    | ``nonlinear_diode``        | drain / collector / anode current       |
     +----------------------------+-----------------------------------------+
 
     Sentinel handling. Pulsim uses ``node_id = −1`` for the
@@ -1187,14 +1190,16 @@ def _result_i(self, name: str, t=None, *, port=None):
     ``result._switch_fn = your_switch_fn`` for a switch, and then the
     switch_fn is re-evaluated with a warning.
 
-    Not yet supported (their device params aren't exposed by
-    ``builder.components()`` today): ``mosfet_level1``,
-    ``igbt_level1``, ``nonlinear_diode``, ``lauritzen_diode``,
-    ``nonlinear_capacitor``, ``vcvs``, ``saturable_inductor``. Calls
-    on those kinds raise :class:`NotImplementedError` with the
-    recipe that works: a small series resistor (1 mOhm) whose
-    ``res.i()`` is the device current. ``device_loss_summary`` does
-    not report them either.
+    ``mosfet_level1``, ``igbt_level1`` (without a tail) and
+    ``nonlinear_diode`` read the kernel's device law at each stored
+    state; a ``saturable_inductor`` is its own branch-current column.
+    Not yet supported: ``lauritzen_diode``, ``nonlinear_capacitor`` and
+    an IGBT with a tail (their current needs a stored charge the states
+    do not give the law), and the ``power_mosfet`` composite. Calls on
+    those kinds raise
+    :class:`NotImplementedError` with the recipe that works: a small
+    series resistor (1 mOhm) whose ``res.i()`` is the device current.
+    ``device_loss_summary`` does not report them either.
 
     Sign convention. Current is positive flowing from the ``from``
     terminal to the ``to`` terminal of the ``add_*`` call (matches
@@ -1476,6 +1481,17 @@ def _result_i(self, name: str, t=None, *, port=None):
         G_arr = _np.where(closed, g_on, g_off)
         return _finalize(_hold_unsolved(v_sw * G_arr))
 
+    # ------------- static Newton kinds: the kernel's law ---------------
+    if kind in ("mosfet_level1", "igbt_level1", "nonlinear_diode"):
+        # add-unified-device-interface 9.2: the device law at each stored
+        # state (the reading the in-loop recorders take); drain / collector
+        # / anode current. A MOSFET's body diode is its own branch.
+        from . import _pulsim as _kmod
+        rd = _kmod.static_device_readings(builder.graph, builder.pool,
+                                          states, int(b_id))
+        if rd is not None:
+            return _finalize(_np.asarray(rd[0], dtype=float))
+
     # ----------------------- not yet supported -----------------------
     raise NotImplementedError(
         f"branch {name!r} has kind={kind!r}; result.i() does not yet "
@@ -1484,7 +1500,9 @@ def _result_i(self, name: str, t=None, *, port=None):
         f"supported: inductor, voltage_source (incl. pwm / sine / "
         f"pulse variants), resistor, capacitor, current_source (incl. "
         f"sine / pulse / pwl), vccs, cccs, ccvs, gyrator, "
-        f"diode, shockley_diode, switch. To measure this device's "
+        f"diode, shockley_diode, switch, saturable_inductor, "
+        f"nonlinear_diode, mosfet_level1, igbt_level1 (without a "
+        f"tail). To measure this device's "
         f"current, put a small resistor in series with it (1 mOhm) "
         f"and read `res.i(<that resistor>)`; its loss is then the "
         f"time average of v_device * i over a window "

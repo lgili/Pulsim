@@ -74,10 +74,10 @@ machine (`-j2`, `nice`).
 
 ## 9. Generic outputs
 - [ ] 9.1 Kernel: pin currents and power for every category at commit; on-demand evaluation for `f`-only kinds; per-sample table for kinds with a `q` row — SKIPPED (slice 10): pin currents / power at commit and a per-sample table for q kinds are a time-loop edit (LOOP FREEZE) — step 9's law readings exist (DECISIONS #43); the per-sample recording needs the stepper's `StepHooks::on_device_state` (#31)
-- [ ] 9.2 Python `res.i` / `res.p` use the kernel for every kind; delete the ladder at `python/pulsim/__init__.py:1004-1188` and `_shockley_params` — SKIPPED: depends on 9.1
-- [ ] 9.3 `device_loss_summary` and `device_thermal_summary` list the Newton kinds, integrating `p` over `t` — SKIPPED: depends on 9.1
-- [ ] 9.4 Tests: `∫v·i` against a 1 mΩ sense resistor within 1e-4 for each Newton kind on pwl and trbdf2; PWL and linear `res.i` unchanged to 1e-12; the adaptive-grid loss equals the fixed-grid loss within 0.5 % — SKIPPED: depends on 9.1
-- [ ] 9.5 Docs: `AI_GUIDE.md` (remove the "add a 1 mΩ resistor" advice), `docs/known-limitations.md`, CHANGELOG, stubs — SKIPPED: depends on 9.1
+- [ ] 9.2 Python `res.i` / `res.p` use the kernel for every kind; delete the ladder at `python/pulsim/__init__.py:1004-1188` and `_shockley_params` — PARTIAL (slice 11): `res.i` of `mosfet_level1`, `igbt_level1` (no tail), `nonlinear_diode` reads the kernel law per stored state (`static_device_readings`, the in-loop recorders' reading); the ladder is KEPT for the kinds it already covers (linear, PWL, Shockley: their numbers must not move) and deleting it waits for 9.1. Still raising: `lauritzen_diode`, `nonlinear_capacitor`, IGBT with a tail, `power_mosfet` (DECISIONS #59)
+- [x] 9.3 `device_loss_summary` and `device_thermal_summary` list the Newton kinds, integrating `p` over `t` — slice 11: the three static kinds above (and Shockley, already); the stored-charge kinds are not listed
+- [ ] 9.4 Tests: `∫v·i` against a 1 mΩ sense resistor within 1e-4 for each Newton kind on pwl and trbdf2; PWL and linear `res.i` unchanged to 1e-12; the adaptive-grid loss equals the fixed-grid loss within 0.5 % — PARTIAL, slice 11 (`python/tests/test_newton_device_currents.py`): current ≤ 2e-12 of peak, energy ≤ 4e-13 for the five covered Newton kinds on both engines; `res.i` baseline identical. The adaptive-vs-fixed 0.5 % loss check was not written
+- [x] 9.5 Docs: `AI_GUIDE.md` (remove the "add a 1 mΩ resistor" advice), `docs/known-limitations.md`, CHANGELOG, stubs — slice 11 (the guide had no such advice left; stubs regenerated)
 
 ## 10. AC and DC from f and q
 - [x] 10.1 `analysis/linearize.hpp`: `Linearization{G, C}` at `(x0, mask)` — slice 11: the linear part is the sweep's own assembly; every Newton kind with a law adds ∂f/∂x, ∂q/∂x from one AD evaluation; local charges (Lauritzen, IGBT tail) are extra unknowns (DECISIONS #55)
