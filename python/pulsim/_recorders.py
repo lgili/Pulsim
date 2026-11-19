@@ -201,7 +201,7 @@ def _descriptor(builder, name: str):
 
 
 def _check_device_atoms(builder, r: "Recorder", p: str, atoms,
-                        engine=None) -> None:
+                        engine=None, integrator=None) -> None:
     if builder is None or not hasattr(builder, "components"):
         return
     for a in atoms:
@@ -211,6 +211,16 @@ def _check_device_atoms(builder, r: "Recorder", p: str, atoms,
         if d is None:
             continue
         kind = d.get("kind", "?")
+        if kind == "capacitor" and integrator == "esdirk43":
+            # integration 14i: on the first step after an event the ESDIRK
+            # commit's companion current misses KCL by ~1e-5 of the node's
+            raise unsupported(
+                "trbdf2", "integrator=esdirk43",
+                f"recorder {r.name!r}, probe {p!r}: {a} of a capacitor is "
+                "not read in the loop on integrator='esdirk43' (its companion "
+                "current is not KCL-consistent on the first step after an "
+                "event); use integrator='trbdf2' or read the other devices of "
+                "the node", device=a[2:-1], kind=kind)
         if kind in _LOOP_ONLY and engine in ("exact", "dsed"):
             raise unsupported(
                 str(engine), "recorders",
@@ -253,7 +263,7 @@ def _refuse(kw: dict, recs: "list[Recorder]", t_start: float,
                 raise ValueError(f"recorder {r.name!r}: {e}") from None
             _check_device_atoms(
                 getattr(kw.get("builder"), "builder", kw.get("builder")),
-                r, p, atoms, kw.get("engine"))
+                r, p, atoms, kw.get("engine"), kw.get("integrator"))
         for k, (a, b) in enumerate(r.windows):
             # a window may end after t_end: it is reported open (NaN) and a
             # run resumed from final_snapshot continues it (task 0b.7)

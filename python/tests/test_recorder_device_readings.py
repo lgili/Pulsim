@@ -239,3 +239,33 @@ def test_vcvs_and_current_source_readings(eng):
     np.testing.assert_allclose(a["i(Ra)"][1:], a["i(I1)"][1:], rtol=1e-9)
     np.testing.assert_allclose(a["i(E1)"], -a["i(Ro)"], rtol=1e-9, atol=1e-15)
     np.testing.assert_allclose(a["p(E1)"], -a["p(Ro)"], rtol=1e-9, atol=1e-15)
+
+
+def test_device_readings_on_esdirk43_agree_with_trbdf2_and_refuse_the_capacitor():
+    # integration 14i: switch, diode, resistor and source readings are
+    # functions of the committed state: in the loop on integrator='esdirk43'
+    # too, and their window energies agree with the TR-BDF2 run's
+    probes = [q for q in _BUCK_P if q != "p(C)"]
+    e = {}
+    for integ, extra in (("trbdf2", {}), ("esdirk43", {"integrator": "esdirk43"})):
+        b, fn, t_end, _, _ = _buck()
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            res = p.simulate(b, t_end, switch_fn=fn, **_RUNS["trbdf2"], **extra,
+                             recorders=[p.Recorder("e", probes, keep="none", windows=[(A, B)])])
+        assert res.recorder_feed["mode"] == "in-loop", res.recorder_feed
+        e[integ] = {q: res.recorded["e"].windows[q]["integral"][0] for q in probes}
+    supplied = -e["trbdf2"]["p(V)"]
+    for q in probes:
+        # both runs at rtol 1e-7; seen <= 2e-5 of the supplied energy
+        print(f"{q}: esdirk43 - trbdf2 = {(e['esdirk43'][q] - e['trbdf2'][q]) / supplied:.2e} "
+              "of the supplied energy", file=sys.stderr)
+        assert abs(e["esdirk43"][q] - e["trbdf2"][q]) <= 2e-4 * supplied, q
+    # a capacitor's companion current misses KCL on the first ESDIRK step
+    # after an event (~1e-5 of the node's current): refused by name
+    b, fn, t_end, _, _ = _buck()
+    with pytest.raises(p.UnsupportedError) as err:
+        p.simulate(b, t_end, switch_fn=fn, **_RUNS["trbdf2"], integrator="esdirk43",
+                   recorders=[p.Recorder("r", ["i(C)"])])
+    assert (err.value.feature, err.value.device, err.value.kind) == (
+        "integrator=esdirk43", "C", "capacitor")

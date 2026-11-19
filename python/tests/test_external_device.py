@@ -497,3 +497,22 @@ def test_threaded_sweep_with_an_external_device_equals_the_serial_run(libs):
     threaded = p.sweep(factory, parallel=True, backend="thread", n_workers=8, **grid)
     for k in ("last", "peak"):
         assert np.array_equal(serial.kpis[k], threaded.kpis[k])
+
+
+@pytest.mark.parametrize("engine", ["pwl", "trbdf2"])
+def test_recorders_with_an_external_device_in_the_circuit(libs, engine):
+    """In the loop the external device has no current law: the other
+    readings are fed in the loop, and its own i() falls back to the stored
+    arrays as every no-law pool kind does, where res.i refuses it by name."""
+    kw = dict(dt=1e-6) if engine == "pwl" else dict(rtol=1e-6)
+    b = _rectifier(libs, True)
+    res = p.simulate(b, 2e-3, engine=engine, device_path="interface", **kw,
+                     recorders=[p.Recorder("r", ["v(out)"])])
+    assert res.recorder_feed["mode"] == "in-loop", res.recorder_feed
+    np.testing.assert_allclose(res.recorded["r"]["v(out)"],
+                               np.asarray(res.states)[:, b.node_id_of("out")],
+                               rtol=1e-12, atol=0.0)
+    with pytest.raises(NotImplementedError, match="branch 'D'"):
+        p.simulate(_rectifier(libs, True), 2e-3, engine=engine,
+                   device_path="interface", **kw,
+                   recorders=[p.Recorder("r", ["i(D)"])])
