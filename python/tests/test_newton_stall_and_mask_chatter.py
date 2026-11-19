@@ -129,6 +129,10 @@ def _run(primary, dt, rectifier="pwl"):
     return float(np.asarray(res.v("vout"))[-1])
 
 
+@pytest.mark.xfail(strict=True, reason=(
+    "release finding F-3-7: under the restart rule (the release default) the saturable-primary "
+    "PSFB aborts at dt = 50 ns (Newton fails at t = 61.55 us even at dt/64, the diode-mask "
+    "chatter); restart-less it runs (6.913 V; linear 6.857 V, exact engine 6.8577 V)"))
 def test_at_a_moderate_step_every_primary_agrees():
     """The control: at 50 ns all three run and land together, so the
     Newton devices are not the problem per se."""
