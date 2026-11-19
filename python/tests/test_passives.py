@@ -118,18 +118,27 @@ def test_c0_is_the_ideal_capacitor_voltage():
 
 def test_esr_step_in_the_ripple():
     # +-1000 V behind 1 kOhm into 100 uF + 50 mOhm: the current reverses
-    # from -1 A to +1 A (to 5e-5); the capacitor voltage barely moves in
-    # one step (trapezoid: h/2C*(i- + i+) = 0), so the terminal voltage
-    # steps by esr * delta_i.
+    # from -1 A to +1 A at t0; v_C is continuous, so the terminal voltage
+    # steps by esr * delta_i, plus what C charges over the sample gap. The
+    # truth is the closed-form RC response (tau = (R + esr) C) from v_C = 0.
+    R, C, esr, t0 = 1000.0, 100e-6, 50e-3, 5e-9
     b = p.CircuitBuilder()
-    b.add_pulse_voltage_source("V", "s", "gnd", -1000.0, 1000.0, 5e-9, 1.0)
-    b.add_resistor("R", "s", "a", 1000.0)
-    b.add_capacitor("C", "a", "gnd", 100e-6, esr=50e-3)
+    b.add_pulse_voltage_source("V", "s", "gnd", -1000.0, 1000.0, t0, 1.0)
+    b.add_resistor("R", "s", "a", R)
+    b.add_capacitor("C", "a", "gnd", C, esr=esr)
     r = p.simulate(b, t_end=10e-9, dt=1e-10, engine="pwl")
+    t = np.asarray(r.times)
     v = np.asarray(r.v("a"))
     k = int(np.argmax(np.asarray(r.v("s")) > 0.0))   # first sample at +1000 V
-    expected = 50e-3 * 2000.0 / (1000.0 + 50e-3)
-    assert v[k] - v[k - 1] == pytest.approx(expected, rel=1e-6)
+    tau = (R + esr) * C
+
+    def v_a(tt, vs):
+        vc0 = -1000.0 * (1.0 - math.exp(-min(tt, t0) / tau))
+        vc = vc0 if vs < 0 else vs + (vc0 - vs) * math.exp(-(tt - t0) / tau)
+        return vc + esr * (vs - vc) / (R + esr)
+
+    expected = v_a(t[k], 1000.0) - v_a(t[k - 1], -1000.0)
+    assert v[k] - v[k - 1] == pytest.approx(expected, rel=1e-9)
 
 
 def test_inductor_self_resonance_from_c_par():
