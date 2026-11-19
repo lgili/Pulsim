@@ -496,7 +496,7 @@ def render():
     L += [f"| {e} | `{k}` | `{x.value!r}` | `{x.change}` | {x.decision} |" for e, k, x in nd.table()]
     L += ["", "Not applied (not expressible through the harness on this tree):", ""]
     L += [f"- {e}: {w} (`{c}`): {y}" for e, w, c, y in nd.NOT_APPLIED]
-    L += ["", f"## Counts, differential matrix ({len(diff)} circuits)", "",
+    L += ["", "## Counts, differential matrix", "", f"{len(diff)} circuits.",
           "Graded as `REFERENCE_STATUS.md` (strict gate, harness tolerances, suspect -> unverified).",
           "`timeout`: the cell passed the per-cell limit and was killed.", "",
           "| configuration | group | " + " | ".join(KINDS) + " | cells | wall (s) |",
@@ -511,7 +511,7 @@ def render():
     L += ["", f"Configuration (a) reproduces REFERENCE_STATUS.md's strict counts: **{'yes' if ok else 'NO'}**"
           f" (read from that file: {exp}).", ""]
     if ana:
-        L += [f"## Counts, analytic set ({len(ana)} cases; closed-form truth, frozen ceilings)", "",
+        L += ["## Counts, analytic set", "", f"{len(ana)} cases; closed-form truth, frozen ceilings.", "",
               "| configuration | " + " | ".join(KINDS) + " |", "|---|" + "---:|" * len(KINDS)]
         for n in CONFIGS:
             cnt, tot = _counts(ana, n)
@@ -595,9 +595,18 @@ def render():
 
 
 def blockers(allu, rows):
+    import subprocess
+    head = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--short=8", "HEAD"], capture_output=True,
+                          text=True, encoding="utf-8", check=True).stdout.strip()
     L = ["# Next-defaults rehearsal", "",
-         "Rehearsal of the number-changing release on `feat/core-integration` fe75ee01 (method and",
-         "tables below the blocker list).", "",
+         f"Rehearsal of the number-changing release, rendered on `{head}` from the cell cache of `run`",
+         "(method and tables below the blocker list; the pytest blast radius states its own run).", ""]
+    if not any("output_rtol" in d for d in nd.PROFILE.values()):
+        L += ["The profile at this head has no `output_rtol` (the exact engine's output-grid rule is not",
+              "integrated yet): `auto+next` runs the exact engine without dt at its default output",
+              "ceiling, so its strict counts are expected to stay where the previous rehearsal put them",
+              "(80 / 28 / 1); the measured counts are in the tables below.", ""]
+    L += [
          "## Ranked blocker list", "",
          "### 1. Cells worse under the profile than under today's default, by class",
          "", "The first three classes (fails, samples wrong, disagree without a truth) are engine",
@@ -646,8 +655,8 @@ def blockers(allu, rows):
         L.append("(none)")
     L += suite_refusals()
     better = collections.Counter((e, bs) for e in rows for (u, v, a, b, r, bs) in rows[e] if v == "better")
-    L += ["", f"### 2. Accepted changes of number ({sum(better.values())} cells better under the profile)", "",
-          "By engine and basis: " + ", ".join(f"{e} {bs} {n}" for (e, bs), n in sorted(better.items()))
+    L += ["", "### 2. Accepted changes of number", "",
+          f"{sum(better.values())} cells better under the profile. By engine and basis: " + ", ".join(f"{e} {bs} {n}" for (e, bs), n in sorted(better.items()))
           + ". Each is listed in 'Better under the full profile' below with its basis; the CHANGELOG",
           "migration note of the release cites them.", ""]
     L += ["### 3. Owner decisions (add-kernel-simulation-object DECISIONS 23, branch "
