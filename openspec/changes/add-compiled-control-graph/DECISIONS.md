@@ -823,3 +823,39 @@ then ticked themselves): the queue path changed no number.
   label / state runs and a two-rate chain byte-identical to the tree
   before. The full ctest had not finished building when this was written:
   run it before pushing.
+
+## G34. The tick Jacobian: block laws on the AD scalar (2026-11-19)
+
+- `block_laws.h` stays one C99 file (export_c copies it verbatim, checked
+  `-std=c99 -Wall -Wextra -Werror -pedantic`). In C++ every real-valued
+  law is a template on `pl_real` (`PL_TPL`); the double instantiation is
+  the same expression, so plain runs are byte-identical by construction
+  (goldens 21/21, stateful, engines, steps, pwl 390/390, trbdf2 371/371,
+  1580 dumped calls: all identical). Double-only: `pl_cos/sin_call`,
+  `pl_mux_index`, `pl_pwm` (a PWM leg's derivative is the modulator's
+  geometry, not a law).
+- Kinks: every comparison in a law goes through `PL_LT/GT/LE/GE/NE` or
+  `PL_KINK` (abs, the PLL wrap). For a non-arithmetic scalar it notes
+  (law, a, b, side, live) in a thread-local sink; for double it is the
+  bare comparison. `tick_jacobian` returns the notes; the side taken is
+  reported, and a caller that differentiates refuses a live kink within
+  1e-9 relative (sensitivity `control_kink`). ON a kink the AD derivative
+  is the one-sided derivative of the branch the double law takes.
+- `CxxBlockChain.tick_jacobian(group, t, x, params, commit)`: forward
+  mode, one AD pass per column (a graph has a handful of states).
+  Columns: states, `sig:<slot>` (every slot), probed `x[i]`, then named
+  params (`<block>.<field>` or a const input `<block>.<input>`). Rows:
+  states after the tick, then every slot. `commit=True` runs the group's
+  own tick at (t, x) and checks the AD values equal the double values bit
+  for bit (`logic_error` otherwise). Refused by name: a block with no AD
+  law (`pwm`, `DelayBlock`, Python/C blocks), a compute delay.
+- Tests: `core/tests/layer2/test_block_laws_ad.cpp` — every law against a
+  central difference (relative step for |x| < 1e-2; tol 1e-9, the PLL
+  1e-7 for the roundoff of omega = 314 over a 1e-9 step), PI closed forms
+  (du/dKp = e, du/dKi = dx⁺/dKi = dt(e+e_prev)/2, du/dsp = Kp + Ki dt/2,
+  dx⁺/dx = 1), the saturated side, a tick ON the kink (closest ≤ 1e-15).
+  Layer2 binary 169/169 cases on Eigen 5.
+- Group 7 NOT done: 7.1 / 7.3 need the continuous states inside the
+  plant's propagator (on the exact path `dsed/scheduler.hpp`, out of this
+  slice's scope) and 7.2 a located event source (hook requests (3) / (4)
+  above stand). The AD laws are the piece 7.1 needs from this track.

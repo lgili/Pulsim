@@ -3529,6 +3529,10 @@ class CxxChainPwmGate:
     """
     def __call__(self, t: float) -> SwitchStateMask:
         ...
+    def legs(self) -> list[tuple[int, int, float, float, float, float]]:
+        """
+        Per leg: (switch bit, duty slot, period, phase, d t_rise / d duty, d t_fall / d duty) from the modulator's geometry.
+        """
     def next_edge_after(self, t: float) -> float:
         """
         First gate edge strictly after t under the duties held now (period starts and OFF thresholds); stale after a tick.
@@ -3797,9 +3801,17 @@ class CxxBlockChain:
         """
     def size(self) -> int:
         ...
+    def slot(self, name: str) -> int:
+        """
+        The signal slot of channel `name` (allocated on first mention).
+        """
     def tick_counts(self) -> list[int]:
         """
         Ticks per group (index 0: evaluations of the every-call group).
+        """
+    def tick_jacobian(self, group: int, t: float, x: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"], params: collections.abc.Sequence[str] = [], commit: bool = False) -> dict[typing.Any, typing.Any]:
+        """
+        Exact Jacobian of one tick of rate group `group` at (t, x) from the graph's current state, by the block laws on the AD scalar: rows = the states after the tick then 'sig:<channel>' for every signal; cols = the states before it, the signals, the probed state entries 'x[i]', then `params` ('<block>.<field>' parameters or constant inputs). `kinks`: every comparison of a law the tick took (operands a, b, the side, live = it depends on a column). commit=True then runs the group's own tick at (t, x) (no counters, no recording).
         """
     def uncaptured_blocks(self) -> list[str]:
         """

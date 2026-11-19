@@ -235,3 +235,59 @@ confirmed. Found and fixed (each with a test in
 - 9.1 sweep guide waits for group 6; 9.2 is the verification of each
   push (ruff, pytest, the touched C++ targets; full ctest on the
   integration tree).
+
+## 14. Closed-loop sensitivities on the exact path (2026-11-19)
+
+- Scope: one rate group driving graph PWM gates (`bind_pi_to_switch`,
+  `ControlGraph` gates) through duty registers; probes read node
+  voltages. Parameters: `<block>.<field>` of the graph (kind "control")
+  plus every plant parameter as before. Refused by name: `<switch>.duty`
+  in a loop (the duty is a graph output), a graph gate without its ticks
+  (would run open), a tick-moving event, a live kink within 1e-9.
+- At tick kT (before the sample's events): S_c⁺ = J·[S_c; S_sig;
+  R S + dR xb; e_p] with J from `tick_jacobian` (control-graph G34); the
+  duty rows give S_d. At the gate's OFF edge t = phase + (k + d)T the jump
+  uses dτ = (∂t_off/∂d)·S_d = T·S_d (`CarrierPwm::edge_duty_derivative`,
+  rising edge 0), with the existing S⁺ = S⁻ + (f⁻ − f⁺)·dτ. Sign: a larger
+  duty delays the OFF edge, dτ > 0. Control: setting edge_dtau to 0, or
+  blinding the probe columns, breaks agreement by > 1% (tests).
+- Discrete-time saturation has no instant to shift: a clamp is decided at
+  a tick, and its derivative is one-sided (0 for Kp, Ki, setpoint while
+  clamped, the limit's own column 1). Central differences of the exact map
+  agree on both sides (ticks 3 / 6 / 8 / 50 / 150 of a run clamped for
+  ticks 0–4).
+- `pi.setpoint` moves the pi block's constant input only; the
+  `error` subtract's `a` is a separate parameter (`error.a`).
+- Measured (macOS arm64): closed-loop buck to 1 ms, AD vs central
+  differences of the exact map, max relative error at h/p = 1e-2…1e-7:
+  Kp 6.1e-5, 6.1e-7, 6.3e-9, 4.8e-9, 7.5e-8, 9.2e-7 (O(h²) then
+  roundoff); at 1e-4 / 1e-5: Ki 2.8e-9 / 6.8e-10, setpoint 4.1e-10 /
+  1.9e-10, L 7.7e-9 / 2.0e-9, R 9.5e-9 / 3.3e-9. Tests pin 1e-5, assert
+  1e-6. Steady state (20 ms, tick 1999): v = 5.000000000000, dV/dVref =
+  1.000, dV/dKp = −4.2e-14, dV/dKi = −7.3e-19, dV/dL = −3.6e-9, dV/dR =
+  −3.5e-15 (closed form 1, 0, 0, 0, 0).
+- Open: 8.2 (a graph-driven held source value as a sensitivity state —
+  the exact path closes the loop through gate edges only); closed-loop
+  `orbit_sensitivities` / Floquet multipliers with the controller state
+  (goal 4, not started: the period map must carry (x, x_c) and the tick
+  Jacobian is the controller block of M); TR-BDF2 closed-loop
+  sensitivities (stepper group 5).
+- Stage recurrence for Newton laws (not in scope, recorded): the exact
+  path refuses Newton kinds; a closed-loop gradient through one needs the
+  stepper's per-stage S recurrence S_{n+1} = −J⁻¹(∂F/∂x_n S_n + ∂F/∂p)
+  with the device Jacobian at the converged stage (`Params<S>` seeds
+  exist), the stage's own tick and edge terms ordered as here, and the
+  converged Newton J factor reused for the back-substitutions.
+- Fresh-context review (2026-11-19). Fixed: (1) coinciding OFF edges of
+  several legs added their shifts (2T·S_d for two switches on one duty):
+  now applied once when identical, refused when they differ (the event
+  splits); (2) the kink test was relative only, so `PL_GT(err, 0)` at
+  err = 3e-17 passed: floor 1e-12 absolute. Open: the PLL wrap notes only
+  the post-wrap side (θ just below 2π is not flagged; the fix
+  `PL_KINK(two_pi - fabs(theta), 0)` after the fmod waits for a rebuild —
+  the machine was out of disk); "live" means any seeded column separates
+  the operands, not the requested parameters (a sample_hold on its own
+  period is refused loudly, never wrong); a kink inside `pl_clamp` is
+  reported as `pl_clamp`, not the calling law; the replay ticks at
+  offset + kT, not the run's jittered instant (the OFF-edge check catches
+  a drift).

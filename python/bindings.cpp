@@ -5658,7 +5658,18 @@ void init_module(py::module_& m) {
             py::arg("t"))
         .def("next_edge_after", &ChainPwmGate::next_edge_after, py::arg("t"),
             "First gate edge strictly after t under the duties held now "
-            "(period starts and OFF thresholds); stale after a tick.");
+            "(period starts and OFF thresholds); stale after a tick.")
+        .def("legs", [](const ChainPwmGate& self) {
+                std::vector<std::tuple<Index, Index, Real, Real, Real, Real>> out;
+                for (Size i = 0; i < self.legs.size(); ++i) {
+                    const auto& l = self.legs[i];
+                    const auto d = l.edge_duty_derivative();
+                    out.emplace_back(l.hs, self.leg_slots[i], l.T, l.phase, d[0], d[1]);
+                }
+                return out;
+            },
+            "Per leg: (switch bit, duty slot, period, phase, d t_rise / d duty, "
+            "d t_fall / d duty) from the modulator's geometry.");
 
     py::class_<ChainSignalGate>(m, "CxxChainSignalGate", py::dynamic_attr(),
         "A discrete gate: a switch is ON while its control-graph signal "
@@ -5733,6 +5744,35 @@ void init_module(py::module_& m) {
             py::arg("block"), py::arg("group"))
         .def_property_readonly("has_rates", &BlockChain::has_rates)
         .def("group_period", &BlockChain::group_period, py::arg("group"))
+        .def("slot", [](BlockChain& self, const std::string& name) { return self.slot(name); },
+            py::arg("name"), "The signal slot of channel `name` (allocated on first mention).")
+        .def("tick_jacobian",
+            [](BlockChain& self, int group, Real t, const Vector& x,
+               const std::vector<std::string>& params, bool commit) {
+                const TickJacobian j = self.tick_jacobian(group, t, x, params, commit);
+                const auto nr = static_cast<py::ssize_t>(j.rows.size());
+                const auto nc = static_cast<py::ssize_t>(j.cols.size());
+                py::array_t<Real> J({nr, nc});
+                if (!j.J.empty()) std::memcpy(J.mutable_data(), j.J.data(), j.J.size() * sizeof(Real));
+                py::list kinks;
+                for (const auto& k : j.kinks) {
+                    kinks.append(py::dict(py::arg("block") = k.block, py::arg("law") = k.law,
+                                          py::arg("a") = k.a, py::arg("b") = k.b,
+                                          py::arg("side") = k.side, py::arg("live") = k.live));
+                }
+                return py::dict(py::arg("rows") = j.rows, py::arg("cols") = j.cols,
+                                py::arg("values") = j.values, py::arg("J") = J,
+                                py::arg("kinks") = kinks);
+            }, py::arg("group"), py::arg("t"), py::arg("x"),
+            py::arg("params") = std::vector<std::string>{}, py::arg("commit") = false,
+            "Exact Jacobian of one tick of rate group `group` at (t, x) from the "
+            "graph's current state, by the block laws on the AD scalar: rows = "
+            "the states after the tick then 'sig:<channel>' for every signal; "
+            "cols = the states before it, the signals, the probed state entries "
+            "'x[i]', then `params` ('<block>.<field>' parameters or constant "
+            "inputs). `kinks`: every comparison of a law the tick took (operands "
+            "a, b, the side, live = it depends on a column). commit=True then "
+            "runs the group's own tick at (t, x) (no counters, no recording).")
         .def("group_offset", &BlockChain::group_offset, py::arg("group"))
         .def("tick_counts", &BlockChain::tick_counts,
             "Ticks per group (index 0: evaluations of the every-call group).")
@@ -5901,12 +5941,14 @@ void init_module(py::module_& m) {
                 blk->k = k;
                 auto p = make_gain_step(self, blk, x, out);
                 self.add(std::move(p.step), std::move(p.reset));
+                self.set_last_ad(std::move(p.ad));
             }, py::arg("k"), py::arg("x"), py::arg("output"))
         .def("add_subtract",
             [](BlockChain& self, InputRef a, InputRef b, std::string out) {
                 auto blk = std::make_shared<Subtract>();
                 auto p = make_subtract_step(self, blk, a, b, out);
                 self.add(std::move(p.step), std::move(p.reset));
+                self.set_last_ad(std::move(p.ad));
             }, py::arg("a"), py::arg("b"), py::arg("output"))
         .def("add_sum",
             [](BlockChain& self, Real w0, Real w1, Real w2,
@@ -5951,6 +5993,7 @@ void init_module(py::module_& m) {
                 auto p = make_pi_controller_step(self, blk, setpoint, measured,
                                                        dt_ref, out);
                 self.add(std::move(p.step), std::move(p.reset));
+                self.set_last_ad(std::move(p.ad));
             }, py::arg("Kp"), py::arg("Ki"),
                 py::arg("output_min"), py::arg("output_max"),
                 py::arg("setpoint"), py::arg("measured"),
@@ -6012,6 +6055,7 @@ void init_module(py::module_& m) {
                 blk->min_v = min_v; blk->max_v = max_v;
                 auto p = make_limiter_step(self, blk, x, out);
                 self.add(std::move(p.step), std::move(p.reset));
+                self.set_last_ad(std::move(p.ad));
             }, py::arg("min_v"), py::arg("max_v"),
                 py::arg("x"), py::arg("output"))
         .def("add_moving_average",
@@ -6119,6 +6163,7 @@ void init_module(py::module_& m) {
                                               std::move(inputs), outputs);
                     self.add(std::move(p.step), std::move(p.reset),
                              std::move(p.update));
+                    self.set_last_ad(std::move(p.ad));
                 } catch (...) {
                     self.discard_pending();
                     throw;

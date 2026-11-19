@@ -201,7 +201,7 @@ class _Param:
     period: float = 0.0
 
 
-def _resolve(builder, names, switch_fn) -> list:
+def _resolve(builder, names, switch_fn, loop=None) -> list:
     if isinstance(names, str):
         names = [names]
     names = list(names)
@@ -223,11 +223,21 @@ def _resolve(builder, names, switch_fn) -> list:
                 f"sensitivities: {nm!r} is not '<component>.<field>'.")
         cname, fld = nm.rsplit(".", 1)
         c = comps.get(cname)
+        if c is None and loop is not None and loop.is_param(nm):
+            # a block parameter or constant input of the loop's graph
+            out.append(_Param(nm, cname, "control", float("nan")))
+            continue
         if c is None:
             raise ValueError(
                 f"sensitivities: {nm!r}: no component named {cname!r} "
                 f"(components: {sorted(comps)}).")
         kind = c["kind"]
+        if kind == "switch" and fld == "duty" and loop is not None:
+            raise _unsup(
+                "sensitivity_parameter", f"sensitivities: {nm!r}: in a closed "
+                "loop the duty is the controller's output, not a parameter; "
+                "differentiate the controller's parameters ('<block>.<field>').",
+                device=cname, kind="duty")
         if kind == "switch" and fld == "duty":
             out.append(_Param(nm, cname, "duty", float("nan"),
                               bit=int(builder.switch_index_of(cname))))
@@ -562,6 +572,8 @@ def _check_circuit(builder, switch_fn, b_extra_fn):
         return _ConstSchedule(builder.graph.num_switches)
     from .periodic_steady_state import _closed_loop_source
     src = _closed_loop_source(switch_fn)
+    if src and _graph_gate(switch_fn) is not None:
+        return switch_fn          # a control graph's PWM gate: see _Loop
     if src:
         raise _unsup(
             "closed_loop", f"sensitivities: switch_fn comes from {src}: its "
@@ -581,6 +593,209 @@ def _check_circuit(builder, switch_fn, b_extra_fn):
     return switch_fn
 
 
+_KINK_RTOL = 1e-9   # a law's comparison this close to its switch point: ON a kink
+
+
+def _graph_gate(sf):
+    """The control graph behind a PWM gate made by a graph
+    (``CxxChainPwmGate``, e.g. ``bind_pi_to_switch``), or None."""
+    g = getattr(sf, "_graph", None)
+    if g is None or not hasattr(sf, "legs") or not hasattr(g, "_cxx_chain"):
+        return None
+    return g
+
+
+class _Leg:
+    __slots__ = ("bit", "slot", "T", "phase", "drise", "dfall", "row")
+
+    def __init__(self, bit, slot, T, phase, drise, dfall):
+        self.bit, self.slot, self.T, self.phase = int(bit), int(slot), T, phase
+        self.drise, self.dfall, self.row = drise, dfall, -1
+
+
+class _Loop:
+    """A closed loop on the exact path (``add-parameter-sensitivities``
+    group 8): one rate group of a control graph ticking at ``offset + k
+    T`` on the state ``x(kT)``, its signals driving a PWM gate's duty
+    registers. At a tick the controller's state and signals ``c`` move by
+    the tick map ``c+ = g(c, y, p)``, ``y`` the probed node voltages, so
+
+        S_c+ = dg/dc . S_c + dg/dy . (R S + dR xb) + dg/dp
+
+    with the exact Jacobian of ``g`` (``CxxBlockChain.tick_jacobian``: the
+    block laws on the AD scalar). A duty change moves its leg's edges by
+    the modulator's own ``d t_edge / d duty`` (``T`` for the OFF edge of a
+    trailing-edge leg, 0 for its period start), which enters the event
+    jump ``S+ = S- + (f- - f+) dtau`` as ``dtau = d t_edge/d duty . S_duty``.
+    The graph is replayed tick by tick from its state before the run
+    (``commit``), and the replay must land the run's OFF edges."""
+
+    def __init__(self, builder, sf, ticks):
+        g = _graph_gate(sf)
+        cxx = g._cxx_chain
+        groups = sorted(getattr(g, "_groups", {}).values())
+        if not ticks:
+            raise _unsup(
+                "closed_loop", "sensitivities: switch_fn follows a control "
+                "graph that this run does not tick, so the loop would run "
+                "open. Give the loop to simulate(engine='dsed', "
+                "closed_loops=[loop] or step_observer=loop.step_observer, "
+                "sensitivities=[...]).")
+        if len(groups) != 1 or len(ticks) != 1:
+            raise _unsup(
+                "closed_loop", "sensitivities: the closed loop has "
+                f"{len(groups)} rate group(s) and {len(ticks or ())} tick "
+                "source(s); the exact sensitivity path differentiates one "
+                "rate group of one control graph driving its PWM gate.")
+        self.cxx, self.gid = cxx, int(groups[0])
+        self.T = float(cxx.group_period(self.gid))
+        self.offset = float(cxx.group_offset(self.gid))
+        _f, period, off = ticks[0]
+        if abs(float(period) - self.T) > 1e-12 * self.T or float(off) != self.offset:
+            raise _unsup("closed_loop", "sensitivities: the tick source does "
+                         "not run the gate's control graph at its own rate.")
+        self.ticks = ticks
+        self.legs = [_Leg(*lg) for lg in sf.legs()]
+        for lg in self.legs:
+            if not (math.isfinite(lg.drise) and math.isfinite(lg.dfall)):
+                raise _unsup(
+                    "closed_loop", "sensitivities: a dead-time pair leg "
+                    f"(switch bit {lg.bit}): how its edges move with the duty "
+                    "is not derived.", kind="duty")
+        self.n_nodes = int(builder.graph.num_nodes)
+        self.n_full = max(int(builder.pool.state_size(builder.graph)), self.n_nodes)
+        d = self._jac(0.0, np.zeros(self.n_full), [], False)
+        self.rows = list(d["rows"])
+        slot_row = {int(cxx.slot(r[4:])): i for i, r in enumerate(self.rows)
+                    if r.startswith("sig:")}
+        for lg in self.legs:
+            lg.row = slot_row.get(lg.slot, -1)
+            if lg.row < 0:
+                raise _unsup("closed_loop", "sensitivities: the gate's duty "
+                             f"(switch bit {lg.bit}) is not a signal of the "
+                             "ticking group.")
+        bad = [c for c in d["cols"] if c.startswith("x[")
+               and int(c[2:-1]) >= self.n_nodes]
+        if bad:
+            raise _unsup("closed_loop", f"sensitivities: the controller reads "
+                         f"{bad}, a branch current: only node voltages have a "
+                         "recovery row on the exact path.")
+        self.cparams = []
+        self.st0 = self.st1 = None
+
+    def _jac(self, t, xf, params, commit):
+        try:
+            return self.cxx.tick_jacobian(self.gid, t, xf, params, commit)
+        except ValueError as e:
+            if "no derivative" in str(e) or "compute delay" in str(e):
+                raise _unsup("closed_loop", f"sensitivities: {e}.") from e
+            raise ValueError(f"sensitivities: {e}") from e
+
+    def is_param(self, name):
+        try:
+            self._jac(0.0, np.zeros(self.n_full), [name], False)
+        except ValueError:
+            return False
+        return True
+
+    def tick_times(self, n_ticks):
+        return [self.offset + k * self.T for k in range(int(n_ticks))]
+
+    def begin(self, params):
+        """Rewind the graph to its state before the run."""
+        self.cparams = [p.name for p in params if p.kind == "control"]
+        self.pcol = {p.name: j for j, p in enumerate(params)}
+        self.Sc = np.zeros((len(self.rows), len(params)))
+        self.S_duty = [np.zeros(len(params)) for _ in self.legs]
+        self.duty = [float("nan")] * len(self.legs)
+        self.history = []          # per tick: t, duties, S_duty, sides
+        self.cxx.restore_state(self.st0)
+
+    def end(self):
+        self.cxx.restore_state(self.st1)
+
+    def tick(self, ctx, t, x, S, keys):
+        n_p = S.shape[1]
+        xb = np.append(x, 1.0)
+        nn = self.n_nodes
+        v = [ctx.rec[k][:nn] @ xb for k in keys]
+        xf = np.zeros(self.n_full)
+        xf[:nn] = v[0]
+        j = self._jac(t, xf, self.cparams, True)
+        if list(j["rows"]) != self.rows:
+            raise RuntimeError("sensitivities: the tick map changed shape "
+                               f"({self.rows} -> {list(j['rows'])}).")
+        sides = []
+        for kk in j["kinks"]:
+            if not kk["live"]:
+                continue
+            a, b = float(kk["a"]), float(kk["b"])
+            sides.append((kk["block"], kk["law"], bool(kk["side"])))
+            # floor 1e-12: a comparison against 0 is ON its kink at noise level too
+            if not abs(a - b) > _KINK_RTOL * max(abs(a), abs(b), 1e-3):
+                raise _unsup(
+                    "control_kink",
+                    f"sensitivities: at the tick t = {t!r} block "
+                    f"{kk['block']!r} ({kk['law']}) sits on a kink of its "
+                    f"law ({a!r} against {b!r}): the derivative is one-sided "
+                    "there and the side a parameter change takes is not "
+                    "defined.", device=kk["block"], kind=kk["law"])
+        row = {r: i for i, r in enumerate(self.rows)}
+        Sin = np.zeros((len(j["cols"]), n_p))
+        for c, name in enumerate(j["cols"]):
+            if name in row:
+                Sin[c] = self.Sc[row[name]]
+            elif name.startswith("x["):
+                i = int(name[2:-1])
+                if len(v) > 1 and abs(v[1][i] - v[0][i]) > 1e-9 * max(
+                        1.0, abs(v[0][i])):
+                    raise _unsup(
+                        "closed_loop", f"sensitivities: the controller samples "
+                        f"node {i} at t = {t!r}, where an event makes it jump "
+                        f"({v[0][i]!r} -> {v[1][i]!r}): which side the tick "
+                        "reads is not a function of the parameters.")
+                k0 = keys[0]
+                Sin[c] = ctx.rec[k0][i, :-1] @ S + ctx.drec[k0][:, i, :] @ xb
+            else:
+                Sin[c, self.pcol[name]] = 1.0
+        self.Sc = np.asarray(j["J"]) @ Sin
+        vals = j["values"]
+        for li, lg in enumerate(self.legs):
+            self.S_duty[li] = self.Sc[lg.row].copy()
+            self.duty[li] = float(vals[lg.row])
+        self.history.append((t, list(self.duty),
+                             [s.copy() for s in self.S_duty], tuple(sides)))
+
+    def edge_dtau(self, ev):
+        """``dtau/dp`` of a gate edge: each leg whose bit moved, by its
+        modulator's edge geometry; checks the replayed duty lands it."""
+        shifts = []
+        for li, lg in enumerate(self.legs):
+            o, nw = bool(ev["old"].get(lg.bit)), bool(ev["new"].get(lg.bit))
+            if o == nw:
+                continue
+            if o and not nw:
+                k = math.floor((ev["t"] - lg.phase) / lg.T + 1e-9)
+                want = lg.phase + (k + self.duty[li]) * lg.T
+                if abs(ev["t"] - want) > 1e-9 * lg.T:
+                    raise RuntimeError(
+                        f"sensitivities: the replayed controller puts the OFF "
+                        f"edge of switch bit {lg.bit} at {want!r}, the run at "
+                        f"{ev['t']!r}: the replay is not the run.")
+            shifts.append((lg.dfall if (o and not nw) else lg.drise)
+                          * self.S_duty[li])
+        if not shifts:
+            return 0.0
+        # one event is one instant: legs moving together must move as one
+        # (same duty, same edge), else a perturbation splits the event
+        if any(not np.array_equal(s, shifts[0]) for s in shifts[1:]):
+            raise _unsup(
+                "closed_loop", f"sensitivities: at t = {ev['t']!r} gate edges "
+                "of several switches coincide but move differently with the "
+                "parameters: the event splits under a perturbation.")
+        return shifts[0]
+
+
 @dataclass
 class _Traj:
     times: np.ndarray              # (N,)
@@ -590,6 +805,7 @@ class _Traj:
     events: dict                   # k -> list of event dicts
     native: dict
     n_steps: int
+    ticks: dict = field(default_factory=dict)   # k -> control tick instant
 
 
 _EVENT_SAMPLE_TOL = 1e-12   # = detail::kEventSampleTol (period_integrals.hpp)
@@ -616,7 +832,7 @@ def _attach_events(times, log) -> dict:
     return events
 
 
-def _run(builder, sf, x0, t_end, dt_max, dt_init, ic_from_builder):
+def _run(builder, sf, x0, t_end, dt_max, dt_init, ic_from_builder, loop=None):
     from . import PwlStateSpaceCache
     from . import _pulsim
     cache = PwlStateSpaceCache(builder.graph, builder.pool)
@@ -638,10 +854,19 @@ def _run(builder, sf, x0, t_end, dt_max, dt_init, ic_from_builder):
         from ._dsed_dispatch import MODE_GUARD, _shadow_h_e
         if MODE_GUARD:
             guard = {"mode_guard_h_e": _shadow_h_e(builder, sf, t_end)}
+    if loop is not None:
+        guard.update(
+            tick_fns=[f for f, _p, _o in loop.ticks],
+            tick_periods=[float(p_) for _f, p_, _o in loop.ticks],
+            tick_offsets=[float(o) for _f, _p, o in loop.ticks],
+            tick_monitors=[False] * len(loop.ticks))
+        loop.st0 = loop.cxx.save_state()
     r = _pulsim.run_ped_native_builder(
         ad, sf, x0, t_end, rtol=1e-11, atol=1e-14, dt_init=dt_init,
         dt_max=dt_max, store_every=1, enable_event_projection=False,
         diode_law_rel=0.0, event_log=True, **guard)
+    if loop is not None:
+        loop.st1 = loop.cxx.save_state()
     if int(r["n_exact_steps"]) != int(r["n_accept"]):
         raise _unsup(
             "sensitivities", "sensitivities: the exact stepper took "
@@ -660,8 +885,17 @@ def _run(builder, sf, x0, t_end, dt_max, dt_init, ic_from_builder):
         for e in events.get(k, ()):
             cur = e["new"]
         masks.append(cur)
-    return _Traj(times, states, masks, left, events, r, int(r["n_accept"])), \
-        x0
+    traj = _Traj(times, states, masks, left, events, r, int(r["n_accept"]))
+    if loop is not None:
+        n_t = int(list(r.get("control_tick_counts", [0]))[0])
+        tol = 4 * np.finfo(float).eps * max(float(times[-1]), loop.T)
+        for tk in loop.tick_times(n_t):
+            k = int(np.searchsorted(times, tk - tol, side="left"))
+            if k == len(times) or abs(times[k] - tk) > tol:
+                raise RuntimeError(f"sensitivities: the tick at t = {tk!r} has "
+                                   "no sample of its own in the trajectory.")
+            traj.ticks[k] = tk
+    return traj, x0
 
 
 # ----------------------------------------------------------------------
@@ -688,7 +922,7 @@ class _Context:
         derivs = [None] * n_p
         self.n_assemblies = 1
         for j, prm in enumerate(params):
-            if prm.kind != "duty":
+            if prm.kind not in ("duty", "control"):
                 derivs[j] = _param_derivative(
                     builder, prm, self.mask_by_key, h_max, ic_from_builder,
                     base, len(traj.states[0]) + 1)
@@ -747,6 +981,7 @@ class _Context:
                     self.S0[:, j] = derivs[j]["__ic__"]
         self.diodes = {c["branch_id"]: c for c in self.comps
                        if c["kind"] == "diode"}
+        self.loop = None
 
     def f(self, key, x):
         Ab = self.modes[key].Ab
@@ -781,6 +1016,8 @@ def _jump(ctx, ev, x, S, params):
             if prm.kind == "duty" and ev["old"].get(prm.bit) \
                     and not ev["new"].get(prm.bit):
                 dtau[j] = prm.period
+        if ctx.loop is not None:
+            dtau = dtau + ctx.loop.edge_dtau(ev)
     elif ev["type"] in (_DIODE_ON, _DIODE_OFF):
         c = ctx.diode_of(ev["name"])
         a, k = (int(v) for v in c["nodes"])
@@ -823,11 +1060,27 @@ def _propagate(ctx, traj, S0):
     S = S0.copy()
     scale = np.abs(traj.states).max(axis=0) + 1e-12
     n_sens = 0
+    loop = ctx.loop
+    if loop is not None:
+        loop.begin(params)
     for k in range(N):
         x = traj.states[k]
         S_all[k] = S
+        tick = loop is not None and k in traj.ticks
+        if tick:
+            # the tick reads x(kT); an event at the same instant must leave
+            # the sensitivity continuous (a period start: dtau = 0)
+            loop.tick(ctx, traj.ticks[k], x, S,
+                      [str(traj.mask_left[k]), str(traj.masks[k])])
         for ev in traj.events.get(k, ()):
             S, dtau = _jump(ctx, ev, x, S, params)
+            if tick and np.any(dtau != 0):
+                raise _unsup(
+                    "closed_loop", f"sensitivities: the event {ev['name']!r} "
+                    f"moves with the parameters and falls on the control tick "
+                    f"at t = {ev['t']!r} (a duty at 0 or 1, or a diode event "
+                    "on the tick): which the controller samples first is not "
+                    "a function of the parameters.")
             dtaus.append(dict(ev, k=k, dtau=dtau))
         if k in traj.events:
             S_right[k] = S
@@ -903,6 +1156,10 @@ class SensitivityResult:
     _S_right: dict = field(default_factory=dict, repr=False)
     #: an orbit run (its two ends are one point)
     periodic: bool = False
+    #: a closed loop: per control tick ``times``, the legs' ``duty``,
+    #: ``duty_sens`` (tick, leg, param) and the ``sides`` its laws took
+    #: (block, law, side) — a change of sides is a saturation / clamp tick
+    control: Optional[dict] = None
 
     # -- signals ---------------------------------------------------------
     def _signal(self, name):
@@ -1368,7 +1625,11 @@ def _near_misses(ctx, traj, K=8):
 def _compute(ctx, traj, S0=None):
     params = ctx.params
     S0 = ctx.S0 if S0 is None else S0
-    S_all, S_right, dtaus, n_sens = _propagate(ctx, traj, S0)
+    try:
+        S_all, S_right, dtaus, n_sens = _propagate(ctx, traj, S0)
+    finally:
+        if ctx.loop is not None:
+            ctx.loop.end()       # the graph as the run left it
     flags = _near_misses(ctx, traj)
     if flags:
         f = flags[0]
@@ -1384,17 +1645,28 @@ def _compute(ctx, traj, S0=None):
                     n_assemblies=ctx.n_assemblies,
                     tiers={k: m.tier for k, m in ctx.modes.items()})
     S_all.setflags(write=False)
-    return SensitivityResult(
+    control = None
+    if ctx.loop is not None:
+        h = ctx.loop.history
+        control = dict(
+            times=np.array([e[0] for e in h]),
+            duty=np.array([e[1] for e in h]),
+            duty_sens=np.array([e[2] for e in h]).reshape(len(h), -1, len(params)),
+            sides=[e[3] for e in h])
+        counters["n_ticks"] = len(h)
+    sr = SensitivityResult(
         params=[p.name for p in params], labels=list(ctx.labels),
         times=traj.times, states=S_all,
         event_dtau=[dict(name=d["name"], t=d["t"], k=d["k"], old=d["old"],
                          new=d["new"], dtau=d["dtau"]) for d in dtaus],
         flags=flags, counters=counters, _ctx=ctx, _traj=traj,
         _S_right=S_right)
+    sr.control = control
+    return sr
 
 
-def _prepare(builder, names, sf, t_end):
-    params = _resolve(builder, names, sf)
+def _prepare(builder, names, sf, t_end, loop=None):
+    params = _resolve(builder, names, sf, loop)
     for prm in params:
         if prm.kind == "duty":
             prm.period, prm.value = _duty_period(
@@ -1410,7 +1682,7 @@ def _prepare(builder, names, sf, t_end):
 def simulate_sensitivities(builder, t_end, *, sensitivities, dt=None,
                            t_start=0.0, switch_fn=None, initial_state=None,
                            ic_from_builder=False, dt_init=None,
-                           b_extra_fn=None, integrator=None):
+                           b_extra_fn=None, integrator=None, ticks=None):
     """The ``simulate(engine='dsed', sensitivities=[...])`` path: one run
     of the exact stepper (events located, no event projection: the map
     ``periodic_steady_state`` differentiates) and the sensitivities of
@@ -1422,8 +1694,14 @@ def simulate_sensitivities(builder, t_end, *, sensitivities, dt=None,
                      f"{integrator!r}; the sensitivities are those of the "
                      "exact stepper (integrator='auto' or 'rk45').")
     sf = _check_circuit(builder, switch_fn, b_extra_fn)
+    loop = _Loop(builder, sf, ticks) if _graph_gate(sf) is not None else None
+    if loop is None and ticks:
+        raise _unsup(
+            "closed_loop", "sensitivities: control ticks that drive no PWM "
+            "gate of a control graph (a Python observer, a monitor): their "
+            "effect on the circuit has no derivative here.")
     window = float(t_end) - float(t_start)
-    params = _prepare(builder, sensitivities, sf, window)
+    params = _prepare(builder, sensitivities, sf, window, loop)
     dt_max = float(dt) if dt else 1e-5
     if initial_state is None and not ic_from_builder:
         from . import _pulsim
@@ -1434,9 +1712,10 @@ def simulate_sensitivities(builder, t_end, *, sensitivities, dt=None,
         ad.set_mask(sf(0.0))
         initial_state = np.zeros(int(ad.n_state))
     traj, _x0 = _run(builder, sf, initial_state, window, dt_max,
-                     dt_init if dt_init else 1e-9, ic_from_builder)
-    sr = _compute(_Context(builder, params, traj, ic_from_builder, dt_max),
-                  traj)
+                     dt_init if dt_init else 1e-9, ic_from_builder, loop)
+    ctx = _Context(builder, params, traj, ic_from_builder, dt_max)
+    ctx.loop = loop
+    sr = _compute(ctx, traj)
     res = _result_from_native(traj.native, t_start)
     sr.times = traj.times + float(t_start)
     res.sensitivity = sr
