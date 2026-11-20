@@ -11,6 +11,1080 @@ import numpy
 import numpy.typing
 import typing
 __all__: list[str] = ['BranchKind', 'BuilderScope', 'CacheMetrics', 'ChargeLaw', 'ChargeTable', 'Circuit', 'CircuitBuilder', 'CommutationEvent', 'ConductionTable', 'ControlGraphBuildError', 'ConvergenceError', 'CxxBlockChain', 'CxxBlockChainState', 'CxxChainBExtra', 'CxxChainPwmGate', 'CxxChainSignalGate', 'CxxChainTick', 'CxxClarkeTransform', 'CxxFirstOrderLowPass', 'CxxGain', 'CxxInputRef', 'CxxIntegrator', 'CxxInverseParkTransform', 'CxxLimiter', 'CxxPIController', 'CxxPIDController', 'CxxPLL', 'CxxParkTransform', 'CxxPwmGenerator', 'CxxSpaceVectorModulator', 'CxxSubtract', 'DCOperatingPoint', 'DCSolveReport', 'DCStrategy', 'DeviceInfo', 'DeviceLossRecord', 'DevicePath', 'DevicePool', 'DiodeModeInconsistentError', 'DtRetry', 'DutyRegister', 'EventIterationBreach', 'FluxMapDQ', 'Graph', 'GridKind', 'IdealDiodeParams', 'ImplausibleVoltage', 'InductorGuardAction', 'InternalError', 'LiveRingHandle', 'LoadedCircuit', 'LossEvent', 'LossTable3D', 'MnaSweepKernelResult', 'NativeMultiMaskPwm', 'NativePwm2Switch', 'NewtonCounters', 'NewtonRoundoffBudgetExceeded', 'OptionsError', 'Parameter', 'ParametricRefactorMode', 'ParametricRefactorResult', 'PreflightFinding', 'PreflightIssue', 'PreflightOptions', 'PreflightReport', 'PulsimError', 'PwlStateSpaceCache', 'ReinitRecord', 'ResolutionRecord', 'RingingRecord', 'RunOptions', 'RunStats', 'Simulation', 'SimulationAborted', 'SimulationOptions', 'SimulationResult', 'SolverSnapshot', 'StoredKind', 'SwitchSchedule', 'SwitchStateMask', 'ThevArm', 'ThevArmParams', 'ThreePhaseLegIndices', 'UnsupportedError', 'block_laws_source', 'compose_chain_observers', 'compute_dc_op', 'compute_dc_op_with_strategy', 'compute_dc_operating_point', 'describe_implausible_voltage', 'device_field_table', 'dopri5_solve', 'dsed_period_map', 'dsed_periodic_orbit', 'engine_capabilities', 'find_implausible_voltage', 'full_bridge', 'half_bridge', 'ja_evaluate', 'ja_replay', 'load_yaml_file', 'load_yaml_string', 'make_carrier_pwm_fn', 'make_chain_switch_fn', 'make_combined_switch_fn', 'make_constant_switch_fn', 'make_dead_time_pwm_pair_fn', 'make_edge_list_fn', 'make_phase_control_fn', 'make_phase_shift_full_bridge_fn', 'make_pwm_switch_fn', 'make_spwm_pair_fn', 'make_three_phase_spwm_fn', 'radau_iia3_solve', 'run_auto_native', 'run_auto_native_builder', 'run_bdf2_native', 'run_bdf2_native_builder', 'run_mna_sweep_kernel', 'run_option_defaults', 'run_option_table', 'run_ped_native', 'run_ped_native_builder', 'run_transient', 'run_transient_bdf1', 'run_transient_trbdf2', 'run_transient_with_chain', 'shockley_saturation_current_at', 'shockley_voltage_for_current', 'static_device_readings', 'thermal_voltage']
+class Graph:
+    """
+    Pulsim topology graph. Build via CircuitBuilder; access via builder.graph.
+    """
+    @staticmethod
+    def ground() -> int:
+        ...
+    def branch_name(self, branch_id: int) -> str:
+        """
+        The branch's user-facing name, or '' when it was created without one.
+        """
+    def node_name(self, node_id: int) -> str:
+        """
+        The node's name, or '' when out of range/unnamed.
+        """
+    @property
+    def branches(self) -> list[typing.Any]:
+        """
+        List of all branches in insertion order. Each entry is a dict {id, from_, to, kind} where `kind` is a `BranchKind` enum value.
+        """
+    @property
+    def nodes(self) -> list[typing.Any]:
+        """
+        List of all nodes in insertion order. Each entry is a dict {id, name}.
+        """
+    @property
+    def num_branches(self) -> int:
+        ...
+    @property
+    def num_nodes(self) -> int:
+        ...
+    @property
+    def num_switches(self) -> int:
+        """
+        Count of branches with kind = Switch — this is the bit-width the PWL cache enumerates over. Use it as the argument to SwitchStateMask(num_switches).
+        """
+class DevicePool:
+    """
+    Pulsim device parameter pool. Build via CircuitBuilder; access via builder.pool.
+    """
+    def branch_var_id_for_inductor(self, branch_id: int, graph: Graph) -> int:
+        """
+        Resolve the state-vector index for an inductor (or saturable inductor) branch's i_L unknown. Throws if `branch_id` is not registered as an inductor.
+        """
+    def branch_var_id_for_source(self, branch_id: int, graph: Graph) -> int:
+        """
+        Resolve the state-vector index for a voltage-source branch's i_source unknown (also works for PWM/Sine/Pulse/VCVS sources, since they share the same branch-var numbering).
+        """
+    def branch_var_id_for_switch(self, branch_id: int, graph: Graph) -> int:
+        """
+        State-vector index of a branch-form switch or diode's current unknown i_s, or -1 for the conductance form (add-branch-form-ideal-switch).
+        """
+    def control_column(self, branch_id: int, graph: Graph) -> int:
+        """
+        State-vector column of the current a CCCS / CCVS senses.
+        """
+    def current_waveform_value(self, branch_id: int, t: float) -> float:
+        """
+        Value [A] of a sine / pulse / table current source at `t`, leaving at its `n_pos`.
+        """
+    def has_nonlinear_devices(self) -> bool:
+        """
+        Alias of requires_newton(): True if any branch needs a Newton solve (the capability table's NewtonStatic / NewtonStateful kinds, see pulsim.engine_capabilities()).
+        """
+    def igbt_has_tail(self, branch_id: int) -> bool:
+        """
+        True when this branch is an IGBT with a turn-off tail (tau_tail and k_tail both set). The engine router uses it to decide whether TR-BDF2 has to refuse the circuit.
+        """
+    def induction_machines(self) -> list[typing.Any]:
+        """
+        MNA-native induction machines on this pool, one dict per machine: branch_ids (a, b, c), omega_node, rotor_nodes (state-vector indices of psi_ra, psi_rb) and params.
+        """
+    def kind_of(self, branch_id: int) -> StoredKind:
+        """
+        Return the StoredKind enum for `branch_id`. Used by the v1.4.0 parametric refactor pipeline to pick the right update_* mutator from a string-based component name lookup.
+        """
+    def pmsm_mna_machines(self) -> list[typing.Any]:
+        """
+        MNA-native PMSMs registered on this pool, one dict per machine: branch_ids (a, b, c), omega_node, theta_node (state-vector indices) and params. `simulate` reads this to attach the `<name>.omega/theta/T_em/i_d/i_q` traces.
+        """
+    def requires_newton(self) -> bool:
+        """
+        True if any branch needs a Newton solve.
+        """
+    def requires_static_refresh(self) -> bool:
+        """
+        True if any branch needs the static Newton chain (smooth / Shockley diode, MOSFET, IGBT).
+        """
+    def state_size(self, graph: Graph) -> int:
+        """
+        Total state-vector size for this pool + graph (= num_active_nodes + num_sources + num_inductors).
+        """
+class StoredKind:
+    """
+    Device kind stored in DevicePool. v1.4.0+ — exposed so Python helpers (sweep_path_aware etc.) can auto-dispatch update_* mutators per device type.
+
+    Members:
+
+      Resistor
+
+      VoltageSource
+
+      Switch
+
+      Capacitor
+
+      Inductor
+
+      Diode
+
+      NonlinearDiode
+
+      CurrentSource
+
+      PWMVoltageSource
+
+      SineVoltageSource
+
+      PulseVoltageSource
+
+      MosfetLevel1
+
+      IgbtLevel1
+
+      VCVS
+
+      SaturableInductor
+
+      NonlinearCapacitor
+
+      ShockleyDiode
+
+      LauritzenDiode
+
+      PmsmMna
+
+      IdealTransformer
+
+      VCCS
+
+      CCCS
+
+      CCVS
+
+      Gyrator
+
+      SineCurrentSource
+
+      PulseCurrentSource
+
+      PwlCurrentSource
+
+      InductionMachineMna
+
+      ExternalDevice
+
+      ExcessLoss
+
+      TransmissionLine
+    """
+    CCCS: typing.ClassVar[StoredKind]
+    CCVS: typing.ClassVar[StoredKind]
+    Capacitor: typing.ClassVar[StoredKind]
+    CurrentSource: typing.ClassVar[StoredKind]
+    Diode: typing.ClassVar[StoredKind]
+    ExcessLoss: typing.ClassVar[StoredKind]
+    ExternalDevice: typing.ClassVar[StoredKind]
+    Gyrator: typing.ClassVar[StoredKind]
+    IdealTransformer: typing.ClassVar[StoredKind]
+    IgbtLevel1: typing.ClassVar[StoredKind]
+    InductionMachineMna: typing.ClassVar[StoredKind]
+    Inductor: typing.ClassVar[StoredKind]
+    LauritzenDiode: typing.ClassVar[StoredKind]
+    MosfetLevel1: typing.ClassVar[StoredKind]
+    NonlinearCapacitor: typing.ClassVar[StoredKind]
+    NonlinearDiode: typing.ClassVar[StoredKind]
+    PWMVoltageSource: typing.ClassVar[StoredKind]
+    PmsmMna: typing.ClassVar[StoredKind]
+    PulseCurrentSource: typing.ClassVar[StoredKind]
+    PulseVoltageSource: typing.ClassVar[StoredKind]
+    PwlCurrentSource: typing.ClassVar[StoredKind]
+    Resistor: typing.ClassVar[StoredKind]
+    SaturableInductor: typing.ClassVar[StoredKind]
+    ShockleyDiode: typing.ClassVar[StoredKind]
+    SineCurrentSource: typing.ClassVar[StoredKind]
+    SineVoltageSource: typing.ClassVar[StoredKind]
+    Switch: typing.ClassVar[StoredKind]
+    TransmissionLine: typing.ClassVar[StoredKind]
+    VCCS: typing.ClassVar[StoredKind]
+    VCVS: typing.ClassVar[StoredKind]
+    VoltageSource: typing.ClassVar[StoredKind]
+    __members__: typing.ClassVar[dict[str, StoredKind]]
+    def __eq__(self, other: object) -> bool:
+        ...
+    def __getstate__(self) -> int:
+        ...
+    def __hash__(self) -> int:
+        ...
+    def __index__(self) -> int:
+        ...
+    def __init__(self, value: int) -> None:
+        ...
+    def __int__(self) -> int:
+        ...
+    def __ne__(self, other: object) -> bool:
+        ...
+    def __repr__(self) -> str:
+        ...
+    def __setstate__(self, state: int) -> None:
+        ...
+    def __str__(self) -> str:
+        ...
+    @property
+    def name(self) -> str:
+        ...
+    @property
+    def value(self) -> int:
+        ...
+class SimulationResult:
+    """
+    Output of run_transient: parallel `times` and `states` arrays, plus event diagnostics.
+    """
+    def __init__(self) -> None:
+        """
+        An empty result. Kernel adapters fill it (`_adapter_fill`, `_set_run_info`); every engine returns this type.
+        """
+    def _adapter_fill(self, times: typing.Annotated[numpy.typing.ArrayLike, numpy.float64], states: typing.Annotated[numpy.typing.ArrayLike, numpy.float64], switch_states: typing.Any = None, reinit_records: list[typing.Any] = []) -> None:
+        """
+        Adapter use only: fill an empty result from arrays (times, states, the per-sample mask, re-initialisation dicts).
+        """
+    def _set_device_losses(self, records: collections.abc.Sequence[DeviceLossRecord], heat_injected: float, heat_pending: float) -> None:
+        """
+        The exact engine's loss records (dsed loss port).
+        """
+    def _set_final_snapshot(self, snapshot: SolverSnapshot) -> None:
+        """
+        The exact engine's end-of-run snapshot (dsed).
+        """
+    def _set_run_info(self, engine: str, grid: GridKind, stats: dict[typing.Any, typing.Any]) -> None:
+        """
+        Adapter use only: set the grid kind and the run statistics.
+        """
+    def at(self, probe: str, t):
+        """
+        ``probe`` at time(s) ``t``: linear on the step that holds it, the
+        right limit at an event instant where the engine stored one. A scalar
+        for a scalar ``t``; an array for an increasing 1-D ``t``.
+        """
+    def avg(self, probe: str, t0 = None, t1 = None) -> float:
+        """
+        Time average of ``probe`` over [t0, t1] (default: the whole run):
+        the trapezoid of the STORED samples (linear between them, from the
+        right limit where one is stored) divided by ``t1 - t0``, windows
+        clipped exactly. Time-weighted on any grid, unlike ``.mean()``; exact
+        for the fixed engine's rule, O(h^2) otherwise (``engine='exact'``
+        without ``dt`` stores one sample per 10 us). For the exact average of
+        the trajectory use an in-loop ``Recorder(windows=...)``.
+        """
+    def device_output(self, name: str, key: str):
+        """
+        ``key`` of the external device ``name`` at every stored sample:
+        ``'i(<pin>)'`` (the current INTO the device at that pin, its law's
+        ``f`` plus the committed ``dq/dt``), ``'power'`` (the sum of pin voltage
+        times pin current) or one of the model's named outputs (evaluated with
+        the state committed at that step). The device must be added with
+        ``record=True`` and the run must go through pwl or trbdf2.
+        """
+    def empty(self) -> bool:
+        """
+        True when nothing was recorded.
+        """
+    def integral(self, probe: str, t0 = None, t1 = None) -> float:
+        """
+        Integral of ``probe`` over [t0, t1] (see :meth:`avg`).
+        """
+    def minmax(self, probe: str, t0 = None, t1 = None) -> 'tuple[float, float]':
+        """
+        (min, max) of ``probe`` over [t0, t1], both limits of an event
+        inside the window included.
+        """
+    def num_steps(self) -> int:
+        ...
+    def rms(self, probe: str, t0 = None, t1 = None) -> float:
+        """
+        RMS of ``probe`` over [t0, t1]: exact for the line between stored
+        samples (``h(a^2 + ab + b^2)/3`` per step; see :meth:`avg`).
+        """
+    @property
+    def _device_losses(self) -> list[DeviceLossRecord]:
+        """
+        add-in-kernel-event-losses: one DeviceLossRecord per loss port (read with loss_events / device_energy).
+        """
+    @property
+    def commutation_events(self) -> list[CommutationEvent]:
+        ...
+    @property
+    def counters(self) -> dict[typing.Any, typing.Any]:
+        """
+        Fixed-step loop counters (pwl engine; 0 elsewhere): `switch_fn_calls` (schedule evaluations in the step loop, one per distinct solve time), `segment_searches` (segment lookups not absorbed by the last-segment memo), `rollback_snapshots` (steps whose pre-step state was copied for a possible rollback).
+        """
+    @property
+    def cpu_time_seconds(self):
+        """
+        Exact engine only: res.stats.cpu_time_seconds.
+        """
+    @property
+    def dt_retries(self) -> list[DtRetry]:
+        """
+        Steps that had to be re-taken at a reduced dt. Empty on a run that never needed one.
+        """
+    @property
+    def event_iteration_breaches(self) -> list[EventIterationBreach]:
+        ...
+    @property
+    def event_iteration_count(self) -> list[int]:
+        ...
+    @property
+    def final_snapshot(self) -> SolverSnapshot:
+        """
+        Complete state at the end of the run. Pass it to simulate(resume_from=...) to continue EXACTLY where this left off.
+        """
+    @property
+    def gate_states(self) -> typing.Any:
+        """
+        Per-sample record of the COMMANDED gate bit each gated PWL device (IGBT, GTO, thyristor, TRIAC) was decided under, in the layout of switch_states (column j = builder.switch_index_of(name); False for every other column). switch_states holds the stamped conduction state. None in a circuit without a gated device.
+        """
+    @property
+    def grid(self) -> GridKind:
+        """
+        GridKind of the rows: Uniform (pwl), Accepted (trbdf2, dsed) or Requested. A plain .mean() over an Accepted grid is not a time average: use pulsim.time_average.
+        """
+    @property
+    def heat_injected(self) -> float:
+        """
+        J of heat the run deposited into thermal nodes.
+        """
+    @property
+    def heat_pending(self) -> float:
+        """
+        J of heat recorded in the last step and not yet deposited (the step that would carry it is past t_end).
+        """
+    @property
+    def inductor_guard_actions(self) -> list[InductorGuardAction]:
+        """
+        Inductors whose current a post-solve guard overwrote. Empty unless a guard was enabled AND fired.
+        """
+    @property
+    def inner_events(self) -> typing.Any:
+        """
+        Events INSIDE a stored step (the fixed engine's event split under the restart rule): dict of arrays, per event the sample it follows ('after'), its time, its left limit (state and mask of the sub-step that ended there) and its right limit (a NaN row: none). None: no record. pulsim.with_event_limits(res) inserts them as rows.
+        """
+    @property
+    def kernel_tick_counts(self) -> list[int]:
+        """
+        Ticks delivered per tick_fns source (run_transient tick_periods=); simulate() copies them into control_tick_counts.
+        """
+    @property
+    def kernel_tick_jitter_max(self) -> float:
+        """
+        Largest step time minus scheduled instant of a kernel tick (0 when every period is a multiple of dt).
+        """
+    @property
+    def mode_diagnostics(self) -> dict[typing.Any, typing.Any]:
+        """
+        add-complementarity-mode-selection on pwl: 'mode_shadow' / 'mode_selection' counters and the default guard's 'mode_guard' (simulate() copies them to res.diagnostics).
+        """
+    @property
+    def n_accept(self):
+        """
+        Exact engine only: res.stats.n_accept.
+        """
+    @property
+    def n_bdf2_steps(self):
+        """
+        Exact engine only: res.stats.n_bdf2_steps.
+        """
+    @property
+    def n_events(self):
+        """
+        Exact engine only: res.stats.n_mode_events.
+        """
+    @property
+    def n_exact_steps(self):
+        """
+        Exact engine only: res.stats.n_exact_steps.
+        """
+    @property
+    def n_reject(self):
+        """
+        Exact engine only: res.stats.n_reject.
+        """
+    @property
+    def n_restart_factorizations(self) -> int:
+        """
+        Factorisations made for the restart stages: one per mask at 2*gamma*dt (more only if the segment byte budget evicts), plus every refactor for a restart stage of another size (event-split sub-intervals, the stage-2 re-try). 0 with the rule off.
+        """
+    @property
+    def n_restart_steps(self) -> int:
+        """
+        Steps taken as SDIRK(2,2) restart steps (discontinuity_restart). 0 with the rule off.
+        """
+    @property
+    def n_rk45_steps(self):
+        """
+        Exact engine only: res.stats.n_rk45_steps.
+        """
+    @property
+    def n_split_steps(self) -> int:
+        """
+        Steps split at a gate edge, source jump or diode crossing inside them (enable_substep_state_correction). 0 with the split off.
+        """
+    @property
+    def newton(self) -> NewtonCounters:
+        """
+        Newton counters of the run (NewtonCounters).
+        """
+    @property
+    def newton_roundoff_accepts(self) -> int:
+        """
+        Transient Newton solves accepted at roundoff level (stagnated dx, row backward error <= 8 eps) instead of aborting.
+        """
+    @property
+    def newton_roundoff_omega_max(self) -> float:
+        ...
+    @property
+    def newton_roundoff_row(self) -> int:
+        ...
+    @property
+    def reinit_records(self) -> list[ReinitRecord]:
+        """
+        Impulsive re-initialisations of dependent modes (add-branch-form-ideal-switch D4).
+        """
+    @property
+    def resolution(self) -> typing.Any:
+        """
+        Resolution diagnostics of a pwl run (None when off, and for trbdf2/dsed). See pulsim.ResolutionWarning.
+        """
+    @property
+    def sensitivity_trace(self) -> typing.Any:
+        """
+        Forward parameter sensitivities of a pwl / trbdf2 run (add-parameter-sensitivities group 5): a dict with 'params', 'times' (the start and every accepted step), 'states' (sample, param, state) and the counters 'n_sens_solves', 'n_sens_iterations' (of accepted steps), 'n_sens_discarded' (back-substitutions of rejected attempts); None without sensitivities.
+        """
+    @property
+    def states(self) -> typing.Any:
+        """
+        Recorded state samples as a read-only (num_steps, state_size) numpy view — zero-copy over the kernel's contiguous buffer. Use `.copy()` for a mutable array.
+        """
+    @property
+    def states_bytes(self) -> int:
+        """
+        Bytes held by the contiguous sample buffer.
+        """
+    @property
+    def stats(self) -> RunStats:
+        """
+        RunStats: engine-independent counters (zero where the engine does not report one).
+        """
+    @property
+    def switch_states_bytes(self) -> int:
+        """
+        Bytes held by the stamped-mask record.
+        """
+    @property
+    def times(self) -> typing.Any:
+        """
+        Sample times as a read-only numpy view over the result (zero-copy). `list(res.times)` gives the old list.
+        """
+    @property
+    def total_bytes(self) -> int:
+        """
+        Estimated bytes held by the whole result: the contiguous sample buffer plus the parallel times and diagnostic vectors.
+        """
+    # --- members attached by the pulsim Python layer (scripts/stubs_overlay.pyi) ---
+    engine_used: str
+    """Engine that produced this result (for example ``"pwl"``,
+    ``"trbdf2"`` or ``"dsed"``). Set by :func:`pulsim.simulate`."""
+    engine_route_reason: str | None
+    """Why ``engine="auto"`` did not take the variable-step path, or
+    ``None`` when it did (or when the engine was chosen explicitly)."""
+    recorded: dict[str, typing.Any]
+    """``simulate(recorders=[...])`` only: ``pulsim.Recording`` per
+    recorder name (kernel probes and exact windowed statistics)."""
+    recorder_feed: dict[str, typing.Any]
+    """``simulate(recorders=[...])`` only: the feed that ran (``mode``:
+    ``'in-loop'`` with ``n_steps`` / ``n_events`` / ``n_jumps`` /
+    ``n_dropped``, or ``'stored-arrays'`` with ``why``)."""
+    step_loop_python_callbacks: tuple[str, ...]
+    """Names of the Python callables :func:`pulsim.simulate` installed in
+    the engine's step loop (``"switch_fn"``, ``"b_extra_fn"``,
+    ``"step_observer"``, ``"should_continue"``, ``"closed_loops"``);
+    empty when the loop ran fully native."""
+    diagnostics: dict[str, typing.Any]
+    """Complementarity mode-selection counters of a ``pwl`` run
+    (``'mode_shadow'``, ``'mode_selection'``, ``'mode_guard'``): a copy of
+    ``mode_diagnostics``. Set by :func:`pulsim.simulate` on ``pwl``. With
+    ``mode_selection='auto'`` it also holds ``'mode_selection_auto'``
+    (``requested``, ``chosen`` ``'lcp'`` / ``'legacy'``, ``reason``), on
+    every engine."""
+    control_tick_counts: list[int]
+    """Controller ticks per tick source, in registration order (closed
+    loops, then ``step_observer``): ``ceil(span / T_j)`` each. Set by
+    :func:`pulsim.simulate` on ``pwl`` and ``trbdf2``."""
+    control_tick_jitter_max: float
+    """Largest lateness of a controller tick [s]: below ``dt`` on
+    ``pwl`` (0 when every period is a multiple of ``dt``), 0 on
+    ``trbdf2``."""
+    states_reduced: numpy.ndarray[typing.Any, numpy.dtype[numpy.float64]] | None
+    """Exact engine (``'dsed'``) only: the reduced state per sample."""
+    has_full_states: bool
+    """Exact engine only: whether ``states`` holds the full MNA vector."""
+    exact: dict[str, typing.Any] | None
+    """Exact engine, native builder path: per visited mask the propagator
+    tier, kappa2 and reason, plus the eig / Pade / cache counters; else ``None``."""
+    initial_condition_adjustment: dict[str, typing.Any] | None
+    """Exact engine: the projection applied to an inconsistent initial state, or ``None``."""
+    event_times: numpy.ndarray[typing.Any, numpy.dtype[numpy.float64]] | None
+    """Exact engine, native builder path: the event instants; else ``None``."""
+    event_types: typing.Any
+    """Exact engine, native builder path: the predicate type of each event; else ``None``."""
+    right_limit_index: numpy.ndarray[typing.Any, numpy.dtype[numpy.int64]] | None
+    """Exact engine: sample indices that hold a left limit, whose right limit follows."""
+    right_limit_states: numpy.ndarray[typing.Any, numpy.dtype[numpy.float64]] | None
+    """Exact engine: the right-limit state at each ``right_limit_index``."""
+    right_limit_switch_states: numpy.ndarray[typing.Any, numpy.dtype[numpy.bool_]] | None
+    """Exact engine: the switch states after each ``right_limit_index`` event."""
+    @typing.overload
+    def v(self, name: str, t: None = None) -> numpy.ndarray[typing.Any, numpy.dtype[numpy.float64]]:
+        """
+        Return the node-voltage trace for ``name``.
+
+        See :class:`NameNotFoundError` for the typed error raised on
+        unknown names. The result wrapper stores the source
+        :class:`CircuitBuilder` as ``self._builder`` so name lookup
+        works without forcing callers to re-pass it.
+
+        Parameters
+        ----------
+        name : str
+            Node name passed to ``CircuitBuilder.add_*`` (or a
+            registered alias when alias support is enabled). A ground
+            name (``"gnd"``, ``"GND"``, ``"0"``) returns zeros.
+        t : int | slice | array-like, optional
+            SAMPLE selection (an index into ``times``, not a time).
+            ``None`` (default) returns the full per-sample trace as a
+            ``numpy.ndarray``. An ``int`` returns a scalar ``float``.
+            For the value at a time use
+            ``np.interp(t, res.times, res.v(name))``.
+        """
+        ...
+    @typing.overload
+    def v(self, name: str, t: int) -> float: ...
+    @typing.overload
+    def v(self, name: str, t: slice | typing.Sequence[int] | numpy.ndarray[typing.Any, typing.Any]) -> numpy.ndarray[typing.Any, numpy.dtype[numpy.float64]]: ...
+    @typing.overload
+    def i(self, name: str, t: None = None, *, port: int | None = None) -> numpy.ndarray[typing.Any, numpy.dtype[numpy.float64]]:
+        """
+        Return the branch-current trace for ``name``.
+
+        ``result.i()`` aims at the PLECS-style output-equation convention:
+        the simulator's state vector ``x`` is the small set of MNA
+        natives (node voltages + augmented inductor / voltage-source
+        currents), and any branch current is a deterministic function of
+        that state plus the device's stored params + (for switched
+        devices) the active switch mask. Reading any current is therefore
+        a per-step evaluation of that function — no need for sentinel
+        probes or sense resistors in the topology.
+
+        Supported branch kinds and their reconstruction:
+
+        +----------------------------+-----------------------------------------+
+        | kind                        | ``i(t)``                                |
+        +============================+=========================================+
+        | ``inductor``               | ``states[:, branch_var_id_for_inductor]`` |
+        | ``voltage_source``         | ``states[:, branch_var_id_for_source]`` |
+        | ``pwm_voltage_source``     | ditto                                   |
+        | ``sine_voltage_source``    | ditto                                   |
+        | ``pulse_voltage_source``   | ditto                                   |
+        | ``resistor``               | ``(V_from − V_to) / R_ohms``            |
+        | ``capacitor``              | ``C · d(V_from − V_to)/dt``             |
+        | ``current_source``         | constant ``I`` from params              |
+        | ``sine_current_source``,   | the source's value at each sample time  |
+        | ``pulse_current_source``,  | (positive OUT of ``n_pos``, as for      |
+        | ``pwl_current_source``     | ``current_source``)                     |
+        | ``vccs``                   | ``gm·(V_in_pos − V_in_neg)`` out of     |
+        |                            | ``n_pos``                               |
+        | ``cccs``                   | ``gain·i(control)`` out of ``n_pos``    |
+        | ``ccvs``                   | its branch unknown (a voltage source)   |
+        | ``gyrator``                | ``port=2`` (default): ``i_2 = −g·v_1``; |
+        |                            | ``port=1``: ``i_1 = g·v_2``; both INTO  |
+        |                            | the device at ``p1_pos`` / ``p2_pos``   |
+        | ``diode`` (PWL switched)   | ``g_on·(V_from − V_to − V_f)`` on       |
+        |                            | samples the solver stamped the diode    |
+        |                            | ON, ``g_off·(V_from − V_to)`` otherwise |
+        |                            | (the kernel's per-sample                |
+        |                            | ``switch_states`` record; NOT           |
+        |                            | ``v_D > V_th`` — V_th is a commutation  |
+        |                            | threshold, V_f the forward drop)        |
+        | ``switch``                 | ``(V_from − V_to)·G`` where             |
+        |                            | ``G = g_on`` when the recorded stamped  |
+        |                            | mask bit is set, ``g_off`` otherwise    |
+        | ``shockley_diode``         | ``I_S·(exp(v_D/(n·V_T)) − 1)``          |
+        |                            | ``+ v_D·G_min`` (minus the mirrored     |
+        |                            | breakdown branch when ``BV > 0``): the  |
+        |                            | kernel's law, ``add_shockley_diode``    |
+        |                            | parameters                              |
+        | ``mosfet_level1``,         | the kernel's device law at each stored  |
+        | ``igbt_level1`` (no tail), | state (``static_device_readings``):     |
+        | ``nonlinear_diode``        | drain / collector / anode current       |
+        +----------------------------+-----------------------------------------+
+
+        Sentinel handling. Pulsim uses ``node_id = −1`` for the
+        ground / reference node (no column in the state vector;
+        implicit zero in the MNA solve). The reconstruction treats
+        ``node_id < 0`` as ``V = 0`` instead of Python's
+        negative-indexing into ``states``.
+
+        Switch / diode state. Every engine records, per stored sample,
+        the mask it STAMPED for the solve that produced it
+        (``result.switch_states``); switch and diode currents read that,
+        with no ``switch_fn`` call. Row 0 of a run seeded with
+        ``initial_state`` (including the state ``c0=`` / ``i0=`` build) is
+        not a solve in this run (``switch_states_unsolved``): its state
+        came from a solve whose mask this run does not know, so a switch
+        or diode current there is undefined. Reading it with any guessed
+        mask can invent a ``g_on·V`` current (48 kA through a buck's
+        MOSFET seeded on a gate edge), so that row returns the value of
+        the FIRST SOLVED sample after it instead: a real current, one step
+        late, never a phantom. (NaN would be more literal, but every
+        ``i0=`` / ``c0=`` run has such a row, and plots and sums of
+        ``result.i()`` would break.) The loss and thermal summaries do not
+        use the row at all. Only a result built another way (no record) needs
+        ``result._switch_fn = your_switch_fn`` for a switch, and then the
+        switch_fn is re-evaluated with a warning.
+
+        ``mosfet_level1``, ``igbt_level1`` (without a tail) and
+        ``nonlinear_diode`` read the kernel's device law at each stored
+        state; a ``saturable_inductor`` is its own branch-current column.
+        Not yet supported: ``lauritzen_diode``, ``nonlinear_capacitor`` and
+        an IGBT with a tail (their current needs a stored charge the states
+        do not give the law), and the ``power_mosfet`` composite. Calls on
+        those kinds raise
+        :class:`NotImplementedError` with the recipe that works: a small
+        series resistor (1 mOhm) whose ``res.i()`` is the device current.
+        ``device_loss_summary`` does not report them either.
+
+        Sign convention. Current is positive flowing from the ``from``
+        terminal to the ``to`` terminal of the ``add_*`` call (matches
+        the inductor / voltage-source convention).
+
+        Parameters
+        ----------
+        name
+            Branch name (any supported kind from the table above).
+        t
+            Optional step selection (``int`` / ``slice`` / array-like).
+            ``None`` returns the full per-sample trace.
+        port
+            Gyrator only: ``1`` or ``2`` (default ``2``, the branch).
+        """
+        ...
+    @typing.overload
+    def i(self, name: str, t: int, *, port: int | None = None) -> float: ...
+    @typing.overload
+    def i(self, name: str, t: slice | typing.Sequence[int] | numpy.ndarray[typing.Any, typing.Any], *, port: int | None = None) -> numpy.ndarray[typing.Any, numpy.dtype[numpy.float64]]: ...
+    @property
+    def switch_states(self) -> numpy.ndarray[typing.Any, numpy.dtype[numpy.bool_]] | None:
+        """
+        Per-sample record of the switch / diode mask the solver STAMPED for the solve that produced states[k], as a (num_steps, num_switches) bool array (column j = builder.switch_index_of(name)). A switched branch's current is exactly (g_on if bit else g_off) * v_branch, less g_on * V_f for an ON diode with a forward drop V_f. None when the result carries no record (a result not produced by a kernel engine). Raw: where switch_states_unsolved[k] is True (a sample 0 seeded from initial_state) the row is the bits the solver carried in, not a solve, and g(bit) * v does not hold there; result.i() and the loss / thermal summaries read that row with the mask of the first solve after it. With store_every > 1 a row is the mask of the LAST solve before the sample, not of the whole stored interval, so duty cycles and time integrals over a decimated grid alias. Unpacked on each access; the kernel stores ceil(num_switches/8) bytes per sample.
+        """
+        ...
+    @property
+    def switch_states_unsolved(self) -> numpy.ndarray[typing.Any, numpy.dtype[numpy.bool_]] | None:
+        """
+        Per-sample bool: True where states[k] was NOT produced by a solve under switch_states[k] — today only a sample 0 seeded from initial_state, whose mask is the bits the solver carried in (result.i() and the loss / thermal summaries read that row with the first solve's mask). A resume_from sample 0 carries the bits of the solve that produced it and is not flagged. None without a record.
+        """
+        ...
+    def power(self, device_name: str) -> float:
+        """
+        Return the average dissipated power for ``device_name``,
+        sourced from :func:`device_loss_summary`.
+
+        Only resistors carry a meaningful ``P_avg`` today (inductors
+        are ideal — no loss; switches/diodes aren't in the summary
+        yet). For other device kinds the method raises
+        :class:`NotImplementedError` with the same migration hint as
+        :meth:`i`.
+        """
+        ...
+    def signal(self, name: str) -> numpy.ndarray[typing.Any, numpy.dtype[numpy.float64]]:
+        """
+        Return a user-recorded trace by name (e.g.
+        ``result.signal("M1.omega")``).
+
+        Sources, in resolution order:
+
+        1. ``self._motor_traces`` — populated by motor observer bundles
+           (PMSM / BLDC / DC motor / IM) when their ``attach_to_result``
+           was called. :func:`pulsim.simulate` does this automatically
+           when it detects a :class:`MotorObserverBundle` in
+           ``step_observer`` or inside ``closed_loops``.
+        2. Future-extensible: any other observer that registers traces
+           under the same dict can be reached the same way.
+
+        Returns
+        -------
+        numpy.ndarray
+            The recorded samples. Use ``self.signal(f"{name}.t")`` if you
+            also need the timestamp array (motor bundles publish their
+            own ``<motor>.t`` alongside each motor for convenience —
+            these typically equal ``self.times`` but the motor observer
+            captures the value at observer-call time, which can differ
+            from kernel sample time in an adaptive integrator).
+
+        Raises
+        ------
+        NameNotFoundError
+            When `name` isn't registered. The error carries fuzzy
+            suggestions over the registered trace names.
+        """
+        ...
+    def signals(self) -> list[str]:
+        """
+        Return the sorted list of registered signal names (e.g.
+        ``['M1.T_em', 'M1.i_a', 'M1.i_b', 'M1.i_c', 'M1.i_d',
+           'M1.i_q', 'M1.omega', 'M1.t', 'M1.theta']``).
+        """
+        ...
+    def currents(self, *, skip_unsupported: bool = True) -> dict[str, numpy.ndarray[typing.Any, numpy.dtype[numpy.float64]]]:
+        """
+        Return ``{branch_name: ndarray}`` with every supported branch's
+        current trace — pulsim's nearest equivalent to PLECS' "all currents
+        from the output equation" UX.
+
+        Walks ``builder.components()`` and calls :meth:`i` on every branch
+        whose kind has a reconstruction implementation (inductor,
+        voltage_source family, resistor, capacitor, current_source, diode,
+        shockley_diode, switch). When ``skip_unsupported`` is True (default), kinds without
+        a Python-side reconstruction
+        (``mosfet_level1``/``igbt_level1``/``nonlinear_diode``/``vcvs``/
+        ``saturable_inductor``) are silently omitted from the result —
+        pass ``False`` to surface their ``NotImplementedError`` instead.
+
+        Returns
+        -------
+        dict[str, numpy.ndarray]
+            Branch name → per-sample current trace. Empty dict if the
+            result wasn't produced via ``pulsim.simulate(...)`` (no builder
+            reference attached).
+        """
+        ...
+    def loss_events(self, device: str) -> numpy.ndarray[typing.Any, typing.Any]:
+        """
+        The commutations of ``device`` as a structured array with fields
+        ``t, kind ('on'|'off'), v, i, Tj, E`` (``set_device_losses``).
+        """
+        ...
+    def device_energy(self, device: str) -> dict[str, float]:
+        """
+        ``{"E_on", "E_off", "E_cond_electrical", "E_cond_table",
+        "E_impulse", "n_on", "n_off"}`` of ``device`` (energies in J).
+        ``E_cond_electrical`` is the device's ``∫v·i`` (always),
+        ``E_cond_table`` the on-state table's (0 without one); the spec's
+        ``conduction`` says which one was deposited as heat. ``E_impulse`` is
+        the impulsive re-initialisation energy booked to the device
+        (``result.reinit_records`` whose ``cause`` it is), deposited as heat.
+        """
+        ...
+    def plot(self, *signals: str, save: str | None = None, show: bool | None = None, **kwargs: typing.Any) -> typing.Any:
+        """
+        Plot one or more signals from this simulation result.
+
+        Each ``signal`` can be:
+
+        * ``"vout"``, ``"node_name"`` — a node voltage. Resolved via
+          :meth:`~SimulationResult.v`.
+        * ``"L1"``, ``"R_load"``, ``"M1"``, ... — a branch current.
+          Resolved via :meth:`~SimulationResult.i`.
+
+        The result must carry a back-reference to its builder (which
+        :func:`simulate` sets automatically). Standalone
+        ``run_transient`` consumers without the builder attached must
+        use :func:`pulsim.scope` directly.
+
+        Parameters
+        ----------
+        signals
+            Variable-length list of signal names. Each must resolve as
+            either a node voltage or a branch current — unknown names
+            raise :class:`NameNotFoundError` with the same fuzzy
+            "Did you mean ...?" suggestion path used by
+            :meth:`SimulationResult.v` / :meth:`.i`.
+        save
+            Optional path; passed through to :func:`pulsim.scope`.
+        show
+            If ``True`` (default when called interactively), display
+            the figure. If ``False``, just return it.
+        **kwargs
+            Forwarded into :func:`pulsim.scope` (titles, axes options,
+            etc.).
+
+        Returns
+        -------
+        matplotlib.figure.Figure
+            The figure produced by :func:`pulsim.scope`.
+
+        Raises
+        ------
+        AttributeError
+            If the result has no `_builder` back-reference. Use
+            :func:`pulsim.scope(builder, result, signals=[...])` for
+            that case.
+        NameNotFoundError
+            If any signal can't be resolved as a node OR a branch.
+        """
+        ...
+    def flux(self, name: str) -> numpy.ndarray[typing.Any, numpy.dtype[numpy.float64]]:
+        """
+        Flux Phi [Wb] through the permeance-type element ``name`` (a
+        permeance, an air gap or a saturable permeance), per sample: P*F, or
+        the element's law Phi(F) (add-permeance-magnetic-domain).
+        """
+        ...
+    def b_field(self, name: str) -> numpy.ndarray[typing.Any, numpy.dtype[numpy.float64]]:
+        """
+        Flux density B = Phi/area [T] of an air gap or a saturable
+        permeance (elements built from geometry).
+        """
+        ...
+    def h_field(self, name: str) -> numpy.ndarray[typing.Any, numpy.dtype[numpy.float64]]:
+        """
+        Field H = F/length [A/m] of an air gap or a saturable permeance
+        (elements built from geometry).
+        """
+        ...
+    @property
+    def plan(self) -> typing.Any:
+        """
+        The run's RunPlan (circuit, ties, preflight); None for a run from a builder stand-in.
+        """
+        ...
+    @property
+    def circuit(self) -> Circuit | None:
+        """
+        The pulsim.Circuit this run simulated (with any regularising ties); the caller's builder is never changed.
+        """
+        ...
+class SolverSnapshot:
+    """
+    The COMPLETE state of a run at one instant.
+
+    `initial_state=` restores only the MNA vector and then INVENTS the companion history from it (a capacitor gets i_prev = 0, an inductor v_prev = 0), so resuming from it does NOT reproduce the run — a continuous 2T RLC and a T-then-resume differ by 2.3e-4 where a true resume is ~1e-15. A snapshot carries what was missing: the trapezoidal companion history, the state of every stateful device (saturable / gapped / hysteretic inductors, charge-based Coss, Lauritzen diodes, IGBT tails, MNA PMSMs) and the solver-owned diode bits. Pass it as simulate(resume_from=...): exact on engine='pwl', to tolerance on engine='trbdf2'. Pickles.
+    """
+    valid: bool
+    def __getstate__(self) -> tuple[typing.Any, ...]:
+        ...
+    def __init__(self) -> None:
+        ...
+    def __repr__(self) -> str:
+        ...
+    def __setstate__(self, arg0: tuple[typing.Any, ...]) -> None:
+        ...
+    @property
+    def _control_state(self) -> typing.Any:
+        """
+        The controllers' state at t (pulsim internal; set by simulate(), read by resume_from).
+        """
+    @_control_state.setter
+    def _control_state(self, arg1: typing.Any) -> None:
+        ...
+    @property
+    def controller_state(self) -> typing.Any:
+        """
+        The step-size controller's state (step::ControllerState): ``(kind, values)`` with kind 1 = fixed, 2 = LTE (TR-BDF2; layout [h, h_mem_gate0, h_mem_gate1, pending_gate_slot, diode_slot, gate_parity, h_mem_diode...]), 3 = the exact engine's committed instant (reduced state, schedule position, step memory; engine='dsed' resumes from it, the others refuse it), or None: the resumed engine then restarts its controller.
+        """
+    @property
+    def coss_history(self) -> list[float]:
+        """
+        Deprecated view of one block of ``dev_state`` (the 2.0 field). Writing it turns the snapshot into a 2.0-style payload.
+        """
+    @coss_history.setter
+    def coss_history(self, arg1: collections.abc.Sequence[float]) -> None:
+        ...
+    @property
+    def dev_layout(self) -> list[int]:
+        """
+        Instance count per block of ``dev_state``; empty for a 2.0-style payload.
+        """
+    @property
+    def dev_layout_names(self) -> list[str]:
+        """
+        The block names of ``dev_state``, in layout order.
+        """
+    @property
+    def dev_state(self) -> list[float]:
+        """
+        Every device state the run carries, one flat vector in the blocks named by ``dev_layout_names`` (linear companion history, then the stateful-device histories).
+        """
+    @dev_state.setter
+    def dev_state(self, arg0: collections.abc.Sequence[float]) -> None:
+        ...
+    @property
+    def diode_on(self) -> list[bool]:
+        """
+        Deprecated name of ``mask``.
+        """
+    @diode_on.setter
+    def diode_on(self, arg1: collections.abc.Sequence[bool]) -> None:
+        ...
+    @property
+    def grid_dt(self) -> float:
+        """
+        Step of the fixed-step grid (see ``grid_origin``); NaN: none.
+        """
+    @grid_dt.setter
+    def grid_dt(self, arg0: float) -> None:
+        ...
+    @property
+    def grid_origin(self) -> float:
+        """
+        The fixed-step grid ``t`` sits on: t == grid_origin + grid_step * grid_dt to rounding (NaN: none). A fixed-step resume with the same dt continues it, so its trace is the continuous run's bit for bit.
+        """
+    @grid_origin.setter
+    def grid_origin(self, arg0: float) -> None:
+        ...
+    @property
+    def grid_step(self) -> int:
+        """
+        Index of ``t`` on the fixed-step grid (see ``grid_origin``).
+        """
+    @grid_step.setter
+    def grid_step(self, arg0: int) -> None:
+        ...
+    @property
+    def history(self) -> list[float]:
+        """
+        Deprecated view of one block of ``dev_state`` (the 2.0 field). Writing it turns the snapshot into a 2.0-style payload.
+        """
+    @history.setter
+    def history(self, arg1: collections.abc.Sequence[float]) -> None:
+        ...
+    @property
+    def igbt_tail_history(self) -> list[float]:
+        """
+        Deprecated view of one block of ``dev_state`` (the 2.0 field). Writing it turns the snapshot into a 2.0-style payload.
+        """
+    @igbt_tail_history.setter
+    def igbt_tail_history(self, arg1: collections.abc.Sequence[float]) -> None:
+        ...
+    @property
+    def invalid_reason(self) -> str:
+        """
+        Why the run that produced this snapshot left it invalid, when it knows (a route that keeps no snapshot); resume_from refuses it with this cause. Empty for a valid snapshot. Not pickled.
+        """
+    @invalid_reason.setter
+    def invalid_reason(self, arg0: str) -> None:
+        ...
+    @property
+    def lauritzen_history(self) -> list[float]:
+        """
+        Deprecated view of one block of ``dev_state`` (the 2.0 field). Writing it turns the snapshot into a 2.0-style payload.
+        """
+    @lauritzen_history.setter
+    def lauritzen_history(self, arg1: collections.abc.Sequence[float]) -> None:
+        ...
+    @property
+    def layout_signature(self) -> int:
+        """
+        Hash of the block names and counts; a resume refuses a snapshot whose layout is not the circuit's, naming the block.
+        """
+    @property
+    def line_state(self) -> list[float]:
+        """
+        The transmission lines' committed past (pickle field 19, present only with a line): per line Z0, delay, n, then n x (t, w_a, w_b). Empty: no line.
+        """
+    @line_state.setter
+    def line_state(self, arg0: collections.abc.Sequence[float]) -> None:
+        ...
+    @property
+    def mask(self) -> list[bool]:
+        """
+        The solver-owned mode bits the next step starts from (which switched diodes conduct).
+        """
+    @mask.setter
+    def mask(self, arg0: collections.abc.Sequence[bool]) -> None:
+        ...
+    @property
+    def pmsm_history(self) -> list[float]:
+        """
+        Deprecated view of one block of ``dev_state`` (the 2.0 field). Writing it turns the snapshot into a 2.0-style payload.
+        """
+    @pmsm_history.setter
+    def pmsm_history(self, arg1: collections.abc.Sequence[float]) -> None:
+        ...
+    @property
+    def post_edge_derivatives(self) -> bool:
+        """
+        True when a variable-step run ended exactly on a gate edge after refreshing the device derivatives for the post-edge circuit (``x`` is the pre-edge solve). engine='pwl' refuses to resume from it; engine='trbdf2' resumes.
+        """
+    @post_edge_derivatives.setter
+    def post_edge_derivatives(self, arg0: bool) -> None:
+        ...
+    @property
+    def recorder_spec(self) -> str:
+        """
+        Signature of the recorders that wrote recorder_state.
+        """
+    @recorder_spec.setter
+    def recorder_spec(self, arg0: str) -> None:
+        ...
+    @property
+    def recorder_state(self) -> list[float]:
+        """
+        The in-loop recorders' state at the snapshot (pickle field 18; simulate(recorders=..., resume_from=) continues them). Empty: no recorder fed in the loop, or an older snapshot.
+        """
+    @recorder_state.setter
+    def recorder_state(self, arg0: collections.abc.Sequence[float]) -> None:
+        ...
+    @property
+    def restart_pending(self) -> bool:
+        """
+        True when restart_steps_left > 0.
+        """
+    @property
+    def restart_steps_left(self) -> int:
+        """
+        discontinuity_restart: SDIRK restart steps still owed when the run ended (the rule takes a discontinuity's step and the next two); a resumed run takes them first. 0 = none.
+        """
+    @restart_steps_left.setter
+    def restart_steps_left(self, arg0: int) -> None:
+        ...
+    @property
+    def saturable_history(self) -> list[float]:
+        """
+        Deprecated view of one block of ``dev_state`` (the 2.0 field). Writing it turns the snapshot into a 2.0-style payload.
+        """
+    @saturable_history.setter
+    def saturable_history(self, arg1: collections.abc.Sequence[float]) -> None:
+        ...
+    @property
+    def stamped_mask(self) -> list[bool]:
+        """
+        The switch / diode mask stamped for the solve that produced ``x`` (one bool per SwitchStateMask bit): the previous run's last ``switch_states`` row. A resume records it as its row 0. Not ``diode_on`` + ``switch_fn(t)``: a variable-step run that ends on a gate edge stores that sample under the pre-edge mask and only then re-decides the diodes. Empty when unknown (a hand-built or older snapshot); row 0 is then flagged in ``switch_states_unsolved``.
+        """
+    @stamped_mask.setter
+    def stamped_mask(self, arg0: collections.abc.Sequence[bool]) -> None:
+        ...
+    @property
+    def t(self) -> float:
+        ...
+    @t.setter
+    def t(self, arg0: float) -> None:
+        ...
+    @property
+    def tick_next_k(self) -> list[int]:
+        """
+        Per control-tick source: the index k of its next instant.
+        """
+    @tick_next_k.setter
+    def tick_next_k(self, arg0: collections.abc.Sequence[int]) -> None:
+        ...
+    @property
+    def tick_origin(self) -> list[float]:
+        """
+        Per control-tick source, in registration order: the origin of its grid (ticks at origin + offset + k*period). simulate(resume_from=) passes it back so the resumed ticks stay on the run's grid. Empty: no ticks, or an older snapshot.
+        """
+    @tick_origin.setter
+    def tick_origin(self, arg0: collections.abc.Sequence[float]) -> None:
+        ...
+    @property
+    def x(self) -> typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"]:
+        ...
+    @x.setter
+    def x(self, arg0: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"]) -> None:
+        ...
 class PulsimError(Exception):
     pass
 class ConvergenceError(RuntimeError, PulsimError):
@@ -761,8 +1835,16 @@ class CircuitBuilder:
         with 50 sections); a finite edge needs
         :func:`recommend_line_sections` sections to stay near 5 %.
 
-        ``model="bergeron"`` (exact delay) needs a kernel device that does
-        not exist yet and is refused by name.
+        ``model="bergeron"``: the kernel's travelling-wave line (openspec
+        add-realistic-passives D18), exact for a lossless line: branches
+        ``{name}`` (port ``k``) and ``{name}.b`` (port ``m``) carry the current
+        INTO the line. ``R`` is lumped as R/4 - R/2 - R/4 around two half
+        lines (``R <= Z0``). ``pwl`` needs ``dt <= delay`` (exact when ``delay``
+        is a multiple of ``dt``; otherwise the far end is interpolated, first
+        order on a front, plateaus exact); ``trbdf2`` caps its step at
+        ``delay``; the AC sweep stamps the exact two-port; a wire at DC. The
+        exact engine, ``bdf1``, ``integrator='esdirk43'`` and periodic
+        shooting refuse it by name. ``sections`` is not used.
 
         Sub-elements: ``{name}.l{k}``, ``{name}.c{k}``, ``{name}.r{k}``;
         internal nodes ``{name}.n{k}``; ``{name}.ret`` (0 V source) joins
@@ -1067,221 +2149,6 @@ class BranchKind:
     Source: typing.ClassVar[BranchKind]
     Switch: typing.ClassVar[BranchKind]
     __members__: typing.ClassVar[dict[str, BranchKind]]
-    def __eq__(self, other: object) -> bool:
-        ...
-    def __getstate__(self) -> int:
-        ...
-    def __hash__(self) -> int:
-        ...
-    def __index__(self) -> int:
-        ...
-    def __init__(self, value: int) -> None:
-        ...
-    def __int__(self) -> int:
-        ...
-    def __ne__(self, other: object) -> bool:
-        ...
-    def __repr__(self) -> str:
-        ...
-    def __setstate__(self, state: int) -> None:
-        ...
-    def __str__(self) -> str:
-        ...
-    @property
-    def name(self) -> str:
-        ...
-    @property
-    def value(self) -> int:
-        ...
-class Graph:
-    """
-    Pulsim topology graph. Build via CircuitBuilder; access via builder.graph.
-    """
-    @staticmethod
-    def ground() -> int:
-        ...
-    def branch_name(self, branch_id: int) -> str:
-        """
-        The branch's user-facing name, or '' when it was created without one.
-        """
-    def node_name(self, node_id: int) -> str:
-        """
-        The node's name, or '' when out of range/unnamed.
-        """
-    @property
-    def branches(self) -> list[typing.Any]:
-        """
-        List of all branches in insertion order. Each entry is a dict {id, from_, to, kind} where `kind` is a `BranchKind` enum value.
-        """
-    @property
-    def nodes(self) -> list[typing.Any]:
-        """
-        List of all nodes in insertion order. Each entry is a dict {id, name}.
-        """
-    @property
-    def num_branches(self) -> int:
-        ...
-    @property
-    def num_nodes(self) -> int:
-        ...
-    @property
-    def num_switches(self) -> int:
-        """
-        Count of branches with kind = Switch — this is the bit-width the PWL cache enumerates over. Use it as the argument to SwitchStateMask(num_switches).
-        """
-class DevicePool:
-    """
-    Pulsim device parameter pool. Build via CircuitBuilder; access via builder.pool.
-    """
-    def branch_var_id_for_inductor(self, branch_id: int, graph: Graph) -> int:
-        """
-        Resolve the state-vector index for an inductor (or saturable inductor) branch's i_L unknown. Throws if `branch_id` is not registered as an inductor.
-        """
-    def branch_var_id_for_source(self, branch_id: int, graph: Graph) -> int:
-        """
-        Resolve the state-vector index for a voltage-source branch's i_source unknown (also works for PWM/Sine/Pulse/VCVS sources, since they share the same branch-var numbering).
-        """
-    def branch_var_id_for_switch(self, branch_id: int, graph: Graph) -> int:
-        """
-        State-vector index of a branch-form switch or diode's current unknown i_s, or -1 for the conductance form (add-branch-form-ideal-switch).
-        """
-    def control_column(self, branch_id: int, graph: Graph) -> int:
-        """
-        State-vector column of the current a CCCS / CCVS senses.
-        """
-    def current_waveform_value(self, branch_id: int, t: float) -> float:
-        """
-        Value [A] of a sine / pulse / table current source at `t`, leaving at its `n_pos`.
-        """
-    def has_nonlinear_devices(self) -> bool:
-        """
-        Alias of requires_newton(): True if any branch needs a Newton solve (the capability table's NewtonStatic / NewtonStateful kinds, see pulsim.engine_capabilities()).
-        """
-    def igbt_has_tail(self, branch_id: int) -> bool:
-        """
-        True when this branch is an IGBT with a turn-off tail (tau_tail and k_tail both set). The engine router uses it to decide whether TR-BDF2 has to refuse the circuit.
-        """
-    def induction_machines(self) -> list[typing.Any]:
-        """
-        MNA-native induction machines on this pool, one dict per machine: branch_ids (a, b, c), omega_node, rotor_nodes (state-vector indices of psi_ra, psi_rb) and params.
-        """
-    def kind_of(self, branch_id: int) -> StoredKind:
-        """
-        Return the StoredKind enum for `branch_id`. Used by the v1.4.0 parametric refactor pipeline to pick the right update_* mutator from a string-based component name lookup.
-        """
-    def pmsm_mna_machines(self) -> list[typing.Any]:
-        """
-        MNA-native PMSMs registered on this pool, one dict per machine: branch_ids (a, b, c), omega_node, theta_node (state-vector indices) and params. `simulate` reads this to attach the `<name>.omega/theta/T_em/i_d/i_q` traces.
-        """
-    def requires_newton(self) -> bool:
-        """
-        True if any branch needs a Newton solve.
-        """
-    def requires_static_refresh(self) -> bool:
-        """
-        True if any branch needs the static Newton chain (smooth / Shockley diode, MOSFET, IGBT).
-        """
-    def state_size(self, graph: Graph) -> int:
-        """
-        Total state-vector size for this pool + graph (= num_active_nodes + num_sources + num_inductors).
-        """
-class StoredKind:
-    """
-    Device kind stored in DevicePool. v1.4.0+ — exposed so Python helpers (sweep_path_aware etc.) can auto-dispatch update_* mutators per device type.
-
-    Members:
-
-      Resistor
-
-      VoltageSource
-
-      Switch
-
-      Capacitor
-
-      Inductor
-
-      Diode
-
-      NonlinearDiode
-
-      CurrentSource
-
-      PWMVoltageSource
-
-      SineVoltageSource
-
-      PulseVoltageSource
-
-      MosfetLevel1
-
-      IgbtLevel1
-
-      VCVS
-
-      SaturableInductor
-
-      NonlinearCapacitor
-
-      ShockleyDiode
-
-      LauritzenDiode
-
-      PmsmMna
-
-      IdealTransformer
-
-      VCCS
-
-      CCCS
-
-      CCVS
-
-      Gyrator
-
-      SineCurrentSource
-
-      PulseCurrentSource
-
-      PwlCurrentSource
-
-      InductionMachineMna
-
-      ExternalDevice
-
-      ExcessLoss
-    """
-    CCCS: typing.ClassVar[StoredKind]
-    CCVS: typing.ClassVar[StoredKind]
-    Capacitor: typing.ClassVar[StoredKind]
-    CurrentSource: typing.ClassVar[StoredKind]
-    Diode: typing.ClassVar[StoredKind]
-    ExcessLoss: typing.ClassVar[StoredKind]
-    ExternalDevice: typing.ClassVar[StoredKind]
-    Gyrator: typing.ClassVar[StoredKind]
-    IdealTransformer: typing.ClassVar[StoredKind]
-    IgbtLevel1: typing.ClassVar[StoredKind]
-    InductionMachineMna: typing.ClassVar[StoredKind]
-    Inductor: typing.ClassVar[StoredKind]
-    LauritzenDiode: typing.ClassVar[StoredKind]
-    MosfetLevel1: typing.ClassVar[StoredKind]
-    NonlinearCapacitor: typing.ClassVar[StoredKind]
-    NonlinearDiode: typing.ClassVar[StoredKind]
-    PWMVoltageSource: typing.ClassVar[StoredKind]
-    PmsmMna: typing.ClassVar[StoredKind]
-    PulseCurrentSource: typing.ClassVar[StoredKind]
-    PulseVoltageSource: typing.ClassVar[StoredKind]
-    PwlCurrentSource: typing.ClassVar[StoredKind]
-    Resistor: typing.ClassVar[StoredKind]
-    SaturableInductor: typing.ClassVar[StoredKind]
-    ShockleyDiode: typing.ClassVar[StoredKind]
-    SineCurrentSource: typing.ClassVar[StoredKind]
-    SineVoltageSource: typing.ClassVar[StoredKind]
-    Switch: typing.ClassVar[StoredKind]
-    VCCS: typing.ClassVar[StoredKind]
-    VCVS: typing.ClassVar[StoredKind]
-    VoltageSource: typing.ClassVar[StoredKind]
-    __members__: typing.ClassVar[dict[str, StoredKind]]
     def __eq__(self, other: object) -> bool:
         ...
     def __getstate__(self) -> int:
@@ -1842,7 +2709,7 @@ class EventIterationBreach:
         ...
 class ReinitRecord:
     """
-    One impulsive re-initialisation (add-branch-form-ideal-switch D4): kind 'cut_set' (lambda = flux, V*s) or 'capacitor_loop' (lambda = charge, C); dW the energy removed [J]; sample the stored sample of the step that carried the pulse (-1: not stored).
+    One impulsive re-initialisation (add-branch-form-ideal-switch D4): kind 'cut_set' (lambda = flux, V*s) or 'capacitor_loop' (lambda = charge, C), or on the exact engine 'start_projection' (a given initial state the start mode cannot keep, moved at t0; projection_gap the largest move); dW the energy removed [J]; sample the stored sample of the step that carried the pulse (-1: not stored).
     """
     @property
     def cause(self) -> str:
@@ -2063,626 +2930,11 @@ class RunStats:
     @property
     def n_steps(self) -> int:
         ...
-class SimulationResult:
-    """
-    Output of run_transient: parallel `times` and `states` arrays, plus event diagnostics.
-    """
-    def __init__(self) -> None:
-        """
-        An empty result. Kernel adapters fill it (`_adapter_fill`, `_set_run_info`); every engine returns this type.
-        """
-    def _adapter_fill(self, times: typing.Annotated[numpy.typing.ArrayLike, numpy.float64], states: typing.Annotated[numpy.typing.ArrayLike, numpy.float64], switch_states: typing.Any = None, reinit_records: list[typing.Any] = []) -> None:
-        """
-        Adapter use only: fill an empty result from arrays (times, states, the per-sample mask, re-initialisation dicts).
-        """
-    def _set_device_losses(self, records: collections.abc.Sequence[DeviceLossRecord], heat_injected: float, heat_pending: float) -> None:
-        """
-        The exact engine's loss records (dsed loss port).
-        """
-    def _set_final_snapshot(self, snapshot: SolverSnapshot) -> None:
-        """
-        The exact engine's end-of-run snapshot (dsed).
-        """
-    def _set_run_info(self, engine: str, grid: GridKind, stats: dict[typing.Any, typing.Any]) -> None:
-        """
-        Adapter use only: set the grid kind and the run statistics.
-        """
-    def at(self, probe: str, t):
-        """
-        ``probe`` at time(s) ``t``: linear on the step that holds it, the
-        right limit at an event instant where the engine stored one. A scalar
-        for a scalar ``t``; an array for an increasing 1-D ``t``.
-        """
-    def avg(self, probe: str, t0 = None, t1 = None) -> float:
-        """
-        Time average of ``probe`` over [t0, t1] (default: the whole run):
-        the integral of the engines' dense output (linear between samples,
-        from the right limit where one is stored) divided by ``t1 - t0``,
-        windows clipped exactly. Correct on any grid, unlike ``.mean()``.
-        """
-    def device_output(self, name: str, key: str):
-        """
-        ``key`` of the external device ``name`` at every stored sample:
-        ``'i(<pin>)'`` (the current INTO the device at that pin, its law's
-        ``f`` plus the committed ``dq/dt``), ``'power'`` (the sum of pin voltage
-        times pin current) or one of the model's named outputs (evaluated with
-        the state committed at that step). The device must be added with
-        ``record=True`` and the run must go through pwl or trbdf2.
-        """
-    def empty(self) -> bool:
-        """
-        True when nothing was recorded.
-        """
-    def integral(self, probe: str, t0 = None, t1 = None) -> float:
-        """
-        Integral of ``probe`` over [t0, t1] (see :meth:`avg`).
-        """
-    def minmax(self, probe: str, t0 = None, t1 = None) -> 'tuple[float, float]':
-        """
-        (min, max) of ``probe`` over [t0, t1], both limits of an event
-        inside the window included.
-        """
-    def num_steps(self) -> int:
-        ...
-    def rms(self, probe: str, t0 = None, t1 = None) -> float:
-        """
-        RMS of ``probe`` over [t0, t1]: exact for the linear dense output
-        (``h(a^2 + ab + b^2)/3`` per step).
-        """
-    @property
-    def _device_losses(self) -> list[DeviceLossRecord]:
-        """
-        add-in-kernel-event-losses: one DeviceLossRecord per loss port (read with loss_events / device_energy).
-        """
-    @property
-    def commutation_events(self) -> list[CommutationEvent]:
-        ...
-    @property
-    def counters(self) -> dict[typing.Any, typing.Any]:
-        """
-        Fixed-step loop counters (pwl engine; 0 elsewhere): `switch_fn_calls` (schedule evaluations in the step loop, one per distinct solve time), `segment_searches` (segment lookups not absorbed by the last-segment memo), `rollback_snapshots` (steps whose pre-step state was copied for a possible rollback).
-        """
-    @property
-    def cpu_time_seconds(self):
-        """
-        Exact engine only: res.stats.cpu_time_seconds.
-        """
-    @property
-    def dt_retries(self) -> list[DtRetry]:
-        """
-        Steps that had to be re-taken at a reduced dt. Empty on a run that never needed one.
-        """
-    @property
-    def event_iteration_breaches(self) -> list[EventIterationBreach]:
-        ...
-    @property
-    def event_iteration_count(self) -> list[int]:
-        ...
-    @property
-    def final_snapshot(self) -> SolverSnapshot:
-        """
-        Complete state at the end of the run. Pass it to simulate(resume_from=...) to continue EXACTLY where this left off.
-        """
-    @property
-    def gate_states(self) -> typing.Any:
-        """
-        Per-sample record of the COMMANDED gate bit each gated PWL device (IGBT, GTO, thyristor, TRIAC) was decided under, in the layout of switch_states (column j = builder.switch_index_of(name); False for every other column). switch_states holds the stamped conduction state. None in a circuit without a gated device.
-        """
-    @property
-    def grid(self) -> GridKind:
-        """
-        GridKind of the rows: Uniform (pwl), Accepted (trbdf2, dsed) or Requested. A plain .mean() over an Accepted grid is not a time average: use pulsim.time_average.
-        """
-    @property
-    def heat_injected(self) -> float:
-        """
-        J of heat the run deposited into thermal nodes.
-        """
-    @property
-    def heat_pending(self) -> float:
-        """
-        J of heat recorded in the last step and not yet deposited (the step that would carry it is past t_end).
-        """
-    @property
-    def inductor_guard_actions(self) -> list[InductorGuardAction]:
-        """
-        Inductors whose current a post-solve guard overwrote. Empty unless a guard was enabled AND fired.
-        """
-    @property
-    def kernel_tick_counts(self) -> list[int]:
-        """
-        Ticks delivered per tick_fns source (run_transient tick_periods=); simulate() copies them into control_tick_counts.
-        """
-    @property
-    def kernel_tick_jitter_max(self) -> float:
-        """
-        Largest step time minus scheduled instant of a kernel tick (0 when every period is a multiple of dt).
-        """
-    @property
-    def mode_diagnostics(self) -> dict[typing.Any, typing.Any]:
-        """
-        add-complementarity-mode-selection on pwl: 'mode_shadow' / 'mode_selection' counters and the default guard's 'mode_guard' (simulate() copies them to res.diagnostics).
-        """
-    @property
-    def n_accept(self):
-        """
-        Exact engine only: res.stats.n_accept.
-        """
-    @property
-    def n_bdf2_steps(self):
-        """
-        Exact engine only: res.stats.n_bdf2_steps.
-        """
-    @property
-    def n_events(self):
-        """
-        Exact engine only: res.stats.n_mode_events.
-        """
-    @property
-    def n_exact_steps(self):
-        """
-        Exact engine only: res.stats.n_exact_steps.
-        """
-    @property
-    def n_reject(self):
-        """
-        Exact engine only: res.stats.n_reject.
-        """
-    @property
-    def n_restart_factorizations(self) -> int:
-        """
-        Factorisations made for the restart stages: one per mask at 2*gamma*dt (more only if the segment byte budget evicts), plus every refactor for a restart stage of another size (event-split sub-intervals, the stage-2 re-try). 0 with the rule off.
-        """
-    @property
-    def n_restart_steps(self) -> int:
-        """
-        Steps taken as SDIRK(2,2) restart steps (discontinuity_restart). 0 with the rule off.
-        """
-    @property
-    def n_rk45_steps(self):
-        """
-        Exact engine only: res.stats.n_rk45_steps.
-        """
-    @property
-    def n_split_steps(self) -> int:
-        """
-        Steps split at a gate edge, source jump or diode crossing inside them (enable_substep_state_correction). 0 with the split off.
-        """
-    @property
-    def newton(self) -> NewtonCounters:
-        """
-        Newton counters of the run (NewtonCounters).
-        """
-    @property
-    def newton_roundoff_accepts(self) -> int:
-        """
-        Transient Newton solves accepted at roundoff level (stagnated dx, row backward error <= 8 eps) instead of aborting.
-        """
-    @property
-    def newton_roundoff_omega_max(self) -> float:
-        ...
-    @property
-    def newton_roundoff_row(self) -> int:
-        ...
-    @property
-    def reinit_records(self) -> list[ReinitRecord]:
-        """
-        Impulsive re-initialisations of dependent modes (add-branch-form-ideal-switch D4).
-        """
-    @property
-    def resolution(self) -> typing.Any:
-        """
-        Resolution diagnostics of a pwl run (None when off, and for trbdf2/dsed). See pulsim.ResolutionWarning.
-        """
-    @property
-    def states(self) -> typing.Any:
-        """
-        Recorded state samples as a read-only (num_steps, state_size) numpy view — zero-copy over the kernel's contiguous buffer. Use `.copy()` for a mutable array.
-        """
-    @property
-    def states_bytes(self) -> int:
-        """
-        Bytes held by the contiguous sample buffer.
-        """
-    @property
-    def stats(self) -> RunStats:
-        """
-        RunStats: engine-independent counters (zero where the engine does not report one).
-        """
-    @property
-    def switch_states_bytes(self) -> int:
-        """
-        Bytes held by the stamped-mask record.
-        """
-    @property
-    def times(self) -> typing.Any:
-        """
-        Sample times as a read-only numpy view over the result (zero-copy). `list(res.times)` gives the old list.
-        """
-    @property
-    def total_bytes(self) -> int:
-        """
-        Estimated bytes held by the whole result: the contiguous sample buffer plus the parallel times and diagnostic vectors.
-        """
-    # --- members attached by the pulsim Python layer (scripts/stubs_overlay.pyi) ---
-    engine_used: str
-    """Engine that produced this result (for example ``"pwl"``,
-    ``"trbdf2"`` or ``"dsed"``). Set by :func:`pulsim.simulate`."""
-    engine_route_reason: str | None
-    """Why ``engine="auto"`` did not take the variable-step path, or
-    ``None`` when it did (or when the engine was chosen explicitly)."""
-    recorded: dict[str, typing.Any]
-    """``simulate(recorders=[...])`` only: ``pulsim.Recording`` per
-    recorder name (kernel probes and exact windowed statistics)."""
-    recorder_feed: dict[str, typing.Any]
-    """``simulate(recorders=[...])`` only: the feed that ran (``mode``:
-    ``'in-loop'`` with ``n_steps`` / ``n_events`` / ``n_jumps`` /
-    ``n_dropped``, or ``'stored-arrays'`` with ``why``)."""
-    step_loop_python_callbacks: tuple[str, ...]
-    """Names of the Python callables :func:`pulsim.simulate` installed in
-    the engine's step loop (``"switch_fn"``, ``"b_extra_fn"``,
-    ``"step_observer"``, ``"should_continue"``, ``"closed_loops"``);
-    empty when the loop ran fully native."""
-    diagnostics: dict[str, typing.Any]
-    """Complementarity mode-selection counters of a ``pwl`` run
-    (``'mode_shadow'``, ``'mode_selection'``, ``'mode_guard'``): a copy of
-    ``mode_diagnostics``. Set by :func:`pulsim.simulate` on ``pwl``. With
-    ``mode_selection='auto'`` it also holds ``'mode_selection_auto'``
-    (``requested``, ``chosen`` ``'lcp'`` / ``'legacy'``, ``reason``), on
-    every engine."""
-    control_tick_counts: list[int]
-    """Controller ticks per tick source, in registration order (closed
-    loops, then ``step_observer``): ``ceil(span / T_j)`` each. Set by
-    :func:`pulsim.simulate` on ``pwl`` and ``trbdf2``."""
-    control_tick_jitter_max: float
-    """Largest lateness of a controller tick [s]: below ``dt`` on
-    ``pwl`` (0 when every period is a multiple of ``dt``), 0 on
-    ``trbdf2``."""
-    states_reduced: numpy.ndarray[typing.Any, numpy.dtype[numpy.float64]] | None
-    """Exact engine (``'dsed'``) only: the reduced state per sample."""
-    has_full_states: bool
-    """Exact engine only: whether ``states`` holds the full MNA vector."""
-    exact: dict[str, typing.Any] | None
-    """Exact engine, native builder path: per visited mask the propagator
-    tier, kappa2 and reason, plus the eig / Pade / cache counters; else ``None``."""
-    initial_condition_adjustment: dict[str, typing.Any] | None
-    """Exact engine: the projection applied to an inconsistent initial state, or ``None``."""
-    event_times: numpy.ndarray[typing.Any, numpy.dtype[numpy.float64]] | None
-    """Exact engine, native builder path: the event instants; else ``None``."""
-    event_types: typing.Any
-    """Exact engine, native builder path: the predicate type of each event; else ``None``."""
-    right_limit_index: numpy.ndarray[typing.Any, numpy.dtype[numpy.int64]] | None
-    """Exact engine: sample indices that hold a left limit, whose right limit follows."""
-    right_limit_states: numpy.ndarray[typing.Any, numpy.dtype[numpy.float64]] | None
-    """Exact engine: the right-limit state at each ``right_limit_index``."""
-    right_limit_switch_states: numpy.ndarray[typing.Any, numpy.dtype[numpy.bool_]] | None
-    """Exact engine: the switch states after each ``right_limit_index`` event."""
-    @typing.overload
-    def v(self, name: str, t: None = None) -> numpy.ndarray[typing.Any, numpy.dtype[numpy.float64]]:
-        """
-        Return the node-voltage trace for ``name``.
-
-        See :class:`NameNotFoundError` for the typed error raised on
-        unknown names. The result wrapper stores the source
-        :class:`CircuitBuilder` as ``self._builder`` so name lookup
-        works without forcing callers to re-pass it.
-
-        Parameters
-        ----------
-        name : str
-            Node name passed to ``CircuitBuilder.add_*`` (or a
-            registered alias when alias support is enabled). A ground
-            name (``"gnd"``, ``"GND"``, ``"0"``) returns zeros.
-        t : int | slice | array-like, optional
-            SAMPLE selection (an index into ``times``, not a time).
-            ``None`` (default) returns the full per-sample trace as a
-            ``numpy.ndarray``. An ``int`` returns a scalar ``float``.
-            For the value at a time use
-            ``np.interp(t, res.times, res.v(name))``.
-        """
-        ...
-    @typing.overload
-    def v(self, name: str, t: int) -> float: ...
-    @typing.overload
-    def v(self, name: str, t: slice | typing.Sequence[int] | numpy.ndarray[typing.Any, typing.Any]) -> numpy.ndarray[typing.Any, numpy.dtype[numpy.float64]]: ...
-    @typing.overload
-    def i(self, name: str, t: None = None, *, port: int | None = None) -> numpy.ndarray[typing.Any, numpy.dtype[numpy.float64]]:
-        """
-        Return the branch-current trace for ``name``.
-
-        ``result.i()`` aims at the PLECS-style output-equation convention:
-        the simulator's state vector ``x`` is the small set of MNA
-        natives (node voltages + augmented inductor / voltage-source
-        currents), and any branch current is a deterministic function of
-        that state plus the device's stored params + (for switched
-        devices) the active switch mask. Reading any current is therefore
-        a per-step evaluation of that function — no need for sentinel
-        probes or sense resistors in the topology.
-
-        Supported branch kinds and their reconstruction:
-
-        +----------------------------+-----------------------------------------+
-        | kind                        | ``i(t)``                                |
-        +============================+=========================================+
-        | ``inductor``               | ``states[:, branch_var_id_for_inductor]`` |
-        | ``voltage_source``         | ``states[:, branch_var_id_for_source]`` |
-        | ``pwm_voltage_source``     | ditto                                   |
-        | ``sine_voltage_source``    | ditto                                   |
-        | ``pulse_voltage_source``   | ditto                                   |
-        | ``resistor``               | ``(V_from − V_to) / R_ohms``            |
-        | ``capacitor``              | ``C · d(V_from − V_to)/dt``             |
-        | ``current_source``         | constant ``I`` from params              |
-        | ``sine_current_source``,   | the source's value at each sample time  |
-        | ``pulse_current_source``,  | (positive OUT of ``n_pos``, as for      |
-        | ``pwl_current_source``     | ``current_source``)                     |
-        | ``vccs``                   | ``gm·(V_in_pos − V_in_neg)`` out of     |
-        |                            | ``n_pos``                               |
-        | ``cccs``                   | ``gain·i(control)`` out of ``n_pos``    |
-        | ``ccvs``                   | its branch unknown (a voltage source)   |
-        | ``gyrator``                | ``port=2`` (default): ``i_2 = −g·v_1``; |
-        |                            | ``port=1``: ``i_1 = g·v_2``; both INTO  |
-        |                            | the device at ``p1_pos`` / ``p2_pos``   |
-        | ``diode`` (PWL switched)   | ``g_on·(V_from − V_to − V_f)`` on       |
-        |                            | samples the solver stamped the diode    |
-        |                            | ON, ``g_off·(V_from − V_to)`` otherwise |
-        |                            | (the kernel's per-sample                |
-        |                            | ``switch_states`` record; NOT           |
-        |                            | ``v_D > V_th`` — V_th is a commutation  |
-        |                            | threshold, V_f the forward drop)        |
-        | ``switch``                 | ``(V_from − V_to)·G`` where             |
-        |                            | ``G = g_on`` when the recorded stamped  |
-        |                            | mask bit is set, ``g_off`` otherwise    |
-        | ``shockley_diode``         | ``I_S·(exp(v_D/(n·V_T)) − 1)``          |
-        |                            | ``+ v_D·G_min`` (minus the mirrored     |
-        |                            | breakdown branch when ``BV > 0``): the  |
-        |                            | kernel's law, ``add_shockley_diode``    |
-        |                            | parameters                              |
-        | ``mosfet_level1``,         | the kernel's device law at each stored  |
-        | ``igbt_level1`` (no tail), | state (``static_device_readings``):     |
-        | ``nonlinear_diode``        | drain / collector / anode current       |
-        +----------------------------+-----------------------------------------+
-
-        Sentinel handling. Pulsim uses ``node_id = −1`` for the
-        ground / reference node (no column in the state vector;
-        implicit zero in the MNA solve). The reconstruction treats
-        ``node_id < 0`` as ``V = 0`` instead of Python's
-        negative-indexing into ``states``.
-
-        Switch / diode state. Every engine records, per stored sample,
-        the mask it STAMPED for the solve that produced it
-        (``result.switch_states``); switch and diode currents read that,
-        with no ``switch_fn`` call. Row 0 of a run seeded with
-        ``initial_state`` (including the state ``c0=`` / ``i0=`` build) is
-        not a solve in this run (``switch_states_unsolved``): its state
-        came from a solve whose mask this run does not know, so a switch
-        or diode current there is undefined. Reading it with any guessed
-        mask can invent a ``g_on·V`` current (48 kA through a buck's
-        MOSFET seeded on a gate edge), so that row returns the value of
-        the FIRST SOLVED sample after it instead: a real current, one step
-        late, never a phantom. (NaN would be more literal, but every
-        ``i0=`` / ``c0=`` run has such a row, and plots and sums of
-        ``result.i()`` would break.) The loss and thermal summaries do not
-        use the row at all. Only a result built another way (no record) needs
-        ``result._switch_fn = your_switch_fn`` for a switch, and then the
-        switch_fn is re-evaluated with a warning.
-
-        ``mosfet_level1``, ``igbt_level1`` (without a tail) and
-        ``nonlinear_diode`` read the kernel's device law at each stored
-        state; a ``saturable_inductor`` is its own branch-current column.
-        Not yet supported: ``lauritzen_diode``, ``nonlinear_capacitor`` and
-        an IGBT with a tail (their current needs a stored charge the states
-        do not give the law), and the ``power_mosfet`` composite. Calls on
-        those kinds raise
-        :class:`NotImplementedError` with the recipe that works: a small
-        series resistor (1 mOhm) whose ``res.i()`` is the device current.
-        ``device_loss_summary`` does not report them either.
-
-        Sign convention. Current is positive flowing from the ``from``
-        terminal to the ``to`` terminal of the ``add_*`` call (matches
-        the inductor / voltage-source convention).
-
-        Parameters
-        ----------
-        name
-            Branch name (any supported kind from the table above).
-        t
-            Optional step selection (``int`` / ``slice`` / array-like).
-            ``None`` returns the full per-sample trace.
-        port
-            Gyrator only: ``1`` or ``2`` (default ``2``, the branch).
-        """
-        ...
-    @typing.overload
-    def i(self, name: str, t: int, *, port: int | None = None) -> float: ...
-    @typing.overload
-    def i(self, name: str, t: slice | typing.Sequence[int] | numpy.ndarray[typing.Any, typing.Any], *, port: int | None = None) -> numpy.ndarray[typing.Any, numpy.dtype[numpy.float64]]: ...
-    @property
-    def switch_states(self) -> numpy.ndarray[typing.Any, numpy.dtype[numpy.bool_]] | None:
-        """
-        Per-sample record of the switch / diode mask the solver STAMPED for the solve that produced states[k], as a (num_steps, num_switches) bool array (column j = builder.switch_index_of(name)). A switched branch's current is exactly (g_on if bit else g_off) * v_branch, less g_on * V_f for an ON diode with a forward drop V_f. None when the result carries no record (a result not produced by a kernel engine). Raw: where switch_states_unsolved[k] is True (a sample 0 seeded from initial_state) the row is the bits the solver carried in, not a solve, and g(bit) * v does not hold there; result.i() and the loss / thermal summaries read that row with the mask of the first solve after it. With store_every > 1 a row is the mask of the LAST solve before the sample, not of the whole stored interval, so duty cycles and time integrals over a decimated grid alias. Unpacked on each access; the kernel stores ceil(num_switches/8) bytes per sample.
-        """
-        ...
-    @property
-    def switch_states_unsolved(self) -> numpy.ndarray[typing.Any, numpy.dtype[numpy.bool_]] | None:
-        """
-        Per-sample bool: True where states[k] was NOT produced by a solve under switch_states[k] — today only a sample 0 seeded from initial_state, whose mask is the bits the solver carried in (result.i() and the loss / thermal summaries read that row with the first solve's mask). A resume_from sample 0 carries the bits of the solve that produced it and is not flagged. None without a record.
-        """
-        ...
-    def power(self, device_name: str) -> float:
-        """
-        Return the average dissipated power for ``device_name``,
-        sourced from :func:`device_loss_summary`.
-
-        Only resistors carry a meaningful ``P_avg`` today (inductors
-        are ideal — no loss; switches/diodes aren't in the summary
-        yet). For other device kinds the method raises
-        :class:`NotImplementedError` with the same migration hint as
-        :meth:`i`.
-        """
-        ...
-    def signal(self, name: str) -> numpy.ndarray[typing.Any, numpy.dtype[numpy.float64]]:
-        """
-        Return a user-recorded trace by name (e.g.
-        ``result.signal("M1.omega")``).
-
-        Sources, in resolution order:
-
-        1. ``self._motor_traces`` — populated by motor observer bundles
-           (PMSM / BLDC / DC motor / IM) when their ``attach_to_result``
-           was called. :func:`pulsim.simulate` does this automatically
-           when it detects a :class:`MotorObserverBundle` in
-           ``step_observer`` or inside ``closed_loops``.
-        2. Future-extensible: any other observer that registers traces
-           under the same dict can be reached the same way.
-
-        Returns
-        -------
-        numpy.ndarray
-            The recorded samples. Use ``self.signal(f"{name}.t")`` if you
-            also need the timestamp array (motor bundles publish their
-            own ``<motor>.t`` alongside each motor for convenience —
-            these typically equal ``self.times`` but the motor observer
-            captures the value at observer-call time, which can differ
-            from kernel sample time in an adaptive integrator).
-
-        Raises
-        ------
-        NameNotFoundError
-            When `name` isn't registered. The error carries fuzzy
-            suggestions over the registered trace names.
-        """
-        ...
-    def signals(self) -> list[str]:
-        """
-        Return the sorted list of registered signal names (e.g.
-        ``['M1.T_em', 'M1.i_a', 'M1.i_b', 'M1.i_c', 'M1.i_d',
-           'M1.i_q', 'M1.omega', 'M1.t', 'M1.theta']``).
-        """
-        ...
-    def currents(self, *, skip_unsupported: bool = True) -> dict[str, numpy.ndarray[typing.Any, numpy.dtype[numpy.float64]]]:
-        """
-        Return ``{branch_name: ndarray}`` with every supported branch's
-        current trace — pulsim's nearest equivalent to PLECS' "all currents
-        from the output equation" UX.
-
-        Walks ``builder.components()`` and calls :meth:`i` on every branch
-        whose kind has a reconstruction implementation (inductor,
-        voltage_source family, resistor, capacitor, current_source, diode,
-        shockley_diode, switch). When ``skip_unsupported`` is True (default), kinds without
-        a Python-side reconstruction
-        (``mosfet_level1``/``igbt_level1``/``nonlinear_diode``/``vcvs``/
-        ``saturable_inductor``) are silently omitted from the result —
-        pass ``False`` to surface their ``NotImplementedError`` instead.
-
-        Returns
-        -------
-        dict[str, numpy.ndarray]
-            Branch name → per-sample current trace. Empty dict if the
-            result wasn't produced via ``pulsim.simulate(...)`` (no builder
-            reference attached).
-        """
-        ...
-    def loss_events(self, device: str) -> numpy.ndarray[typing.Any, typing.Any]:
-        """
-        The commutations of ``device`` as a structured array with fields
-        ``t, kind ('on'|'off'), v, i, Tj, E`` (``set_device_losses``).
-        """
-        ...
-    def device_energy(self, device: str) -> dict[str, float]:
-        """
-        ``{"E_on", "E_off", "E_cond_electrical", "E_cond_table",
-        "E_impulse", "n_on", "n_off"}`` of ``device`` (energies in J).
-        ``E_cond_electrical`` is the device's ``∫v·i`` (always),
-        ``E_cond_table`` the on-state table's (0 without one); the spec's
-        ``conduction`` says which one was deposited as heat. ``E_impulse`` is
-        the impulsive re-initialisation energy booked to the device
-        (``result.reinit_records`` whose ``cause`` it is), deposited as heat.
-        """
-        ...
-    def plot(self, *signals: str, save: str | None = None, show: bool | None = None, **kwargs: typing.Any) -> typing.Any:
-        """
-        Plot one or more signals from this simulation result.
-
-        Each ``signal`` can be:
-
-        * ``"vout"``, ``"node_name"`` — a node voltage. Resolved via
-          :meth:`~SimulationResult.v`.
-        * ``"L1"``, ``"R_load"``, ``"M1"``, ... — a branch current.
-          Resolved via :meth:`~SimulationResult.i`.
-
-        The result must carry a back-reference to its builder (which
-        :func:`simulate` sets automatically). Standalone
-        ``run_transient`` consumers without the builder attached must
-        use :func:`pulsim.scope` directly.
-
-        Parameters
-        ----------
-        signals
-            Variable-length list of signal names. Each must resolve as
-            either a node voltage or a branch current — unknown names
-            raise :class:`NameNotFoundError` with the same fuzzy
-            "Did you mean ...?" suggestion path used by
-            :meth:`SimulationResult.v` / :meth:`.i`.
-        save
-            Optional path; passed through to :func:`pulsim.scope`.
-        show
-            If ``True`` (default when called interactively), display
-            the figure. If ``False``, just return it.
-        **kwargs
-            Forwarded into :func:`pulsim.scope` (titles, axes options,
-            etc.).
-
-        Returns
-        -------
-        matplotlib.figure.Figure
-            The figure produced by :func:`pulsim.scope`.
-
-        Raises
-        ------
-        AttributeError
-            If the result has no `_builder` back-reference. Use
-            :func:`pulsim.scope(builder, result, signals=[...])` for
-            that case.
-        NameNotFoundError
-            If any signal can't be resolved as a node OR a branch.
-        """
-        ...
-    def flux(self, name: str) -> numpy.ndarray[typing.Any, numpy.dtype[numpy.float64]]:
-        """
-        Flux Phi [Wb] through the permeance-type element ``name`` (a
-        permeance, an air gap or a saturable permeance), per sample: P*F, or
-        the element's law Phi(F) (add-permeance-magnetic-domain).
-        """
-        ...
-    def b_field(self, name: str) -> numpy.ndarray[typing.Any, numpy.dtype[numpy.float64]]:
-        """
-        Flux density B = Phi/area [T] of an air gap or a saturable
-        permeance (elements built from geometry).
-        """
-        ...
-    def h_field(self, name: str) -> numpy.ndarray[typing.Any, numpy.dtype[numpy.float64]]:
-        """
-        Field H = F/length [A/m] of an air gap or a saturable permeance
-        (elements built from geometry).
-        """
-        ...
-    @property
-    def plan(self) -> typing.Any:
-        """
-        The run's RunPlan (circuit, ties, preflight); None for a run from a builder stand-in.
-        """
-        ...
-    @property
-    def circuit(self) -> Circuit | None:
-        """
-        The pulsim.Circuit this run simulated (with any regularising ties); the caller's builder is never changed.
-        """
-        ...
 class LoadedCircuit:
     """
     Result of `load_yaml_*`: a populated `CircuitBuilder` (`.builder`) + the `simulation:` block (`.options`).
 
-    Read-only conveniences: `source`, `has_simulation`, `t_start`, `t_end`, `dt`, `switch_names`, `node_names`, `warnings`. `pulsim.simulate(loaded, ...)` takes t_start / t_end / dt / store_every from it.
+    Read-only conveniences: `source`, `has_simulation`, `t_start`, `t_end`, `dt`, `switch_names`, `node_names`, `warnings`, `simulation_keys`. `pulsim.simulate(loaded, ...)` takes every `simulation:` key from it; a keyword you pass wins.
     """
     options: SimulationOptions
     def __repr__(self) -> str:
@@ -2704,6 +2956,11 @@ class LoadedCircuit:
     def node_names(self) -> list[str]:
         """
         Non-ground node names in node-id order (the names `result.v(name)` accepts). Ground ('gnd' / '0') is not listed.
+        """
+    @property
+    def simulation_keys(self) -> list[str]:
+        """
+        The known `simulation:` keys the YAML sets, in file order; `simulate(loaded)` forwards these.
         """
     @property
     def source(self) -> str:
@@ -2889,226 +3146,6 @@ class LiveRingHandle:
         """
         Numpy view of the ring's state buffer, shape ``(capacity, state_size)``. Zero-copy; aliases the C++ memory.
         """
-class SolverSnapshot:
-    """
-    The COMPLETE state of a run at one instant.
-
-    `initial_state=` restores only the MNA vector and then INVENTS the companion history from it (a capacitor gets i_prev = 0, an inductor v_prev = 0), so resuming from it does NOT reproduce the run — a continuous 2T RLC and a T-then-resume differ by 2.3e-4 where a true resume is ~1e-15. A snapshot carries what was missing: the trapezoidal companion history, the state of every stateful device (saturable / gapped / hysteretic inductors, charge-based Coss, Lauritzen diodes, IGBT tails, MNA PMSMs) and the solver-owned diode bits. Pass it as simulate(resume_from=...): exact on engine='pwl', to tolerance on engine='trbdf2'. Pickles.
-    """
-    valid: bool
-    def __getstate__(self) -> tuple[str, int, float, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"], list[float], list[int], int, list[bool], list[bool], int, bool, typing.Any, typing.Any, tuple[float, int, float, bool], typing.Any, list[float], list[int], list[float], typing.Any]:
-        ...
-    def __init__(self) -> None:
-        ...
-    def __repr__(self) -> str:
-        ...
-    def __setstate__(self, arg0: tuple[typing.Any, ...]) -> None:
-        ...
-    @property
-    def _control_state(self) -> typing.Any:
-        """
-        The controllers' state at t (pulsim internal; set by simulate(), read by resume_from).
-        """
-    @_control_state.setter
-    def _control_state(self, arg1: typing.Any) -> None:
-        ...
-    @property
-    def controller_state(self) -> typing.Any:
-        """
-        The step-size controller's state (step::ControllerState): ``(kind, values)`` with kind 1 = fixed, 2 = LTE (TR-BDF2; layout [h, h_mem_gate0, h_mem_gate1, pending_gate_slot, diode_slot, gate_parity, h_mem_diode...]), 3 = the exact engine's committed instant (reduced state, schedule position, step memory; engine='dsed' resumes from it, the others refuse it), or None: the resumed engine then restarts its controller.
-        """
-    @property
-    def coss_history(self) -> list[float]:
-        """
-        Deprecated view of one block of ``dev_state`` (the 2.0 field). Writing it turns the snapshot into a 2.0-style payload.
-        """
-    @coss_history.setter
-    def coss_history(self, arg1: collections.abc.Sequence[float]) -> None:
-        ...
-    @property
-    def dev_layout(self) -> list[int]:
-        """
-        Instance count per block of ``dev_state``; empty for a 2.0-style payload.
-        """
-    @property
-    def dev_layout_names(self) -> list[str]:
-        """
-        The block names of ``dev_state``, in layout order.
-        """
-    @property
-    def dev_state(self) -> list[float]:
-        """
-        Every device state the run carries, one flat vector in the blocks named by ``dev_layout_names`` (linear companion history, then the stateful-device histories).
-        """
-    @dev_state.setter
-    def dev_state(self, arg0: collections.abc.Sequence[float]) -> None:
-        ...
-    @property
-    def diode_on(self) -> list[bool]:
-        """
-        Deprecated name of ``mask``.
-        """
-    @diode_on.setter
-    def diode_on(self, arg1: collections.abc.Sequence[bool]) -> None:
-        ...
-    @property
-    def grid_dt(self) -> float:
-        """
-        Step of the fixed-step grid (see ``grid_origin``); NaN: none.
-        """
-    @grid_dt.setter
-    def grid_dt(self, arg0: float) -> None:
-        ...
-    @property
-    def grid_origin(self) -> float:
-        """
-        The fixed-step grid ``t`` sits on: t == grid_origin + grid_step * grid_dt to rounding (NaN: none). A fixed-step resume with the same dt continues it, so its trace is the continuous run's bit for bit.
-        """
-    @grid_origin.setter
-    def grid_origin(self, arg0: float) -> None:
-        ...
-    @property
-    def grid_step(self) -> int:
-        """
-        Index of ``t`` on the fixed-step grid (see ``grid_origin``).
-        """
-    @grid_step.setter
-    def grid_step(self, arg0: int) -> None:
-        ...
-    @property
-    def history(self) -> list[float]:
-        """
-        Deprecated view of one block of ``dev_state`` (the 2.0 field). Writing it turns the snapshot into a 2.0-style payload.
-        """
-    @history.setter
-    def history(self, arg1: collections.abc.Sequence[float]) -> None:
-        ...
-    @property
-    def igbt_tail_history(self) -> list[float]:
-        """
-        Deprecated view of one block of ``dev_state`` (the 2.0 field). Writing it turns the snapshot into a 2.0-style payload.
-        """
-    @igbt_tail_history.setter
-    def igbt_tail_history(self, arg1: collections.abc.Sequence[float]) -> None:
-        ...
-    @property
-    def invalid_reason(self) -> str:
-        """
-        Why the run that produced this snapshot left it invalid, when it knows (a route that keeps no snapshot); resume_from refuses it with this cause. Empty for a valid snapshot. Not pickled.
-        """
-    @invalid_reason.setter
-    def invalid_reason(self, arg0: str) -> None:
-        ...
-    @property
-    def lauritzen_history(self) -> list[float]:
-        """
-        Deprecated view of one block of ``dev_state`` (the 2.0 field). Writing it turns the snapshot into a 2.0-style payload.
-        """
-    @lauritzen_history.setter
-    def lauritzen_history(self, arg1: collections.abc.Sequence[float]) -> None:
-        ...
-    @property
-    def layout_signature(self) -> int:
-        """
-        Hash of the block names and counts; a resume refuses a snapshot whose layout is not the circuit's, naming the block.
-        """
-    @property
-    def mask(self) -> list[bool]:
-        """
-        The solver-owned mode bits the next step starts from (which switched diodes conduct).
-        """
-    @mask.setter
-    def mask(self, arg0: collections.abc.Sequence[bool]) -> None:
-        ...
-    @property
-    def pmsm_history(self) -> list[float]:
-        """
-        Deprecated view of one block of ``dev_state`` (the 2.0 field). Writing it turns the snapshot into a 2.0-style payload.
-        """
-    @pmsm_history.setter
-    def pmsm_history(self, arg1: collections.abc.Sequence[float]) -> None:
-        ...
-    @property
-    def post_edge_derivatives(self) -> bool:
-        """
-        True when a variable-step run ended exactly on a gate edge after refreshing the device derivatives for the post-edge circuit (``x`` is the pre-edge solve). engine='pwl' refuses to resume from it; engine='trbdf2' resumes.
-        """
-    @post_edge_derivatives.setter
-    def post_edge_derivatives(self, arg0: bool) -> None:
-        ...
-    @property
-    def recorder_spec(self) -> str:
-        """
-        Signature of the recorders that wrote recorder_state.
-        """
-    @recorder_spec.setter
-    def recorder_spec(self, arg0: str) -> None:
-        ...
-    @property
-    def recorder_state(self) -> list[float]:
-        """
-        The in-loop recorders' state at the snapshot (pickle field 18; simulate(recorders=..., resume_from=) continues them). Empty: no recorder fed in the loop, or an older snapshot.
-        """
-    @recorder_state.setter
-    def recorder_state(self, arg0: collections.abc.Sequence[float]) -> None:
-        ...
-    @property
-    def restart_pending(self) -> bool:
-        """
-        True when restart_steps_left > 0.
-        """
-    @property
-    def restart_steps_left(self) -> int:
-        """
-        discontinuity_restart: SDIRK restart steps still owed when the run ended (the rule takes a discontinuity's step and the next two); a resumed run takes them first. 0 = none.
-        """
-    @restart_steps_left.setter
-    def restart_steps_left(self, arg0: int) -> None:
-        ...
-    @property
-    def saturable_history(self) -> list[float]:
-        """
-        Deprecated view of one block of ``dev_state`` (the 2.0 field). Writing it turns the snapshot into a 2.0-style payload.
-        """
-    @saturable_history.setter
-    def saturable_history(self, arg1: collections.abc.Sequence[float]) -> None:
-        ...
-    @property
-    def stamped_mask(self) -> list[bool]:
-        """
-        The switch / diode mask stamped for the solve that produced ``x`` (one bool per SwitchStateMask bit): the previous run's last ``switch_states`` row. A resume records it as its row 0. Not ``diode_on`` + ``switch_fn(t)``: a variable-step run that ends on a gate edge stores that sample under the pre-edge mask and only then re-decides the diodes. Empty when unknown (a hand-built or older snapshot); row 0 is then flagged in ``switch_states_unsolved``.
-        """
-    @stamped_mask.setter
-    def stamped_mask(self, arg0: collections.abc.Sequence[bool]) -> None:
-        ...
-    @property
-    def t(self) -> float:
-        ...
-    @t.setter
-    def t(self, arg0: float) -> None:
-        ...
-    @property
-    def tick_next_k(self) -> list[int]:
-        """
-        Per control-tick source: the index k of its next instant.
-        """
-    @tick_next_k.setter
-    def tick_next_k(self, arg0: collections.abc.Sequence[int]) -> None:
-        ...
-    @property
-    def tick_origin(self) -> list[float]:
-        """
-        Per control-tick source, in registration order: the origin of its grid (ticks at origin + offset + k*period). simulate(resume_from=) passes it back so the resumed ticks stay on the run's grid. Empty: no ticks, or an older snapshot.
-        """
-    @tick_origin.setter
-    def tick_origin(self, arg0: collections.abc.Sequence[float]) -> None:
-        ...
-    @property
-    def x(self) -> typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"]:
-        ...
-    @x.setter
-    def x(self, arg0: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"]) -> None:
-        ...
 class DCStrategy:
     """
     DC operating-point strategy selector.
@@ -4254,6 +4291,12 @@ class RunOptions:
     def rtol(self, arg0: float | None) -> None:
         ...
     @property
+    def sensitivities(self) -> list[str]:
+        ...
+    @sensitivities.setter
+    def sensitivities(self, arg0: collections.abc.Sequence[str]) -> None:
+        ...
+    @property
     def stiffness_threshold(self) -> float | None:
         ...
     @stiffness_threshold.setter
@@ -4434,9 +4477,9 @@ def _branch_form_capabilities() -> dict[typing.Any, typing.Any]:
     """
     The branch form's engine column (add-branch-form-ideal-switch): {'Switch'|'Diode': {engine: bool}}; False refuses with UnsupportedError(feature='branch_form').
     """
-def _commutation_points(seq: collections.abc.Sequence[tuple[bool, float, float]]) -> tuple[list[tuple[float, float]], list[tuple[float, float]]]:
+def _commutation_points(seq: collections.abc.Sequence[tuple[bool, float, float]], gated: bool, g_on: float, g_off: float) -> tuple[list[tuple[float, float, bool]], list[tuple[float, float, bool]]]:
     """
-    (on, off): the (|v|, |i|) of every turn-on and turn-off of an edge sequence [(closed, v, i), ...] by the kernel's reading rule (turn-on: v before, i after; turn-off: the reverse).
+    (on, off): the (|v|, |i|, soft) of every turn-on and turn-off of an edge sequence [(closed, v, i), ...] by the kernel's reading rule (turn-on: v before, i after; turn-off: the reverse). With `gated` (a switch, not a diode) an edge whose open-side v and closed-side i have opposite signs is soft: v = 0, no energy -- unless that current is within (g_off + eps g_on)|v|, the open device's own leakage and the closed law's rounding (thermal::commutation_point).
     """
 def _cpp_ipd_switching_function(m_ref: float, t: float, n_sm: int, f_carrier: float, sm_type: str = 'half_bridge') -> int:
     """
@@ -4664,7 +4707,7 @@ def run_auto_native(system: typing.Any, switch_fn: typing.Any, x0: typing.Annota
     """
     Native PEDSimulatorAuto (per-mode RK45↔BDF2 dispatch via stiffness detector) running the C++ scheduler inner loop. Returns a dict that additionally includes n_rk45_steps + n_bdf2_steps for each mode-segment.
     """
-def run_auto_native_builder(adapter: _NativeCircuitBuilderAdapter, switch_fn: typing.Any, x0: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"], t_end: float, rtol: float = 1e-06, atol: float = 1e-09, dt_init: float = 1e-09, dt_max: float = 1e-05, h_bdf2: float = 1e-06, stiffness_threshold: float = 10.0, store_every: int = 1, event_log: bool = True, resume: SolverSnapshot | None = None) -> dict[typing.Any, typing.Any]:
+def run_auto_native_builder(adapter: _NativeCircuitBuilderAdapter, switch_fn: typing.Any, x0: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"], t_end: float, rtol: float = 1e-06, atol: float = 1e-09, dt_init: float = 1e-09, dt_max: float = 1e-05, h_bdf2: float = 1e-06, stiffness_threshold: float = 10.0, store_every: int = 1, event_log: bool = True, resume: SolverSnapshot | None = None, loop_feed: typing.Any = None) -> dict[typing.Any, typing.Any]:
     """
     Bridge.11 — native PEDSimulatorAuto over a NativeCircuitBuilderAdapter (per-mode RK45↔BDF2 dispatch).
     """
@@ -4698,7 +4741,7 @@ def run_ped_native_builder(adapter: _NativeCircuitBuilderAdapter, switch_fn: typ
     """
     Bridge.11 — native PEDSimulator (DOPRI5) over a NativeCircuitBuilderAdapter. RHS / b_vector / A_matrix all execute in C++ without GIL roundtrips; the only Python callback is `switch_fn` at gate edges (rare). v2.0 Phase 3: PWL diodes are commutated by auto-derived event predicates on the reconstructed branch voltage, and every event projects the state onto the new mode's slow manifold (consistent reinitialization; pass enable_event_projection=False for the raw pre-projection behaviour).
     """
-def run_transient(cache: PwlStateSpaceCache, graph: Graph, pool: DevicePool, opts: SimulationOptions, switch_fn: typing.Any, b_extra_fn: typing.Any = None, start_from_dc_op: bool = False, enable_nonlinear_refresh: bool | None = None, step_observer: typing.Any = None, initial_state: typing.Any = None, should_continue: collections.abc.Callable[[], bool] | None = None, live_ring: LiveRingHandle | None = None, resume_from: typing.Any = None, tick_periods: collections.abc.Sequence[float] = [], tick_fns: collections.abc.Sequence[typing.Any] = [], tick_before: typing.Any = None, tick_origin: float = ..., tick_origins: collections.abc.Sequence[float] = [], tick_next_ks: collections.abc.Sequence[int] = []) -> SimulationResult:
+def run_transient(cache: PwlStateSpaceCache, graph: Graph, pool: DevicePool, opts: SimulationOptions, switch_fn: typing.Any, b_extra_fn: typing.Any = None, start_from_dc_op: bool = False, enable_nonlinear_refresh: bool | None = None, step_observer: typing.Any = None, initial_state: typing.Any = None, should_continue: collections.abc.Callable[[], bool] | None = None, live_ring: LiveRingHandle | None = None, resume_from: typing.Any = None, tick_periods: collections.abc.Sequence[float] = [], tick_fns: collections.abc.Sequence[typing.Any] = [], tick_before: typing.Any = None, tick_origin: float = ..., tick_origins: collections.abc.Sequence[float] = [], tick_next_ks: collections.abc.Sequence[int] = [], tick_closed_ends: collections.abc.Sequence[bool] = []) -> SimulationResult:
     """
     Run a fixed-dt transient simulation. switch_fn(t) → SwitchStateMask; b_extra_fn(t) → Vector adds to b_constant at each step. `step_observer(t, x)` (optional) is a void callback fired at the start of every step BEFORE switch_fn/b_extra_fn evaluate — use it to update Python-side controller state (PI, comparator, etc.) so the next switch_fn call reads the new duty. A `b_extra_fn` may declare its jump instants with a `next_jump_after(t)` attribute (first jump strictly after t, inf when none): with discontinuity_restart they restart the step and are read at their left limit; an undeclared jump is not restarted. `enable_nonlinear_refresh`: None (default) lets the kernel stamp the Newton devices (smooth / Shockley diode, MOSFET, IGBT) when the circuit has any; True is the same (deprecated); False with such devices raises UnsupportedError.
     """
@@ -4706,7 +4749,7 @@ def run_transient_bdf1(builder: CircuitBuilder, opts: SimulationOptions, switch_
     """
     BDF1 (implicit Euler) transient simulation. Use when the trapezoidal path rings on stiff problems — BDF1 is L-stable (adds artificial damping that kills numerical oscillation). Slower than trap because it assembles + factors per step; intended for ROBUSTNESS over speed.
     """
-def run_transient_trbdf2(cache: PwlStateSpaceCache, graph: Graph, pool: DevicePool, t_start: float, t_end: float, rtol: float, atol: float, h_init: float, h_max: float, switch_fn: typing.Any, b_extra_fn: typing.Any = None, initial_state: typing.Any = None, max_event_iterations: int | None = None, should_continue: collections.abc.Callable[[], bool] | None = None, observer_period: float = 0.0, step_observer: typing.Any = None, enable_nonlinear_refresh: bool | None = None, max_newton_iterations: int | None = None, tol_newton_dx: float = -1.0, tol_newton_res: float = -1.0, enable_newton_line_search: bool = False, enable_newton_lm: bool = False, resume_from: typing.Any = None, observer_periods: collections.abc.Sequence[float] = [], observers: collections.abc.Sequence[typing.Any] = [], newton_roundoff_budget: int | None = None, on_impulse_error: bool = False, observer_offsets: collections.abc.Sequence[float] = [], observer_origin: float = ..., observer_monitors: collections.abc.Sequence[bool] = [], observer_origins: collections.abc.Sequence[float] = [], observer_next_k: collections.abc.Sequence[int] = [], device_path: DevicePath = DevicePath.Legacy, mode_selection: int = 0, integrator: int = 0, roundoff_floor: int = 0) -> tuple[SimulationResult, dict[typing.Any, typing.Any]]:
+def run_transient_trbdf2(cache: PwlStateSpaceCache, graph: Graph, pool: DevicePool, t_start: float, t_end: float, rtol: float, atol: float, h_init: float, h_max: float, switch_fn: typing.Any, b_extra_fn: typing.Any = None, initial_state: typing.Any = None, max_event_iterations: int | None = None, should_continue: collections.abc.Callable[[], bool] | None = None, observer_period: float = 0.0, step_observer: typing.Any = None, enable_nonlinear_refresh: bool | None = None, max_newton_iterations: int | None = None, tol_newton_dx: float = -1.0, tol_newton_res: float = -1.0, enable_newton_line_search: bool = False, enable_newton_lm: bool = False, resume_from: typing.Any = None, observer_periods: collections.abc.Sequence[float] = [], observers: collections.abc.Sequence[typing.Any] = [], newton_roundoff_budget: int | None = None, on_impulse_error: bool = False, observer_offsets: collections.abc.Sequence[float] = [], observer_origin: float = ..., observer_monitors: collections.abc.Sequence[bool] = [], observer_origins: collections.abc.Sequence[float] = [], observer_next_k: collections.abc.Sequence[int] = [], device_path: DevicePath = DevicePath.Legacy, mode_selection: int = 0, integrator: int = 0, roundoff_floor: int = 0, trace_forced: bool = False) -> tuple[SimulationResult, dict[typing.Any, typing.Any]]:
     """
     Variable-step TR-BDF2 transient (engine='auto'): L-stable, 2nd order, LTE-controlled step, gate edges landed by bisection, diode crossings localized by Illinois. Returns (SimulationResult, stats dict). `observers[j]` ticks at t_start + observer_offsets[j] + k*observer_periods[j] (ceil((span - offset_j)/T_j) times, index order when coincident; offsets default to 0); observer_origin (NaN = t_start) moves the grid's origin, so a resumed run ticks where the uninterrupted one would; stats['control_tick_counts'] counts each.
     """
