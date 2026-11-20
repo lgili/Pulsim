@@ -412,7 +412,9 @@ needs the unified stepper (task 2.4). Sine, PWM and pulse voltage
 sources and sine / pulse / table current sources are exact (corners are
 time events); a user `b_extra_fn` makes the mask numeric, refused as
 `'source'` unless allowed. `integrator='bdf2'` is numeric throughout and
-not refused. Without `dt` the exact engine samples every 10 µs plus its
+not refused. Without `dt` the exact engine samples every 10 µs (its step ceiling
+`dt_max`; every `dt_max / 10` = 1 µs when the gate names no edge: no
+`switch_fn`, or a plain callable without `next_edge_after`) plus its
 events: exact at those instants, but a waveform interpolated between
 them is not (pass `dt` for a finer output grid). Capacitor loops (parallel
 capacitors) are refused by the extractor, so the charge-conserving

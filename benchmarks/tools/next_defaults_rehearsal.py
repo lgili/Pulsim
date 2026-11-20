@@ -571,7 +571,7 @@ def render():
                          f"{b['outcome']} {_err(b)} | {', '.join(resp) or 'combination'} | {basis} |")
     L += ["", "## engine='auto' under the profile", "",
           "`auto` = today (no dt: trbdf2, or a refusal naming the blocker); `auto+next` = the",
-          "release route (no dt). The exact engine without dt samples at its 10 us default ceiling,",
+          "release route (no dt). The exact engine without dt samples at its 10 us default ceiling (1 us when the gate names no edge),",
           "so its strict cell can disagree where `dsed+next` (netlist dt as the output grid) agrees.", "",
           "| circuit | today: engine / outcome | next: engine / outcome | route reason |", "|---|---|---|---|"]
     moved = 0
@@ -638,7 +638,7 @@ def blockers(allu, rows):
                             if exs else "") +
                          (("On `auto` the exact engine runs without dt: "
                            + (f"the `output_rtol` = {nd.PROFILE['dsed']['output_rtol'].value!r} output grid; "
-                              if "output_rtol" in nd.PROFILE["dsed"] else "10 us default output ceiling; ")
+                              if "output_rtol" in nd.PROFILE["dsed"] else "10 us default output ceiling (1 us gate poll without edges); ")
                            + "the strict gate interpolates linearly between those samples. ")
                           if all(x[1] == "auto" for x in grp) else "") +
                          "Circuits (today -> profile): "

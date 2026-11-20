@@ -244,7 +244,9 @@ def _resolve_dsed_options(
 
     * **dt_max**: if user passed ``dt``, use it. Otherwise default to
       10 µs (covers typical PWM up to ~10 kHz; the PI controller
-      adapts down naturally for higher f_sw).
+      adapts down naturally for higher f_sw). A gate that names no edge
+      (no ``switch_fn``, or a plain callable without ``next_edge_after``)
+      is polled every ``dt_max / 10`` = 1 µs, so such a run steps at 1 µs.
     * **h_bdf2**: default 1 µs (reasonable for stiff segments at
       typical power-electronics scales).
     * **dt_init**: default 1 ns (PI controller grows from here).
