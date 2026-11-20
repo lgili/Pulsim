@@ -2271,7 +2271,7 @@ class SimulationResult:
     @property
     def right_limit_states(self) -> typing.Any:
         """
-        (len(right_limit_index), n_states): the right limit of each of those samples (where the next step starts). On the fixed engine under the restart rule it is the start of the line whose trapezoid is the restart step's own SDIRK quadrature (the right limit to second order; exact for the step's integral of a quantity linear in the state).
+        (len(right_limit_index), n_states): the right limit of each of those samples (where the next step starts). On the fixed engine under the restart rule it is the start of the line whose trapezoid is the restart step's own SDIRK quadrature (exact for the step's integral of a quantity linear in the state; as a value the right limit to second order, to first order after a kept backward-Euler stage 2).
         """
     @right_limit_states.setter
     def right_limit_states(self, arg1: typing.Any) -> None:
