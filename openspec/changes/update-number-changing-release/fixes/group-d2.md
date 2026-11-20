@@ -145,3 +145,52 @@ on the saturable inductor's flux — its only state. Third commit: the q rows
 take the entries' embedded first-order estimate on an SDIRK step,
 (1−gs)/gs·(d_g/gs − d_1) with d = q(X) − q_n (`trbdf2_increments`), also at
 the run's first step (it reads no slot). Re-measured below.
+
+## Moved cases — final (tip after the q-row commit)
+
+Identity at the tip vs 85637327: `trbdf2_identity` 367/371 identical (the
+same four move), `pwl_identity` 390/390 identical (measured on 8508df9b;
+pwl does not include the trbdf2 header's loop; not re-run after the last
+two commits). The SDIRK step's q rows read their own stage-2 increment
+q(x_1) − ψ5 before the rollback (the rollback also drops the γ capture:
+with `trbdf2_increments` every flyback pair aborted again — measured, fixed
+in 86cecb95).
+
+Per-sample rms error relative to the component's max (old = 85637327, new = tip):
+
+| moved case, component | truth | old | new |
+|---|---|---|---|
+| boost_saturable_inductor v_out | esdirk43 rtol 1e-10 | 1.220e-4 | 1.155e-4 |
+| boost_saturable_inductor i_L | same | 1.554e-5 | 1.635e-5 |
+| same at rtol 1e-4 (v_out / i_L) | same | 3.746e-4 / 3.682e-5 | 2.962e-4 / 3.180e-5 |
+| same at rtol 1e-6 (v_out / i_L) | same | 3.516e-5 / 4.312e-6 | 3.392e-5 / 4.272e-6 |
+| rect_atan v_o / i_L | trbdf2 rtol 1e-10 | 4.671e-6 / 5.234e-6 | 4.679e-6 / 5.244e-6 |
+| rect_atan v_o / i_L | esdirk43 rtol 1e-10 | 6.576e-6 / 6.719e-6 | 6.518e-6 / 6.788e-6 |
+| rect_gapped v_o / i_L | trbdf2 rtol 1e-10 | 1.069e-4 / 2.929e-4 | 1.067e-4 / 2.924e-4 |
+| hysteretic demo (two states) | pwl dt 1e-9 | 1.293e-4 / 5.220e-5 | 1.282e-4 / 5.176e-5 |
+
+Verdict: the boost moves toward the truth at three tolerances out of three on
+v_out and two of three on i_L (+5 % at the example's own rtol 1e-5); the
+rectifiers move by ≤ 1 % of their error, both ways (step-sequence noise);
+the hysteretic demo moves closer. No case moves away systematically.
+
+Test-suite cases that moved (pytest, touched files):
+
+| case | old | new | truth |
+|---|---|---|---|
+| F-3-4 flyback, branch switch / conductance diode, rtol 1e-6 | aborts at 0.47 ms | 15.310393 V | esdirk43 15.31034, pwl dt 1e-8 15.3095 |
+| F-3-4, the other three pairs | 15.310393 V | 15.310393 V | same |
+| F-S-1 nonlinear C (m = 0) + 10 A, esdirk43 | aborts at t = 0 | end −0.01 V, max err 1.3e-7 V | −0.01·(1 − e^(−t/1 ps)) |
+| same, TR-BDF2 | max err 1.8e-3 V (first ps) | 5.7e-7 V | same |
+| dependent_states next to a Lauritzen diode (trbdf2 / esdirk43) | refused | max err 3.8e-9 A / 3.4e-8 A | flux-conservation closed form |
+| Coss buck E_cond, trbdf2 defaults | +4.40 % | +3.91 % | closed form (`_conduction_truth`) |
+| same, rtol 1e-6 / 1e-8 | +4.62 % / +2.08 % | +3.43 % / +2.20 % | same |
+| same, esdirk43 defaults / rtol 1e-6 | +3.81 % / +4.75 % | +5.14 % / +4.64 % | same |
+| same, esdirk43 dt 4e-9 / 4e-8 | +0.16 % / +1.16 % | +0.16 % / +0.98 % | same |
+
+The Coss buck's scatter (both directions) is the F-4-5 probe defect riding on
+the step sequence: with the probe made short (dt = 4e-9) old and new agree
+to 1e-4 at +0.16 %. Its band in `test_coss_turn_on_energy_is_e_oss_on_the_variable_step_engine`
+went 5 % → 8 % with the cause written next to it, and a NEW strict xfail
+`test_coss_conduction_energy_to_1pc_at_defaults[trbdf2, esdirk43]` holds the
+1 % the probe fix must reach.

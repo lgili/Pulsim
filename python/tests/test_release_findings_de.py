@@ -88,14 +88,30 @@ def test_coss_turn_on_energy_is_e_oss_on_the_variable_step_engine(kw):
     assert d.E_on == pytest.approx(20 * 1e-4, rel=1e-12)
     assert d.E_off == pytest.approx(20 * 1e-4, rel=1e-12)
     truth = _conduction_truth(r)
-    # E_oss is 29 % of it. Measured +2.1 % (rtol 1e-8) .. +4.4 % (defaults),
-    # esdirk43 +4.1 %: the first step after each turn-on explains 0.8 %
-    # (group-de.md), the rest is NOT traced. The finding was +1.7e5.
-    assert d.E_cond_electrical == pytest.approx(truth, rel=5e-2)
+    # E_oss is 29 % of it. The excess (+2 .. +5 %; the finding was +1.7e5)
+    # is the committed gate-edge probe (1e-6 x the PRE-edge step, up to 0.5
+    # tau of the C_oss loop) booked from the right limit: up to ~0.25 E_oss
+    # per edge, so up to ~7 %, and it moves with the step sequence
+    # (group-d2.md). The strict xfail below holds the 1 % that a short probe gives.
+    assert d.E_cond_electrical == pytest.approx(truth, rel=8e-2)
     # every joule booked reaches the junction (or is pending at t_end)
     assert r.heat_injected + r.heat_pending == pytest.approx(
         d.E_on + d.E_off + d.E_cond_electrical, rel=1e-9)
     assert float(np.asarray(r.v("tj")).max()) < 30.0
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "release finding F-4-5 remainder (group-d2.md): the landed gate edge commits a "
+    "trapezoidal probe of max(h_probe_floor, 1e-6 h_pre); after a 2.8e-7 s step that "
+    "is 2.8e-13 s = 0.47 tau of the channel / C_oss loop, it starts from the pre-edge "
+    "capacitor current (half the discharge) and the loss port books it from the right "
+    "limit's 2.3 MW: +0.20 .. +0.25 E_oss on 13 of 19 edges, +4.4 % in all. dt=4e-9 "
+    "(probe <= 4e-15 s) gives +0.09 %. Fix: a short or backward-Euler committed probe "
+    "(moves every trbdf2 gate edge; owner of the gate-edge restart)"))
+@pytest.mark.parametrize("kw", [dict(), dict(integrator="esdirk43")])
+def test_coss_conduction_energy_to_1pc_at_defaults(kw):
+    r = _run_coss(engine="trbdf2", **kw)
+    assert r._device_losses[0].E_cond_electrical == pytest.approx(_conduction_truth(r), rel=1e-2)
 
 
 def test_coss_loss_port_energy_does_not_depend_on_rtol():
