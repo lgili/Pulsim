@@ -37,6 +37,7 @@ reference scenarios.
 from __future__ import annotations
 
 import re
+import sys
 import warnings
 
 import numpy as _np
@@ -52,6 +53,14 @@ from ._pulsim import (  # type: ignore[import-not-found]
 )
 from ._pulsim import run_option_defaults as _run_option_defaults  # type: ignore[import-not-found]
 from ._refusal import _UnsupportedNotImplemented, unsupported
+from . import _exact_route as _exact_route_mod
+from . import _pulsim as _kern_mod  # type: ignore[attr-defined]
+
+# The pulsim package, read by attribute at call time (as `from . import X`
+# in a function reads it, monkeypatches included) without the relative
+# import's per-call cost (importlib's _handle_fromlist / ModuleSpec.parent,
+# ~30 bytecodes each: simulate() pays them on every exact run).
+_pkg = sys.modules[__package__]
 
 
 # =============================================================================
@@ -374,7 +383,7 @@ def _exact_result(
       0.0234 A against 0.0535 A. Empty when no event fired, ``None``
       when ``switch_states`` is ``None``.
     """
-    from ._pulsim import GridKind, SimulationResult  # type: ignore[import-not-found]
+    GridKind = _kern_mod.GridKind; SimulationResult = _kern_mod.SimulationResult
     t_arr = _np.asarray(times, dtype=float).reshape(-1)
     arr = _np.asarray(states, dtype=float)
     if arr.ndim == 1:
@@ -426,7 +435,8 @@ def _exact_result(
               and (rl_idx.size == 0
                    or (rl_idx.min() >= 0
                        and rl_idx.max() < len(t_arr)
-                       and _np.all(_np.diff(rl_idx) > 0))))
+                       # strictly increasing (np.all(np.diff(..) > 0), as ufuncs)
+                       and _np.logical_and.reduce(rl_idx[1:] > rl_idx[:-1]))))
         if ok:
             for a in (rl_idx, rl_states, rl_sw):
                 a.setflags(write=False)
@@ -465,13 +475,12 @@ def _result_from_native(native_res, t_start: float):
     res.exact = native_res.get("exact")
     if res.exact is not None:
         # add-exact-propagator-strategy D11: the route record (report only)
-        from ._exact_route import segments_from_exact
-        res.exact["segments"] = segments_from_exact(
+        res.exact["segments"] = _exact_route_mod.segments_from_exact(
             res.exact, native_res.get("switch_states"))
         # 13.3, report only: would 'auto' route this run exact? (every
         # segment exact; the default route does not read it)
         res.exact["auto_would_route"] = bool(res.exact["segments"]) and all(
-            seg["exact"] for seg in res.exact["segments"])
+            [seg["exact"] for seg in res.exact["segments"]])
     et = native_res.get("event_times")
     res.event_times = (None if et is None
                        else np.asarray(et) + float(t_start))
@@ -641,7 +650,7 @@ OUTPUT_BUDGET = 2_000_000
 
 def _shadow_h_e(builder: Any, switch_fn: Any, t_window: float) -> float:
     import math
-    from . import _pulsim as _kern
+    _kern = _kern_mod
     periods = [float(t_window),
                float(_kern._min_source_period(builder.graph, builder.pool))]
     nxt = getattr(switch_fn, "next_edge_after", None)
@@ -739,8 +748,7 @@ def run_dsed_from_builder(
     """
     import numpy as np
     if mode_selection == "auto":   # not through simulate(): the plan's rule, here
-        from . import _resolve_mode_auto
-        mode_selection, mode_auto = _resolve_mode_auto(builder, "dsed", None)
+        mode_selection, mode_auto = _pkg._resolve_mode_auto(builder, "dsed", None)
 
     # ------------------------------------------------------------------
     # v2.0 Phase 3 — structural refusal, BEFORE any work happens.
@@ -764,7 +772,7 @@ def run_dsed_from_builder(
     # rather than an exception handler. Same stance as
     # run_transient_bdf1's PWL-diode refusal (v2.0 Phase 2).
     # ------------------------------------------------------------------
-    from . import _pulsim as _kern
+    _kern = _kern_mod
     _n_sw, _n_diodes, _controlled = _kern._switch_census(
         builder.graph, builder.pool)
     if _n_diodes > 0:
@@ -885,10 +893,10 @@ def run_dsed_from_builder(
 
     # ---- Stage 1: build the cache + adapter ---------------------------
     try:
-        from . import PwlStateSpaceCache as _PwlCache  # type: ignore[attr-defined]
-        from . import SwitchStateMask  # noqa: F401  # type: ignore[attr-defined]  (an install check)
+        _PwlCache = _pkg.PwlStateSpaceCache
+        SwitchStateMask = _pkg.SwitchStateMask  # (an install check)
         from .dsed._builder_bridge import CircuitBuilderAdapter
-    except ImportError as e:
+    except (ImportError, AttributeError) as e:
         raise RuntimeError(
             f"pulsim.simulate(engine='dsed'): required Pulsim bindings "
             f"not available ({e}). Either the install is broken or "
@@ -908,13 +916,9 @@ def run_dsed_from_builder(
     # warning — review finding PY-3).
     sf = opts.switch_fn
     if sf is None:
-        from . import _undriven
+        _undriven = _pkg._undriven
         sf = (_undriven("dsed", builder, stacklevel=5) if undriven is None
               else _undriven("dsed", builder, 5, undriven))
-
-    adapter = CircuitBuilderAdapter(
-        builder=builder, cache=cache, switch_fn=sf,
-        b_extra_fn=b_extra_fn)
 
     # A switch_fn that cannot name its next edge is sampled every
     # dt_max/10 (the "poll"), and each change found is bisected to the
@@ -1039,12 +1043,7 @@ def run_dsed_from_builder(
     # ---- Stage 4: prefer Bridge.11 (full-native adapter + scheduler),
     # fall back to Bridge.10 (Python adapter + native scheduler),
     # fall back to Bridge.5 (Python adapter + Python scheduler).
-    _native = None
-    try:
-        from . import _pulsim as _native_mod   # type: ignore[attr-defined]
-        _native = _native_mod
-    except ImportError:
-        _native = None
+    _native = _kern_mod   # (imported with this module: no ImportError here)
 
     NativeAdapterCls = (getattr(_native, "_NativeCircuitBuilderAdapter", None)
                         if _native is not None else None)
@@ -1121,7 +1120,7 @@ def run_dsed_from_builder(
                     shadow_kw["mode_shadow_h_e"] = h_e
             if opts.integrator == "rk45":
                 # add-probes-and-recorders R5: the recorders in the loop
-                from . import _recorders as _rec
+                _rec = _pkg._recorders
                 feed_slot = _rec.ExactFeedSlot(builder)
                 _rec.attach_loop_feed(feed_slot, "dsed")
                 native_res = run_ped_b11(
