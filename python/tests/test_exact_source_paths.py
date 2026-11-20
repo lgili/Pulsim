@@ -1,6 +1,6 @@
 """The exact engine's recorder closed forms on the source paths the sources
 slice left untested (reviewer R4, fixes/exact-buck-integrals.md), and the
-engine findings met on the way (strict xfails with their traces).
+engine findings met on the way (fixed by the F5 settle decisions; kept as regressions).
 
 Truths, by hand: every circuit is first order, y' = (K u(t) - y)/tau with a
 piecewise-linear input u = a + b s on each piece, so
@@ -178,7 +178,7 @@ def test_a_sine_with_non_positive_frequency_is_its_dc_level(f):
            A, B, cuts)
 
 
-# --- engine findings (scheduler.hpp settle territory: left to its owner) ------
+# --- engine findings, fixed by fix/core-release-f5-settle-decisions (regressions) ---
 
 def _pulse_diode(v0):
     b = p.CircuitBuilder()
@@ -190,41 +190,24 @@ def _pulse_diode(v0):
     return b
 
 
-@pytest.mark.xfail(strict=True, raises=p._pulsim.DiodeModeInconsistentError, reason=(
-    "engine finding (fixes/exact-buck-integrals.md, 'Engine findings'): the pulse's "
-    "rise starts at 5 us with v_D = 0 exactly; the corner is a same-mask time event "
-    "(no settle) and the next step's scan starts on an exact zero, which it leaves to "
-    "the mode decision that never runs: D1 stays OFF while forward-biased by 10 V"))
 def test_a_ramp_starting_on_a_diode_s_zero_turns_it_on():
+    # was a strict xfail; fixed by the settle decision at a source corner (F5 (a))
     res = p.simulate(_pulse_diode(0.0), 100e-6, engine="exact")
     t_on = [t for t in res.event_times if t >= 5e-6]
     assert t_on and t_on[0] - 5e-6 < 1e-12
 
 
-@pytest.mark.xfail(strict=True, raises=p._pulsim.DiodeModeInconsistentError, reason=(
-    "engine finding: the turn-off on the falling ramp is located (i = 0 at "
-    "58.937711 us) but the settle keeps D1 ON; the adapter's OFF mode reads "
-    "v_D = +1.35e-10 V at the root (the located root's residual current times "
-    "1 + R*g_on = 1e5) and -2.77e5 V/s after it, so the decision is taken on the "
-    "root's residual, not on the ramp (source handling verified: rhs and "
-    "node_pair_voltage include the slope). The mode guard is not involved "
-    "(the same with h_e = 0)"))
 def test_a_turn_off_on_a_falling_ramp_is_kept():
+    # was a strict xfail; fixed by F5 (b) (a located root's error is a time error).
+    # OFF is g_off = 1e-9 S: the reverse leakage g_off * v_D (to -7.8 nA) is the OFF law.
     res = p.simulate(_pulse_diode(-1.0), 100e-6, engine="exact")
+    assert [t for t in res.event_times if t > 50e-6] == pytest.approx([58.937711e-6], abs=1e-12)
     t = np.asarray(res.times)
     after = t > 59e-6
-    assert np.all(np.asarray(res.i("D1"))[after] >= -1e-9)
+    v_d = np.asarray(res.v("in"))[after] - np.asarray(res.v("a"))[after]
+    assert np.all(v_d < 0)
+    np.testing.assert_allclose(np.asarray(res.i("D1"))[after], 1e-9 * v_d, rtol=1e-9, atol=1e-18)
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
-    "engine finding: on the three-phase bridge with line inductance the truth "
-    "(benchmarks/tools/exact_truth.py, 40 digits) has D2 ON at 5.000000250912935 ms "
-    "with D5 still ON, and D5 OFF 1.350692 us later (the same at 11.6667 ms); the "
-    "engine's settle turns D5 OFF at the D2 instant (8 events, not 10), leaving end "
-    "states 1.8e-9 off; the scan certificate of fix/core-release-f3-exact-leftovers "
-    "(F-X-5) is for modes without sine sources and does not reach it"))
-def test_three_phase_bridge_keeps_the_overlap_of_d2_and_d5():
-    res = p.simulate(src._bridge_3ph(), 6e-3, engine="exact")
-    ev = np.asarray(res.event_times)
-    for t_truth in (5.000000250912935e-3, 5.001350943090826e-3):
-        assert np.min(np.abs(ev - t_truth)) < 1e-9, (t_truth, ev)
+# The three-phase bridge's merged D2 / D6 flips (the same circuit and truth instants) are
+# test_exact_settle_decisions.py::test_the_overlap_of_d2_and_d6_is_kept (strict xfail, F5 (c)).
