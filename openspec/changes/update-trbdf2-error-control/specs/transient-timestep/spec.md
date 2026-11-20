@@ -72,3 +72,31 @@ its left limit.
 - **GIVEN** a pulse source with a 100 ns rise time
 - **WHEN** it runs
 - **THEN** the start and the end of the rise are both sample times
+
+### Requirement: TR-BDF2 Error Estimate Covers Stateful Device States
+
+The variable-step engine's local error norm SHALL include one row per
+internal state of every stateful device kind (charges and fluxes: the
+Lauritzen diode's stored charge, the IGBT tail charge, a nonlinear
+capacitor's charge, a saturable inductor's flux, a machine's flux
+linkages, an external device's charge rows), on both integrators of
+`engine='trbdf2'`. Each row SHALL be weighted by
+`atol·s + rtol·max(|q_n|, |q_1|)` where `s` converts the device's
+electrical unknown into the unit of its state (a capacitance, an
+inductance, a time constant), so that a row whose state stays zero keeps
+a finite scale. On TR-BDF2 the row's estimate SHALL be Bank's formula on
+the derivatives the two stage rules imply for that state.
+
+#### Scenario: Error falls with rtol where the dynamics live in a device
+- **GIVEN** a Lauritzen diode reverse recovery, an IGBT tail turn-off and
+  a nonlinear capacitor charged through a resistor, each against its
+  closed form or a SciPy truth
+- **WHEN** each runs on `engine='trbdf2'` at rtol 1e-5 and 1e-8
+- **THEN** the error at 1e-8 is below a tenth of the error at 1e-5
+
+#### Scenario: An idle stateful device costs no steps
+- **GIVEN** a switched RC beside an IGBT whose gate is held off, once
+  with a tail (a q row that stays ~0) and once without
+- **WHEN** both run at rtol 1e-6 and 1e-9 on each integrator
+- **THEN** the accepted steps differ by at most 5 % and neither run has
+  more forced accepts than the other

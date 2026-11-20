@@ -262,6 +262,19 @@ public:
         for (const auto& e : entries_) *d++ = e.k0 + e.k1 * steady_state_at(e, x) - *psi++;
     }
     void stage_clear() noexcept {}
+    // ---- TR-BDF2's q rows (the error estimate) ----
+    /// Q − Q_n at γ (the stage-1 capture) and at the step end (the BDF2
+    /// stage's K0/K1, as `commit` computes it).
+    void trbdf2_increments(const Vector& x1, Real* dqg, Real* dq1) const {
+        for (const auto& e : entries_) {
+            *dq1++ = e.k0 + e.k1 * steady_state_at(e, x1) - e.q_prev;
+            *dqg++ = e.q_gamma - e.q_prev;
+        }
+    }
+    /// atol_q / atol per row: Q = k·τ·i_ss in equilibrium.
+    void q_scales(Real* s) const {
+        for (const auto& e : entries_) *s++ = e.params.k_tail * e.params.tau_tail;
+    }
 
     /// Flat (Q, f) pairs, for `SolverSnapshot`.
     [[nodiscard]] std::vector<Real> to_flat() const {
