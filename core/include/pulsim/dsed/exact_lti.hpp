@@ -106,6 +106,7 @@ struct ChordWork {
     Vector gB, gC;                          // the growing modes' terms at one probe
     Vector eb, tol_eff;                     // the bound at one probe; the tolerance it is held to
     Eigen::Index n_uncertified = 0;         // states the bound cannot certify (exact_chord_step)
+    Real floor = 0;                         // only a tolerance <= floor may be left uncertified
     std::vector<Eigen::Index> grow;         // modes with Re λ > 0
     Eigen::VectorXcd zdd;
     DenseMatrix S, B, C, A0;                // n × (n+1) sums per split (exact_chord_step)
@@ -917,16 +918,17 @@ inline constexpr Real kSettleTau = Real{40};
                    .matrix();
         return true;
     };
-    // A state the bound cannot certify even at the modes' own resolution (d·ρ = 1e-3,
-    // where its chord error is q·|ẍ_j(0)| to 1e-3) is not held to it: there the bound
-    // is the triangle inequality over the modes against a cancellation between them
-    // it cannot see (the far nodes of an RC ladder, ~0 V, against a sum of volts),
-    // and it would cut every step to the floor (F-X-3: a 500-section ladder > 29 min).
-    // w.n_uncertified counts them; the caller reports it.
+    // A state held only to the floor tolerance (w.floor: it has not moved more than the
+    // caller's atol) that the bound cannot certify even at the modes' own resolution
+    // (d·ρ = 1e-3) is not held to it: there the bound is the triangle inequality over the
+    // modes against a cancellation between them it cannot see (the far nodes of an RC
+    // ladder, ~0 V, against a sum of volts), and it would cut every step to the floor
+    // (F-X-3: a 500-section ladder > 29 min). A tolerance above the floor is always held
+    // (a tight rtol on a moving state is a real constraint). w.n_uncertified counts them.
     w.tol_eff = tol;
-    if (e.chord_rho > Real{0} && bound(std::min(h, Real{1e-3} / e.chord_rho))) {
+    if (w.floor > Real{0} && e.chord_rho > Real{0} && bound(std::min(h, Real{1e-3} / e.chord_rho))) {
         for (Eigen::Index j = 0; j < n; ++j) {
-            if (w.eb[j] > tol[j]) {
+            if (w.eb[j] > tol[j] && tol[j] <= w.floor) {
                 w.tol_eff[j] = kInf;
                 ++w.n_uncertified;
             }

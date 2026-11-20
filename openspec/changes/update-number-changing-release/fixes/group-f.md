@@ -87,10 +87,15 @@ triangle-inequality sum over modes (1e-3..1e-7 V for those nodes) of terms that 
 ~1e-14 there. Every chord was cut to the floor: n=25 638 samples, n=50 1 357, n=100 197 755
 (14.4 s); n=500 did not finish in 29 min (and every sample also advanced the state, F-6-7).
 
-**Fix.** A component whose bound exceeds its tolerance even over the modes' own resolution
-step (min(h, 1e-3/max|λ|)) cannot be certified by this bound at any useful step: it is not
-held to it, the step is counted (`n_output_uncertified`, a `RuntimeWarning` from the dispatch).
-The state carried is the rule-free run's (F-6-7), so this changes only where samples fall.
+**Fix.** A component held only to the floor tolerance (it has not moved more than atol)
+whose bound exceeds that tolerance even over the modes' own resolution step
+(min(h, 1e-3/max|λ|)) cannot be certified by this bound at any useful step: it is not held to
+it, the call is counted (`diagnostics['output_grid']['n_output_uncertified']`, no warning: a
+start from rest leaves one such chord on an ordinary resonant tank). A tolerance above the
+floor is always held: the first version (any component) let `test_exact_lti`'s resonant case
+(constant tol 5e-5 against a 2e4 V/s state) through 2188× over its tolerance, and would have
+dropped every moving state at `output_rtol` ≲ 1e-7. The state carried is the rule-free run's
+(F-6-7), so this changes only where samples fall.
 
 **After.** n=100: 2 140 samples, 0.15 s (test). n=500 (ladder500_rc): 66 798 samples, 104 s
 against 7.6 s rule off = 13.7× — the 3× target is NOT met. The remaining cost is the O(n²)

@@ -3200,6 +3200,7 @@ private:
                                   .cwiseMax(Vector::Constant(x.size(), output_atol_)) * output_rtol_;
             };
             set_tol();
+            output_work_.floor = output_atol_ * output_rtol_;   // set_tol's floor, bit for bit
             bool bounded = true;
             Real d = system_.exact_output_step(t, x, output_tol_, output_rtol_, h, bounded, output_work_);
             if (d < h) {
