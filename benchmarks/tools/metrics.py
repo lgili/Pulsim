@@ -319,9 +319,11 @@ def exact_parts(t, y, cand, *, span: float, h: float, truth_events=(), engine_ev
       the truth's limits at the engine's instant.
     rule (1), a projected transient: at a matched event where the engine
       reports a projection and records a right value the truth does not
-      have at its instant but SETTLES to within ``parasitic`` after it
-      (:func:`collapsed_transient`: within ``limits_tol`` of span, settled
-      to PROJECTION_SETTLE of span, after tau_eff), that right value is a
+      have at its instant but SETTLES to, followed to PROJECTION_REACH ×
+      ``parasitic`` and not past the next truth event
+      (:func:`collapsed_transient`: within ``limits_tol`` of span from
+      tau_eff on, settled to PROJECTION_SETTLE of span or 1e-6 of the jump),
+      that right value is a
       transient collapsed in time, not a wrong limit: it is charged in
       ``instants`` by its true L2 cost ∫(truth − engine right)² over
       [t, t + tau_eff] (once per truth instant), and in ``limits`` by its
