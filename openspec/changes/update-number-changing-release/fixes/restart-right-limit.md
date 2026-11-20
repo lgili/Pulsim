@@ -385,3 +385,35 @@ against this tip to separate session 1 from 2, then move `split` /
 `rl_loc_*` out of the per-step closures (read `split` inside event_right_limit,
 which is built once per run). Then re-run sb2.py, fb_count.py, ident2.sh
 compare, rlcmp.py, the restart tests, instr.sh.
+
+## Session 3 (50bbda52): the minimal construction — NOT mergeable yet
+
+### Measured first (scratch instrumented builds, not committed)
+- Events per accepted step: buck_pwl_restart 405 rows / 20000 = 0.020; vsi_pwl_restart 805 / 100000 = 0.008.
+- Old tip 62b86ff1: buck 399 calls x 1 rung x 5 solves, every solve a numeric refactor (aux table one dt per mask, five eps); solves 92.5 % of the right-limit time, bookkeeping + validity 7.5 %; the right limit was 9 % of the run. vsi: 1248 rungs / 799 calls, 6240 solves (97 %), 117 fallbacks of 799.
+- Default-path bisect (instructions per accepted step, min of six, base 6027f4fd with this tree's flags): c43be8b4 vsi_pwl +0.17 %, buck_pwl +0.03 %; 62b86ff1 vsi_pwl +0.27 %, buck_pwl +0.38 %. The base itself moves 0.5-1.4 % between runs (3625 / 3676 / 3776 for buck_pwl_restart): one run is not a gate.
+- New construction with RL_OFF switches (buck_pwl_restart): rows off 3766, rows recorded without solves 3831, full 3843. The solves cost ~12 instr/step (~600 instr/event); row recording ~65 instr/step.
+
+### The construction (event_right_limit)
+States = x0 (x0 + J after an ideal element's jump). Algebraic unknowns: backward-Euler solves at a FIXED eps = 1e-3*gamma*dt on the aux table (one factor per mode, cache hits afterwards), in stage 1's mode (nothing forced or re-decided), the histories corrected each pass (history -= state - target) until every state is within 1e-9 of its kind's scale (<= 4 passes; error (eps/tau)^k). Linear modes call cache.solve_at directly. Counted (n_right_limit_fallbacks): pin not converged, `events::redecide` would change the mode at the row, a located turn-off that is not a continuity point. Located crossing of V_f = 0 diodes alone (turn-off, or turn-on with V_th = 0), stage-1 bits = the located bits, and no gate/source trigger at a crossing landed on b (`rs_trig_dio`): the row IS the left (no solve). ip_struct: -2x(e) + 5x(2e) - 2x(4e), e = 5e-4*gamma*h. Conductance impulse: e = 1e-9*gamma*h. Per normal event: 2.07 solves on average (buck), 0 factorizations after the first event in a mode.
+
+### Results at 50bbda52
+- Tests: test_restart_right_limit.py 15 passed (12 + R1, R2, R3); the group's files 484 passed / 9 xfailed before the V_th fix, test_release_findings_b (f54/f55 V_th=0.7 bridge) passes after it.
+- R1 (located turn-off at b beside an ideal switch closing): row V(out) = 5 V, counted (1). R2 (V_f = 0.7 turn-off): counted. R3 (1 fF RC): v_C 2.7e-3 V, i 9.9973 A, counted. R4/R5: no ladder, one solve vector per row (structural); no dedicated test.
+- Cost (two runs): rule on buck_pwl_restart +1.54 / +1.56 %, vsi_pwl_restart +1.15 / +1.03 % (budget 2 %: MET); default vsi_pwl +0.06 / +0.15 % (MET), buck_pwl +0.98 / +0.92 % (NOT MET; the default path runs no new code — closure layout; not separated).
+- Old measure, 20 circuits x 3 columns: 53 OK; worse than b9e: ll10 restart/split 5.83e-7 (b9e 1.64e-7: the fixed eps's conditioning on the floating legs — the gamma*h/2 rung is gone), chopper_with_rc_snubber restart 2.569e-8 (+2.8 %, unchanged: so it is NOT the eps0 rounding), back_to_back_diodes_sine pwl+next 2.06e-16 (b9e 1.96e-16), cascaded_boost_buck split and vcswitch_resistor split (known, not this branch).
+- Fallbacks on the 81 circuits: pwl+restart 1184 / 32648, pwl+split 1356 / 29102 (were 65 / 120): flyback 199/205, active_clamp_forward 138/155, half_bridge_transformer_dc 158/230, forward 100/205, boost_pfc_open_loop 587/3605 (restart) 748/1209 (split). Cause not separated (pin tolerance 1e-9 vs coupled inductors / the redecide check / tau <~ eps leakage modes).
+- Three-part measure: NOT run this session.
+
+### Fresh review (opus) of 50bbda52 — confirmed by running, uncounted wrong rows
+- H1: the ip_struct path adds the probe's jump to every state that moved (ip_d flag), not only the constraint's dependent states, and takes states from the extrapolation: C1 -ideal S- (C1 1 uF from 2 V) -1 ohm- C2 1 nF: row v_d = 10 V, i_R = 0 (truth: v_d continuous, 8 A). Fix: jump only the structure check's dependent states, states from the targets, redecide + count on this path.
+- H2/H3: gated latching devices (thyristor) pass the continuity rule: turn-off at I_H (laws do not meet) and a gate-fired turn-on landed on b (its bit is diode-owned, so `rs_trig_dio` reads the gate edge as a diode flip). Fix: no gated device is ever pure; gated bits excluded from rs_trig_dio.
+- M1: nonlinear-capacitor / saturable states (hs) are not pinned (1 BE step of eps): 10 V -> switch -> 1 ohm -> nonlinear C 50 nF: v_C 0.029 V, i 9.971 A (truth 0, 10). Pin hs states or count every row with hs states.
+- L1-L3: the Newton path's counters / step_ctx / mode_structure_checks not put back; per-kind (not per-state) pin scale; fallback rows feed the voltage guard.
+
+### Next step, in order
+1. H2/H3 (one line each: gated => not pure; exclude gated bits in rs_trig_dio), H1 (dependent states from `structure.check(...).dependent`), M1 (count rows whose circuit has hs states until pinned).
+2. Fallback explosion: print, per counted row of flyback_converter, which test fired (pin / redecide / located); then fix the cause (likely the per-kind 1e-9 scale or the redecide's thresholds) — a fallback must stay rare to mean anything.
+3. ll10: eps from conditioning (e.g. eps = 1e-3*gamma*dt only if a solve's residual check passes, else gamma*h/2 with more passes — the pin converges at rate eps/tau) and re-grade; chopper +2.8 % is not eps-rounding (unchanged here): look at its turn-off rows' states.
+4. buck_pwl default +0.95 %: separate with a build that reverts only the split_step/run_restart signature changes.
+Then: three-part measure on the 28 cells (b9e/head/now), full pytest, stubs, byte compares, C++ step/record targets.
