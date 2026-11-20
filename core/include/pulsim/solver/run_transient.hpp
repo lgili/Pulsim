@@ -907,9 +907,13 @@ inline SimulationResult run_transient(
     // (a jump; an ideal element's), the moved histories (ip_hist stays at
     // x0), and
     // the right-limit solve's scratch.
-    bool ip_jump = false, ip_struct = false;
+    bool ip_jump = false, ip_struct = false, ip_moved = false;
+    // the nonlinear capacitors consistent_start carried: (k, v0, q0) at x0
+    std::vector<std::tuple<Size, Real, Real>> rl_nc0;
     std::vector<Real> ip_hist_p, rl_hist, rl_hw, rl_hcur;
     Vector rl_x1, rl_b0, rl_b, rl_bs, rl_h, rl_xa, rl_xb;
+    std::vector<Real> rl_ncq;
+    std::vector<Index> rl_dep;
     std::vector<bool> rl_bits, rl_lsb, rl_dec;
     // a LOCATED diode crossing (split_step): its time, the post-event bits,
     // whether only V_f = 0 diodes flip (vf0) and nothing else coincides
@@ -2025,6 +2029,8 @@ inline SimulationResult run_transient(
                                     bool& breach_1) PULSIM_STEP_DRIVER -> bool {
             const auto& ents = history.entries();
             ip_jump = false;
+            ip_moved = false;
+            rl_nc0.clear();
             if (ents.empty() &&
                 hs.get<pwl::SaturableInductorHistory>().entries().empty() &&
                 hs.get<pwl::NonlinearCapacitorHistory>().entries().empty()) {
@@ -2610,6 +2616,7 @@ inline SimulationResult run_transient(
             }
             const bool impulsive = solved && moving && !structural;
             ip_jump = solved && jumped;   // the right limit adds J (event_right_limit)
+            ip_moved = solved && moving;  // the histories are x0 + d: the right limit starts from x0
             ip_struct = structural;
             if (!impulsive && solved && moving && L) [[unlikely]] {
                 // the lines' stage 1 from x0+ (a window integral is the
@@ -2735,6 +2742,7 @@ inline SimulationResult run_transient(
             auto& ncm = hs.get<pwl::NonlinearCapacitorHistory>().mutable_entries();
             for (Size k = 0; k < ncm.size(); ++k) {
                 if (ip_nc[3 * k + 2] != Real{0}) {
+                    if (ip_nc[3 * k + 2] == Real{2}) rl_nc0.emplace_back(k, ncm[k].v_prev, ncm[k].q_prev);
                     ncm[k].v_prev = ip_nc[3 * k];
                     ncm[k].q_prev = ip_nc[3 * k + 1];
                 }
@@ -2825,6 +2833,14 @@ inline SimulationResult run_transient(
             if (!lin) {
                 rl_lsb = last_solved_bits;
                 hs.snapshot_into(rl_hs);
+                // a nonlinear capacitor the probe only MOVED (flag 2) is
+                // continuous at t_from: x0's (v, q), put back with rl_hs
+                // below; a recorded jump (flag 1) keeps its (v0+, q0+)
+                auto& ncm = hs.get<pwl::NonlinearCapacitorHistory>().mutable_entries();
+                for (const auto& [k, v0, q0] : rl_nc0) {
+                    ncm[k].v_prev = v0;
+                    ncm[k].q_prev = q0;
+                }
             }
             history.snapshot_into(rl_hcur);
             // the run's Newton round-off budget and its counters are not the
@@ -2848,10 +2864,24 @@ inline SimulationResult run_transient(
                 rl_b -= be_iwave;
             }
             const auto& ents = history.entries();
-            if (ip_jump) {   // the probe ran: its x0, plus the constrained jumps
+            // the probe carried states (x0 + d): the right limit starts from
+            // x0 plus an ideal element's recorded jumps (flag 1); a move
+            // (flag 2) is continuous at t_from, and a conductance-form jump
+            // keeps the model's own right limit (states at x0)
+            if (ip_moved) {
                 rl_hist = ip_hist;
-                for (Size k = 0; ip_struct && k < ents.size(); ++k) {
-                    if (ip_d[2 * k + 1] != Real{0}) {
+                // only the ideal element's dependent states jump (H1: a state
+                // the probe saw jump numerically, a 1 ns RC behind a resistor,
+                // is continuous in the ideal circuit)
+                rl_dep.clear();
+                if (ip_jump && ip_struct) {
+                    for (const auto& ds : structure.check(stamped_mask, true).dependent) {
+                        rl_dep.insert(rl_dep.end(), ds.states.begin(), ds.states.end());
+                    }
+                }
+                for (Size k = 0; ip_jump && ip_struct && k < ents.size(); ++k) {
+                    if (ip_d[2 * k + 1] == Real{1} &&
+                        std::find(rl_dep.begin(), rl_dep.end(), ents[k].branch_id) != rl_dep.end()) {
                         rl_hist[2 * k + (ents[k].kind == pwl::DevicePool::StoredKind::Capacitor
                                              ? 0 : 1)] += ip_d[2 * k];
                     }
@@ -2909,42 +2939,78 @@ inline SimulationResult run_transient(
             };
             std::optional<AuxEvents> aux_events(std::in_place, cache);
             try {
-                if (elim) {
-                    solve_eps(eps);
-                    rl_xa = x;
-                    solve_eps(Real{2} * eps);
-                    rl_xb = x;
-                    solve_eps(Real{4} * eps);
-                    out = Real{5} * rl_xb - Real{2} * (rl_xa + x);
-                } else {
+                // nonlinear capacitors: pinned in charge like the C / L
+                // histories (their q_prev is the BE companion's base)
+                auto* ncw = lin ? nullptr
+                                : &hs.get<pwl::NonlinearCapacitorHistory>().mutable_entries();
+                const Size n_nc = ncw ? ncw->size() : 0;
+                auto nc_q = [&](Size k) {
+                    const auto& e = (*ncw)[k];
+                    return models::NonlinearCapacitor::charge(
+                        e.params, stamping::read_node_voltage(x, e.from) -
+                                      stamping::read_node_voltage(x, e.to));
+                };
+                rl_ncq.resize(n_nc);
+                for (Size k = 0; k < n_nc; ++k) rl_ncq[k] = (*ncw)[k].q_prev;
+                auto is_dep = [&](Size k) {
+                    return std::find(rl_dep.begin(), rl_dep.end(), ents[k].branch_id) != rl_dep.end();
+                };
+                // One ε solve with every state pinned to its target (an
+                // ideal element's dependent states excepted: the constraint
+                // sets them); the histories corrected each pass. Returns
+                // whether every pinned state met its target.
+                auto pinned = [&](Real e) -> bool {
                     rl_hw = rl_hist;
-                    Real s_c = 0, s_l = 0;   // the states' scale, per kind
+                    history.restore(rl_hw);
+                    for (Size k = 0; k < n_nc; ++k) (*ncw)[k].q_prev = rl_ncq[k];
+                    Real s_c = 0, s_l = 0, s_q = 0;   // the states' scale, per kind
                     for (Size k = 0; k < ents.size(); ++k) {
-                        (ents[k].kind == pwl::DevicePool::StoredKind::Capacitor ? s_c : s_l) =
-                            std::max(ents[k].kind == pwl::DevicePool::StoredKind::Capacitor ? s_c : s_l,
-                                     std::abs(rl_hist[slot(k)]));
+                        Real& s = ents[k].kind == pwl::DevicePool::StoredKind::Capacitor ? s_c : s_l;
+                        s = std::max(s, std::abs(rl_hist[slot(k)]));
                     }
-                    bool conv = ents.empty();
-                    constexpr Size kPasses = 4;
+                    for (Size k = 0; k < n_nc; ++k) s_q = std::max(s_q, std::abs(rl_ncq[k]));
+                    bool conv = ents.empty() && n_nc == 0;
+                    // error (e/τ)^k: 4 passes at the small ε; the ideal-element
+                    // path's 4ε can sit near a fast RC's τ (rare: its own factors)
+                    const Size kPasses = elim ? 40 : 4;
                     for (Size pass = 0; pass < kPasses; ++pass) {
-                        solve_eps(eps);
+                        solve_eps(e);
                         if (conv) break;
                         if (pass == 0) {
                             for (Size k = 0; k < ents.size(); ++k) {
                                 Real& s = ents[k].kind == pwl::DevicePool::StoredKind::Capacitor ? s_c : s_l;
                                 s = std::max(s, std::abs(state_of(k)));
                             }
+                            for (Size k = 0; k < n_nc; ++k) s_q = std::max(s_q, std::abs(nc_q(k)));
                         }
                         conv = true;
                         for (Size k = 0; k < ents.size(); ++k) {
+                            if (is_dep(k)) continue;
                             const Real d = state_of(k) - rl_hist[slot(k)];
                             const Real s = ents[k].kind == pwl::DevicePool::StoredKind::Capacitor ? s_c : s_l;
                             conv = conv && std::abs(d) <= Real{1e-9} * s;   // NaN fails
                             rl_hw[slot(k)] -= d;
                         }
+                        for (Size k = 0; k < n_nc; ++k) {
+                            const Real d = nc_q(k) - rl_ncq[k];
+                            conv = conv && std::abs(d) <= Real{1e-9} * s_q;   // NaN fails
+                            (*ncw)[k].q_prev -= d;
+                        }
                         if (conv) break;
                         history.restore(rl_hw);
                     }
+                    return conv;
+                };
+                if (elim) {
+                    bool conv = pinned(eps);
+                    rl_xa = x;
+                    conv = pinned(Real{2} * eps) && conv;
+                    rl_xb = x;
+                    conv = pinned(Real{4} * eps) && conv;
+                    out = Real{5} * rl_xb - Real{2} * (rl_xa + x);
+                    count = count || !conv;
+                } else {
+                    const bool conv = pinned(eps);
                     out = x;
                     count = count || !conv;
                     // the mode must hold at t_e+ (it is read, never changed)

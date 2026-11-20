@@ -323,3 +323,49 @@ def test_r3_a_mode_faster_than_the_limit_step_is_right_or_counted():
     right = abs(vc) <= 1e-6 * 10.0 and i == pytest.approx(10.0, rel=1e-6)
     assert right or r.n_right_limit_fallbacks >= 1, (vc, i, r.n_right_limit_fallbacks)
 
+
+
+@pytest.mark.parametrize("split", [False, True])
+def test_h1_a_state_the_probe_only_moved_is_continuous_at_the_right_limit(split):
+    """H1: 10 V -> ideal S -> C1 1 uF (2 V) -> 1 ohm -> C2 1 nF (2 V). At the
+    closing C1 jumps to 10 V (the ideal element's jump); C2 (tau = 1 ns) only
+    MOVES inside the probe (flag 2): it is continuous, so v_C2+ = 2 V and
+    i_R+ = 8 A. The row used to carry every moved state (v_C2+ = 10 V, i = 0)."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "vin", "gnd", 10.0)
+    b.add_ideal_switch("S", "vin", "a", 0.0, 0.0)
+    b.add_capacitor("C1", "a", "gnd", 1e-6, 2.0)
+    b.add_resistor("R", "a", "d", 1.0)
+    b.add_capacitor("C2", "d", "gnd", 1e-9, 2.0)
+    r = _quiet(p.simulate, b, t_end=6e-6, dt=DT, switch_fn=_gate(b, "S", False),
+               enable_substep_state_correction=split, **RULE)
+    v, t, k = _limits(r)
+    (j,) = k
+    assert np.asarray(v.v("a"))[j + 1] == pytest.approx(10.0, rel=1e-9)
+    assert np.asarray(v.v("d"))[j + 1] == pytest.approx(2.0, rel=1e-6)
+    assert np.asarray(v.i("R"))[j + 1] == pytest.approx(8.0, rel=1e-6)
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "open (restart line STATUS, work item M1): the probe flags this 50 ns RC's charge as a "
+    "recorded jump (flag 1); putting x0's charge back in the row moves the soft-switching "
+    "hard turn-on energy 6.3e-5 -> 0.054 J (the loss booking reads the row's state)"))
+@pytest.mark.parametrize("split", [False, True])
+def test_m1_a_nonlinear_capacitor_is_continuous_in_charge_at_the_right_limit(split):
+    """M1: 10 V -> switch (1 uohm / 1e-12 S) -> 1 ohm -> junction capacitor
+    50 nF from 0 V (tau ~ 50 ns << dt). The probe moves the capacitor's charge
+    inside the step; the right limit keeps x0's charge (v_C+ = 0) and the
+    current the closing drives through it, (10 - 0)/(1 + 1e-6) A. The row
+    used to read the moved state (10.01 V, -0.011 A) or one unpinned BE step."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "vin", "gnd", 10.0)
+    b.add_ideal_switch("S", "vin", "a", 1e-6, 1e-12)
+    b.add_resistor("R", "a", "c", 1.0)
+    b.add_nonlinear_capacitor("C", "c", "gnd", 50e-9, 0.7, 0.5)
+    r = _quiet(p.simulate, b, t_end=6e-6, dt=DT, switch_fn=_gate(b, "S", False),
+               enable_substep_state_correction=split, **RULE)
+    v, t, k = _limits(r)
+    (j,) = k
+    vc, i = np.asarray(v.v("c"))[j + 1], np.asarray(v.i("R"))[j + 1]
+    assert abs(vc) <= 1e-6 * 10.0, vc
+    assert i == pytest.approx(10.0 / (1.0 + 1e-6), rel=1e-6)
