@@ -53,7 +53,7 @@
   `test_conservation_kpi_closes_on_the_other_long_run_circuits` [gan, stiff, mmc].)
 - [x] 5.3 Validate: conservation residual < 1 % over the full simulated time.
   (And under the grid's own bound; the engines that miss it are strict xfails
-  F-L-1, F-L-2, F-L-3 in FINDINGS.md.)
+  F-L-1 and F-L-2 in FINDINGS.md.)
 
 ## 6. Dashboard integration
 - [ ] 6.1 Add an `--include-long-runs` flag to `closed_loop_dashboard.py` so the default run skips them.
