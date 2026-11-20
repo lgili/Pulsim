@@ -138,6 +138,30 @@ public:
     void stage_clear() noexcept {
         for (auto& e : entries_) e.lambda_offset = Real{0};
     }
+    // ---- TR-BDF2's q rows (the error estimate) ----
+    /// λ − λ_n at γ and at the step end, by the law `commit` uses (the
+    /// hysteretic law from the stage-1 base (H_γ, M_γ)); the stateless
+    /// laws in increment form (no eps·|λ| cancellation).
+    void trbdf2_increments(const Vector& x1, Real* dqg, Real* dq1) const {
+        for (const auto& e : entries_) {
+            const Real i = x1[e.branch_var_id];
+            if (e.params.ja) {
+                *dq1++ = models::JilesAthertonCore::evaluate(*e.params.ja, e.ja_gamma, i).lambda
+                         - e.lambda_old;
+                *dqg++ = e.lambda_gamma - e.lambda_old;
+            } else if (e.params.table) {
+                *dq1++ = models::SaturableInductor::flux(i, e.params) - e.lambda_old;
+                *dqg++ = e.lambda_gamma - e.lambda_old;
+            } else {
+                *dq1++ = models::SaturableInductor::flux_increment(i, e.i_L_old, e.params);
+                *dqg++ = models::SaturableInductor::flux_increment(e.i_gamma, e.i_L_old, e.params);
+            }
+        }
+    }
+    /// atol_q / atol per row: the inductance at zero current (λ = L·i).
+    void q_scales(Real* s) const {
+        for (const auto& e : entries_) *s++ = std::abs(flux_and_inductance(e, Real{0}).second);
+    }
     /// The JA base state for a stage. The trapezoidal stage — and
     /// every fixed-engine solve, probe, landing and seed — integrates
     /// from the committed (H_n, M_n). The BDF2 stage integrates from

@@ -159,8 +159,17 @@ def test_a_snapshot_resumes_on_the_other_engine(first_engine, second_engine):
     assert np.array_equal(x2[0], np.asarray(snap.x))
     # each stateful kind continues from its own state across the seam,
     # checked up to the next gate edge
+    # Into the fixed engine: 4e-3 as before (intact <= 7.1e-4).
+    # Into TR-BDF2, bound 1e-2: the seam error is the fixed engine's own
+    # error at t_split carried on (i(D1) 4.1e-3; at rtol 1e-10 the
+    # continuation from the pwl state is 6.2e-3 from the continuous run,
+    # while the continuous run at the default rtol is 3.5e-6 from its
+    # rtol-1e-10 self). It read 7.8e-4 before update-trbdf2-error-control
+    # DECISIONS 10 only because the continuous TR-BDF2 reference shared
+    # the uncontrolled stateful error (4.0e-5 from its tight self). A
+    # dropped state reads > 2e-2 (v(Cj) 0.82 into TR-BDF2: next test).
     for name, err in _seam_errors(second_engine, second, full).items():
-        assert err <= 4e-3, name   # intact <= 7.1e-4; a dropped state > 2e-2
+        assert err <= (1e-2 if second_engine == "trbdf2" else 4e-3), name
 
 
 _RUN = {"pwl": _pwl, "trbdf2": _trbdf2}

@@ -291,8 +291,8 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | hard_switched_rc | 0.01 ✗ | 4.92e-05 | 4.92e-05 | 2.22e-06 | 7.58e-14 |
 | buck_ccm | 0.000256 | 1.23e-08 | 1.23e-08 | 3.37e-07 | 3.92e-15 |
 | buck_dcm | 0.000538 | 5.32e-08 | 1.87e-08 | 5.62e-07 | 7.34e-10 |
-| im_locked_rotor | 1.35e-06 | 1.35e-06 | 1.35e-06 | 8.23e-06 | refused |
-| im_free_acceleration | 9.62e-05 | 6e-06 | 6e-06 | 4.25e-05 | refused |
+| im_locked_rotor | 1.35e-06 | 1.35e-06 | 1.35e-06 | 4.32e-06 | refused |
+| im_free_acceleration | 9.62e-05 | 6e-06 | 6e-06 | 2.34e-05 | refused |
 | gapped_core_rl | 0.00159 | 1.84e-06 | 1.84e-06 | 2.26e-07 | 4.37e-16 |
 | three_limb_zero_seq | 0.00159 | 1.84e-06 | 1.84e-06 | 2.27e-07 | 2.59e-14 |
 

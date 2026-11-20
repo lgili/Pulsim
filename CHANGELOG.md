@@ -21,6 +21,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 * **Fixed** `fit_core_loss_elements`'s excess coefficient: the mean of
   `|cos|^1.5` is `Γ(5/4)/(√π·Γ(7/4)) = 0.5564179`, not 0.5563852 (the
   fitted `c` was 5.9e-5 high).
+### The variable-step engine's error estimate sees the stateful devices
+
+* **Fixed (changes results)** `engine='trbdf2'` (the default variable-step
+  engine) had no error estimate for the internal state of a stateful
+  device: the Lauritzen diode's stored charge, the IGBT tail charge, a
+  nonlinear capacitor's charge, a saturable inductor's flux, a PMSM's or an
+  induction machine's flux linkages, an external device's charge rows. A
+  circuit whose dynamics live there ran at its step ceiling whatever
+  `rtol` asked for: a Lauritzen reverse recovery was 20 % off its closed
+  form at every `rtol`, an IGBT tail 0.5 %. Each such state now has a row
+  in the estimate, weighted by `atol·s + rtol·|q|` with `s` the device's
+  own capacitance / inductance / time constant, and the error now falls as
+  `rtol^(2/3)` (the recovery: 2.3e-4 at rtol 1e-4, 2e-6 at 1e-7). **Every
+  run with one of these devices on `engine='trbdf2'` gives different (more
+  accurate) results and usually takes more steps** (a saturable boost at
+  the default rtol: 20.6 k to 32.8 k steps); runs without one are
+  bit-identical. `integrator='esdirk43'` uses the same rows (its floor at
+  1e-3 of the largest |q| is gone: a nonlinear capacitor started from zero
+  no longer aborts at t = 0), so its stateful runs move too.
+* **Added** `run_transient_trbdf2(..., trace_forced=True)` (low-level):
+  `stats['forced_trace']` lists each forced accept with the unknown that
+  forced it.
 
 ### Thermal networks on the variable-step engine; the exact engine's output grid
 
