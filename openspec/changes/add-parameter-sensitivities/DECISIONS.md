@@ -509,3 +509,30 @@ Worst truth gaps of the number cells: diode turn-on 1.9e-7 (split) /
 6.0e-8 (trbdf2); duty 5e-10 / 5e-9 / 4e-12 (esdirk43) — d v/d D is entirely
 the jump term, so the sign and the factor T of dτ/dD are checked there;
 sine on/off on split 8.2e-8 (two turn-ons, two turn-offs, the ḃ term).
+
+### Review (fresh-context, opus, read-only, 2026-11-20) and what changed
+
+Asked for an event configuration that returns a number without having
+differentiated the event, and for the sign and factor of dτ/dp. Found, each
+reproduced against a Radau truth and fixed:
+1. ḃ HAD THE WRONG SIGN in `state_event`'s ẋ⁻: `src` writes the engines'
+   b_extra rows, whose sign is the opposite of b in f = G·x − b (the
+   engine's rhs is −(b_const + b_extra)). Every diode crossing driven by a
+   time-varying source got a wrong dτ/dp: a sine-fed rectifier with a series
+   R2 (the turn-on's jump survives to t_end) returned 1.787e-2 vs 1.611e-2
+   (11 %), a sine current source into a diode 2.7e-6 vs 1.19e-4. The audit's
+   sine cell had passed because its turn-on jump decayed in 0.1 µs and its
+   turn-off jump is zero; the cell now has the series R2.
+2. AN EVENT INSIDE THE FIRST STEP of plain pwl returned a number (a duty
+   edge before dt: 0.0 vs 9.95; a diode turn-on: −4.5e-4 vs 1.85e-4): the
+   gate baseline was taken at the end of step 1, and the first stage adopted
+   any mode. Now the gate baseline is `gate_at(t_start)` and the engines hand
+   their start mode to `start_mode` (when it is known: a seeded start
+   decides its mode from x0 at step 1, not an event); the first stage is
+   checked like any other. Both are audit cells.
+Confirmed right by the reviewer's own derivation and runs: the sign and the
+factor T of dτ/dD (one-pulse RC, entirely the jump term: 2.5e-8 pwl+split,
+5e-9 trbdf2; with a diode cascading at the OFF edge 1e-10 / 2e-8), a
+DC-driven turn-on on an algebraic node (jump 58 % of the answer, ≤ 1e-8).
+Not probed by the reviewer: events at t_end, ties with differing dτ/dp,
+ESDIRK / Newton refusals beyond the tests.

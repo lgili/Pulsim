@@ -192,6 +192,11 @@ public:
         record_(t0);
     }
 
+    /// The engine's mode at the start: the first stage must be solved under
+    /// it, or after an event registered in between (a mode change inside the
+    /// first step is refused like any other that was not located).
+    [[gnu::noinline]] void start_mode(const topology::SwitchStateMask& mask) { init_mode_(mask); }
+
     /// A step (attempt) begins at (t0, x0): the earlier attempt's stages are
     /// discarded. The engine must start it from the state this object last
     /// committed; anything else (an event landing, a probe or a split that
@@ -212,19 +217,7 @@ public:
                const Vector& X, Real t, const sparse::DirectSolver& fac,
                const sparse::Matrix* J_lin) {
         if (!have_qx_) {
-            mask_ = mask;
-            const Vector& x0_ = x_last_;
-            split_(mask, G_, b_);
-            have_qx_ = true;
-            // the step start's q derivative: ∂q/∂p(x0), S0 = 0
-            Vector qp(n_);
-            for (std::size_t j = 0; j < params_.size(); ++j) {
-                qp.setZero();
-                add_qp_(params_[j], x0_, qp);
-                dq_n_.col(static_cast<Index>(j)) = qp;
-            }
-            qv_n_ = Cq_ * x0_;            // the engine's own start: q(x0), q̇ = 0
-            qdv_n_.setZero(n_);
+            init_mode_(mask);
         } else if (mask == mask_) {
             pend_.on = false;   // an event that changed no mode: f⁻ = f⁺, no jump
         } else {
@@ -410,12 +403,14 @@ public:
             return (stamping::node_is_active(from) ? Real(v[from]) : Real{0})
                    - (stamping::node_is_active(to) ? Real(v[to]) : Real{0});
         };
-        // ḃ(τ) by a central difference of the sources (smooth near the event)
+        // ḃ(τ) by a central difference of the sources (smooth near the event).
+        // `src` writes the engines' b_extra rows, whose sign is the opposite
+        // of b in f = G·x − b (the engine's rhs is −(b_const + b_extra)).
         const Real eps = Real{1e-7} * std::max(std::abs(tau), Real{1e-9}) + Real{1e-15};
         Vector bp = Vector::Zero(n_), bm = Vector::Zero(n_);
         src(tau + eps, bp);
         src(tau - eps, bm);
-        const Vector bdot = (bp - bm) / (Real{2} * eps);
+        const Vector bdot = (bm - bp) / (Real{2} * eps);
         // ẋ⁻: C/2·y = q̇⁻ and G·y − ḃ in range(C/2)
         bordered_(fac);
         const Vector y = solve_bordered_(fac, Vector(bdot + a * qdm), qdm, tau, name);
@@ -459,6 +454,21 @@ public:
             trace_.n_sens_discarded += st_solves_[ii] + st_iters_[ii];
             st_solves_[ii] = st_iters_[ii] = 0;
         }
+    }
+
+    void init_mode_(const topology::SwitchStateMask& mask) {
+        mask_ = mask;
+        split_(mask, G_, b_);
+        have_qx_ = true;
+        // the step start's q derivative: ∂q/∂p(x0), S0 = 0
+        Vector qp(n_);
+        for (std::size_t j = 0; j < params_.size(); ++j) {
+            qp.setZero();
+            add_qp_(params_[j], x_last_, qp);
+            dq_n_.col(static_cast<Index>(j)) = qp;
+        }
+        qv_n_ = Cq_ * x_last_;   // the engine's own start: q(x0), q̇ = 0
+        qdv_n_.setZero(n_);
     }
 
     void split_(const topology::SwitchStateMask& mask, sparse::Matrix& G, Vector& b) {

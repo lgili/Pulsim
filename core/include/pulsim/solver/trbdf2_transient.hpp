@@ -1465,6 +1465,8 @@ inline SimulationResult run_transient_trbdf2(
     // The mask the current x was solved under (final_snapshot).
     SwitchStateMask x_mask = initial_mask;
     bool x_mask_known = !initial_seeded;
+    // a seeded start decides its mode at the first step (from x0: no event)
+    if (sens.on() && x_mask_known) [[unlikely]] sens.start_mode(initial_mask);
     // A resumed run continues its mode: no re-initialisation at the seam
     // (review M3). shortcut: a run cut within the 3 re-init steps of an
     // entry resumes with plain steps; carry reinit_left in the snapshot

@@ -1658,6 +1658,7 @@ inline SimulationResult run_transient(
             sens.refuse_setup(lt != nullptr, static_cast<bool>(nl_refresh),
                               opts.enable_newton_lm);
             sens.start(opts.t_start, x);
+            if (stamped_known) sens.start_mode(stamped_mask);   // seeded: decided at step 1
         }
 
         // ---- discontinuity restart (add-discontinuity-restart-rule) --
@@ -1814,10 +1815,13 @@ inline SimulationResult run_transient(
             }
         };
         auto sens_gate_event = [&](Real at, bool located) {
+            if (!sens_gate_known) {   // an edge inside the first step counts too
+                sens_gate = gate_at(opts.t_start);
+                sens_gate_known = true;
+            }
             const topology::SwitchStateMask g = gate_at(gate_t);
-            if (sens_gate_known && !(g == sens_gate)) sens.time_event(at, sens_gate, g, located);
+            if (!(g == sens_gate)) sens.time_event(at, sens_gate, g, located);
             sens_gate = g;
-            sens_gate_known = true;
         };
         // the located diode crossings (split_events) at tau; the pre-event
         // mode's factor is the first solve's (mask_first at for_dt)

@@ -36,7 +36,7 @@ scipy_integrate = pytest.importorskip("scipy.integrate")
 # it carries a few % of the current; reverse in C, where v_c reaches 10 V)
 IS, NN, VT, GMIN = 1e-8, 10.0, 0.025852, 1e-12
 DP = 0.3                                    # duty of the B cases
-SA, SF, SC, SRL = 10.0, 1e3, 10e-6, 1e3     # C: half-wave rectifier
+SA, SF, SC, SR2, SRL = 10.0, 1e3, 10e-6, 20.0, 100.0   # C: half-wave rectifier
 
 ENGINES = {
     "pwl": ("pwl", {}),
@@ -49,14 +49,20 @@ ENGINES = {
 # kind: (parameter, t_end, pwl dt). A: a PWL diode turn-on (state event) and
 # no event (t_end before it); B: one PWM pulse, its gate edges fixed (R.R)
 # or moving with the duty; C: a sine-fed rectifier, turn-on AND turn-off
-# with a time-varying source (the ḃ term of ẋ⁻).
+# with a time-varying source (the ḃ term of ẋ⁻; the series R2 keeps the
+# turn-on's jump alive to t_end: with ḃ's sign flipped this cell is 11 %
+# off). The "_in_step_1" kinds put the event inside the first step of a
+# coarse plain-pwl run (the gate baseline and the first stage's mode).
 KINDS = {
     "no_event": ("R.R", 0.5 * TAU_ON, 1e-8),
     "diode_turn_on": ("R.R", T_END_ON, 1e-8),
     "fixed_gate_edge": ("R.R", 0.8 * TP, 1e-7),
     "duty_edge": ("S.duty", 0.8 * TP, 1e-7),
-    "diode_on_off_sine": ("RL.R", 1.3e-3, 1e-7),
+    "diode_on_off_sine": ("RL.R", 1.15e-3, 1e-7),
+    "diode_turn_on_in_step_1": ("R.R", 3e-4, 1e-4),
+    "duty_edge_in_step_1": ("S.duty", 0.8 * TP, 1e-5),
 }
+STEP_1 = {"diode_turn_on_in_step_1": DP, "duty_edge_in_step_1": 0.005}   # kind: duty
 DEVICES = ("linear", "newton", "stateful")
 
 # refusal reasons, by the words of their messages
@@ -71,6 +77,8 @@ FLOOR = "conditioning floor"
 def _expected(kind, dev, eng):
     if dev == "stateful":
         return STATEFUL
+    if kind in STEP_1:
+        return STAIRCASE if kind == "duty_edge_in_step_1" else NOT_LOCATED
     if kind in ("no_event", "fixed_gate_edge"):
         return None
     if eng in ("pwl", "pwl+restart"):
@@ -84,21 +92,24 @@ def _expected(kind, dev, eng):
     return None
 
 
-EXPECTED = {(k, d, e): _expected(k, d, e) for k in KINDS for d in DEVICES for e in ENGINES}
+EXPECTED = {(k, d, e): _expected(k, d, e) for k in KINDS for d in DEVICES for e in ENGINES
+            if k not in STEP_1 or e in ("pwl", "pwl+restart")}
 
 
 def _shock(v):
     return IS * math.expm1(v / (NN * VT)) + GMIN * v
 
 
-def _circuit(kind, dev, R=R0, D=DP, RL=SRL):
+def _circuit(kind, dev, R=R0, D=None, RL=SRL):
     sf = None
-    if kind in ("no_event", "diode_turn_on"):
+    D = STEP_1.get(kind, DP) if D is None else D
+    if kind in ("no_event", "diode_turn_on", "diode_turn_on_in_step_1"):
         b = _diode_on(R=R)
     elif kind == "diode_on_off_sine":
         b = p.CircuitBuilder()
         b.add_sine_voltage_source("V", "in", "gnd", 0.0, SA, SF)
-        b.add_diode("D", "in", "c", GON, GOFF, V_th=VTH)
+        b.add_diode("D", "in", "k", GON, GOFF, V_th=VTH)
+        b.add_resistor("R2", "k", "c", SR2)
         b.add_capacitor("C", "c", "gnd", SC)
         b.add_resistor("RL", "c", "gnd", RL)
     else:
@@ -131,12 +142,13 @@ def _truth_v(kind, dev, t_end, R=R0, D=DP, RL=SRL):
             return SA * math.sin(2 * math.pi * SF * s)
 
         def f(g):
-            return lambda s, y: [(g * (vin(s) - y[0]) - y[0] / RL - sh(y[0])) / SC]
+            return lambda s, y: [((vin(s) - y[0]) * g / (1 + g * SR2) - y[0] / RL
+                                  - sh(y[0])) / SC]
 
-        def ev_on(s, y):
-            return vin(s) - y[0] - VTH
+        def ev_on(s, y):   # the diode's own voltage reaches V_th
+            return (vin(s) - y[0]) / (1 + GOFF * SR2) - VTH
 
-        def ev_off(s, y):
+        def ev_off(s, y):   # its current reaches zero
             return vin(s) - y[0]
 
         ev_on.terminal, ev_on.direction = True, 1
@@ -195,9 +207,7 @@ def _run(kind, dev, eng, sens=True, **over):
         return p.simulate(b, t_end, engine=engine, switch_fn=sf, **kw)
 
 
-@pytest.mark.parametrize("eng", list(ENGINES))
-@pytest.mark.parametrize("dev", DEVICES)
-@pytest.mark.parametrize("kind", list(KINDS))
+@pytest.mark.parametrize("kind,dev,eng", list(EXPECTED))
 def test_every_cell_is_a_true_number_or_a_refusal_by_name(kind, dev, eng):
     name = KINDS[kind][0]
     want = EXPECTED[(kind, dev, eng)]
@@ -209,6 +219,22 @@ def test_every_cell_is_a_true_number_or_a_refusal_by_name(kind, dev, eng):
         assert want in str(e), str(e)
         return
     assert want is None, f"a number came back where the table expects a refusal ({want})"
+    # the run is the same bits without sensitivities, with the same factor
+    # traffic (5.4 / 5.5; pwl's linear factors come from `resident_factor`,
+    # which never builds one); one sensitivity solve per committed stage
+    r0 = _run(kind, dev, eng, False)
+    assert np.array_equal(np.asarray(r0.times), np.asarray(r.times))
+    assert np.array_equal(np.asarray(r0.states), np.asarray(r.states))
+    for k in ("n_factorizations", "n_solves", "n_accept", "n_reject"):
+        assert getattr(r0.stats, k) == getattr(r.stats, k), k
+    assert r0.newton.factorizations == r.newton.factorizations
+    c = r.sensitivity.counters
+    rows = len(r.sensitivity.times) - 1
+    assert rows <= c["n_sens_solves"] <= 5 * rows + 8, (c, rows)
+    if dev == "linear":
+        assert c["n_sens_iterations"] == 0, c
+    else:   # modified Newton on the stage's factor: about one refinement each
+        assert c["n_sens_solves"] <= c["n_sens_iterations"] <= 2 * c["n_sens_solves"], c
     s = float(r.sens("c", name)[-1])
     t_last = float(r.sensitivity.times[-1])
     if eng == "pwl":
