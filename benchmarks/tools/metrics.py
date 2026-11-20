@@ -16,17 +16,38 @@ import numpy as np
 Reference = Union[Callable[[np.ndarray], np.ndarray], tuple]
 
 
+def first_kept(t, exclude_t0: bool) -> int:
+    """Index of the first sample a comparison keeps. ``exclude_t0`` drops the
+    initial sample(s) (on pwl / trbdf2 the stored initial state of an algebraic
+    node, not the t = 0+ solution: design.md, Context) -- unless that leaves fewer
+    than two samples: a short trace (the exact engine stores a DC circuit as its
+    two ends under the output rule) is then compared whole, not called
+    undersampled."""
+    t = np.asarray(t, dtype=float)
+    if not exclude_t0:
+        return 0
+    k = int(np.searchsorted(t, t[0], side="right"))
+    return k if t.size - k >= 2 else 0
+
+
 def _window(t, y, exclude_t0: bool):
     t = np.asarray(t, dtype=float)
     y = np.asarray(y, dtype=float)
-    if t.shape != y.shape or t.size < 2:
-        raise ValueError(f"need matching traces of >= 2 samples, got {t.shape} / {y.shape}")
-    if exclude_t0:
-        # The first stored sample of an algebraic node on pwl / trbdf2 is the
-        # initial state, not the t = 0+ solution (design.md, Context).
-        k = int(np.searchsorted(t, t[0], side="right"))
-        t, y = t[k:], y[k:]
-    return t, y
+    if t.shape != y.shape or t.size < 2 or not t[-1] > t[0]:
+        raise ValueError(f"a trace needs >= 2 samples spanning a time window to be compared, "
+                         f"got {t.shape} / {y.shape}")
+    k = first_kept(t, exclude_t0)
+    return t[k:], y[k:]
+
+
+def _ref_window(t, ref, exclude_t0: bool):
+    """A short trace kept whole (first_kept) is compared from the reference's own
+    first kept sample on: the reference's initial state is not t = 0+ either."""
+    if not exclude_t0 or callable(ref) or first_kept(t, True) > 0:
+        return ref
+    tr, yr = (np.asarray(a, dtype=float) for a in ref)
+    k = first_kept(tr, True)
+    return tr[k:], yr[k:]
 
 
 def time_mean(t, y) -> float:
@@ -66,6 +87,7 @@ def err_rms(t, y, ref: Reference, *, abs_scale: float = 0.0, exclude_t0: bool = 
 
     ``exclude``: ``(lo, hi)`` time intervals left out of the integral and the
     window (the edge DIAGNOSTIC of the differential runner, never its gate)."""
+    ref = _ref_window(t, ref, exclude_t0)
     t, y = _window(t, y, exclude_t0)
     g, a, r = _on_grid(t, y, ref)
     span = max(float(r.max() - r.min()), abs_scale)
@@ -108,10 +130,47 @@ def err_rms_symmetric(a: tuple, b: tuple, *, abs_scale: float = 0.0, exclude=())
     return _rms(g, (va - vb) ** 2, exclude) / span
 
 
+def rule_ratio(t, y, ref: Reference, *, rtol: float, atol: float, exclude=()) -> float:
+    """What the exact engine's output rule promises, checked: between events the
+    linear interpolation of the stored samples is within ``max(rtol * range, atol)``
+    of the solution (``simulate(output_rtol=)``). Returns the worst
+    ``|interp(m) - ref(m)| / (rtol * range + atol)`` over the trace's interval
+    midpoints ``m`` (``range``: the reference's range over the run, at least 1e-3 of
+    its peak; a sum, not a max, of the two tolerances, so the reference's own error
+    near atol is absorbed). Intervals of zero length or overlapping an ``exclude``
+    interval (a recorded switch-state change: the rule promises nothing across an
+    event) are skipped. <= 1 is within the promise; nan when no interval is left."""
+    t = np.asarray(t, dtype=float)
+    y = np.asarray(y, dtype=float)
+    keep = np.diff(t) > 0
+    lo, hi = t[:-1][keep], t[1:][keep]
+    m = 0.5 * (lo + hi)
+    ym = 0.5 * (y[:-1][keep] + y[1:][keep])
+    if len(exclude):
+        iv = np.asarray(exclude, dtype=float).reshape(-1, 2)
+        bad = np.zeros(m.shape, bool)
+        for a, b in iv:
+            bad |= (lo < b) & (hi > a)
+        m, ym = m[~bad], ym[~bad]
+    if callable(ref):
+        rm = np.asarray(ref(m), dtype=float)
+        rr = np.asarray(ref(t), dtype=float)
+    else:
+        tr, yr = (np.asarray(a, dtype=float) for a in ref)
+        inside = (m >= tr[0]) & (m <= tr[-1])
+        m, ym = m[inside], ym[inside]
+        rm, rr = np.interp(m, tr, yr), yr
+    if not m.size:
+        return float("nan")
+    rng = max(float(np.ptp(rr)), 1e-3 * float(np.abs(rr).max()))
+    return float(np.abs(ym - rm).max() / (rtol * rng + atol))
+
+
 def err_max(t, y, ref: Reference, *, abs_scale: float = 0.0, exclude_t0: bool = False,
             exclude=()) -> float:
     """``max|y − ref| / span`` at the same points as :func:`err_rms` (grid
     points strictly inside an ``exclude`` interval are skipped)."""
+    ref = _ref_window(t, ref, exclude_t0)
     t, y = _window(t, y, exclude_t0)
     g, a, r = _on_grid(t, y, ref)
     span = max(float(r.max() - r.min()), abs_scale)

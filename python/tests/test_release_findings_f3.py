@@ -58,3 +58,35 @@ def test_fx6_forward_converter_keeps_the_inductor_current_at_the_switch_off(rt):
     # under the rule (1.1e-5 V at 1e-5); the defect moved it by 0.131 V
     tol = 1e-2 if rt is None else 100 * rt
     assert abs(mean - float(truth["windows"]["full"]["V(out)"]["mean"])) < tol
+
+
+def _tools():
+    sys.path[:0] = [str(ROOT / "benchmarks" / "tools")]
+    try:
+        import metrics
+    finally:
+        del sys.path[0]
+    return metrics
+
+
+def test_fx4_harness_compares_a_two_sample_trace():
+    """A DC circuit under the output rule stores its two ends; dropping the first sample
+    left one, a NaN err_rms and 'undersampled'. The short trace is compared whole, from
+    the reference's own first kept sample (its sample 0 is an initial state, 0 V here)."""
+    m = _tools()
+    ref = (np.array([0.0, 0.0, 1e-6, 2e-6]), np.array([0.0, 5.0, 5.0, 5.0]))
+    kw = dict(exclude_t0=True, abs_scale=5e-3)
+    assert m.err_rms([0.0, 2e-6], [5.0, 5.0], ref, **kw) == 0.0
+    assert m.err_max([0.0, 2e-6], [5.0, 5.0], ref, **kw) == 0.0
+    with pytest.raises(ValueError, match="2 samples"):
+        m.err_rms([1e-6], [5.0], ref, **kw)
+
+
+def test_fx4_rule_ratio_reads_the_chord_against_the_promise():
+    """exp(-t) sampled every 0.1: the worst chord midpoint error is about h^2/8 = 1.25e-3."""
+    m = _tools()
+    t = np.linspace(0.0, 1.0, 11)
+    r = m.rule_ratio(t, np.exp(-t), lambda s: np.exp(-s), rtol=1e-3, atol=0.0)
+    span = 1.0 - np.exp(-1.0)
+    assert 0.9 < r * 1e-3 * span / 1.25e-3 < 1.0   # h^2/8 * f''(xi), f'' <= 1 on the first interval
+    assert m.rule_ratio(t, np.exp(-t), lambda s: np.exp(-s), rtol=1e-2, atol=0.0) < 1.0
