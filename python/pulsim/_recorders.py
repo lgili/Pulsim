@@ -333,8 +333,11 @@ def _reading(res, atom: str) -> np.ndarray:
 def record_result(res, recs: "list[Recorder]", stream: bool = True) -> dict:
     """Run the kernel recorders over a finished result."""
     from . import _pulsim
-    from ._result_views import with_right_limits
+    from ._result_views import with_inner_events, with_right_limits
 
+    # the events inside a stored step (the fixed engine's split under the
+    # restart rule) as rows, as the in-loop feed takes them
+    res = with_inner_events(res)
     atoms: list[str] = []
     for r in recs:
         for p in r.probes:

@@ -79,7 +79,11 @@ namespace pulsim::solver {
 /// the value that makes the line's trapezoid the integrator's own
 /// quadrature, 2·w1·X1 + (2·w2 − 1)·X2 (SDIRK(2,2): w = (1 − γ, γ)): a
 /// quantity linear in the state integrates exactly as the step did, a
-/// product to second order. Empty: the step's ends only.
+/// product to second order. A stage 2 in another mode than stage 1 (each
+/// device changing once over the step): X1 held over w1·h, then X2 (an
+/// extra row at a + w1·h), the same
+/// quadrature with each point a solved state in its own mode. Empty: the
+/// step's ends only.
 struct StepLines {
     static constexpr Size kMax = 9;
     bool start = false;
@@ -94,12 +98,20 @@ struct StepLines {
     // (sub)step, whether its stage 2 was the backward-Euler re-take, and
     // whether the step is representable (false: the dt-retry ladder)
     Vector x1;
-    topology::SwitchStateMask m1;
+    topology::SwitchStateMask m1, m_a;   // stage 1's mode, the (sub)step start's
     bool be_kept = false;
     bool ok = true;
     // the step (its end time) the lines belong to: run_transient resets
     // them at a step's first restart, not every step
     Real owner = -std::numeric_limits<Real>::infinity();
+    // F-4-4, filled only for an in-loop recorder (a step sink): per history
+    // entry, a capacitor's companion current at the start right limit and
+    // at each event's two limits — at a restart start the same combination
+    // of the stage currents as the state, 2·w1·i(X1) + (1 − 2·w1)·i(X2), so
+    // a reading is KCL-consistent there and its trapezoid is the step's
+    // charge; `v0` the capacitor voltages a restart (sub)step starts from
+    std::vector<Real> c_start, v0;
+    std::array<std::vector<Real>, kMax> c_left, c_right;
     void clear() noexcept {
         start = false;
         n = 0;

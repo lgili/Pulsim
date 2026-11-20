@@ -2909,8 +2909,10 @@ inline SimulationResult run_transient(
             // step start, its right limit; inside the step, the event's left
             // limit (the sub-step that ended at a) and its right limit. The
             // start of the line is 2·w1·X1 + (1 − 2·w1)·X2, w1 the stage-1
-            // weight (SDIRK 1 − γ; the backward-Euler re-take γ); a stage 2
-            // in another mode than stage 1 has no line (the step's ends).
+            // weight (SDIRK 1 − γ; the backward-Euler re-take γ). A stage 2
+            // in another mode than stage 1 (F-4-4) is the same quadrature as
+            // two held pieces, each a solved state in its own mode: X1 over
+            // w1·h, then X2 (an extra row at a + w1·h, not an event).
             auto restart_lined = [&](Real a, Real h) {
                 const bool inner = a != t_prev_step;
                 StepLines& lines = *L;   // restart steps exist under the rule only
@@ -2920,6 +2922,14 @@ inline SimulationResult run_transient(
                     lines.owner = t_step;
                 }
                 const Size j = lines.n;
+                // F-4-4: the capacitor currents at the line points, for an
+                // in-loop recorder only (StepLines::c_*)
+                const auto& es = history.entries();
+                const bool caps = hook_step && !es.empty();
+                auto v_cap = [](const Vector& xv, const pwl::HistoryEntry& e) {
+                    return stamping::read_node_voltage(xv, e.from) -
+                           stamping::read_node_voltage(xv, e.to);
+                };
                 if (inner) {
                     if (j < StepLines::kMax) {
                         lines.t[j] = a;
@@ -2927,25 +2937,90 @@ inline SimulationResult run_transient(
                         lines.m_left[j] = stamped_mask;
                         lines.right_ok[j] = false;
                         lines.n = j + 1;
+                        if (caps) {   // the sub-step that ended at a, committed
+                            lines.c_left[j].resize(es.size());
+                            for (Size k = 0; k < es.size(); ++k) lines.c_left[j][k] = es[k].i_prev;
+                        }
                     } else {
                         lines.ok = false;
                     }
                 }
+                if (caps) {
+                    lines.v0.resize(es.size());
+                    for (Size k = 0; k < es.size(); ++k) lines.v0[k] = es[k].v_prev;
+                }
+                lines.m_a = stamped_mask;   // the mode the (sub)step starts in
                 run_restart(a, h);
-                if (!(lines.m1 == stamped_mask) || (inner && j >= StepLines::kMax)) return;
+                if (inner && j >= StepLines::kMax) return;
                 // shortcut: after a kept backward-Euler stage 2 (w1 = γ) the
                 // start lies between the stages, the quadrature's value but
                 // only a first-order right limit; record the extrapolation
                 // separately if a reader needs the value there
                 const Real w1 = lines.be_kept ? kGamma : Real{1} - kGamma;
+                const bool mixed = !(lines.m1 == stamped_mask);
+                const Real t_m = a + w1 * h;
+                // held pieces only when no device's stage-1 state is neither
+                // side's (off -> on -> off would read as an on/off pair the
+                // loss tracker never books)
+                bool one_way = mixed;
+                for (Size bit = 0; one_way && bit < lines.m1.size(); ++bit) {
+                    const bool s1 = lines.m1.get(bit);
+                    one_way = s1 == lines.m_a.get(bit) || s1 == stamped_mask.get(bit);
+                }
+                if (mixed && (!one_way || lines.n >= StepLines::kMax ||
+                              !(t_m > a && t_m < a + h))) {
+                    return;   // the step's ends
+                }
                 Vector& dst = inner ? lines.right[j] : lines.x_start;
-                dst = (Real{2} * w1) * lines.x1 + (Real{1} - Real{2} * w1) * x;
+                if (mixed) {
+                    dst = lines.x1;
+                } else {
+                    dst = (Real{2} * w1) * lines.x1 + (Real{1} - Real{2} * w1) * x;
+                }
+                const auto& m_dst = mixed ? lines.m1 : stamped_mask;
                 if (inner) {
-                    lines.m_right[j] = stamped_mask;
+                    lines.m_right[j] = m_dst;
                     lines.right_ok[j] = true;
                 } else {
-                    lines.m_start = stamped_mask;
+                    lines.m_start = m_dst;
                     lines.start = true;
+                }
+                const Size q = lines.n;   // the held pieces' row
+                if (mixed) {
+                    lines.t[q] = t_m;
+                    lines.left[q] = lines.x1;
+                    lines.m_left[q] = lines.m1;
+                    lines.right[q] = x;
+                    lines.m_right[q] = stamped_mask;
+                    lines.right_ok[q] = true;
+                    lines.n = q + 1;
+                }
+                if (caps) {
+                    // the stage currents as the solves enforced them: stage 1
+                    // backward Euler of γh from v0, stage 2 the commit's
+                    // (x2 − x0*)/(γh), or (x2 − x1)/h_b after a kept BE re-take
+                    // (the histories hold x0* / x1 until the commit)
+                    std::vector<Real>& c = inner ? lines.c_right[j] : lines.c_start;
+                    c.resize(es.size());
+                    if (mixed) {
+                        lines.c_left[q].resize(es.size());
+                        lines.c_right[q].resize(es.size());
+                    }
+                    for (Size k = 0; k < es.size(); ++k) {
+                        const auto& e = es[k];
+                        if (e.kind != pwl::DevicePool::StoredKind::Capacitor) continue;
+                        const models::Capacitor::Params cp{e.C_or_L};
+                        const Real i1 = models::Capacitor::g_eq(Real{2} * (kGamma * h), cp) *
+                                        (v_cap(lines.x1, e) - lines.v0[k]);
+                        const Real i2 = models::Capacitor::g_eq(Real{2} * be_commit_h, cp) *
+                                        (v_cap(x, e) - e.v_prev);
+                        if (mixed) {
+                            c[k] = lines.c_left[q][k] = i1;
+                            lines.c_right[q][k] = i2;
+                        } else {
+                            c[k] = (Real{2} * w1) * i1 + (Real{1} - Real{2} * w1) * i2;
+                        }
+                    }
                 }
             };
 
@@ -3602,6 +3677,28 @@ inline SimulationResult run_transient(
                 }
             }
         };
+        // F-4-4: a step taken on lines to the in-loop recorder line by line
+        // (StepHooks::line), each point with its capacitor currents; the
+        // `on_step` functions see the whole step.
+        auto feed_lines = [&](Real t_prev, Real t) {
+            const StepLines& lines = *L;
+            hooks->step_fns(t_prev, x_prev, mask_start, t, x, stamped_mask);
+            auto cap = [](const std::vector<Real>& c) { return c.empty() ? nullptr : c.data(); };
+            Real ta = t_prev;
+            const Vector* xa = lines.start ? &lines.x_start : &x_prev;
+            const topology::SwitchStateMask* ma = lines.start ? &lines.m_start : &mask_start;
+            const Real* ca = lines.start ? cap(lines.c_start) : nullptr;
+            for (Size j = 0; j < lines.n; ++j) {
+                hooks->line(ta, *xa, *ma, lines.t[j], lines.left[j], lines.m_left[j], ca,
+                            cap(lines.c_left[j]));
+                ta = lines.t[j];
+                const bool r = lines.right_ok[j];
+                xa = r ? &lines.right[j] : &lines.left[j];
+                ma = r ? &lines.m_right[j] : &lines.m_left[j];
+                ca = cap(r ? lines.c_right[j] : lines.c_left[j]);
+            }
+            hooks->line(ta, *xa, *ma, t, x, stamped_mask, ca, nullptr);
+        };
         auto step_record = [&](Size k) PULSIM_STEP_PHASE {
             const Real t = t_step;
             const Real t_prev = t_prev_step;
@@ -3749,7 +3846,11 @@ inline SimulationResult run_transient(
                     hooks->event(t_prev, x_prev, mask_start, x, stamped_mask);
                 }
                 if (hook_step) {
-                    hooks->step(t_prev, x_prev, mask_start, t, x, stamped_mask, hook_contig);
+                    if (L && L->owner == t && L->ok && !L->empty() && hooks->takes_lines()) [[unlikely]] {
+                        feed_lines(t_prev, t);
+                    } else {
+                        hooks->step(t_prev, x_prev, mask_start, t, x, stamped_mask, hook_contig);
+                    }
                     hook_contig = true;
                 }
                 mask_start = stamped_mask;   // the next step's start
