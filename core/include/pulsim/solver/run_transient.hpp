@@ -2292,7 +2292,6 @@ inline SimulationResult run_transient(
             const bool flipped_s = flipped;
             const bool cycle_s = mask_cycle;
             const auto stamped_s = stamped_mask;
-            const Real gate_s = gate_t;
             if (has_diodes) diodes.snapshot_on_bits_into(rl_bits);
             rl_lsb = last_solved_bits;
             history.snapshot_into(rl_hcur);
@@ -2357,10 +2356,6 @@ inline SimulationResult run_transient(
                                                               Real{0});
                     b_extra += be_iwave;
                 }
-                // the gates on the event's post side too (a vcswitch's gate is
-                // its control source's value: a stale gate_t read one of two
-                // simultaneous edges' pre side, ll10)
-                gate_t = te;
                 // the settle's own re-decision (diodes, vcswitches), without
                 // its mode machinery and counters: a mode that does not settle
                 // in max_iters keeps its last solve
@@ -2399,7 +2394,6 @@ inline SimulationResult run_transient(
             flipped = flipped_s;
             mask_cycle = cycle_s;
             stamped_mask = stamped_s;
-            gate_t = gate_s;
             if (has_diodes) diodes.restore_on_bits(rl_bits);
             last_solved_bits = rl_lsb;
             newton_roundoff_run = nr_s;

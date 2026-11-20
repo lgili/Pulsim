@@ -37,7 +37,7 @@ unknown solved in the event's mode there:
   For ideal elements both readings coincide.
 
 The algebraic solve: the ε → 0 limit of a backward-Euler solve of ε from those
-states in stage 1's mode (sources and gates at t_e + ε, read with no left-bias window,
+states in stage 1's mode (sources at t_e + ε read with no left-bias window, gates the step's own sample,
 i.e. a source edge's right value even when t/h > 2e4), as two SINGLE solves
 (`run_event_iteration(..., single = true)`: the mode selector's caches and
 counters — mode_guard, lcp `mode_answers`, shadow — are the run's and are not
@@ -76,7 +76,7 @@ appear in `inner_events`.
 | 48 V, L 1 mH, switch g_off 1 nS (F-5-10 on pwl) | v_sw+ = i_L/g_off, i_L continuous | no right-limit row voltage | 2.4e9-class row, warning raised |
 | ll09, every right row: i(Lload), V(mid) | continuous (V(mid) = f(i_L)) | V(mid) 48.98 V vs 99.99 V | right − left ≤ 1.2e-17 A / 7.7e-13 V |
 
-(scoreboard cells: below)
+(scoreboard cells: see Scoreboard)
 
 ## Voltage guard on the fixed engine (group A hand-off)
 
@@ -92,7 +92,7 @@ one bool test.
 | id | finding | state |
 |---|---|---|
 | D1 | ε solves read a source edge on its pre side when t/h > 2e4 (64-ulp left bias) | fixed: sources read at t_e + ε with lb = 0 |
-| D2 | the non-single event iteration ran the mode selector (mode_guard counters, lcp `mode_answers`, shadow): an lcp bridge trajectory moved | fixed: single solves + the settle's own `events::redecide` (no mode machinery); `gate_t` = t_e + ε inside, restored |
+| D2 | the non-single event iteration ran the mode selector (mode_guard counters, lcp `mode_answers`, shadow): an lcp bridge trajectory moved | fixed: single solves + the settle's own `events::redecide` (no mode machinery) |
 | D3 | UnsupportedError (invalid_argument) escaped the ε solves | fixed: caught, no row |
 | D4 | constraint currents of ideal dependent states amplified ~1/ε | reduced: ε = 5e-4·γh (1e-9·γh only for a conductance-form impulse); see ll10 below. Not separately tested |
 | D5 | `rl_want` stays set if `run_restart` throws | fixed: read and cleared at the top of `run_restart` |
@@ -107,3 +107,36 @@ the dead time the two legs float on 1 MΩ bleeds; at ε = 1e-9·γh the L/ε ent
 64·(ε/τ)^4 of a mode τ (a third-order one left 2.5e-10 V on the 1 µs RC of the
 closing test: error ∝ (h/τ)³, measured). A conductance-form impulse keeps ε = 1e-9·γh (its
 ps mode must not relax inside ε: F-5-10's micro right limit).
+
+## Scoreboard (exact measure; `.scratch/sb2.py`, 20 circuits, pwl+restart / pwl+split)
+
+28 cells were worse at the head than at b9e46778. Now (0dacc666 code; the
+gate_t revert after it does not change values):
+
+| circuit | cell | b9e46778 | head | now | |
+|---|---|---|---|---|---|
+| back_to_back_diodes_sine | restart / split | 1.93e-16 / 1.94e-16 | 1.43e-9 / 1.64e-9 | 1.93e-16 / 1.97e-16 | ok |
+| diode_bridge_rectifier | restart / split | 2.21e-5 / 2.38e-5 | 4.43e-5 / 4.38e-5 | = b9e | ok |
+| half_wave_rectifier_sine | restart / split | 1.01e-4 / 2.56e-6 | 1.08e-4 / 1.58e-5 | = b9e | ok |
+| voltage_doubler | restart / split | 1.67e-6 / 2.19e-7 | 3.02e-6 / 2.19e-6 | = b9e | ok |
+| transformer_step_up | both | 4.03e-16 | 8.19e-10 | 4.03e-16 | ok |
+| chopper_with_rc_snubber | split | 3.11e-8 | 2.79e-7 | 3.11e-8 | ok |
+| pwm_voltage_rc | both | 1.38e-8 | 4.86e-8 | 1.38e-8 | ok |
+| flyback_converter | both | 2.55e-6 | 6.47e-6 | 2.56e-6 | ok (+0.5 %) |
+| three_phase_diode_rectifier | both | 9.98e-4 / 9.96e-4 | 1.27e-2 | = b9e | ok |
+| ll09_half_bridge_inverter_leg | both | 9.81e-3 | 4.14e-2 | 1.85e-7 | ok (better) |
+| full_bridge_dc | both | 3.76e-9 / 3.91e-9 | 8.02e-9 / 4.87e-9 | 3.72e-9 / 3.82e-9 | ok |
+| t_type_3level_halfbridge | both | 2.10e-7 | 3.26e-7 | 2.10e-7 | ok |
+| vcswitch_resistor | split | 0 | 3.16e-2 | 6.7e-25 | ok |
+| chopper_with_rc_snubber | restart | 2.50e-8 | 2.88e-7 | 2.57e-8 | worse by 2.8 % |
+| cascaded_boost_buck | split | 2.37e-7 | 6.02e-7 | 3.16e-7 | worse (half the head's excess left) |
+| ll10_full_bridge_inverter_lc | both | 1.64e-7 | 1.71e-7 | 2.46e-6 | worse: the dead-time right row's common mode (rounding through L/ε; 0.4 V of 36664 V) |
+
+New, not worse at the head:
+
+| circuit | cell | b9e46778 | head | now | |
+|---|---|---|---|---|---|
+| diode_half_wave_rl_load | split | 9.64e-4 | 6.82e-4 | 5.55e-2 | worse: the located D1 turn-off (10.1 ms) right row reads the RL residual current through g_off (a reverse spike, 2.48 spans); the truth's root has i = 0. Open: at a located turn-off the ON mode is the well-conditioned representative |
+
+Mispriced by the measure: none separated; every remaining worse cell above
+is a real right-row value.
