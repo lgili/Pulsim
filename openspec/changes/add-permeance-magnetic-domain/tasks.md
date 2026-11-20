@@ -1,3 +1,5 @@
+Status (2026-11-19, feat/core-p5-line-and-excess): no open boxes — 4.2, 4.3, 4.5 done (DECISIONS 13). (Closeout 2026-11-19 had them open: DECISIONS 12.)
+
 ## 1. Linear magnetic networks (after `add-controlled-source-set`)
 - [x] 1.1 `add_winding` (gyrator `g = 1/N`, `turns > 0` refused otherwise by name), `add_permeance`, `add_air_gap` (`P = μ₀·A/l`), `add_magnetic_resistance`; builder registry of magnetic nodes
 - [x] 1.2 Preflight: a magnetic island without a reference node is refused naming one of its nodes; no tie resistor is inserted on a magnetic node
@@ -21,17 +23,17 @@
 - [x] 3.5 Three-limb transformer with saturable limbs under unbalanced load (tutorial case; flux in each limb recorded) — tutorial 09
 
 ## 4. Hysteresis and excess loss (after `add-unified-device-interface`)
-Deferred: add-unified-device-interface is not on this branch's base (DECISIONS 7).
-- [ ] 4.1 `add_hysteretic_permeance` on the existing JA law; test against `add_hysteretic_core_inductor` for the same core within 1e-6; loop area equals `∮F·dΦ` within 1e-6
-- [ ] 4.2 `models/magnetic_loss.hpp`: excess-loss element with the flux rate as its unknown; `dF/du` against finite differences (1e-7); monotone at 1e-12 spacing around `u = 0`
-- [ ] 4.3 Test: `c = 0.01`, `ε = 0.01 V`, N = 10, 100 V peak sine → 0.1759 W within 0.5 %
-- [ ] 4.4 `fit_core_loss_elements(f, B, P_v, *, geometry)`; round-trip on synthetic loss data (1e-6); the fitted points are excluded from any reported agreement
-- [ ] 4.5 Consistency report (not a validation): JA + eddy + excess fitted on sine data, compared with iGSE on a triangular flux; the difference is reported, not gated
+add-unified-device-interface has landed (DECISIONS 7 no longer applies); closeout 2026-11-19: DECISIONS 10–12.
+- [x] 4.1 `add_hysteretic_permeance` on the existing JA law; test against `add_hysteretic_core_inductor` for the same core within 1e-6; loop area equals `∮F·dΦ` within 1e-6 — unit winding + one-turn JA inductor (DECISIONS 10); measured 1.0e-9 (pwl) / 1.3e-9 (trbdf2) of the peak current, ∮F·dΦ = absorbed electrical energy to 1.1e-9 (a power identity through the lossless unit gyrator, not an independent truth; the independent check of the loop area is the `compute_bh_loop` replay of the same JA law, within 5 %) (`test_hysteretic_permeance_*`); YAML `hysteretic_permeance`; conformance cell `magnetic[hysteretic_permeance]`
+- [x] 4.2 `models/magnetic_loss.hpp`: excess-loss element with the flux rate as its unknown; `dF/du` against finite differences (1e-7); monotone at 1e-12 spacing around `u = 0` — new kind `StoredKind::ExcessLoss` on every surface (DECISIONS 13); `test_device_laws.cpp` "[excess]": AD slope vs closed form (16 ulp) and central difference (1e-7), strictly increasing at 1e-12 spacing around 0, ±ε, ±10 V, odd bit-exactly, hand stamp = interface law (1e-12); `add_excess_loss`
+- [x] 4.3 Test: `c = 0.01`, `ε = 0.01 V`, N = 10, 100 V peak sine → 0.1759 W within 0.5 % — measured 0.1759547 W: −8.8e-9 (pwl) / −4.0e-9 (trbdf2) vs the regularised law (mpmath), −7.4e-7 vs the ideal c·U^1.5·0.5564179 (`test_excess_loss.py`); f^1.5 slope 1.5000000013 over two decades
+- [x] 4.4 `fit_core_loss_elements(f, B, P_v, *, geometry)`; round-trip on synthetic loss data (1e-6); the fitted points are excluded from any reported agreement — `pulsim.fit_core_loss_elements` (DECISIONS 11); round trip of β, k_h, R_m, c to 1e-6; the fitted R_m dissipates its eddy share k_e·f²·B²·volume in a run within 1e-4 (its `device_loss_summary` core-loss row, from the solved MMF); `fitted_on` lists every point
+- [x] 4.5 Consistency report (not a validation): JA + eddy + excess fitted on sine data, compared with iGSE on a triangular flux; the difference is reported, not gated — `probes/core_loss_consistency.py` (hysteresis share from the fit, eddy + excess simulated): −0.1 … −0.4 % vs iGSE on synthetic data (DECISIONS 13)
 
 ## 5. Outputs and surface
 - [x] 5.1 `res.flux(name)`, `res.b_field(name)`, `res.h_field(name)`; loss elements in `device_loss_summary` under `core_loss`
 - [x] 5.2 Bindings, stubs, `components()` entries — `components()` unchanged: the elements are listed under their existing kinds
-- [x] 5.3 YAML types `winding`, `permeance`, `air_gap`, `saturable_permeance`, `hysteretic_permeance`, `magnetic_resistance`, `excess_loss`; strict keys; loader tests — `hysteretic_permeance`, `excess_loss` refused by name (group 4 deferred)
+- [x] 5.3 YAML types `winding`, `permeance`, `air_gap`, `saturable_permeance`, `hysteretic_permeance`, `magnetic_resistance`, `excess_loss`; strict keys; loader tests — all seven read (`excess_loss` since DECISIONS 13: keys `from`, `to`, `c`, `eps`)
 - [x] 5.4 Conformance rows (`add-engine-conformance-matrix`): each element × {pwl, trbdf2, dsed, DC, AC} — cells on pwl / trbdf2 / dsed / bdf1 (saturable: refused by name off the Newton engines); AC: linear cell against its electrical equivalent, saturable refused by name; DC: the C++ flux-row tests (`test_permeance.cpp`)
 
 ## 6. Documentation

@@ -690,13 +690,26 @@ inline void load_device(
                                   require_real(dev, idx, type, "length"),
                                   require_real(dev, idx, type, "mu_r"),
                                   require_real(dev, idx, type, "B_sat"));
-    } else if (type == "hysteretic_permeance" || type == "excess_loss") {
-        throw std::runtime_error(
-            "yaml::load: device " + device_label(dev, idx) + " has type '" +
-            type + "', which add-permeance-magnetic-domain defines but has not "
-            "shipped yet (it needs the unified device interface). Use "
-            "hysteretic_inductor for a Jiles-Atherton core and "
-            "magnetic_resistance for in-loop eddy loss.");
+    } else if (type == "hysteretic_permeance") {
+        require_only_keys(dev, idx, type, {"from", "to", "area", "length", "Ms",
+                                           "a", "alpha", "c", "k", "M0"});
+        models::JilesAthertonParams ja;
+        ja.Ms    = require_real(dev, idx, type, "Ms");
+        ja.a     = require_real(dev, idx, type, "a");
+        ja.alpha = require_real(dev, idx, type, "alpha");
+        ja.c     = require_real(dev, idx, type, "c");
+        ja.k     = require_real(dev, idx, type, "k");
+        b.add_hysteretic_permeance(name, require_string(dev, idx, type, "from"),
+                                   require_string(dev, idx, type, "to"),
+                                   require_real(dev, idx, type, "area"),
+                                   require_real(dev, idx, type, "length"), ja,
+                                   /*substeps_min=*/8, real_or(dev, "M0", Real{0}));
+    } else if (type == "excess_loss") {
+        require_only_keys(dev, idx, type, {"from", "to", "c", "eps"});
+        b.add_excess_loss(name, require_string(dev, idx, type, "from"),
+                          require_string(dev, idx, type, "to"),
+                          require_real(dev, idx, type, "c"),
+                          require_real(dev, idx, type, "eps"));
     } else if (type == "sine_current_source") {
         require_only_keys(dev, idx, type, {"from", "to", "i_dc", "i_amplitude",
                                            "frequency", "phase"});
@@ -898,6 +911,12 @@ inline void load_device(
         if (T_load != Real{0}) {
             b.add_current_source(name + ".tl", "gnd", omega, T_load);
         }
+        std::vector<std::string> members;
+        if (R_a > Real{0}) members.push_back(name + ".ra");
+        for (const char* s : {".la", ".em", ".j"}) members.push_back(name + s);
+        if (B > Real{0}) members.push_back(name + ".b");
+        if (T_load != Real{0}) members.push_back(name + ".tl");
+        b.record_composite("dc_machine", name, name + ".em", std::move(members));
     } else if (type == "diode" &&
                string_or(dev, "form", default_switch_form()) == "branch") {
         // add-branch-form-ideal-switch: `form: branch` (R_on, g_off
@@ -1505,7 +1524,8 @@ inline void load_device(
             "gapped_core_inductor, transformer, multi_winding_transformer, "
             "ideal_transformer, saturable_transformer, induction_motor, "
             "induction_machine, dc_machine, pmsm, bldc, winding, permeance, "
-            "air_gap, magnetic_resistance, saturable_permeance");
+            "air_gap, magnetic_resistance, saturable_permeance, "
+            "hysteretic_permeance, excess_loss");
     }
     if (dev["losses"]) load_losses(b, dev, idx, type, name);
 }

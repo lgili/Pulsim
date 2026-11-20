@@ -259,6 +259,31 @@ public:
         refresh_derivatives(x_probe);
     }
 
+    // ---- the stage form (βh, ψ) of integrator='esdirk43' ----
+    // One q row per device: q = q_M, q̇ = f (the committed derivative). A
+    // stage is backward Euler of βh from the base q_m_prev = ψ (the stamp's
+    // BE rule); after its solve q_M = K0 + K1·q_E(v) under that stage's
+    // K0/K1 (set by every stamp), as capture_gamma reads it.
+    [[nodiscard]] Size stage_rows() const noexcept { return entries_.size(); }
+    void stage_start(Real hh, Real* q0, Real* hqd0) const {
+        for (const auto& e : entries_) {
+            *q0++ = e.q_m_prev;
+            *hqd0++ = hh * e.f_prev;
+        }
+    }
+    void stage_base(const Real* psi, const Real* /*dpsi*/) {
+        for (auto& e : entries_) e.q_m_prev = *psi++;
+    }
+    void stage_increment(const Vector& x, const Real* psi, Real* d) const {
+        for (const auto& e : entries_) {
+            const Real v = stamping::read_node_voltage(x, e.from)
+                         - stamping::read_node_voltage(x, e.to);
+            *d++ = e.k0 + e.k1 * models::LauritzenDiode::junction_charge<Real>(v, e.params)
+                   - *psi++;
+        }
+    }
+    void stage_clear() noexcept {}
+
     /// Flat (q_M, f) pairs, for `SolverSnapshot`. The gamma point
     /// is deliberately NOT carried: it lives only between the two
     /// stages of one step, and a snapshot is always taken at a step

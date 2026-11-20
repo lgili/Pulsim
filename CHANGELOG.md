@@ -36,6 +36,22 @@ above.
 
 ## [Unreleased]
 
+### Excess core loss in the permeance network
+
+* **Added** `CircuitBuilder.add_excess_loss(name, m_a, m_b, c, eps)`:
+  Bertotti's excess loss of a core segment, `F = c·u/(u² + eps²)^¼` for
+  the flux rate `u` (the square-root law `c·sign(u)·|u|^½`, linear below
+  `eps`). A unit winding plus the new Newton kind `StoredKind.ExcessLoss`
+  (a static law on both device paths): pwl, trbdf2, esdirk43 and the AC
+  sweep (at zero flux rate the conductance `c/√eps`); the exact engine
+  refuses it by name. `res.i(name)` is the MMF, `device_loss_summary`
+  lists it under `core_loss`, the in-loop recorder reads `p(name)`. YAML
+  type `excess_loss` (refused by name before); IR kind `excess_loss`.
+  Sine loss within `(3/4)·(eps/Û)²` of `c·Û^1.5·0.556418`.
+* **Fixed** `fit_core_loss_elements`'s excess coefficient: the mean of
+  `|cos|^1.5` is `Γ(5/4)/(√π·Γ(7/4)) = 0.5564179`, not 0.5563852 (the
+  fitted `c` was 5.9e-5 high).
+
 ### Thermal networks on the variable-step engine; the exact engine's output grid
 
 * **Fixed** `engine='trbdf2'` (and `integrator='esdirk43'`) with a loss
@@ -88,6 +104,31 @@ above.
   `on_impulse='warn'` / `'error'` with the exact engine's `integrator='bdf2'`
   (which cannot detect an impulse) is refused by name; the exact engine's
   impulse refusal names the device kind.
+
+### `components()` entry of the DC machine
+
+* **Added** `CircuitBuilder.record_composite(kind, name, anchor, members)` /
+  `composites()`; `add_dc_machine` and the YAML `dc_machine` record the
+  machine, and `components()` gives its `{name}.em` entry the keys
+  `composite`, `composite_name`, `sub_elements` and `composite_params`
+  (read back from the members). `to_yaml` / `from_yaml` keep the record.
+  A `dc_machine` record must name `{name}.la`, `.em`, `.j` (and the
+  optional `.ra`, `.b`, `.tl`) with their kinds; anything else is refused
+  by name.
+
+### Hysteretic permeance and the core-loss element fitter
+
+* **Added** `CircuitBuilder.add_hysteretic_permeance(name, m_a, m_b, area,
+  length, Ms, a, alpha, c, k)`: a Jiles-Atherton core segment in the
+  permeance network (a unit winding plus a one-turn JA inductor; no new
+  device kind), equal to `add_hysteretic_core_inductor` seen from a winding
+  to 1e-9 on pwl and trbdf2. YAML type `hysteretic_permeance` (refused by
+  name before). `res.flux` / `b_field` / `h_field` refuse it by name (its
+  flux depends on the JA state); the MMF is `res.i(name)`.
+* **Added** `pulsim.fit_core_loss_elements(f, B, P_v, *, geometry)`: the
+  hysteresis / eddy / excess split of sine loss data mapped to the magnetic
+  resistance `R_m` and the excess coefficient `c` of a segment; the fitted
+  points are listed and are not a validation.
 
 ### esdirk43 runs the stateful kinds and the losses; the exact engine's loss port
 

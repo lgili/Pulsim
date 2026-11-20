@@ -110,7 +110,8 @@ public:
     // One q row per device: q = λ, q̇ = V_L. A stage is backward Euler of
     // βh from the base λ_old = ψ; the increment form reads λ(i) − ψ as
     // Δλ(i, i_L_old) − (ψ − λ_old) with that offset carried exactly. Not the
-    // hysteretic law (its base is a magnetisation state, refused upstream).
+    // hysteretic law (refused upstream: its law is first order in the step
+    // on both integrators, DECISIONS 17).
     [[nodiscard]] std::size_t stage_rows() const noexcept { return entries_.size(); }
     void stage_start(Real hh, Real* q0, Real* hqd0) const {
         for (const auto& e : entries_) {
@@ -137,13 +138,6 @@ public:
     void stage_clear() noexcept {
         for (auto& e : entries_) e.lambda_offset = Real{0};
     }
-    [[nodiscard]] bool stage_form() const noexcept {
-        for (const auto& e : entries_) {
-            if (e.params.ja) return false;
-        }
-        return true;
-    }
-
     /// The JA base state for a stage. The trapezoidal stage — and
     /// every fixed-engine solve, probe, landing and seed — integrates
     /// from the committed (H_n, M_n). The BDF2 stage integrates from

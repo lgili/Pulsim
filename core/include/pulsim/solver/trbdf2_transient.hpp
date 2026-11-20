@@ -256,6 +256,10 @@ struct TrBdf2Options {
     /// recorded only), 2 'lcp' (the LCP decides where the settle's answer
     /// can differ from it).
     int mode_selection = 0;
+    /// The estimate's round-off floor (add-high-order-stiff-integrator
+    /// DECISIONS 17): 0 TR-BDF2's rule as before (an all-positive noise
+    /// right-hand side), 1 alternating signs. ESDIRK always takes 1.
+    int roundoff_floor = 0;
     /// The integrator of the variable step (add-high-order-stiff-integrator):
     /// 0 TR-BDF2, 1 ESDIRK4(3)6L[2]SA (`simulate(integrator='esdirk43')`).
     /// The phases are shared; only the stages, the estimate and the history
@@ -2229,42 +2233,25 @@ inline SimulationResult run_transient_trbdf2(
         bool commutated = false;
         // ---- integrator='esdirk43' (add-high-order-stiff-integrator) ----
         // Runs on the skeleton only. The linear companions (C, L, coupled
-        // windings) and the stateful kinds with the stage form (βh, ψ) —
-        // the nonlinear capacitor, the saturable inductor but its
-        // hysteretic law, external devices — take the five stages; the
-        // Lauritzen diode, IGBT tail, machines and the hysteretic core keep
-        // a Newton history whose stage takes no arbitrary base yet.
+        // windings) and every stateful kind take the five stages through
+        // the stage form (βh, ψ) of StatefulHistories (DECISIONS 16, 17)
+        // but the hysteretic core, refused by name.
         const bool esdirk = opts.integrator == 1;
         if (opts.integrator != 0 && !esdirk) {
             throw std::invalid_argument(
                 "run_transient_trbdf2: integrator must be 0 (TR-BDF2) or 1 (ESDIRK4(3))");
         }
-        if (esdirk && hs.any()) {
-            auto k = pwl::DevicePool::StoredKind::Resistor;
-            bool found = false;
-            hs.for_each([&](const auto& kk) {
-                using K = std::remove_cvref_t<decltype(kk)>;
-                if (!found && !pwl::StatefulHistories::stage_form(kk)) {
-                    k = K::kStoredKind;
-                    found = true;
-                }
-            });
-            if (found) {
-                std::string name;
-                for (Index b = 0; b < graph.num_branches(); ++b) {
-                    if (pool.kind_of(graph.branch(b).id) == k) { name = std::string(graph.branch_name(b)); break; }
-                }
+        if (esdirk) {
+            for (const auto& e : hs.get<pwl::SaturableInductorHistory>().entries()) {
+                if (!e.params.ja) continue;
+                const std::string name(graph.branch_name(e.branch_id));
                 throw UnsupportedError(
-                    "trbdf2", "integrator=esdirk43", name,
-                    std::string(pwl::stored_kind_name(k)),
-                    std::format("engine 'trbdf2': integrator='esdirk43' takes its five "
-                                "backward-Euler stages through the linear companions and "
-                                "the stage form of the nonlinear capacitor, saturable "
-                                "inductor and external devices; the {} '{}' keeps a "
-                                "Newton history whose stage takes no arbitrary "
-                                "pseudo-previous state yet (a hysteretic core neither). "
-                                "Drop integrator='esdirk43'.",
-                                pwl::stored_kind_name(k), name));
+                    "trbdf2", "integrator=esdirk43", name, "SaturableInductor",
+                    std::format("engine 'trbdf2': integrator='esdirk43' does not run the "
+                                "Jiles-Atherton core '{}': its in-loop law is first order "
+                                "in the step on both integrators (measured; a fourth-order "
+                                "integrator buys nothing there). Drop integrator='esdirk43'.",
+                                name));
             }
         }
         // the stateful kinds take the stages (their q rows below)
@@ -2288,6 +2275,7 @@ inline SimulationResult run_transient_trbdf2(
         // landing.)
         std::vector<Real> ed_sq0, ed_shd0, ed_spsi, ed_sdpsi, ed_spsi5, ed_sdpsi5;
         std::array<std::vector<Real>, step::Esdirk43::n_stages> ed_sd;
+        std::vector<Real> ed_sqmax;   // per q row: the largest |q| so far (estimate floor)
         pwl::StatefulHistories::Snapshot ed_hs_snap;
         // The five stages of one ESDIRK4(3) step on the factor of h/2
         // (G + C/(γh)): stage s is backward Euler of γh from the pseudo
@@ -2907,9 +2895,12 @@ inline SimulationResult run_transient_trbdf2(
         // error: the LTE and the controller's verdict (reject, forced accept)
         auto tb_error = [&]<bool kE = false>() PULSIM_STEP_PHASE {
             (void)ed_hd0; (void)ed_d; (void)ed_y0;   // captured outside kE (MSVC)
+            (void)ed_sf; (void)ed_sq0; (void)ed_shd0; (void)ed_sd; (void)ed_spsi5; (void)ed_sqmax;
 
             // ---- LTE over the differential variables ----
             Real err_sq = Real{0};
+            Real q_sq = Real{0};   // the q rows' share (esdirk43), kept for the floor
+            Size n_q = 0;
             Size n_err = 0;
             est_v.assign(entries.size(), Real{0});
             est_sc.assign(entries.size(), Real{1});
@@ -3038,6 +3029,38 @@ inline SimulationResult run_transient_trbdf2(
                 err_sq += w * w;
                 ++n_err;
             }
+            if constexpr (kE) {
+                // The stateful kinds' q rows join the norm (DECISIONS 17): a
+                // circuit whose dynamics live only there (a Lauritzen diode
+                // behind a resistor, a hysteretic core) had no estimate and
+                // sat at its step ceiling at any rtol. Same embedded weights
+                // on the q increments; scale rtol·max(|q0|, |q1|) with a
+                // floor at 1e-3 of the row's largest |q| so far (no atol:
+                // a charge or a flux has no unit in common with it).
+                if (ed_sf && !sdirk) {
+                    using E = step::Esdirk43;
+                    const Size nq = ed_sq0.size();
+                    ed_sqmax.resize(nq, Real{0});
+                    for (Size r = 0; r < nq; ++r) {
+                        Real ee = E::err_explicit_weight() * ed_shd0[r];
+                        for (int j = 0; j < E::n_stages; ++j) {
+                            ee += E::err_weight(j) * ed_sd[static_cast<std::size_t>(j)][r];
+                        }
+                        const Real q1 = ed_spsi5[r] + ed_sd[E::n_stages - 1][r];
+                        const Real qm = std::max(std::abs(ed_sq0[r]), std::abs(q1));
+                        // the max reads committed values only (q0): a rejected
+                        // trial's q1 must not loosen later scales
+                        ed_sqmax[r] = std::max(ed_sqmax[r], std::abs(ed_sq0[r]));
+                        const Real sc = opts.rtol * std::max(qm, Real{1e-3} * ed_sqmax[r])
+                                        + std::numeric_limits<Real>::min();
+                        const Real w = ee / sc;
+                        q_sq += w * w;
+                        ++n_q;
+                    }
+                }
+            }
+            err_sq += q_sq;
+            n_err += n_q;
             err =
                 n_err > 0 ? std::sqrt(err_sq
                                        / static_cast<Real>(n_err))
@@ -3054,8 +3077,15 @@ inline SimulationResult run_transient_trbdf2(
             // floor (eps * J^-1 (|J||x| + |b|) through each entry's
             // estimate) joins the scale, and the step is accepted when the
             // estimate is within it. Steps that pass are unchanged.
-            if (!kE && err > Real{1} && !nl_effective && !sdirk
-                && !entries.empty()) {   // TR-BDF2's constants (kc, kl, clte)
+            // ONE floor for both integrators (add-high-order-stiff-integrator
+            // DECISIONS 17): ESDIRK steps always (their estimate had none);
+            // TR-BDF2 as before unless opts.roundoff_floor = 1. With 1 the
+            // noise right-hand side carries alternating signs: |J||x| + |b|
+            // all positive through J^-1 cancels where the elimination's
+            // round-off does not (PSFB defect (2), update-trbdf2-post-event-
+            // restart DECISIONS 21).
+            if (err > Real{1} && !nl_effective && !sdirk
+                && !entries.empty()) {
                 const Vector* nbc = nullptr;
                 const sparse::Matrix* nJ =
                     cache.resident_event_matrix(mask_step, hg, &nbc);
@@ -3068,6 +3098,9 @@ inline SimulationResult run_transient_trbdf2(
                 noise_r = nJ->cwiseAbs() * x_1.cwiseAbs();
                 noise_r += nbc->cwiseAbs() + b_stage.cwiseAbs();
                 noise_rhs = -noise_r;
+                if (kE || opts.roundoff_floor == 1) {
+                    for (Index k = 1; k < noise_rhs.size(); k += 2) noise_rhs[k] = -noise_rhs[k];
+                }
                 cache.solve_at(mask_step, hg, noise_rhs, noise_y);
                 noise_rhs.setZero(static_cast<Index>(state_size));
                 cache.solve_at(mask_step, hg, noise_rhs, noise_y0);
@@ -3080,11 +3113,27 @@ inline SimulationResult run_transient_trbdf2(
                     + Real{1} / (gamma * (Real{1} - gamma))
                     + Real{1} / (Real{1} - gamma);
                 Real e2 = Real{0};
+                // ESDIRK: est = Σ e_j·(Y_j − ψ_j) + e_0·h·ẏ0, each term a
+                // state difference: its noise is Σ|e_j|·δy (+|e_0|/γ·δy
+                // through the committed slot)
+                using E = step::Esdirk43;
+                const Real ce = [] {
+                    Real c = std::abs(E::err_explicit_weight()) / E::gamma;
+                    for (int j = 0; j < E::n_stages; ++j) c += std::abs(E::err_weight(j));
+                    return c;
+                }();
                 for (Size i = 0; i < entries.size(); ++i) {
                     const auto& e = entries[i];
                     const Real dv =
                         stamping::read_node_voltage(noise_y, e.from)
                         + stamping::read_node_voltage(noise_y, e.to);
+                    if constexpr (kE) {
+                        const Real dy = e.kind == pwl::DevicePool::StoredKind::Capacitor
+                            ? dv : noise_y[e.inductor_branch_var_id];
+                        const Real w = est_v[i] / (est_sc[i] + ce * dy);
+                        e2 += w * w;
+                        continue;
+                    }
                     Real df;
                     if (e.kind == pwl::DevicePool::StoredKind::Capacitor) {
                         df = kc * dv;
@@ -3105,7 +3154,11 @@ inline SimulationResult run_transient_trbdf2(
                         / (est_sc[i] + std::abs(Real{2} * clte * h) * df);
                     e2 += w * w;
                 }
-                const Real err_n = std::sqrt(e2 / static_cast<Real>(entries.size()));
+                // the q rows keep their share without a floor: the floor
+                // never accepts a step on a stateful kind's error (today
+                // unreachable: a stateful kind sets nl_effective; kept so a
+                // future relaxation of that guard cannot drop them)
+                const Real err_n = std::sqrt((e2 + q_sq) / static_cast<Real>(entries.size() + n_q));
                 if (err_n <= Real{1}) {
                     // Not clamped to 1 (keep h): measured, the SEPIC at
                     // rtol 1e-8 then took 662,366 steps instead of

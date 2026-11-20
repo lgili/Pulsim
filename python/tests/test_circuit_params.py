@@ -84,6 +84,11 @@ KINDS = {
         b.add_induction_machine_mna("X", "pa", "pb", "pc", "n", "om", 0.5, 2e-3, v,
                                     2e-3, 60e-3, 2.0, 1e-3),
         b.add_resistor("Rn", "n", "gnd", 1e6))),
+    # add-permeance-magnetic-domain 4.2: the kernel kind is the branch "X"
+    "ExcessLoss": ("X.c", 0.01, 0.02, lambda b, v: (
+        b.add_sine_voltage_source("Vs", "a", "gnd", 0.0, 5.0, 1e3),
+        b.add_winding("W", "a", "gnd", "m", "gnd", 1.0),
+        b.add_excess_loss("X", "m", "gnd", v, 1e-2))),
     "IdealTransformer": ("X.n", 2.0, 3.0, lambda b, v: (
         _src(b), b.add_resistor("Rp", "a", "p", 1.0),
         b.add_ideal_transformer("X", "p", "gnd", "s", "gnd", v), b.add_resistor("R", "s", "gnd", 10.0))),

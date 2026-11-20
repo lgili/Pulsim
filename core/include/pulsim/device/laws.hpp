@@ -38,6 +38,7 @@
 #include "pulsim/models/igbt_level1.hpp"
 #include "pulsim/models/jiles_atherton.hpp"
 #include "pulsim/models/lauritzen_diode.hpp"
+#include "pulsim/models/magnetic_loss.hpp"
 #include "pulsim/models/mosfet_level1.hpp"
 #include "pulsim/models/nonlinear_capacitor.hpp"
 #include "pulsim/models/saturable_inductor.hpp"
@@ -131,6 +132,24 @@ struct ShockleyDiode : CurrentLaw<models::ShockleyDiode, 2, ShockleyParams> {
     template <class S> using Params = ShockleyParams<S>;
     [[nodiscard]] static Params<Real> from(const models::ShockleyDiode::Params& m) {
         return {m.I_S, m.n, m.V_T, m.G_min, m.i_lim, m.BV};
+    }
+};
+
+template <class S> struct ExcessLossParams {
+    S c, eps;
+    template <class F> auto map(F&& f) const {
+        return ExcessLossParams<decltype(f(c))>{f(c), f(eps)};
+    }
+};
+/// The excess-loss element's dual (add-permeance-magnetic-domain 4.2):
+/// i = c·v/(v²+ε²)^¼ between {a, b}; the model's body.
+struct ExcessLoss : CurrentLaw<models::ExcessLoss, 2, ExcessLossParams> {
+    /// Parameter names in `Params` declaration order (sensitivity refusals).
+    static constexpr std::array<std::string_view, 2> kParamNames{"c", "eps"};
+    static constexpr std::size_t n_params = 2;
+    template <class S> using Params = ExcessLossParams<S>;
+    [[nodiscard]] static Params<Real> from(const models::ExcessLoss::Params& m) {
+        return {m.c, m.eps};
     }
 };
 
@@ -461,6 +480,7 @@ struct IgbtTail {
 };
 
 static_assert(Device<ShockleyDiode>);
+static_assert(Device<ExcessLoss>);
 static_assert(Device<IdealDiode>);
 static_assert(Device<MosfetLevel1>);
 static_assert(Device<IgbtLevel1>);
@@ -477,7 +497,7 @@ inline constexpr bool kLawLayout =
     && sizeof(typename D::template Params<ad::ADRealN<D::n_params>>)
            == D::n_params * sizeof(ad::ADRealN<D::n_params>)
     && std::is_standard_layout_v<typename D::template Params<ad::ADRealN<D::n_params>>>;
-static_assert(kLawLayout<ShockleyDiode> && kLawLayout<IdealDiode>
+static_assert(kLawLayout<ShockleyDiode> && kLawLayout<ExcessLoss> && kLawLayout<IdealDiode>
               && kLawLayout<MosfetLevel1> && kLawLayout<IgbtLevel1>
               && kLawLayout<NonlinearCapacitor> && kLawLayout<SaturableInductor>
               && kLawLayout<LauritzenDiode> && kLawLayout<IgbtTail>);

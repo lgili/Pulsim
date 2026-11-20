@@ -161,3 +161,33 @@ circuit:
     REQUIRE(c.scopes().size() == 1);
     CHECK(c.scopes()[0].kind == "RC");
 }
+
+TEST_CASE("Circuit YAML: a recorded composite and a hysteretic permeance",
+          "[ir][yaml][composite][permeance]") {
+    // add-mna-native-machines D23, add-permeance-magnetic-domain 4.1
+    CircuitBuilder b;
+    b.add_voltage_source("V", "a", "gnd", 10.0);
+    b.add_inductor("M.la", "a", "M.emf", 1e-3);
+    b.add_ideal_transformer("M.em", "w", "gnd", "M.emf", "gnd", 0.1);
+    b.add_capacitor("M.j", "w", "gnd", 1e-5);
+    b.record_composite("dc_machine", "M", "M.em", {"M.la", "M.em", "M.j"});
+    pulsim::models::JilesAthertonParams ja;
+    ja.Ms = 4.0e5; ja.a = 50.0; ja.alpha = 5e-5; ja.c = 0.2; ja.k = 30.0;
+    b.add_winding("W", "a", "gnd", "m1", "gnd", 10.0);
+    b.add_hysteretic_permeance("H", "m1", "gnd", 1e-4, 0.05, ja);
+    CHECK(b.branch_id_of("H.w") >= 0);
+    CHECK(b.pool().is_flux_node(b.node_id_of("m1")));
+
+    const auto c = b.build();
+    const auto y = to_yaml(c);
+    CHECK_THAT(y, Catch::Matchers::ContainsSubstring(
+        R"({kind: "dc_machine", name: "M", anchor: "M.em", members: ["M.la", "M.em", "M.j"]})"));
+    const auto c2 = from_yaml(y);
+    CHECK(c2.value_hash() == c.value_hash());
+    CHECK(to_yaml(c2) == y);
+
+    CHECK_THROWS_WITH(b.record_composite("dc_machine", "M", "M.em", {"M.em"}),
+                      Catch::Matchers::ContainsSubstring("already recorded"));
+    CHECK_THROWS_WITH(b.add_hysteretic_permeance("X", "m1", "gnd", 0.0, 0.05, ja),
+                      Catch::Matchers::ContainsSubstring("area"));
+}

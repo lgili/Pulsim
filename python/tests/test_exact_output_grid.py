@@ -228,7 +228,7 @@ def test_a_parasitic_mode_at_rounding_does_not_set_the_output_step():
     to ~5e12 /s that the event projection leaves at rounding. The chord bound of a32b97ed read
     lambda^2 x rounding as curvature and cut every interval to a constant ~1e-8 s step (20 ms:
     14078 samples over the 10 us grid at 1e-5; ten banks ran > 8 min). Each mode's contribution
-    now saturates at its amplitude (DECISIONS 3): 647 extra samples measured; bound 2x."""
+    now saturates at its amplitude (update-number-changing-release DECISIONS 5): 647 extra samples measured; bound 2x."""
     off = pulsim.simulate(_bridges(2), 0.02, engine="exact")
     on = pulsim.simulate(_bridges(2), 0.02, engine="exact", output_rtol=1e-5)
     t = np.asarray(on.times)

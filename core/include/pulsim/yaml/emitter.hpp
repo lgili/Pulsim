@@ -61,7 +61,7 @@ inline constexpr std::array<std::string_view, pwl::DevicePool::kNumKinds> kKindY
     "shockley_diode", "lauritzen_diode", "pmsm_mna", "ideal_transformer",
     "vccs", "cccs", "ccvs", "gyrator", "sine_current_source",
     "pulse_current_source", "pwl_current_source", "induction_machine_mna",
-    "external_device"};
+    "external_device", "excess_loss"};
 
 namespace yaml_detail {
 
@@ -103,7 +103,7 @@ namespace m = ::pulsim::models;
         case K::NonlinearDiode: case K::MosfetLevel1: case K::IgbtLevel1:
         case K::SaturableInductor: case K::NonlinearCapacitor:
         case K::ShockleyDiode: case K::LauritzenDiode: case K::PmsmMna:
-        case K::InductionMachineMna: case K::ExternalDevice:
+        case K::InductionMachineMna: case K::ExternalDevice: case K::ExcessLoss:
             return BK::Nonlinear;
         default:
             return BK::Source;
@@ -503,6 +503,17 @@ namespace yaml_detail {
             o += "  - " + mm.str() + "\n";
         }
     }
+    if (!b.composites().empty()) {
+        o += "composites:\n";
+        for (const auto& c : b.composites()) {
+            std::string members = "[";
+            for (std::size_t i = 0; i < c.members.size(); ++i) {
+                members += (i ? ", " : "") + quote(c.members[i]);
+            }
+            o += "  - " + Map{}.add("kind", quote(c.kind)).add("name", quote(c.name))
+                .add("anchor", quote(c.anchor)).add("members", members + "]").str() + "\n";
+        }
+    }
     // shortcut: refused, not written; the IR track adds loss ports to the
     // dialect (and to value_hash). Silently dropping one lost its heat.
     if (const auto& ls = pool.device_losses(); !ls.empty()) {
@@ -731,14 +742,15 @@ struct YamlIo {
         keys(root, "document", {"pulsim_circuit", "nodes", "devices", "couplings",
                                 "branch_form", "scopes", "parameters", "bindings",
                                 "initial_conditions", "aliases", "power_mosfets",
-                                "controls", "magnetic_nodes", "magnetic_geometry"});
+                                "controls", "magnetic_nodes", "magnetic_geometry",
+                                "composites"});
         if (text(root["pulsim_circuit"], "document", "pulsim_circuit") != "1") {
             fail("document", "pulsim_circuit must be 1");
         }
         for (const auto* k : {"nodes", "devices", "couplings", "branch_form", "scopes", "parameters",
                               "bindings", "initial_conditions", "aliases",
                               "power_mosfets", "controls", "magnetic_nodes",
-                              "magnetic_geometry"}) {
+                              "magnetic_geometry", "composites"}) {
             if (root[k] && !root[k].IsSequence()) fail(k, "must be a list");
         }
         builder::CircuitBuilder b;
@@ -860,6 +872,14 @@ struct YamlIo {
                         br ? std::optional<std::string_view>{*br} : std::nullopt);
         }
         for (const auto& pm : root["power_mosfets"]) read_power_mosfet_(b, pm);
+        for (const auto& c : root["composites"]) {
+            keys(c, "a composite", {"kind", "name", "anchor", "members"});
+            const auto nm = text(c["name"], "a composite", "name");
+            std::vector<std::string> members;
+            for (const auto& x : c["members"]) members.push_back(text(x, nm, "members"));
+            b.record_composite(text(c["kind"], nm, "kind"), nm,
+                               text(c["anchor"], nm, "anchor"), std::move(members));
+        }
         for (const auto& ct : root["controls"]) {
             keys(ct, "a control", {"name", "kind", "hash"});
             const auto nm = text(ct["name"], "a control", "name");
@@ -969,6 +989,7 @@ private:
             } else if constexpr (std::is_same_v<P, m::NonlinearCapacitor::Params>) {
                 pool.add_nonlinear_capacitor(bi, charge(n, who));
             } else if constexpr (std::is_same_v<P, m::ShockleyDiode::Params>) pool.add_shockley_diode(bi, p);
+            else if constexpr (std::is_same_v<P, m::ExcessLoss::Params>) pool.add_excess_loss(bi, p);
             else if constexpr (std::is_same_v<P, m::LauritzenDiode::Params>) pool.add_lauritzen_diode(bi, p);
             else if constexpr (std::is_same_v<P, m::PmsmMna::Params>) {
                 if (const auto hn = n["harmonics"]) {

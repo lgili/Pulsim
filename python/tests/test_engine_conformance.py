@@ -335,6 +335,12 @@ CELLS = {
     "PmsmMna": (_pmsm, "ua2", "Md", 2e-2, 1e-5, False),
     "InductionMachineMna": (_induction, "ua2", "Md", 2e-2, 1e-5, False),
     "ExternalDevice": (lambda on: _external(on), "o", "Rd", 5e-4, 1e-7, False),
+    # add-permeance-magnetic-domain 4.2: a one-turn winding across the
+    # clamped node onto an excess-loss segment (i = c·√|v| above eps)
+    "ExcessLoss": (_clamp(lambda b: (
+        b.add_winding("Wd", "o", "gnd", "md", "gnd", 1.0),
+        b.add_excess_loss("Xd", "md", "gnd", 3e-3, 1e-2))),
+        "o", "Xd", 2e-3, 2e-7, False),
     "IdealTransformer": (_xfmr, "o", "Td", 5e-4, 1e-7, False),
     "VCCS": (_ctl(lambda b: b.add_vccs("Gd", "a", "gnd", "x", "gnd", 5e-3)),
              "o", "Gd", 5e-4, 1e-7, False),
@@ -1230,7 +1236,24 @@ def _magnetic(saturable):
     return build
 
 
+def _magnetic_hysteretic(on):
+    # add-permeance-magnetic-domain 4.1: a JA core segment (unit winding +
+    # one-turn JA inductor) in series with the gap
+    b = _magnetic(False)(False)
+    if on:
+        ja = p.reference_material("ferrite_n87")
+        b.add_winding("Wd", "o", "gnd", "m1", "gnd", 25)
+        b.add_magnetic_resistance("Rm", "m1", "m2", 0.625)
+        b.add_hysteretic_permeance("Core", "m2", "m3", 76e-6, 72e-3, ja.Ms,
+                                   ja.a, ja.alpha, ja.c, ja.k)
+        b.add_air_gap("Gap", "m3", "gnd", 76e-6, 0.5e-3)
+    return b
+
+
 MAGNETIC_CELLS = {
+    "magnetic[hysteretic_permeance]": (
+        (_magnetic_hysteretic, "o", "Core", 5e-4, 1e-7, False),
+        ("Gyrator", "Capacitor", "SaturableInductor", "Resistor")),
     "magnetic[linear]": (
         (_magnetic(False), "o", "Core", 5e-4, 1e-7, False),
         ("Gyrator", "Capacitor", "Resistor")),
@@ -2011,3 +2034,83 @@ GATED_EDGE_CELLS = {
 def test_gated_cell_with_gate_edges(mode, engine):
     _check_cell(mode + "[gated, edges]", GATED_EDGE_CELLS[mode], engine,
                 k._gated_capabilities()[mode][engine])
+
+
+# AC and DC columns of the gated rows (add-pwl-igbt-and-thyristor 4.5): the
+# IGBT and GTO (gate held), the thyristor and the TRIAC (latching). The AC
+# sweep stamps a gated device at the supplied mask: g_on (the drop V_f has
+# no small-signal part) with its bit on, g_off with it off. Reference: the
+# closed-form impedance of the 1 kOhm / 10 nF clamp node with the device as
+# that conductance (the TRIAC's two branches in parallel).
+_GATED_ADDERS = {
+    "igbt": (lambda b: b.add_igbt("Q", "o", "gnd", 1e-3, 1e9, V_ce0=0.7,
+                                  reverse_blocking=True, V_th=0.701), 1),
+    "gto": (lambda b: b.add_gto("Q", "o", "gnd", 1e-3, 1e9, V_f=0.7,
+                                V_th=0.701), 1),
+    "thyristor": (lambda b: b.add_thyristor("Q", "o", "gnd", 1e-3, 1e9,
+                                            V_f=0.7, V_th=0.701), 1),
+    "triac": (lambda b: b.add_triac("Q", "o", "gnd", 1e-3, 1e9, V_f=0.7,
+                                    V_th=0.701), 2),
+}
+
+
+@pytest.mark.parametrize("name", list(_GATED_ADDERS))
+def test_gated_device_on_the_ac_sweep(name):
+    add, n_branches = _GATED_ADDERS[name]
+    b = _clamp(add)(True)
+    bits = b.switch_indices_of("Q")
+    assert len(bits) == n_branches
+    f = np.array([1e2, 1e4, 1e6])
+
+    def H(on):
+        m = p.SwitchStateMask(b.graph.num_switches)
+        for j in (bits if on else ()):
+            m.set(j, True)
+        return np.asarray(k.run_mna_sweep_kernel(
+            b.graph, b.pool, m, list(f), b.node_id_of("o"),
+            b.node_id_of("o")).H, dtype=complex)
+
+    for on, g in ((True, 1e3), (False, 1e-9)):
+        want = 1.0 / (1e-3 + 2j * np.pi * f * 10e-9 + n_branches * g)
+        assert np.max(np.abs(H(on) - want) / np.abs(want)) < 1e-9, (name, on)
+
+
+@pytest.mark.parametrize("name", list(_GATED_ADDERS))
+def test_gated_device_dc_operating_point(name):
+    # DC column: 10 A forced through the device with its gate on settles on
+    # the drop V_f + i/g_on (the 1 MOhm probe keeps the node defined); the
+    # same circuit with the gate off blocks (control first: it conducts).
+    add, n_branches = _GATED_ADDERS[name]
+    for gate in (True, False):
+        b = p.CircuitBuilder()
+        b.add_current_source("I", "o", "gnd", 10.0)
+        b.add_resistor("Rp", "o", "gnd", 1e6)
+        add(b)
+        m = p.SwitchStateMask(b.graph.num_switches)
+        for j in (b.switch_indices_of("Q") if gate else ()):
+            m.set(j, True)
+        sw = (lambda m_: (lambda _t: m_))(m)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            r = p.simulate(b, 1e-5, engine="pwl", dt=1e-6, switch_fn=sw,
+                           start_from_dc_op=True)
+        v0 = float(np.asarray(r.v("o"))[0])
+        if gate:
+            # one conducting branch: v = 0.7 + 1e-3·(10 − v/1e6)
+            assert v0 == pytest.approx((0.7 + 1e-2) / (1 + 1e-9), abs=1e-9)
+        else:
+            # blocked: 10 A into 1 MOhm, the off conductance and the DC
+            # point's 1e-12 S node floor
+            g_off = n_branches * 1e-9
+            assert v0 == pytest.approx(10.0 / (1e-6 + g_off + 1e-12), rel=1e-9)
+
+
+def test_hysteretic_permeance_refused_by_the_ac_sweep():
+    # a Jiles-Atherton law has no unique small-signal model (minor loops):
+    # the sweep refuses its inductor by name, as for the inductor form
+    b = _magnetic_hysteretic(True)
+    with pytest.raises(p.UnsupportedError, match="Jiles-Atherton") as ei:
+        k.run_mna_sweep_kernel(
+            b.graph, b.pool, p.SwitchStateMask(b.graph.num_switches),
+            [1e2, 1e4], b.node_id_of("o"), b.node_id_of("o"))
+    assert ei.value.device == "Core"

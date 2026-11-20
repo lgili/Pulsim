@@ -244,6 +244,25 @@ public:
         refresh_derivatives(x_probe);
     }
 
+    // ---- the stage form (βh, ψ) of integrator='esdirk43' ----
+    // One q row per device: q = Q, q̇ = f. A stage is backward Euler of βh
+    // from the base q_prev = ψ; after its solve Q = K0 + K1·i_ss(x) under
+    // that stage's K0/K1 (set by every stamp).
+    [[nodiscard]] Size stage_rows() const noexcept { return entries_.size(); }
+    void stage_start(Real hh, Real* q0, Real* hqd0) const {
+        for (const auto& e : entries_) {
+            *q0++ = e.q_prev;
+            *hqd0++ = hh * e.f_prev;
+        }
+    }
+    void stage_base(const Real* psi, const Real* /*dpsi*/) {
+        for (auto& e : entries_) e.q_prev = *psi++;
+    }
+    void stage_increment(const Vector& x, const Real* psi, Real* d) const {
+        for (const auto& e : entries_) *d++ = e.k0 + e.k1 * steady_state_at(e, x) - *psi++;
+    }
+    void stage_clear() noexcept {}
+
     /// Flat (Q, f) pairs, for `SolverSnapshot`.
     [[nodiscard]] std::vector<Real> to_flat() const {
         std::vector<Real> out;

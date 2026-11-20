@@ -241,9 +241,12 @@ private:
             // are stamped open by the DC assembly and stay so here.
             // The MNA-native machines' stator rows are v − R·i − e = 0 at
             // DC (dc_assemble, add-mna-native-machines D19): a path.
+            // The excess-loss conductance is c/√ε at zero flux rate and
+            // positive for every u (add-permeance-magnetic-domain 4.2).
             return pool.kind_of(branch.id) == SK::SaturableInductor ||
                    pool.kind_of(branch.id) == SK::PmsmMna ||
-                   pool.kind_of(branch.id) == SK::InductionMachineMna;
+                   pool.kind_of(branch.id) == SK::InductionMachineMna ||
+                   pool.kind_of(branch.id) == SK::ExcessLoss;
         case topology::BranchKind::Switch:
             return true;
     }
