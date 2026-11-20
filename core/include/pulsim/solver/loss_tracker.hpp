@@ -94,6 +94,7 @@ public:
                     s.device, pwl::stored_kind_name(k)));
             }
             d.law = pwl::PwlBranchLaw::of(graph, pool, d.branch);
+            d.gated = k == K::Switch;
             const auto& node_name = s.deposit_node();
             if (!node_name.empty()) {
                 d.node = find_node_(graph, node_name);
@@ -175,15 +176,7 @@ public:
             }
             if (d.spec.conduction == thermal::ConductionHeat::Electrical) heat = e_el;
             d.last = {h, e_el, d.spec.v_on ? d.e_tab_last_ : Real{0}, false};
-            if (on1 != d.on) {
-                const auto pt = thermal::commutation_point(on1, d.v, d.i, v1, i1);
-                const auto& tab = on1 ? d.spec.e_on : d.spec.e_off;
-                const Real e = tab ? (*tab)(pt.v, pt.i, tj0) : Real{0};
-                d.rec.events.push_back({t0, on1, pt.v, pt.i, tj0, e});
-                (on1 ? d.e_on : d.e_off).add(e);
-                ++(on1 ? d.rec.n_on : d.rec.n_off);
-                heat += e;
-            }
+            if (on1 != d.on) heat += book_(d, t0, on1, d.v, d.i, v1, i1, tj0);
             if (d.node >= 0) add_(queue_, d.node, heat);
             d.on = on1;
             d.v = v1;
@@ -635,6 +628,7 @@ private:
         thermal::DeviceLossSpec spec;   // a copy: the pool may grow mid-run
         Index branch = -1, node = -1;
         pwl::PwlBranchLaw law;   // v and i under the stamped mode (one law)
+        bool gated = false;      // a switch (commutation_point's soft edges)
         bool on = false;     // state at the last accepted step
         Real v = 0, i = 0;   // device voltage / current there
         Real x_tj = 0;       // junction temperature there (closed loop)
@@ -663,9 +657,9 @@ private:
     /// One commutation of `d` by the reading rule: record, ledger, energy.
     Real book_(Dev& d, Real t, bool on1, Real v0, Real i0, Real v1, Real i1,
                Real tj) {
-        const auto pt = thermal::commutation_point(on1, v0, i0, v1, i1);
+        const auto pt = thermal::commutation_point(on1, v0, i0, v1, i1, d.gated);
         const auto& tab = on1 ? d.spec.e_on : d.spec.e_off;
-        const Real e = tab ? (*tab)(pt.v, pt.i, tj) : Real{0};
+        const Real e = tab && !pt.soft ? (*tab)(pt.v, pt.i, tj) : Real{0};
         d.rec.events.push_back({t, on1, pt.v, pt.i, tj, e});
         (on1 ? d.e_on : d.e_off).add(e);
         ++(on1 ? d.rec.n_on : d.rec.n_off);

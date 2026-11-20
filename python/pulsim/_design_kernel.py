@@ -355,7 +355,7 @@ class Plan:
                                   spec.idx[("i", name)],
                                   None if on is None else on._kernel(),
                                   None if off is None else off._kernel(),
-                                  float(tj)))
+                                  float(tj), kind == "switch"))
                 P.op("sw", k, 0)
                 P.op("sw", k, 1)
                 P.op("add")

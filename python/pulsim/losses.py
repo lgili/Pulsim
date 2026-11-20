@@ -1302,6 +1302,7 @@ def _switch_switching_loss(closed_trace: np.ndarray,
                             v_start: "Optional[np.ndarray]" = None,
                             i_start: "Optional[np.ndarray]" = None,
                             window: "Optional[_views.TimeWindow]" = None,
+                            gated: bool = True,
                             ) -> Dict[str, float]:
     """Post-hoc turn-on / turn-off switching loss for an ideal-switch
     branch (MOSFET / IGBT equivalent).
@@ -1329,8 +1330,12 @@ def _switch_switching_loss(closed_trace: np.ndarray,
     measured, so a soft edge -- where the antiparallel diode holds the
     switch near 0 V, e.g. after a dead time -- costs about 0 J. With
     no dead time the complementary switch takes the current at the
-    same instant, the switch blocks the full bus on the soft edge too,
-    and that edge is charged like a hard one.
+    same instant and the switch blocks the full bus on the soft edge
+    too: the two readings then have OPPOSITE signs (a switch would
+    deliver energy crossing from one to the other), so the edge is
+    soft and costs 0 J -- the kernel's rule,
+    ``thermal::commutation_point``, which ``gated`` (a switch; False
+    for a diode's recovery table) turns on.
 
     ``closed_start`` / ``v_start`` / ``i_start`` are the state at the
     start of the step after each sample
@@ -1443,10 +1448,15 @@ def _switch_switching_loss(closed_trace: np.ndarray,
             return 0.0
         pre_k = np.clip(idxs - 1, 0, v_SW.size - 1)
         load_k = idxs if load_at_post_edge else pre_k
-        V_blk = np.abs(_post_edge(v_SW, v_s, idxs)
-                       if blocking_at_post_edge else v_SW[pre_k])
-        I_load = np.abs(_post_edge(i_SW, i_s, idxs)
-                        if load_at_post_edge else i_SW[pre_k])
+        V_blk = (_post_edge(v_SW, v_s, idxs)
+                 if blocking_at_post_edge else v_SW[pre_k])
+        I_load = (_post_edge(i_SW, i_s, idxs)
+                  if load_at_post_edge else i_SW[pre_k])
+        if gated:
+            # a soft edge costs nothing (thermal::commutation_point)
+            hard = ~(V_blk * I_load < 0.0)
+            V_blk, I_load, load_k = V_blk[hard], I_load[hard], load_k[hard]
+        V_blk, I_load = np.abs(V_blk), np.abs(I_load)
         if table is not None:
             # The 3-D table needs no V_ref scaling: the voltage IS
             # one of its axes.

@@ -657,23 +657,25 @@ void init_module(py::module_& m) {
         .def_readonly("n_on", &thermal::DeviceLossRecord::n_on)
         .def_readonly("n_off", &thermal::DeviceLossRecord::n_off);
     m.def("_commutation_points",
-        [](const std::vector<std::tuple<bool, Real, Real>>& seq) {
+        [](const std::vector<std::tuple<bool, Real, Real>>& seq, bool gated) {
             // One reading rule for the transient tracker and the periodic
             // orbit (_period_kpis.commutations): thermal::commutation_point.
-            std::vector<std::pair<Real, Real>> on, off;
+            std::vector<std::tuple<Real, Real, bool>> on, off;
             for (std::size_t k = 1; k < seq.size(); ++k) {
                 const auto& [c0, v0, i0] = seq[k - 1];
                 const auto& [c1, v1, i1] = seq[k];
                 if (c0 == c1) continue;
-                const auto pt = thermal::commutation_point(c1, v0, i0, v1, i1);
-                (c1 ? on : off).emplace_back(pt.v, pt.i);
+                const auto pt = thermal::commutation_point(c1, v0, i0, v1, i1, gated);
+                (c1 ? on : off).emplace_back(pt.v, pt.i, pt.soft);
             }
             return py::make_tuple(on, off);
         },
-        py::arg("seq"),
-        "(on, off): the (|v|, |i|) of every turn-on and turn-off of an edge "
-        "sequence [(closed, v, i), ...] by the kernel's reading rule (turn-on: "
-        "v before, i after; turn-off: the reverse).");
+        py::arg("seq"), py::arg("gated"),
+        "(on, off): the (|v|, |i|, soft) of every turn-on and turn-off of an "
+        "edge sequence [(closed, v, i), ...] by the kernel's reading rule "
+        "(turn-on: v before, i after; turn-off: the reverse). With `gated` (a "
+        "switch, not a diode) an edge whose open-side v and closed-side i "
+        "have opposite signs is soft: v = 0, no energy.");
 
     // ---- add-power-mosfet-datasheet-device: charge laws ----------------
     py::class_<models::FluxMapDQ, std::shared_ptr<models::FluxMapDQ>>(m, "FluxMapDQ",

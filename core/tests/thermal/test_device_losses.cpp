@@ -61,12 +61,36 @@ Index node_of(const builder::CircuitBuilder& b, std::string_view n) {
 
 TEST_CASE("reading rule: turn-on v before / i after, turn-off the reverse",
           "[thermal][device_losses]") {
-    const auto on = thermal::commutation_point(true, -600.0, 0.1, 1.0, -40.0);
+    const auto on = thermal::commutation_point(true, -600.0, 0.1, 1.0, -40.0, true);
     CHECK(on.v == 600.0);
     CHECK(on.i == 40.0);
-    const auto off = thermal::commutation_point(false, 1.0, -40.0, -600.0, 0.1);
+    CHECK_FALSE(on.soft);
+    const auto off = thermal::commutation_point(false, 1.0, -40.0, -600.0, 0.1, true);
     CHECK(off.v == 600.0);
     CHECK(off.i == 40.0);
+    CHECK_FALSE(off.soft);
+}
+
+TEST_CASE("reading rule: a switch's edge with opposite-sign readings is soft",
+          "[thermal][device_losses]") {
+    // the low switch of a zero-dead-time leg: blocking +600 V, then
+    // carrying the load current in reverse (its diode direction)
+    const auto on = thermal::commutation_point(true, 600.0, 1e-7, -1e-3, -40.0, true);
+    CHECK(on.soft);
+    CHECK(on.v == 0.0);
+    CHECK(on.i == 40.0);
+    const auto off = thermal::commutation_point(false, -1e-3, -40.0, 600.0, 1e-7, true);
+    CHECK(off.soft);
+    CHECK(off.v == 0.0);
+    // with a dead time its diode clamps it at -V_f: signs agree, charged
+    const auto dt = thermal::commutation_point(true, -0.8, -1e-9, -1e-3, -40.0, true);
+    CHECK_FALSE(dt.soft);
+    CHECK(dt.v == 0.8);
+    // a diode's recovery (forward i, then reverse v) is never soft
+    const auto rr = thermal::commutation_point(false, 0.7, 40.0, -600.0, -1e-7, false);
+    CHECK_FALSE(rr.soft);
+    CHECK(rr.v == 600.0);
+    CHECK(rr.i == 40.0);
 }
 
 TEST_CASE("adiabatic junction: ten 1 mJ events raise it 1.000 K",

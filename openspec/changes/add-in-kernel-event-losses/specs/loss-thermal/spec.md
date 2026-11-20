@@ -58,7 +58,18 @@ and the current before. The temperature SHALL be the junction node's
 value in the last accepted state before the commutation, or the fixed
 `Tj`. The rule SHALL apply equally to gate-commanded commutations and to
 commutations the kernel decides. Each event SHALL be recorded as
-`(t, kind, v, i, T_j, E)`.
+`(t, kind, v, i, T_j, E)`. A switch's event whose voltage and current
+readings (signed, passive convention) have opposite signs SHALL be soft:
+recorded with `v = 0` and `E = 0` (another device commutated the current;
+add-ai-usage-guide task 12.8). A diode's events are never soft.
+
+#### Scenario: A leg with no dead time charges one hard edge per commutation
+- **GIVEN** a half-bridge of two switches with antiparallel diodes, no
+  dead time, carrying an inductive load current of one sign
+- **WHEN** both switches carry `E_on` / `E_off` tables
+- **THEN** the switch that carries the load current in its forward
+  direction records the energies at the bus voltage, and the
+  complementary switch records every edge soft (`E = 0`), on every engine
 
 #### Scenario: Agreement with the post-hoc summary at fixed temperature
 - **GIVEN** a three-phase inverter whose six switches carry `E_on` and

@@ -53,10 +53,11 @@ struct DeviceLossSpec {
     }
 };
 
-/// (|v|, |i|) a commutation is charged at.
+/// (|v|, |i|) a commutation is charged at; `soft`: it costs no energy.
 struct CommutationPoint {
     double v = 0.0;
     double i = 0.0;
+    bool soft = false;
 };
 
 /// The reading rule of add-in-kernel-event-losses (design "Reading
@@ -64,11 +65,22 @@ struct CommutationPoint {
 /// and the current AFTER it; a turn-off the voltage after and the
 /// current before. `before` is the last accepted state with the old
 /// mask, `after` the first one with the new mask.
+///
+/// A `gated` switch whose open-side voltage and closed-side current have
+/// OPPOSITE signs (passive convention) is soft (task 12.8): crossing from
+/// one to the other inside the device would deliver energy, so another
+/// device commutated the current (the complementary switch of a leg with
+/// no dead time, which this rule charges) and this channel turned on at
+/// zero voltage or off at zero current. It is charged at v = 0, nothing.
+/// A diode (`gated` false) blocks reverse voltage after forward current
+/// by nature: its turn-off is its recovery and is always charged.
 [[nodiscard]] inline CommutationPoint commutation_point(
     bool turn_on, double v_before, double i_before, double v_after,
-    double i_after) noexcept {
-    return turn_on ? CommutationPoint{std::abs(v_before), std::abs(i_after)}
-                   : CommutationPoint{std::abs(v_after), std::abs(i_before)};
+    double i_after, bool gated) noexcept {
+    const double v = turn_on ? v_before : v_after;
+    const double i = turn_on ? i_after : i_before;
+    if (gated && v * i < 0.0) return {0.0, std::abs(i), true};
+    return {std::abs(v), std::abs(i), false};
 }
 
 /// Neumaier compensated sum: the ledgers of event and conduction energy

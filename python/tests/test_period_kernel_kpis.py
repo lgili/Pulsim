@@ -239,20 +239,21 @@ def test_the_scalar_table_switching_loss_is_the_general_one_bit_for_bit():
                 st = not st
                 v, i = rng.normal(0, 30, 2)
                 seq.append((st, v, i))          # right limit
-            fast = pk._table_switching_loss(seq, spec)
             cl = np.array([s[0] for s in seq], dtype=bool)
-            gen = _switch_switching_loss(
-                cl, np.zeros(cl.size), np.array([s[1] for s in seq]),
-                np.array([s[2] for s in seq]), spec)
-            for k, v in fast.items():
-                assert v == gen[k], (k, n_edges)
+            for gated in (True, False):     # random signs: soft edges too
+                fast = pk._table_switching_loss(seq, spec, gated)
+                gen = _switch_switching_loss(
+                    cl, np.zeros(cl.size), np.array([s[1] for s in seq]),
+                    np.array([s[2] for s in seq]), spec, gated=gated)
+                for k, v in fast.items():
+                    assert v == gen[k], (k, n_edges, gated)
     # other specs take the general path
     assert pk._table_switching_loss([(True, 1.0, 1.0)], {
-        "E_on_ref": 1e-6, "V_ref": 1, "I_ref": 1}) is None
+        "E_on_ref": 1e-6, "V_ref": 1, "I_ref": 1}, True) is None
     assert pk._table_switching_loss([(True, 1.0, 1.0)], dict(
-        spec, Tj=lambda t: 25.0)) is None
+        spec, Tj=lambda t: 25.0), True) is None
     assert pk._table_switching_loss([(False, np.nan, 1.0), (True, 1.0, 1.0)],
-                                    spec) is None
+                                    spec, True) is None
 
 
 def test_the_buck_example_records_do_not_depend_on_the_scalar_path(

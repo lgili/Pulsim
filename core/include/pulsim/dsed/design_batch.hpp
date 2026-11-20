@@ -33,6 +33,7 @@
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/cache.hpp"
 #include "pulsim/solver/voltage_sanity.hpp"
+#include "pulsim/thermal/device_losses.hpp"
 #include "pulsim/thermal/loss_table.hpp"
 #include "pulsim/topology/switch_state.hpp"
 
@@ -92,6 +93,7 @@ struct SwitchingEntry {
     int obs_i = -1;
     std::shared_ptr<const thermal::LossTable3D> on, off;
     Real tj = 0;
+    bool gated = true;   // a switch, not a diode (commutation_point)
 };
 
 /// Everything a design needs besides its row, period and schedule.
@@ -147,8 +149,8 @@ struct Fallback {
 };
 
 /// `_period_kpis.Period.edges` + `_table_switching_loss` for one
-/// switch: (E_on, E_off, n_on, n_off). Turn-on reads the blocking v
-/// before and the load i after; turn-off the reverse.
+/// switch: (E_on, E_off, n_on, n_off), each edge read by
+/// thermal::commutation_point (a soft edge adds no entry).
 inline std::array<Real, 4> switching_energy(const PeriodMapResult<SSM>& p,
                                             const SwitchingEntry& s, Real T) {
     struct Pt { bool closed; Real v, i; };
@@ -180,12 +182,14 @@ inline std::array<Real, 4> switching_energy(const PeriodMapResult<SSM>& p,
         const auto& a = seq[q];
         const auto& b = seq[q + 1];
         if (a.closed == b.closed) continue;
-        const Real v = b.closed ? std::abs(a.v) : std::abs(b.v);
-        const Real i = b.closed ? std::abs(b.i) : std::abs(a.i);
+        const auto pt = thermal::commutation_point(b.closed, a.v, a.i, b.v, b.i, s.gated);
+        const Real v = pt.v, i = pt.i;
         if (!std::isfinite(v) || !std::isfinite(i)) {
             throw Fallback{"a non-finite switching point"};
         }
-        if (b.closed) {
+        if (pt.soft) {
+            // a soft edge costs nothing (thermal::commutation_point)
+        } else if (b.closed) {
             if (s.on) on.push_back((*s.on)(v, i, s.tj));
         } else if (s.off) {
             off.push_back((*s.off)(v, i, s.tj));

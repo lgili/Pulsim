@@ -57,6 +57,20 @@ recovery table by the turn-off row. Events that the kernel decides
 (diodes, the PWL IGBT's natural turn-off) and events the gate commands
 follow the same rule.
 
+Soft edges (add-ai-usage-guide 12.8): a SWITCH's edge whose signed
+readings `v` (open side) and `i` (closed side) have opposite signs costs
+nothing and is recorded with `v = 0`. Passing from `(v, 0)` to `(0, i)`
+inside the device would deliver energy, so another device commutated
+the current: in a leg with no dead time, the complementary switch whose
+own readings agree in sign (the hard edge). With a dead time the
+antiparallel diode clamps the soft switch at `-V_f` before it turns on
+(and after it turns off), the signs agree, and the edge stays charged at
+the diode drop as before. A diode's turn-off is its recovery: never
+soft. The rule is `thermal::commutation_point` for the tracker, the
+period path (`_commutation_points`) and the design batch;
+`losses._switch_switching_loss` applies it in numpy (a test compares the
+two bit for bit).
+
 ### Deposition
 
 The energy enters the junction node as heat, once per event:

@@ -49,8 +49,8 @@ def _e(e_ref, v, i):
 def truth(vm, td, duty=0.5):
     """Per-device switching power (HS, LS) in W, closed form.
 
-    The schedule of make_dead_time_pwm_pair_fn: HS on [0, DT - td), LS on
-    [DT, T - td), both off for td before each turn-on. A segment drives
+    The schedule of make_dead_time_pwm_pair_fn: HS on [0, D T - td), LS on
+    [D T, T - td), both off for td before each turn-on. A segment drives
     the load with v_a - vm = u - r i, so i(t) = u/R' + (i0 - u/R') e^(-t R'/L)
     with R' = R + r; the periodic orbit is the fixed point of the
     composed affine map."""
@@ -166,17 +166,79 @@ def test_dead_time_leg_matches_the_closed_form(engine, vm):
     assert ls == pytest.approx(t_ls, rel=_RTOL[engine], abs=_ATOL)
 
 
-def test_leg_loss_is_continuous_as_the_dead_time_vanishes():
+@pytest.mark.parametrize("vm", [0.0, 300.0])
+def test_leg_loss_is_continuous_as_the_dead_time_vanishes(vm):
     """P_sw(td) for td = 1 us, 100 ns, 10 ns, 0 on the dsed engine (it
-    lands every edge): the leg total converges to the zero-dead-time
-    value; what remains at td -> 0 is the two soft edges' diode-drop
-    energy, (V_f + R_d i) / V of a hard edge."""
-    vm = 0.0
+    lands every edge). The leg total tends to the zero-dead-time value
+    up to the diode's drop: with any dead time the diode conducts in
+    between, so the hard edge commutates V + V_f + R_d |i| and the soft
+    one V_f + R_d |i|, where with none they see V and nothing. The gap is
+    at most 2 (V_f + R_d i_max) / V of the total (0.98 % here at Vm = 0,
+    0.70 % measured) plus the dead time's own O(td f) change of the
+    current. Before task 12.8 it was 100 % (the soft edges at the bus)."""
     p0 = sum(measured(vm, 0.0, "dsed"))
-    t0 = sum(truth(vm, 0.0))
-    assert p0 == pytest.approx(t0, rel=2e-4)
+    assert p0 == pytest.approx(sum(truth(vm, 0.0)), rel=2e-4)
+    i_max = V / R
     for td in (1e-6, 1e-7, 1e-8):
         ptd = sum(measured(vm, td, "dsed"))
         assert ptd == pytest.approx(sum(truth(vm, td)), rel=2e-4)
-        # the diode-drop share bounds the gap at every td
-        assert abs(ptd - p0) / p0 < 1e-3 + 4 * td * F
+        assert abs(ptd - p0) / p0 < 2 * (V_F + R_D * i_max) / V + 4 * td * F
+
+
+def test_three_phase_vsi_switch_loss_is_the_half_cycle_average():
+    """Guide 3.7's VSI (600 V, 10 kHz SPWM, m = 0.8, 50 Hz, 10 Ohm + 5 mH
+    star load) with NO dead time, on dsed.
+
+    Closed form: the load current is I sin(wt - phi) with I = sqrt(2) V_ph
+    / |Z|, V_ph = sqrt(3/8) m V / sqrt(3). A switch is the hard one of its
+    leg over the half cycle in which the current flows in its forward
+    direction; there each carrier period costs (E_on + E_off)(V / 600)
+    (|i| / 50) (linear tables). Averaged over a fundamental period each
+    switch costs f_sw (E_on + E_off)(I / 50) / pi = 11.32 W, the leg
+    22.65 W (45.28 W before task 12.8: every edge at the bus). The leg
+    total holds to 0.5 % (the (E_off - E_on) x ripple term is 0.2 %).
+
+    The split between the two switches is not 50/50 (11.61 / 10.99 W):
+    the floating neutral bends the ripple at the other legs' edges, so
+    the edge samples of i_a are biased differently in the two half
+    cycles. Per device the truth is the classification by the load
+    current itself: each commutation of the leg (an HSa gate edge) costs
+    E_on + E_off of whichever switch carries i_a forward, at |i_a| there.
+    """
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vdc", "dcp", "gnd", V)
+    vsi = p.add_three_phase_vsi(b, "INV", vdc_pos="dcp", vdc_neg="gnd",
+                                out_a="a", out_b="b", out_c="c")
+    for ph in "abc":
+        b.add_resistor(f"R{ph}", ph, f"m{ph}", 10.0)
+        b.add_inductor(f"L{ph}", f"m{ph}", "n", 5e-3)
+    for d in ("INV__HSa", "INV__LSa"):
+        b.set_device_losses(d, Tj=25.0, E_on=_tab(E_ON), E_off=_tab(E_OFF))
+    legs = p.ThreePhaseLegIndices(*vsi.switch_indices)
+    fn = p.make_three_phase_spwm_fn(F, 50.0, 0.8, legs,
+                                    b.graph.num_switches, 0.0)
+    res = p.simulate(b, t_end=40e-3, switch_fn=fn, engine="dsed")
+    v_ph = math.sqrt(3.0 / 8.0) * 0.8 * V / math.sqrt(3.0)
+    i_pk = math.sqrt(2.0) * v_ph / abs(complex(10.0, 2 * math.pi * 50 * 5e-3))
+    p_truth = F * (E_ON + E_OFF) * (i_pk / 50.0) / math.pi
+    p_sw = {}
+    for d in ("INV__HSa", "INV__LSa"):
+        ev = res.loss_events(d)
+        w = ev["t"] >= 20e-3
+        p_sw[d] = math.fsum(ev["E"][w]) / 20e-3
+    assert p_sw["INV__HSa"] + p_sw["INV__LSa"] == pytest.approx(
+        2 * p_truth, rel=5e-3)
+    # per device: the load current's sign at each commutation decides
+    t = np.asarray(res.times)
+    ia = np.asarray(res.i("La"))
+    hs = ls = 0.0
+    ev = res.loss_events("INV__HSa")
+    for e in ev[ev["t"] >= 20e-3]:
+        i = float(np.interp(e["t"], t, ia))
+        hs_on = e["kind"] == "on"
+        if i > 0:
+            hs += (E_ON if hs_on else E_OFF) * i / 50.0
+        else:
+            ls += (E_OFF if hs_on else E_ON) * -i / 50.0
+    assert p_sw["INV__HSa"] == pytest.approx(hs / 20e-3, rel=1e-3)
+    assert p_sw["INV__LSa"] == pytest.approx(ls / 20e-3, rel=1e-3)
