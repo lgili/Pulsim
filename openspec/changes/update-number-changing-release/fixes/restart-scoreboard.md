@@ -412,3 +412,14 @@ Findings pinned (strict xfail, `python/tests/test_restart_scoreboard_findings.py
 (split and restart variants), F-SB-3 (ll06 restart, ll06 split, rl_load dsed), F-SB-4.
 `test_exact_scoreboard.py` pins vcswitch_resistor pwl+split as F-SB-2 and
 diode_half_wave_rl_load dsed as F-SB-3 (floors), the other cells as ceilings with their part.
+
+### State after rule (1) (tip of `feat/core-scoreboard-measure`, 2026-11-20)
+
+Done: rule (1) + review fix (d2f9968f, 6b85d9b5), triage and F-SB-2..4 xfails (d58d86b5),
+`test_exact_scoreboard.py` re-pinned (06dad196), full regeneration (`run --force && twins &&
+render --previous 55b5905a && accuracy_summary.py`, log `.scratch/sbm/run4.log`, `done 0`):
+0 cells moved > 2x, 0 class changes, n_projected 0 everywhere; counts unchanged (pwl 27/9/6,
+pwl+restart 65/17/7, pwl+split 72/21/7, trbdf2 80/26/8, esdirk43 81/64/11, dsed 80/76/69).
+`## Notes` written, DECISIONS 6, tasks 4.3 note, CHANGELOG. Not done here: the rehearsal's
+stored cells (`NEXT_DEFAULTS_REHEARSAL.md`) still carry the old definition (re-run
+`next_defaults_rehearsal.py`; it now passes rule (1)'s window too).
