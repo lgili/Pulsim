@@ -849,3 +849,19 @@ Tip at start dde945bd (extension = e88a06dc's C++, `build/python/pulsim` is a sy
   boost_pfc_open_loop 14.2×, buck_dcm 9.6×, textbook_erickson_buck_ccm 6.9×,
   ll06_buck_vcswitch 6.2×, buck_boost 6.0×, two_phase_interleaved_boost 5.4×,
   buck_hard_switching_reference 4.9×, textbook_erickson_boost_ccm 4.9×, boost_classic 4.9×.
+* **Instructions per run, rule OFF, e88a06dc's build vs base075** (`.scratch/f3/cost10.sh`, min
+  of six, minus an import-only run; `cost_ruleoff_instructions_vs_base075.log`): buck_ccm
+  +1.80 %, bridge3 +5.08 %, active_clamp_forward +4.26 %, forward_converter +2.28 %,
+  boost_pfc_open_loop +7.65 % — the 0.5 % gate FAILS on all five, and the only C++ difference
+  between the two builds is e88a06dc (no default number moved: the extra work is the sharper
+  certificate / the sine modes now scanned). base075 already contains the certificate's own
+  cost (+11–13 % on the two forward converters against the pre-certificate build); this
+  measured only what came after it.
+* **DECISION: e88a06dc REVERTED (7d7f3bf6)** — the gate failed because of it and the fix is
+  not a few lines. core/ = 075feac9's + the test fix f8babadc; the extension in
+  `python/pulsim` is base075's .so (byte-identical; e88a06dc's saved in
+  `.scratch/so_e88a06dc/`), so the rule-off cost of the tip equals base075's by construction.
+  `pulsim_core_dsed_tests` on the reverted tip (Eigen 5): 143 cases / 41 326 assertions pass
+  (`ctest_dsed_run_eigen5_reverted.log`). The two defects above (ten bridges, diode clamp)
+  were measured on base075 too, so they hold on the reverted tip. Re-run chain:
+  `.scratch/f7/chain_reverted.sh` (logs `R_*`).
