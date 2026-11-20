@@ -1433,35 +1433,44 @@ private:
                 if (cert == nullptr) return false;
                 const auto n = x0.size();
                 if (cert->scan_q.size() < preds.size()) cert->scan_q.resize(preds.size());
-                Eigen::VectorXcd& q = cert->scan_q[ip];
-                scan_probe_.setZero(n);
-                const Real g0 = p.value(t0, scan_probe_);
-                ++result.n_predicate_evals;
-                if (q.size() != n) {   // once per mode and predicate
-                    q.resize(n);
+                Eigen::VectorXcd& q = cert->scan_q[ip];   // n row entries, then g(0)
+                if (q.size() != n + 1) {   // once per mode and predicate
+                    q.resize(n + 1);
+                    scan_probe_.setZero(n);
+                    const Real g0 = p.value(t0, scan_probe_);
                     for (Eigen::Index k = 0; k < n; ++k) {
                         scan_probe_ = cert->V_re.col(k);
                         const Real re = p.value(t0, scan_probe_) - g0;
                         scan_probe_ = cert->V_im.col(k);
                         q[k] = {re, p.value(t0, scan_probe_) - g0};
                     }
-                    result.n_predicate_evals += static_cast<Size>(2 * n);
+                    q[n] = g0;
+                    result.n_predicate_evals += static_cast<Size>(2 * n + 1);
                 }
-                // the row is the predicate's only if g is affine in x here: an ideal
-                // branch diode's DiodeOn reads -1 inside its band, so a probe at x = 0
-                // can be off by its V_th; no certificate then (the D3 scan alone)
-                Real lin = g0, mag = std::abs(g0);
-                for (Eigen::Index k = 0; k < n; ++k) {
-                    const std::complex<Real> qz = q[k] * scan_z_[k];
-                    lin += qz.real();
-                    mag += std::abs(qz);
-                }
-                if (!(std::abs(ga0 - lin) <= Real{1e-6} * (mag + std::abs(ga0)))) return false;
                 scan_aq_.resize(n);
                 for (Eigen::Index k = 0; k < n; ++k) scan_aq_[k] = std::abs(q[k]) * std::abs(scan_zdd_[k]);
                 aq_ready = true;
                 aq_none = false;
                 return true;
+            };
+            // the row is the predicate's only if g is affine in x at the step start:
+            // an ideal branch diode's DiodeOn reads -1 inside its band, so a probe at
+            // x = 0 can be off by its V_th. Read only where a halving would start (a
+            // certified interval is no event either way); not affine: the D3 scan alone
+            int affine_ = -1;
+            const auto affine = [&]() -> bool {
+                if (affine_ < 0) {
+                    const Eigen::VectorXcd& q = cert->scan_q[ip];
+                    const auto n = q.size() - 1;
+                    Real lin = q[n].real(), mag = std::abs(lin);
+                    for (Eigen::Index k = 0; k < n; ++k) {
+                        const std::complex<Real> qz = q[k] * scan_z_[k];
+                        lin += qz.real();
+                        mag += std::abs(qz);
+                    }
+                    affine_ = std::abs(ga0 - lin) <= Real{1e-6} * (mag + std::abs(ga0)) ? 1 : 0;
+                }
+                return affine_ == 1;
             };
             const auto certified = [&](Real a, Real g_a, Real b, Real g_b) {
                 const Real tau = a - t0, d = b - a;
@@ -1583,7 +1592,7 @@ private:
                                                   output_rtol_ == Real{0});
                     }
                 } else if (dio && ga * gb > Real{0} && static_cast<Real>(s) * ga > Real{0}
-                           && aq_of() && !certified(ta, ga, tb, gb)
+                           && aq_of() && !certified(ta, ga, tb, gb) && affine()
                            && std::abs(ga) > bound_at(ta, xa())
                            && std::abs(gb) > bound_at(tb, x_at(k + 1))) {
                     // F-X-5: halve until each piece is certified or holds a significant
