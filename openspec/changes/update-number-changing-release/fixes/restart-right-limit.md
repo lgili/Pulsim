@@ -333,6 +333,39 @@ columns) are within +0.3 % of b9e (mantissas 6.0034/6.0031, 1.5294/1.5333,
 | R6 | stale `rl_loc_t` on a retried step; fallbacks of discarded attempts are counted | low |
 | R7 | two modes of opposite sign can cancel in Q's test | remark |
 
+### F-SB-3 (ll06_buck_vcswitch), checked on this tip with the three-part measure
+
+Graded with `metrics.exact_parts` / `exact_scoreboard.py` / `differential_runner.py`
+of `origin/feat/core-scoreboard-measure` (8b12ff35), copied to `.scratch/sbm/`
+(not merged). Limits part, V(sw):
+
+| cell | be5454f3 (coordinator) | this tip |
+|---|---|---|
+| pwl+split | 0.581 | 0.0805 (worst: a LEFT limit, 1.72 ms) |
+| pwl+restart | 0.999 | 0.999 (worst at 1.72 ms) |
+
+- split: the 27.9 V line-start reading is gone (session 1 + the located rule):
+  every right row agrees with the truth's right limit to ≤ 1.1e-4 of the span.
+  The remaining 0.0805 is the stored LEFT value at the gate edges after a DCM
+  turn-off (engine 23.77 V vs truth 19.91 V at 1.72 ms): the ringing after
+  D1's turn-off behind τ = L1·(g_off,S1 + g_off,D1) = 13.6 ns, unresolved at
+  dt = 0.2 µs: a stored-sample matter, not a right limit.
+- restart (no split): NOT the located-crossing code. The engine does not
+  locate D1's turn-off without the split: at 1.72 ms its i_L is still 7.5 mA
+  with D1 ON, and D1 goes OFF at the same instant as S1's gate turn-on (one
+  row, bits S1+ D1−, right V(sw) = 47.9999 = the truth's S1+ right limit to
+  1e-6). The measure pairs that merged row with the truth's separate D1−
+  crossing (V(sw) continuous near 0 there) and grades 48 V against 0. The row
+  is the right limit of the event the engine records; the 0.999 is the
+  engine's unresolved D1 crossing (no split) as the measure prices it. Not
+  chased on this branch.
+- Tried and reverted (not in the tip): on the non-split path, reading the
+  sources at the unclamped source-edge offset (`rs_trig_src`) in the ε solves.
+  It changes the 1.7082 ms row's ctrl to its post-edge 0 V, while the vcswitch
+  keeps its sampled state until the 1.7084 ms row, and it moves neither ll06
+  cell. Left out: it would change non-split rows elsewhere without a
+  re-grade.
+
 ## State and next step
 
 Tip 62b86ff1 (+ this notes commit). Not mergeable as is: vsi_pwl default-path
