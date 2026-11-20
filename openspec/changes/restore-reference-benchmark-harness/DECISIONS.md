@@ -87,10 +87,10 @@ Implementation choices not covered by the design:
     | `test_dsed_without_scipy.py` 5 ms buck | `elapsed < 5 s` | native result type + `0 < n_accept <= 10_000` (41794994) |
     | `test_dsed_without_scipy.py` speed-up | wall ratio `> 2` | step ratio `5 · n_accept(dsed) <= n_steps(pwl)` (41794994) |
     | `test_sampled_ac.py` cost vs points | time ratio `< 8` (later `< 2`) | `n_period_runs` equal for 10 and 400 points (41794994) |
-    | `test_shipped_yaml_examples.py` | `elapsed < 20 / 60 s` | rows `<= MAX_STEPS + 1` (THIS change: 41794994 only said "asserted above"; it was implied by the grid, now asserted) |
+    | `test_shipped_yaml_examples.py` | `elapsed < 20 / 60 s` | rows: the end-time and uniform-`dt` asserts force exactly `MAX_STEPS + 1` (41794994) |
     | `test_steady_state.py` brute force | `t_ss < 1 s` | `n_period_runs < 20` (27 under the regression below; 41794994) |
     | `test_subsystems.py` build growth | time ratio `< 24`, `< 0.05 s` | REMOVED (41794994): the growth is printed only. The C++ builder exposes no operation counter, so linearity of `add_*` / `branch_id_of` is unguarded by any assertion; restoring it needs a C++-side counter or test (debt, not this change) |
-    | `test_doc_snippets.py` runtime budget | `total wall <= 60 s` | THIS change: rows returned by `pulsim.simulate` in all executed docs `<= 2,900,000` (2,175,414 measured, 33 % margin); wall time printed per doc |
+    | `test_doc_snippets.py` runtime budget | `total wall <= 60 s` | THIS change: rows returned by `pulsim.simulate` in all executed docs `<= 2,900,000` (2,175,414 measured, 33 % margin); wall time printed per doc. Limit: only top-level `pulsim.simulate` is counted; a snippet using `store_every`, `sweep`, `steady_state` or another helper costs work the count does not see |
     | `test_sweep_path_aware.py:269`, `test_design_steady_and_batch.py:159` | `wall_time_s > 0`, `wall_s >= 0` | kept: field-presence checks, cannot fail under load |
 
     Each converted gate was shown to FAIL on a deliberate regression in a
@@ -149,12 +149,17 @@ Implementation choices not covered by the design:
       intent; ngspice is the arbiter (`buck_igbt` only).
     - R3: v1's parser ignored a diode's `is` / `n` (always binary,
       `yaml_parser.cpp:2479`); the reader maps them to the Shockley diode (12
-      files).
+      diodes in 6 files).
     - R4: v1's parser read a switch's `initial_state` only; all 11 files write
       `initial_closed`, so v1 ran them open. The reader honours `initial_closed`.
     - R5: a mosfet's `g_off` (3 files) is dropped: the Level-1 law has none.
     - Defaults aligned with v1 (`kp` 0.1, `lambda` 0.01, igbt `g_on` 1e4);
       every file sets these keys, so no number moves.
+    - The unit tests use non-default values for every key they exercise
+      (diode 50 / 1e-6 S, switch 1e4 / 1e-8 S, vcswitch threshold 4 V on a
+      ramped control so the threshold sets the on window, Shockley n 1.5,
+      igbt V_T 4 V with the gate 0.3 V above it): a reader that dropped the key
+      would fail (review finding).
     - Decision 7 is superseded: the reader reads a pwm `phase` as a fraction of
       the period (module docstring, batch 6b), not radians.
 
@@ -179,20 +184,30 @@ Implementation choices not covered by the design:
       (`gmres_trbdf2`, `jfnk_trbdf2`, `trbdf2`, `direct_bdf1`, `rosenbrockw`)
       ran the pwl default under their own names (rc_step: three identical
       errors). Fixed: `benchmarks/` on `sys.path`; t0 dropped from the
-      comparison (OQ8); `v2_refusal()` skips those scenarios as
-      `refused: v1 integrator '…'` / `v1 linear solver …` / Newton-Krylov;
-      an unmappable component or periodic mode is `skipped` + `refused: <name>`
-      instead of `failed`. The switching-loss KPI call site (`window_s` on the
-      soft-switching branch) is untouched.
-    - After the fix, the default manifest end to end: 43 passed, 38 skipped
-      (refused), the rest failed. Of the failures: 2 baselines missing
+      comparison (OQ8; it also hides a t = 0 error of a state observable);
+      `v2_refusal()` skips a benchmarks.yaml SCENARIO whose override selects
+      another integrator (30 of 120 scenario rows), an iterative solver or
+      Newton-Krylov, as `refused: …`; an unmappable component or periodic
+      mode is `skipped` + `refused: <name>` instead of `failed`. The refusal
+      is applied in `run_benchmarks` to the scenario override only — not to a
+      file's own `integrator:` (29 files say bdf1; they still run as pwl, as
+      before) and not inside `run_pulsim`, which `benchmark_ngspice.py` and
+      `local_limit_suite.py` call directly (a first version refused there and
+      the reviewer measured 29 ngspice parity rows turning `failed`). Debt
+      BR-2: the ngspice nightly therefore still runs `gmres_trbdf2` /
+      `trbdf2` rows as the pwl default under those names. The switching-loss
+      KPI call site (`window_s` on the soft-switching branch) is untouched.
+      The `sys.path` fix (a) is not covered by a test (the pytest run already
+      has `benchmarks/` on the path); it was seen working by the CLI run below.
+    - After the fix, the default manifest end to end (120 scenario rows):
+      47 passed, 47 skipped (`refused:` — 30 solver scenarios, the rest
+      unmappable components / periodic modes), 26 failed. Of the failures: 2 baselines missing
       (`current_source_rc`, `pulse_voltage_rl`), ~20 `max_error` against v1
       CSV baselines on switching circuits (10–48 V: a pointwise max of a
       waveform whose edges moved by a step is the full swing — the reason the
       harness grades time-weighted errors), 1 `run_transient` failure
       (`buck_igbt`, step at 7.8 µs not taken in 64 sub-steps), 1
-      `observable 'out'` (`bode_rlc_low_pass`), plus the closed-loop control
-      blocks the reader refuses. Many "passed" rows have no validation block
+      `observable 'out'` (`bode_rlc_low_pass`). Many "passed" rows have no validation block
       (status = it ran). Test:
       `test_benchmark_harness.py::test_benchmark_runner_runs_v1_files_against_their_stored_expectations`
       (rc_step analytic, bridge baseline CSV, transformer_step_up; two refused
@@ -219,10 +234,15 @@ Implementation choices not covered by the design:
 16. **Task 3.2 reworded: cause ids, not issues.** No GitHub issue is filed
     from this change (outward-facing). Each of the 28 `known:` entries of
     `v2_triage.yaml` carries `cause: [id, ...]`; the ids are the bullets of
-    KNOWN_LIMITATIONS.md "Triage causes": TC-EDGE-GRID (12 circuits),
-    TC-CLOSED-LOOP (4), TC-PWL-ORDER (8), TC-GATE-NODE (ll08, with
-    TC-PWL-ORDER), TC-OPEN (4: transformer_leakage, high_q_rlc_ringdown,
-    ll11, ll13). The assignment follows the evidence already in the manifest
+    KNOWN_LIMITATIONS.md "Triage causes": TC-EDGE-GRID (10 circuits),
+    TC-CLOSED-LOOP (4), TC-PWL-ORDER (9), TC-GATE-NODE (ll08, with
+    TC-PWL-ORDER), TC-OPEN (5: transformer_leakage, ll06_buck_vcswitch,
+    high_q_rlc_ringdown, ll11, ll13). The review moved two: `ll06` (edge
+    error 0.0211 > 0.02, edges ~99 steps apart: not edge timing) to TC-OPEN,
+    `boost_pfc_open_loop` (chatter on pwl, `pwl+split` agrees 1.06e-5) to
+    TC-PWL-ORDER, whose definition now names restart OR split;
+    `t_type_3level_halfbridge` stays TC-EDGE-GRID (REFERENCE_STATUS edge
+    diagnostic: edge err 8.0e-4 / 1.4e-6, timing ≤ 1 step). The assignment follows the evidence already in the manifest
     comments and REFERENCE_STATUS.md: TC-PWL-ORDER where the `pwl` cell
     disagrees and the `pwl+restart` cell agrees or is much smaller;
     TC-EDGE-GRID where the edge diagnostic is within tolerance with timing

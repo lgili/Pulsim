@@ -98,7 +98,7 @@ circuits:
   circuits/switching/basic/snubber_rc.yaml: {status: runs}
   circuits/switching/basic/vcswitch_resistor.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.0332, pwl+restart: 0.0682, pwl+split: 0.0332}, cause: [TC-EDGE-GRID]}
   circuits/switching/boost/boost_classic.yaml: {status: runs}
-  circuits/switching/boost/boost_pfc_open_loop.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree}, known_err: {pwl: 0.0304, pwl+restart: 0.0304}, cause: [TC-EDGE-GRID]}
+  circuits/switching/boost/boost_pfc_open_loop.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree}, known_err: {pwl: 0.0304, pwl+restart: 0.0304}, cause: [TC-PWL-ORDER]}
   circuits/switching/boost/boost_switching_complex.yaml: {status: runs}
   circuits/switching/boost/cascaded_boost_buck.yaml: {status: runs}
   circuits/switching/boost/ll07_boost_vcswitch.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.0984, pwl+restart: 0.0997, pwl+split: 0.0997}, cause: [TC-EDGE-GRID]}
@@ -117,7 +117,7 @@ circuits:
   circuits/switching/buck/high_freq_gan_buck.yaml: {status: runs}
   # dsed on the vcswitch circuits (ll06, ll07, ll09, ll10) agrees since the two-sided trace + fast-mode samples
   # (add-exact-propagator-strategy DECISIONS, "Samples at a discontinuity"); the 0.05-0.13 was the trace, not the engine.
-  circuits/switching/buck/ll06_buck_vcswitch.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.0781, pwl+restart: 0.118, pwl+split: 0.0704}, cause: [TC-EDGE-GRID]}
+  circuits/switching/buck/ll06_buck_vcswitch.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.0781, pwl+restart: 0.118, pwl+split: 0.0704}, cause: [TC-OPEN]}
   circuits/switching/buck/ll08_buck_mosfet.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.227, pwl+restart: 0.0842, pwl+split: 0.0842}, cause: [TC-GATE-NODE, TC-PWL-ORDER]}  # was error: the roundoff acceptance lets it finish; trbdf2 agrees (1.1e-4) since the post-event sample (update-trbdf2-post-event-restart DECISIONS 13)
   circuits/switching/buck/sync_buck_500khz.yaml: {status: runs}
   circuits/switching/buck/synchronous_buck.yaml: {status: runs}

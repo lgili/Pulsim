@@ -188,16 +188,17 @@ def apply_runtime_defaults(netlist: Dict[str, Any]) -> None:
         simulation["step_mode"] = "fixed"
 
 
-def v2_refusal(simulation: Any) -> Optional[str]:
+def v2_refusal(simulation: Any, variable: Optional[bool] = None) -> Optional[str]:
     """Why a v1 scenario's solver selection cannot run on 2.0, or None.
 
     The runner maps a v1 file to ``pwl`` (fixed step, trapezoidal) or
-    ``trbdf2`` (variable step); a scenario that selects another integrator,
-    an iterative linear solver or Newton-Krylov would otherwise run as that
-    default under the scenario's name.
+    ``trbdf2`` (variable step); a benchmarks.yaml scenario that selects
+    another integrator, an iterative linear solver or Newton-Krylov would
+    otherwise run as that default under the scenario's name.
     """
     sim = simulation if isinstance(simulation, dict) else {}
-    variable = str(sim.get("step_mode", "")).lower() == "variable" or bool(sim.get("adaptive_timestep"))
+    if variable is None:
+        variable = str(sim.get("step_mode", "")).lower() == "variable" or bool(sim.get("adaptive_timestep"))
     integ = str(sim.get("integrator", "trapezoidal")).lower()
     if integ not in ("trapezoidal", "trap") and not (integ == "trbdf2" and variable):
         return f"v1 integrator {integ!r}{' (fixed step)' if integ == 'trbdf2' else ''} has no 2.0 equivalent here"
@@ -227,9 +228,6 @@ def run_pulsim(
         raise v1_reader.Unmapped(f"periodic mode {preferred_mode!r} is not run by the v2 harness")
     case = v1_reader.load(netlist_path)
     sim = load_yaml(netlist_path).get("simulation") or {}
-    refusal = v2_refusal(sim)
-    if refusal is not None:
-        raise v1_reader.Unmapped(refusal)
     variable = str(sim.get("step_mode", "")).lower() == "variable" or bool(sim.get("adaptive_timestep"))
     engine = "trbdf2" if variable else "pwl"
     t0 = _time.perf_counter()
@@ -567,7 +565,9 @@ def run_benchmarks(
             use_initial_conditions = bool(
                 simulation_cfg.get("uic", False) if isinstance(simulation_cfg, dict) else False
             )
-            refusal = v2_refusal(simulation_cfg)
+            # only a SCENARIO's solver override is refused: a file's own `integrator:` (29 say
+            # bdf1) is history, and benchmark_ngspice / local_limit_suite call run_pulsim directly
+            refusal = v2_refusal((scenario_override or {}).get("simulation"), _is_variable)
             if refusal is not None:
                 results.append(ScenarioResult(
                     benchmark_id=benchmark_id, scenario=scenario_name, status="skipped",

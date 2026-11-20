@@ -198,7 +198,7 @@ def test_current_source_injects_into_its_first_node(tmp_path):
 
 @pytest.mark.parametrize("forward", [True, False], ids=["forward", "reverse"])
 def test_binary_diode_is_g_on_or_g_off(tmp_path, forward):
-    V, R, g_on, g_off = 10.0, 1e3, 1e3, 1e-9
+    V, R, g_on, g_off = 10.0, 1e3, 50.0, 1e-6          # not the reader's defaults (1e3 / 1e-9)
     nodes = ["a", 0] if forward else [0, "a"]
     case = _case(tmp_path, [_dc("V", "s", V), _r("R", "s", "a", R),
                             {"type": "diode", "name": "D", "nodes": nodes,
@@ -209,18 +209,18 @@ def test_binary_diode_is_g_on_or_g_off(tmp_path, forward):
 
 def test_diode_with_is_is_the_shockley_law(tmp_path):
     # v1's kernel ignored `is` (binary diode); the reader keeps the file's intent (DECISIONS 14)
-    V, R, i_s, n = 5.0, 1e3, 1e-14, 1.0
+    V, R, i_s, n = 5.0, 1e3, 1e-12, 1.5
     case = _case(tmp_path, [_dc("V", "s", V), _r("R", "s", "a", R),
                             {"type": "diode", "name": "D", "nodes": ["a", 0], "is": i_s, "n": n}],
                  1e-5, 1e-6)
     vd = _root(lambda x: (V - x) / R - i_s * math.expm1(x / (n * V_T_2_0)) - G_MIN_2_0 * x, 0.0, V)
-    assert 0.5 < vd < 0.8
+    assert 0.7 < vd < 1.2
     assert case.run("pwl").v("a")[-1] == pytest.approx(vd, abs=1e-6)
 
 
 @pytest.mark.parametrize("closed", [True, False])
 def test_static_switch_follows_initial_closed(tmp_path, closed):
-    V, R, g_on, g_off = 10.0, 1e3, 1e6, 1e-12
+    V, R, g_on, g_off = 10.0, 1e3, 1e4, 1e-8           # not the defaults (1e6 / 1e-12)
     case = _case(tmp_path, [_dc("V", "s", V), _r("R", "s", "a", R),
                             {"type": "switch", "name": "S", "nodes": ["a", 0],
                              "initial_closed": closed, "g_on": g_on, "g_off": g_off}], 1e-5, 1e-6)
@@ -228,23 +228,30 @@ def test_static_switch_follows_initial_closed(tmp_path, closed):
     assert case.run("pwl").v("a")[-1] == pytest.approx(V * r_s / (R + r_s), rel=1e-9)
 
 
-def test_vcswitch_follows_its_pwm_control_node(tmp_path):
-    V, R, g_on, g_off, f = 10.0, 1e3, 1e3, 1e-9, 10e3
-    T = 1 / f
+def test_vcswitch_follows_its_control_node_through_its_threshold(tmp_path):
+    # control: a SPICE pulse 0 -> 5 V with 20 us ramps; at v_threshold 4 V (not the 2.5 V default)
+    # the switch is ON from td + 0.8 tr to td + tr + pw + 0.2 tf in every period
+    V, R, g_on, g_off, thr = 10.0, 1e3, 500.0, 1e-7, 4.0
+    td, tr, pw, tf, per = 10e-6, 20e-6, 20e-6, 20e-6, 100e-6
     case = _case(tmp_path, [_dc("V", "vin", V),
                             {"type": "voltage_source", "name": "Vg", "nodes": ["ctrl", 0],
-                             "waveform": {"type": "pwm", "v_high": 5.0, "v_low": 0.0,
-                                          "frequency": f, "duty": 0.5}},
+                             "waveform": {"type": "pulse", "v_initial": 0.0, "v_pulse": 5.0,
+                                          "t_delay": td, "t_rise": tr, "t_fall": tf,
+                                          "t_width": pw, "period": per}},
                             {"type": "vcswitch", "name": "S", "nodes": ["ctrl", "vin", "a"],
-                             "v_threshold": 2.5, "g_on": g_on, "g_off": g_off},
+                             "v_threshold": thr, "g_on": g_on, "g_off": g_off},
                             _r("R", "a", 0, R)], 3e-4, 1e-7)
     r = case.run("pwl")
     t = np.asarray(r.times)
-    u = t % T
-    on = u < 0.5 * T
-    far = np.minimum(np.abs(u - 0.5 * T), np.minimum(u, T - u)) > 2e-7
+    x = thr / 5.0
+    t_on, t_off = td + tr * x, td + tr + pw + tf * (1 - x)       # 26 us, 54 us
+    u = t % per
+    on = (u >= t_on) & (u < t_off)
+    far = (np.abs(u - t_on) > 2e-7) & (np.abs(u - t_off) > 2e-7)
+    far[0] = False
     want = np.where(on, V * R / (R + 1 / g_on), V * R / (R + 1 / g_off))
     np.testing.assert_allclose(np.asarray(r.v("a"))[far], want[far], rtol=1e-9, atol=1e-12)
+    assert on[far].any() and (~on[far]).any()
 
 
 # -------------------------------------------------- transistors ---
@@ -269,7 +276,8 @@ def test_nmos_triode_dc_point_is_the_v1_law():
 def test_igbt_conducts_above_its_saturation_voltage(tmp_path):
     # mapped to add_igbt_level1: I_C = sigma(kappa (V_GE - V_T)) smoothmax0(V_CE - V_CE_sat) g_on,
     # smoothmax0(x) = (x + sqrt(x^2 + v_knee^2)) / 2, kappa 10, v_knee 0.01 (2.0 defaults)
-    V, R, g_on, vsat, vth, vg = 20.0, 1.0, 200.0, 1.5, 5.0, 15.0
+    # gate 0.3 V above V_T: the sigmoid is 0.95, so vth is exercised (defaults: 5 V, 1.5 V, 1e4 S)
+    V, R, g_on, vsat, vth, vg = 20.0, 1.0, 200.0, 1.2, 4.0, 4.3
     case = _case(tmp_path, [_dc("V", "s", V), _dc("Vg", "g", vg), _r("R", "s", "c", R),
                             {"type": "igbt", "name": "Q", "nodes": ["g", "c", 0], "vth": vth,
                              "g_on": g_on, "g_off": 1e-9, "v_ce_sat": vsat}], 1e-5, 1e-6)
@@ -280,7 +288,7 @@ def test_igbt_conducts_above_its_saturation_voltage(tmp_path):
         return (V - v) / R - alpha * g_on * 0.5 * (x + math.hypot(x, 0.01))
 
     vce = _root(kcl, 0.0, V)
-    assert vce == pytest.approx(vsat + (V - vsat) / (1 + R * g_on), abs=1e-3)   # ideal knee
+    assert vce == pytest.approx(vsat + (V - vsat) / (1 + R * g_on * alpha), abs=1e-3)   # ideal knee
     assert case.run("pwl").v("c")[-1] == pytest.approx(vce, abs=1e-6)
 
 

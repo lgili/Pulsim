@@ -691,7 +691,8 @@ comments and `benchmarks/REFERENCE_STATUS.md`.
 - **TC-EDGE-GRID** — a gate edge between grid points on `pwl`: the stored
   samples bracket the edge and the trace ramps over one step (timing ≤ 1-2
   steps; the edge diagnostic is within tolerance, the states agree off the
-  edges; REFERENCE_STATUS notes "Fixed-step event splitting"). The strict
+  edges; REFERENCE_STATUS notes "Fixed-step event splitting" and its edge
+  diagnostic table). The strict
   gate is not changed for it, so the cells stay frozen.
 - **TC-CLOSED-LOOP** — a helper closed loop: `pwl` samples the gate on the
   grid and ticks in label time (first order), `trbdf2` records no post-edge
@@ -699,8 +700,9 @@ comments and `benchmarks/REFERENCE_STATUS.md`.
   gets right", above).
 - **TC-PWL-ORDER** — `pwl` is first order after a diode / source event or
   from an inconsistent start ("Fixed engine: first order after a
-  discontinuity", above): the `pwl` cell disagrees and the `pwl+restart`
-  cell of the same circuit agrees or is much smaller.
+  discontinuity", above): the `pwl` cell disagrees and the `pwl+restart` or
+  `pwl+split` cell of the same circuit agrees or is much smaller.
+  `boost_pfc_open_loop`: chatter / undersampled on `pwl`, split agrees.
 - **TC-GATE-NODE** — a Level-1 MOSFET driven through its gate node: its
   channel crosses `V_T` between grid points, which is no event, so neither
   the restart nor the split makes it second order (same section). The
@@ -708,7 +710,9 @@ comments and `benchmarks/REFERENCE_STATUS.md`.
   DECISIONS 14 R1) is a second, open defect on these circuits.
 - **TC-OPEN** — not isolated: the cell is frozen with its measured error and
   the manifest comment says what is known. `transformer_leakage` (linear, no
-  switching: 4.1e-3 on every `pwl` configuration), `high_q_rlc_ringdown`
+  switching: 4.1e-3 on every `pwl` configuration), `ll06_buck_vcswitch`
+  (edge error above tolerance on `pwl` / `pwl+restart`, edges ~99 steps
+  apart), `high_q_rlc_ringdown`
   (`pwl` 0.0229, `trbdf2` 0.00566 against rtol 1e-8), `ll11_llc_resonant_converter`
   (`error` on every configuration), `ll13_active_clamp_forward` (`pwl` 4.51;
   no DC operating point, started from zero state).
