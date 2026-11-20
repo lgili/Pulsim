@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import subprocess
 import sys
 import warnings
@@ -214,12 +215,31 @@ def test_unmapped_construct_is_named():
 
 def test_triage_lists_every_circuit_on_disk():
     on_disk = {p.relative_to(BENCH).as_posix() for p in (BENCH / "circuits").rglob("*.yaml")}
-    assert len(on_disk) == 126
+    assert len(on_disk) == 128
     assert set(TRIAGE) == on_disk
     assert {e["status"] for e in TRIAGE.values()} <= {"runs", "skipped", "error"}
     for rel, e in TRIAGE.items():
         if e["status"] != "runs":
             assert e.get("reason"), rel
+
+
+def test_every_known_cell_names_a_cause_that_resolves():
+    """Task 3.2: a frozen disagree / error cell carries `cause: [id, ...]`; each id is a
+    `- **id**` entry of KNOWN_LIMITATIONS.md's "Triage causes" (no outward issue tracker)."""
+    kl = (BENCH.parent / "KNOWN_LIMITATIONS.md").read_text(encoding="utf-8")
+    sec = kl[kl.index("#### Triage causes"):]
+    sec = sec[:sec.index("\n###", 1)]
+    defined = set(re.findall(r"^- \*\*(TC-[A-Z-]+)\*\*", sec, flags=re.M))
+    assert len(defined) >= 5
+    used = set()
+    for rel, e in TRIAGE.items():
+        if "known" in e or "known_err" in e:
+            assert e.get("cause"), f"{rel}: a known cell without a cause"
+            assert set(e["cause"]) <= defined, (rel, set(e["cause"]) - defined)
+            used |= set(e["cause"])
+        else:
+            assert "cause" not in e, rel
+    assert used == defined, defined - used          # no orphan cause
 
 
 @pytest.mark.parametrize("rel", sorted(TRIAGE))
@@ -464,6 +484,27 @@ def test_benchmark_runner_imports_without_the_retired_backend():
     import benchmark_runner  # noqa: F401
 
 
+def test_benchmark_runner_runs_v1_files_against_their_stored_expectations(tmp_path):
+    """The runner end to end on 2.0 (benchmarks.yaml -> v1 reader -> pulsim.simulate -> the
+    file's own validation): an analytic RC step, a baseline-CSV bridge, a transformer. A scenario
+    whose v1 solver selection or component has no 2.0 equivalent is refused by name."""
+    import benchmark_runner as br
+
+    ids = ["rc_step", "bridge_resistive_pure", "transformer_step_up", "saturating_inductor_step"]
+    got = {(r.benchmark_id, r.scenario): r
+           for r in br.run_benchmarks(BENCH / "manifests" / "benchmarks.yaml", tmp_path, selected=ids)}
+    for bid in ids[:3]:
+        r = got[(bid, "direct_trap")]
+        assert r.status == "passed" and r.max_error is not None, (bid, r.message)
+    assert got[("rc_step", "direct_trap")].max_error < 5e-3                 # measured 2.5e-3
+    assert got[("bridge_resistive_pure", "direct_trap")].max_error < 1e-6  # measured 3.3e-10
+    for key in [("rc_step", "gmres_trbdf2"), ("rc_step", "jfnk_trbdf2")]:
+        assert got[key].status == "skipped"
+        assert got[key].message.startswith("refused: v1 integrator 'trbdf2' (fixed step)")
+    sat = [r for (b, _), r in got.items() if b == "saturating_inductor_step"]
+    assert sat and all(r.status == "skipped" and "saturable_inductor" in r.message for r in sat)
+
+
 def test_a_suspect_reference_grades_nothing_and_a_frozen_error_may_not_grow():
     # checkpoint review M1 / M7 (integration batch 6b)
     sus = {"status": "runs", "reference": "suspect", "reference_reason": "broken"}
@@ -553,3 +594,16 @@ def test_a_pulse_driven_rl_step_is_graded_against_its_ramp_closed_form():
         # 2e-8: the gate's own measure, the engine's samples (1e-7 s apart, tau = 1e-4 s)
         # interpolated linearly onto the union grid; at its samples dsed is 2e-12 V off
         assert rec["outcome"] == "agree" and rec["err_rms"] < 1e-7
+
+
+def test_a_right_limit_at_t0_belongs_to_the_initial_instant():
+    """A restart-rule run keeps the right limit of its start, one ulp after
+    t = 0 (with_right_limits). exclude_t0 drops it with the stored t = 0 row,
+    so the gate reads the cell from its first step as before: the 0+ row
+    against the reference's kept t = 0 row (0 V) read an exact DC trace
+    2.24e-3 off on the restart / split columns."""
+    t_ref = np.array([0.0, 5e-10, 1e-7, 2e-7])
+    ref = (t_ref, {"y": np.array([0.0, 1.0, 1.0, 1.0])}, None)
+    t = np.array([0.0, np.nextafter(0.0, 1.0), 1e-7, 2e-7])
+    eng = (t, {"y": np.array([0.0, 1.0, 1.0, 1.0])}, None)
+    assert dr.compare(eng, ref, ["y"], 1e-3)[0] == 0.0

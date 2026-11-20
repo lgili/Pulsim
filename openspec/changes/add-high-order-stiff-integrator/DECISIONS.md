@@ -744,6 +744,13 @@ scale `rtol·max(|q0|, |q1|, 1e-3·max|q0|)` (the max over committed
 step-start values only, so a rejected trial cannot loosen later scales). FINDING, left unchanged: the
 same gap exists on TR-BDF2 (its Lauritzen error is 2e-1 at any rtol);
 closing it changes default numbers, so it needs its own change.
+(2026-11-19: closed by update-trbdf2-error-control DECISIONS 10. The
+rows now sit once in `tb_error` for both integrators, scale
+`atol·s + rtol·max(|q0|, |q1|)` with s the device's own C / L / τ instead
+of the 1e-3·max|q| floor, which was a vanishing scale for a row that never
+moved: a nonlinear capacitor from x = 0 aborted at t = 0 here. They join
+the entries by max of the two RMS, not one RMS. The esdirk43 numbers above
+move within each case's floor band; that entry has the table.)
 
 **carry_q (measured, not ported).** 10^4 periods, rtol 1e-6. Flux (a
 saturable inductor across a cosine source, exact invariant λ(kT) =

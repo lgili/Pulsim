@@ -656,3 +656,73 @@ The default-profile keys of the same entries (not among the 72: none was `UNEXPE
 - The old `pwl+restart` / `pwl+split` keys are gone: those configurations exist only as `@legacy` columns now.
 - ll11 `auto`: the no-dt route aborts inside trbdf2 (`run_transient_trbdf2: Newton failed at t = 1e-5`), the same failure as the frozen `trbdf2` error: class a. ll13 `auto` lands on trbdf2 (1.55e-3, the `trbdf2` default cell measures the same): class a, frozen at the recorded trbdf2 error 1.33e-3.
 - **F-X-4** (class c): `electrothermal_resistor_self_heating` `auto` disagrees 1.78e-3 (tol 1e-3, err_max 1.0). The run is right (V(vin) = 5 V); without dt, `auto` now lands on dsed, whose output rule writes 2,000,002 samples (1 us) on this 2 s DC resistor (trbdf2 route before: 1004 samples), and the reference's uic sample V(vin)(0) = 0, interpolated to 5 V at 2e-5 s, spans 20 of them. dsed with the netlist dt agrees (err 0, 4002 samples). Group F (output rule), severity C; frozen `auto: disagree (0.00178)` citing the id.
+
+## 10. The rehearsal's bar for cells under the output rule (orchestrator, 2026-11-20)
+
+- KEPT: F-X-4 ("a step end the rule's chord already covers is not stored"). A DC circuit under
+  the rule stores its two ends; a slow stretch keeps few samples.
+- The bar "no cell worse than 2x the base" (section 5's verification) is REPLACED, for every cell
+  that ran under the output rule (the exact engine without `dt`, `diagnostics['output_grid']`;
+  the rehearsal writes `rule_ratio`), by: no cell changes class (outcome rank), and every cell
+  within what the rule promises -- the linear interpolation of its samples within
+  `output_rtol`*range + `atol` of the reference at every interval midpoint between events
+  (`metrics.rule_ratio` <= 1; range = the reference's range, at least 1e-3 of its peak). The base
+  looked better only because the 1 us gate poll (`dt_max / 10`, kept: decision of the same day)
+  stored extra points. Other cells keep the 2x rules.
+- The harness compares a short trace: dropping the initial sample is skipped when it would
+  leave fewer than two (`metrics.first_kept`); the reference is then read from its own first
+  kept sample. `undersampled` is reserved for a trace that cannot be compared, with the reason.
+- The opaque-gate poll stays at `dt_max / 10` (1 us with the defaults); the documents that said
+  10 us now say so. No number moves.
+
+## 11. The exact scoreboard's measure in three parts, and rule (1), 2026-11-20
+
+Branch `feat/core-scoreboard-measure`. Evidence only: no library file changes, no default number
+moves. The measure, the old one kept beside it, the tests and the triage are in
+`fixes/restart-scoreboard.md` ("Measure v2"); the scoreboard's `## The measure` states it.
+
+1. **Definition.** `exact` = the largest of three parts of the worst column, each a fraction of
+   the truth's span: smooth (the engine's stored rows, minus the initial instant, the 0+ row and
+   the rows inside a matched event's displacement), instants (sqrt(Σ jump²·|δ| / T), a missing
+   event charged as displaced to the device's next event, at most 2 h), limits (max distance of
+   every recorded one-sided value from the truth's). The previous definition is kept as
+   `exact_old` for this release (json and table), and a `--previous` json without the measure
+   tag is compared on `exact_old`.
+2. **Rule (1), a projected transient (decided by the orchestrator).** At a matched event where
+   the engine REPORTS a projection (a `reinit_records` entry within 4 ulp of its instant) and
+   records a right value the truth does not have at its instant, the truth is followed to
+   32 W (W = the engine's declared parasitic window, `PARASITIC`: dt/100 for the exact engine,
+   from `project_`'s threshold 100/dt_max with dt_max = dt in the harness; h/32 for pwl, so
+   followed to h), on the offsets 32 W·2^-k (k < 60) cut at irrational fractions, never past the
+   next truth event. If it settles (one doubling moves it ≤ max(1e-9 span, 1e-6 jump)) and every
+   value from its settling offset tau_eff on is within the cell's tol of the engine's value, the
+   right value is a transient collapsed in time: priced in instants by its true L2 cost
+   ∫(truth − engine)² over [t_e, t_e + tau_eff] (once per truth instant), its residual against
+   the settled truth kept in limits, counted in `n_projected`. Either condition failing leaves the limit as it is. A fixed-engine impulse
+   record is told apart by the data: the truth makes that jump too (its own right limit is
+   already the recorded value, carrying the jump energy dW the record books), so nothing is
+   collapsed and the rule does not apply; a projection's record would carry only the transient's
+   dissipation, and the truth reaches its value only after tau_eff.
+3. **What rule (1) changed: no cell.** No engine writes a record at the events it was made
+   for. The exact engine's slow-manifold projection (`scheduler.hpp` `project_` →
+   `project_slow`) writes none; `reinit_records` comes only from the constraint re-init
+   (`builder_adapter.hpp`), and only above 1e-9 of the circuit's scale. On
+   `diode_half_wave_rl_load` dsed the rule WOULD apply (forced in a probe: 0.030 limits →
+   4.8e-6 instants, limits 3.0e-7 = the frozen-source error of the projected value, −3.1e-6 V
+   against the settled truth's −6.3e-6 V; 3 turn-offs). Finding F-SB-3.
+   Reviewer (fresh context, adversarial): the first version (cost jump²·tau_eff on the bare
+   dyadic offsets W·2^-k) hid an overshoot of 184x the span (7.1e-4 against an honest 2.5e-2), a
+   ringing of 10x the span whose period was a dyadic fraction of W (3.5e-4 against 2.9e-3), and
+   charged a transient once per device; fixed in 6b85d9b5 as above, each case a test. Left as
+   written: the projection flag is per instant, not per state (any record at that instant arms
+   the rule; condition (ii) still gates it); a narrow pulse between two evaluated offsets can
+   still be missed, but the truth is one LTI segment there (no truth event inside), a sum of
+   exponentials, so only a ringing can hide and the irrational cut defeats the aliasing.
+4. **Triage of the cells the one-sided-limits part set.** See `fixes/restart-scoreboard.md`
+   ("Triage"). F-SB-1's test (each right-limit row at a restart-window step with no event
+   replaced by the engine's own left value, re-graded) moved none of them: none is F-SB-1.
+   New findings, strict xfails in `python/tests/test_restart_scoreboard_findings.py`: F-SB-2
+   (a switch_fn edge inside a step: split applies it from the step start, restart from the next
+   step), F-SB-3 (a diode turn-off behind a sub-step transient: a right limit the truth does not
+   have, no projection record), F-SB-4 (the split rule locates diode_rectifier's D1 turn-on
+   0.227 h late).

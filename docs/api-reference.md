@@ -400,6 +400,11 @@ r.feeding, res.recorder_feed                       # 'in-loop' | 'stored-arrays'
 - A window that starts exactly on an event starts from the right limit,
   one that ends on an event ends on the left limit, and min / max see
   both limits of events inside it.
+- An impulse (an ideal switch closing a capacitor onto a source, a
+  restart's jump) is a Dirac: `integral` is the regular part on every
+  engine, and the jump is reported by `res.reinit_records` (charge or
+  flux `lambda_`, energy `dW`), counted in a window that contains its
+  instant or starts at it.
 - Event rows say how the right value was obtained (`event_resolution`):
   `'exact'` — the exact engine's right limit at the instant; `'settled'`
   — trbdf2's settled post-event state at the instant (the next line starts
@@ -408,7 +413,18 @@ r.feeding, res.recorder_feed                       # 'in-loop' | 'stored-arrays'
   trbdf2 where its settle did not report). No right limit is invented.
 - RMS integrates the line between samples exactly, `h(a² + ab + b²)/3`;
   a product probe is linear between its own samples, as
-  `time_average` of the product trace is.
+  `time_average` of the product trace is. EXCEPT in the exact engine's
+  loop: there each step's integral and RMS are the closed form of its mode
+  (exact for the trajectory, the same at any `dt` / `output_rtol`; a probe
+  that is a polynomial of degree ≤ 2 in its readings; sine, pulse, PWM and
+  table sources included: they are states of the mode). A piece with no
+  closed form (another probe, a user `b_extra_fn`) is the line and warns;
+  `res.recorder_feed["closed_form"]` counts both. min / max are the values
+  at the samples and window edges.
+- `res.avg` / `res.rms` / `res.integral` and the stored-array pass are the
+  line between STORED samples: exact for the fixed engine's rule, O(h²)
+  otherwise — `engine='exact'` without `dt` stores one sample per 10 µs
+  (1e-4 off on a buck's window average). Use an in-loop recorder there.
 - **Feeding mode per engine** (`r.feeding`, `res.recorder_feed`):
 
   | engine | mode | |
@@ -498,9 +514,11 @@ res = p.simulate(loaded)    # t_end / dt from the file; keywords override
 ```
 
 `simulate(loaded)` takes `t_end`, `dt` (when the file sets one),
-`t_start` and `store_every` from the `simulation:` block; any keyword
-you pass wins. The other `simulation:` fields (Newton tolerances,
-`integrator`, ...) stay on `loaded.options` for you to forward. A
+`t_start` and `store_every` from the `simulation:` block, and every
+other key the file sets (`loaded.simulation_keys`: Newton tolerances and
+caps, `integrator`, `rtol`, `atol`, `dt_init`) as the keyword of the same
+name; a keyword you pass, then `solver=`, wins. A key the engine the run
+lands on cannot honour is not used and raises one `RuntimeWarning`. A
 `LoadedCircuit` with no top-level `simulation:` block (or no `t_end` in
 it) is refused with a `ValueError` naming the file, unless you pass
 `t_end=`.

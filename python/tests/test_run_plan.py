@@ -131,6 +131,7 @@ _SWALLOWING_HELPERS = {
     ("__init__.py", "_warn_resolution"),             # state_var_names, test doubles
     ("__init__.py", "_auto_attach_motor_traces"),    # a bundle's attach_to_result
     ("__init__.py", "_auto_check_voltage_sanity"),   # the post-run check
+    ("__init__.py", "_check_right_limit_voltage"),   # the same check, right limits
 }
 
 

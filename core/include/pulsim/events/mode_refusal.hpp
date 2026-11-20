@@ -43,9 +43,12 @@ struct PassivityClass {
 };
 
 /// Throw the named refusal for a failed selection; no-op on a solution.
+/// `diodes`: the labels the message shows; `names` (when given): the user's
+/// device names `.device` carries (F-3-2: never the internal label).
 inline void raise_if_refused(const ModeSelection& sel, const std::string& engine,
                              Real t, const std::vector<std::string>& diodes,
-                             const PassivityClass& cls) {
+                             const PassivityClass& cls,
+                             const std::vector<std::string>* names_in = nullptr) {
     if (sel.status == LcpStatus::Solution || sel.status == LcpStatus::Trivial) return;
     char tb[32];
     std::snprintf(tb, sizeof tb, "%.9e", t);
@@ -58,10 +61,12 @@ inline void raise_if_refused(const ModeSelection& sel, const std::string& engine
             "(" + std::to_string(diodes.size()) + " diodes in the circuit). Reduce the number of diodes the controlled element "
             "couples, or use a passive equivalent.");
     }
-    std::string names;
+    std::string names, device;
     for (const auto& d : diodes) names += (names.empty() ? "" : ", ") + d;
+    if (names_in)
+        for (const auto& d : *names_in) device += (device.empty() ? "" : ", ") + d;
     throw UnsupportedError(
-        engine, "consistent_mode", names, "Diode",
+        engine, "consistent_mode", names_in ? device : names, "Diode",
         "mode selection at t = " + std::string(tb) + " s: no conduction state of the diodes ("
         + names + ") is consistent (" + to_string(sel.status) + "). The circuit forces "
         "a current no diode configuration can carry (a current source into blocking "

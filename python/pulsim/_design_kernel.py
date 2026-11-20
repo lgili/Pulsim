@@ -261,6 +261,7 @@ class Plan:
         from ._dsed_dispatch import H_E_REL, MODE_GUARD
         from .design import _KpiSpec, _SEMIS, _as_builder
         from .loss_tables import LossTable
+        from .losses import _edge_law
         c = ev.circuit
         b = _as_builder(c)
         spec = ev._spec(c)
@@ -355,7 +356,8 @@ class Plan:
                                   spec.idx[("i", name)],
                                   None if on is None else on._kernel(),
                                   None if off is None else off._kernel(),
-                                  float(tj)))
+                                  float(tj),
+                                  *_edge_law(kind, comps[name]["params"])))
                 P.op("sw", k, 0)
                 P.op("sw", k, 1)
                 P.op("add")

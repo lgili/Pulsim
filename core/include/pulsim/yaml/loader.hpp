@@ -91,6 +91,10 @@ struct LoadedCircuit {
     bool                       has_simulation{false};
     /// Non-fatal findings (unknown `simulation:` keys), in file order.
     std::vector<std::string>   warnings{};
+    /// The known `simulation:` keys the YAML sets, in file order:
+    /// `simulate(loaded)` forwards exactly these (a key set to its
+    /// default value still wins over an engine's own default).
+    std::vector<std::string>   simulation_keys{};
 };
 
 /// add-external-device-abi 1.7: what a netlist may load. A YAML
@@ -704,6 +708,16 @@ inline void load_device(
                                    require_real(dev, idx, type, "area"),
                                    require_real(dev, idx, type, "length"), ja,
                                    /*substeps_min=*/8, real_or(dev, "M0", Real{0}));
+    } else if (type == "transmission_line") {
+        require_only_keys(dev, idx, type,
+                          {"a_pos", "a_neg", "b_pos", "b_neg", "Z0", "delay", "R"});
+        b.add_transmission_line(name, require_string(dev, idx, type, "a_pos"),
+                                require_string(dev, idx, type, "a_neg"),
+                                require_string(dev, idx, type, "b_pos"),
+                                require_string(dev, idx, type, "b_neg"),
+                                require_real(dev, idx, type, "Z0"),
+                                require_real(dev, idx, type, "delay"),
+                                real_or(dev, "R", Real{0}));
     } else if (type == "excess_loss") {
         require_only_keys(dev, idx, type, {"from", "to", "c", "eps"});
         b.add_excess_loss(name, require_string(dev, idx, type, "from"),
@@ -1525,7 +1539,7 @@ inline void load_device(
             "ideal_transformer, saturable_transformer, induction_motor, "
             "induction_machine, dc_machine, pmsm, bldc, winding, permeance, "
             "air_gap, magnetic_resistance, saturable_permeance, "
-            "hysteretic_permeance, excess_loss");
+            "hysteretic_permeance, excess_loss, transmission_line");
     }
     if (dev["losses"]) load_losses(b, dev, idx, type, name);
 }
@@ -1723,6 +1737,7 @@ inline void warn_unknown_keys(
 inline constexpr std::string_view kNodeKeys[] = {
     "from", "to", "anode", "cathode", "drain", "source", "gate", "collector",
     "emitter", "in_pos", "in_neg", "out", "out_pos", "out_neg", "a_pos", "a_neg",
+    "b_pos", "b_neg",
     "p_from", "p_to", "s_from", "s_to", "p1_pos", "p1_neg", "p2_pos", "p2_neg",
     "neutral_node", "omega_node", "theta_node",
     "omega", "theta"};   // a registry-kind entry (pmsm_mna); its `pins` lists too
@@ -2042,6 +2057,13 @@ namespace detail {
         }
         detail::collect_unknown_simulation_keys(sim, loaded.warnings);
         detail::load_simulation_options(loaded.options, sim);
+        for (const auto& kv : sim) {
+            if (!kv.first.IsScalar()) continue;
+            std::string key = kv.first.as<std::string>();
+            if (detail::is_known_simulation_key(key)) {
+                loaded.simulation_keys.push_back(std::move(key));
+            }
+        }
         loaded.has_simulation = true;
     }
 

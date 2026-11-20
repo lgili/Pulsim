@@ -24,6 +24,11 @@
 //     the start state as its right limit (resolution `Settled`, `n_jumps`),
 //     and the line of the step starts from it;
 //   * the end state is the sample at t.
+// A fixed step taken by the restart rule comes line by line
+// (`StepHooks::line`, release F-4-4): a line's start right limit is such a
+// jump (an event row; at the run's first step after the start sample), an
+// event inside the step a sample (its left limit) and a jump; a capacitor
+// reads the engine's current at each line point (StepRunView::cap_*).
 // Commutations (`StepHooks::on_event`):
 //   * fixed engine (`Events::Bracket`): the pair brackets the commutation
 //     within one step; recorded with `event_bracket` (left at the step's
@@ -194,6 +199,7 @@ public:
         }
         graph_ = &graph;
         pool_ = &pool;
+        if (view_of_ != nullptr) set_lines_(*view_of_);   // attached before the circuit
     }
 
     /// Pre-size kept rows for `n_samples` and the period windows up to t_last.
@@ -230,6 +236,7 @@ public:
         bool batch = general_.empty() && !settled_;
         for (const auto& r : recs_) batch = batch && !r.streams();
         hooks.set_step_sink(&LoopFeed::sink_step, this, batch ? &LoopFeed::sink_batch : nullptr);
+        set_lines_(hooks);
         hooks.on_event([this](Real t, const Vector& xl, const topology::SwitchStateMask& ml,
                               const Vector& xr, const topology::SwitchStateMask& mr) {
             on_event(t, xl, ml, xr, mr);
@@ -259,6 +266,12 @@ public:
     /// the last or the next sample): counted, never fabricated.
     [[nodiscard]] Size n_dropped() const noexcept { return n_dropped_; }
     [[nodiscard]] const std::vector<Recorder>& recorders() const noexcept { return recs_; }
+    [[nodiscard]] const std::vector<StateReading>& readings() const noexcept { return readings_; }
+    /// Every recorder's pieces from `s` (Recorder::set_segment_source; the
+    /// exact engine's closed forms), nullptr to stop. `s` outlives its use.
+    void set_segment_source(SegmentSource* s) noexcept {
+        for (Size k = 0; k < recs_.size(); ++k) recs_[k].set_segment_source(s, k);
+    }
     /// RingSink for recorder k (`Recorder::stream_to`): its kept rows are
     /// pushed into `ring` as the run goes (the ring must outlive the runs).
     void stream_to(Size k, streaming::LiveRing* ring) { recs_.at(k).stream_to(ring); }
@@ -331,6 +344,13 @@ public:
     [[nodiscard]] bool restored() const noexcept { return restored_; }
 
 private:
+    // A stateful reading reads the committed histories: no value at a point
+    // inside a step, so such a feed takes restart steps whole.
+    void set_lines_(events::StepHooks& hooks) const noexcept {
+        bool lines = true;
+        for (const auto& r : readings_) lines = lines && r.dev.law != DeviceCurrent::Law::Stateful;
+        hooks.set_sink_takes_lines(lines);
+    }
     std::vector<std::string> names_;
     std::vector<StateReading> readings_;
     std::vector<Recorder> recs_;
@@ -358,7 +378,7 @@ private:
     const topology::Graph* graph_ = nullptr;
     const pwl::DevicePool* pool_ = nullptr;
     events::StepHooks* view_of_ = nullptr;
-    topology::SwitchStateMask mask_last_, mask_pending_;
+    topology::SwitchStateMask mask_last_, mask_pending_, mask_seed_;
     bool started_ = false, has_pending_ = false, attached_ = false, settled_ = false;
     bool event_at_last_ = false;  // a settled event row at the last sample
     Real t_last_ = 0, t_pending_ = 0;
@@ -366,10 +386,12 @@ private:
 
     // A reading at (t, x) under `mask`. `probe_right`: x is a settled
     // post-event probe (TR-BDF2), the histories are still the left side's.
+    // `cap`: the capacitors' companion currents at x, per history entry
+    // (a restart step's line point, StepRunView::cap_*; nullptr: i_prev).
     void eval(Real t, const Vector& x, const topology::SwitchStateMask& mask,
-              std::vector<Real>& out, bool probe_right = false) {
+              std::vector<Real>& out, bool probe_right = false, const Real* cap = nullptr) {
         eval_state(x.data(), out.data());
-        eval_general(t, x, mask, out, probe_right);
+        eval_general(t, x, mask, out, probe_right, cap);
     }
     // The unit and linear readings of a state (all of them when general_
     // is empty)
@@ -388,18 +410,18 @@ private:
         }
     }
     void eval_general(Real t, const Vector& x, const topology::SwitchStateMask& mask,
-                      std::vector<Real>& out, bool probe_right) {
+                      std::vector<Real>& out, bool probe_right, const Real* cap = nullptr) {
         Real* const o = out.data();
         for (const Size j : general_) {
             const auto& r = readings_[j];
             o[j] = r.dev.law == DeviceCurrent::Law::None
                        ? r.eval(x)
-                       : device(readings_[j], t, x, mask, probe_right);
+                       : device(readings_[j], t, x, mask, probe_right, cap);
         }
     }
 
     Real device(StateReading& r, Real t, const Vector& x, const topology::SwitchStateMask& mask,
-                bool probe_right) {
+                bool probe_right, const Real* cap) {
         using L = DeviceCurrent::Law;
         auto& d = r.dev;
         const auto& view = view_of_->run_view();
@@ -426,7 +448,7 @@ private:
                 i = models::Capacitor::g_eq(*view.probe_dt, models::Capacitor::Params{e.C_or_L}) *
                         (v - e.v_prev) - e.i_prev;
             } else {
-                i = e.i_prev;
+                i = cap != nullptr ? cap[d.entry] : e.i_prev;
             }
             break;
         }
@@ -476,6 +498,7 @@ private:
         seed_.resize(names_.size());
         eval(0, x0, m0, seed_);
         x_seed_ = x0;
+        mask_seed_ = m0;
         x_row_.resize(x0.size());   // a batched row the general path takes
         seeded_ = true;
     }
@@ -608,7 +631,9 @@ private:
              (*ms == mask_last_ && bits_equal(*xs, x_last_)))) {
             {
                 eval_state(xe.data(), row_.data());
-                if (!general_.empty()) [[unlikely]] eval_general(t, xe, me, row_, false);
+                if (!general_.empty()) [[unlikely]] {
+                    eval_general(t, xe, me, row_, false, view_of_->run_view().cap_end);
+                }
             }
             for (auto& r : recs_) r.sample_row(t, row_.data());
             copy_state(xe);
@@ -671,9 +696,14 @@ private:
         }
         const Vector& xs = *xsp;
         const topology::SwitchStateMask& ms = *msp;
+        const auto& view = view_of_->run_view();
         if (!started_) {
-            eval(t0, xs, ms, row_);
-            if (seeded_ && same(xs, x_seed_)) {
+            // a restart line at the run's first step starts from a right
+            // limit: the run's start is the first sample, the line's start
+            // a jump from it
+            const bool line0 = view.line && seeded_ && !same(xs, x_seed_);
+            eval(t0, line0 ? x_seed_ : xs, line0 ? mask_seed_ : ms, row_);
+            if (seeded_ && (line0 || same(xs, x_seed_))) {
                 // a reading of the histories at the run's start
                 for (Size j = 0; j < readings_.size(); ++j) {
                     const auto law = readings_[j].dev.law;
@@ -686,6 +716,11 @@ private:
             x_last_ = xe;  // sizes the buffer once
             t_last_ = t0;
             started_ = true;
+            if (line0) {
+                eval(t0, xs, ms, row_, false, view.cap_start);
+                for (auto& r : recs_) r.event(row_, Recorder::Resolution::Settled);
+                ++n_jumps_;
+            }
         } else if (settled_ && has_pending_ && t_last_ < t_pending_ && t_pending_ < t) {
             // trbdf2 committed [t0, t_ev] and then the post-event probe
             // [t_ev, t] as ONE hook step (a landed gate edge / breakpoint
@@ -697,14 +732,20 @@ private:
             mask_last_ = mask_pending_;
         } else if (!event_at_last_ && (!(ms == mask_last_) || !same(xs, x_last_))) {
             // the engine restarted from another state than it committed
-            eval(t0, xs, ms, row_);
+            // (a restart step's line: its start right limit)
+            eval(t0, xs, ms, row_, false, view.cap_start);
             for (auto& r : recs_) r.event(row_, Recorder::Resolution::Settled);
             ++n_jumps_;
         }
         const bool had_event = event_at_last_;
         event_at_last_ = false;
-        eval(t, xe, me, row_);
-        if (has_pending_ && !settled_) {
+        eval(t, xe, me, row_, false, view.cap_end);
+        if (has_pending_ && !settled_ && view.line) {
+            // a step fed as lines: its jump rows place the commutation (a
+            // bracket would end on the first line, a left limit)
+            has_pending_ = false;
+            ++n_events_;
+        } else if (has_pending_ && !settled_) {
             // the bracket's right side is this step's end (xr was xe), read
             // at t: a source's value belongs to the end, not to the report
             for (auto& r : recs_) r.event_bracket(t, row_);

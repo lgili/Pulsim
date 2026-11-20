@@ -106,3 +106,33 @@ def test_without_them_the_answer_is_silently_absurd():
     t2 = np.asarray(r2.times)
     v2 = np.abs(np.asarray(r2.v("ua"))[t2 >= 2e-3])
     assert float(v2.max()) < 400.0, float(v2.max())
+
+
+def test_floating_neutral_vsi_runs_on_the_exact_engine():
+    """add-ai-usage-guide 12.6: the exact engine refused a VSI whose star
+    neutral floats, with a message listing long-fixed causes and a design
+    note no wheel ships. It runs now; truth for a balanced R-L star:
+    KCL at the neutral (the phase currents sum to 0) and so
+    v_n = (v_a + v_b + v_c) / 3 at every sample."""
+    import numpy as np
+
+    from pulsim import _dsed_dispatch
+
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vdc", "dcp", "gnd", 600.0)
+    v = p.add_three_phase_vsi(b, "INV", vdc_pos="dcp", vdc_neg="gnd",
+                              out_a="a", out_b="b", out_c="c")
+    for ph in "abc":
+        b.add_resistor(f"R{ph}", ph, f"m{ph}", 10.0)
+        b.add_inductor(f"L{ph}", f"m{ph}", "n", 5e-3)
+    spwm = p.make_three_phase_spwm_fn(
+        10e3, 50.0, 0.8, p.ThreePhaseLegIndices(*v.switch_indices),
+        b.graph.num_switches, 1e-6)
+    r = p.simulate(b, 2e-3, engine="dsed", switch_fn=spwm)
+    assert r.engine_used == "dsed"
+    i_sum = r.i("La") + r.i("Lb") + r.i("Lc")
+    assert np.max(np.abs(i_sum)) < 1e-9 * np.max(np.abs(r.i("La")))
+    v_n = (r.v("a") + r.v("b") + r.v("c")) / 3.0
+    assert np.max(np.abs(r.v("n") - v_n)) < 1e-9 * 600.0
+    msg = _dsed_dispatch._BRIDGE_FALLBACK_MESSAGE
+    assert "notes/" not in msg and "floating capacitors" not in msg

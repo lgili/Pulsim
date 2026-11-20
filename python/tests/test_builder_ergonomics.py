@@ -105,6 +105,19 @@ class TestAliases:
             "ground_clone": ("node", "gnd"),
         }
 
+    def test_alias_yaml_round_trip(self):
+        """docs/helpers.md §5.3: the GUI saves the circuit as YAML and gets
+        its labels back on load (add-python-builder-ergonomics 5.2)."""
+        b = ps.CircuitBuilder()
+        b.add_voltage_source("V1", "net_42", "gnd", 12.0)
+        b.add_resistor("R1", "net_42", "gnd", 1.0)
+        b.set_alias("vin", node="net_42")
+        c = ps.Circuit.from_yaml(b.build().to_yaml())
+        assert c.aliases() == {"vin": ("node", "net_42")}
+        res = ps.simulate(c, t_end=1e-4, dt=1e-5)
+        np.testing.assert_array_equal(res.v("vin"), res.v("net_42"))
+        assert res.v("vin")[-1] == 12.0
+
     def test_alias_both_node_and_branch_rejected(self):
         b = ps.CircuitBuilder()
         b.add_resistor("R1", "a", "gnd", 1.0)

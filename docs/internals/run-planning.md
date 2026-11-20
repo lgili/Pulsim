@@ -49,6 +49,33 @@ engine this way. Now:
 - Behaviour that legitimately differs per engine is an explicit per-engine
   entry of the plan or of `_finalize`, never a position in the code.
 
+## Time: `t_start` is an absolute label
+
+`t_start` labels the run's first instant on the ONE clock every input is
+written on. Every time-dependent object — the gate and its edge oracle,
+`b_extra_fn`, the circuit's sine / pulse / PWM / PWL sources, control-tick
+callables, recorder windows and periods, loss-event and re-initialisation
+instants — is evaluated or reported at absolute `t` on every engine, so a
+run on `[t_start, t_end]` started from the state at `t_start` equals the
+tail of the run on `[0, t_end]` (which is what a resume means). Two
+deliberate choices: a fresh run's control-tick grid starts at `t_start`
+(`t_start + k*T`, the ticks' documented contract; a resume continues the
+first run's grid from the snapshot), and the stored state at `t_start` is
+the caller's `initial_state`.
+
+An engine whose clock runs from 0 shifts EVERY input it hands a time to in
+one place — where the plan hands it the drive — and shifts every output
+back. Today that is the exact engine on a fresh run (not a resume: it
+resumes on the absolute clock): `_run_dsed` wraps the gate (and its edge
+oracle) and `b_extra_fn` (`_dsed_dispatch.on_absolute_clock`), and
+`_result_from_native` relabels the times, event times, re-initialisation
+records, mode diagnostics and the output budget (the loss events in the
+binding, `t_offset`). What cannot be shifted from Python is refused by name:
+the circuit's own time-varying sources (the native adapter evaluates them on
+the engine's clock; `feature='t_start'`), controllers (`_compose_for`), the
+snapshot of such a run (`final_snapshot.invalid_reason`). The test is
+`test_tstart_time_base.py`.
+
 ## What still differs per engine, and how the release makes it one
 
 Stage A moved code without changing a result, a warning or a refusal. The
@@ -68,6 +95,6 @@ where the difference is the engine's own.
 | voltage check | one function `_auto_check_voltage_sanity` on every engine (was: an inline copy on pwl) | same | same | the same (done) | none needed |
 | `resume_from` clock | starts at the snapshot's `t` when `t_start` is left 0.0; an explicit `t_start` wins | same | resumes on its own absolute clock (`t_end` absolute; the plan keeps `t_start`, the run starts at the snapshot's `t`; another explicit `t_start` refused by name) | the same | one rule in `_plan_run`; `plan.resolved_from['t_start'] == 'resume_from'` |
 | `mmc_arms`, `on_cache`, `progress`, `live_stream` | composed / wired in the run (they need the run's own cache or per-step ring) | refused / routed by the option table | refused (`progress` runs) | kept per engine | the option table refuses them by name |
-| loss port on the exact engine | honours `integrator`, `t_start` | honours both | refuses `integrator='bdf2'` by name; a fresh `t_start` run is the zero-start run relabelled (loss events at `t + t_start`) | kept per engine | refusal by name |
+| loss port on the exact engine | honours `integrator`, `t_start` | honours both | refuses `integrator='bdf2'` by name; a fresh `t_start` run runs on the engine's clock with the drive shifted onto it (loss events at `t + t_start`; see "Time" above) | kept per engine | refusal by name |
 
 Stage B moves the plan into the kernel (`sim::RunOptions`, `sim::Simulation`).

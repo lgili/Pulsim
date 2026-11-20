@@ -92,3 +92,120 @@ class TestMnaSweepCancellation:
             _k.run_mna_sweep_kernel(b.graph, b.pool, mask, freqs,
                                       0, 0, should_continue=stop_after_5)
         assert "cancelled" in str(excinfo.value).lower()
+
+
+# ---------------------------------------------------------------------------
+# run_ac_sweep / run_mna_sweep (Python entry points): tasks 3.3, 3.6, 4.3
+# ---------------------------------------------------------------------------
+def _rc_sweep_circuit():
+    import math
+    b = ps.CircuitBuilder()
+    b.add_voltage_source("Vin", "in", "gnd", 1.0)
+    b.add_resistor("R1", "in", "out", 1e3)
+    b.add_capacitor("C1", "out", "gnd", 1e-6)
+    n = b.pool.state_size(b.graph)
+    k = b.pool.branch_var_id_for_source(b.branch_id_of("Vin"), b.graph)
+
+    def excite(t, eps, f):
+        out = [0.0] * n
+        out[k] = -eps * math.sin(2 * math.pi * f * t)
+        return out
+    return b, excite
+
+
+def _ac(should_continue=None, freqs=(100.0, 159.15, 1e3)):
+    b, excite = _rc_sweep_circuit()
+    return ps.run_ac_sweep(b, freqs=list(freqs), excite_fn=excite,
+                           output_idx=b.node_id_of("out"), cycles_per_point=4,
+                           settling_cycles=4, verbose=False,
+                           should_continue=should_continue)
+
+
+class _StopAfter:
+    def __init__(self, n):
+        self.n, self.calls = n, 0
+
+    def __call__(self):
+        self.calls += 1
+        return self.calls <= self.n
+
+
+class TestAcSweepCancellation:
+    def test_cancel_before_the_first_point(self):
+        with pytest.raises(ps.Cancelled) as e:
+            _ac(lambda: False)
+        assert e.value.where == "run_ac_sweep"
+        assert e.value.point_index == 0
+
+    def test_cancel_inside_a_point_raises_that_point(self):
+        """The callback says False inside point 1's transient. simulate()
+        would return that transient cut short; the sweep must not keep it
+        as the point's |H|."""
+        first = _StopAfter(10**9)
+        _ac(first, freqs=(100.0,))
+        per_point = first.calls          # polls for one whole point
+        stop = _StopAfter(per_point + 5)
+        with pytest.raises(ps.Cancelled) as e:
+            _ac(stop)
+        assert e.value.point_index == 1
+
+    def test_a_raising_callback_propagates(self):
+        class Boom(Exception):
+            pass
+
+        def boom():
+            raise Boom("from the callback")
+        with pytest.raises(Boom):
+            _ac(boom)
+
+    def test_a_true_callback_changes_nothing(self):
+        """|H| of the RC low-pass against 1/sqrt(1 + (w R C)^2), and the
+        same bits with and without an always-True callback."""
+        import math
+        a, c = _ac(), _ac(lambda: True)
+        np.testing.assert_array_equal(a.H, c.H)
+        for f, h in zip(a.freqs, a.H):
+            w = 2 * math.pi * f * 1e-3
+            assert abs(h) == pytest.approx(1 / math.sqrt(1 + w * w), rel=2e-2)
+
+
+class TestRunMnaSweepCancellation:
+    def _kernel(self, should_continue):
+        b, _ = _rc_sweep_circuit()
+        return ps.run_mna_sweep(b, output_idx=b.node_id_of("out"),
+                                freqs=list(np.logspace(1, 4, 20)),
+                                v_in_branch_id=b.branch_id_of("Vin"),
+                                should_continue=should_continue)
+
+    def test_kernel_path_raises_pulsim_cancelled(self):
+        with pytest.raises(ps.Cancelled) as e:
+            self._kernel(_StopAfter(4))
+        assert e.value.where == "run_mna_sweep"
+
+    def test_kernel_path_true_callback_and_truth(self):
+        r = self._kernel(lambda: True)
+        w = 2 * np.pi * r.freqs * 1e-3
+        np.testing.assert_allclose(np.abs(r.H), 1 / np.sqrt(1 + w * w),
+                                   rtol=1e-9)
+
+    def test_impulse_path_raises_instead_of_a_short_trace(self):
+        b, _ = _rc_sweep_circuit()
+        with pytest.raises(ps.Cancelled) as e:
+            ps.run_mna_sweep(b, output_idx=b.node_id_of("out"), dt=1e-6,
+                             t_end=2e-3, use_kernel=False,
+                             should_continue=_StopAfter(50))
+        assert e.value.where == "run_mna_sweep"
+
+
+def test_settle_strategy_cancelled_mid_transient_returns_no_point():
+    """strategy='settle' runs a transient: cancelled inside it, simulate()
+    returns the trace so far, and the steady-state check used to judge
+    that partial trace (returning it as the operating point when it read
+    flat, or a RuntimeError 'too short'). It raises Cancelled now."""
+    b = ps.CircuitBuilder()
+    b.add_voltage_source("V1", "a", "gnd", 12.0)
+    b.add_resistor("R1", "a", "b", 10.0)
+    b.add_capacitor("C1", "b", "gnd", 1e-9)
+    with pytest.raises(ps.Cancelled) as e:
+        ps.compute_dc_op(b, strategy="settle", should_continue=_StopAfter(200))
+    assert e.value.where == "compute_dc_op"

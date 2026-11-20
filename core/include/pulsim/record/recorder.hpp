@@ -24,6 +24,11 @@
 // pulsim.time_average / time_rms, so the two agree to round-off on the
 // same samples. A nonlinear probe (v*i) is linear between its own samples,
 // as it is when time_average is applied to the product trace.
+// EXCEPT where a feeder gives the piece's closed form (`SegmentSource`: the
+// exact engine, dsed/segment_integrals.hpp): the integral, the integral of
+// the square and the clipped ends' values are then the closed form's, exact
+// for the trajectory and independent of the step (F-B2-1); min / max stay
+// the values at the samples and the clip points.
 //
 // Feeding:
 //   * `sample(t, readings)` once per accepted step; `event(readings)` after
@@ -104,6 +109,19 @@ struct WindowStat {
     [[nodiscard]] Real rms() const noexcept {
         return std::sqrt(std::max(sq3 / (3 * (t1 - t0)), Real{0}));
     }
+};
+
+/// A feeder's closed form of the piece being sampled (the exact engine:
+/// dsed/segment_integrals.hpp). For probe `p` of recorder `rec` over
+/// [lo, hi] ⊂ the piece [ta, tb], whose line runs from `ya` to `yb` (the
+/// recorder's own values):
+/// out = {∫y, ∫y², y(lo), y(hi)}; ∫y² NaN: only ∫y is closed (the recorder
+/// takes the line for ∫y²). False: no closed form for this piece (the
+/// recorder takes the line). Valid for the sample being fed only.
+struct SegmentSource {
+    virtual ~SegmentSource() = default;
+    virtual bool piece(Size rec, Size p, Real ta, Real tb, Real ya, Real yb, Real lo, Real hi,
+                       Real* out) noexcept = 0;
 };
 
 class Recorder {
@@ -504,6 +522,16 @@ public:
     [[nodiscard]] const std::vector<WindowStat>& periods() const noexcept { return periodic_; }
     /// Kept rows go to a LiveRing (`stream_to`).
     [[nodiscard]] bool streams() const noexcept { return ring_ != nullptr; }
+    /// The feeder's reading index of each atom of probe p (after bind()).
+    [[nodiscard]] std::span<const Size> atom_readings(Size p) const noexcept {
+        return {cols_.data() + offs_[p], offs_[p + 1] - offs_[p]};
+    }
+    /// Pieces from `s` (nullptr: every piece is its line); `rec` names this
+    /// recorder to it. The caller keeps `s` alive while it is set.
+    void set_segment_source(SegmentSource* s, Size rec) noexcept {
+        seg_ = s;
+        seg_rec_ = rec;
+    }
 
 private:
     std::vector<Probe> probes_;
@@ -533,6 +561,8 @@ private:
     std::vector<std::uint8_t> interpolated_;
     Size next_time_ = 0, unreached_ = 0;
     streaming::LiveRing* ring_ = nullptr;
+    SegmentSource* seg_ = nullptr;
+    Size seg_rec_ = 0;
 
     // sample_row's statistics and its kept rows other than every / none:
     // out of line, so the common sample keeps its registers
@@ -654,16 +684,33 @@ private:
     }
 
     // The piece (ta, tb] runs from start_ (at ta) to left_ (at tb).
-    void accumulate(WindowStat& w, Real ta, Real tb, Real ya, Real yb) const noexcept {
+    // Probe p; with a segment source, its closed form over [lo, hi].
+    void accumulate(WindowStat& w, Size p, Real ta, Real tb, Real ya, Real yb) noexcept {
         snap(w.t0, ta, tb);
         snap(w.t1, ta, tb);
         const Real lo = std::max(w.t0, ta), hi = std::min(w.t1, tb);
         if (!(hi > lo)) return;
-        const Real a = lo == ta ? ya : lerp(ta, ya, tb, yb, lo);
-        const Real b = hi == tb ? yb : lerp(ta, ya, tb, yb, hi);
-        const Real h = hi - lo;
-        w.integral += 0.5 * (a + b) * h;
-        w.sq3 += (a * a + a * b + b * b) * h;
+        Real a, b;
+        Real cf[4];
+        if (seg_ != nullptr && seg_->piece(seg_rec_, p, ta, tb, ya, yb, lo, hi, cf)) [[unlikely]] {
+            // min / max: the samples at the step's ends, the closed form at a clip
+            a = lo == ta ? ya : cf[2];
+            b = hi == tb ? yb : cf[3];
+            w.integral += cf[0];
+            if (std::isnan(cf[1])) {   // the source closed ∫y only: ∫y² is the line
+                const Real la = lo == ta ? ya : lerp(ta, ya, tb, yb, lo);
+                const Real lb = hi == tb ? yb : lerp(ta, ya, tb, yb, hi);
+                w.sq3 += (la * la + la * lb + lb * lb) * (hi - lo);
+            } else {
+                w.sq3 += 3 * cf[1];
+            }
+        } else {
+            a = lo == ta ? ya : lerp(ta, ya, tb, yb, lo);
+            b = hi == tb ? yb : lerp(ta, ya, tb, yb, hi);
+            const Real h = hi - lo;
+            w.integral += 0.5 * (a + b) * h;
+            w.sq3 += (a * a + a * b + b * b) * h;
+        }
         if (a < w.min) { w.min = a; w.t_min = lo; }
         if (b < w.min) { w.min = b; w.t_min = hi; }
         if (a > w.max) { w.max = a; w.t_max = lo; }
@@ -680,6 +727,10 @@ private:
         return kc_np_ != kNoWindow && ta > fast_lo_ && tb < fast_hi_;
     }
     PULSIM_RECORD_INLINE void accumulate_window(Real ta, Real tb) noexcept {
+        if (seg_ != nullptr) [[unlikely]] {
+            accumulate_window_seg(ta, tb);
+            return;
+        }
         const Size np = probes_.size();
         const Real h = tb - ta;
         WindowStat* const ws = periodic_.data() + kc_np_;
@@ -697,11 +748,18 @@ private:
         }
     }
 
+    // accumulate_window with a segment source: accumulate() on that window
+    // (its snaps and clips do nothing there, as the fast path assumes)
+    PULSIM_RECORD_NOINLINE void accumulate_window_seg(Real ta, Real tb) noexcept {
+        WindowStat* const ws = periodic_.data() + kc_np_;
+        for (Size p = 0; p < probes_.size(); ++p) accumulate(ws[p], p, ta, tb, start_[p], left_[p]);
+    }
+
     void piece(Real ta, Real tb) {
         const Size np = probes_.size();
         for (Size w = 0; w < spec_.windows.size(); ++w) {
             for (Size p = 0; p < np; ++p) {
-                accumulate(declared_[w * np + p], ta, tb, start_[p], left_[p]);
+                accumulate(declared_[w * np + p], p, ta, tb, start_[p], left_[p]);
             }
         }
         if (spec_.period <= 0 || tb <= spec_.offset) return;
@@ -724,7 +782,7 @@ private:
                 continue;
             }
             for (Size p = 0; p < np; ++p) {
-                accumulate(periodic_[k * np + p], ta, tb, start_[p], left_[p]);
+                accumulate(periodic_[k * np + p], p, ta, tb, start_[p], left_[p]);
             }
         }
         // The window that holds tb strictly inside it is the fast path's

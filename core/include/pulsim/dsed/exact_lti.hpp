@@ -94,6 +94,10 @@ struct ExactLTI {
     mutable DenseMatrix chord_vabs;
     mutable std::vector<Eigen::Index> chord_order;
     mutable Vector chord_s;
+    mutable Real chord_rho = Real{0};   // max |λ_k|
+    // The event scan's certificate (PEDSimulator::locate_event_exact_): per armed
+    // predicate (index), its modal row q_k = c·V_k, built on first use (empty: not yet).
+    mutable std::vector<Eigen::VectorXcd> scan_q;
 };
 
 /// The output rule's work arrays (exact_chord_step, the adapter's
@@ -102,10 +106,11 @@ struct ExactLTI {
 struct ChordWork {
     Vector xa, ta, c0, c1, v, s;            // the adapter's augmented state / sources
     Vector cr, ci, a;                       // V⁻¹c (re, im); |z̈_k| (decaying / zero modes)
-    Vector gB, gC;                          // the growing modes' terms at one probe
+    Vector gB, gC, gD;                      // the growing modes' terms at one probe
+    Vector eb;                              // the bound at one probe
     std::vector<Eigen::Index> grow;         // modes with Re λ > 0
     Eigen::VectorXcd zdd;
-    DenseMatrix S, B, C, A0;                // n × (n+1) sums per split (exact_chord_step)
+    DenseMatrix S, B, C, D, A0, A1;         // n × (n+1) sums per split (exact_chord_step)
 };
 
 /// eˢ − 1 for complex s without cancellation at any |s|.
@@ -812,7 +817,12 @@ inline constexpr Real kSettleTau = Real{40};
 ///                                       |Σ_{k∈S} V_jk z̈_k| + δ Σ_{k∈S} m_jk |λ_k|)
 /// (the S part bounds max|ẍ_j^S| by the triangle inequality, or by its value at
 /// τ = 0 plus |e^s − 1| ≤ |s|e^{max(0, Re s)}, which keeps the cancellation
-/// between modes at rest). With F empty this is the bound of a32b97ed.
+/// between modes at rest). The second-order form |Σ_{k∈S} V_jk z̈_k| +
+/// δ |Σ_{k∈S} V_jk z̈_k λ_k| + δ²/2 Σ_{k∈S} m_jk |λ_k|² is taken too (the min of
+/// the three): near a start from rest the first-order term δ Σ m|λ| is the
+/// triangle inequality over every mode and was 5× too long a sample count on
+/// an RC ladder's first node (F-X-3: 5349 samples in its first µs, 1170 with
+/// it, ~600 needed by the closed form). With F empty this is the bound of a32b97ed.
 /// Defective modes have no tier-1 basis: `bounded` = false and h returned.
 /// Any δ the bisection returns satisfies the bound (lo always fits), so the
 /// split need not make it monotone. c0 / c1 nullable (no piecewise-linear source).
@@ -839,6 +849,7 @@ inline constexpr Real kSettleTau = Real{40};
                          [&](Eigen::Index a, Eigen::Index b) { return s[a] < s[b]; });
         e.chord_s.resize(n);
         for (Eigen::Index q = 0; q < n; ++q) e.chord_s[q] = s[e.chord_order[static_cast<std::size_t>(q)]];
+        e.chord_rho = e.lambda.size() > 0 ? e.lambda.cwiseAbs().maxCoeff() : Real{0};
     }
     // modal coordinates: z = V⁻¹x, ż = Λz + w (+ V⁻¹c0), z̈ = Λż (+ V⁻¹c1)
     e.z_re.noalias() = e.Vinv_re * x;
@@ -871,15 +882,22 @@ inline constexpr Real kSettleTau = Real{40};
     w.B.resize(n, n + 1);
     w.C.resize(n, n + 1);
     w.A0.resize(n, n + 1);
+    w.D.resize(n, n + 1);
+    w.A1.resize(n, n + 1);
     w.S.col(0).setZero();
     w.B.col(n).setZero();
     w.C.col(n).setZero();
+    w.D.col(n).setZero();
     w.A0.col(n).setZero();
+    w.A1.col(n).setZero();
     for (Eigen::Index q = n - 1; q >= 0; --q) {
         const Eigen::Index k = e.chord_order[static_cast<std::size_t>(q)];
+        const std::complex<Real> zl = w.zdd[k] * e.lambda[k];
         w.B.col(q) = w.B.col(q + 1) + e.chord_vabs.col(k) * w.a[k];
         w.C.col(q) = w.C.col(q + 1) + e.chord_vabs.col(k) * (w.a[k] * std::abs(e.lambda[k]));
+        w.D.col(q) = w.D.col(q + 1) + e.chord_vabs.col(k) * (w.a[k] * std::norm(e.lambda[k]));
         w.A0.col(q) = w.A0.col(q + 1) + e.V_re.col(k) * w.zdd[k].real() - e.V_im.col(k) * w.zdd[k].imag();
+        w.A1.col(q) = w.A1.col(q + 1) + e.V_re.col(k) * zl.real() - e.V_im.col(k) * zl.imag();
     }
     Eigen::Index n_sat = 0;   // modes with a finite s_k (only they can join F)
     while (n_sat < n && e.chord_s[n_sat] < kInf) ++n_sat;
@@ -887,29 +905,41 @@ inline constexpr Real kSettleTau = Real{40};
         const Eigen::Index k = e.chord_order[static_cast<std::size_t>(q)];
         w.S.col(q + 1) = w.S.col(q) + e.chord_vabs.col(k) * (w.a[k] * e.chord_s[q]);
     }
-    // whether step d satisfies the bound for every component
-    auto fits = [&](Real d) {
+    // the bound on |e_j| at step d, per component, into w.eb (false: not finite)
+    auto bound = [&](Real d) {
         const Real q = d * d / Real{8};
         const auto i = static_cast<Eigen::Index>(
             std::lower_bound(e.chord_s.data(), e.chord_s.data() + n_sat, q) - e.chord_s.data());
+        const Real d2 = d * d / Real{2};
         if (w.grow.empty()) {
-            return ((w.S.col(i).array()
-                     + q * w.B.col(i).array().min(w.A0.col(i).array().abs() + d * w.C.col(i).array()))
-                    <= tol.array()).all();
+            const auto a0 = w.A0.col(i).array().abs();
+            w.eb = (w.S.col(i).array()
+                    + q * w.B.col(i).array()
+                              .min(a0 + d * w.C.col(i).array())
+                              .min(a0 + d * w.A1.col(i).array().abs() + d2 * w.D.col(i).array()))
+                       .matrix();
+            return true;
         }
         w.gB.setZero(n);
         w.gC.setZero(n);
+        w.gD.setZero(n);
         for (const Eigen::Index k : w.grow) {   // always in S (s_k = ∞)
             const Real m = std::abs(w.zdd[k]) * std::exp(e.lambda[k].real() * d);
             if (!std::isfinite(m)) return false;
             w.gB += e.chord_vabs.col(k) * m;
             w.gC += e.chord_vabs.col(k) * (m * std::abs(e.lambda[k]));
+            w.gD += e.chord_vabs.col(k) * (m * std::norm(e.lambda[k]));
         }
-        return ((w.S.col(i).array()
-                 + q * (w.B.col(i) + w.gB).array().min(
-                           w.A0.col(i).array().abs() + d * (w.C.col(i) + w.gC).array()))
-                <= tol.array()).all();
+        const auto a0 = w.A0.col(i).array().abs();
+        w.eb = (w.S.col(i).array()
+                + q * (w.B.col(i) + w.gB).array()
+                          .min(a0 + d * (w.C.col(i) + w.gC).array())
+                          .min(a0 + d * w.A1.col(i).array().abs() + d2 * (w.D.col(i) + w.gD).array()))
+                   .matrix();
+        return true;
     };
+    // whether step d satisfies the bound for every component
+    auto fits = [&](Real d) { return bound(d) && (w.eb.array() <= tol.array()).all(); };
     if (fits(h)) return h;
     // bisect in log d; lo always fits, so the result is a bound whatever the split does
     Real lo = h * Real{1e-12}, hi = h;

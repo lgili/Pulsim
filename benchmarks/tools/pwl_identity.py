@@ -106,8 +106,25 @@ def run(fn) -> dict:
             return {"raised": f"{type(e).__name__}: {e}"}
 
 
+def _attr_paths(k: str) -> list[str]:
+    """The attribute paths a digest key lies under: ".r.x[0].y#len" ->
+    [".r", ".r.x", ".r.x[0].y"] (index and #len suffixes stay inside)."""
+    parts = k.split(".")[1:]
+    out = []
+    for i, part in enumerate(parts):
+        out.append("." + ".".join(parts[:i] + [part.split("[", 1)[0].split("#", 1)[0]]))
+    return out
+
+
 def first_difference(a: dict, b: dict) -> str | None:
+    """First digest of ``b`` (this run) that differs from ``a`` (the
+    baseline). An attribute the baseline does not have at all is new, not a
+    difference; one the baseline has must match in every digest (a list that
+    grew differs in its #len)."""
+    old = {p for k in a for p in _attr_paths(k)}
     for k in sorted(set(a) | set(b)):
+        if k not in a and any(p not in old for p in _attr_paths(k)):
+            continue
         if a.get(k) != b.get(k):
             return f"{k}: {'present on one side only' if k not in a or k not in b else 'differs'}"
     return None

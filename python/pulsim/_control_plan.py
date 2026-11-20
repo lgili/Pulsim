@@ -128,8 +128,9 @@ class ControlPlan:
             cxx = obs._cxx_chain
             cxx.set_queue_driven(queue)
             if queue:
-                self._queue_groups += [(cxx, gi) for gi
-                                       in range(1, len(cxx.tick_counts()))]
+                groups = range(1, len(cxx.tick_counts()))
+                _check_graph_periods(cxx, groups, float(dt))
+                self._queue_groups += [(cxx, gi) for gi in groups]
         if self._queue_groups:
             # the graphs run after the queue's ticks, in one pass each
             post = list(self.loop_graphs) + post
@@ -193,6 +194,11 @@ class ControlPlan:
         nan, unknown = float("nan"), 2 ** 64 - 1
         kw["tick_origins"] = origins[:n_py] if origins else [nan] * n_py
         kw["tick_next_ks"] = ks[:n_py] if ks else [unknown] * n_py
+        # A group's instant tau is queued at tau + dt, so the last one the
+        # run can serve (tau = t_end - dt, at the call labelled t_end) sits
+        # AT t_end: the queue's run end is closed for them (release finding
+        # F-4-7: the half-open end dropped it, n steps -> n - 1 fires).
+        kw["tick_closed_ends"] = [False] * n_py + [True] * len(self._queue_groups)
         for cxx, gi in self._queue_groups:
             # the graph continues its grid unless time goes back (it then
             # rearms at t_start: rearm_if_restarted)
@@ -359,6 +365,21 @@ def _helper(obs) -> bool:
     """A label-time graph (helpers, C blocks), whatever mode this run's
     control_tick put its chain in."""
     return bool(getattr(getattr(obs, "_graph", None), "label_time", False))
+
+
+def _check_graph_periods(cxx, groups, dt: float) -> None:
+    """The graph's own check (BlockChain::check_periods), before the run: a
+    queue-driven graph meets it only at its first in-run call, where the
+    kernel re-wraps the ControlGraphBuildError as SimulationAborted (release
+    finding F-3-5); the chain path checks in set_solver_dt, before the run."""
+    for gi in groups:
+        period = float(cxx.group_period(gi))
+        if period < dt * (1.0 - 1e-9):
+            from ._pulsim import ControlGraphBuildError  # type: ignore[import-not-found]
+            raise ControlGraphBuildError(
+                f"control graph: a Rate period ({period:.6g} s) is shorter than "
+                f"the fixed solver step ({dt:.6g} s); a group ticks at most once "
+                "per step. Use a period >= dt, or a smaller dt.")
 
 
 def _check_fixed_periods(periods, dt: float, stacklevel: int = 6) -> None:

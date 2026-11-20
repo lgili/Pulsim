@@ -48,6 +48,7 @@
 // rank-reduced in the ZERO_CURRENT mode. This is the seed of the Gate 4
 // linear-solve hook for partial_refactor projection.
 
+#include <array>
 #include <algorithm>
 #include <chrono>
 #include <concepts>
@@ -187,6 +188,7 @@ struct PEDResult {
     std::size_t n_reject = 0;
     std::size_t n_events = 0;
     std::size_t n_exact_steps = 0;   // closed-form LTI propagator
+    std::size_t n_output_samples = 0;   // the output rule's samples (no step)
     std::size_t n_predicate_evals = 0;  // exact path (D10)
     Real cpu_time_seconds = Real{0};
     ModeShadowReport mode_shadow;      // mode_selection='shadow' / 'lcp'
@@ -516,19 +518,28 @@ public:
         law_settled_.clear();
         // a run that threw inside fire_event_ must not leak its event context
         settle_decisions_ = false;
+        start_decision_ = false;
         has_event_sample_ = false;
         loc_dx_.resize(0);
         // the output rule's state is per run: a resumed run rebuilds it (its
         // state range restarts at the snapshot instant), nothing is carried
         output_lo_.resize(0);
         output_count_ = output_events_ = n_output_capped_ = n_output_unbounded_ = 0;
+        output_pend_ = false;
         output_total_ = 0;
         output_budget_t_ = std::numeric_limits<Real>::quiet_NaN();
         if (resume == nullptr) {
             MaskT m0 = system_.current_mask();
             const MaskT prev0 = diode_bits_;
             const MaskT old0 = m0;
+            start_decision_ = true;
+            const std::size_t start_mark = reinit_log_size_();
+            const Vector x_given = x;
             decide_modes_(t, x, m0, old0, prev0, old0, result);
+            start_decision_ = false;
+            // a projection that moved the given state is a reported jump, never silent
+            if constexpr (requires { system_.record_start_projection(t, x_given, x, start_mark); })
+                system_.record_start_projection(t, x_given, x, start_mark);
             // The ticks at t = 0 run before the first sample; the gate is
             // sampled again with what they wrote.
             if (run_due_ticks_(t, x)) {
@@ -575,6 +586,7 @@ public:
 
             // 0. A control tick not taken at a landing (a run that sits
             // on its instant): run it and sample the gate again.
+            if (output_pend_ && tick_due_(t)) output_flush_(t, x, result);
             if (run_due_ticks_(t, x)) {
                 const MaskT before = system_.current_mask();
                 rk_state.invalidate();
@@ -598,8 +610,10 @@ public:
             Real h_use = std::min({h, dt_max_, t_target - t});
             if (h_use <= Real{0}) {
                 // Sitting exactly on a gate edge — fire it.
+                if (output_pend_) output_flush_(t, x, result);
                 if (t_gate < t_end) {
                     const MaskT before = system_.current_mask();
+                    corner_event_ = at_corner ? 2 : 0;
                     fire_event_(t_gate, "gate_edge", PredicateType::GateEdge,
                                   x, rk_state, result);
                     t = t_gate;
@@ -642,7 +656,11 @@ public:
                     if (fast_k_ < fast_t_.size()) {
                         h_ex = std::min(h_ex, fast_t_[fast_k_] - t);
                     }
-                    if (output_rtol_ > Real{0}) h_ex = output_step_(t, x, h_ex, result.n_events, t_target);
+                    // the junction loop's heat lands at each step's end (state_kick_), so a
+                    // sample read inside a step would miss it: there the rule's samples are
+                    // steps (0.04 K of a 7.5 K rise missed otherwise)
+                    const bool out_steps = output_rtol_ > Real{0} && static_cast<bool>(state_kick_);
+                    if (out_steps) h_ex = output_step_(t, x, h_ex, result.n_events, t_target);
                     // no sliver step short of the edge (scheduler_auto.hpp)
                     if (h_ex < t_target - t && near_time(t + h_ex, t_target)) {
                         h_ex = t_target - t;
@@ -655,6 +673,35 @@ public:
                         evt = locate_event_exact_(t, x, h_ex, x_new_,
                                                   result);
                     }
+                    // the output rule's samples inside the step, read from its start
+                    // (the step itself is the rule-free one: F-6-7). F-X-4: the step's
+                    // start may be a deferred end (output_pend_): when the chord from the
+                    // last stored sample covers this step too nothing is stored; else that
+                    // start is stored first. out_defer: the step's end is covered (certified).
+                    bool out_defer = false;
+                    if (output_rtol_ > Real{0} && !out_steps) {
+                        const Real t1 = evt ? evt->t_event : t + h_ex;
+                        if (output_pend_) {
+                            if (!evt) {
+                                const Real ts = result.times.back();
+                                const Real d = output_step_(ts, result.states.back(), t1 - ts,
+                                                            result.n_events, t_target, false);
+                                out_defer = output_certified_ && !(d < t1 - ts);
+                                // the chord ends at the run's chained state, not at the flow
+                                // from ts the bound saw: their gap must stay at rounding level
+                                if (out_defer) {
+                                    advance_(ts, result.states.back(), t1 - ts, output_end_);
+                                    out_defer = ((x_new_ - output_end_).cwiseAbs().array()
+                                                 <= Real{1e-3} * output_tol_.array()).all();
+                                }
+                            }
+                            if (!out_defer) output_flush_(t, x, result);
+                        }
+                        if (!out_defer)
+                            out_defer = push_output_samples_(t, x, t1, result.n_events, t_target, result)
+                                        && !evt;
+                    }
+                    bool out_transparent = !evt;   // the end's fire (if any) moved nothing
                     // An event at the very end of the step fires too:
                     // the next step starts past the crossing and could
                     // never see it again.
@@ -677,10 +724,16 @@ public:
                             if (on_edge && at_corner) t = t_gate;
                             x_pre_event = x;
                             step_fired = true;
-                            run_due_ticks_(t, x);   // a tick at the edge's instant first (D2)
+                            const bool ticked = run_due_ticks_(t, x);   // a tick at the edge's instant first (D2)
+                            corner_event_ = on_edge && at_corner ? 2 : (ticked ? 1 : 0);
                             fire_event_(on_edge ? t_gate : t, on_edge ? "gate_edge" : "control_tick",
                                           PredicateType::GateEdge,
                                           x, rk_state, result);
+                            // a poll landing of a gate that names no edge, which changed
+                            // nothing: the chord across it stays one LTI piece (F-X-4)
+                            out_transparent = on_edge && !at_corner && !ticked
+                                              && system_.current_mask() == mask_before
+                                              && (x.array() == x_pre_event.array()).all();
                             plan_fast_samples_(
                                 t, (on_edge && at_corner)
                                        || !(system_.current_mask() == mask_before));
@@ -690,9 +743,15 @@ public:
                     ++result.n_accept;
                     ++result.n_exact_steps;
                     hook_accepted_(t_step0, t, step_fired ? x_pre_event : x, step_mask);
-                    if (state_kick_) state_kick_(x, step_fired ? &x_pre_event : nullptr);
+                    // a kick (heat on the thermal states) is a jump the LTI chord does not see
+                    const bool kicked = state_kick_ && state_kick_(x, step_fired ? &x_pre_event : nullptr);
                     ++step_idx;
-                    if (step_idx % store_every_ == 0) {
+                    // F-X-4: under the output rule an end the chord from the last stored
+                    // sample covers is not stored (stored later only if a chord needs it)
+                    if (out_defer && out_transparent && !kicked && t < t_end && !near_time(t, t_end)) {
+                        output_pend_ = true;
+                    } else if (step_idx % store_every_ == 0) {
+                        output_pend_ = false;
                         ped_push_sample(result, t, x,
                                         system_.current_mask(), step_mask,
                                         step_fired ? &x_pre_event
@@ -705,6 +764,7 @@ public:
                 }
             }
 
+            if (output_pend_) output_flush_(t, x, result);   // a numeric step stores its own ends
             // 3. Snapshot k1 BEFORE step (needed for Hermite backtrack
             // when a predicate fires inside the step).
             const bool need_pred_scan = (predictor_.size() > 0);
@@ -870,7 +930,9 @@ public:
                     if (on_edge && at_corner) t = t_gate;
                     x_pre_event = x;
                     step_fired = true;
-                    if (run_due_ticks_(t, x)) rk_state.invalidate();   // D2: tick first
+                    const bool ticked = run_due_ticks_(t, x);   // D2: tick first
+                    if (ticked) rk_state.invalidate();
+                    corner_event_ = on_edge && at_corner ? 2 : (ticked ? 1 : 0);
                     fire_event_(on_edge ? t_gate : t, on_edge ? "gate_edge" : "control_tick",
                                   PredicateType::GateEdge,
                                   x, rk_state, result);
@@ -991,12 +1053,16 @@ public:
 
     /// The output-grid rule (update-number-changing-release; off = rtol 0):
     /// each exact step is cut so that linear interpolation between samples
-    /// is within rtol·max(|x_j| seen so far, atol) of every state
+    /// is within max(rtol·range_j, atol) of every state (range_j: its range
+    /// so far, at least 1e-3 of its peak; atol: the run's one absolute
+    /// tolerance, an absolute floor, not scaled by rtol)
     /// (exact_chord_step), at most `cap` cut steps between two events
     /// (n_output_capped counts the intervals where the cap bit), at most
     /// `budget` cut steps in the run (past it the rule stops cutting:
-    /// output_budget_t is the time it ran out, NaN when it did not). The event
-    /// projection then removes the parasitic cluster only (project_).
+    /// output_budget_t is the time it ran out, NaN when it did not). The
+    /// samples are read from the step's start (push_output_samples_): the
+    /// steps are the rule-free ones. The event projection removes the
+    /// parasitic cluster only (project_).
     void set_output_rule(Real rtol, Real atol, std::size_t cap,
                          std::size_t budget = std::size_t{2000000}) noexcept {
         output_rtol_ = rtol;
@@ -1105,6 +1171,7 @@ private:
                 // re-read at each landing; without it a plain Python gate
                 // ran with its t = 0 mask frozen.
                 t_sw = std::min(t_now + dt_max_ * Real{0.1}, t_end);
+                poll_t_ = t_sw;
             }
         }
         if constexpr (requires { system_.next_source_corner_after(t_now); }) {
@@ -1142,6 +1209,7 @@ private:
         const bool ticked = run_due_ticks_(t, x);
         bool fired = false;
         if (on_edge || ticked) {
+            corner_event_ = on_edge && at_corner ? 2 : (ticked ? 1 : 0);
             fire_event_(on_edge ? t_gate : t, on_edge ? "gate_edge" : "control_tick",
                         PredicateType::GateEdge, x, rk_state, result);
             fired = !(system_.current_mask() == before);
@@ -1336,6 +1404,18 @@ private:
         loc_t_tol_ = t_tol;
 
         const auto& preds = predictor_.predicates();
+        // F-X-5: a no-crossing certificate per scan interval. Between events a
+        // diode's predicate is affine in the state, g = Re Σ_k q_k z_k(τ) + d(τ),
+        // q_k = c·V_k, with d affine over the step (piecewise-linear sources) and
+        // z̈_k(τ) = z̈_k(0) e^{λ_k τ}; so |g − chord| on [a, a + δ] is at most
+        // E = Σ_k |q_k z̈_k(a)| min(δ²/8 · e^{max(0, Re λ_k) δ}, 2/|λ_k|²) (the output
+        // rule's per-mode bound, exact_chord_step: curvature, or the decaying
+        // term's amplitude). Ends of one sign with min(|g_a|, |g_b|) > E hold no
+        // root; otherwise the interval is halved (a double crossing, two sign
+        // changes, leaves the ends' signs equal: the D3 scan alone missed one in
+        // active_clamp_forward). Tier-1 modes without sine sources only.
+        const ExactLTI* cert = nullptr;
+        bool cert_tried = false;
         for (std::size_t ip = 0; ip < preds.size(); ++ip) {
             const auto& p = preds[ip];
             if (p.required_bit >= 0 &&
@@ -1344,6 +1424,75 @@ private:
             }
             Real ga = p.value(t0, x0);
             ++result.n_predicate_evals;
+            const Real ga0 = ga;
+            bool aq_ready = false, aq_none = false;
+            const auto aq_of = [&]() -> bool {
+                if (aq_ready) return true;
+                if (aq_none) return false;
+                aq_none = true;
+                if (!cert_tried) {
+                    cert_tried = true;
+                    if constexpr (requires { system_.exact_scan_modes(t0, x0, scan_z_, scan_zdd_); })
+                        cert = system_.exact_scan_modes(t0, x0, scan_z_, scan_zdd_);
+                }
+                if (cert == nullptr) return false;
+                const auto n = x0.size();
+                if (cert->scan_q.size() < preds.size()) cert->scan_q.resize(preds.size());
+                Eigen::VectorXcd& q = cert->scan_q[ip];   // n row entries (and g(0) at the probe's t)
+                if (q.size() != n + 1) {   // once per mode and predicate
+                    q.resize(n + 1);
+                    scan_probe_.setZero(n);
+                    const Real g0 = p.value(t0, scan_probe_);
+                    for (Eigen::Index k = 0; k < n; ++k) {
+                        scan_probe_ = cert->V_re.col(k);
+                        const Real re = p.value(t0, scan_probe_) - g0;
+                        scan_probe_ = cert->V_im.col(k);
+                        q[k] = {re, p.value(t0, scan_probe_) - g0};
+                    }
+                    q[n] = g0;
+                    result.n_predicate_evals += static_cast<Size>(2 * n + 1);
+                }
+                scan_aq_.resize(n);
+                for (Eigen::Index k = 0; k < n; ++k) scan_aq_[k] = std::abs(q[k]) * std::abs(scan_zdd_[k]);
+                aq_ready = true;
+                aq_none = false;
+                return true;
+            };
+            // the row is the predicate's only if g is affine in x at the step start:
+            // an ideal branch diode's DiodeOn reads -1 inside its band, so a probe at
+            // x = 0 can be off by its V_th. Read only where a halving would start (a
+            // certified interval is no event either way); not affine: the D3 scan alone
+            int affine_ = -1;
+            const auto affine = [&]() -> bool {
+                if (affine_ < 0) {
+                    const Eigen::VectorXcd& q = cert->scan_q[ip];
+                    const auto n = q.size() - 1;
+                    scan_probe_.setZero(n);   // g(0) carries the sources: read at t0
+                    Real lin = p.value(t0, scan_probe_), mag = std::abs(lin);
+                    ++result.n_predicate_evals;
+                    for (Eigen::Index k = 0; k < n; ++k) {
+                        const std::complex<Real> qz = q[k] * scan_z_[k];
+                        lin += qz.real();
+                        mag += std::abs(qz);
+                    }
+                    affine_ = std::abs(ga0 - lin) <= Real{1e-6} * (mag + std::abs(ga0)) ? 1 : 0;
+                }
+                return affine_ == 1;
+            };
+            const auto certified = [&](Real a, Real g_a, Real b, Real g_b) {
+                const Real tau = a - t0, d = b - a;
+                Real e = Real{0};
+                for (Eigen::Index k = 0; k < scan_aq_.size(); ++k) {
+                    const std::complex<Real> lam = cert->lambda[k];
+                    const Real re = lam.real();
+                    Real c = d * d / Real{8};
+                    if (re > Real{0}) c *= std::exp(re * d);
+                    const Real r2 = std::norm(lam);
+                    if (re <= Real{0} && r2 > Real{0}) c = std::min(c, Real{2} / r2);
+                    e += (tau > Real{0} ? scan_aq_[k] * std::exp(re * tau) : scan_aq_[k]) * c;
+                }
+                return std::min(std::abs(g_a), std::abs(g_b)) > e;
+            };
             Real ta0 = t0;
             Size scan_from = 0;
             const SchedulerDiode* dio = admissible_sign_(p.type) != 0 ? diode_of_(p.aux_index) : nullptr;
@@ -1448,6 +1597,34 @@ private:
                             : locate_root_bracket([&](Real tau) { return g_at(tau) + off; },
                                                   ta, tb, ga_s, gb + off, t_tol,
                                                   output_rtol_ == Real{0});
+                    }
+                } else if (dio && ga * gb > Real{0} && static_cast<Real>(s) * ga > Real{0}
+                           && aq_of() && !certified(ta, ga, tb, gb) && affine()
+                           && std::abs(ga) > bound_at(ta, xa())
+                           && std::abs(gb) > bound_at(tb, x_at(k + 1))) {
+                    // F-X-5: halve until each piece is certified or holds a significant
+                    // sign change (the first in time); a piece at the depth cap or
+                    // touching zero inside the band is left (no event, as before)
+                    struct Piece { Real a, ga, b, gb; int depth; };
+                    std::array<Piece, 48> st{};
+                    int sp = 0, budget = 256;   // halvings per scan interval
+                    st[static_cast<std::size_t>(sp++)] = Piece{ta, ga, tb, gb, 0};
+                    while (sp > 0 && !root && budget-- > 0) {
+                        const Piece v = st[static_cast<std::size_t>(--sp)];
+                        if (v.depth > 0 && certified(v.a, v.ga, v.b, v.gb)) continue;
+                        if (v.depth >= 40 || !(v.b - v.a > t_tol)) continue;
+                        const Real m = Real{0.5} * (v.a + v.b);
+                        const Real gm = g_at(m);
+                        // a crossing out of the admissible side only (a piece that starts
+                        // past the threshold is a way back: no event, as in the scan)
+                        if (gm * v.ga < Real{0} && static_cast<Real>(s) * v.ga > Real{0}
+                            && std::abs(gm) > bound_at(m, x_tmp_)) {
+                            root = locate_root_bracket(g_at, v.a, m, v.ga, gm, t_tol,
+                                                       output_rtol_ == Real{0});
+                            break;
+                        }
+                        st[static_cast<std::size_t>(sp++)] = Piece{m, gm, v.b, v.gb, v.depth + 1};
+                        st[static_cast<std::size_t>(sp++)] = Piece{v.a, v.ga, m, gm, v.depth + 1};
                     }
                 }
                 ga = gb;
@@ -1579,21 +1756,56 @@ private:
         // a decision that rejected a candidate as an ideal loop and then found no
         // admissible mode is refused by the loop's name: that loop is the cause
         rejected_loop_.reset();
+        last_select_ray_ = false;
         try {
             decide_modes_impl_(t, x, mask, gates_prev, prev_bits, rec, result);
         } catch (const UnsupportedError& e) {
+            // only a selection that ended on a secondary ray (pwl's rule), not a
+            // consistent_mode thrown after a successful one (stale q_he_)
+            if (e.feature() == "consistent_mode" && !rejected_loop_ && last_select_ray_)
+                classify_refusal_(gates_prev, prev_bits, rec);
             if (e.feature() == "consistent_mode" && rejected_loop_) {
                 const UnsupportedError loop = *rejected_loop_;
                 rejected_loop_.reset();
+                // the loop's own advice, not consistent_mode's ("add the missing
+                // path" is wrong for a loop: F-4-1)
                 throw UnsupportedError("dsed", loop.feature(), loop.device(), loop.kind(),
-                                       std::string{loop.what()} + " No other mode is admissible: "
-                                       + e.what());
+                                       std::string{loop.what()}
+                                       + " No other mode of the diodes is admissible.");
             }
             throw;
         }
         rejected_loop_.reset();
     }
     std::optional<UnsupportedError> rejected_loop_;
+    bool last_select_ray_ = false;   // the last run_selector_ ended on a secondary ray
+    /// F-4-1: a failed selection is classified on the selector's closure candidate
+    /// (every ideal diode the posed network does not reverse-bias closed), the rule
+    /// pwl uses: a loop of sources there names the refusal, not `consistent_mode`.
+    void classify_refusal_(const MaskT& gates_prev, const MaskT& prev_bits, const MaskT& rec) {
+        if constexpr (HasNodePairVoltage<System> && HasExactStep<System>) {
+            if (shadow_ports_.size() != diodes_.size()) return;
+            std::vector<char> base(diodes_.size());
+            for (std::size_t j = 0; j < diodes_.size(); ++j)
+                base[j] = prev_bits.get(diodes_[j].switch_idx) ? 1 : 0;
+            const auto cand = selector_.closure_candidate(shadow_ports_, base,
+                                                          selector_.tol * last_scale_.vscale);
+            MaskT m = gates_prev;
+            for (std::size_t j = 0; j < diodes_.size(); ++j)
+                m.set(diodes_[j].switch_idx, cand[j] != 0);
+            system_.set_mask(m);
+            try {
+                (void)system_.has_exact_step();
+            } catch (const UnsupportedError& e) {
+                if (candidate_refusal_(e)) rejected_loop_ = e;
+            } catch (const std::exception&) {
+                // another refusal of that mode: not a structure, consistent_mode stands
+            }
+            system_.set_mask(rec);
+        } else {
+            (void)gates_prev; (void)prev_bits; (void)rec;
+        }
+    }
     /// A candidate mode the extraction cannot pose: an ON ideal diode closing a
     /// loop of sources and closed ideal elements, or a capacitor loop through a
     /// time-varying source. The candidate is rejected and the search goes on; the
@@ -1685,13 +1897,23 @@ private:
                     d.var >= 0 ? d.R_on : Real{1} / d.g_on, d.g_off, d.V_f, d.V_th});
                 shadow_nodes_.emplace_back(d.from, d.to);
                 shadow_labels_.push_back(d.label);
+                // the user's name (.device of a refusal, F-3-2): the label without its branch
+                const auto cut = d.label.rfind(" (branch #");
+                shadow_names_.push_back(cut == std::string::npos ? d.label : d.label.substr(0, cut));
             }
         }
         std::vector<char> prev(diodes_.size());
         for (std::size_t j = 0; j < diodes_.size(); ++j)
             prev[j] = prev_bits.get(diodes_[j].switch_idx) ? 1 : 0;
         system_.set_mask(rec);
-        const events::CircuitScale sc = system_.port_scale(t, x_held);
+        // the start's `rec` is a guess, never integrated: its recovery map can turn a
+        // given inductor current into g_off volts (F-S-4); the state's own scale there
+        events::CircuitScale sc;
+        if constexpr (requires { system_.port_scale_state(x_held); }) {
+            sc = start_decision_ ? system_.port_scale_state(x_held) : system_.port_scale(t, x_held);
+        } else {
+            sc = system_.port_scale(t, x_held);
+        }
         selector_.passive = passivity_.passive();
         const auto sel = selector_.select(
             shadow_ports_, prev,
@@ -1710,7 +1932,12 @@ private:
                 Real worst = Real{0};
                 int c = 0;
                 try {
-                    c = judge_(gates_prev, m, t, x_held, sc, worst);
+                    // F-5-3: the horizons skip the parasitic transient, where an
+                    // OFF pin dumps its inductor current into g_off (a 1 ps gate
+                    // pulse lost): a pin OFF and forward-biased at t+ is not consistent
+                    // (the LCP's decisions only: the default guard's repair keeps its judge)
+                    c = lcp_decides_ && off_forward_at_(gates_prev, m, t, x_held, sc)
+                            ? 0 : judge_(gates_prev, m, t, x_held, sc, worst);
                 } catch (const UnsupportedError& e) {
                     if (!candidate_refusal_(e)) throw;
                     rejected_loop_ = e;
@@ -1741,6 +1968,7 @@ private:
         rep.released += static_cast<std::size_t>(sel.released);
         rep.enumerations += static_cast<std::size_t>(sel.enumerations);
         rep.nonunique_modes += static_cast<std::size_t>(sel.nonunique_modes);
+        last_select_ray_ = sel.status == events::LcpStatus::SecondaryRay;
         last_scale_ = sc;
         return sel;
     }
@@ -1751,14 +1979,14 @@ private:
                      const MaskT& prev_bits, const MaskT& rec, ModeShadowReport& rep)
         requires HasNodePairVoltage<System> {
         const auto sel = run_selector_(t, x_held, gates_prev, prev_bits, rec, rep);
-        events::raise_if_refused(sel, "dsed", t, shadow_labels_, passivity_);
+        events::raise_if_refused(sel, "dsed", t, shadow_labels_, passivity_, &shadow_names_);
         rejected_loop_.reset();   // a mode was selected: a later refusal is not that loop's
         for (std::size_t j = 0; j < diodes_.size(); ++j)
             diode_bits_.set(diodes_[j].switch_idx, sel.on[j] != 0);
         MaskT m = gates_prev.overlay(diode_bits_, diode_owned_);
         system_.set_mask(m);
         pose_or_open_loops_(t, x_held, gates_prev, m);
-        release_band_ties_(t, x_held, m);
+        release_band_ties_(t, x_held, m, sel.tied);
         pose_or_open_loops_(t, x_held, gates_prev, m);
         return m;
     }
@@ -1825,7 +2053,13 @@ private:
     /// one pass per diode. A gated bridge from rest (sine through D1, D4)
     /// kept D1 OFF, its signal rising 3e4 V/s from exactly 0, while a pin
     /// held D4 ON: the predicate starts on its event side and never fires.
-    void release_band_ties_(Real t, const Vector& x, MaskT& mask)
+    /// Only the selector's remaining ties (`tied`): a port a pass DECIDED OFF
+    /// (its gap clear of tol_w) is not reopened by a signal that sits in the
+    /// band at t (F-4-3: the ideal PSFB's D1 decided OFF with a 3.4e-4 V gap,
+    /// its C_j state at 1.3e-13 V, the ladder read that residue as forward and
+    /// D1 went ON into a reverse current). Empty `tied`: every OFF diode (the
+    /// default guard's repair, unchanged).
+    void release_band_ties_(Real t, const Vector& x, MaskT& mask, const std::vector<char>& tied)
         requires HasNodePairVoltage<System> {
         // The band on the circuit's scale (sources included): from rest every node
         // is 0 V and zero_band_tol_ is 0, so a rounding-level look-ahead (1e-20 V)
@@ -1833,8 +2067,9 @@ private:
         const Real tol = tie_band_(t, x);
         for (std::size_t pass = 0; pass < diodes_.size(); ++pass) {
             bool flipped = false;
-            for (const auto& d : diodes_) {
-                if (diode_bits_.get(d.switch_idx)) continue;
+            for (std::size_t jd = 0; jd < diodes_.size(); ++jd) {
+                const auto& d = diodes_[jd];
+                if (diode_bits_.get(d.switch_idx) || (!tied.empty() && !tied[jd])) continue;
                 const Real sig = models::SwitchedDiode::crossing_signal(
                     false, system_.node_pair_voltage(d.from, d.to, t, x), d.params());
                 const MaskT before = mask;
@@ -1925,7 +2160,7 @@ private:
         events::ModeSelection sel;
         try {
             sel = run_selector_(t, shadow_x_, gates_prev, prev_bits, rec, g.lcp);
-            events::raise_if_refused(sel, "dsed", t, shadow_labels_, passivity_);
+            events::raise_if_refused(sel, "dsed", t, shadow_labels_, passivity_, &shadow_names_);
             rejected_loop_.reset();   // a mode was selected: a later refusal is not that loop's
         } catch (const UnsupportedError& e) {
             throw UnsupportedError(
@@ -1959,7 +2194,8 @@ private:
         mask = gates_prev.overlay(diode_bits_, diode_owned_);
         system_.set_mask(mask);
         pose_or_open_loops_(t, shadow_x_, gates_prev, mask);
-        release_band_ties_(t, shadow_x_, mask);
+        // the default guard (no LCP decisions) keeps releasing every band tie
+        release_band_ties_(t, shadow_x_, mask, lcp_decides_ ? sel.tied : std::vector<char>{});
         pose_or_open_loops_(t, shadow_x_, gates_prev, mask);
         x = shadow_x_;
         undo_reinit_records_();
@@ -2024,8 +2260,16 @@ private:
                 if (by_value == on
                     || std::abs(models::SwitchedDiode::crossing_signal(on, v_d, prm)) <= tol)
                     continue;
-                // confirmed on the OFF-mode trajectory, as the settle confirms a flip
-                if (zero_band_on_(t, x, d, mask, tol, by_value) == on) continue;
+                // confirmed on the OFF-mode trajectory, as the settle confirms a flip. At
+                // t = 0 from the GIVEN state: no event precedes it, and the projection's
+                // slow-manifold asymptote lags the trajectory by the parasitic time
+                // constant (F-S-4: 200 pF across 1 mOhm under a 40 A/us ramp sits at
+                // -8e-9 V, while v_b(t) = R i' (t - tau (1 - e^(-t/tau))) >= 0 from the given
+                // state: the body diode was turned ON and carried -4 mA). After an event
+                // the projected state is the jump's physics (the forward converter below);
+                // reading the held state there broke 8 scoreboard cells.
+                if (zero_band_on_(t, start_decision_ ? x_held : x, d, mask, tol, by_value) == on)
+                    continue;
                 if (pass == 4) { flipped = d.label; break; }
                 diode_bits_.set(d.switch_idx, !on);
                 flipped = d.label;
@@ -2210,14 +2454,20 @@ private:
                     changed = true;
                     project_(t, x);
                 }
-                if (track && changed && reinit_log_size_() > mark) {
-                    // a trial mode's projection left records behind: that jump is
-                    // not physics, so the settled mode starts again from the
-                    // pre-event state (its own records alone). Keeping the iterated
-                    // state carried a cut-set trial's i_L = 0 into the freewheel
-                    // mode it settled in, with no record (the decision on the
-                    // projection's 1e-18 A residue is rounding: MSVC, R = 10·(1−u))
-                    truncate_reinit_log_(mark);
+                if (changed) {
+                    // a trial mode's projection is not physics: the settled mode
+                    // starts again from the pre-event state (its own records and
+                    // its own projection alone). Keeping the iterated state carried
+                    // a cut-set trial's i_L = 0 into the freewheel mode it settled
+                    // in, with no record (MSVC, R = 10·(1−u)), and a trial's
+                    // PARTIAL slow-manifold projection (no record at all) into the
+                    // forward converter's freewheel mode: I(L_o) +0.585 A in 0.2 ps
+                    // under the output rule's cut (F-X-6). The restart is not
+                    // re-checked by the cascade: on the forward converter the
+                    // restarted state reads D_fw off again at every switch-off
+                    // (a current at its threshold), and the restart is the state
+                    // the mpmath truth confirms (5.6208 A)
+                    if (track) truncate_reinit_log_(mark);
                     x = settle_x0_;
                     project_(t, x);
                 }
@@ -2332,6 +2582,9 @@ private:
                        int aux_index = -1) {
         const MaskT old_mask = system_.current_mask();
         const MaskT prev_bits = diode_bits_;
+        const Real prev_time_event_t = last_time_event_t_;
+        const int inputs = corner_event_;   // set by the caller for this call only
+        corner_event_ = 0;
         if (ptype == PredicateType::GateEdge) last_time_event_t_ = t_event;   // next_time_event_
         // the event's left limit for a step hook listening to events (the loss port)
         const bool hook_event = hooks_ != nullptr && hooks_->has_event();
@@ -2355,6 +2608,11 @@ private:
                 && loc_t_tol_ > Real{0} && system_.has_exact_step()) {
                 advance_(t_event, x, loc_t_tol_, loc_dx_);
                 loc_dx_ -= x;
+                // the root, kept for root_time_error_ (computed only if a decision
+                // would revert this crossing: zero_band_on_)
+                loc_root_x_ = x;
+                loc_root_mask_ = old_mask;
+                loc_fired_ = aux_index;
             }
         }
 
@@ -2381,8 +2639,20 @@ private:
         const MaskT new_mask =
             effective_mask_(switch_fn_(advance_past(t_event)));
 
-        // Drop spurious same-mask gate edges silently.
-        if (ptype == PredicateType::GateEdge && new_mask == old_mask) {
+        // Drop spurious same-mask gate edges silently — unless a diode is undecided
+        // there (a source corner on its zero: F5 (a)).
+        if (ptype == PredicateType::GateEdge && new_mask == old_mask
+            && !undecided_at_time_event_(t_event, x, inputs)) {
+            // F-X-1: a poll landing of a gate that names no edge, which changed
+            // nothing, is not a time event: as one it made resolved_scale_ the time
+            // left to t_end, so the parasitic cluster shrank as the run neared its
+            // end (ten bridges: a 2e-10 s mode left the cluster 31 us before t_end).
+            // A gate whose next_edge_after is itself a poll boundary (a Python gate's
+            // EdgeSearch: has_edge_oracle() false) lands there the same way.
+            bool polled = t_event == poll_t_;
+            if constexpr (requires { switch_fn_.has_edge_oracle(); })
+                polled = polled || !switch_fn_.has_edge_oracle();
+            if (polled) last_time_event_t_ = prev_time_event_t;
             return;
         }
 
@@ -2450,6 +2720,8 @@ private:
         }
         settle_decisions_ = false;
         loc_dx_.resize(0);
+        loc_fired_ = -1;
+        loc_dt_ = std::numeric_limits<Real>::quiet_NaN();
 
         // Consistent reinitialization (Phase-3 item 2). The event
         // deposits x off the new mode's slow manifold — a µA of
@@ -2475,6 +2747,72 @@ private:
             // trial records truncated): left under old_mask, right under final_mask
             if (hook_event) hooks_->event(t_event, hook_x_left_, old_mask, x, final_mask);
         }
+    }
+
+    /// The located root's TIME error (F5 (b)): the locator stops where the crossing
+    /// signal g is zero only to its significance bound B (signal_bound_ at the
+    /// root), so the root is known to t_tol + B / |ġ| (ġ the signal's slope there
+    /// along the pre-event mode, read as the secant to the first significant rung
+    /// of the ladder). A decision in another mode reads its own signal over that
+    /// window as noise (ladder_sign_'s dt0): the OFF mode of a conductance diode
+    /// amplifies the ON signal's B by 1 + R·g_on (1e5: +1.35e-10 V at a located
+    /// turn-off on a falling ramp, which kept the diode ON while v_D fell at
+    /// −2.77e5 V/s). t_tol alone when the signal never becomes significant.
+    /// Read at (t, x) under the pre-event mask, `on` the diode's pre-event state.
+    [[nodiscard]] Real root_time_error_(Real t, const Vector& x, const SchedulerDiode* d, bool on)
+        requires HasExactStep<System> {
+        if (d == nullptr) return loc_t_tol_;
+        const auto prm = d->params();
+        const auto g_of = [&](Real tau, const Vector& xx) {
+            return models::SwitchedDiode::crossing_signal(on, law_v_(*d, tau, xx), prm);
+        };
+        const Real g0 = g_of(t, x);
+        Real dk = Real{0}, gk = Real{0};
+        if (ladder_sign_(t, x, *d, decision_cap_(t), g_of, dk, nullptr, Real{0}, &gk) == 0)
+            return loc_t_tol_;
+        const Real slope = std::abs(gk - g0) / dk;
+        const Real b = signal_bound_(*d, t, x, signal_scale_(*d, t, x), signal_abs_(*d, t, x));
+        return slope > Real{0} ? loc_t_tol_ + b / slope : loc_t_tol_;
+    }
+
+    /// A source corner that keeps the mask still changes every predicate's RATE (the
+    /// source's new slope enters ġ), so a diode whose signal sits in its zero band
+    /// there is decided as the settle cascade would (its first round: by the sign
+    /// of the first non-vanishing derivative after t, zero_band_on_); at a tick
+    /// (a new level) so is a diode past its threshold beyond the band. A poll
+    /// changes no input and decides nothing (`inputs`: 2 corner, 1 tick, 0 poll). The scan after the event cannot: it leaves a
+    /// start on, or past, the event side to the mode decision (locate_event_exact_),
+    /// which a dropped event never ran — a pulse rising from 0 V kept its diode OFF
+    /// under 10 V (F5 (a)). True when a diode would flip: the event then runs the
+    /// full decision.
+    [[nodiscard]] bool undecided_at_time_event_(Real t, const Vector& x, int inputs) {
+        if constexpr (HasNodePairVoltage<System>) {
+            // a poll changes no input: the scan located every crossing up to it
+            if (!has_diodes_ || inputs == 0) return false;
+            const bool corner = inputs == 2;
+            const MaskT mask = system_.current_mask();
+            const Real tol = zero_band_tol_(t, x);
+            for (const auto& d : diodes_) {
+                const bool on = diode_bits_.get(d.switch_idx);
+                const Real v_d = law_v_(d, t, x);
+                const auto prm = d.params();
+                const bool by_value = models::SwitchedDiode::decide(on, v_d, prm);
+                const bool in_band =
+                    std::abs(models::SwitchedDiode::crossing_signal(on, v_d, prm))
+                    <= (d.reads_current() ? signal_bound_(d, t, x, Real{-1}, Real{0}) : tol);
+                // in its band: a decision only where the rates change (a corner);
+                // elsewhere nothing moved it and continuity keeps the mode (a poll
+                // re-deciding a leakage-level ON diode in a bridge cut 264 us off
+                // its conduction against the mpmath truth)
+                if (in_band && !corner) continue;
+                if ((in_band || by_value != on)
+                    && zero_band_on_(t, x, d, mask, tol, in_band ? false : by_value) != on)
+                    return true;
+            }
+        } else {
+            (void)t; (void)x; (void)inputs;
+        }
+        return false;
     }
 
     // ----- v2.0 Phase 3: diode-commutation machinery -----------------
@@ -2674,10 +3012,13 @@ private:
     /// decision, the settle cascade, the LCP re-settle and the guard's repair.
     template <class G>
     int ladder_sign_(Real t0, const Vector& x0, const SchedulerDiode& d, Real cap,
-                     G&& g_of, Real& d_out, const Vector* dx0 = nullptr)
+                     G&& g_of, Real& d_out, const Vector* dx0 = nullptr,
+                     Real dt0 = Real{0}, Real* g_out = nullptr)
         requires HasExactStep<System> {
         // dx0: the start's own error (a located root's): the signal moved by it
-        // along the mode, |g(x0 + dx0) − g(x0)|, is not significant either
+        // along the mode, |g(x0 + dx0) − g(x0)|, is not significant either.
+        // dt0: the same root's TIME error (root_time_error_): the signal moved
+        // along this mode over dt0, sources included, is not significant either
         if (dx0) x_offp_ = x0 + *dx0;
         // the trajectory's scale over the horizon: the propagated inputs'
         // rounding is relative to it, not to a state at rest
@@ -2693,8 +3034,13 @@ private:
                 advance_(t0, x_offp_, delta, x_lad2_);
                 b_loc = std::abs(g_of(t0 + delta, x_lad2_) - g);
             }
+            if (dt0 > Real{0}) {
+                advance_(t0, x0, delta + dt0, x_lad2_);
+                b_loc = std::max(b_loc, std::abs(g_of(t0 + delta + dt0, x_lad2_) - g));
+            }
             if (std::abs(g) > signal_bound_(d, t0 + delta, x_lad_, s0, v0) + b_loc) {
                 d_out = delta;
+                if (g_out) *g_out = g;
                 return g > Real{0} ? 1 : -1;
             }
         }
@@ -2877,11 +3223,27 @@ private:
                     dx0 = &dxs;
                 }
                 Real dj = Real{0};
-                const int sg = ladder_sign_(t0, x0, d, decision_cap_(t0),
-                    [&](Real tau, const Vector& xx) {
-                        return models::SwitchedDiode::crossing_signal(
-                            false, system_.node_pair_voltage(d.from, d.to, tau, xx), prm);
-                    }, dj, dx0);
+                const auto g_off_mode = [&](Real tau, const Vector& xx) {
+                    return models::SwitchedDiode::crossing_signal(
+                        false, system_.node_pair_voltage(d.from, d.to, tau, xx), prm);
+                };
+                int sg = ladder_sign_(t0, x0, d, decision_cap_(t0), g_off_mode, dj, dx0);
+                // F5 (b): a decision that reverts the located crossing (the fired
+                // diode back to its pre-event state) must be significant beyond the
+                // root's TIME error too (root_time_error_); computed once per event,
+                // and only here: an agreeing decision needs no more noise
+                if (dx0 && loc_fired_ == static_cast<int>(d.switch_idx)
+                    && (sg > 0) == loc_root_mask_.get(d.switch_idx)) {
+                    if (std::isnan(loc_dt_)) {
+                        system_.set_mask(loc_root_mask_);
+                        loc_dt_ = root_time_error_(t, loc_root_x_, &d,
+                                                   loc_root_mask_.get(d.switch_idx));
+                        diode_bits_.set(d.switch_idx, false);   // back to the candidate OFF mode
+                        system_.set_mask(mask.overlay(diode_bits_, diode_owned_));
+                        diode_bits_.set(d.switch_idx, was);
+                    }
+                    sg = ladder_sign_(t0, x0, d, decision_cap_(t0), g_off_mode, dj, dx0, loc_dt_);
+                }
                 // no significant rung: zero to double precision up to the cap,
                 // the diode keeps its mode (rest and exact ties stay quiet)
                 on = sg > 0;
@@ -3006,6 +3368,24 @@ private:
             (void)gates; (void)mode; (void)t; (void)x; (void)sc; (void)worst_j;
             return -1;
         }
+    }
+
+    /// Some diode OFF in `mode` breaks its law at t itself on `x` (the right limit
+    /// of the event in that mode, before any parasitic transient). Leaves the
+    /// system's mask at the mode's.
+    bool off_forward_at_(const MaskT& gates, const std::vector<char>& mode, Real t,
+                         const Vector& x, const events::CircuitScale& sc)
+        requires HasNodePairVoltage<System> {
+        MaskT m = gates;
+        for (std::size_t j = 0; j < diodes_.size(); ++j)
+            m.set(diodes_[j].switch_idx, mode[j] != 0);
+        for (std::size_t j = 0; j < diodes_.size(); ++j) {
+            if (mode[j]) continue;
+            system_.set_mask(m);
+            if (breaks_law_(diodes_[j], false, t, x) && !held_across_ideal_path_(diodes_[j], m, t, x, sc))
+                return true;
+        }
+        return false;
     }
 
     /// An OFF ideal diode whose ON mode would close a loop of closed ideal
@@ -3162,7 +3542,9 @@ private:
     ChordWork output_work_;
 
     /// The exact step from (t, x) cut by the output rule (exact_chord_step).
-    Real output_step_(Real t, const Vector& x, Real h, std::size_t n_events, Real t_target) {
+    Real output_step_(Real t, const Vector& x, Real h, std::size_t n_events, Real t_target,
+                      bool count = true) {
+        output_certified_ = false;   // true only when the bound decided the returned step
         if constexpr (requires(bool& b, ChordWork& w) {
                           system_.exact_output_step(t, x, x, Real{}, h, b, w); }) {
             // a new interval: an event fired, or a time event (tick, edge, corner) passed
@@ -3183,27 +3565,35 @@ private:
             output_lo_ = output_lo_.cwiseMin(x);
             output_hi_ = output_hi_.cwiseMax(x);
             // relative to each state's range so far (a ripple on a large DC level
-            // is what a plot reads), floored at 1e-3 of its peak and at atol
+            // is what a plot reads; at least 1e-3 of its peak), with the run's atol
+            // as an ABSOLUTE floor (F-X-3): a state sitting at ~0 V is held to atol,
+            // not to rtol·atol = rounding (a 500-section ladder's far nodes cut
+            // every chord to 1e-14 V against a bound that cannot see their cancellation)
             auto set_tol = [&] {
-                output_tol_ = (output_hi_ - output_lo_)
-                                  .cwiseMax(Real{1e-3} * output_hi_.cwiseAbs().cwiseMax(output_lo_.cwiseAbs()))
-                                  .cwiseMax(Vector::Constant(x.size(), output_atol_)) * output_rtol_;
+                output_tol_ = ((output_hi_ - output_lo_)
+                                   .cwiseMax(Real{1e-3} * output_hi_.cwiseAbs().cwiseMax(output_lo_.cwiseAbs()))
+                               * output_rtol_)
+                                  .cwiseMax(Vector::Constant(x.size(), output_atol_));
             };
             set_tol();
             bool bounded = true;
             Real d = system_.exact_output_step(t, x, output_tol_, output_rtol_, h, bounded, output_work_);
             if (d < h) {
                 // the scale of the interval ahead too (a state starting from rest
-                // would otherwise be cut to its atol floor); only a step the bound
-                // cuts needs it: a wider range only lengthens the step
+                // would otherwise be cut to its atol floor); only a step the bound cuts needs it
                 advance_(t, x, h, output_end_);
                 output_lo_ = output_lo_.cwiseMin(output_end_);
                 output_hi_ = output_hi_.cwiseMax(output_end_);
                 set_tol();
                 d = system_.exact_output_step(t, x, output_tol_, output_rtol_, h, bounded, output_work_);
             }
-            if (!bounded) ++n_output_unbounded_;
+            if (!bounded) {
+                if (count) ++n_output_unbounded_;
+                return h;
+            }
+            output_certified_ = true;
             if (!(d < h)) return h;
+            if (!count) return d;
             ++output_total_;
             if (++output_count_ == output_cap_) ++n_output_capped_;
             // never below the time's own resolution (a zero tolerance is floored by atol)
@@ -3213,10 +3603,44 @@ private:
         (void)t; (void)x; (void)n_events; (void)t_target;
         return h;
     }
+    Vector output_x_;   // push_output_samples_: the sample being read
+    bool output_certified_ = false;   // output_step_: the bound decided its step
+    bool output_pend_ = false;   // the current step start is an end not stored (F-X-4)
+    void output_flush_(Real t, const Vector& x, PEDResult<MaskT>& result) {
+        const MaskT m = system_.current_mask();
+        ped_push_sample(result, t, x, m, m, nullptr);
+        output_pend_ = false;
+    }
+
+    /// The output rule's samples strictly inside the exact step [t0, t1) taken
+    /// from (t0, x0). Each is EVALUATED from the step's start, x(τ) = Φ(τ − t0)·x0,
+    /// never propagated from the sample before it: the run's state, its steps
+    /// and every event located on them are the rule-free run's, whatever is
+    /// sampled (F-6-7: a chained Φ(δ) per sample accumulated a rounding of the
+    /// mode's basis each, 6.6e-8 A on ten bridges at 1e-5, 2.1e-6 A at 1e-8).
+    /// True when the last chord (to t1) was certified by the bound (not the
+    /// cap / budget / an unbounded mode): only then may t1 go unstored (F-X-4).
+    bool push_output_samples_(Real t0, const Vector& x0, Real t1, std::size_t n_events,
+                              Real t_target, PEDResult<MaskT>& result) {
+        const MaskT mask = system_.current_mask();
+        Real tau = t0;
+        output_x_ = x0;
+        for (;;) {
+            const Real h = t1 - tau;
+            const Real d = output_step_(tau, output_x_, h, n_events, t_target);
+            // no sample a sliver short of the step's end (the end is a sample)
+            if (!(d < h) || near_time(tau + d, t1)) return output_certified_ && !(d < h);
+            tau += d;
+            advance_(t0, x0, tau - t0, output_x_);
+            ped_push_sample(result, tau, output_x_, mask, mask, nullptr);
+            ++result.n_output_samples;
+        }
+    }
     Real probe_t_end_ = std::numeric_limits<Real>::infinity();   // next_time_event_
     std::size_t reinit_mark_ = 0;   // reinit_log_size_() before the settle
     Vector settle_x0_;   // settle_and_project_: the pre-event state (its records)
     Real last_time_event_t_ = std::numeric_limits<Real>::quiet_NaN();   // last gate edge / corner fired
+    Real poll_t_ = std::numeric_limits<Real>::quiet_NaN();   // next_gate_edge_: the last poll boundary
     // add-unified-event-queue group 3: the run's time events (start_time_events_)
     events::EventQueue queue_;
     events::TickPlan ticks_;
@@ -3241,7 +3665,7 @@ private:
     bool guard_refuses_ = false; // guard off: refuse what it would repair
     events::PassivityClass passivity_;
     events::CircuitScale last_scale_;
-    std::vector<std::string> shadow_labels_;
+    std::vector<std::string> shadow_labels_, shadow_names_;
     events::ModeSelector selector_;
     std::vector<events::DiodePort> shadow_ports_;
     std::vector<std::pair<Index, Index>> shadow_nodes_;
@@ -3264,14 +3688,24 @@ private:
     };
     Vector x_set_, x_off_;     // settled_: the cascade's and the OFF probe's
     bool settle_decisions_ = false;   // fire_event_: a located diode event
+    bool start_decision_ = false;     // the t = 0 decision: its mask is a guess (F-S-4)
     Vector event_sample_;             // D1: the settled state stored at a located diode event
     bool has_event_sample_ = false;
     std::vector<std::pair<std::size_t, Vector>> law_settled_;   // D1: (sample, settled state)
     // The located root's time tolerance (locator) and the state error it
     // carries, x(t + t_tol) − x(t) in the pre-event mode (fire_event_).
     Real loc_t_tol_ = Real{0};
+    Real loc_dt_ = std::numeric_limits<Real>::quiet_NaN();   // root_time_error_, NaN until read
+    int loc_fired_ = -1;          // the located event's diode (switch index), -1 outside one
+    MaskT loc_root_mask_{};       // its pre-event mask
+    Vector loc_root_x_;           // its root state
+    int corner_event_ = 0;   // the next fire_event_'s inputs: 2 a source corner, 1 a tick, 0 neither
     Vector loc_dx_, x_lad2_, x_offp_;
     std::vector<Vector> scan_x_;
+    Eigen::VectorXcd scan_zdd_;   // locate_event_exact_'s certificate: z̈ at the step start
+    Eigen::VectorXcd scan_z_;     // and z = V⁻¹x there
+    Vector scan_probe_;           // the predicate row's probe state
+    Vector scan_aq_;              // |q_k z̈_k(0)| of one predicate
 };
 
 }  // namespace pulsim::dsed

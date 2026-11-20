@@ -89,6 +89,12 @@ KINDS = {
         b.add_sine_voltage_source("Vs", "a", "gnd", 0.0, 5.0, 1e3),
         b.add_winding("W", "a", "gnd", "m", "gnd", 1.0),
         b.add_excess_loss("X", "m", "gnd", v, 1e-2))),
+    # add-realistic-passives D18: both ports carry the line's Z0
+    "TransmissionLine": ("X.Z0", 50.0, 80.0, lambda b, v: (
+        _src(b), b.add_resistor("Rp", "a", "p", 10.0),
+        b.add_transmission_line("X", "p", "gnd", "o", "gnd", Z0=v, delay=1e-5,
+                                model="bergeron"),
+        b.add_resistor("R", "o", "gnd", 10.0))),
     "IdealTransformer": ("X.n", 2.0, 3.0, lambda b, v: (
         _src(b), b.add_resistor("Rp", "a", "p", 1.0),
         b.add_ideal_transformer("X", "p", "gnd", "s", "gnd", v), b.add_resistor("R", "s", "gnd", 10.0))),

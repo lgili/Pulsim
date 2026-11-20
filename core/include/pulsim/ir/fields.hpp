@@ -326,6 +326,10 @@ inline constexpr std::array kInductionMachine{
     direct<IM, &IM::T_load>("T_load", B::Finite).doc("N*m", "constant load torque")};
 inline constexpr std::array kIdealXfmr{
     direct<m::IdealTransformer::Params, &m::IdealTransformer::Params::n>("n", B::Positive).doc("1", "turns ratio").listed_in_components()};
+using TL = m::TransmissionLine::Params;
+inline constexpr std::array kTransmissionLine{
+    direct<TL, &TL::Z0>("Z0", B::Positive).doc("Ohm", "surge (characteristic) impedance").listed_in_components(),
+    direct<TL, &TL::delay>("delay", B::Positive).doc("s", "one-way travel time; the step must not exceed it").listed_in_components()};
 inline constexpr std::array kVccs{
     direct<m::VCCS::Params, &m::VCCS::Params::gm>("gm", B::Finite).doc("S", "transconductance").listed_in_components()};
 inline constexpr std::array kCccs{
@@ -370,7 +374,8 @@ inline constexpr std::array<std::span<const FieldSpec>, pwl::DevicePool::kNumKin
         detail::kPmsm,         detail::kIdealXfmr,     detail::kVccs,
         detail::kCccs,         detail::kCcvs,          detail::kGyrator,
         detail::kSineI,        detail::kPulseI,        detail::kPwlI,
-        detail::kInductionMachine, detail::kExternal, detail::kExcessLoss};
+        detail::kInductionMachine, detail::kExternal, detail::kExcessLoss,
+        detail::kTransmissionLine};
 static_assert(kKindFields.size() == pwl::kKindCaps.size(),
               "every device kind needs a row in ir::kKindFields");
 
@@ -424,6 +429,8 @@ inline void check_device(const ParamsVariant& v, std::string_view field) {
             m::ShockleyDiode::validate(p);
         } else if constexpr (std::is_same_v<P, m::ExcessLoss::Params>) {
             m::ExcessLoss::validate(p);
+        } else if constexpr (std::is_same_v<P, m::TransmissionLine::Params>) {
+            m::TransmissionLine::validate(p);
         } else if constexpr (std::is_same_v<P, m::PmsmMna::Params>) {
             if (p.harmonics && field == "psi_pm") unread("PM-harmonic");
             if (p.flux_map && (field == "psi_pm" || field == "L_d" || field == "L_q")) {

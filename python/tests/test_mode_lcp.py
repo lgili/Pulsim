@@ -296,8 +296,11 @@ def test_lcp_bridge_on_a_floating_source_is_not_decided_by_rounding(source, h_e_
         assert on.any(), d                                              # D2 and D3 never conducted
         assert v[~on].max() < 1e-9, d                                   # D2 blocked +49.86 V
     if h_e_rel == DD.H_E_REL == 1e-7:
+        # Not bit-identical to the default since F-4-3 (group C): at D4's turn-off (5.98 ms) the
+        # LCP decides D1 OFF (reverse-biased, -3.6e-6 V or less, no tie) and the band-tie release
+        # no longer reopens it; the default keeps D1 ON for a few samples at -7.8e-11 A.
         r0 = _sim(b, 0.04)
-        assert np.array_equal(np.asarray(r.states), np.asarray(r0.states))
+        assert _end(r, "p-n") == pytest.approx(_end(r0, "p-n"), rel=1e-12)
 
 
 def _bridge_bank(n, ls=0.2e-3):

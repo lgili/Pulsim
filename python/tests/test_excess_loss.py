@@ -274,3 +274,17 @@ def test_excess_loss_on_a_triangular_flux_is_c_u_to_the_1p5():
     P = period_mean(t, r.v("X.e") * r.i("X"), T, 2)
     assert P == pytest.approx(c * U ** 1.5, rel=3e-4)
     assert P < c * U ** 1.5
+
+
+def test_thermal_specs_on_an_excess_loss_is_refused_by_name():
+    """The excess element dissipates (device_loss_summary books it under
+    core_loss), but the thermal summary has no junction model for it:
+    thermal_specs naming it is refused by name (release group G), never
+    left out of the result silently."""
+    b = drive(perm=2e-6)
+    r = p.simulate(b, t_end=2e-4, engine="pwl", dt=1e-6)
+    with pytest.raises(p.OptionsError, match="'X'") as ei:
+        p.device_thermal_summary(
+            b, r, thermal_specs={"X": {"stages": [p.FosterStage(1.0, 1e-3)]}})
+    assert ei.value.option == "thermal_specs"
+    assert "excess_loss" in str(ei.value)

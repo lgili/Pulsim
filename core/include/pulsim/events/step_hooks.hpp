@@ -77,6 +77,13 @@ struct StepRunView {
     const pwl::HistoryState* history = nullptr;
     const pwl::StatefulHistories* stateful = nullptr;
     const Real* probe_dt = nullptr;
+    /// Release F-4-4: set only while `line()` hands the sink one line of a
+    /// fixed step the restart rule integrated on lines. `cap_start` /
+    /// `cap_end`: per history entry, a capacitor's companion current at
+    /// the line's start / end (nullptr: the committed `i_prev`).
+    const Real* cap_start = nullptr;
+    const Real* cap_end = nullptr;
+    bool line = false;
 };
 
 class StepHooks {
@@ -225,6 +232,32 @@ public:
         sink_(sink_ctx_, t_prev, contiguous ? nullptr : &x_start,
               contiguous ? nullptr : &mask_start, t, x_end, mask_end);
     }
+    /// Release F-4-4: a fixed step taken by the restart rule, integrated on
+    /// its lines (solver::StepLines), goes to the `on_step` functions whole
+    /// (`step_fns`) and to the sink line by line (`line`): each line from
+    /// its start (a right limit where the line starts from one: the sink
+    /// sees a jump) to its end, with the capacitors' companion currents at
+    /// both points. Never batched (the held rows go first).
+    void step_fns(Real t_prev, const Vector& x_start, const topology::SwitchStateMask& mask_start,
+                  Real t, const Vector& x_end, const topology::SwitchStateMask& mask_end) const {
+        for (const auto& f : step_) f(t_prev, x_start, mask_start, t, x_end, mask_end);
+    }
+    /// The sink takes lines (default); false: `takes_lines()` tells the
+    /// engine to hand it whole steps.
+    void set_sink_takes_lines(bool v) noexcept { sink_lines_ = v; }
+    [[nodiscard]] bool takes_lines() const noexcept { return sink_ != nullptr && sink_lines_; }
+    void line(Real t0, const Vector& xs, const topology::SwitchStateMask& ms, Real t,
+              const Vector& xe, const topology::SwitchStateMask& me, const Real* cap_start,
+              const Real* cap_end) {
+        if (sink_ == nullptr) return;
+        flush_steps();
+        view_.cap_start = cap_start;
+        view_.cap_end = cap_end;
+        view_.line = true;
+        sink_(sink_ctx_, t0, &xs, &ms, t, xe, me);
+        view_.cap_start = view_.cap_end = nullptr;
+        view_.line = false;
+    }
     /// Hand the batched steps to the sink (no-op when none are held).
     void flush_steps() {
         if (batch_n_ == 0) return;
@@ -303,6 +336,7 @@ private:
     StepSinkFn sink_ = nullptr;
     void* sink_ctx_ = nullptr;
     StepBatchFn batch_fn_ = nullptr;
+    bool sink_lines_ = true;
     static constexpr Size kBatchRows = 128;
     std::vector<Real> batch_;
     Size batch_cap_ = 0, batch_n_ = 0, batch_stride_ = 0;   // rows

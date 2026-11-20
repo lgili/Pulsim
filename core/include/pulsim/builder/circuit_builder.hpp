@@ -965,6 +965,77 @@ public:
         return *this;
     }
 
+    /// add-realistic-passives section 5 (D18): a two-conductor Bergeron
+    /// line of surge impedance `Z0` [Ω] and one-way `delay` [s] between
+    /// port a (`a`, `a_ref`) and port b (`b`, `b_ref`). Lossless (`R` = 0):
+    /// one device, branches `name` (port a) and `name.b` (port b), each
+    /// carrying the current INTO the line at its port. `R` > 0 [Ω, total
+    /// series]: R/4 (`name.ra`), a lossless half (`name`, `name.h1.b`),
+    /// R/2 (`name.rm`), the other half (`name.h2`, `name.b`), R/4
+    /// (`name.rb`); the halves' middle reference is `a_ref`. Valid for
+    /// R ≪ Z0: R > Z0 is refused (use the π model). A wire at DC.
+    CircuitBuilder& add_transmission_line(
+        std::string_view name, std::string_view a, std::string_view a_ref,
+        std::string_view b, std::string_view b_ref, Real Z0, Real delay,
+        Real R = Real{0}) {
+        const auto who = std::format("add_transmission_line(\"{}\")", name);
+        if (name.empty()) {
+            throw std::invalid_argument("add_transmission_line: the line needs a name");
+        }
+        if (!(Z0 > Real{0}) || !std::isfinite(Z0)) {
+            throw std::invalid_argument(std::format(
+                "{}: Z0 must be finite and > 0 (got {}).", who, Z0));
+        }
+        if (!(delay > Real{0}) || !std::isfinite(delay)) {
+            throw std::invalid_argument(std::format(
+                "{}: delay must be finite and > 0 (got {}).", who, delay));
+        }
+        if (!(R >= Real{0}) || !std::isfinite(R)) {
+            throw std::invalid_argument(std::format(
+                "{}: R must be finite and >= 0 (got {}).", who, R));
+        }
+        if (R > Z0) {
+            throw std::invalid_argument(std::format(
+                "{}: R = {} ohm exceeds Z0 = {} ohm; the lumped R/4-R/2-R/4 "
+                "losses are valid for R << Z0 only. Use model='pi' with "
+                "sections for a resistive line.", who, R, Z0));
+        }
+        // sequenced: resolve_node_ creates nodes (no two in one expression)
+        const Index ia = resolve_node_(a);
+        const Index iar = resolve_node_(a_ref);
+        const Index ib = resolve_node_(b);
+        const Index ibr = resolve_node_(b_ref);
+        if (ia == iar || ib == ibr) {
+            throw std::invalid_argument(std::format(
+                "{}: a port's two terminals are the same node.", who));
+        }
+        const std::string nm{name};
+        auto line = [&](const std::string& na, const std::string& nb,
+                        std::string_view pa, std::string_view pr,
+                        std::string_view qa, std::string_view qr, Real tau) {
+            const Index n0 = resolve_node_(pa);
+            const Index n1 = resolve_node_(pr);
+            const Index n2 = resolve_node_(qa);
+            const Index n3 = resolve_node_(qr);
+            const Index ba = add_branch_(na, n0, n1, topology::BranchKind::Source);
+            const Index bb = add_branch_(nb, n2, n3, topology::BranchKind::Source);
+            pool_.add_transmission_line(
+                ba, bb, models::TransmissionLine::Params{.Z0 = Z0, .delay = tau});
+        };
+        if (R == Real{0}) {
+            line(nm, nm + ".b", a, a_ref, b, b_ref, delay);
+            return *this;
+        }
+        const std::string na = nm + ".na", m1 = nm + ".m1", m2 = nm + ".m2",
+                          nb = nm + ".nb";
+        add_resistor(nm + ".ra", a, na, R / Real{4});
+        line(nm, nm + ".h1.b", na, a_ref, m1, a_ref, delay / Real{2});
+        add_resistor(nm + ".rm", m1, m2, R / Real{2});
+        line(nm + ".h2", nm + ".b", m2, a_ref, nb, b_ref, delay / Real{2});
+        add_resistor(nm + ".rb", nb, b, R / Real{4});
+        return *this;
+    }
+
     /// Phase 4 C.4 — a saturable inductor whose law is a TABLE:
     /// (i_k, λ_k) knots for i ≥ 0 from the origin, strictly increasing
     /// in both, extended as an odd function. Monotone-cubic between

@@ -246,6 +246,36 @@ public:
         }
     }
     void stage_clear() noexcept {}
+    // ---- TR-BDF2's q rows (the error estimate) ----
+    /// q − q_n at γ (the stage-1 capture) and at the step end (q(x1), as
+    /// `commit` stores it).
+    void trbdf2_increments(const Vector& x1, Real* dqg, Real* dq1) const {
+        for (const auto& d : devices_) {
+            const std::size_t R = d.inst->rows();
+            gather_(d, x1);
+            eval_(d, time_());
+            for (std::size_t r = 0; r < R; ++r) {
+                *dq1++ = d.o.q[r] - cells_[d.off + r];
+                *dqg++ = cells_[d.off + 2 * R + r] - cells_[d.off + r];
+            }
+        }
+    }
+    /// atol_q / atol per row: the largest |∂q_r/∂x| of the row at the
+    /// model's last evaluation (its own capacitance / unit; 0 there → 1 in
+    /// the fold), −1 for a row with no q entry: it is not a state and stays
+    /// out of the estimate (it would dilute the q rows' RMS).
+    void q_scales(Real* s) const {
+        for (const auto& d : devices_) {
+            const auto& md = d.inst->model().d();
+            const std::size_t R = d.inst->rows();
+            std::fill(s, s + R, Real{-1});   // −1: a row with no q entry (no estimate)
+            for (std::uint32_t k = 0; k < md.nnz_q; ++k) {
+                Real& sr = s[md.q_rows[k]];
+                sr = std::max(sr, k < d.o.dq.size() ? std::abs(d.o.dq[k]) : Real{0});
+            }
+            s += R;
+        }
+    }
 
     /// `h_accept` (> 0): the step the model's accept() advances when the
     /// formula's h is a stage's (esdirk43 commits backward Euler of γh).

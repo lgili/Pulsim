@@ -638,3 +638,36 @@ def test_switch_specs_zero_when_no_e_refs() -> None:
     assert sw["P_sw_avg"] == 0.0
     assert sw["n_turn_on_events"] >= 1
     assert sw["n_turn_off_events"] >= 1
+
+
+def test_switch_i_rms_counts_the_flip_step_as_the_energy_does():
+    """add-ai-usage-guide 12.5: a pulsed switch current's i_rms read low
+    on a fixed grid (the line through a flip step's two stamps gives
+    I²·h/3 where the switch carried I for the whole step): -0.56 % here,
+    first order in dt. Truth: V/(R + R_on)·sqrt(n_on/N) for a grid PWM
+    into a resistor, over whole periods; over a window cut half a step
+    into a turn-on step, the same with half a step less on-time."""
+    V, R, R_on, dt, N, n_on = 10.0, 10.0, 0.1, 5e-8, 100, 30
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "in", "gnd", V)
+    b.add_switch("S", "in", "x", 1.0 / R_on, 1e-9)
+    b.add_resistor("R", "x", "gnd", R)
+
+    def sw(t):
+        m = p.SwitchStateMask(1)
+        m.set(0, (int(round(t / dt)) % N) < n_on)
+        return m
+
+    res = p.simulate(b, t_end=200 * N * dt, dt=dt, switch_fn=sw,
+                          engine="pwl")
+    I_on = V / (R + R_on)
+
+    def i_rms(t_from):
+        rows = p.device_loss_summary(b, res, switch_fn=sw, t_from=t_from,
+                                          t_to=150 * N * dt)
+        return {r["name"]: r for r in rows}["S"]["i_rms"]
+
+    assert i_rms(N * dt) == pytest.approx(I_on * np.sqrt(n_on / N), rel=1e-9)
+    on, span = 147 * n_on - 0.5, 147 * N - 0.5
+    assert i_rms(3 * N * dt + 0.5 * dt) == pytest.approx(
+        I_on * np.sqrt(on / span), rel=1e-9)

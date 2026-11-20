@@ -223,7 +223,8 @@ def compute_temperature(t: np.ndarray,
                             stages,
                             T_amb_C: float = 25.0,
                             *,
-                            should_continue=None) -> np.ndarray:
+                            should_continue=None,
+                            piecewise_linear: bool = False) -> np.ndarray:
     """Convolve P(t) with Z_th(t) to get ΔT_j(t), then add T_amb.
 
     Uses the standard Foster decomposition: for each pole
@@ -239,14 +240,28 @@ def compute_temperature(t: np.ndarray,
     frequent). Returning ``False`` raises :class:`pulsim.Cancelled`
     with ``where='compute_temperature'`` so a GUI's cancel button
     can preempt a long convolution within ~1 ms on a 100 kHz / 10 s
-    trace.
+    trace. A callback that raises propagates. GUI Cancel button:
+    ``should_continue=lambda: not cancel.is_set()`` with
+    ``cancel = threading.Event()``.
+
+    ``piecewise_linear=True``: no resample. Each pole is advanced over
+    each step ``[t[n-1], t[n]]`` (any spacing, repeated instants
+    included) EXACTLY for the power line from ``p[n-1]`` to ``p[n]``,
+    ``T_i(h) = α T_i(0) + R_th (c − α a − (c − a) τ (1 − α) / h)``
+    (``a``, ``c`` the line's ends): the time-weighted reading of the
+    trace (the stats module's piecewise-linear waveform). One value
+    per input sample.
     """
     t = np.asarray(t, dtype=float)
     p = np.asarray(p_loss, dtype=float)
-    if t.shape != p.shape:
-        raise ValueError("t and p_loss must have the same shape")
-    if len(t) < 2:
-        raise ValueError("need at least 2 samples")
+    bad = ("t and p_loss must have the same shape" if t.shape != p.shape
+           else "need at least 2 samples" if len(t) < 2
+           else "t must be non-decreasing"
+           if piecewise_linear and np.any(np.diff(t) < 0) else None)
+    if bad:
+        raise ValueError(bad)
+    if piecewise_linear:
+        return _foster_piecewise_linear(t, p, stages, T_amb_C, should_continue)
     # The IIR below advances on a FIXED dt. A variable-step trace
     # (engine='auto') has none — its spacing swings by orders of
     # magnitude between event clusters and smooth strides, so
@@ -281,6 +296,34 @@ def compute_temperature(t: np.ndarray,
             delta += state[i]
         T_out[n] = T_amb_C + delta
     return T_out
+
+
+def _foster_piecewise_linear(t, p, stages, T_amb_C, should_continue):
+    """compute_temperature(piecewise_linear=True): the exact response of
+    each Foster pole to the piecewise-linear power through the samples."""
+    h = np.diff(t)   # non-decreasing: compute_temperature checked it
+    out = np.full(t.shape, 0.0)
+    a, c = p[:-1], p[1:]
+    for s in stages:
+        x = h / s.tau_s
+        alpha = np.exp(-x)
+        # tau (1 - alpha) / h, -> 1 as h -> 0 (a repeated instant: no change)
+        ratio = np.ones_like(x)
+        nz = x > 0
+        ratio[nz] = -np.expm1(-x[nz]) / x[nz]
+        drive = s.R_th_K_per_W * (c - alpha * a - (c - a) * ratio)
+        T = 0.0
+        Ts = np.empty(t.shape)
+        Ts[0] = 0.0
+        check = max(1, min(1000, h.size // 100))
+        for n in range(h.size):
+            if should_continue is not None and n % check == 0 and not should_continue():
+                from . import Cancelled as _Cancelled
+                raise _Cancelled("compute_temperature", point_index=n)
+            T = alpha[n] * T + drive[n]
+            Ts[n + 1] = T
+        out += Ts
+    return T_amb_C + out
 
 
 # =============================================================================
@@ -610,6 +653,12 @@ def _with_step_starts(times: np.ndarray, p: np.ndarray,
             np.insert(p, idx + 1, p_start[idx]))
 
 
+# The kinds device_thermal_summary reconstructs a P_cond(t) for.
+_THERMAL_KINDS = frozenset((
+    "resistor", "inductor", "switch", "diode", "shockley_diode",
+    "mosfet_level1", "igbt_level1", "nonlinear_diode"))
+
+
 def device_thermal_summary(
     builder,
     result,
@@ -739,9 +788,15 @@ def device_thermal_summary(
     * A level-1 MOSFET, a level-1 IGBT without a tail and a smooth
       diode dissipate ``v · i`` with ``i`` the kernel's device law at
       each stored state.
-    * A branch-form switch / diode (``form='branch'``, ``R_on >= 0``)
-      dissipates its solved ``v · i`` (0 W for an ideal one) plus its
-      impulsive re-initialisation energy as a constant offset
+    * Every device's ``P_cond_avg`` is its :func:`pulsim.device_loss_summary`
+      entry's (:func:`pulsim.losses.conduction_power_avg`), and its trace
+      follows the same model, so the two summaries agree for every kind
+      and form. A device ``thermal_specs`` names whose kind has no loss
+      model (a source, a capacitor) is refused by name.
+    * A branch-form switch / diode with ``R_on > 0`` follows its conductance
+      law as the conductance form does (``conduction_specs`` included); an
+      ideal one (``R_on = 0``) dissipates its solved ``v · i`` (0 W). Either
+      adds its impulsive re-initialisation energy as a constant offset
       (``P_impulse_avg``, :func:`pulsim.losses.impulse_losses`); its entry
       carries ``form='branch'`` and ``P_impulse_avg``. A kernel loss port
       (``set_device_losses``) carries that energy into its own junction
@@ -756,6 +811,12 @@ def device_thermal_summary(
     # (_result_views.solved_part). T_j_trace keeps one sample per
     # result.times: the dropped rows read T_ambient, where the network
     # starts.
+    # The events inside stored steps as rows (the fixed engine's event
+    # split; _result_views.with_inner_events); T_j_trace drops them again.
+    result = _views.with_inner_events(result)
+    inner_keep = getattr(result, "_inner_keep", None)
+    has_limits = (inner_keep is not None
+                  or getattr(result, "right_limit_index", None) is not None)
     t_all = np.asarray(result.times, dtype=float)
     n_full = int(t_all.shape[0])
     result = _views.solved_part(result)
@@ -844,109 +905,93 @@ def device_thermal_summary(
                 f"'stages' (list of FosterStage).")
         T_amb_dev = float(t_spec.get("T_ambient_C", T_ambient_C))
 
-        loss = loss_by_bid.get(bid, {})
+        if kind not in _THERMAL_KINDS:
+            from ._pulsim import OptionsError  # type: ignore[import-not-found]
+            err = OptionsError(  # a ValueError, typed
+                f"device_thermal_summary: thermal_specs names {name!r} "
+                f"(kind {kind!r}), which has no loss model here (supported: "
+                f"{', '.join(sorted(_THERMAL_KINDS))}).")
+            err.option = "thermal_specs"
+            raise err
+        loss = loss_by_bid.get(bid)
+        if loss is None:
+            if (kind == "switch" and switch_fn is None and kernel_masks is None
+                    and not desc.get("params", {}).get("branch_form")):
+                raise ValueError(
+                    f"thermal_specs targets switch {name!r}, the result "
+                    "carries no record of the stamped switch mask, and "
+                    "switch_fn= was not provided — pass the same "
+                    "callable you used in simulate().")
+            warnings.warn(
+                f"device_thermal_summary: {name!r} ({kind}) has no entry in "
+                "device_loss_summary (no loss reconstruction for it in this result); it is left out.",
+                RuntimeWarning, stacklevel=2)
+            continue
         P_sw_avg = float(loss.get("P_sw_avg", 0.0))
         P_core_avg = float(loss.get("P_core_avg", 0.0))
         P_constant = P_sw_avg + P_core_avg
-
+        # A branch-form element's impulsive re-initialisation energy: a
+        # constant offset, as P_sw_avg.
         P_impulse_avg = None
-        # Reconstruct P_cond(t) per kind.
-        if kind in ("switch", "diode") and desc.get("params", {}).get("branch_form"):
-            # A branch-form element has no conductance law: its conduction
-            # is the solved v·i (0 W for an ideal one, R_on = 0, V_f = 0) and
-            # its switching loss the impulsive category; both are what
-            # device_loss_summary reported for it (E_total, P_impulse_avg).
-            # The impulse is a constant offset, as P_sw_avg.
-            if "E_total" not in loss:
-                warnings.warn(
-                    f"device_thermal_summary: branch-form {kind} {name!r} has no "
-                    "entry in device_loss_summary (no branch current in this "
-                    "result); it is left out.", RuntimeWarning, stacklevel=2)
-                continue
+        if desc.get("params", {}).get("branch_form"):
+            P_impulse_avg = float(loss.get("P_impulse_avg", 0.0))
+            P_constant += P_impulse_avg
+
+        # P_cond(t) per kind, on the model device_loss_summary used for
+        # this device (its entry): the conduction_specs model where one
+        # applies, else the solved v*i. The average is the entry's own.
+        if loss.get("form") == "branch":
+            # An ideal branch-form element (R_on = 0) has no conductance
+            # law: its conduction is the solved v*i (0 W while ON with
+            # V_f = 0), what device_loss_summary integrated.
             col = int(builder.pool.branch_var_id_for_switch(bid, builder.graph))
-            from_id, to_id = desc.get("nodes", (None, None))
+            from_id, to_id = desc["nodes"]
             v_B = (_views.node_voltage_trace(states, int(from_id))
                    - _views.node_voltage_trace(states, int(to_id)))
             v_B_s = (_views.node_voltage_trace(states_s, int(from_id))
                      - _views.node_voltage_trace(states_s, int(to_id)))
             P_cond_t = v_B * states[:, col]
             P_start_t = v_B_s * states_s[:, col]
-            E_cond = float(loss["E_total"])
-            P_impulse_avg = float(loss.get("P_impulse_avg", 0.0))
-            P_constant += P_impulse_avg
         elif kind == "resistor":
-            R = float(desc.get("params", {}).get("R_ohms", float("nan")))
-            from_id, to_id = desc.get("nodes", (None, None))
-            if not (np.isfinite(R) and R > 0) or from_id is None \
-                    or to_id is None:
-                continue
+            R = float(desc["params"]["R_ohms"])
+            from_id, to_id = desc["nodes"]
             v_R = (_views.node_voltage_trace(states, int(from_id))
                    - _views.node_voltage_trace(states, int(to_id)))
             v_R_s = (_views.node_voltage_trace(states_s, int(from_id))
                      - _views.node_voltage_trace(states_s, int(to_id)))
             P_cond_t = v_R * v_R / R
             P_start_t = v_R_s * v_R_s / R
-            v_w, v_s_w = win.cont(v_R, v_R_s)
-            g_c = np.full_like(v_w, 1.0 / R)
-            E_cond = _losses._branch_energy(win.times, v_w, g_c, v_s_w, g_c)
         elif kind == "inductor":
             # Ideal inductor — conduction loss is zero. Any thermal
             # rise comes from P_core_avg above.
             P_cond_t = np.zeros_like(times)
             P_start_t = P_cond_t
-            E_cond = 0.0
         elif kind == "shockley_diode":
             prm = _shockley_params(builder, name)
-            from_id, to_id = desc.get("nodes", (None, None))
-            if prm is None or from_id is None or to_id is None:
-                continue
+            from_id, to_id = desc["nodes"]
             v_D = (_views.node_voltage_trace(states, int(from_id))
                    - _views.node_voltage_trace(states, int(to_id)))
             v_D_s = (_views.node_voltage_trace(states_s, int(from_id))
                      - _views.node_voltage_trace(states_s, int(to_id)))
-            i_D = _diode_state.shockley_current(v_D, prm)
-            i_D_s = _diode_state.shockley_current(v_D_s, prm)
-            P_cond_t = v_D * i_D
-            P_start_t = v_D_s * i_D_s
-            v_w, v_s_w = win.cont(v_D, v_D_s)
-            i_w, i_s_w = win.cont(i_D, i_D_s)
-            E_cond = _views.pl_integral_product(win.times, v_w, i_w,
-                                                v_s_w, i_s_w)
+            P_cond_t = v_D * _diode_state.shockley_current(v_D, prm)
+            P_start_t = v_D_s * _diode_state.shockley_current(v_D_s, prm)
         elif kind in ("mosfet_level1", "igbt_level1", "nonlinear_diode"):
             # the kernel's device law at each state, as device_loss_summary
             from . import _pulsim as _kmod
-            from_id, to_id = desc.get("nodes", (None, None))
+            from_id, to_id = desc["nodes"]
             rd = _kmod.static_device_readings(builder.graph, builder.pool,
                                               states, int(bid))
             rd_s = _kmod.static_device_readings(builder.graph, builder.pool,
                                                 states_s, int(bid))
-            if rd is None or rd_s is None or from_id is None or to_id is None:
-                warnings.warn(
-                    f"device_thermal_summary: {name!r} ({kind}) is skipped: its "
-                    f"current needs a stored charge (an IGBT tail). Put a 1 mOhm "
-                    f"resistor in series and give its v*i to the thermal model.",
-                    stacklevel=2)
-                continue
             v_D = (_views.node_voltage_trace(states, int(from_id))
                    - _views.node_voltage_trace(states, int(to_id)))
             v_D_s = (_views.node_voltage_trace(states_s, int(from_id))
                      - _views.node_voltage_trace(states_s, int(to_id)))
-            i_D = np.asarray(rd[0], float)
-            i_D_s = np.asarray(rd_s[0], float)
-            P_cond_t = v_D * i_D
-            P_start_t = v_D_s * i_D_s
-            v_w, v_s_w = win.cont(v_D, v_D_s)
-            i_w, i_s_w = win.cont(i_D, i_D_s)
-            E_cond = _views.pl_integral_product(win.times, v_w, i_w,
-                                                v_s_w, i_s_w)
+            P_cond_t = v_D * np.asarray(rd[0], float)
+            P_start_t = v_D_s * np.asarray(rd_s[0], float)
         elif kind == "diode":
-            params = desc.get("params", {})
-            g_on = float(params.get("g_on", float("nan")))
-            g_off = float(params.get("g_off", float("nan")))
-            from_id, to_id = desc.get("nodes", (None, None))
-            if not (np.isfinite(g_on) and np.isfinite(g_off)) \
-                    or from_id is None or to_id is None:
-                continue
+            params = desc["params"]
+            g_on, g_off = float(params["g_on"]), float(params["g_off"])
             # Same recorded stamp as device_loss_summary / result.i()
             # (a PWL diode's ON drop is V_f + i/g_on, not V_th — see
             # pulsim._diode_state). The loss summary above already
@@ -956,14 +1001,6 @@ def device_thermal_summary(
             v_D = d_trace.v
             g_arr = np.where(d_trace.closed, g_on, g_off)
             g_arr_s = np.where(d_trace.closed_start, g_on, g_off)
-            # The forward drop V_f (i = g_on·(v − V_f) while ON); None
-            # keeps the V_f = 0 arithmetic bit-identical.
-            o_D, o_D_s = ((d_trace.v_off, d_trace.v_off_start)
-                          if d_trace.V_f else (None, None))
-            # Cut at the window where the whole-run integral is linear
-            # (current; power on a step that flips the stamp).
-            _, i_w, i_s_w, E_br = _losses._window_conductance(
-                win, v_D, g_arr, d_trace.v_start, g_arr_s, o_D, o_D_s)
             i_D, i_D_s = d_trace.current, d_trace.current_start
             c_spec = cond_by_bid.get(bid)
             if c_spec is not None:
@@ -971,33 +1008,17 @@ def device_thermal_summary(
                     i_D, c_spec)
                 P_start_t = _losses._conduction_power_offset_slope(
                     i_D_s, c_spec)
-                E_cond = _losses._conduction_model_energy(
-                    win.times, i_w, i_s_w, c_spec)
             elif d_trace.V_f:
                 P_cond_t = v_D * i_D
                 P_start_t = d_trace.v_start * i_D_s
-                E_cond = E_br
             else:
                 P_cond_t = v_D * v_D * g_arr
                 P_start_t = d_trace.v_start * d_trace.v_start * g_arr_s
-                E_cond = E_br
-        elif kind == "switch":
-            params = desc.get("params", {})
-            g_on = float(params.get("g_on", float("nan")))
-            g_off = float(params.get("g_off", float("nan")))
-            from_id, to_id = desc.get("nodes", (None, None))
-            if not (np.isfinite(g_on) and np.isfinite(g_off)) \
-                    or from_id is None or to_id is None:
-                continue
-            sidx = switch_seq_idx_by_bid.get(bid)
-            if sidx is None:
-                continue
-            if switch_fn is None and kernel_masks is None:
-                raise ValueError(
-                    f"thermal_specs targets switch {name!r}, the result "
-                    "carries no record of the stamped switch mask, and "
-                    "switch_fn= was not provided — pass the same "
-                    "callable you used in simulate().")
+        else:  # switch
+            params = desc["params"]
+            g_on, g_off = float(params["g_on"]), float(params["g_off"])
+            sidx = switch_seq_idx_by_bid[bid]
+            from_id, to_id = desc["nodes"]
             v_SW = (_views.node_voltage_trace(states, int(from_id))
                     - _views.node_voltage_trace(states, int(to_id)))
             # Use the recorded mask when available, else re-evaluate
@@ -1013,54 +1034,56 @@ def device_thermal_summary(
                       - _views.node_voltage_trace(states_s, int(to_id)))
             g_arr = np.where(closed, g_on, g_off)
             g_arr_s = np.where(closed_s, g_on, g_off)
-            _, i_w, i_s_w, E_br = _losses._window_conductance(
-                win, v_SW, g_arr, v_SW_s, g_arr_s)
             c_spec = cond_by_bid.get(bid)
             if c_spec is not None:
                 P_cond_t = _losses._conduction_power_offset_slope(
                     v_SW * g_arr, c_spec)
                 P_start_t = _losses._conduction_power_offset_slope(
                     v_SW_s * g_arr_s, c_spec)
-                E_cond = _losses._conduction_model_energy(
-                    win.times, i_w, i_s_w, c_spec)
             else:
                 P_cond_t = v_SW * v_SW * g_arr
                 P_start_t = v_SW_s * v_SW_s * g_arr_s
-                E_cond = E_br
-        else:
-            # Unsupported kind for the thermal pipeline.
-            continue
 
         t_aug, p_aug = _with_step_starts(times, P_cond_t + P_constant,
                                          P_start_t + P_constant)
-        T_j_int = compute_temperature(t_aug, p_aug, stages, T_amb_dev)
-        if t_aug.size == times.size and not is_dsed:
-            # pwl / trbdf2: unchanged (compute_temperature's own grid;
-            # a variable-step trace is resampled to a uniform one).
+        on_grid = t_aug.size == times.size and not is_dsed
+        pl = not on_grid and (is_dsed or has_limits)
+        # pwl / trbdf2 without event limits: compute_temperature's own
+        # grid (a variable-step trace resampled to a uniform one). An
+        # event result (engine='dsed', or step-start powers inserted): the
+        # exact response to the piecewise-linear power on its own grid, no
+        # resample. The resample's grid fell between the edges unless its
+        # spacing divided the period: on the exact engine's output-rule
+        # grid (T_j_avg - 25)/R_th/P_cond_avg read 0.978 / 1.011 on a
+        # boost, 0.994 / 0.994 with the grid on the edges (F-2-4).
+        T_j_int = compute_temperature(t_aug, p_aug, stages, T_amb_dev,
+                                      piecewise_linear=pl)
+        if on_grid:
             T_j_trace = T_j_int
             T_j_avg = float(np.mean(T_j_trace))
             T_j_peak = float(np.max(T_j_trace))
             on_times = _views.grid_is_uniform(times)
-        else:
-            # engine='dsed': its event grid is not uniform, and where
-            # the step-start power differs from the stored sample it was
-            # inserted, so the IIR ran on a uniform resample of a longer
-            # grid. Every DSED device takes this branch, inserted
-            # samples or not (a resistor's power has no step-start
-            # jump: its trace was the resample itself, index 500 at
-            # 485.9 µs against t[500] = 497.8 µs on a 1 ms boost).
-            # Sample it back at result.times, one value per sample, and
-            # average over TIME on the uniform internal grid (a plain
-            # mean of the trace at the clustered event times is not).
+        elif not pl:
+            # step starts inserted on a result without event limits (pwl /
+            # trbdf2 reinit records): the uniform resample, as before
             t_int = (t_aug if _views.grid_is_uniform(t_aug)
                      else _views.resample_uniform(t_aug, p_aug)[0])
             T_j_trace = np.interp(times, t_int, T_j_int)
             T_j_avg = float(np.mean(T_j_int))
             T_j_peak = float(np.max(T_j_int))
             on_times = True
+        else:
+            # one value per result.times sample (t_aug holds every one of
+            # them), averaged over TIME (a plain mean of the trace at the
+            # clustered event times is not)
+            T_j_trace = np.interp(times, t_aug, T_j_int)
+            T_j_avg = (_views.pl_integral(t_aug, T_j_int)
+                       / float(t_aug[-1] - t_aug[0]))
+            T_j_peak = float(np.max(T_j_int))
+            on_times = True
         if not win.whole:
             # Over the window, on the grid the network ran on.
-            t_net = (t_aug if _views.grid_is_uniform(t_aug)
+            t_net = (t_aug if pl or _views.grid_is_uniform(t_aug)
                      else _views.resample_uniform(t_aug, p_aug)[0])
             w_net = _views.TimeWindow(t_net, win.a, win.b,
                                       what="device_thermal_summary")
@@ -1072,9 +1095,9 @@ def device_thermal_summary(
             # variable-step trace is on its own grid and stays so).
             T_j_trace = np.concatenate(
                 (np.full(n_lead, T_amb_dev), T_j_trace))
-        T = win.span if times.size > 1 else 1.0
-        P_cond_avg = (float(E_cond) / T if T > 0 and times.size > 1
-                      else float(P_cond_t.mean()))
+        if inner_keep is not None and np.shape(T_j_trace) == inner_keep.shape:
+            T_j_trace = np.asarray(T_j_trace)[inner_keep]
+        P_cond_avg = _losses.conduction_power_avg(loss)
         extra = {} if P_impulse_avg is None else {"form": "branch",
                                                   "P_impulse_avg": P_impulse_avg}
         out.append({

@@ -164,13 +164,17 @@ def test_stateful_stamps_and_a_loss_port_compose_on_pwl():
 
 
 def test_stateful_stamps_compose_on_trbdf2_with_and_without_its_loss_port():
+    # Truth: esdirk43 at rtol 1e-11 (17.08836174 V, 3.38753530 A; esdirk43
+    # and trbdf2 at 1e-10 agree to 3e-9). Measured at the defaults 2.3e-5 /
+    # 1.5e-4 relative; before update-trbdf2-error-control DECISIONS 10 (no
+    # estimate on the stateful kinds) 1.7e-4 / 1.4e-3, then pinned to itself.
     r = _end("trbdf2", False)
-    assert np.asarray(r.v("out"))[-1] == pytest.approx(17.08541162982808, rel=1e-5)
-    assert np.asarray(r.i("L"))[-1] == pytest.approx(3.3922212010816595, rel=1e-5)
+    assert np.asarray(r.v("out"))[-1] == pytest.approx(17.088361741354667, rel=1e-4)
+    assert np.asarray(r.i("L"))[-1] == pytest.approx(3.3875352980223887, rel=5e-4)
     # the port heats only the thermal node: the electrical end state is r's
     # to the step controller's tolerance (the junction is in its error norm)
     rl = _end("trbdf2", True)
-    assert np.asarray(rl.v("out"))[-1] == pytest.approx(17.08541162982808, rel=1e-4)
+    assert np.asarray(rl.v("out"))[-1] == pytest.approx(17.088361741354667, rel=1e-4)
     assert rl.heat_injected > 0
 
 

@@ -321,8 +321,9 @@ paralleled through `R_on = 0`) runs on `pwl` with
 `discontinuity_restart=True` and on `trbdf2` (re-initialised by three
 SDIRK(2,2) steps and recorded in `res.reinit_records`, the same record
 on both); on `pwl` without the rule it is refused with
-`feature='dependent_states'`, as on `trbdf2` with a stateful device
-history (Coss, Lauritzen, IGBT tail, PMSM, saturable inductor). On
+`feature='dependent_states'` (on `trbdf2` it also runs next to a
+stateful device history since the release fix group D2; a nonlinear state
+INSIDE the dependent set is still refused by name). On
 `trbdf2` no diode crossing is located inside the re-initialisation step
 itself (a diode left on its forbidden side is re-decided at the next
 step's start; one that crosses and returns inside it is missed). The
@@ -412,7 +413,9 @@ needs the unified stepper (task 2.4). Sine, PWM and pulse voltage
 sources and sine / pulse / table current sources are exact (corners are
 time events); a user `b_extra_fn` makes the mask numeric, refused as
 `'source'` unless allowed. `integrator='bdf2'` is numeric throughout and
-not refused. Without `dt` the exact engine samples every 10 µs plus its
+not refused. Without `dt` the exact engine samples every 10 µs (its step ceiling
+`dt_max`; every `dt_max / 10` = 1 µs when the gate names no edge: no
+`switch_fn`, or a plain callable without `next_edge_after`) plus its
 events: exact at those instants, but a waveform interpolated between
 them is not (pass `dt` for a finer output grid). Capacitor loops (parallel
 capacitors) are refused by the extractor, so the charge-conserving
@@ -681,6 +684,42 @@ reference takes 18,192 steps with 15 forced accepts. dsed is a frozen
 Circuits whose v1 file has no `uic: true`
 start from the DC operating point, which `dsed` cannot take (refused).
 
+#### Triage causes (`cause:` of a `known:` entry in `v2_triage.yaml`)
+
+Every frozen `disagree` / `error` cell names one or more of these ids;
+`python/tests/test_benchmark_harness.py::test_every_known_cell_names_a_cause_that_resolves`
+keeps them resolvable. The per-circuit numbers are in the manifest's
+comments and `benchmarks/REFERENCE_STATUS.md`.
+
+- **TC-EDGE-GRID** — a gate edge between grid points on `pwl`: the stored
+  samples bracket the edge and the trace ramps over one step (timing ≤ 1-2
+  steps; the edge diagnostic is within tolerance, the states agree off the
+  edges; REFERENCE_STATUS notes "Fixed-step event splitting" and its edge
+  diagnostic table). The strict
+  gate is not changed for it, so the cells stay frozen.
+- **TC-CLOSED-LOOP** — a helper closed loop: `pwl` samples the gate on the
+  grid and ticks in label time (first order), `trbdf2` records no post-edge
+  sample at an edge that is also a tick ("Closed loops: what each engine
+  gets right", above).
+- **TC-PWL-ORDER** — `pwl` is first order after a diode / source event or
+  from an inconsistent start ("Fixed engine: first order after a
+  discontinuity", above): the `pwl` cell disagrees and the `pwl+restart` or
+  `pwl+split` cell of the same circuit agrees or is much smaller.
+  `boost_pfc_open_loop`: chatter / undersampled on `pwl`, split agrees.
+- **TC-GATE-NODE** — a Level-1 MOSFET driven through its gate node: its
+  channel crosses `V_T` between grid points, which is no event, so neither
+  the restart nor the split makes it second order (same section). The
+  reader's `K = kp` (half v1's law; restore-reference-benchmark-harness
+  DECISIONS 14 R1) is a second, open defect on these circuits.
+- **TC-OPEN** — not isolated: the cell is frozen with its measured error and
+  the manifest comment says what is known. `transformer_leakage` (linear, no
+  switching: 4.1e-3 on every `pwl` configuration), `ll06_buck_vcswitch`
+  (edge error above tolerance on `pwl` / `pwl+restart`, edges ~99 steps
+  apart), `high_q_rlc_ringdown`
+  (`pwl` 0.0229, `trbdf2` 0.00566 against rtol 1e-8), `ll11_llc_resonant_converter`
+  (`error` on every configuration), `ll13_active_clamp_forward` (`pwl` 4.51;
+  no DC operating point, started from zero state).
+
 ### TR-BDF2 on a bridge whose DC side floats on a tie resistor
 
 `engine='trbdf2'` follows the exact mode sequence of the 1 MΩ-tied
@@ -737,9 +776,12 @@ of R, L, C (YAML reads `esr`, `esl`, `c_par` and `rac:` ladder cells;
 an `(f, R_ac)` curve is refused by name). The MLCC DC-bias capacitor
 (`fit_mlcc_dc_bias`, YAML `nonlinear_capacitor` with `dc_bias:`) is a
 Newton device (pwl / trbdf2) integrating the small-signal curve (no
-hysteresis). Not done: YAML `transmission_line` and the Bergeron line
-(a stateful kernel kind, deferred to the unified device interface;
-`model="bergeron"` is refused).
+hysteresis). `model="bergeron"` is the exact travelling-wave line (kind
+`TransmissionLine`; YAML `transmission_line`): pwl and trbdf2 (step
+capped at the delay; its interpolation error is not in the trbdf2 error
+estimate, so set `dt=` to resolve the waves), the AC sweep, DC as a wire;
+esdirk43, the exact engine, bdf1 and `periodic_steady_state` refuse it
+by name (`docs/transmission-line.md`).
 The π line overshoots an ideal step by 27 % at any section count (the
 exact line does not): give the source a rise time and use
 `recommend_line_sections`. A fitted ladder reproduces its own data; it

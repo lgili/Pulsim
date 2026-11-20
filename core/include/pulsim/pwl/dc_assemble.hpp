@@ -517,6 +517,26 @@ inline void dc_assemble(const topology::Graph& graph,
                     J, b, x, coord, p_from, p_to, branch_var_id, p.n);
                 break;
             }
+            case DevicePool::StoredKind::TransmissionLine: {
+                // add-realistic-passives D18 (5): a lossless line is a wire
+                // at DC, i.e. a 1:1 ideal transformer: port b's row
+                // v_b − v_a = 0 (the secondary's), port a's row i_a + i_b = 0.
+                const Index row = pool.branch_var_id_for_source(branch.id, graph);
+                const Index other_id = pool.line_partner(branch.id);
+                const Index other = pool.branch_var_id_for_source(other_id, graph);
+                if (pool.is_line_port_b(branch.id)) {
+                    stamping::stamp_voltage_source(J, b, x, coord, row, Real{0});
+                    const auto& oa = graph.branch(other_id);
+                    if (stamping::node_is_active(oa.from)) J.coeffRef(row, oa.from) -= Real{1};
+                    if (stamping::node_is_active(oa.to)) J.coeffRef(row, oa.to) += Real{1};
+                } else {
+                    if (stamping::node_is_active(coord.from)) J.coeffRef(coord.from, row) += Real{1};
+                    if (stamping::node_is_active(coord.to)) J.coeffRef(coord.to, row) -= Real{1};
+                    J.coeffRef(row, row) += Real{1};
+                    J.coeffRef(row, other) += Real{1};
+                }
+                break;
+            }
             default:
                 break;
             }
@@ -885,6 +905,13 @@ struct DCVoltageLoop {
             fixed = false;
             break;
         }
+        case SK::TransmissionLine:   // a wire at DC: port b = port a, 1:1
+            if (pool.is_line_port_b(b_id)) {
+                const auto& pa = graph.branch(pool.line_partner(b_id));
+                xfmrs.push_back({b_id, pa.from, pa.to, Real{1}, false, false});
+            }
+            fixed = false;
+            break;
         default:
             fixed = false;
             break;
