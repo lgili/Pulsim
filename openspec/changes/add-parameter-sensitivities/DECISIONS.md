@@ -650,3 +650,60 @@ ESDIRK / Newton refusals beyond the tests.
   full pytest, ruff, openspec validate, pulsim_core_step_tests. The move
   and the lazy gate event change code paths on the default pwl loop: the
   byte compares are the first thing the next agent runs.
+
+### Verification of the tip (2026-11-20, fourth session): 0d518f42
+
+- BYTE COMPARES vs 41860812, sensitivities off (`.scratch/g6cmp.sh compare`
+  against `.scratch/g6base`): at 713229ce (the closure move, lazy gate
+  event, `sx`) AND again on the final extension at 0d518f42 — goldens with
+  counters, stateful, engines, steps all identical; pwl_identity 390/390,
+  trbdf2_identity 371/371. Logs `.scratch/logs/g6cmp_713229ce.txt`,
+  `g6cmp_0d518f42.txt`. The refactor is behaviour-preserving.
+- THE REVIEWER'S FINDING, re-run (`.scratch/c7/review/edge_at_tend2.py`,
+  `diode_at_tend3.py` = diode_at_tend2 catching refusals; logs
+  `.scratch/logs/repro_*`): the diode turn-on was refused at every gap
+  ≤ 2.2e-13 s and right above it (4.399967e-3, 1.8e-8). The duty edge was
+  NOT fixed by the pending-event refusal: gaps 3e-17 … 3e-14 s still read
+  dv/dD = 0.000 (truth 7.38) — the edge never became pending. Cause:
+  trbdf2/esdirk43's no-final-sliver rule (tb_clamp) leaves an edge within
+  64 h_min of t_end to the next run, and on pwl+restart / pwl+split the
+  restart rule reads the gates at t_prev, so an edge AT the last grid point
+  is opened by no step (sens_open) — on both, x(t_end) is the pre-edge
+  side. FIX (0d518f42): `StageSensitivity::edge_past_end(τ, before,
+  after)` refuses by name ("whose jump in the derivative was not applied:
+  the run ends at it") when a duty parameter's switch turns OFF there;
+  called in the no-final-sliver branch (trbdf2_transient.hpp) and after
+  the pwl driver (run_transient.hpp, gates at gate_t vs t_reached; plain
+  pwl reads the gates at t, no-op). Both sens-gated. After it every gap
+  ≤ 3e-14 s is refused, ≥ 3e-13 s right (7.380810).
+- AUDIT CELLS `test_an_event_at_t_end_is_refused_by_name_or_true` (20):
+  duty edge / diode turn-on at τ(1 + 1e-11) and 1.5 steps before t_end,
+  five engine configurations, pwl grid ending at t_end. At t_end: refused
+  by name everywhere (pwl STAIRCASE, pwl+restart/split/trbdf2/esdirk43
+  NOT_APPLIED; diode: pwl+restart NOT_LOCATED, esdirk43 LANDING), except
+  plain pwl's diode, whose own trajectory (first order from the start) has
+  not crossed yet: its number is its own map's derivative (central
+  difference h = 1e-6 R; h = 1e-4 R steps over its crossing). Before
+  t_end: numbers within 2e-8 of the closed forms on pwl+split / trbdf2 /
+  esdirk43 (duty) — the refusal hides no working case. Audit 107 passed,
+  every sensitivity file 261 passed / 1 xfailed (`.scratch/logs/
+  audit_step2.txt`, `sens_tests_step2.txt`).
+- pulsim_core_step_tests built (Eigen 5.0, /opt/homebrew/include/eigen3,
+  `.scratch/build-ctest`, LTO on as that tree's cache has it) and run:
+  811 assertions in 34 test cases pass (`.scratch/logs/
+  steptests_0d518f42.txt`). Nothing to fix.
+- FULL PYTEST at 0d518f42: 6306 passed, 110 skipped, 9 xfailed, 0 failed
+  (`.scratch/logs/pytest_full_0d518f42.log`). ruff check python/ clean;
+  `openspec validate add-parameter-sensitivities --strict` valid. Stubs
+  not run (no binding signature changed).
+- COST GATE on the final extension (LTO off, `.scratch/bl/cost.sh 6
+  norec`, min of 6, sensitivities off, vs 41860812): buck_pwl 3044.9 vs
+  3095.3 (−1.63 %), vsi_pwl 4726.9 vs 4783.6 (−1.19 %), buck_trbdf2
+  11068.9 vs 11061.7 (+0.07 %), bridge_trbdf2 12843.8 vs 12831.2
+  (+0.10 %). The pwl gain is confirmed; trbdf2 reads +0.07/+0.10 against
+  the earlier +0.02/+0.05 (one sens-gated branch added to tb_clamp's
+  no-final-sliver arm, plus run-to-run spread): all within +0.1 %.
+  Log `.scratch/logs/cost_0d518f42.txt`.
+- NOT RUN: full ctest, Eigen 3.4.0, g++-15, a fresh-context review of
+  0d518f42's fix. Still open as before: 6.3 at rtol 1e-9 (strict xfail),
+  4.4 saturable inductor.
