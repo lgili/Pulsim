@@ -219,3 +219,45 @@ g_off)`, `SwitchingEntry.edge` (design batch, from `_edge_law`), and
    `_switch_switching_loss` raises `switch_specs['<name>']: a non-finite
    commutation point`; the period path's scalar route falls to it; the
    design batch's Fallback leads there; the kernel fixed point raises.
+
+Tests (`test_commutation_edge_rule.py`, new): the rule against the
+leakage floor through the binding and the numpy mirror (fails on
+a5af1ade: -1e-15 A and -1e-7 A read soft there); the DCM buck turn-on
+(pwl with `discontinuity_restart`, trbdf2, dsed, table path) = 50 x
+[c (V_in - V_out)/V_T + current part] against the closed-form DCM ratio
+(rel 2e-3); the bare leg (every commutation at zero current, g_off 1 nS
+and 0) books 20 x E_on(600, 0) exactly once each (rel 1e-6); the loaded
+leg's soft edges (~45 A reverse) stay 0 J with an intercept table; the
+capacitor-loop turn-on on pwl / trbdf2 / dsed / the table path on trbdf2
+and dsed results: v = 8 V, E_on = E(8 V, 0) = 0.8 nJ (table E = 1e-9 v/10
++ 1e-6 i; a5af1ade booked 0 on trbdf2), E_impulse = 24 uJ unchanged;
+the run ending on the jump's step keeps the edge; non-finite refused.
+The DCM, bare-leg and loaded-leg tests are regression guards (a5af1ade
+passes them: the leakage of the newly blocking devices flows FORWARD
+through an incoming switch, so no engine read a reverse sign there).
+The default pwl rings on the DCM switch node's leakage mode (trapezoidal
+at tau = L g_off << dt: v at the turn-on 0..19 V for a true 9.61 V, five
+of fifty turn-ons read soft); that is the integrator, not this rule
+(`discontinuity_restart=True` reads 9.6098 V on every edge).
+
+Reviewer (fresh context, opus, read-only) on 28b913f2, and what was done:
+1. a deferred edge was lost if the run / snapshot ended on the jump's
+   step -> settled at write()/save(), read on its pre-edge side (no
+   regular post-jump state exists); the table path does the same.
+2. trbdf2's event() right limit is a probe across the edge, not a
+   projected state -> only dsed passes `projected = true`; trbdf2 defers.
+3. unbook_ left the last booking valid -> invalidated.
+4. the structure's other switches flipping with the impulse -> also
+   impulsive (ReinitRecord.devices), tracker and table path.
+5. the table path on a dsed result read one sample past the right limit
+   -> reads the stored step-start state (test case `table_dsed`).
+6. the floor is the device's OWN leakage: a reverse leakage summed over
+   several blocking devices above it, or a solver error above one ulp
+   of the closed law, still reads soft. Left (documented): no circuit
+   tried produced a reverse reading at all.
+7. non-finite refused before the no-spec early return (table and
+   period paths).
+8. impulse times per summary computed once.
+9. the earlier open items 1-3 marked closed; regression guards labelled.
+Not addressed: `store_every > 1` with an impulse (the table path's
+`times[k-1]` is then not the jump step's start; the tracker is unaffected).
