@@ -232,8 +232,8 @@ TEST_CASE("segment integrals: probe programs compose to degree <= 2 or refuse",
 // [i, v] (ω0 = 3e5) driven by an oscillator (s, c) at ω = ω0 (a defective
 // pair: secular t·sin terms), 1e-8 and 1e-3 off it, and 3ω0; a damped one at
 // ω0 over a piece; an RC-like pair driven by a level with a slope (a Jordan
-// block at 0: the ramp). Truths: .scratch/src/seg_truth_exo.py of the branch
-// fix/core-exact-integrals-sources (mp.quad on mp.expm, 50 digits, no pulsim).
+// block at 0: the ramp). Truths: openspec/changes/update-number-changing-release/
+// fixes/exact_sources_truth/seg_truth_exo.py (mp.quad on mp.expm, 50 digits, no pulsim).
 namespace {
 
 std::vector<dsed::SegForm> forms5() {
@@ -305,4 +305,25 @@ TEST_CASE("segment integrals: a sine source on, near and far from a circuit mode
            {1.1354402446931820074e-5, 2.0305533525271573785e-5, 1.137523939458945324e-5,
             2.3929616238125319774e-5},
            1e-12, "resonant, damped, a piece inside the step");
+}
+
+TEST_CASE("segment integrals: a source's level with a slope (a ramp, a Jordan block at 0)",
+          "[dsed][segment_integrals]") {
+    DenseMatrix A = DenseMatrix::Zero(4, 4);
+    A(0, 0) = -2e5;
+    A(0, 1) = 1e5;
+    A(1, 0) = 5e4;
+    A(1, 1) = -3e5;
+    A(0, 2) = 2e5;   // the level drives x1
+    A(2, 3) = 1e5;   // level' = slope (scaled)
+    Vector b = Vector::Zero(4);
+    b[1] = 1e4;
+    check5(A, b, 0, kH,
+           {1.4145623499627910915e-5, 2.1699288570771626233e-5, 4.7222024195266352991e-5,
+            2.583215136576584696e-4},
+           1e-12, "ramp");
+    check5(A, b, 0.3 * kH, 0.7 * kH,
+           {5.6061848460882354887e-6, 7.9694977338022419683e-6, 1.8021205875054266056e-5,
+            8.3414213249364020456e-5},
+           1e-12, "ramp, a piece inside the step");
 }
