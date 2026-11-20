@@ -199,13 +199,14 @@ TEST_CASE("vdmos_cgd: C = dQ/dv, Q monotone at picovolts, limits",
 TEST_CASE("NonlinearCapacitor: junction law unchanged, refusals by law (1.5)",
           "[mosfet][nonlinear_capacitor][unit]") {
     // The default-constructed Params is the junction law, and the junction
-    // branch is the pre-variant arithmetic: compare bit-for-bit.
+    // branch is the pre-variant arithmetic: C bit-for-bit; Q is the same
+    // closed form, evaluated as expm1(log1p) since F-S-5 (libm: 1e-12).
     NonlinearCapacitor::Params legacy{.C0 = 2e-9, .V0 = 25.0, .m = 0.5, .v_floor = -0.9};
     for (Real v : {-30.0, -1.0, 0.0, 3.3, 400.0}) {
         const Real u = std::max(v / 25.0, -0.9);
         CHECK(NonlinearCapacitor::capacitance(legacy, v) == 2e-9 / std::pow(1.0 + u, 0.5));
-        CHECK(NonlinearCapacitor::charge(legacy, v)
-              == 2e-9 * 25.0 / 0.5 * (std::pow(1.0 + u, 0.5) - 1.0));
+        const Real q = 2e-9 * 25.0 / 0.5 * (std::pow(1.0 + u, 0.5) - 1.0);
+        CHECK(std::abs(NonlinearCapacitor::charge(legacy, v) - q) <= 1e-12 * std::abs(q));
     }
     CHECK_THROWS(NonlinearCapacitor::validate(NonlinearCapacitor::vdmos_cgd(1e-9, -1e-12, 0.5)));
     CHECK_NOTHROW(NonlinearCapacitor::validate(NonlinearCapacitor::vdmos_cgd(1e-9, 0.0, 0.5)));
