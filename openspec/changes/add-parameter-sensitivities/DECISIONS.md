@@ -429,3 +429,42 @@ from the first post-event stage solve, as the design says.
   sub-step fraction removes consistently (the state itself was computed as if
   the event were at the grid point), so a mode change that was not located is
   REFUSED naming the device. TR-BDF2 lands its steps on the located event.
+- S⁺ is re-initialised consistently too (one more bordered solve per
+  parameter on the same QR): C/2·S⁺ = dq⁺ − ∂q/∂p, G⁺S⁺ + ∂f/∂p ∈ range, and
+  dq̇/dp⁺ = −(G⁺S⁺ + ∂f/∂p), so a trapezoid after the event (trbdf2's
+  gate-edge probe) reads a consistent slot. An event with dτ/dp = 0 is NOT
+  re-initialised: the recurrence then mirrors the engine's own discrete map.
+- Measured (macOS arm64, Eigen 5), all within the tests' 1e-5 relative:
+  diode turn-on (V_th 0.7, V_f 0) vs its closed form (complex step on the
+  piecewise solution), R and C, on pwl+split (dt 1e-8) and trbdf2 (rtol
+  1e-10): pass; the dτ/dp term is > 50 % of each answer (asserted;
+  ≈ 94 % for R). One RC pulse, `S.duty`, `R.R`, `C.C` vs the closed form on
+  pwl+split (dt 1e-6) and trbdf2: pass; d v/d D is entirely the jump term.
+  DCM buck (task 6.3 table, 40 T) on pwl+split at dt = T/1000: ∂v/∂L, ∂R,
+  ∂D within 1e-5: pass. Fixed gate edges without splitting vs central
+  differences of the same scheme: 1e-6, pass.
+
+### State at hand-off (2026-11-20, context budget reached)
+
+Branch feat/core-sensitivity-events. OPEN, each a strict xfail or a
+refusal by name:
+1. trbdf2 DCM buck: its turn-off is an INTERPOLATED landing (secant between
+   two bracket states, no solve): refused by name. Next step: differentiate
+   the interpolation (S_land = S_a + θ(S_b − S_a) with S_b a trap stage on
+   the trial's factor, captured when the trial is solved) — or land with a
+   solve when sensitivities are on.
+2. `test_moving_event_with_a_newton_device_is_refused` (strict xfail): a
+   pwl+split run with a Shockley diode and a PWL diode turn-on returned a
+   number; no refusal fired. NOT TRACED — possibly a silent wrong answer
+   (the Newton split path may never reach `sens_diode_events`, e.g. the
+   flip handled inside a Newton restart stage under a pending event). Trace
+   first: it is the priority.
+3. trbdf2 crossing within the conditioning floor (probe flip at t),
+   ESDIRK landings, Newton-circuit moving events: refused by name.
+4. 4.4 saturable inductor: its flux λ(i) is a nonlinear q with its own
+   history (`sat_history`), outside the recurrence's linear q = C/2·x. It
+   needs q(X) and ∂q/∂x from the law at each stage, its history checked to
+   follow the scheme's ψ on every integrator, and ∂λ/∂(L_0, I_sat) by
+   `seed_params`; not started.
+Not run: cost gate, byte compares, full pytest, C++ targets, stubs (no
+binding signature changed), openspec validate, the fresh-context reviewer.

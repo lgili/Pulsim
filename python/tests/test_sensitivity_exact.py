@@ -342,7 +342,9 @@ def test_orbit_costs_one_more_period_run(orbit):
 # Refusals (by name, typed)
 # ---------------------------------------------------------------------
 
-@pytest.mark.parametrize("engine", ["pwl", "trbdf2", "auto"])
+# pwl carries fixed gate edges and their zero-time cascades since group 6
+# (test_sensitivity_events.py); its unlocated diode events are refused there.
+@pytest.mark.parametrize("engine", ["trbdf2", "auto"])
 def test_other_engines_refuse_sensitivities(engine):
     b = _buck()
     kw = {"dt": T / 100} if engine == "pwl" else {}

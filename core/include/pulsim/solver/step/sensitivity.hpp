@@ -467,7 +467,6 @@ public:
         Cq_ = Real{0.5} * C;   // J = G + (1/factor_dt)·C = G + a·(C/2)
     }
 
-public:
     /// A moving event in a circuit with a Newton law: refused by name.
     void refuse_newton_event(Real tau, std::string_view what) const {
         if (!has_newton_) return;
@@ -481,7 +480,6 @@ public:
                         engine_, tau, what));
     }
 
-private:
     /// Registers an event at τ (pre-event values: the uncommitted last stage
     /// when there is one, else the committed step end). Two events at one
     /// instant (a cascade) must move together: a tie whose order changes
@@ -680,7 +678,7 @@ private:
     }
 
     [[nodiscard]] Param resolve_(const std::string& nm) const {
-        const auto dot = nm.rfind('.');
+        const auto dot = nm.substr(0, nm.find("#T=")).rfind('.');
         if (dot == std::string::npos || dot == 0 || dot + 1 == nm.size()) {
             throw std::invalid_argument("sensitivities: '" + nm +
                                         "' is not '<component>.<field>'.");

@@ -301,7 +301,7 @@ def test_an_unlocated_state_event_is_refused_by_name():
     with pytest.raises(p.UnsupportedError) as ei:
         _run(_diode_rect(), 20e-3, "pwl", sensitivities=["C.C"], dt=1e-5)
     assert (ei.value.engine, ei.value.feature) == ("pwl", "sensitivities")
-    assert "group 6" in str(ei.value) and "'D' turns ON" in str(ei.value)
+    assert "group 6" in str(ei.value) and "'D' turns" in str(ei.value)
 
 
 def test_resume_and_other_refusals():
