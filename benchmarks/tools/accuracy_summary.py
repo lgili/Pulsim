@@ -6,7 +6,7 @@ cannot drift from them:
     accuracy_summary.py --check    # exit 1 if the page differs from what the artefacts give
 
 Sources (nothing is run): ``benchmarks/exact_scoreboard.json`` (the floor-free
-``exact`` measure against the 50-digit truth), ``benchmarks/NEXT_DEFAULTS_REHEARSAL.md``
+three-part ``exact`` measure, ``metrics.exact_parts``, against the 50-digit truth), ``benchmarks/NEXT_DEFAULTS_REHEARSAL.md``
 (strict reference counts today and under the release profile) and
 ``benchmarks/IDEAL_SWITCH_FLIP_EVIDENCE.md`` (strict counts per switch variant); ``benchmarks/EXACT_TRUTH.md`` for the circuits the
 truth engine refuses by name.
@@ -64,18 +64,27 @@ def build() -> str:
          "`benchmarks/EXACT_SCOREBOARD.md`, `## Notes`).", ""]
 
     L += ["## Circuits within a distance of the 50-digit truth", "",
-          f"`exact` measure (`benchmarks/tools/metrics.py`, time-weighted RMS over the engine's own samples, "
-          f"fraction of the truth's span) on the {n} circuits the truth solves "
-          "(`benchmarks/EXACT_SCOREBOARD.md`). `not graded` = the run refused or failed.", "",
-          "| configuration | engine | keywords | form | < 1e-3 | < 1e-6 | < 1e-9 | not graded |",
-          "|---|---|---|---|---:|---:|---:|---:|"]
+          f"`exact` measure (`benchmarks/tools/metrics.py`, `exact_parts`; fractions of the truth's span) on "
+          f"the {n} circuits the truth solves (`benchmarks/EXACT_SCOREBOARD.md`, `## The measure`): per cell "
+          "the largest of three parts, the smooth error of the engine's stored rows away from a displaced event, "
+          "the L2 cost of its event instants against the truth's, and its recorded one-sided limits against the "
+          "truth's. `set by` counts the cells each part decided (smooth / instants / limits). `old` = the same "
+          "cells under the previous definition (one time-weighted RMS over the two-sided trace with a 1e-3 dt "
+          "snap window), kept for this release. `not graded` = the run refused or failed.", "",
+          "| configuration | engine | keywords | form | < 1e-3 | < 1e-6 | < 1e-9 | set by s / i / l "
+          "| old < 1e-3 / 1e-6 / 1e-9 | not graded |",
+          "|---|---|---|---|---:|---:|---:|---:|---:|---:|"]
     for k in cfgs:
         d = sb["configs"][k]
-        ex = [r["cells"][k]["exact"] for r in recs if "exact" in r["cells"].get(k, {})]
+        cs = [r["cells"][k] for r in recs if "exact" in r["cells"].get(k, {})]
+        ex = [c["exact"] for c in cs]
+        old = [c["exact_old"] for c in cs]
         ng = sum(1 for r in recs if k in r["cells"] and "exact" not in r["cells"][k])
         kw = ", ".join(f"{a}={d['kwargs'][a]!r}" for a in sorted(d["kwargs"])) or "-"
+        by = " / ".join(str(sum(c["exact_part"] == p for c in cs)) for p in ("smooth", "instants", "limits"))
         L.append(f"| {k} | {d['engine']} | {kw} | {d['form'] or '-'} | "
-                 + " | ".join(str(sum(e < t for e in ex)) for t in THRESHOLDS) + f" | {ng} |")
+                 + " | ".join(str(sum(e < t for e in ex)) for t in THRESHOLDS) + f" | {by} | "
+                 + " / ".join(str(sum(e < t for e in old)) for t in THRESHOLDS) + f" | {ng} |")
 
     rows = {r[0]: r for r in _md_table(reh, "## Counts, differential matrix")}
     head = _md_table(reh, "## Counts, differential matrix")[0]
@@ -110,13 +119,13 @@ def build() -> str:
             L.append(f"| {r[0]} | {r[1]} | " + " | ".join(r[2:6]) + " |")
 
     L += ["", "## Five largest remaining errors per configuration", "",
-          "`departs at` = the last truth event before the first sample off by more than the cell's "
+          "`departs at` = the last truth event before the first smooth-part row off by more than the cell's "
           "tolerance (the scoreboard's `departure`; `-` = no sample beyond the tolerance); it locates the "
           "error, it is not its cause. The last columns are the same circuit on other configurations. This "
           "page states no cause; see `benchmarks/EXACT_SCOREBOARD.md` (`## Notes`, `## Findings for the "
           "engine tracks`), `benchmarks/EXACT_TRUTH.md` and `benchmarks/circuits/NOTES_known_issues.md`.", "",
-          "| configuration | circuit | exact | departs at (truth event) | " + " | ".join(SAME) + " |",
-          "|---|---|---:|---|" + "---:|" * len(SAME)]
+          "| configuration | circuit | exact | part | departs at (truth event) | " + " | ".join(SAME) + " |",
+          "|---|---|---:|---|---|" + "---:|" * len(SAME)]
     for k in cfgs:
         xs = sorted(((r["cells"][k]["exact"], r["circuit"], r["cells"][k]) for r in recs
                      if "exact" in r["cells"].get(k, {})), key=lambda x: (-x[0], x[1]))[:5]
@@ -126,7 +135,8 @@ def build() -> str:
             r = next(x for x in recs if x["circuit"] == circ)
             other = [_g(r["cells"][o]["exact"]) if "exact" in r["cells"].get(o, {}) else
                      r["cells"].get(o, {}).get("outcome", "-") for o in SAME]
-            L.append(f"| {k} | {circ.removeprefix('circuits/')} | {_g(e)} | {where} | " + " | ".join(other) + " |")
+            L.append(f"| {k} | {circ.removeprefix('circuits/')} | {_g(e)} | {c['exact_part']} | {where} | "
+                     + " | ".join(other) + " |")
 
     every = [r[0] for r in _md_table(reh, "## Every cell") if not r[0].startswith("analytic:")][1:]
     solved = {r["circuit"].removeprefix("circuits/") for r in recs}
@@ -141,7 +151,8 @@ def build() -> str:
           "(`benchmarks/EXACT_TRUTH.md`, coverage table): " + "; ".join(f"{Path(c).stem} ({refused[c]})" for c in ref)
           + f". {len(rest)} are in its scope but have no truth record in `benchmarks/truth/` (not computed; no "
           "reason recorded): " + ", ".join(Path(c).stem for c in rest) + ".",
-          "- Only the engine's samples are graded: what a trace does between its samples is not measured.",
+          "- Only what the engine records is graded (its stored rows, event instants and one-sided limits): "
+          "what a trace does between its samples is not measured.",
           "- Platform: every number here was measured on macOS (arm64, CPython 3.13); Linux and Windows "
           "are covered by CI tests, not by these artefacts.",
           "- The release profile is not the default: `+next` columns apply it through the harness "
