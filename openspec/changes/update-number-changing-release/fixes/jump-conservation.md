@@ -65,3 +65,36 @@ max(δt_loc·|ẋ(0−)|, |Δ2 of the start mode|). A state over the old bound b
 MOVE: carried to x0 + J like a jump (else stage 2's pseudo-state carries it: −0.71067 V at the next
 sample instead of −0.71, measured with a version that left it unmoved), recorded by nobody, no
 right limit at t_from.
+
+## Implementation as landed (09126877) [R]
+- Detection unchanged (the rule's per-state test; ẋ(0−) allowance), plus the start-mode allowance above.
+- The series runs over ALL C / L / nonlinear-capacitor entries with one coefficient vector (charge and flux
+  structural), whenever a state is carried and there are ≥ 2 entries; one entry keeps the scalar code bit for bit.
+  A Ritz value outside the fast range (real ∉ [0, γ/(1+γ)], complex of modulus > γ/(1+γ)) is held at ρ = 0
+  (factor 1: the rule's d for a state that does not jump). Fallbacks: the flagged states only (> 6 modes over
+  all), then the per-state a (a stage failed, a source jump inside the extra stages, > 6 modes among the flagged).
+- The start-mode probe: three single stages in (new gates, diode bits before stage 1); per state a smooth move
+  (|Δ1 − Δ2| ≤ |Δ2|/γ + noise) allows |Δ2|; a jump of that mode only its Aitken slow rate (≤ |Δ2|); a third
+  stage that fails (a junction law driven out of its range: the clamp's 14 V stages) gives 0 for a jump.
+- Flags: 1 = jump (recorded, energy), 2 = move (carried, unrecorded, no right limit, no energy, mutual term
+  skipped), 3 = a nonlinear capacitor the series carried without a flag (moved, unrecorded).
+
+## Numbers at 09126877 against the truths [M]
+Island (dt 10 ns; `.scratch/jc/nums.py`), after the event's step / record vs E_before − E_after:
+| | R2 | v+ (all three) | record | truth | rel |
+|---|---|---|---|---|---|
+| linear | 1e-6 / 0.05 / 0.4 / 0.8 | 25.0000000 | 3.749999988e-6 | 3.749999988e-6 | ≤ 1.0e-13 |
+| linear | 1e9 | 33.3333333, C3 3e-7 | 3.333333320e-6 | 3.333333320e-6 | 2.2e-13 |
+| laws | 1e-6 / 0.05 | 19.1474536 | 2.141523786e-6 | 2.141523786e-6 | ≤ 5.7e-12 |
+| laws | 0.4 | 19.1474539 / …539 / …528 | 2.141523982e-6 | 2.141523786e-6 | +9.2e-8 |
+| laws | 0.8 | 19.1474635 / …634 / …176 | 2.141528859e-6 | 2.141523786e-6 | +2.4e-6 |
+| laws | 1e9 | 25.9608554, C3 3e-7 | 1.946686259e-6 | 1.946686259e-6 | 3e-12 |
+Base: +0.099 / +0.40 / +0.78 / +1.44 V (linear, R2 0.05/0.2/0.4/0.8), record +2.4 %; laws +0.048…+0.78 V, +1.7 %.
+The laws' residual at R2 = 0.4/0.8 is the series' secant model of a nonlinear stage map (exact for a linear one).
+ΣQ over the event step: ≤ 7e-19 C (linear; = Ssrc's OFF leakage 1e-12 S·100 V·dt), ≤ 6e-18 C (laws, Newton).
+Inductor dual (L1 1 µH at 10 A through S, L2 2 µH, L3 1 µH, Rm): i+ = 2.5 / −2.5 / −2.5 A at Rm 1e9 / 2e4 /
+2500 / 1250 Ω (truth −φ/ΣL = 2.5), Δφ ≤ 5e-21 Wb, record 3.740013322e-5 J (truth = ½Σ L(i² − i+²), test rel 1e-6);
+Rm 1e-6: 3.33333332 / −3.33333332, L3 −4e-8, record 3.323348319e-5. Base at Rm 2e4: 2.5105 A, Δφ −4.2e-8 Wb.
+Two snubbers (test_release_findings_a): record 1.000778e-5 J [½Cs(J1² + J2²) = 1.000778e-5]; Cs2 after the step
+0.0099990 V [v_on 0.0099990]; base 1.000782e-5 and Cs2 +0.010220 V.
+Clamp: no record at 1 µs (base 4.9e-10 / 4.924e-10 J), v = −0.71 V from the next sample on (1e-9).

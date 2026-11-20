@@ -176,12 +176,12 @@ def test_an_inductor_loop_of_two_fast_modes_keeps_its_flux(Rm, split):
     assert recs[0].dW == pytest.approx(e_loss, rel=1e-6)
 
 
-def _clamp(nl, split, I=10.0, C=2e-9):
+def _clamp(nl, split, i_src=10.0, C=2e-9):
     """A current source pulls I from node n; Sl (1 mOhm) holds n at -I R_on = -0.01 V; Dl
     (gnd -> n, V_f 0.7 V, 1 mOhm) clamps n at -0.71 V. Sl opens at 1 us: C carries I and
     n falls 0.7 V in C*0.7/I = 140 ps (finite rate), then Dl takes the current."""
     b = p.CircuitBuilder()
-    b.add_current_source("I", "gnd", "n", I)
+    b.add_current_source("I", "gnd", "n", i_src)
     b.add_switch("Sl", "n", "gnd", 1e3, 1e-9)
     b.add_diode("Dl", "gnd", "n", 1e3, 1e-9, 0.0, 0.7)
     if nl:
