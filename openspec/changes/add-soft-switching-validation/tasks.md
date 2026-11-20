@@ -13,7 +13,7 @@
 ## 1. ZVS / ZCS detection KPIs
 - [x] 1.1 Add `compute_zvs_fraction(switch_state, v_ds_samples, threshold, lookback)` to `benchmarks/kpi/`.
 - [x] 1.2 Add `compute_zcs_fraction(switch_state, i_d_samples, threshold, lookback)`.
-- [x] 1.3 Add `compute_switching_loss(switch_state, v_ds, i_d)` — integrate ½·V·I at each transition.
+- [x] 1.3 Add `compute_switching_loss(switch_state, v_ds, i_d)` — integrate v·i dt over a window after each transition (the earlier "½·V·I" was not an energy: F-S-2).
 - [x] 1.4 Unit tests against synthetic switch state + ramp V_DS to confirm ZVS / ZCS / loss counts match hand-computed expectations.
 
   (2026-11-20: 1.1/1.2 existed under these names with sample lookbacks;

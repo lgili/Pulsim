@@ -25,14 +25,14 @@ each transition (`switching_energy_j` added); `benchmark_runner` passes the
 KPI entry's `window_s`. Synthetic test against 50/6 uJ.
 
 ### F-S-3 — the exact-truth tool cannot settle a transformer-coupled diode rectifier at a gate edge (truth tool, not the simulator)
- raises "no consistent diode mode" at the
+`benchmarks/tools/exact_truth.py` raises "no consistent diode mode" at the
 first turn-off of an LLC half-bridge with an ideal 4:1 transformer and a
 diode bridge (t = 3.7 us) and of a phase-shifted full bridge (t = 1.8 us):
 no enumerated mode passes its forward-consistency test. The LLC benchmark
 therefore uses the rectified load's first-harmonic equivalent (R_ac across
 L_m); the PSFB has no independent truth and was not added (tasks 3.x).
- on that PSFB netlist (started near its operating point,
-L_o 24 A) raises  at t = 10 ns (body diode D4
+`engine='dsed'` on that PSFB netlist (started near its operating point,
+L_o 24 A) raises `DiodeModeInconsistentError` at t = 10 ns (body diode D4
 ON at -1.95 mA): loud, not silent; not chased (the start may be
 inconsistent: L_lk 0 A against a 24 A secondary).
 
@@ -56,7 +56,7 @@ window from `device_loss_summary`, against the closed form:
   -0.49 ns on 31 ns); a diode clamp rings step by step (5 A / 0 A around
   2.5 A); both are AI_GUIDE trap 9.
 
-* LLC () on the fixed engine without restart: the
+* LLC (`llc_half_bridge_zvs.yaml`) on the fixed engine without restart: the
   switch and its body diode ring 14 A / 33 A step by step through the on
   time and the turn-off dumps C_oss in ONE step (truth: 66 ns); transition
   times off by up to 27 ns (2.7 steps), i_Lr at turn-off by 0.019 A. Trap 9.
