@@ -881,7 +881,7 @@ inline SimulationResult run_transient(
     // the right-limit solve's scratch.
     bool ip_jump = false, ip_struct = false, rl_want = false;
     std::vector<Real> ip_hist_p, rl_hist, rl_hcur;
-    Vector rl_x1, rl_b0, rl_b, rl_h, rl_xa, rl_xb, rl_xc, rl_xd, rl_left, rl_r4;
+    Vector rl_x1, rl_b0, rl_b, rl_h, rl_xa, rl_xb, rl_xc, rl_xd, rl_r4;
     std::vector<bool> rl_bits, rl_last, rl_lsb, rl_done;
     // a LOCATED diode crossing at rl_loc_t: the diodes that cross there
     // (split_step); their right limit is solved with them ON (below)
@@ -2398,12 +2398,17 @@ inline SimulationResult run_transient(
             // fourth-order combination P on ε…8ε against the same on
             // 2ε…16ε, else the combination Q that also annihilates a 1/ε
             // term, (−8x1 + 22x2 − 13x4 + 2x8)/3, against its shifted twin;
-            // agreement within 1e-7 of the unknown's size. An unknown that
-            // agrees in neither takes the next ε of the ladder (1e-3·ε0
-            // toward ε ≪ τ, then 1e2·ε0), and after the ladder the fallback:
-            // the impulse rule's x0+ after a probed jump, else the left
-            // value; counted (n_right_limit_fallbacks).
-            constexpr Real kLadder[] = {Real{1}, Real{1e-3}, Real{1e2}};
+            // agreement within 1e-6 of the unknown's size. An unknown that
+            // agrees in neither takes the next ε of the ladder: 1e3·ε0 =
+            // γh/2, the stage's own conditioning (ll10: a floating common
+            // mode set by 1 MΩ bleeds, lost to rounding through L/ε at small
+            // ε, kept by the stored samples at 2L/dt), then 1e-3·ε0 (toward
+            // ε ≪ τ; last: where rounding saturates, a lost unknown is
+            // constant in ε and passes either test). After the ladder the fallback,
+            // counted (n_right_limit_fallbacks): the impulse rule's x0+
+            // after a probed jump, else ε0's P (the states are x0 + J in
+            // every solve: only algebraic unknowns can fail).
+            constexpr Real kLadder[] = {Real{1}, Real{1e3}, Real{1e-3}};
             rl_done.assign(static_cast<std::size_t>(rl_x1.size()), false);
             Size n_done = 0;
             for (Size rung = 0; rung < 3 && n_done < rl_done.size(); ++rung) {
@@ -2433,7 +2438,7 @@ inline SimulationResult run_transient(
                 for (Index i = 0; i < rl_r4.size(); ++i) {
                     if (rl_done[i]) continue;
                     const Real s = std::max(std::abs(rl_r4[i]), std::abs(rl_x1[i]));
-                    const Real tol = Real{1e-7} * s + floor;
+                    const Real tol = Real{1e-6} * s + floor;
                     const Real p2 = (Real{64} * rl_xb[i] - Real{56} * rl_xc[i] +
                                      Real{14} * rl_xd[i] - x[i]) / Real{21};
                     const Real q1 = (Real{-8} * rl_xa[i] + Real{22} * rl_xb[i] -
@@ -2454,10 +2459,11 @@ inline SimulationResult run_transient(
             aux_events.reset();
             restart_factorizations = rf_s;
             if (ok && n_done < rl_done.size()) {
-                const Vector& fb = ip_jump ? event_rl_x : rl_left;
-                for (Index i = 0; i < out.size(); ++i) {
-                    if (!rl_done[i]) out[i] = i < fb.size() ? fb[i] : rl_x1[i];
-                }
+                if (ip_jump && event_rl_x.size() == out.size()) {
+                    for (Index i = 0; i < out.size(); ++i) {
+                        if (!rl_done[i]) out[i] = event_rl_x[i];
+                    }
+                }   // else out keeps ε0's P
                 ++result.n_right_limit_fallbacks;
             }
             if (ok) ok = out.allFinite();
@@ -3143,7 +3149,6 @@ inline SimulationResult run_transient(
             auto run_restart = [&](Real t_from, Real h, Real loc) {
                 const bool rl_ev = rl_want;
                 rl_want = false;
-                if (rl_ev) rl_left = x;   // the event's left value (the right limit's fallback)
                 const Real h_s = kGamma * h;
                 const Real dt_eq = Real{2} * h_s;
                 be_commit_h = h_s;
