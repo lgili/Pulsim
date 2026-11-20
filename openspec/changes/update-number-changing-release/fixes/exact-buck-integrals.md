@@ -672,3 +672,7 @@ the RC value update, then 36/36 test_recorders); the new files 16 passed +
 (regenerated: `run_auto_native_builder(loop_feed=)` and a docstring the
 predecessor had changed). Not run: Eigen 3.4.0, g++, full ctest. Item 6
 (exact interior extrema, keep='times' from the flow): not done, left.
+
+Full pytest on 88ba6bf4: 6151 passed, 110 skipped, 11 xfailed (8 before + the
+3 new strict xfails), 0 failed (11 min 35 s); build/python is a symlink to
+python/pulsim (one .so, built from this tip).
