@@ -33,6 +33,7 @@ import numpy as np
 import pytest
 
 import pulsim as p
+from pulsim import _recorders
 
 F = 1e4                      # every gate / source period is 1e-4 s
 TS, T = 3e-5, 2e-4           # the time-base probes: t_start off every edge
@@ -272,13 +273,29 @@ def _buck():
 CIRCUITS = {"leg": (_leg, 0.43e-3), "rectifier": (_rectifier, 0.43e-3), "buck": (_buck, 0.4e-3)}
 
 
+def _recs(probes):
+    return [p.Recorder("r", list(probes), keep="none", windows=[(0.5e-3, 0.9e-3)],
+                       period=1e-4)]
+
+
+def _like_with_like(full, got, probes):
+    """The uninterrupted run's recording on the fresh run's feed. A fresh t_start
+    run on the exact engine takes the stored-arrays pass (warned; fixes/
+    exact-buck-integrals.md) while the uninterrupted run integrates in the loop in
+    closed form: the two differ by the trapezoid's chord, so the fresh run is
+    compared with the same stored pass over the uninterrupted run's samples."""
+    if got.recorder_feed["mode"] == full.recorder_feed["mode"]:
+        return full.recorded["r"]
+    assert got.recorder_feed["mode"] == "stored-arrays", got.recorder_feed
+    return _recorders.record_result(full, _recs(probes))["r"]
+
+
 def _run(circuit, opts, t_end, rec=True, built=None, **kw):
     """``built``: the (builder, drive, probes) of an earlier run, so a resume
     continues its Python controller objects (the snapshot holds the circuit)."""
     make, t_mid = CIRCUITS[circuit] if isinstance(circuit, str) else circuit
     b, kw0, probes = built or make()
-    recs = [p.Recorder("r", list(probes), keep="none", windows=[(0.5e-3, 0.9e-3)],
-                       period=1e-4)] if rec and t_end > 0.5e-3 else None
+    recs = _recs(probes) if rec and t_end > 0.5e-3 else None
     r = _sim(b, t_end=t_end, **opts, **kw0, recorders=recs, **kw)
     r._built = (b, kw0, probes)
     return r, probes
@@ -336,7 +353,9 @@ def _assert_tail(engine, how, full, first, got, probes, t_mid, circuit):
         np.testing.assert_allclose(tg, tf, rtol=0, atol=1e-12)        # absolute instants
         np.testing.assert_allclose(eg, ef, rtol=tol, atol=0)
     # recorder statistics over an absolute window and absolute periods
-    rf, rg = full.recorded["r"], got.recorded["r"]
+    rf, rg = _like_with_like(full, got, probes), got.recorded["r"]
+    if rf is not full.recorded["r"]:
+        assert engine in EXACT and how == "fresh", (engine, how)
     for pr in probes:
         for f in ("avg", "rms", "min", "max"):
             a, c = rf.windows[pr][f], rg.windows[pr][f]
@@ -390,7 +409,8 @@ def test_exact_engine_other_integrators_fresh_t_start_matches_the_tail(integrato
     assert np.abs(np.asarray(got.states[-1]) - np.asarray(full.states[-1])).max() <= tol * scale
     for pr in probes:
         np.testing.assert_allclose(got.recorded["r"].windows[pr]["avg"],
-                                   full.recorded["r"].windows[pr]["avg"], rtol=tol, atol=tol * scale)
+                                   _like_with_like(full, got, probes).windows[pr]["avg"],
+                                   rtol=tol, atol=tol * scale)
 
 
 # ------------------------------------------------- the reviewer's cases
