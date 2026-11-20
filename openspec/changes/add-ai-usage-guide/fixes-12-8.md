@@ -261,3 +261,46 @@ Reviewer (fresh context, opus, read-only) on 28b913f2, and what was done:
 9. the earlier open items 1-3 marked closed; regression guards labelled.
 Not addressed: `store_every > 1` with an impulse (the table path's
 `times[k-1]` is then not the jump step's start; the tracker is unaffected).
+
+Moved values (32 loss / thermal / design / examples-claims / guide / doc
+files + this note's tests, every loss record / `loss_rows` row /
+table-path result dumped on a5af1ade and on the tip, 109 common tests
+diffed): ONE value moves, back to its pre-12.8 value:
+`test_a_capacitor_loop_impulse...` on TRBDF2 (the predecessor's table
+said dsed; dsed never moved), S turn-on v 0 / E 0 -> v 7.99999999 V /
+E 1e-9 J (the test's constant table): right, the switch blocked 8 V and
+the jump is E_impulse. Unchanged and staying: `test_vsi_parity` totals
+(their soft edges read 0.05-10.8 A, real currents far above g_off |v| =
+6e-7 A), the two dsed DCM-boost edge energies (a 7 mA reading), the
+buck_pareto designs (negative inductor current of amps at Q1's turn-on):
+none of those currents is within the leakage floor, so the predecessor's
+classification stands. (`test_one_and_eight_workers` records arrive in
+another order; the sets are equal. The bit-for-bit test's inputs changed.)
+
+Gates: byte compares vs a5af1ade all identical: goldens with counters,
+stateful, engines 35, steps, pwl_identity 390/390, trbdf2_identity
+371/371, dsed bit identity 36/36 default and 36/36 shadow, and the 18
+loss-port runs (VSI + leg, dead 0 / 1 us, three engines). Cost,
+instructions per accepted step, min of six per round, two interleaved
+rounds, same build flags (Release, no LTO, ccache), base .so vs tip .so,
+port off: buck_pwl 3077.0 -> 3090.9 (+0.45 %, the base itself spans
+3077-3092 between rounds; no code in a port-off loop changed), vsi_pwl
+4759.2 -> 4756.6 (-0.05 %), buck_trbdf2 10979.5 -> 10955.5 (-0.22 %),
+bridge_trbdf2 12721.9 -> 12722.3 (0.00 %); port on (leg, pwl) 3298.0 ->
+3306.6 (+0.26 %).
+
+Found on the way, NOT fixed (out of scope): `engine='dsed'` with a loss
+port on a circuit with NO state variables (a leg on a DC source, no L / C)
+dies with SIGSEGV (600 V source, two 1 mOhm / 1 nS switches in a leg,
+`set_device_losses` on one, 10 kHz pair; without the port it runs).
+
+Verification (follow-up): extension build; `pulsim_core_thermal_tests`
+(129 assertions / 13 cases) and `pulsim_core_dsed_tests` (41265 / 142)
+on Eigen 5, pass; the 35 dumped loss / thermal / design / examples-claims
+/ guide / doc files pass (1017 passed); ONE full pytest from the repo
+root on 9d2be33f + notes: 6241 passed, 110 skipped, 8 xfailed, 1 failed
+(the untyped-`raise ValueError` ratchet, 563 > 562: the new refusal is a
+RuntimeError now; that file + this note's tests re-run, 132 pass); ruff
+clean; stubs `--check` clean; `openspec validate add-ai-usage-guide
+--strict` and `add-in-kernel-event-losses --strict` valid; AI guide
+untouched (32,748 bytes). NOT run: full ctest, Eigen 3.4.0, g++.

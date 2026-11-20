@@ -486,7 +486,7 @@ def test_a_non_finite_reading_is_refused_on_the_table_and_period_paths():
     (on,), _ = _commutation_points([(False, math.inf, 0.0), (True, 0.0, -40.0)],
                                    True, 1e3, 1e-9)
     assert on[2] is False and math.isinf(on[0])
-    with pytest.raises(ValueError, match=r"'Q'.*non-finite"):
+    with pytest.raises(RuntimeError, match=r"'Q'.*non-finite"):
         _switch_switching_loss(np.array([False, True]), np.zeros(2),
                                np.array([math.inf, 0.0]), np.array([0.0, -40.0]),
                                {"E_on_table": _tab(E_ON), "Tj": 25.0},

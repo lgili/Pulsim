@@ -1482,7 +1482,7 @@ def _switch_switching_loss(closed_trace: np.ndarray,
             if load_at_post_edge:
                 I_load = np.where(late, i_SW[nxt], I_load)
         if not (np.all(np.isfinite(V_blk)) and np.all(np.isfinite(I_load))):
-            raise ValueError(f"switch_specs[{name!r}]: a non-finite "
+            raise RuntimeError(f"switch_specs[{name!r}]: a non-finite "
                              "commutation point")
         if E_ref <= 0 and curve is None and table is None:
             return 0.0
