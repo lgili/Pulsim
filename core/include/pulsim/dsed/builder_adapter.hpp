@@ -470,7 +470,7 @@ public:
     /// (exact_chord_step's modal second derivative; c0 / c1 the piecewise-linear
     /// sources' level and slope at t). nullptr when the mode has no tier-1 basis or
     /// sine sources (augmented state: the predicate's own source term is not affine).
-    [[nodiscard]] const ExactLTI* exact_scan_modes(Real t, const Vector& x,
+    [[nodiscard]] const ExactLTI* exact_scan_modes(Real t, const Vector& x, Eigen::VectorXcd& z,
                                                    Eigen::VectorXcd& zdd) const {
         ensure_current_resolved_();
         ensure_exact_built_(*current_entry_);
@@ -480,19 +480,27 @@ public:
         if (!e.valid || e.tier != 1 || !le.aug_omegas.empty() || e.V_re.rows() != n) return nullptr;
         e.z_re.noalias() = e.Vinv_re * x;
         e.z_im.noalias() = e.Vinv_im * x;
+        z.resize(n);
         zdd.resize(n);
-        for (Index k = 0; k < n; ++k)
-            zdd[k] = e.lambda[k] * std::complex<Real>{e.z_re[k], e.z_im[k]} + e.w[k];
+        for (Index k = 0; k < n; ++k) {
+            z[k] = std::complex<Real>{e.z_re[k], e.z_im[k]};
+            zdd[k] = e.lambda[k] * z[k] + e.w[k];
+        }
         if (!pwl_sources_.empty()) {
             const auto m = static_cast<Index>(pwl_sources_.size());
-            Vector v(m), s(m);
+            Vector& v = scan_v_;
+            Vector& s = scan_s_;
+            v.resize(m);
+            s.resize(m);
             for (Index j = 0; j < m; ++j) {
                 const auto [vj, sj] = pwl_value_slope_(pwl_sources_[static_cast<Size>(j)], t);
                 v[j] = vj;
                 s[j] = sj;
             }
-            const Vector c0 = le.pwl_cols * v;
-            const Vector c1 = le.pwl_cols * s;
+            scan_c0_.noalias() = le.pwl_cols * v;
+            scan_c1_.noalias() = le.pwl_cols * s;
+            const Vector& c0 = scan_c0_;
+            const Vector& c1 = scan_c1_;
             e.z_re.noalias() = e.Vinv_re * c0;
             e.z_im.noalias() = e.Vinv_im * c0;
             for (Index k = 0; k < n; ++k) zdd[k] += std::complex<Real>{e.z_re[k], e.z_im[k]};
@@ -505,6 +513,8 @@ public:
         for (Index k = 0; k < n; ++k) zdd[k] *= e.lambda[k];
         return &e;
     }
+
+    mutable Vector scan_v_, scan_s_, scan_c0_, scan_c1_;   // exact_scan_modes' work
 
     /// Output instants resolving the current mode's fast transient after
     /// an event at t_e (exact_fast_samples).

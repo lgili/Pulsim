@@ -1419,33 +1419,48 @@ private:
             }
             Real ga = p.value(t0, x0);
             ++result.n_predicate_evals;
-            bool aq_ready = false;
+            const Real ga0 = ga;
+            bool aq_ready = false, aq_none = false;
             const auto aq_of = [&]() -> bool {
                 if (aq_ready) return true;
+                if (aq_none) return false;
+                aq_none = true;
                 if (!cert_tried) {
                     cert_tried = true;
-                    if constexpr (requires { system_.exact_scan_modes(t0, x0, scan_zdd_); })
-                        cert = system_.exact_scan_modes(t0, x0, scan_zdd_);
+                    if constexpr (requires { system_.exact_scan_modes(t0, x0, scan_z_, scan_zdd_); })
+                        cert = system_.exact_scan_modes(t0, x0, scan_z_, scan_zdd_);
                 }
                 if (cert == nullptr) return false;
                 const auto n = x0.size();
                 if (cert->scan_q.size() < preds.size()) cert->scan_q.resize(preds.size());
                 Eigen::VectorXcd& q = cert->scan_q[ip];
-                if (q.size() != n) {   // once per mode and predicate: g is affine in x
+                scan_probe_.setZero(n);
+                const Real g0 = p.value(t0, scan_probe_);
+                ++result.n_predicate_evals;
+                if (q.size() != n) {   // once per mode and predicate
                     q.resize(n);
-                    x_tmp_.setZero(n);
-                    const Real g0 = p.value(t0, x_tmp_);
                     for (Eigen::Index k = 0; k < n; ++k) {
-                        x_tmp_ = cert->V_re.col(k);
-                        const Real re = p.value(t0, x_tmp_) - g0;
-                        x_tmp_ = cert->V_im.col(k);
-                        q[k] = {re, p.value(t0, x_tmp_) - g0};
+                        scan_probe_ = cert->V_re.col(k);
+                        const Real re = p.value(t0, scan_probe_) - g0;
+                        scan_probe_ = cert->V_im.col(k);
+                        q[k] = {re, p.value(t0, scan_probe_) - g0};
                     }
-                    result.n_predicate_evals += static_cast<Size>(2 * n + 1);
+                    result.n_predicate_evals += static_cast<Size>(2 * n);
                 }
+                // the row is the predicate's only if g is affine in x here: an ideal
+                // branch diode's DiodeOn reads -1 inside its band, so a probe at x = 0
+                // can be off by its V_th; no certificate then (the D3 scan alone)
+                Real lin = g0, mag = std::abs(g0);
+                for (Eigen::Index k = 0; k < n; ++k) {
+                    const std::complex<Real> qz = q[k] * scan_z_[k];
+                    lin += qz.real();
+                    mag += std::abs(qz);
+                }
+                if (!(std::abs(ga0 - lin) <= Real{1e-6} * (mag + std::abs(ga0)))) return false;
                 scan_aq_.resize(n);
                 for (Eigen::Index k = 0; k < n; ++k) scan_aq_[k] = std::abs(q[k]) * std::abs(scan_zdd_[k]);
                 aq_ready = true;
+                aq_none = false;
                 return true;
             };
             const auto certified = [&](Real a, Real g_a, Real b, Real g_b) {
@@ -1568,9 +1583,9 @@ private:
                                                   output_rtol_ == Real{0});
                     }
                 } else if (dio && ga * gb > Real{0} && static_cast<Real>(s) * ga > Real{0}
-                           && aq_of() && !certified(ta, ga, tb, gb)
                            && std::abs(ga) > bound_at(ta, xa())
-                           && std::abs(gb) > bound_at(tb, x_at(k + 1))) {
+                           && std::abs(gb) > bound_at(tb, x_at(k + 1))
+                           && aq_of() && !certified(ta, ga, tb, gb)) {
                     // F-X-5: halve until each piece is certified or holds a significant
                     // sign change (the first in time); a piece at the depth cap or
                     // touching zero inside the band is left (no event, as before)
@@ -1584,7 +1599,10 @@ private:
                         if (v.depth >= 40 || !(v.b - v.a > t_tol)) continue;
                         const Real m = Real{0.5} * (v.a + v.b);
                         const Real gm = g_at(m);
-                        if (gm * v.ga < Real{0} && std::abs(gm) > bound_at(m, x_tmp_)) {
+                        // a crossing out of the admissible side only (a piece that starts
+                        // past the threshold is a way back: no event, as in the scan)
+                        if (gm * v.ga < Real{0} && static_cast<Real>(s) * v.ga > Real{0}
+                            && std::abs(gm) > bound_at(m, x_tmp_)) {
                             root = locate_root_bracket(g_at, v.a, m, v.ga, gm, t_tol,
                                                        output_rtol_ == Real{0});
                             break;
@@ -2376,7 +2394,11 @@ private:
                     // in, with no record (MSVC, R = 10·(1−u)), and a trial's
                     // PARTIAL slow-manifold projection (no record at all) into the
                     // forward converter's freewheel mode: I(L_o) +0.585 A in 0.2 ps
-                    // under the output rule's cut (F-X-6)
+                    // under the output rule's cut (F-X-6). The restart is not
+                    // re-checked by the cascade: on the forward converter the
+                    // restarted state reads D_fw off again at every switch-off
+                    // (a current at its threshold), and the restart is the state
+                    // the mpmath truth confirms (5.6208 A)
                     if (track) truncate_reinit_log_(mark);
                     x = settle_x0_;
                     project_(t, x);
@@ -3489,6 +3511,8 @@ private:
     Vector loc_dx_, x_lad2_, x_offp_;
     std::vector<Vector> scan_x_;
     Eigen::VectorXcd scan_zdd_;   // locate_event_exact_'s certificate: z̈ at the step start
+    Eigen::VectorXcd scan_z_;     // and z = V⁻¹x there
+    Vector scan_probe_;           // the predicate row's probe state
     Vector scan_aq_;              // |q_k z̈_k(0)| of one predicate
 };
 
