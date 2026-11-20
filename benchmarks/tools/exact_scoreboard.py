@@ -15,8 +15,8 @@ peak; raised to the truth's range at the engine's samples):
 
 - smooth: time-weighted RMS over the engine's STORED rows of the distance to
   the truth at those times (``exact_truth.Solver.at_float``, no snap window),
-  leaving out the initial instant, the 0+ row and every row whose step on
-  either side holds a device event, truth's or engine's;
+  leaving out the initial instant, the 0+ row and every row with a device
+  event (truth's or engine's) at it or strictly inside a step on either side;
 - instants: each engine device event matched to the truth's (same device and
   direction, in order, within EVENT_WINDOW netlist steps); the displacement's
   L2 cost sqrt(sum jump^2 |delta| / T), and max |delta| / dt;
@@ -75,8 +75,10 @@ MEASURE_TEXT = [
     "fraction of `span` (the truth's peak-to-peak, floored at 1e-3 of its peak):", "",
     "- **smooth**: sqrt(sum w_i e_i^2 / sum w_i) over the engine's STORED rows, e_i the distance to the "
     "truth at t_i (two one-sided candidates only when t_i is a truth event instant; either is right), w_i "
-    "trapezoid time weights; left out: the initial instant, the right limit at t = 0+, and every row whose "
-    "step on either side holds a device event (the truth's or the engine's). No snap window, no timing charge.",
+    "trapezoid time weights; left out: the initial instant, the right limit at t = 0+, and every row with a "
+    "device event (the truth's or the engine's) at it or strictly inside a step on either side of it (the row "
+    "one full step after an engine event is a solved value of the new mode and is graded). No snap window, "
+    "no timing charge.",
     "- **instants**: engine device events (changes of the switch record of `pulsim.with_event_limits(res)`: "
     "stored rows, the split's inner events, right limits; the instant is the row before the change) "
     "matched to the truth's by device and direction, in order, the nearest within "

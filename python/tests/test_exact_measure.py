@@ -115,7 +115,7 @@ def test_spurious_events_are_named_and_initial_selection_is_not_spurious():
            (0.31, "S+", 0.0, 0.0, 0.0, 0.0), (0.33, "S-", 0.0, 0.0, 0.0, 0.0)]
     r = metrics.exact_parts(GRID, f, f[:, None], span=1.0, h=H, engine_events=eng)
     assert r["spurious"] == [(0.31, "S+"), (0.33, "S-")] and r["n_initial"] == 1
-    assert r["smooth_rows"] == GRID.size - 1 - 3               # rows 0.1 (event at 0), 0.3 and 0.4
+    assert r["smooth_rows"] == GRID.size - 1 - 2               # rows 0.3 and 0.4 (0.1: the event at 0 ends its step)
 
 
 def test_an_event_at_t0_and_the_0plus_row_are_not_graded():
@@ -171,3 +171,16 @@ def test_float_instants_and_the_record_end_are_not_graded():
                             engine_events=eng)
     assert r["instants"] == 0.0 and r["max_dt_h"] == 0.0
     assert r["missing"] == [] and r["summary"] == 0.0
+
+
+def test_the_row_one_step_after_an_event_is_graded():
+    """Only rows with an event at them or strictly inside an adjacent step are
+    left out: a wrong first solved value of the new mode is not hidden."""
+    tau = 0.5
+    cand, tev = step_truth(tau)
+    y = np.where(GRID <= tau, 0.0, 1.0)
+    y[6] = 1.5                                       # the first stored row after the switch
+    r = metrics.exact_parts(GRID, y, cand(GRID), span=1.0, h=H, truth_events=tev,
+                            engine_events=[(tau, "S+", 0.0, None, 0.0, 1.0)])
+    assert r["smooth_rows"] == GRID.size - 2         # only the row at the event
+    assert r["smooth"] == pytest.approx(np.sqrt(0.25 * H / 0.8), rel=1e-12)   # weight 0.1 of the 0.8 s kept

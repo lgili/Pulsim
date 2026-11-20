@@ -249,8 +249,9 @@ def exact_parts(t, y, cand, *, span: float, h: float, truth_events=(), engine_ev
     engine records. ``h``: the unit of the reported instant error.
 
     smooth: ``sqrt(Σ w_i e_i² / Σ w_i)``, e_i = :func:`exact_dev`, over the
-      stored rows except the initial instant and every row whose step on
-      either side holds a device event (truth or engine): w_i the trapezoid
+      stored rows except the initial instant and every row with a device
+      event (truth or engine) at it or strictly inside a step on either
+      side of it: w_i the trapezoid
       weights of the grid; no snap window, no timing charge. None if no row
       is left.
     instants: ``sqrt(Σ_e jump_e² |δ_e| / T)``, δ_e = engine − truth instant
@@ -297,11 +298,14 @@ def exact_parts(t, y, cand, *, span: float, h: float, truth_events=(), engine_ev
                    limits=float("inf"), smooth_rows=0, kept=np.zeros(t.size, dtype=bool))
         return out
 
-    # (a) smooth: rows whose two adjacent steps hold no device event
+    # (a) smooth: rows with no device event strictly inside their two adjacent steps
+    # (an event AT the row counts; one at the far end of a step does not: the row one
+    # full step after an engine event is a solved value of the new mode and is graded)
     ev = np.sort(np.r_[[e[0] for e in truth_events], [e[0] for e in engine_events]]).astype(float)
     prev = np.r_[t[0], t[:-1]]
     nxt = np.r_[t[1:], t[-1]]
-    near = np.searchsorted(ev, prev, side="left") < np.searchsorted(ev, nxt, side="right")
+    near = np.searchsorted(ev, prev, side="right") < np.searchsorted(ev, nxt, side="left")
+    near |= np.isin(t, ev)
     graded = t > t0
     w = np.zeros(t.size)
     g = t[graded]
