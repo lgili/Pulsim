@@ -483,3 +483,65 @@ the doubled Gramian per (mask, h)) is where that would come back.
 
 6135 passed, 110 skipped, 8 xfailed (11 min 46 s), build/python and
 python/pulsim the same .so. Not run: Eigen 3.4.0, g++, full ctest.
+
+# Every route, the cost, the source paths (same branch, from f7a7aeba)
+
+## 1. The diode-free route (`integrator='auto'`, PEDSimulatorAuto)
+
+A circuit with no diode, loss port, `output_rtol` or ticks runs on
+PEDSimulatorAuto (`dsed/scheduler_auto.hpp`): per step the closed-form
+propagator when the mode has one (`exact_advance_state_into`, the same as
+PEDSimulator's), DOPRI5 / BDF2 otherwise. It had no step hooks, so its
+recorders took the stored-array pass (the trapezoid of the 10 µs samples),
+silently. Now it drives `events::StepHooks` with PEDSimulator's conventions:
+`start` (before a resume's landing, as there), `event(t, left, old, right,
+new)` from inside `fire_gate_event_` (a copy of the left limit only when an
+event listener is attached), `accepted(t0, t, pre-event state, step mask)`
+after both the exact and the numeric branch. `run_auto_native_builder`
+takes `loop_feed=` and attaches the same `ExactFeedAdapter` +
+`ExactSegmentSource`; a numeric (non-exact) step fails the closed form's end
+check and is counted as the line, warned, as before. Nothing stepped or
+stored changes: the hooks only read.
+
+The remaining stored-array routes of the exact engine (`integrator='bdf2'`,
+a fresh `t_start` run, a step hook that did not fire) now WARN
+(RuntimeWarning, "trapezoid of the stored samples") when a recorder has
+windows or periods; `res.recorder_feed['mode'] == 'stored-arrays'` counts
+it. `test_exact_recorder_routes.py` enumerates auto (diode-free), rk45,
+auto→rk45 (diode), output_rtol, bdf2, t_start × {with, without recorder}:
+closed form with no warning, or stored arrays with exactly one warning;
+times and states bit-identical with and without the recorder on each.
+
+Numbers (window [0.21 ms + 1.234 ns, 0.87 ms + 4.321 ns], hand mpmath truth
+of a SYNCHRONOUS buck — two ideal switches, 24 V, 100 µH, 10 µF, 5 Ω,
+20 kHz, D = 0.4, from rest; one affine law per mode, M the same in both):
+
+| statistic | f7a7aeba (stored arrays) | now (default route) | truth |
+|---|---|---|---|
+| ∫i(L) | 1.2848344194661705e-3 | 1.2850038019123695e-3 | 1.285003801912367e-3 |
+| ∫v(out) | 6.324751201621357e-3 | 6.323796867570363e-3 | 6.323796867570354e-3 |
+| ∫p(R) | 1.2189152099455192e-2 | 1.2186816641668244e-2 | 1.2186816641668225e-2 |
+| series LC, detune 1.7, ∫v(c)·i(L) | −1.0103357289111828e-7 | −9.979694316339019e-8 | −9.979694316339956e-8 |
+
+Tests at 1e-11 (the predecessor's tolerance): the sync buck (∫ and rms of
+i(L), v(out), ∫p(R)), the series LC at detune 0, 1e-3, 1.7 and the RL on
+two sines — the predecessor's own truths, now on the default route.
+
+MOVED test values (the RC of `test_recorders.py`, engine='exact', window
+[0.37 ms + 1.234 ns, 2.71 ms + 4.321 ns]; truth = the closed form in the test):
+
+| | old (stored arrays) | new (in the loop) | truth |
+|---|---|---|---|
+| avg v(out) | 7.332494924704019 | 7.332495146996288 | 7.332495146996273 |
+| rms v(out) | 7.533260060824895 | 7.533260244177804 | 7.533260244177797 |
+| avg v(in,out)/1e3 | 2.667505075295974e-3 | 2.667504853003703e-3 | 2.6675048530037273e-3 |
+| min v(out) (at the clipped start) | 3.0926652130277494 (chord) | 3.0926652172829012 | V(1 − e^{−A/τ}) |
+
+`FEEDING['exact']` is 'in-loop'; `RC_BOUND['exact']` 2e-5·V → 1e-12·V; the
+stored-sample `time_average` comparisons stay for pwl / trbdf2 only.
+
+Byte compares against f7a7aeba (base rebuilt from `git archive` with the
+same flags): goldens with counters ALL IDENTICAL; dsed bit-identity 36/36;
+auto-route stored times + states (sync buck, LC ×2, pulse RLC) 8/8 arrays;
+loss port energies + period map 74/74; recorder values of the rk45 route
+(the predecessor's AC/pulse 64 and DC 48) 64/64 and 48/48 identical.
