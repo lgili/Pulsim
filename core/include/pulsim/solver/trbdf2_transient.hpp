@@ -1927,7 +1927,8 @@ inline SimulationResult run_transient_trbdf2(
         // dtp late): replace the slots only.
         if (!commit || t + dtp >= opts.t_end - h_min
             || t + dtp >= queue.next_of(events::Kind::ControlTick) - h_min) {
-            if (sens.on()) [[unlikely]] {   // the slots move, x and t do not
+            // the slots move, x and t do not; harmless at t_end (no step follows)
+            if (sens.on() && t < opts.t_end - h_min) [[unlikely]] {
                 sens.refuse_step(t, "followed by a slot-only derivative refresh "
                                     "(an event probe near t_end or a tick)");
             }
@@ -3433,6 +3434,10 @@ inline SimulationResult run_transient_trbdf2(
                         std::max(h_min, h * Real{1e-4});
                     if (t_star - t < dt_floor) {
                         if (sens.on()) [[unlikely]] {
+                            // carried as an event at t from the committed
+                            // state, this was 3.6e-4 off a Radau truth on a
+                            // sine-fed rectifier at rtol 1e-10 (7.6e-5 at
+                            // 1e-12): refused until that bias is traced
                             sens.refuse_step(t, "met by a diode crossing within the "
                                              "conditioning floor of its start (flipped "
                                              "by probes at t, not landed)");
@@ -3814,14 +3819,24 @@ inline SimulationResult run_transient_trbdf2(
                     history.update_from_state(x_trial, dt_land);
                     }
                     if (sens.on()) [[unlikely]] {   // group 6: the landing's stage
-                        if (interp_land || (kE && ed_land)) {
+                        if ((kE && ed_land) || (kE && interp_land && !sdirk)) {
                             sens.refuse_step(t + dt_land, "an interpolated or ESDIRK "
                                              "diode landing (no trapezoidal stage)");
                         }
                         sens.begin_step(t, x);
-                        sens_stage(0, step::psi_trapezoidal(dt_land), mask_step, dt_land,
-                                   x_trial, t + dt_land);
-                        sens.commit(t + dt_land);
+                        if (interp_land) {   // no solve: carried on a resident factor
+                            Real f_dt = Real{0};
+                            const auto* f = cache.any_resident_factor(mask_step, f_dt);
+                            if (f == nullptr) {
+                                sens.refuse_step(t + dt_land, "an interpolated diode "
+                                                 "landing with no factor of its mode");
+                            }
+                            sens.carry(t + dt_land, mask_step, x_trial, *f, Real{2} / f_dt);
+                        } else {
+                            sens_stage(0, step::psi_trapezoidal(dt_land), mask_step, dt_land,
+                                       x_trial, t + dt_land);
+                            sens.commit(t + dt_land);
+                        }
                     }
                     // The stateful devices land here too. Only the
                     // linear companion history was committed at an
@@ -3896,12 +3911,20 @@ inline SimulationResult run_transient_trbdf2(
                             sens.refuse_newton_event(t, graph.branch_name(de.branch_id));
                             sens.refuse_step(t, "a diode event of a Newton solve");
                         }
+                        // the landing's own factor, or any of its mode (an
+                        // interpolated landing solved nothing)
+                        Real sens_fac_dt = dt_land;
+                        const auto* sens_fac = interp_land
+                            ? cache.any_resident_factor(mask_step, sens_fac_dt)
+                            : &cache.resident_factor(mask_step, dt_land);
+                        if (sens_fac == nullptr) {
+                            sens.refuse_step(t, "an interpolated diode landing with no "
+                                             "factor of its mode");
+                        }
                         sens.state_event(t, graph.branch_name(de.branch_id), de.from, de.to,
                                          (bits_land[cross_idx] && de.var >= 0) ? de.var
                                                                               : Index{-1},
-                                         mask_step,
-                                         cache.resident_factor(mask_step, dt_land),
-                                         Real{2} / dt_land,
+                                         mask_step, *sens_fac, Real{2} / sens_fac_dt,
                                          [&](Real ts, Vector& out) {
                                              accumulate_sources(ts, out);
                                          });

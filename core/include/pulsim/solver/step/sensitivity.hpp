@@ -433,6 +433,36 @@ public:
         add_pending_(tau, dtau, name);
     }
 
+    /// A landing interpolated between two states of the current mode, below
+    /// the engine's conditioning floor (no solve: TR-BDF2's turn-off at its
+    /// bracket floor). Its length dt is a few ps: dq/dp moves by dt·dq̇/dp
+    /// (first order in dt, the scheme's own order there), the slots are
+    /// kept, and S is re-initialised consistent with dq/dp at x1 by one
+    /// bordered solve per parameter on `fac` (any factor of the mode, a =
+    /// 2/its dt) — no factorization. Call after `begin_step`.
+    [[gnu::noinline]] void carry(Real t1, const topology::SwitchStateMask& mask, const Vector& x1,
+                                 const sparse::DirectSolver& fac, Real a) {
+        if (!have_qx_ || !(mask == mask_) || pend_.on || n_stage_ != 0) {
+            refuse_step(t1, "an interpolated diode landing in a mode the recurrence "
+                            "did not reach by a stage");
+        }
+        dq_n_ += (t1 - t_last_) * dqd_n_;
+        qv_n_ = Cq_ * x1;
+        bordered_(fac);
+        Vector qp(n_), fp(n_);
+        for (Index j = 0; j < S_.cols(); ++j) {
+            qp.setZero();
+            fp.setZero();
+            add_qp_(params_[static_cast<std::size_t>(j)], x1, qp);
+            add_fp_(params_[static_cast<std::size_t>(j)], x1, fp);
+            S_.col(j) = solve_bordered_(fac, Vector(-fp + a * (dq_n_.col(j) - qp)),
+                                        Vector(dq_n_.col(j) - qp), t1, "a landing");
+        }
+        x_last_ = x1;
+        t_last_ = t1;
+        record_(t1);
+    }
+
     /// True while an event waits for its first post-event stage.
     [[nodiscard]] bool event_pending() const noexcept { return pend_.on; }
 

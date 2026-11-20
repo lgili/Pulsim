@@ -162,10 +162,11 @@ def _buck(L=100e-6, R=50.0, C=47e-6, Vin=24.0):
 
 @pytest.mark.parametrize("engine,kw", [
     ("pwl", dict(dt=ref.T / 1000, enable_substep_state_correction=True, discontinuity_restart=True)),
+    ("trbdf2", dict(rtol=1e-10, atol=1e-13)),
     pytest.param("trbdf2", dict(rtol=1e-9, atol=1e-12), marks=pytest.mark.xfail(
         strict=True, raises=p.UnsupportedError,
-        reason="OPEN (DECISIONS 16): the DCM turn-off is an interpolated "
-               "(no-solve) landing on trbdf2, refused by name"))])
+        reason="OPEN (DECISIONS 16): at rtol 1e-9 a turn-off falls within the "
+               "conditioning floor of a step start (flipped at t), refused by name"))])
 def test_dcm_buck_transient_against_the_table(engine, kw):
     """6.3: ∂v_C/∂L, ∂R, ∂D at 40 T within 1e-5 of the exact path's table."""
     b = _buck()

@@ -536,3 +536,29 @@ factor T of dτ/dD (one-pulse RC, entirely the jump term: 2.5e-8 pwl+split,
 DC-driven turn-on on an algebraic node (jump 58 % of the answer, ≤ 1e-8).
 Not probed by the reviewer: events at t_end, ties with differing dτ/dp,
 ESDIRK / Newton refusals beyond the tests.
+
+### TR-BDF2 turn-off landings (6.3, 2026-11-20)
+
+- The INTERPOLATED landing (a turn-off at its bracket floor, no solve) is
+  carried: `StageSensitivity::carry` moves dq/dp by dt_land·dq̇/dp (dt_land is
+  ps; first order, the scheme's own order there), keeps the slots, and
+  re-initialises S consistent with dq/dp at the landed x by one bordered
+  solve per parameter on ANY resident factor of the mode
+  (`PwlStateSpaceCache::any_resident_factor`: the event entry's, else the
+  segment's; read-only, no build — no factorization with or without
+  sensitivities; the off path is untouched). The event that follows uses
+  the same factor for ẋ⁻. ESDIRK interpolated landings stay refused.
+- A slot-only derivative refresh AT t_end no longer refuses (no step follows).
+- DCM buck (40 T) on TR-BDF2 vs the exact path's table: rtol 1e-10 L 5.2e-6,
+  R 2.9e-8, D 5.2e-8 (pass, test); rtol 1e-11 L 1.1e-6. At rtol 1e-9 a
+  turn-off falls within the conditioning floor of a step start (the bits are
+  flipped by probes at t, nothing landed): REFUSED by name (strict xfail).
+  Tried and reverted: carrying that flip as an event at t from the committed
+  state — 3.6e-4 off a Radau truth on the sine-fed rectifier at rtol 1e-10,
+  1.7e-4 at 1e-11, 7.6e-5 at 1e-12 (a bias that converges slowly, not traced:
+  candidates are τ = t instead of the crossing up to dt_floor later, and the
+  probe-decided cascade). NEXT STEP for 6.3 at rtol 1e-9: trace that bias on
+  the audit's sine cell (trbdf2), e.g. by forming the jump at the probe's
+  located t_star instead of t.
+- The 2 T buck of `test_sensitivity_exact.py` now runs on trbdf2 and agrees
+  with the exact engine within 1e-5 at rtol 1e-10 (it was a refusal test).
