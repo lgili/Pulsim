@@ -366,3 +366,15 @@ Results on the FINAL build (TEMP removed):
   0.909368 at both, closed form 0.908907): the strict xfail is removed and
   1e-9 is a passing case (the reviewer's 1e-9 abort is gone, so it does not
   join an xfail).
+- Byte compares vs the 14b0c81a recordings: goldens ALL IDENTICAL, stateful
+  ALL IDENTICAL, engines ALL IDENTICAL, pwl_identity 379/379, dsed
+  bit-identity 280/280, trbdf2_identity 368/371. Moved (all three; none
+  newly aborting): ll13 (runs again; vs reference 1.9738e-5 = 14b0c81a),
+  ll08 (1993 steps / 117 accepts vs 2020 / 138; vs reference 2.2730e-6 =
+  cedac36b, at the reference's own error 2.3e-6), ll11_llc_resonant_converter
+  (aborts at 5 us before and after; only the abort message's decline note
+  changed text).
+- Test files (d2, de, saturable transformer incl. the 15.310393 V flyback,
+  trbdf2 stateful error norm incl. its 15-row list, fs5, test_newton_*,
+  test_trbdf2_*, test_esdirk43_* incl. the 1.3e-7 V nonlinear-capacitor
+  start, stateful, test_dc_*): 465 passed, 5 xfailed. ruff clean.
