@@ -252,10 +252,12 @@ def compute_temperature(t: np.ndarray,
     """
     t = np.asarray(t, dtype=float)
     p = np.asarray(p_loss, dtype=float)
-    if t.shape != p.shape:
-        raise ValueError("t and p_loss must have the same shape")
-    if len(t) < 2:
-        raise ValueError("need at least 2 samples")
+    bad = ("t and p_loss must have the same shape" if t.shape != p.shape
+           else "need at least 2 samples" if len(t) < 2
+           else "t must be non-decreasing"
+           if piecewise_linear and np.any(np.diff(t) < 0) else None)
+    if bad:
+        raise ValueError(bad)
     if piecewise_linear:
         return _foster_piecewise_linear(t, p, stages, T_amb_C, should_continue)
     # The IIR below advances on a FIXED dt. A variable-step trace
@@ -297,9 +299,7 @@ def compute_temperature(t: np.ndarray,
 def _foster_piecewise_linear(t, p, stages, T_amb_C, should_continue):
     """compute_temperature(piecewise_linear=True): the exact response of
     each Foster pole to the piecewise-linear power through the samples."""
-    h = np.diff(t)
-    if np.any(h < 0):
-        raise ValueError("t must be non-decreasing")
+    h = np.diff(t)   # non-decreasing: compute_temperature checked it
     out = np.full(t.shape, 0.0)
     a, c = p[:-1], p[1:]
     for s in stages:
