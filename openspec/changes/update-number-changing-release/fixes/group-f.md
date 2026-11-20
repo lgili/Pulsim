@@ -509,3 +509,35 @@ branch_form_reinit, release_uniform_rules: 425 pass) are unchanged.
   +1 per step that uses it); not a listed number. L7/L8 noted, no change.
 * After the fixes: 243 default cells (81 circuits × dsed / dsed+next / no-dt) identical to the
   pre-review tip; goldens and bit-identity 36/36 + 36/36; the F3 tests 16 passed + 1 xfail.
+
+### Rehearsal under the new bar (final C++ ffdf5007; harness with the two fixes below)
+
+Cells of auto, auto:route, auto+next, dsed, dsed:output_grid, dsed+next re-measured (the other
+configurations' cached cells carry an older profile signature and are not re-rendered; the
+committed NEXT_DEFAULTS_REHEARSAL.md is left as it was; this render is in `.scratch`).
+
+| configuration | agree | disagree | error | refused | worse vs base | rule cells | ratio > 1 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| dsed:output_grid (vs dsed) | 100 + 22 | 0 | 0 | 9 + 5 | 0 | 22 | 0 |
+| dsed+next (vs dsed) | 100 + 22 | 0 | 0 | 9 + 5 | 2 (truth) | 22 | 0 |
+| auto+next (vs auto) | 107 + 27 | 1 | 1 | 0 | 53 | 122 | 54 (9 NaN → truth) |
+
+(circuits + analytic). dsed+next's two: half_bridge_transformer_dc ex 1.5e-6 → 3e-6 and
+active_clamp_forward ex 5.2e-9 → 2.5e-8 (dsed+next, not the rule; combination of singles). No
+outcome change anywhere except auto+next high_q_rlc_ringdown disagree → agree (better).
+auto+next ratios > 1: 34 in (1, 1.25], 6 in (1.25, 2], 14 above 2 — ll06_buck_vcswitch 596 (a 5.5 ns
+chord across a fast ring: 32.76 V vs reference 33.05 V), ll10_full_bridge_inverter_lc 93.5,
+ll09_half_bridge_inverter_leg 59.6, high_q_rlc_ringdown 12.4, ll07_boost_vcswitch 8.16,
+diode_bridge_rectifier 5.39, half_wave_rectifier_sine 5.26, diode_clamp_overvoltage 4.87,
+ll02_rc_pulse_charge 4.74, core_loss_steinmetz_sine 4.53, three_phase_diode_rectifier 3.65,
+diode_half_wave_rl_load 3.37, sine_voltage_rc 3.11, diode_rectifier 3.09 (the chord ending on
+the 5 µs source edge). The (1, 1.25] band is the chord bound being an estimate (z̈ at the
+interval's start); the large ones are fast transients the bound under-reads. Every one of them
+agrees at the samples (strict err_rms ≤ 4.6e-4) and the truth (`exact`) did not grow. These are
+OPEN rule findings (the engine's chord bound), not harness artifacts. NOT fixed this session.
+
+Harness fixes found by the re-run (committed): the trace's sample at an event is the left limit
+(a jump's right limit lives in the right-limit arrays), so a chord leaving an event is excluded
+(analytic hard_switched_rc 5.0e4 → 0.995); the reference's first step (its given, possibly
+inconsistent, start) is excluded (vcswitch_resistor 2.5e4 → ≤ 1). Analytic cells pass their
+event instants.
