@@ -445,3 +445,57 @@ benchmarks/REFERENCE_STATUS.md, the tool rewrites it); 6) reviewer; 7) full pyte
 Open by design: a jump on a smooth Newton device region change at a window step without a diode flip
 is no longer probed (no bits to see it); the window-step residual of a restart solve is integrated,
 not recorded.
+
+### Fourth session, verification at 0bd28e03 (b7 = committed header, no trace) [M] — and why the tip is NOT ready
+
+- Group numbers held: F-5-1 one record 4.999998812 J, i_L 100 -> −3.8e-5 A; F-3-3 peak 16.381985087 /
+  16.381988999 / 16.381990009 A at dt 10 / 5 / 2.5 ns (exact 16.381990162; errors −5.1e-6, −1.2e-6,
+  −1.5e-7: order 2.1, 2.9), min +1.5e-7 A; F-3-1 1-ulp sensitivity 2.4e-11 .. 1.8e-12 V; A1 record
+  3.199759e-5 J vs ½·L·7.9997² = 3.199760e-5 J, max|i_L[2:]| 2.0e-7 A.
+- The 48 files using discontinuity_restart / enable_substep_state_correction: 1276 passed, 5 skipped,
+  6 xfailed (A1 no longer xfail).
+- Byte compares vs the PR-head baselines (default options): goldens identical except buck_pwl_restart
+  (states max|d| 13.94, switch states differ) and vsi_pwl_restart (counter cache.event_hits only);
+  stateful identical except everything_pwl_restart; engines / steps differ only on buck_pwl_restart;
+  pwl_identity 326/379, every differing entry is pwl+restart (29) or pwl+split (24) — the predecessor
+  had 32; trbdf2_identity 371/371. Default path: no difference anywhere. buck_pwl_restart's 13.94 is
+  NOT yet checked against the exact engine (it is the reviewer's false-record mechanism below until
+  shown otherwise).
+- NOT run: cost (default path has two bool stores per step), reference_status differential, full
+  pytest, mos_l1 / dt-retry spot checks beyond the 48 files (they passed inside them).
+
+**Reviewer (opus, fresh context) on 0bd28e03 — two defects, both reproduced by its scripts
+(scratchpad q1.py, q1b.py, q2.py of session 659b4e0a):**
+1. FALSE records / refusals: a diode turning an inductor off at zero current INSIDE stage 1 (0, γh)
+   is a kink inside the probe: Δ2 ≈ 0 and d' ≈ 0, so d ≈ the motion before the stop reads as a
+   jump. L 1 µH freewheeling into 100 V, dt 0.1 µs: records 1.105 µJ and 3.09 µJ (= ½·L·i(t0)²);
+   with split 2e-15..8e-15 J. Buck-like freewheel: linear L 2.65e-7 J record; SATURABLE L (far from
+   saturation) now REFUSED ("moves saturable_inductor 'L' by −0.7277 A"; 3.09e-5 A with split) —
+   any DCM circuit with a saturable inductor is refused under the rule. The DCM buck "L cuts" this
+   session called real (0.4–1.5 mA) are this mechanism. The d' criterion cannot see a stop inside
+   (0, γh): it needs the state's motion before the event.
+2. MISSED real jump (the domain restriction): F-5-1's circuit with the FWD, gate 15 -> 0 V through a
+   pulse with 1 ps fall landing at a restart-window step (t = 1.02 ns): no trigger (a ramp is not a
+   source jump), no diode bit (IGBT level 1 is smooth), so the probe is skipped: i_L −100 -> +140.6 A
+   through the FWD, no record (the −√2 reversal of F-5-1). 1cec4e8b probed every restart step and
+   would have flagged it (inferred from its bound, not run). Also dt-retry sub-steps j > 0 skip the
+   probe. Also (older, not this diff): x0+ = x0 − (1−a)²J leaves a(2−a)J unrelaxed (trigger case:
+   0.69 A of 100 A left, FWD holds 0.955 A, truth 0).
+
+**Next steps (precise).**
+a) Revert the domain restriction (`rs_fresh`/`step_fresh`/`prev_be`: probe every restart step as
+   1cec4e8b did) — it fixes reviewer 2 and the dt-retry gap and removes the default-path stores.
+b) Add to the bound the motion a kink inside stage 1 can produce: γh·|ẋ(0−)| (the state stops inside
+   (0, γh) after moving at most γh times its rate before) — i.e.
+   |d| > max(γh·|ẋ(0−)|, |Δ2|/γ, (1+1/γ)|d'|) + tol. Derivation: a stop at θ ∈ (0, γh) gives
+   |d| ≤ θ·|ẋ(0−)| ≤ γh·|ẋ(0−)|. A1 still passes (8 A > γh·V/L = 2.93 A); cuts below γh·|ẋ(0−)| are
+   missed (12x narrower than the old h·|ẋ(0−)|, which the A1 test fixes at 8 A vs 10 A). With (a) the
+   Cj 5.02 µs residual (d = 1.53e-3 V) must then pass by this term (γh·r0 with r0 ≈ 1.2e9 V/s ≈ 7 V):
+   re-check `test_a_nonlinear_capacitor_shorted_by_its_switch_is_refused_by_name`.
+c) Replace `test_a_capacitor_at_its_extremum_is_not_an_impulse` (it asserts the DCM L records exist)
+   by: buck_dcm under the rule has NO records; add the reviewer's freewheel (linear: no record;
+   saturable: no refusal) and its IGBT gate-ramp window case (i_L -> 0 with a record) as tests.
+d) Rebuild, re-run group_nums.py, the 48 files, baseA.sh compare (check buck_pwl_restart vs exact
+   engine), cost (needs a 1cec4e8b extension: build it once), reference_status vs refstat_t7.json,
+   one reviewer, one full pytest.
+A3's left-limit source reading (src_move) and the third stage are independent of (a)/(b) and stay.
