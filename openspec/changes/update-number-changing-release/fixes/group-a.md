@@ -595,3 +595,13 @@ recorded 80 % of ½C(J1² + J2²) and left Cs2 at −3.4 V (truth 0.01 V) — fi
   cascaded_boost_buck split +0.4 %, ll14 (disagree) +0.04 %, stiff_two_timescale_rc, buck_boost split
   ≤ +0.04 %. NOT traced (context budget): which change (every-step probing, the whole jump, or the
   allowance) moves synchronous_flyback; that is the next step before merge.
+- The 48 restart/split test files on 27d83718: 1299 passed, 5 skipped, 7 xfailed. test_release_findings_a:
+  35 passed, 2 xfailed (F-3-7; the t = 0 start-from-initial-conditions stop). Full pytest: started in the
+  background on 27d83718 (log `.scratch/logs/c_full.log`), result not seen by this session. ruff clean;
+  no binding signature changed (stubs not re-checked). No C++ test target touched (none covers the probe).
+
+**State and next steps (end of the fifth session).** Code tip 27d83718, notes 3c79bd73+. NOT mergeable
+yet: (1) trace synchronous_flyback's +26 % (pwl+restart and pwl+split, 1.287e-6 → 1.618e-6) — run it with
+1cec4e8b's extension (`.scratch/so_1cec.so`) and this one, list its records and where the samples move;
+(2) read the full pytest log; (3) open with cause: a jump in (t1, t] of a restart step (reviewer 2), the
+t = 0 stop (strict xfail); (4) the projection-without-record option for the buck_pwl_restart accuracy.
