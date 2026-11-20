@@ -554,3 +554,28 @@ recorded 80 % of ½C(J1² + J2²) and left Cs2 at −3.4 V (truth 0.01 V) — fi
 3. One a per event (FIXED, above).
 
 (verification of this section in progress; numbers below.)
+
+**Numbers at 27d83718 [M]** (truth in brackets):
+- F-5-1: one record 4.999999743 J [½·L·i0² = 5 J], i_L 100 → −3.3e-5 A [0].
+- F-3-3: peak 16.381985394 / 16.381989075 / 16.381990028 A at dt 10 / 5 / 2.5 ns [exact engine
+  16.381990162]: errors −4.8e-6, −1.1e-6, −1.3e-7 (order 2.1, 3.0); min i_p +1.57e-7 A.
+- F-3-1: 1-ulp sensitivity 1.8e-12 .. 2.4e-11 V. A1: record 3.1997599e-5 J [½·L·7.9997² = 3.1997600e-5],
+  i_L → 2e-7 A. A3: no record (test). F-5-10: test passes.
+- Snubber τ = 1 ns, dt 100 ns: record 5.0349e-6 J = ½·Cs·J² [closed form, rel 1e-6], Cs at its ON
+  equilibrium after the step (was 4.40 µJ, the (1 − a)⁴ fraction, and a ringing residual); τ = dt: none.
+  (Also a 5e-14 J record at t = 0: the zero start's Cs, 0 → 0.01 V through τ = 1 ns: a real jump.)
+- 1 ps gate fall at 1.02 ns (window step 2) and 2.02 ns (step 3), split off / on: one record 4.9999994 J
+  [5 J], i_L → 0 (was +140.6 A unrecorded; 1cec4e8b: 4.93 J and 0.955 A held by the FWD).
+- Freewheels (linear / saturable, t_c in window steps, with / without an unrelated gate edge, split off /
+  on): no record, no refusal, currents on the closed form (test). DCM buck: no records. mos_l1 golden: 0
+  records. Cj: 5.02 µs passes, 10 µs refused naming 'Cj' (−24.0 V). dt-retry test: in the 48 files.
+- `buck_pwl_restart` golden vs the exact engine (dsed, auto, output_rtol 1e-9), p99 |dv_out| / |di_L|:
+  1cec4e8b 1.955e-5 V / 7.18e-6 A, 0bd28e03 1.032e-5 / 3.53e-6 (9 records), 27d83718 1.955e-5 / 7.18e-6
+  (identical to 1cec4e8b on these metrics, 0 records). The tip's 2× better samples came from its 9 FALSE
+  records: at the DCM diode turn-offs it projected the late-detected crossing's residual current to the
+  consistent value (and booked it as an impulse). Projection without a record when the jump-shaped d is
+  within the event-time allowance and stage 1 did not flip would keep that gain; not done (it moves every
+  such restart's numbers; needs its own reference_status pass).
+- Cost, instructions per accepted step vs a 1cec4e8b build (min of six, default path unchanged since
+  5fe40868): buck_pwl 1.0036, vsi_pwl 0.9988, buck_trbdf2 1.0002, bridge_trbdf2 0.9989; rule on
+  buck_pwl_restart 1.0306, vsi_pwl_restart 1.0134 (third probe stage, every restart step probed).
