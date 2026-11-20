@@ -179,7 +179,7 @@ def test_fx3_ladder_far_nodes_do_not_cut_every_step_to_the_floor():
     """F-X-3: a 100-section RC ladder, 2e-5 s. The far nodes sit at ~0 V (tolerance
     rtol*atol = 1e-14) while the chord bound sums volts of modes that cancel there: every
     step was cut to the floor, 197 755 samples. A state the bound cannot certify even at
-    the modes' own resolution is not held to it (counted, warned): 2 140 samples. The
+    the modes' own resolution is not held to it (counted in diagnostics): 2 140 samples. The
     state carried is the rule-free run's."""
     off = _run(_ladder(100), 2e-5)
     on = _run(_ladder(100), 2e-5, output_rtol=1e-5)

@@ -102,8 +102,8 @@ def test_the_rule_bounds_linear_interpolation():
     r = pulsim.simulate(build(), 2e-3, engine="exact", output_rtol=rtol)
     t = np.asarray(r.times)
     assert np.all(np.diff(t) > 0)
-    assert r.diagnostics["output_grid"] == {"n_output_capped": 0, "n_output_unbounded": 0,
-                                            "output_budget_t": None}
+    og = r.diagnostics["output_grid"]
+    assert (og["n_output_capped"], og["n_output_unbounded"], og["output_budget_t"]) == (0, 0, None)
     # the trajectory at the chords' interior points, from runs whose grid holds them
     q = np.sort(np.concatenate([t[:-1] + f * np.diff(t) for f in (0.25, 0.5, 0.75)]))
     dense = pulsim.simulate(build(), 2e-3, engine="exact", dt=2e-8)
@@ -226,8 +226,8 @@ def test_a_parasitic_mode_at_rounding_does_not_set_the_output_step():
     on = pulsim.simulate(_bridges(2), 0.02, engine="exact", output_rtol=1e-5)
     t = np.asarray(on.times)
     assert np.all(np.diff(t) >= 0)
-    assert on.diagnostics["output_grid"] == {"n_output_capped": 0, "n_output_unbounded": 0,
-                                             "output_budget_t": None}
+    og = on.diagnostics["output_grid"]
+    assert (og["n_output_capped"], og["n_output_unbounded"], og["output_budget_t"]) == (0, 0, None)
     assert len(t) - len(off.times) <= 1300
 
 

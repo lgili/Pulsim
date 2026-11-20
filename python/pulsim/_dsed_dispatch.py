@@ -484,6 +484,9 @@ def _result_from_native(native_res, t_start: float):
         og = {k: int(native_res[k]) for k in ("n_output_capped", "n_output_unbounded")}
         # the rule's samples: read from a step's start, not steps (n_exact_steps)
         og["n_output_samples"] = int(native_res.get("n_output_samples", 0))
+        # chords a state was not held to (the bound cannot certify it at the modes' own
+        # resolution: ~0 V against cancelling modes, a start from rest); not warned: it
+        # is the first sample of most runs from rest
         og["n_output_uncertified"] = int(native_res.get("n_output_uncertified", 0))
         tb = native_res["output_budget_t"]
         og["output_budget_t"] = None if tb != tb else tb + t_start   # NaN: not spent
@@ -502,14 +505,6 @@ def _result_from_native(native_res, t_start: float):
                 "step(s) had no diagonalising basis to bound: linear interpolation between "
                 "those samples is NOT within output_rtol (diagnostics['output_grid']). "
                 "Pass dt for a fixed output step.", RuntimeWarning, stacklevel=4)
-        if og["n_output_uncertified"]:
-            warnings.warn(
-                f"simulate(engine='exact', output_rtol=...): at {og['n_output_uncertified']} "
-                "sample(s) the chord bound could not certify some state even at the modes' own "
-                "resolution (a state near zero against a cancelling sum of modes); those states "
-                "are NOT held to output_rtol there, the others are "
-                "(diagnostics['output_grid']['n_output_uncertified']).",
-                RuntimeWarning, stacklevel=4)
     # dependent states: the impulsive re-initialisations at mode entry
     # are the result's own `reinit_records` (filled by _exact_result)
     return res
