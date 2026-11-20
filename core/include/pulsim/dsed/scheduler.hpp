@@ -613,7 +613,7 @@ public:
                 if (output_pend_) output_flush_(t, x, result);
                 if (t_gate < t_end) {
                     const MaskT before = system_.current_mask();
-                    corner_event_ = at_corner;
+                    corner_event_ = at_corner ? 2 : 0;
                     fire_event_(t_gate, "gate_edge", PredicateType::GateEdge,
                                   x, rk_state, result);
                     t = t_gate;
@@ -725,7 +725,7 @@ public:
                             x_pre_event = x;
                             step_fired = true;
                             const bool ticked = run_due_ticks_(t, x);   // a tick at the edge's instant first (D2)
-                            corner_event_ = on_edge && at_corner;
+                            corner_event_ = on_edge && at_corner ? 2 : (ticked ? 1 : 0);
                             fire_event_(on_edge ? t_gate : t, on_edge ? "gate_edge" : "control_tick",
                                           PredicateType::GateEdge,
                                           x, rk_state, result);
@@ -930,8 +930,9 @@ public:
                     if (on_edge && at_corner) t = t_gate;
                     x_pre_event = x;
                     step_fired = true;
-                    if (run_due_ticks_(t, x)) rk_state.invalidate();   // D2: tick first
-                    corner_event_ = on_edge && at_corner;
+                    const bool ticked = run_due_ticks_(t, x);   // D2: tick first
+                    if (ticked) rk_state.invalidate();
+                    corner_event_ = on_edge && at_corner ? 2 : (ticked ? 1 : 0);
                     fire_event_(on_edge ? t_gate : t, on_edge ? "gate_edge" : "control_tick",
                                   PredicateType::GateEdge,
                                   x, rk_state, result);
@@ -1208,7 +1209,7 @@ private:
         const bool ticked = run_due_ticks_(t, x);
         bool fired = false;
         if (on_edge || ticked) {
-            corner_event_ = on_edge && at_corner;
+            corner_event_ = on_edge && at_corner ? 2 : (ticked ? 1 : 0);
             fire_event_(on_edge ? t_gate : t, on_edge ? "gate_edge" : "control_tick",
                         PredicateType::GateEdge, x, rk_state, result);
             fired = !(system_.current_mask() == before);
@@ -2530,8 +2531,8 @@ private:
         const MaskT old_mask = system_.current_mask();
         const MaskT prev_bits = diode_bits_;
         const Real prev_time_event_t = last_time_event_t_;
-        const bool corner = corner_event_;   // set by the caller for this call only
-        corner_event_ = false;
+        const int inputs = corner_event_;   // set by the caller for this call only
+        corner_event_ = 0;
         if (ptype == PredicateType::GateEdge) last_time_event_t_ = t_event;   // next_time_event_
         // the event's left limit for a step hook listening to events (the loss port)
         const bool hook_event = hooks_ != nullptr && hooks_->has_event();
@@ -2589,7 +2590,7 @@ private:
         // Drop spurious same-mask gate edges silently — unless a diode is undecided
         // there (a source corner on its zero: F5 (a)).
         if (ptype == PredicateType::GateEdge && new_mask == old_mask
-            && !undecided_at_time_event_(t_event, x, corner)) {
+            && !undecided_at_time_event_(t_event, x, inputs)) {
             // F-X-1: a poll landing of a gate that names no edge, which changed
             // nothing, is not a time event: as one it made resolved_scale_ the time
             // left to t_end, so the parasitic cluster shrank as the run neared its
@@ -2725,16 +2726,18 @@ private:
     /// A source corner that keeps the mask still changes every predicate's RATE (the
     /// source's new slope enters ġ), so a diode whose signal sits in its zero band
     /// there is decided as the settle cascade would (its first round: by the sign
-    /// of the first non-vanishing derivative after t, zero_band_on_); at any
-    /// same-mask time event (a tick's new level, a poll) so is a diode past its
-    /// threshold beyond the band. The scan after the event cannot: it leaves a
+    /// of the first non-vanishing derivative after t, zero_band_on_); at a tick
+    /// (a new level) so is a diode past its threshold beyond the band. A poll
+    /// changes no input and decides nothing (`inputs`: 2 corner, 1 tick, 0 poll). The scan after the event cannot: it leaves a
     /// start on, or past, the event side to the mode decision (locate_event_exact_),
     /// which a dropped event never ran — a pulse rising from 0 V kept its diode OFF
     /// under 10 V (F5 (a)). True when a diode would flip: the event then runs the
     /// full decision.
-    [[nodiscard]] bool undecided_at_time_event_(Real t, const Vector& x, bool corner) {
+    [[nodiscard]] bool undecided_at_time_event_(Real t, const Vector& x, int inputs) {
         if constexpr (HasNodePairVoltage<System>) {
-            if (!has_diodes_) return false;
+            // a poll changes no input: the scan located every crossing up to it
+            if (!has_diodes_ || inputs == 0) return false;
+            const bool corner = inputs == 2;
             const MaskT mask = system_.current_mask();
             const Real tol = zero_band_tol_(t, x);
             for (const auto& d : diodes_) {
@@ -2755,7 +2758,7 @@ private:
                     return true;
             }
         } else {
-            (void)t; (void)x; (void)corner;
+            (void)t; (void)x; (void)inputs;
         }
         return false;
     }
@@ -3626,7 +3629,7 @@ private:
     int loc_fired_ = -1;          // the located event's diode (switch index), -1 outside one
     MaskT loc_root_mask_{};       // its pre-event mask
     Vector loc_root_x_;           // its root state
-    bool corner_event_ = false;   // the next fire_event_ lands on a source corner
+    int corner_event_ = 0;   // the next fire_event_'s inputs: 2 a source corner, 1 a tick, 0 neither
     Vector loc_dx_, x_lad2_, x_offp_;
     std::vector<Vector> scan_x_;
     Eigen::VectorXcd scan_zdd_;   // locate_event_exact_'s certificate: z̈ at the step start
