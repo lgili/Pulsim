@@ -840,6 +840,7 @@ inline SimulationResult run_transient(
     Vector x_prev;                                  // pre-step state snapshot
     pwl::PwlSegment retry_seg;                      // off-nominal-dt companion
     pwl::NewtonWorkspace newton_ws;   // one Newton analysis per pattern per run
+    const sparse::Matrix* sens_J_lin = nullptr;   // the last Newton solve's J_lin
     // add-parameter-sensitivities group 5: the stage recurrence (step/
     // sensitivity.hpp); off (no params) it is one test per step.
     step::StageSensitivity sens{graph, pool, opts.sensitivities, "pwl",
@@ -1653,7 +1654,11 @@ inline SimulationResult run_transient(
         }
 
         if (hooks) hooks->start(x, stamped_mask, {&history, &hs, nullptr});
-        if (sens.on()) sens.start(opts.t_start, x);
+        if (sens.on()) {
+            sens.refuse_setup(lt != nullptr, static_cast<bool>(nl_refresh),
+                              opts.enable_newton_lm);
+            sens.start(opts.t_start, x);
+        }
 
         // ---- discontinuity restart (add-discontinuity-restart-rule) --
         // The next step restarts: the first step of a run that does
@@ -2159,6 +2164,7 @@ inline SimulationResult run_transient(
                 if (nl_refresh_effective) {
                     if (for_dt == opts.dt && !newton_only_rows) {
                         const auto& seg = nominal_segment(mask);
+                        sens_J_lin = &seg.J;
                         x = pwl::solve_with_newton_b_extra(
                             seg, nl_refresh_effective, graph, pool,
                             /*x_init=*/x, b_extra,
@@ -2180,6 +2186,7 @@ inline SimulationResult run_transient(
                             retry_seg.J, retry_seg.b_constant);
                         sparse::compress_in_place(retry_seg.J);
                         retry_seg.state_size = state_size;
+                        sens_J_lin = &retry_seg.J;
                         x = pwl::solve_with_newton_b_extra(
                             retry_seg, nl_refresh_effective, graph,
                             pool, /*x_init=*/x, b_extra,
@@ -2805,14 +2812,15 @@ inline SimulationResult run_transient(
                                                 "state correction)"
                                      : restart ? "a restart (SDIRK) step"
                                      : step_retried ? "retried at a smaller dt"
-                                     : "a diode commutation");
+                                     : n_ev > 0 ? "crossed by a mode event "
+                                                  "(a gate edge or a commutation)"
+                                     : "solved by the event iteration (a "
+                                       "mode change)");
                 }
                 sens.begin_step(t_prev, x_prev);
                 if (nl_refresh_effective) {
                     sens.stage(0, step::psi_trapezoidal(opts.dt), stamped_mask, x, t,
-                               *newton_ws.solver,
-                               newton_only_rows ? &retry_seg.J
-                                                : &nominal_segment(stamped_mask).J);
+                               sens.newton_factor(newton_ws, t), sens_J_lin);
                 } else {
                     sens.stage(0, step::psi_trapezoidal(opts.dt), stamped_mask, x, t,
                                cache.resident_factor(stamped_mask, opts.dt), nullptr);

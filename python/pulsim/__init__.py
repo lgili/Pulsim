@@ -2756,13 +2756,14 @@ def _step_sensitivities(plan, names):
     d = plan.drive
     ctl = d.control
     if (d.user_b_extra_fn is not None or d.user_step_observer is not None
-            or d.user_closed_loops or (ctl is not None and ctl.ticks)):
+            or d.user_closed_loops or (ctl is not None and ctl.ticks)
+            or d.mmc_arms or d.on_cache is not None):
         raise _unsupported(
             engine, "sensitivities",
             f"simulate(engine={engine!r}, sensitivities=...): a b_extra_fn, "
-            "step_observer, closed loop or control tick feeds the circuit "
-            "values the sensitivity recurrence cannot differentiate (a "
-            "Python callable). Use engine='dsed' for a closed loop.")
+            "step_observer, closed loop, control tick, mmc_arms or on_cache "
+            "hook feeds the circuit values the sensitivity recurrence cannot "
+            "differentiate. Use engine='dsed' for a closed loop.")
     via = (plan.step.via_simulation if engine == "pwl"
            else plan.circuit is not None and plan.kernel_run is None)
     if not via:

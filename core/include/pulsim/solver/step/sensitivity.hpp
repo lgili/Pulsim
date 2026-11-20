@@ -46,6 +46,7 @@
 #include "pulsim/pwl/device_refresh.hpp"
 #include "pulsim/pwl/history_state.hpp"
 #include "pulsim/pwl/interface_stamps.hpp"
+#include "pulsim/pwl/nonlinear_solve.hpp"
 #include "pulsim/pwl/nonlinear_refresh_mosfet_level1.hpp"
 #include "pulsim/solver/result.hpp"
 #include "pulsim/solver/step/esdirk43.hpp"
@@ -133,6 +134,37 @@ public:
     }
 
     [[nodiscard]] bool on() const noexcept { return !params_.empty(); }
+
+    /// What the run does beside the stamps the recurrence differentiates:
+    /// in-kernel device losses (heat currents and capacitor-slot writes from
+    /// earlier states), a caller's static-refresh override (another model
+    /// than the pool's laws), or Levenberg–Marquardt from the start (its
+    /// factor is J + λI, not the stage's). Each is refused by name.
+    void refuse_setup(bool losses, bool nl_override, bool lm) const {
+        const char* why = losses ? "in-kernel device losses (their heat currents "
+                                   "read earlier states)"
+                        : nl_override ? "a caller-supplied nl_refresh (not the "
+                                        "pool's device laws)"
+                        : lm ? "enable_newton_lm (the factor is J + λI)"
+                             : nullptr;
+        if (why == nullptr) return;
+        throw UnsupportedError(engine_, "sensitivities", "", "",
+            std::format("sensitivities on engine '{}' with {}: not carried by "
+                        "the stage recurrence; run without it.", engine_, why));
+    }
+
+    /// The factor a Newton stage ended on: the workspace's plain solver.
+    /// A solve that went through Levenberg–Marquardt (an auto-promotion)
+    /// has none of the stage's matrix: refused by name.
+    [[nodiscard]] const sparse::DirectSolver& newton_factor(
+            const pwl::NewtonWorkspace& w, Real t) const {
+        if (!w.solver || w.lm_attempts != 0) {
+            refuse_step(t, "solved by Levenberg-Marquardt (an auto-promotion "
+                           "on a singular or stalled Newton), whose factor is "
+                           "not the stage's matrix");
+        }
+        return *w.solver;
+    }
 
     /// The run's start: S = 0, dq/dp = ∂q/∂p(x0), dq̇/dp = 0 (every engine
     /// starts from zero derivative slots). `x0` must not depend on the
@@ -243,7 +275,8 @@ public:
                             "sensitivities on engine '{}': at t = {} the "
                             "sensitivity solve of '{}' did not converge on the "
                             "stage's factor ({} iterations, last correction "
-                            "{:.3e} of {:.3e}).",
+                            "{:.3e} of {:.3e}; tol_newton_dx is the relative "
+                            "tolerance on S).",
                             engine_, t, trace_.params[static_cast<std::size_t>(j)],
                             it + 1, dn, sn));
                     }

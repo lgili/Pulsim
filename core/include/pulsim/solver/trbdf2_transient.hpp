@@ -794,6 +794,8 @@ inline SimulationResult run_transient_trbdf2(
                 "sensitivities with resume_from: the sensitivity state is not "
                 "part of a snapshot; run from the start.");
         }
+        sens.refuse_setup(lt != nullptr, static_cast<bool>(nl_refresh),
+                          opts.enable_newton_lm);
         sens.start(opts.t_start, x);
     }
     Real nl_seg_dt = Real{-1};
@@ -805,7 +807,7 @@ inline SimulationResult run_transient_trbdf2(
     auto sens_stage = [&](int s, const step::StagePsi& psi, const SwitchStateMask& m,
                           Real fdt, const Vector& X, Real tx) {
         if (nl_effective) {
-            sens.stage(s, psi, m, X, tx, *newton_ws.solver, &nl_seg.J);
+            sens.stage(s, psi, m, X, tx, sens.newton_factor(newton_ws, tx), &nl_seg.J);
         } else {
             sens.stage(s, psi, m, X, tx, cache.resident_factor(m, fdt), nullptr);
         }
@@ -1920,6 +1922,10 @@ inline SimulationResult run_transient_trbdf2(
         // dtp late): replace the slots only.
         if (!commit || t + dtp >= opts.t_end - h_min
             || t + dtp >= queue.next_of(events::Kind::ControlTick) - h_min) {
+            if (sens.on()) {   // the slots move, x and t do not
+                sens.refuse_step(t, "followed by a slot-only derivative refresh "
+                                    "(an event probe near t_end or a tick)");
+            }
             history.refresh_derivatives(x_trial, dtp);
             if (lt) lt->slots_rewritten();
             hs.refresh_derivatives(x_trial, dtp);

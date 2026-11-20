@@ -328,3 +328,36 @@ def test_resume_and_other_refusals():
         _run(b, 1e-4, "pwl", dt=1e-6, sensitivities=["R.R"])
     assert ei.value.feature == "sensitivities"
     assert "Ls" in str(ei.value)
+
+
+def _loss_rc():
+    b = _rc()
+    b.add_switch("S1", "in", "o", 1e6, 1e-12)
+    b.add_resistor("RL", "o", "gnd", 10.0)
+    b.add_voltage_source("Vamb", "amb", "gnd", 25.0)
+    b.add_resistor("Rth", "tj", "amb", 1.0)
+    b.add_capacitor("Cth", "tj", "amb", 1e-3)
+    t = p.LossTable(v_axis=[100.0], i_axis=[1.0], tj_axis=[25.0],
+                    energy=np.full((1, 1, 1), 1e-3))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        b.set_device_losses("S1", junction="tj", E_on=t, E_off=t)
+    return b
+
+
+@pytest.mark.parametrize("engine,kw", [("pwl", dict(dt=1e-6)), ("trbdf2", {})])
+def test_what_the_recurrence_does_not_carry_is_refused(engine, kw):
+    """In-kernel losses (heat from earlier states), Levenberg–Marquardt
+    (a factor J + λI) and an on_cache hook are refused by name, never a
+    silently wrong derivative."""
+    with pytest.raises(p.UnsupportedError) as ei:
+        _run(_loss_rc(), 1e-4, engine, sensitivities=["R.R"], **kw)
+    assert ei.value.feature == "sensitivities" and "losses" in str(ei.value)
+    with pytest.raises(p.UnsupportedError) as ei:
+        _run(_rect(), 1e-4, engine, sensitivities=["C.C"],
+             enable_newton_lm=True, **kw, **NEWTON)
+    assert ei.value.feature == "sensitivities" and "lm" in str(ei.value)
+    with pytest.raises(p.UnsupportedError) as ei:
+        _run(_rc(), 1e-4, engine, sensitivities=["R.R"],
+             on_cache=lambda c: None, **kw)
+    assert ei.value.feature == "sensitivities"
