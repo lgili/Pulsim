@@ -345,3 +345,21 @@ definition`, long-form full table; `--previous` compares `exact_old` with an old
 7. Reviewer pass done once (findings 1–4 fixed in 39e68edf; finding 5, the 2 h window cliff —
    an event 2.1 h off becomes missing + spurious and its left value reads a full jump in
    limits — documented, not changed). A second pass on the regenerated data is optional.
+
+### Update (13375eb0): first full run, one more artefact fixed, re-run in progress
+
+- First full run on 39e68edf: `exact_old` reproduced the ad9ee191 json in all 729 cells
+  (`render --previous ad9ee191`: 0 moved). Old counts at the head extension: pwl 38/11/8,
+  pwl+restart 70/31/8, pwl+split 74/38/8, trbdf2 80/30/9, dsed 81/77/70, esdirk43 81/65/13,
+  pwl+next 75/39/9, trbdf2+next 80/30/9, dsed+next 81/77/70.
+- It exposed an artefact: `cascaded_h_bridge_5level` / `mmc_4cell_chain` read limits ~1.0 on
+  all nine configurations (dsed included). The truth places a complementary pair one ulp apart
+  (S2_BH- at 0.00035, S2_BL+ one ulp later, an intermediate state between); engines flip both
+  at once. Fixed in 13375eb0: truth events within 4 ulp share their outer limits. Still open
+  (minor): the truth's values AT an engine instant (`_one_sided`, used for spurious events and
+  unpaired right rows) take the last candidate at that float time, not the cluster's.
+- The regenerated md/json/summary of that run are in the working tree, NOT committed (they carry
+  the artefact). Re-run on 13375eb0: `run --force && twins && render --previous ad9ee191 &&
+  accuracy_summary.py`, log `.scratch/sbm/run2.log` (ends `done <rc>`), twins
+  `.scratch/sbm/twins2.log`. When `done 0`: check `accuracy_summary.py --check`, commit the
+  three files, then the remaining steps above from step 2.
