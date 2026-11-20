@@ -1,0 +1,42 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: llc_half_bridge_zvs
+  category: soft_switching
+  description: >
+    LLC half-bridge with a linear C_oss (200 pF) and a body diode across each
+    switch, 300 ns dead time, f_s = 125 kHz below f_r = 132.6 kHz (L_r = 60 uH,
+    C_r = 24 nF), L_m = 300 uH, the rectified load as its
+    first-harmonic equivalent R_ac = 150 Ohm across L_m (the commutation is
+    on the primary; the exact tool cannot settle a transformer-coupled
+    rectifier at a gate edge, see FINDINGS).
+    Truth: benchmarks/tools/exact_truth.py (independent mpmath engine); the
+    ZVS check is python/tests/test_soft_switching_validation.py.
+  observables:
+    - column: V(mid)
+    - column: I(Lr)
+simulation:
+  tstart: 0.0
+  tstop: 40e-6
+  dt: 10e-9
+  uic: true
+components:
+  - {type: voltage_source, name: Vdc, nodes: [vin, 0], waveform: {type: dc, value: 400.0}}
+  - type: voltage_source
+    name: Vg_hi
+    nodes: [g_hi, 0]
+    waveform: {type: pwm, v_high: 10.0, v_low: 0.0, frequency: 125000, duty: 0.5, dead_time: 300e-9, phase: 0.0}
+  - type: voltage_source
+    name: Vg_lo
+    nodes: [g_lo, 0]
+    waveform: {type: pwm, v_high: 10.0, v_low: 0.0, frequency: 125000, duty: 0.5, dead_time: 300e-9, phase: 0.5}
+  - {type: vcswitch, name: S_hi, nodes: [g_hi, vin, mid], v_threshold: 5.0, g_on: 1000.0, g_off: 1e-9}
+  - {type: vcswitch, name: S_lo, nodes: [g_lo, mid, 0], v_threshold: 5.0, g_on: 1000.0, g_off: 1e-9}
+  - {type: diode, name: D_hi, nodes: [mid, vin], g_on: 1000.0, g_off: 1e-9}
+  - {type: diode, name: D_lo, nodes: [0, mid], g_on: 1000.0, g_off: 1e-9}
+  - {type: capacitor, name: Coss_hi, nodes: [vin, mid], value: 200e-12, ic: 400.0}
+  - {type: capacitor, name: Coss_lo, nodes: [mid, 0], value: 200e-12, ic: 0.0}
+  - {type: capacitor, name: Cr, nodes: [mid, a], value: 24e-9}
+  - {type: inductor, name: Lr, nodes: [a, p], value: 60e-6}
+  - {type: inductor, name: Lm, nodes: [p, 0], value: 300e-6}
+  - {type: resistor, name: Rac, nodes: [p, 0], value: 150.0}

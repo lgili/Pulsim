@@ -27,13 +27,24 @@
 - [x] 1b.3 Hard turn-on energy (ZVS lost) against the closed form: strict xfails cite the known open items (fixed engine, trbdf2); esdirk43 passes case A; F-S-1 parks its start failure.
 
 ## 2. LLC ZVS benchmark
-- [ ] 2.1 Create `llc_half_bridge_zvs.yaml`: half-bridge with resonant Lr-Cs-Lm tank tuned so V_DS reaches 0 before turn-on of either switch.
+- [x] 2.1 Create `llc_half_bridge_zvs.yaml`: half-bridge with resonant Lr-Cs-Lm tank tuned so V_DS reaches 0 before turn-on of either switch.
 - [ ] 2.2 Capture baselines for V_DS on each switch and i_D.
 - [ ] 2.3 KPI: `kpi__zvs_fraction` (target 100 %), `kpi__avg_switching_loss_w` (target ≈ 0 W).
+
+  (2.1 done in benchmarks/circuits/switching/isolated/ with linear C_oss and
+  R_ac for the rectifier (F-S-3); its truth is exact_truth.py, checked in
+  test_llc_* . 2.2 baselines: not captured — the test computes the truth
+  each run (16 s). 2.3: the ZVS fraction (100 %) is asserted; the average
+  switching loss KPI is not (no YAML kpi block, the runner is dead: see the
+  reconciliation note).)
 
 ## 3. PSFB ZVS benchmark
 - [ ] 3.1 Create `psfb_full_bridge_zvs.yaml`: phase-shifted full-bridge with leakage inductance providing ZVS for the lagging-leg switches.
 - [ ] 3.2 KPI: per-switch ZVS fraction (leading-leg ≈ 100 %, lagging-leg ≈ 100 % at full load).
+  (Not done 2026-11-20: no independent truth — the exact tool cannot settle
+  the transformer-coupled rectifier at a gate edge, F-S-3; engine agreement
+  is not a truth. A draft netlist lost lagging-leg ZVS at 20 and 25 us on
+  pwl+restart / trbdf2 / esdirk43 (170-232 V at turn-on) with L_lk 10 uH.)
 
 ## 4. Hard-switched reference
 - [x] 4.1 Create `buck_hard_switching_loss_reference.yaml`: standard buck where ZVS is not achieved.

@@ -361,3 +361,94 @@ def test_kpi_switching_loss_is_an_energy():
     assert out["switching_loss_w_avg"] == pytest.approx(50 / 6 * 1e-6 / 3e-6, rel=1e-6)
     with pytest.raises(ValueError):
         compute_switching_loss_per_event(gate, list(v), list(i), list(t), window_s=0.0)
+
+
+# ------------------------------------------- LLC half-bridge, exact truth --
+LLC_YAML = (Path(__file__).resolve().parents[2] / "benchmarks" / "circuits" / "switching"
+            / "isolated" / "llc_half_bridge_zvs.yaml")
+LLC_ENGINES = {**ENGINES, "dsed": dict(engine="dsed")}
+LLC_OFF = sorted([k * 8e-6 + 3.7e-6 for k in range(5)] + [k * 8e-6 + 7.7e-6 for k in range(5)])
+
+
+@pytest.fixture(scope="module")
+def llc_truth():
+    """The netlist solved by ``benchmarks/tools/exact_truth.py`` (mpmath, 30
+    digits; it never imports pulsim): per turn-off edge t_e, the tank current
+    i_Lr(t_e), the time the node crosses 200 V and the body diode's turn-on
+    (the end of the transition, v_DS = 0: ZVS)."""
+    pytest.importorskip("yaml")
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "benchmarks" / "tools"))
+    import exact_truth as et
+    sol = et.solve(str(LLC_YAML), dps=30)
+
+    def v(s):
+        return sol.sample(["V(mid)"], [s])["V(mid)"][0]
+    rows = []
+    for te in LLC_OFF:
+        tr = min(e["t"] for e in sol.events if "root" in e["cause"] and e["t"] > te)
+        t200 = mp.findroot(lambda s: v(s) - 200, (mp.mpf(te), tr), solver="anderson")
+        i = sol.sample(["I(Lr)"], [mp.mpf(te)])["I(Lr)"][0]
+        rows.append((te, float(t200), float(i), float(tr)))
+    return sol, rows
+
+
+@functools.lru_cache(maxsize=None)
+def _llc_run(engine):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "benchmarks" / "tools"))
+    import v1_reader
+    case = v1_reader.load(LLC_YAML)
+    kw = dict(LLC_ENGINES[engine])
+    eng = kw.pop("engine")
+    kw.pop("dt", None)          # the netlist's dt (10 ns) is the fixed engine's step
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return case.run(eng, **kw)
+
+
+LLC_KNOWN = "known: trap 9 — without restart the fixed engine rings (body diode / switch 14 A / 33 A " \
+            "step by step) and dumps C_oss in one step: the transition collapses"
+
+
+@pytest.fixture(params=list(LLC_ENGINES))
+def llc_engine(request):
+    return request.param
+
+
+def test_llc_truth_is_zvs_on_every_edge(llc_truth):
+    """The design (dead time 300 ns, 2 C_oss V_dc = 160 nC, |i_Lr| >= 1.46 A
+    at turn-off: <= 110 ns at constant current) reaches v_DS = 0 before
+    every gate: the spec's >= 95 % holds on the truth itself (10 of 10)."""
+    _, rows = llc_truth
+    assert all(tr - te < 300e-9 for te, _, _, tr in rows)
+    assert min(abs(i) for _, _, i, _ in rows) > 1.4
+
+
+def test_llc_dead_time_commutation_against_exact_truth(llc_truth, llc_engine, request):
+    """i_Lr at each turn-off within 2.5e-4 A (1e-4 of the 2.5 A peak; the
+    worst seen 3.4e-5, pwl+restart) and every engine sample inside each
+    transition within 0.5 V of the truth (1.25e-3 of the bus). Both bounds
+    hold the trbdf2 family to its default rtol with margin."""
+    if llc_engine == "pwl":
+        request.applymarker(pytest.mark.xfail(strict=True, reason=LLC_KNOWN))
+    sol, rows = llc_truth
+    r = _llc_run(llc_engine)
+    t, v, il = np.asarray(r.times), np.asarray(r.v("mid")), np.asarray(r.i("Lr"))
+    for te, _, i, tr in rows:
+        assert np.interp(te, t, il) == pytest.approx(i, abs=2.5e-4), te
+        k = np.nonzero((t > te) & (t < tr))[0]
+        assert len(k) >= 1
+        want = np.array([float(x) for x in sol.sample(["V(mid)"], [mp.mpf(float(s)) for s in t[k]])["V(mid)"]])
+        assert np.max(np.abs(v[k] - want)) <= 0.5, te
+
+
+def test_llc_zvs_fraction_kpi(llc_engine):
+    r = _llc_run(llc_engine)
+    t, v = np.asarray(r.times), np.asarray(r.v("mid"))
+    T = 8e-6
+    on_hi = [((x % T) < 3.7e-6) for x in t]
+    on_lo = [(4e-6 <= (x % T) < 7.7e-6) for x in t]
+    hi = compute_zvs_fraction(on_hi, list(400.0 - v), threshold_v=5.0)
+    lo = compute_zvs_fraction(on_lo, list(v), threshold_v=5.0)
+    # 8, 16, 24, 32 us (+ 40 us when the grid ends on it)
+    assert hi["zvs_fraction"] == 1.0 and hi["total_turn_on_events"] >= 4.0
+    assert lo["zvs_fraction"] == 1.0 and lo["total_turn_on_events"] == 5.0
