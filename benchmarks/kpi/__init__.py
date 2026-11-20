@@ -526,6 +526,54 @@ def compute_junction_temperature(
     }
 
 
+def compute_drift(
+    times: Sequence[float],
+    samples: Sequence[float],
+    t_from: Optional[float] = None,
+    t_to: Optional[float] = None,
+) -> float:
+    """Least-squares slope (units per second) of ``samples`` over
+    ``[t_from, t_to]`` (add-long-simulation-stress). A settled waveform's
+    slope is its secular drift; feed it per-period averages, not raw
+    switching samples, or the ripple's phase leaks into the slope."""
+    pts = [(t, y) for t, y in zip(times, samples)
+           if (t_from is None or t >= t_from) and (t_to is None or t <= t_to)]
+    if len(pts) < 2:
+        raise ValueError("compute_drift needs at least two samples in the window")
+    n = len(pts)
+    tm = sum(t for t, _ in pts) / n
+    ym = sum(y for _, y in pts) / n
+    stt = sum((t - tm) ** 2 for t, _ in pts)
+    if stt == 0.0:
+        raise ValueError("compute_drift: all samples share one instant")
+    return sum((t - tm) * (y - ym) for t, y in pts) / stt
+
+
+def compute_conservation_drift(
+    p_in_samples: Sequence[float],
+    p_out_samples: Sequence[float],
+    e_stored_initial: float,
+    e_stored_final: float,
+    time: Sequence[float],
+) -> float:
+    """Relative energy residual ``(∫(p_in − p_out) dt − ΔE_stored) / ∫p_in dt``
+    (add-long-simulation-stress). ``p_out`` is everything that leaves the
+    stored energy (load plus losses); the integrals are trapezoidal over the
+    sample instants ``time``, exact for the piecewise-linear waveform through
+    the samples. Signed: positive means energy went in and is unaccounted."""
+    n = len(time)
+    if n < 2 or len(p_in_samples) != n or len(p_out_samples) != n:
+        raise ValueError("compute_conservation_drift: p_in, p_out and time need one sample per instant (>= 2)")
+    w_in = w_out = 0.0
+    for k in range(1, n):
+        h = time[k] - time[k - 1]
+        w_in += 0.5 * h * (p_in_samples[k] + p_in_samples[k - 1])
+        w_out += 0.5 * h * (p_out_samples[k] + p_out_samples[k - 1])
+    if w_in == 0.0:
+        raise ValueError("compute_conservation_drift: no input energy")
+    return (w_in - w_out - (e_stored_final - e_stored_initial)) / w_in
+
+
 __all__ = [
     "compute_thd",
     "compute_power_factor",
@@ -540,4 +588,6 @@ __all__ = [
     "compute_inductor_flux_density",
     "compute_power_dissipation_resistor",
     "compute_junction_temperature",
+    "compute_drift",
+    "compute_conservation_drift",
 ]
