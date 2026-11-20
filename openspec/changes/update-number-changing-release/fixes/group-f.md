@@ -809,3 +809,43 @@ Tip at start dde945bd (extension = e88a06dc's C++, `build/python/pulsim` is a sy
   bound (`bridges10_1e-5.log`). Likely cause (not confirmed in source): a diode node between
   two OFF diodes reads i(L)/(2·g_off); the fast mode's F share 2|q z| is d-independent, so no
   chord certifies while it is above the node's tolerance. Not a few-line fix: reported.
+* **e88a06dc STAYS**: no gate failed because of it (rule off 243/243 + 36/36, its C++ case
+  passes, the two defects below are identical on base075 = 075feac9).
+* **Rule vs exact flow, 100 units, fixed harness (`.scratch/f4/run5.sh f7`,
+  `rule_vs_exact_flow_100.jsonl`)**: 99 comparable, 0 above 1, worst 0.99988
+  (high_freq_gan_buck; then sync_buck_500khz 0.99983, stiff_rc_high_freq_switching 0.99983,
+  high_q_rlc_ringdown 0.99982). Not comparable: three_phase_balanced_rl_load — and NOT only the
+  dense flow: the RULE CELL ITSELF spends its 2 000 000-sample budget by 4.5295 ms
+  (`output_budget_t`, 2 100 001 stored; 8 038 on the pre-reviewer tip of session 4, 5 153
+  rule-free). It came with 075feac9's per-row rounding floor (after_t0.jsonl, 075feac9: same
+  2 100 001). To be comparable the floating balanced neutral's row needs a floor that
+  certifies a row that is 0 up to rounding (the old 16·u·κ floor did, at 8 038 samples) —
+  the reviewer of session 4 found that floor too loose for ll06/ll09; a floor for rows whose
+  exact value is constant is the open design question.
+* **Property test, 100 units × 200 random grid instants (`property_100x200.jsonl`)**: 95
+  comparable (5 not: event counts differ against the rule-off dt grid — cl_boost_pi,
+  half_bridge_transformer_dc, boost_pfc_open_loop, flyback_converter, forward_converter).
+  94 ≤ 0.9976. **ONE GENUINE VIOLATION: diode_clamp_overvoltage V(out) 9.64 × at 2.5162 ms**
+  (`clamp_probe.log`): the rule stores 11 samples; the chord [1.02 ms, 2.533 ms] reads
+  5.0004999 → 5.0000125 V straight across the pulse's fall corner at 2.52 ms, where V(out) is
+  still 5.0005 V; at 2.5162 ms the chord reads 5.0000179 V (error 4.8e-4, tol 5.0e-5). The
+  dense flow (×0.05) stores the SAME 11 samples, so `rule_ratio_flow` read 0 inside that chord:
+  the exact-flow referee cannot see a defect the dense run shares. Same on base075. Likely
+  path (by reading scheduler.hpp:600–765, not instrumented): the rule-off run steps every
+  1 µs = the no-edge gate poll (dt_max/10); at 2.52 ms the poll and the corner coincide, so
+  `at_corner = t_gate < t_sw` is false, the landing counts as `out_transparent`, the end is
+  deferred, and the next deferral check bounds [ts, t1] in the post-corner piece. A fix
+  (`out_transparent` also requires the landing not be a source corner — a tie test against
+  the corner queue; rule-on only) is a few lines but needs an extension rebuild and a full
+  re-acceptance: NOT done in this session.
+* **`--truth` (mpmath, six circuits, fa4b5c71's tool verified byte-equal)**
+  (`property_truth_mpmath_6.jsonl`): 6/6 comparable, worst 0.9406 vs the dt grid and
+  0.9406 vs the truth (pwm_voltage_rc); the grid and the truth agree to 1e-6 of a tolerance.
+* **Events gate** (`events_gate_output_rtol.log`): event times and states bit-equal across
+  output_rtol 1e-4/1e-5/1e-6: 100 same, 0 diff, 0 skipped.
+* **Stored samples, 6cb51c00 (before.jsonl) → tip** (`samples_before_after.log`): min 1.00,
+  p25 1.00, median 1.00, p75 1.25, p90 4.84, max 407.5; 20 of 100 above 2×; total 879 412 →
+  3 617 402. Ten largest: three_phase_balanced_rl_load 407.5× (5 153 → 2 100 001, the budget),
+  boost_pfc_open_loop 14.2×, buck_dcm 9.6×, textbook_erickson_buck_ccm 6.9×,
+  ll06_buck_vcswitch 6.2×, buck_boost 6.0×, two_phase_interleaved_boost 5.4×,
+  buck_hard_switching_reference 4.9×, textbook_erickson_boost_ccm 4.9×, boost_classic 4.9×.
