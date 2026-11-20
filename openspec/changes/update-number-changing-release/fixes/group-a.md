@@ -70,7 +70,9 @@
 >   trbdf2 371/371); reference_status identical cell for cell to aa5d99f0's run (666 cells; pwl+restart
 >   115/20/1, pwl+split 118/17/1, the same as the run before the two readings; flyback 0.110 -> 2.3e-6
 >   and forward 0.092 -> 2.6e-6 still agree, no cell worse).
->   NOT run: full ctest; the full pytest on the final tip (it ran on aa5d99f0).
+>   Clean rebuild of 77fa64b0 (no trace): the 41 files 1129 passed, 3 skipped, 7 xfailed; stubs up to date.
+>   NOT run: full ctest; the full pytest on the final tip (it ran on aa5d99f0); cost not re-measured
+>   after aa5d99f0 (the later changes touch only the rule-on probe and the split).
 > - **Group B field for the event's peak voltage (step 5; their branch NOT merged).** On
 >   `fix/core-release-b-event-samples` (36836230) the result carries `right_limit_index` /
 >   `right_limit_states` (filled in `record_lines` from `lines.x_start` when `lines.start`) and
