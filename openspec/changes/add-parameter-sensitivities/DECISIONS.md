@@ -562,3 +562,25 @@ ESDIRK / Newton refusals beyond the tests.
   located t_star instead of t.
 - The 2 T buck of `test_sensitivity_exact.py` now runs on trbdf2 and agrees
   with the exact engine within 1e-5 at rtol 1e-10 (it was a refusal test).
+
+### Verification at e149fc47 (2026-11-20) and the state for the next agent
+
+- Byte compares vs 41860812 (sensitivities off, base built LTO off like the
+  tip, `.scratch/g6cmp.sh`): goldens 21/21 (counters incl. cache / Newton
+  factorizations unmoved), stateful 40, engines 35, steps 28, pwl_identity
+  390/390, trbdf2_identity 371/371 — all identical.
+- States bit-identical with and without sensitivities, engine stats and
+  Newton factorizations equal, n_sens_solves within [rows, 5·rows+8] and
+  n_sens_iterations 0 (linear) / ≤ 2 per solve (Newton): asserted in every
+  number cell of the audit.
+- COST GATE (instructions per accepted step, min over 6 alternating
+  processes × 3 runs): bridge_trbdf2 −0.07 %, buck_trbdf2 0.00 %, vsi_pwl
+  −0.07 %, buck_pwl +0.59 % (min of 12: 3106.4 vs 3088.2; means +0.53 %) —
+  buck_pwl FAILS the 0.5 % gate by a hair. Not traced: the off path of the
+  pwl loop gained per-step `if (sens.on())` blocks (gate tracking, the
+  inline-stage flag) and new lambdas; candidates: hoist the step's two
+  sens blocks into one out-of-line call, check code layout.
+- NOT RUN: the C++ step-test target (pulsim_core_step_tests) — no build
+  of the test tree this session; full ctest (track agent rule).
+- NEXT: (1) buck_pwl cost; (2) 6.3 at rtol 1e-9 (the floor-path bias
+  above); (3) 4.4 saturable inductor (item 4 of the hand-off list).
