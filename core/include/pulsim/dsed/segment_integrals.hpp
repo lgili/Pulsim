@@ -39,7 +39,7 @@
 // banks) the matrix form, with no eigenvectors:
 //
 //   Φ = e^{As L},  I = ∫₀ᴸ Φ ds,  W_Q = ∫₀ᴸ Φᵀ Q Φ ds
-//   (Taylor at h = L/2^k with ‖As‖₁ h ≤ 1/4, then k doublings
+//   (Taylor at h = L/2^k with ‖As‖₁,∞ h ≤ 1/4, then k doublings
 //    Φ(2h) = Φ(h)², I(2h) = I(h) + Φ(h)I(h), W(2h) = W(h) + Φ(h)ᵀW(h)Φ(h))
 //
 //   degree ≤ 1: ∫y = l̃·I x̃,  ∫y² = x̃ᵀ W_{l̃l̃ᵀ} x̃;   degree 2: ∫y = x̃ᵀ W_Q̃ x̃
@@ -49,7 +49,7 @@
 // probe's ∫y² there (u·κ⁴ > 1e-10) is the same Gramian one level up: w =
 // x̃⊗x̃ obeys w' = (As⊗I + I⊗As)w and y = vec(Q̃)·w, so ∫y² = w0ᵀW₄w0 with
 // W₄ the Gramian of vec(Q̃)vec(Q̃)ᵀ, dimension (n + 1)², formed for
-// n + 1 ≤ 12; past that the piece's ∫y² is the recorder's line (its ∫y
+// n + 1 ≤ 8 (it is rebuilt for every new step length); past that the piece's ∫y² is the recorder's line (its ∫y
 // stays closed), counted.
 //
 // Every step is CHECKED: its closed form's end must be the engine's end state
@@ -197,11 +197,14 @@ using Cplx = std::complex<Real>;
 }
 
 /// Φ = e^{A L}, I = ∫₀ᴸ Φ and, per Q in qs, W = ∫₀ᴸ Φᵀ Q Φ (see the header):
-/// a Taylor start at ‖A‖₁·L/2^k ≤ 1/4 and k doublings.
+/// a Taylor start at max(‖A‖₁, ‖A‖∞)·L/2^k ≤ 1/4 and k doublings.
 inline void gram_doubling(const DenseMatrix& A, Real L, std::span<const DenseMatrix* const> qs,
                           DenseMatrix& Phi, DenseMatrix& I, std::vector<DenseMatrix>& W) {
     const Index n = A.rows();
-    const Real na = n > 0 ? A.cwiseAbs().colwise().sum().maxCoeff() : Real{0};
+    // max(‖A‖₁, ‖A‖∞): the W series applies X ↦ AᵀX + XA, bounded by both
+    const Real na = n > 0 ? std::max(A.cwiseAbs().colwise().sum().maxCoeff(),
+                                     A.cwiseAbs().rowwise().sum().maxCoeff())
+                          : Real{0};
     int k = 0;
     if (na * L > Real{0.25}) k = static_cast<int>(std::ceil(std::log2(na * L / Real{0.25})));
     const Real h = std::ldexp(L, -k);
@@ -317,11 +320,11 @@ public:
 
     /// The largest n + 1 whose degree-2 ∫y² takes the Kronecker matrix form
     /// (a Gramian of dimension (n + 1)²).
-    static constexpr Index kKronMax = 12;
+    static constexpr Index kKronMax = 8;   // 64²: rebuilt per new step length
     /// out[1] when the square has no closed form here (the recorder takes
     /// its line for ∫y² only), and the reason integrate() then gives.
     static constexpr const char* kNoFourth =
-        "the square of a degree-2 probe on a mode with more than 11 states whose eigenbasis is "
+        "the square of a degree-2 probe on a mode with more than 7 states whose eigenbasis is "
         "too ill-conditioned for it (u*kappa^4 > 1e-10)";
 
 private:
@@ -657,9 +660,12 @@ private:
         if (sm_ != nullptr) return *sm_;
         auto it = modes_.find(m_);
         if (it == modes_.end()) {
-            const MaskT keep = ad_.current_mask();
+            struct Restore {   // the engine's mask, even if the build throws
+                AdapterT& ad;
+                MaskT keep;
+                ~Restore() { ad.set_mask(keep); }
+            } restore{ad_, ad_.current_mask()};
             auto e = detail::make_period_mode(ad_, m_, obs_, true);
-            ad_.set_mask(keep);
             const Index n1 = e.n + 1;
             std::vector<SegForm> rf(readings_.size());
             for (std::size_t j = 0; j < readings_.size(); ++j) {

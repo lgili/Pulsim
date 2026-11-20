@@ -74,7 +74,7 @@ Vector v2(Real a, Real b) {
 
 /// `modal`: the mode has a modal basis; `sq2`: the degree-2 square has a
 /// closed form (modal under u·κ⁴ ≤ 1e-10, else the Kronecker Gramian up to
-/// n + 1 = 12; else NaN: the recorder's line)
+/// n + 1 = 8; else NaN: the recorder's line)
 void check(const Case& c, bool modal, bool sq2, Real tol, const char* name) {
     INFO(name);
     dsed::SegmentMode sm(mode_of(c.A, c.b), forms());

@@ -121,3 +121,156 @@ Run: `.scratch/ref44.py` (reproduces 1.08e-4 / −1.60e-4 / −2.02e-4 vs trbdf2
 exactly), the probes above, the new test (1 xfailed; `--runxfail` fails on the
 integral assertion with the numbers above), ruff on the test. Not run: the
 full pytest, ctest (no C++ touched), any other circuit.
+
+---
+
+# Fix (branch `fix/core-exact-window-integrals`)
+
+**Result: the exact engine's in-loop recorder windows and periods are the
+trajectory's, to 4.4e-16 on F-B2-1's buck, independent of the output grid.**
+
+## The closed forms (`core/include/pulsim/dsed/segment_integrals.hpp`)
+
+Augmented energy coordinates of `period_integrals.hpp`: x̄ = (x, 1),
+x̃ = d∘x̄, As = d·[[A, b], [0, 0]]·d⁻¹ = V·diag(μ)·V⁻¹, z = V⁻¹x̃0, and at a
+piece starting s0 into the step ζ = z∘e^{μ s0}. A probe that is a polynomial
+of degree ≤ 2 in readings affine in the state (v(), i() of a state, a
+resistor, a PWL switch / diode under the step's mask with g_on / g_off /
+V_f, a constant current source; p() = product) is
+
+| degree | y(s) | ∫₀ᴸ y | ∫₀ᴸ y² |
+|---|---|---|---|
+| ≤ 1: l·x̄ | Σ α_i e^{μ_i s}, α = (Vᵀ(l/d))∘ζ | Σ α_i Lφ₁(μ_i L) | Σ α_iα_j Lφ₁((μ_i+μ_j)L) |
+| 2: x̄ᵀQx̄ | Σ β_ij e^{(μ_i+μ_j)s}, β = (Vᵀ D⁻¹QD⁻¹ V)∘ζζᵀ | Σ β_ij Lφ₁((μ_i+μ_j)L) | Σ_pq γ_pγ_q Lφ₁((σ_p+σ_q)L), p = (i ≤ j), σ_p = μ_i+μ_j, γ_p = β_ii or β_ij+β_ji |
+
+Lφ₁(νL) = ∫₀ᴸ e^{νs} ds through `phi1` (expm1 form): λ = 0 gives L exactly
+and |λ|L = 1e-12 loses nothing to cancellation (test: 1e-13).
+
+**Conditioning.** A sum over a product of p modal expansions carries
+u·κ₂(V)^p of the natural scale ‖l̃‖^k‖x̃‖^k: p = 1 the state, 2 a degree-1
+∫y² and a degree-2 ∫y, 4 a degree-2 ∫y². Measured on a near-defective pair
+δ/a = 1e-3 (κ ≈ 1e3): 6e-13, 8e-10, 6e-6. Each is modal only under
+u·κ^p ≤ 1e-10 (the propagator's bar). Otherwise the matrix form, no
+eigenvectors: Φ = e^{As L}, I = ∫Φ, W_Q = ∫ΦᵀQΦ by a Taylor start at
+max(‖As‖₁, ‖As‖∞)·h ≤ 1/4 (24 terms) and k doublings Φ(2h) = Φ², I(2h) =
+I + ΦI, W(2h) = W + ΦᵀWΦ — only forward propagations, so a 5e12 1/s mode
+cannot overflow (test). Degree 1: ∫y = l̃·I x̃, ∫y² = x̃ᵀW_{l̃l̃ᵀ}x̃; degree 2:
+∫y = x̃ᵀW_Q̃x̃, ∫y² by the same Gramian one level up (w = x̃⊗x̃, w' =
+(As⊗I + I⊗As)w, y = vec(Q̃)·w) for n + 1 ≤ 8; past that the piece's ∫y² is
+the line, counted. Defective pairs (Jordan block, an integrator's λ = 0 with
+the augmented constant), δ/a = 1e-8 and δ/a = 3e-2 (κ ≈ 1e2: modal
+products, Kronecker square) are all within 2.3e-13 of 50-digit mpmath
+truths (`core/tests/dsed/test_segment_integrals.cpp`; worst 2.3e-13 is the
+κ ≈ 1e2 modal product, u·κ²; the rest ≤ 7.6e-15).
+
+**Windows inside a segment.** The recorder clips; the source integrates
+[lo, hi] ⊂ [ta, tb] with s0 = lo − ta (ζ above, or Φ(s0)x̃0 in the matrix
+form) and returns y(lo), y(hi) too: min / max take the samples at the step's
+ends and the closed form at a clip point (v(out)'s window min at A moved
+from the chord's 7.84945933 to 7.84937116894253, the truth 7.8493711689425).
+Period statistics are windows of the same pieces.
+
+**Checked, counted.** Each step's closed form must END at the engine's end
+state (energy norm of x̃, 1e-9), so a numeric or corrected step is never
+integrated as a mode. (Not per probe against the recorder's samples: a
+reading like v(in, sw) = 12 − 11.999999999 carries the sample's own
+cancellation, 1e-6 relative; that check refused 23 good pieces of the DCM
+boost.) A piece with no closed form — a probe that is not such a
+polynomial (abs, min, a quotient of states; also a unary function of a
+constant, conservatively), a circuit with time-varying sources (PWM /
+pulse / sine / table: the step's input is not the mode's constant b), a
+degree-2 square past n + 1 = 8 on an ill-conditioned basis — is the
+recorder's line, counted in `res.recorder_feed['closed_form']`
+(`n_closed`, `n_line`, first `why`) and warned (RuntimeWarning).
+
+**One implementation.** `detail::phi1_kernel` / `phi1_pair_kernel` and
+`detail::modal_basis` in `period_integrals.hpp` are THE kernels: the
+period map, the loss port (`loss_port.hpp` `energies_`) and the recorders
+call them. Loss port energies and the period map's integrals are byte-
+identical to the base (74/74 arrays, `.scratch/wi/port_bytes.py`).
+
+## The ledger: window integrals and impulses
+
+Between events the window integral of every element's absorbed power plus
+the storage's ΔE closes to rounding. At a state jump (an ideal switch
+closing a capacitor loop) the energy ½·C1C2/(C1+C2)·ΔV² leaves in zero
+time: no window integral sees it (the integrand has no Dirac part; the
+pieces end at the left limit and restart from the right limit). The loss
+port books it as the switch's `E_impulse`. So the ledger over [0, T] is
+ΔE_C + Σ ∫p (recorders) + Σ E_impulse (loss port) = 0. Measured (default
+grid): buck 1.3e-13 of ∫p(V); DCM boost (57 events, diode turn-offs)
+2.7e-14; capacitor pair + R through an ideal switch closes within 1e-11 of
+∫p(R), with the switch's own g_off leak ∫p(S) = 6.4e-14 J before it closes
+needed to get there.
+
+## Decision 2: stored-record integrals stay the trapezoid (docs)
+
+`res.integral` / `result_avg` / `with_event_limits` / the stored-arrays
+pass integrate the stored samples. Computing them from segment data would
+mean carrying every step's mode (A, b, mask, start state) in the result and
+re-deriving modal forms post-run for arbitrary probes — the in-loop source
+already does this at no storage cost. So the docs say what they are:
+"trapezoid of the STORED samples: exact for the fixed engine's rule, O(h²)
+otherwise (`engine='exact'` without `dt` stores one sample per 10 us); for
+the exact average use an in-loop `Recorder(windows=...)`" (`result_avg`,
+`_recorders` module notes, `docs/api-reference.md`, AI_GUIDE trap 2).
+
+## Decision 3: no silent drop
+
+- `output_rtol` with recorders is kept: the run is the run without them
+  (samples, states, event location and projection: the rule sets those
+  too), and the statistics stay closed forms (identical to the run without
+  the rule to 1e-12; F-B2-1 buck: bit-identical).
+- The sample-cap / unbounded warning now says the stored-record integrals
+  (res.avg / res.integral / with_event_limits) are chords over those gaps
+  and that in-loop recorders integrate the exact trajectory.
+
+## Numbers against the truth (F-B2-1 buck, window [A, B])
+
+| | i(L) | v(out) | p(R) |
+|---|---|---|---|
+| before (chords) | −1.08e-4 | +1.60e-4 | +2.02e-4 |
+| after, default grid | 4.4e-16 | 4.4e-16 | 4.4e-16 |
+| after, output_rtol = 1e-10 | 4.4e-16 | 4.4e-16 | 4.4e-16 |
+
+Test asserts < 1e-11 (the xfail is gone). What limits it: the modal sums'
+rounding, u·κ·Σ|terms| per piece, summed over the pieces (u·κ^2 for the
+products); here a few u. Grid independence (default vs dt = 1e-7 vs
+output_rtol = 1e-8): 2.0e-15 / 1.2e-14 / 1.3e-14 and 0 / 0 / 0 (test at
+1e-12). Over many pieces it adds up: buck_dcm's v(vout)*i(L) RMS differs
+1.7e-11 between the default grid and dt = 1e-7 (3021 steps), 1.3e-10 at
+dt = 1.5e-8 (20049) — the test of `test_exact_recorder_loop.py` holds 1e-10.
+
+## Moved recorder values (probe_vals.py, F-B2-1 buck, w0 = [A, B], w1 = [0, 1 ms])
+
+Old = base 19e4f1c5, new = this branch, ref = stored-line on dt = 1e-8
+(itself O(h²): its error vs dt = 1e-7 is shown so new − ref ≈ (d7 − d8)/100
+reads as the reference's own error).
+
+| probe | stat | old | new | new vs ref | old vs ref | truth |
+|---|---|---|---|---|---|---|
+| i(L) | ∫ w0 | 1.281344126572e-3 | 1.281482929636e-3 | 1.1e-10 | −1.1e-4 | 1.28148292963602e-3 (new 4.4e-16) |
+| v(out) | ∫ w0 | 6.325529461529e-3 | 6.324519877616e-3 | −1.6e-10 | 1.6e-4 | 6.32451987761644e-3 (4.4e-16) |
+| p(R) | ∫ w0 | 1.218860865823e-2 | 1.218614789826e-2 | −3.3e-10 | 2.0e-4 | 1.21861478982593e-2 (4.4e-16) |
+| i(L) | rms w1 | 2.229983026504 | 2.233809745122 | 1.9e-9 | −1.7e-3 | |
+| v(out) | rms w1 | 9.709328797545 | 9.718791916879 | 1.0e-9 | −9.7e-4 | |
+| p(V) | ∫ w1 | −1.930383192614e-2 | −1.932647772373e-2 | −1.1e-9 | 1.2e-3 | ledger |
+| p(S1) | ∫ w1 | 2.147431071104e-6 | 1.997555116794e-6 | −7.5e-8 | 7.5e-2 | ledger |
+| p(D1) | ∫ w1 | 3.088455403649e-6 | 2.992926250797e-6 | −3.2e-8 | 3.2e-2 | ledger |
+| p(L) | ∫ w1 | −2.903109763604e-5 | 8.353442491743e-6 | 4.4e-6 | −4.5 | ½L·iL(T)², 1e-11 |
+| i(D1) | ∫ w1 | 1.202338935643e-3 | 1.202240228223e-3 | −1.0e-10 | 8.2e-5 | |
+| v(sw) | ∫ w1 | 9.618999720892e-3 | 9.618995440744e-3 | −7.3e-12 | 4.4e-7 | |
+| v(out) | min w0 | 7.84945933003 | 7.84937116894 | | | vC(A) 7.8493711689425 |
+
+(all 9 probes × 2 windows × integral / rms moved the same way; min / max
+moved only at clip points, by ≤ 1e-5.) Test values that moved:
+`test_exact_recorder_loop.py` — in-loop statistics no longer equal the
+stored pass's line where closed (compared instead with a dt = 1e-7 run, 1e-10;
+min / max vs the stored pass 1e-9: clip points); the trbdf2 comparison now
+runs on the default grid (was dt = 1e-7). `test_exact_output_grid.py` /
+`test_exact_output_rule_combinations.py` — recorders no longer drop
+output_rtol.
+
+## Run / not run
+
+See the report of this branch's final tip.

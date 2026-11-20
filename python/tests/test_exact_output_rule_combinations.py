@@ -67,9 +67,10 @@ def test_a_resumed_run_with_the_output_rule_equals_the_uninterrupted_one():
 def test_the_output_rule_runs_with_a_recorder_and_is_ignored_with_dt():
     """simulate()'s docstring: ignored with dt / store_every (the exact engine
     refuses store_every by name): the samples are then exactly today's, with
-    no output-grid report. A recorder keeps the rule (F-B2-1): its window
-    statistics are each segment's closed form, so the grid moves only the
-    stored samples, and the recorder does not move the grid."""
+    no output-grid report. A recorder keeps the rule (F-B2-1): the run is
+    the one without it (samples and states byte for byte), and its window
+    statistics, each segment's closed form, are those of the run without
+    the rule to 1e-12."""
     rec = [p.Recorder("s", ["v(vout)"], keep="none", windows=[(10e-6, 90e-6)])]
     b, fn = _ccm()
     bare = _sim(b, 100e-6, fn, output_rtol=OUT)

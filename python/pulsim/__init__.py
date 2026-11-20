@@ -2685,9 +2685,10 @@ def simulate(
         grid); both warn. ``output_budget_t`` is the time the run's sample
         budget (2e6 cut steps, ``pulsim._dsed_dispatch.OUTPUT_BUDGET``) ran
         out, from where the step cap's grid holds (warns; ``None`` when it
-        did not). Ignored with ``dt`` / ``store_every``; with recorders it
-        shapes the stored grid only (their statistics are closed forms,
-        see ``recorders``); refused by name on the other engines, with
+        did not). Ignored with ``dt`` / ``store_every``; with recorders the
+        run is the one without them (the rule also sets how events are
+        located and projected), and their statistics stay closed forms
+        (see ``recorders``); refused by name on the other engines, with
         ``integrator='bdf2'``, sensitivities, and the non-native fallback.
 
     Returns
@@ -2726,7 +2727,7 @@ def simulate(
     # engine's result goes through the same kernel recorder pass.
     if recorders:
         # F-B2-1: in-loop recorders on the exact engine integrate each step in
-        # closed form, so output_rtol shapes only the stored grid: it is kept
+        # closed form, so output_rtol is kept: the run is the one without them
         _kw = {k: v for k, v in locals().items() if k != "recorders"}
         from ._recorders import simulate_with_recorders as _with_rec
         return _with_rec(simulate, _kw, recorders)
@@ -3686,8 +3687,8 @@ def _plan_run(
         # to DSED integrator names.
         # update-number-changing-release: the output-grid rule acts only where
         # the engine picks the samples (no dt, no store_every); anything
-        # explicit keeps today's samples exactly. With recorders it shapes the
-        # stored grid only (their statistics are closed forms: F-B2-1).
+        # explicit keeps today's samples exactly. With recorders it acts as
+        # without them (their statistics are closed forms: F-B2-1).
         if output_rtol is not None:
             if isinstance(output_rtol, bool) or not 0.0 < output_rtol < float("inf"):
                 raise ValueError(f"simulate(output_rtol={output_rtol!r}): must be > 0 (None = off)")
