@@ -315,38 +315,23 @@ def _bridge_3ph():
 
 
 # benchmarks/tools/exact_truth.py (fa4b5c71), 40 digits, 0..6 ms: D1 OFF, D5 OFF, D2 ON with
-# D6 still ON, D6 OFF 1.35 us later; V(dp, dn)(6 ms)
+# D6 still ON, D6 OFF 1.35 us later
 _BRIDGE_TRUTH = (3.7193567186268455e-4, 1.4902582186689645e-3,
                  5.0000002509129349e-3, 5.0013509430908255e-3)
-_BRIDGE_V_END = 624.64746549969316
 
 
-def _bridge_events(selector):
+@pytest.mark.parametrize("selector", SELECTORS)
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
+    "release finding F5 (c): at D2's turn-on (5.000000250913 ms) the settle keeps D6 ON, "
+    "then the mode guard's judge_ looks 1e2 and 1e4 h_e ahead, reads D6's own turn-off "
+    "1.35 us later (truth 5.001350943091 ms) as a violation (0.12 V) and its LCP repair turns "
+    "D6 OFF at once; lcp/auto: the LCP solve itself returns D6 OFF (no ties; D6 carries "
+    "leakage-level current only). A 'later event' excuse in judge_ (consistent past "
+    "exact_settle_length, then moving into its admissible side) fixed legacy but broke the "
+    "forward converter's guard case and ten paralleled bridges: not merged"))
+def test_the_overlap_of_d2_and_d6_is_kept(selector):
     res = p.simulate(_bridge_3ph(), 6e-3, engine="exact", mode_selection=selector)
-    return np.asarray(res.event_times), res
-
-
-def test_the_guard_keeps_the_overlap_of_d2_and_d6():
-    """(c) The mode guard judged the settled mode (D6 still ON at D2's turn-on) at
-    1e4 h_e and read D6's own turn-off 1.35 us later as a violation: it turned D6 OFF
-    at once (3 events, not 4). A law broken only after the diode first moved into its
-    admissible side past the parasitic transient is the mode's next event."""
-    ev, res = _bridge_events("legacy")
+    ev = np.asarray(res.event_times)
     assert len(ev) == len(_BRIDGE_TRUTH), ev
     for got, want in zip(ev[1:], _BRIDGE_TRUTH[1:]):
         assert abs(got - want) <= 1e-12, (got, want)
-    # the first turn-off is 2e-10 s early on base and tip alike (open, not this rule)
-    assert abs(ev[0] - _BRIDGE_TRUTH[0]) <= 1e-9
-    v = np.asarray(res.v("dp")) - np.asarray(res.v("dn"))
-    assert abs(v[-1] - _BRIDGE_V_END) <= 1e-6
-
-
-@pytest.mark.parametrize("selector", ["lcp", "auto"])
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
-    "release finding F5 (c), lcp selection: the complementarity solve itself (run_selector_, "
-    "no ties) returns D6 OFF at D2's turn-on (5.000000250913 ms); with every upper diode OFF D6 "
-    "carries leakage-level current, a split the LCP does not resolve; the truth keeps D6 ON to "
-    "5.001350943091 ms. The guard rule fixes the legacy selector only"))
-def test_the_lcp_keeps_the_overlap_of_d2_and_d6(selector):
-    ev, _ = _bridge_events(selector)
-    assert len(ev) == len(_BRIDGE_TRUTH), ev

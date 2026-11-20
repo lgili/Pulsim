@@ -660,7 +660,7 @@ Selectors: (a) legacy, lcp, auto, both forms; (b) legacy, lcp, auto, conductance
   active_clamp_forward 0.992, forward_converter 0.974 (base spread), boost_pfc_open_loop 0.998.
 * Loss port: no separate number compared; the full pytest (below) carries its tests.
 
-### (c) The mode guard read the mode's next event as a violation — FIXED on legacy (orchestrator's third)
+### (c) The mode guard read the mode's next event as a violation — OPEN (fix tried, reverted; strict xfail)
 
 Circuit: three-phase bridge, 325 V 50 Hz, 0.5 mH lines, D1..D6 (1e3 / 1e-9), 220 µF ∥ 40 Ω, 1 MΩ tie
 (`_bridge_3ph`). Truth (`exact_truth.py`, 40 digits, 0..6 ms): D1 OFF 0.37193567186 ms, D5 OFF
@@ -701,3 +701,19 @@ the three), scoreboard `exact` vs the mpmath truth at 1e-5, base → tip: forwar
 5.6e-12, boost_pfc_open_loop 7.36e-10 → 2.95e-12, flyback_converter 7.265e-7 → 7.262e-7. Their
 dsed / dsed+next / no-dt rule-off cells are identical to base. Cost was measured before (c) (the
 guard's extra ladder runs only on a judged violation); not re-measured on the final tip.
+
+**(c) REVERTED (commit after 2bdc6598).** The exact-engine test files on the (c) tip: 4 failed —
+`test_exact_guard_transient::test_the_forward_converter_rectifier_follows_the_transformer`
+(0.6923 vs 0.7733), `test_exact_route::test_ten_paralleled_bridges_agree_with_pwl[None]` and
+`test_release_findings_f::test_fx1_ten_branch_form_bridges_run_under_the_rule[constant|python]`
+(`DiodeModeInconsistentError`, Db5a ON carrying −1.08e-6 A at 13.265 ms). `exact_settle_length`
+is shorter than the transients the guard exists to see (the forward converter's rectifier is
+consistent past it and still wrong), so "consistent past the parasitic transient, then admissible
+first" excuses real violations. The bridge1_vf07 / rule-on improvements listed above came with
+(c) and are reverted with it. What a fix needs: the guard's look-ahead bounded by the mode's next
+LOCATED crossing (run the scan of the settled mode from the event up to 1e4·h_e and judge only up to
+its first root), not by a transient length; and for lcp/auto the LCP's leakage-level port current
+classification. Strict xfail `test_the_overlap_of_d2_and_d6_is_kept[legacy|lcp|auto]`.
+The final tip's must-not-move numbers are those measured BEFORE (c) (the compares on 78b5…/1f9f1a05+
+poll scoping): goldens identical, bit-identity 36/36 + 36/36, 243 cells identical, rtol 111/0/15,
+rule-on boost_pfc 7.36e-10 → 2.95e-12; this revert restores that C++ exactly.

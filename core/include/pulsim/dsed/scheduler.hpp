@@ -3297,8 +3297,7 @@ private:
                     const Real sig = law_signal_(dd, mode[j] != 0, t + d, x_tmp_);
                     // a non-finite state (an unstable mode over 1e4·h_e) is a violation
                     const bool bad = breaks_law_(dd, mode[j] != 0, t + d, x_tmp_)
-                                     && !held_across_ideal_path_(dd, m, t + d, x_tmp_, sc)
-                                     && !leaves_later_(dd, mode[j] != 0, t, x, d);
+                                     && !held_across_ideal_path_(dd, m, t + d, x_tmp_, sc);
                     // reported in volts: ON -> −i·zs, OFF -> v − V_on
                     const Real viol = mode[j] ? dd.g_on * sig * zs : sig;
                     const Real v_eff = std::isfinite(viol) ? viol
@@ -3318,36 +3317,6 @@ private:
             return -1;
         }
     }
-
-    /// F5 (c): a law the judge finds broken at its horizon t + d by a diode that is
-    /// consistent once the mode's parasitic transient is over (t + L_p, L_p =
-    /// exact_settle_length, what the guard exists to see past) and first moves
-    /// INTO its admissible side from there (the decision's lexicographic test,
-    /// ladder_sign_) is the mode's next event, which the scan locates — not a
-    /// violation of the decision. The three-phase bridge's guard turned D6 OFF at
-    /// D2's turn-on (5.000000250913 ms), merging D6's own turn-off 1.35 µs later
-    /// (mpmath truth 5.001350943091 ms) into it. Leaves the system's mask alone.
-    bool leaves_later_(const SchedulerDiode& dd, bool on, Real t, const Vector& x, Real d)
-        requires HasNodePairVoltage<System> {
-        if constexpr (HasExactStep<System>) {
-            Real lp = Real{0};
-            if constexpr (requires { system_.exact_settle_length(Real{}); })
-                lp = system_.exact_settle_length(resolved_scale_(t));
-            if (!(lp >= Real{0}) || !(lp < d)) return false;
-            advance_(t, x, lp, x_judge_);
-            const auto prm = dd.params();
-            Real dj = Real{0};
-            const int sg = ladder_sign_(t + lp, x_judge_, dd, d - lp,
-                [&](Real tau, const Vector& xx) {
-                    return models::SwitchedDiode::crossing_signal(on, law_v_(dd, tau, xx), prm);
-                }, dj);
-            return sg == (on ? 1 : -1);
-        } else {
-            (void)dd; (void)on; (void)t; (void)x; (void)d;
-            return false;
-        }
-    }
-    Vector x_judge_;
 
     /// An OFF ideal diode whose ON mode would close a loop of closed ideal
     /// elements sits across a closed path: v_D = 0 structurally, and its
