@@ -11,10 +11,20 @@
 > "Pulsim Python runtime backend unavailable".
 
 ## 1. ZVS / ZCS detection KPIs
-- [ ] 1.1 Add `compute_zvs_fraction(switch_state, v_ds_samples, threshold, lookback)` to `benchmarks/kpi/`.
-- [ ] 1.2 Add `compute_zcs_fraction(switch_state, i_d_samples, threshold, lookback)`.
-- [ ] 1.3 Add `compute_switching_loss(switch_state, v_ds, i_d)` — integrate ½·V·I at each transition.
-- [ ] 1.4 Unit tests against synthetic switch state + ramp V_DS to confirm ZVS / ZCS / loss counts match hand-computed expectations.
+- [x] 1.1 Add `compute_zvs_fraction(switch_state, v_ds_samples, threshold, lookback)` to `benchmarks/kpi/`.
+- [x] 1.2 Add `compute_zcs_fraction(switch_state, i_d_samples, threshold, lookback)`.
+- [x] 1.3 Add `compute_switching_loss(switch_state, v_ds, i_d)` — integrate ½·V·I at each transition.
+- [x] 1.4 Unit tests against synthetic switch state + ramp V_DS to confirm ZVS / ZCS / loss counts match hand-computed expectations.
+
+  (2026-11-20: 1.1/1.2 existed under these names with sample lookbacks;
+  1.3 is compute_switching_loss_per_event — its old formula was W/s,
+  finding F-S-2, fixed: int v*i dt over window_s. 1.4:
+  test_kpi_* in python/tests/test_soft_switching_validation.py.)
+
+## 1b. Soft-switching transitions against independent truths
+- [x] 1b.1 Dead-time transition of a half-bridge with nonlinear C_oss, current driven: transition time = charge closed form, on pwl (restart off / on), trbdf2, esdirk43; dsed refuses by name.
+- [x] 1b.2 Resonant transition (L to a stiff node): ZVS energy condition, partial ZVS trough v_min, trajectory against the mpmath ODE, full ZVS at the diode clamp.
+- [x] 1b.3 Hard turn-on energy (ZVS lost) against the closed form: strict xfails cite the known open items (fixed engine, trbdf2); esdirk43 passes case A; F-S-1 parks its start failure.
 
 ## 2. LLC ZVS benchmark
 - [ ] 2.1 Create `llc_half_bridge_zvs.yaml`: half-bridge with resonant Lr-Cs-Lm tank tuned so V_DS reaches 0 before turn-on of either switch.

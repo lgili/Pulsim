@@ -919,7 +919,8 @@ def run_benchmarks(
                                         and sw_obs in series and v_obs in series and i_obs in series):
                                     sw_states = [bool(s > 0.5) for s in series[sw_obs]]
                                     r = compute_switching_loss_per_event(
-                                        sw_states, series[v_obs], series[i_obs], times
+                                        sw_states, series[v_obs], series[i_obs], times,
+                                        float(kpi_entry["window_s"]),
                                     )
                                     for k, v in r.items():
                                         kpis[f"kpi__{k}__{label}"] = v
