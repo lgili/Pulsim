@@ -58,6 +58,12 @@ OUT_JSON = ROOT / "exact_scoreboard.json"
 DELTA = 1e-3                     # the OLD measure's snap window (exact_old only), in netlist steps
 SELF_N = 5000                    # self-score: the smooth part's rows, strided to at most this many
 ONSET = 0.05                     # the error's onset: first sample off by 5 % of tol
+# rule (1): each engine's declared parasitic window, in netlist steps. The exact engine projects
+# every mode with Re(λ) < -100 / dt_max at an event (dsed/scheduler.hpp `project_`; the harness
+# passes dt, so dt_max = dt and the output rule's cut does not apply): a transient shorter than
+# dt / 100. The fixed engine's L-stable step collapses one shorter than its step h. trbdf2 records
+# no right limit (nothing to apply the rule to).
+PARASITIC = {"dsed": 1e-2, "pwl": 1.0}
 # solved directly (20,000 schedule events, ~20 s); `truth` writes no record for it (its dt/32 CSV is 3.2 M rows)
 EXTRA = ("circuits/thermal/long_run_drift_buck.yaml",)
 # Scored here only, never by the strict reference gate (reference_status.CONFIGS):
@@ -225,7 +231,9 @@ def event_record(sol, res, cols, t_end, names):
     (stored rows, the split's inner events, right limits one ulp after);
     the instant is the earlier row's time (the step after it ran in the new
     state), the left value that row, the right value the later row when it
-    is a right limit (one ulp later), else not recorded. Every other right
+    is a right limit (one ulp later), else not recorded; the 7th element is
+    True when the engine reports a projection there (a ``reinit_records``
+    entry within 4 ulp of the instant: rule (1)). Every other right
     limit is a ``right_rows`` entry. Returns per column the keyword
     arguments of ``exact_parts`` besides the rows."""
     import v1_reader
@@ -240,6 +248,10 @@ def event_record(sol, res, cols, t_end, names):
     sv = None if sv is None else np.asarray(sv, dtype=bool)
     available = sv is not None and sv.ndim == 2 and sv.shape[0] == tv.size and sv.shape[1] > 0
     is_right = np.r_[False, tv[1:] == np.nextafter(tv[:-1], np.inf)]
+    proj_t = np.array(sorted(float(r.t) for r in (getattr(res, "reinit_records", None) or ())))
+
+    def reported(te):
+        return bool(proj_t.size) and bool(np.any(np.abs(proj_t - te) <= 4 * np.spacing(abs(te))))
     eev, paired = [], set()
     if available:
         for i in np.flatnonzero(np.any(sv[1:] != sv[:-1], axis=1)):
@@ -273,19 +285,21 @@ def event_record(sol, res, cols, t_end, names):
         y = yv[c]
         out[c] = dict(
             truth_events=[(te, k, *tl_at[c][te]) for te, k in tev],
-            engine_events=[(te, k, float(y[i]), None if r is None else float(y[r]), *el_at[c][te])
-                           for te, k, i, r in eev],
+            engine_events=[(te, k, float(y[i]), None if r is None else float(y[r]), *el_at[c][te],
+                            reported(te)) for te, k, i, r in eev],
             right_rows=[(float(tv[r - 1]), float(y[r]), el_at[c][float(tv[r - 1])][1]) for r in rr],
             events_available=bool(available or not tev))
     return out
 
 
-def grade(sol, tr, cols, sp, dt, tol, self_score=True, names=None):
+def grade(sol, tr, cols, sp, dt, tol, self_score=True, names=None, parasitic=0.0):
     """The exact measure of one run: ``tr`` = ``differential_runner.traces(res, cols)``.
 
     ``exact`` = the cell's summary: per column ``metrics.exact_parts`` (smooth,
     instants, limits; the largest), the worst column; ``exact_part`` names the
-    part that set it. ``exact_old`` = the previous definition (one release)."""
+    part that set it. ``exact_old`` = the previous definition (one release).
+    ``parasitic``: the engine's declared parasitic window in seconds (rule (1),
+    ``PARASITIC``; 0 disables it); ``n_projected`` counts the events it applied to."""
     import mpmath as mp
     import v1_reader
     res = tr.result
@@ -299,7 +313,8 @@ def grade(sol, tr, cols, sp, dt, tol, self_score=True, names=None):
     per, dep, worst_pt = {}, None, 0.0
     for c in cols:
         y = np.asarray(v1_reader.observable(res, c), dtype=float)[keep]
-        p = metrics.exact_parts(t, y, cand[c], span=sp[c], h=dt, **ev[c])
+        p = metrics.exact_parts(t, y, cand[c], span=sp[c], h=dt, parasitic=parasitic, limits_tol=tol,
+                                truth_after=lambda te, s, c=c: _one_sided(sol, [c], te + s)[c][1], **ev[c])
         kept = p.pop("kept")             # the same rows for every column (events are per circuit)
         per[c] = p
         e = metrics.exact_dev(y, cand[c]) / sp[c]
@@ -329,6 +344,7 @@ def grade(sol, tr, cols, sp, dt, tol, self_score=True, names=None):
                limits_worst=dict(zip(("value", "col"), part_max("limits"))) | (
                    {"t": per[part_max("limits")[1]]["limits_worst_t"]} if part_max("limits")[1] else {}),
                n_matched=w["n_matched"], n_initial=w["n_initial"], smooth_rows=w["smooth_rows"],
+               n_projected=max(p.get("n_projected", 0) for p in per.values()),
                missing=w["missing"][:20], n_missing=len(w["missing"]),
                spurious=w["spurious"][:20], n_spurious=len(w["spurious"]),
                exact_old=old[max(old, key=old.get)], exact_old_col=max(old, key=old.get), exact_old_per_col=old,
@@ -385,7 +401,8 @@ def run_circuit(rel):
             dr.classify(cell, res, case, cols, ref, tols[eng], case.dt if eng == "pwl" else None)
         rs._annotate(cell, entry)
         if kind == "ran":
-            cell.update(grade(sol, dr.traces(res, cols), g, sp, case.dt, tols[eng]))
+            cell.update(grade(sol, dr.traces(res, cols), g, sp, case.dt, tols[eng],
+                              parasitic=PARASITIC.get(eng, 0.0) * case.dt))
         rec["cells"][cfg] = {k: cell[k] for k in cell if k not in ("circuit", "reference", "worst")}
     return rec
 

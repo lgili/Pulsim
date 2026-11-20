@@ -219,3 +219,66 @@ def test_the_row_one_step_after_an_event_is_graded():
                             engine_events=[(tau, "S+", 0.0, None, 0.0, 1.0)])
     assert r["smooth_rows"] == GRID.size - 2         # only the row at the event
     assert r["smooth"] == pytest.approx(np.sqrt(0.25 * H / 0.8), rel=1e-12)   # weight 0.1 of the 0.8 s kept
+
+
+# rule (1), the projected transient (diode_half_wave_rl_load's shape): the truth is
+# continuous at the event (1.0 on both sides) and decays to `settle` with time constant
+# TAU_F; the engine records `right` (the post-transient value) as its right limit.
+TAU_F = 1e-4
+WINDOW = 1e-2                                    # the engine's declared parasitic window
+
+
+def collapse_case(*, reported, settle=0.0, right=0.0, window=WINDOW, drift=0.0):
+    tau = 0.5
+
+    def after(s):
+        s = np.asarray(s, dtype=float)
+        return settle + (1.0 - settle) * np.exp(-s / TAU_F) + drift * s
+    t = GRID
+    truth = np.where(t <= tau, 1.0, after(np.maximum(t - tau, 0.0)))
+    y = np.where(t <= tau, 1.0, settle)
+    eng = [(tau, "D-", 1.0, right, 1.0, 1.0, reported)]
+    return metrics.exact_parts(
+        t, y, truth[:, None], span=1.0, h=H, truth_events=[(tau, "D-", 1.0, 1.0)], engine_events=eng,
+        truth_after=lambda te, s: after(s), parasitic=window, limits_tol=1e-3)
+
+
+def test_a_reported_projection_the_truth_reaches_is_priced_as_a_collapsed_transient():
+    r = collapse_case(reported=True)
+    assert r["n_projected"] == 1 and r["projected"] == [0.5]
+    assert r["limits"] <= 2 * metrics.PROJECTION_SETTLE        # what is left once the truth settled
+    # tau_eff: the settling time (20.7 TAU_F to 1e-9), on a 2x grid
+    lo, hi = TAU_F * np.log(1e9), 2 * TAU_F * np.log(1e9)
+    assert np.sqrt(lo / 1.0) <= r["instants"] <= np.sqrt(hi / 1.0)
+    assert r["part"] == "instants" and r["smooth"] < 1e-12
+
+
+def test_the_part_of_a_collapsed_right_value_that_is_wrong_stays_in_limits():
+    r = collapse_case(reported=True, right=2e-4)               # the settled truth is 0.0
+    assert r["n_projected"] == 1
+    assert r["limits"] == pytest.approx(2e-4, rel=1e-3)
+
+
+def test_without_a_projection_record_the_right_value_is_a_wrong_limit():
+    r = collapse_case(reported=False)
+    assert r["n_projected"] == 0
+    assert r["limits"] == pytest.approx(1.0, rel=1e-12) and r["part"] == "limits"
+
+
+@pytest.mark.parametrize("case", [dict(settle=0.5),                # settles, but at 0.5, not 0.0
+                                  dict(window=10 * TAU_F),         # reaches 0.0 only after the window
+                                  dict(drift=1.0)])                # never settles inside the window
+def test_a_truth_that_does_not_settle_at_the_recorded_value_leaves_the_limit_wrong(case):
+    r = collapse_case(reported=True, **case)
+    assert r["n_projected"] == 0 and r["limits"] == pytest.approx(1.0, rel=1e-12)
+
+
+def test_an_impulse_the_truth_makes_too_is_not_a_collapse():
+    """The fixed engine's impulse records: the truth's own right limit is the
+    recorded value (it jumps too); nothing is collapsed, nothing moves."""
+    cand, tev = step_truth(0.5)
+    y = np.where(GRID <= 0.5, 0.0, 1.0)
+    r = metrics.exact_parts(GRID, y, cand(GRID), span=1.0, h=H, truth_events=tev,
+                            engine_events=[(0.5, "S+", 0.0, 1.0, 0.0, 1.0, True)],
+                            truth_after=lambda te, s: np.ones(np.size(s)), parasitic=WINDOW)
+    assert r["n_projected"] == 0 and r["summary"] == 0.0
