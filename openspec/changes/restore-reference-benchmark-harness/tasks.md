@@ -12,7 +12,7 @@
 
 ## 3. Differential runner
 - [x] 3.1 `differential_runner.py`: outcomes, reference selection, `results.json`
-- [ ] 3.2 Run it over the triaged suite; record each `disagree` and `error` cell as a triage entry with an issue reference, not as a tolerance — OPEN: 76 disagree/error cells over 60 circuits recorded as `known:` in v2_triage.yaml; no issue numbers filed (DECISIONS 10)
+- [x] 3.2 Run it over the triaged suite; record each `disagree` and `error` cell as a triage entry with a stable in-repo cause id (no GitHub issue: no outward-facing action from this change), not as a tolerance — 28 `known:` entries carry `cause: [TC-…]`, each id a `- **TC-…**` entry of KNOWN_LIMITATIONS.md "Triage causes" (five: EDGE-GRID, CLOSED-LOOP, PWL-ORDER, GATE-NODE, OPEN); `test_benchmark_harness.py::test_every_known_cell_names_a_cause_that_resolves` passes (DECISIONS 16)
 - [x] 3.3 Test on two fixed cells: the junction-capacitor RC is `refused` on `dsed` (or, before `add-engine-conformance-matrix`, `disagree`: 6.32 V against 1.02 V); the RC charge is `agree` on three engines — dsed today runs it and reads 6.32 V against 1.02 V -> not `agree`
 
 ## 4. Counters and performance gate

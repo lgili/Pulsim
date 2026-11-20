@@ -215,3 +215,17 @@ Implementation choices not covered by the design:
       controller (PI / PWM block) exists in the YAML schema; the `chain:`
       wiring (`python/pulsim/yaml_chain.py`) covers machines and observers,
       not gate drive.
+
+16. **Task 3.2 reworded: cause ids, not issues.** No GitHub issue is filed
+    from this change (outward-facing). Each of the 28 `known:` entries of
+    `v2_triage.yaml` carries `cause: [id, ...]`; the ids are the bullets of
+    KNOWN_LIMITATIONS.md "Triage causes": TC-EDGE-GRID (12 circuits),
+    TC-CLOSED-LOOP (4), TC-PWL-ORDER (8), TC-GATE-NODE (ll08, with
+    TC-PWL-ORDER), TC-OPEN (4: transformer_leakage, high_q_rlc_ringdown,
+    ll11, ll13). The assignment follows the evidence already in the manifest
+    comments and REFERENCE_STATUS.md: TC-PWL-ORDER where the `pwl` cell
+    disagrees and the `pwl+restart` cell agrees or is much smaller;
+    TC-EDGE-GRID where the edge diagnostic is within tolerance with timing
+    ≤ 2 steps (the "late-gate-edge class"). TC-OPEN is a stated
+    "not isolated", not a cause. The test fails on a known cell without a
+    cause, an id that does not resolve, and an orphan id.

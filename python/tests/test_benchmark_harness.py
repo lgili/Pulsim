@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import subprocess
 import sys
 import warnings
@@ -220,6 +221,25 @@ def test_triage_lists_every_circuit_on_disk():
     for rel, e in TRIAGE.items():
         if e["status"] != "runs":
             assert e.get("reason"), rel
+
+
+def test_every_known_cell_names_a_cause_that_resolves():
+    """Task 3.2: a frozen disagree / error cell carries `cause: [id, ...]`; each id is a
+    `- **id**` entry of KNOWN_LIMITATIONS.md's "Triage causes" (no outward issue tracker)."""
+    kl = (BENCH.parent / "KNOWN_LIMITATIONS.md").read_text(encoding="utf-8")
+    sec = kl[kl.index("#### Triage causes"):]
+    sec = sec[:sec.index("\n###", 1)]
+    defined = set(re.findall(r"^- \*\*(TC-[A-Z-]+)\*\*", sec, flags=re.M))
+    assert len(defined) >= 5
+    used = set()
+    for rel, e in TRIAGE.items():
+        if "known" in e or "known_err" in e:
+            assert e.get("cause"), f"{rel}: a known cell without a cause"
+            assert set(e["cause"]) <= defined, (rel, set(e["cause"]) - defined)
+            used |= set(e["cause"])
+        else:
+            assert "cause" not in e, rel
+    assert used == defined, defined - used          # no orphan cause
 
 
 @pytest.mark.parametrize("rel", sorted(TRIAGE))
