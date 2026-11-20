@@ -255,14 +255,14 @@ inline void solve_with_newton_in_place(
     // 2·kRoWindow ||dx||.
     bool ro_set = false;
     bool ro_scaled = false;
-    // ||dx|| of the last 2·kRoWindow iterations, newest first, and how
-    // many were recorded.
+    // ||dx|| of the last 2·kRoWindow iterations and how many were recorded.
     constexpr int kRoWindow = 16;
     constexpr int kRoMinSplit = 8;   // shortest window compared (DECISIONS 11)
-    Real ro_dx[2 * kRoWindow];
+    // A ring (newest at ro_n - 1): one store per iteration, no shift and no
+    // fill per call; unrolled into newest-first order only when the budget
+    // is exhausted (the fixed engine paid 1.9 % per step for the shift).
+    Real ro_ring[2 * kRoWindow];
     int ro_n = 0;
-    std::fill(std::begin(ro_dx), std::end(ro_dx),
-              std::numeric_limits<Real>::infinity());
     if (static_cast<Size>(x.size()) != n) {
         x = Vector::Zero(static_cast<Index>(n));
     }
@@ -652,8 +652,7 @@ inline void solve_with_newton_in_place(
         worst_res_row = f_combined.size() == 0
             ? kInvalidIndex : static_cast<Index>(res_at);
         if (ro_on) {
-            for (int k = 2 * kRoWindow - 1; k > 0; --k) ro_dx[k] = ro_dx[k - 1];
-            ro_dx[0] = last_dx_norm;
+            ro_ring[ro_n & (2 * kRoWindow - 1)] = last_dx_norm;
             ++ro_n;
         }
         if (last_dx_norm < tol_dx && last_res_norm < tol_res) {
@@ -740,6 +739,11 @@ inline void solve_with_newton_in_place(
         // the convergence), and a single low ||dx|| inside a cycle likewise
         // (ll13_active_clamp_forward, DECISIONS 11 amendment). Every k >= 8
         // still declines a monotone rate r < 4^(-1/8) = 0.84.
+        Real ro_dx[2 * kRoWindow];   // newest first
+        for (int k = 0; k < 2 * kRoWindow; ++k) {
+            ro_dx[k] = k < ro_n ? ro_ring[(ro_n - 1 - k) & (2 * kRoWindow - 1)]
+                                : std::numeric_limits<Real>::infinity();
+        }
         const int kw = std::min(kRoWindow, ro_n / 2);
         Real b_new = std::numeric_limits<Real>::infinity(), b_old = b_new;
         Real m_new = 0, m_old = 0;
