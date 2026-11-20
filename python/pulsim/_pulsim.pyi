@@ -2244,6 +2244,11 @@ class SimulationResult:
         Steps taken as SDIRK(2,2) restart steps (discontinuity_restart). 0 with the rule off.
         """
     @property
+    def n_right_limit_fallbacks(self) -> int:
+        """
+        Restart rule: event right limits in which an unknown failed the epsilon-limit smoothness test at every epsilon and took the fallback (the impulse rule's x0+, else the left value). 0 with the rule off.
+        """
+    @property
     def n_rk45_steps(self):
         """
         Exact engine only: res.stats.n_rk45_steps.

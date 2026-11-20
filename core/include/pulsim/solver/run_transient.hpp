@@ -881,8 +881,12 @@ inline SimulationResult run_transient(
     // the right-limit solve's scratch.
     bool ip_jump = false, ip_struct = false, rl_want = false;
     std::vector<Real> ip_hist_p, rl_hist, rl_hcur;
-    Vector rl_x1, rl_b0, rl_b, rl_h, rl_xa, rl_xb, rl_xc;
-    std::vector<bool> rl_bits, rl_last, rl_lsb;
+    Vector rl_x1, rl_b0, rl_b, rl_h, rl_xa, rl_xb, rl_xc, rl_xd, rl_left, rl_r4;
+    std::vector<bool> rl_bits, rl_last, rl_lsb, rl_done;
+    // a LOCATED diode crossing at rl_loc_t: the diodes that cross there
+    // (split_step); their right limit is solved with them ON (below)
+    Real rl_loc_t = std::numeric_limits<Real>::quiet_NaN();
+    std::vector<bool> rl_loc_on;
     pwl::StatefulHistories::Snapshot rl_hs;
     // The OFF state's leakage conductance in total (conductance-form
     // switches and diodes): the restart rule's current resolution
@@ -2283,7 +2287,7 @@ inline SimulationResult run_transient(
         // record carries the collapse. Called with stage 1 solved (x, its
         // b_extra, its bits); everything it touches is put back. Out of line,
         // once per run, as consistent_start.
-        auto event_right_limit = [&](auto& rei, Real t_from, Real h_s, Vector& out,
+        auto event_right_limit = [&](auto& rei, Real t_from, Real h_s, Real loc, Vector& out,
                                      topology::SwitchStateMask& m_out)
                                      PULSIM_STEP_DRIVER -> bool {
             rl_x1 = x;
@@ -2332,7 +2336,20 @@ inline SimulationResult run_transient(
             // fourth-order Richardson leaves (5e-4·γh/τ)^4 of a mode τ.
             // A conductance-form impulse (a ps mode the record reports)
             // needs ε below its τ: the model's micro right limit.
-            const Real eps = (ip_jump && !ip_struct ? Real{1e-9} : Real{5e-4}) * h_s;
+            const Real eps0 = (ip_jump && !ip_struct ? Real{1e-9} : Real{5e-4}) * h_s;
+            // A LOCATED crossing: the state is continuous and the crossing
+            // variable is at its crossing value (zero current at a
+            // turn-off); the laws of both modes meet there. The solved
+            // residual (the locator's tolerance) is read in the mode where
+            // the crossing diodes are ON — through R_on, not 1/g_off — with
+            // no re-decision (it would turn them off again).
+            const bool located = t_from == rl_loc_t && has_diodes &&
+                                 rl_loc_on.size() == rl_bits.size();
+            if (located) {
+                rl_last = rl_bits;
+                for (Size j = 0; j < rl_last.size(); ++j) rl_last[j] = rl_last[j] || rl_loc_on[j];
+                diodes.restore_on_bits(rl_last);
+            }
             bool ok = true;
             const Size rf_s = restart_factorizations;
             struct AuxEvents {   // the run's event factors stay put, on any exit
@@ -2344,15 +2361,21 @@ inline SimulationResult run_transient(
             // Single solves (no mode machinery: its caches and counters are
             // the run's), re-decided by the settle's rule at t_e+ (a located
             // turn-off's residual current: no spike through g_off)
+            // D6: the sources on the post side of the event's last edge,
+            // t_from + loc (a split cluster's ev_s). Without the split
+            // loc = 0: a source edge inside the step is not landed, and the
+            // row at t_prev holds the t_prev+ values (the truth's there). A
+            // located crossing has no edge of its own.
+            const Real t_src = located ? t_from : t_from + loc;
             auto solve_eps = [&](Real e, bool decide) {
                 const Real te = t_from + e;
                 history.compute_b_extra_backward_euler(e, rl_h);
                 b_extra = rl_b + rl_h;
-                // the post side of an edge at t_from (lb = 0: te is within the
-                // edge test's ulps of t_from on a long run)
-                add_source_rows(b_extra, te, te, Real{0});
+                // the post side of an edge at t_src (lb = 0: within the
+                // edge test's ulps of t_src on a long run)
+                add_source_rows(b_extra, t_src + e, t_src + e, Real{0});
                 if (has_iwave) {
-                    sources::compute_current_waveform_b_extra(pool, graph, te, be_iwave,
+                    sources::compute_current_waveform_b_extra(pool, graph, t_src + e, be_iwave,
                                                               Real{0});
                     b_extra += be_iwave;
                 }
@@ -2365,27 +2388,79 @@ inline SimulationResult run_transient(
                     if (!decide || !has_diodes || !events::redecide(diodes, x)) return;
                 }
             };
-            try {
-                solve_eps(eps, true);
-                rl_xa = x;
-                m_out = stamped_mask;
-                solve_eps(Real{2} * eps, false);
-                rl_xb = x;
-                solve_eps(Real{4} * eps, false);
-                rl_xc = x;
-                solve_eps(Real{8} * eps, false);
-            } catch (const std::runtime_error&) {
-                ok = false;   // no right limit recorded; the run goes on
-            } catch (const std::invalid_argument&) {
-                ok = false;   // a refusal (UnsupportedError) of the ε mode
+            // Richardson is valid where x(ε) is smooth on (0, 8ε]: every mode
+            // of the ε mode has ε ≪ τ (its motion is a polynomial in ε). A
+            // mode with ε ≫ τ (relaxed) adds c·τ/ε, and so does an ideal
+            // constraint the moved states x0 + J meet only to the probe's
+            // tolerance (D4: C·δv/ε through the switch) and rounding through
+            // L/ε, C/ε (ll10's floating common mode); a τ inside [ε, 16ε] is
+            // neither. Five solves (ε … 16ε) test it per unknown: the
+            // fourth-order combination P on ε…8ε against the same on
+            // 2ε…16ε, else the combination Q that also annihilates a 1/ε
+            // term, (−8x1 + 22x2 − 13x4 + 2x8)/3, against its shifted twin;
+            // agreement within 1e-7 of the unknown's size. An unknown that
+            // agrees in neither takes the next ε of the ladder (1e-3·ε0
+            // toward ε ≪ τ, then 1e2·ε0), and after the ladder the fallback:
+            // the impulse rule's x0+ after a probed jump, else the left
+            // value; counted (n_right_limit_fallbacks).
+            constexpr Real kLadder[] = {Real{1}, Real{1e-3}, Real{1e2}};
+            rl_done.assign(static_cast<std::size_t>(rl_x1.size()), false);
+            Size n_done = 0;
+            for (Size rung = 0; rung < 3 && n_done < rl_done.size(); ++rung) {
+                const Real eps = kLadder[rung] * eps0;
+                try {
+                    solve_eps(eps, !located);
+                    rl_xa = x;
+                    if (rung == 0) m_out = located ? stamped_s : stamped_mask;
+                    solve_eps(Real{2} * eps, false);
+                    rl_xb = x;
+                    solve_eps(Real{4} * eps, false);
+                    rl_xc = x;
+                    solve_eps(Real{8} * eps, false);
+                    rl_xd = x;
+                    solve_eps(Real{16} * eps, false);
+                } catch (const std::runtime_error&) {
+                    if (rung == 0) ok = false;   // no right limit recorded; the run goes on
+                    break;
+                } catch (const std::invalid_argument&) {
+                    if (rung == 0) ok = false;   // a refusal (UnsupportedError) of the ε mode
+                    break;
+                }
+                // P: four solves in one mode, Richardson to O(ε^4)
+                rl_r4 = (Real{64} * rl_xa - Real{56} * rl_xb + Real{14} * rl_xc - rl_xd) / Real{21};
+                if (rung == 0) out = rl_r4;
+                const Real floor = Real{1e-12} * rl_r4.cwiseAbs().maxCoeff();
+                for (Index i = 0; i < rl_r4.size(); ++i) {
+                    if (rl_done[i]) continue;
+                    const Real s = std::max(std::abs(rl_r4[i]), std::abs(rl_x1[i]));
+                    const Real tol = Real{1e-7} * s + floor;
+                    const Real p2 = (Real{64} * rl_xb[i] - Real{56} * rl_xc[i] +
+                                     Real{14} * rl_xd[i] - x[i]) / Real{21};
+                    const Real q1 = (Real{-8} * rl_xa[i] + Real{22} * rl_xb[i] -
+                                     Real{13} * rl_xc[i] + Real{2} * rl_xd[i]) / Real{3};
+                    const Real q2 = (Real{-8} * rl_xb[i] + Real{22} * rl_xc[i] -
+                                     Real{13} * rl_xd[i] + Real{2} * x[i]) / Real{3};
+                    if (std::abs(rl_r4[i] - p2) <= tol) {   // NaN fails
+                        out[i] = rl_r4[i];
+                    } else if (std::abs(q1 - q2) <= tol) {
+                        out[i] = q1;
+                    } else {
+                        continue;
+                    }
+                    rl_done[i] = true;
+                    ++n_done;
+                }
             }
             aux_events.reset();
             restart_factorizations = rf_s;
-            if (ok) {   // four solves in one mode: Richardson to O(ε^4)
-                out = (Real{64} * rl_xa - Real{56} * rl_xb + Real{14} * rl_xc - x) /
-                      Real{21};
-                ok = out.allFinite();
+            if (ok && n_done < rl_done.size()) {
+                const Vector& fb = ip_jump ? event_rl_x : rl_left;
+                for (Index i = 0; i < out.size(); ++i) {
+                    if (!rl_done[i]) out[i] = i < fb.size() ? fb[i] : rl_x1[i];
+                }
+                ++result.n_right_limit_fallbacks;
             }
+            if (ok) ok = out.allFinite();
             history.restore(rl_hcur);
             hs.restore(rl_hs);
             x = rl_x1;
@@ -3014,7 +3089,8 @@ inline SimulationResult run_transient(
                          : b_jump_after(t_prev - left_by) < t - left_by)))) {
                 restart_left = kRestartSteps;
                 rs_trig_t = t_prev;
-                rs_trig_ev = stamped_known && t_prev != opts.t_start;   // t = 0: a probed jump only
+                // t = 0: a probed jump only; a resume seam is an event (D7)
+                rs_trig_ev = stamped_known && (t_prev != opts.t_start || resume_snap != nullptr);
                 // without the split a built-in source / b_extra jump inside
                 // the step is solved from t_prev: δt_loc is its offset
                 // (a stage reads it only up to t_prev + γh)
@@ -3067,6 +3143,7 @@ inline SimulationResult run_transient(
             auto run_restart = [&](Real t_from, Real h, Real loc) {
                 const bool rl_ev = rl_want;
                 rl_want = false;
+                if (rl_ev) rl_left = x;   // the event's left value (the right limit's fallback)
                 const Real h_s = kGamma * h;
                 const Real dt_eq = Real{2} * h_s;
                 be_commit_h = h_s;
@@ -3096,7 +3173,8 @@ inline SimulationResult run_transient(
                     // F-SB-1: the right limit, only where something happens
                     // (the caller's event, a probed jump)
                     L->rl_ok = (rl_ev || ip_jump) &&
-                               event_right_limit(run_event_iteration, t_from, h_s, L->rl_x,
+                               event_right_limit(run_event_iteration, t_from, h_s,
+                                                 rl_ev && split ? loc : Real{0}, L->rl_x,
                                                  L->rl_m);
                 }
                 if (has_diodes) {
@@ -3474,6 +3552,22 @@ inline SimulationResult run_transient(
                                         .new_state = post_event_bits[j]});
                                 }
                             }
+                            // F-SB-1: a located crossing, for its right limit
+                            // (not one that lands on a scheduled event: !last).
+                            // shortcut: only a diode without a conduction drop
+                            // (V_f = 0: the ON and OFF laws meet at i = 0) is
+                            // read ON; a V_f > 0 turn-off keeps the OFF reading
+                            // (its v_D jumps by V_f: the ON reading would need
+                            // the drop removed from the stamp)
+                            rl_loc_on.resize(ents.size());
+                            for (Size j = 0; j < ents.size(); ++j) {
+                                rl_loc_on[j] = post_event_bits[j] != diodes_snap[j] &&
+                                               ents[j].V_f == Real{0};
+                            }
+                            rl_loc_t = t_d - a < snap ? a
+                                       : b - t_d >= snap ? t_d
+                                       : last ? b
+                                              : std::numeric_limits<Real>::quiet_NaN();
                             if (t_d - a < snap) {
                                 split_events.clear();
                                 restart = true;

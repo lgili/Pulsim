@@ -159,3 +159,98 @@ def test_ll09_right_limits_hold_the_continuous_states(monkeypatch):
     il, vm = np.asarray(v.i("Lload")), np.asarray(v.v("mid"))
     assert np.max(np.abs(il[k + 1] - il[k])) <= 1e-12 * np.max(np.abs(il))
     assert np.max(np.abs(vm[k + 1] - vm[k])) <= 1e-12 * np.max(np.abs(vm))
+
+
+def _half_wave_rl():
+    # diode_half_wave_rl_load: 10 V 50 Hz -> D (g_on 200, g_off 1 uS) -> 10 ohm
+    # -> 1 mH; D turns off when i_L decays to zero near 10.1 ms
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("V", "in", "gnd", 0.0, 10.0, 50.0)
+    b.add_diode("D1", "in", "out", 200.0, 1e-6)
+    b.add_resistor("R1", "out", "nl", 10.0)
+    b.add_inductor("L1", "nl", "gnd", 1e-3, 0.0)
+    return b
+
+
+@pytest.mark.parametrize("dt", [20e-6, 30e-6])   # the crossing lands on b / inside the step
+def test_a_located_turn_off_is_continuous_at_its_right_limit(dt):
+    """At a LOCATED crossing the state is continuous and the crossing
+    variable is at its crossing value: i_D = 0 at the turn-off, where the ON
+    and OFF laws meet (v_D = 0 for this diode). The located current is zero
+    only to the locator's tolerance (here ~26 uA); read through the OFF
+    mode's 1/g_off it was a 25.6 V spike (the scoreboard cell 9.6e-4 ->
+    5.5e-2). The row is solved with the crossing diode ON: V(out) = v_in."""
+    r = _quiet(p.simulate, _half_wave_rl(), t_end=12e-3, dt=dt,
+               enable_substep_state_correction=True, **RULE)
+    v, t, k = _limits(r)
+    k = k[np.abs(t[k] - 10.1e-3) < 2 * dt]
+    assert len(k) == 1
+    (j,) = k
+    vo, il = np.asarray(v.v("out")), np.asarray(v.i("L1"))
+    v_in = 10.0 * np.sin(2 * np.pi * 50.0 * t[j])
+    span = 20.0
+    assert abs(vo[j + 1] - vo[j]) <= 1e-6 * span
+    assert abs(vo[j + 1] - v_in) <= 1e-6 * span
+    assert il[j + 1] == pytest.approx(il[j], rel=1e-9, abs=1e-15)   # the state, x0
+    assert r.n_right_limit_fallbacks == 0
+
+
+def _cap_share(engine):
+    # C1 1 uF at 10 V || R1 1 kohm  -- ideal S (closes at T_E) --  C2 1 uF at 0 V || R2 500 ohm
+    b = p.CircuitBuilder()
+    b.add_capacitor("C1", "a", "gnd", 1e-6, 10.0)
+    b.add_resistor("R1", "a", "gnd", 1e3)
+    b.add_ideal_switch("S", "a", "c", 0.0, 0.0)
+    b.add_capacitor("C2", "c", "gnd", 1e-6, 0.0)
+    b.add_resistor("R2", "c", "gnd", 500.0)
+    kw = RULE if engine == "pwl" else dict(engine="dsed")
+    return _quiet(p.simulate, b, t_end=6e-6, dt=DT, switch_fn=_gate(b, "S", False), **kw)
+
+
+def test_a_constraint_current_after_a_charge_sharing_jump_is_the_regular_one():
+    """D4: the ideal switch ties two capacitors, both jump to the shared
+    voltage v+; the moved states meet the constraint only to the probe's
+    tolerance, and an ε solve reads that mismatch as C·δv/ε through the
+    switch (68 A here). The right limit is the regular current after the
+    impulse: i_S = C2·dv/dt + v+/R2 with dv/dt = −v+(1/R1 + 1/R2)/(C1 + C2)
+    (2.5 mA at v+ = 5 V); the exact engine gives the same."""
+    r = _cap_share("pwl")
+    v, t, k = _limits(r)
+    (j,) = k
+    vp = np.asarray(v.v("a"))[j + 1]
+    i_s = np.asarray(v.i("S"))[j + 1]
+    i_truth = 1e-6 * (-vp * (1e-3 + 2e-3) / 2e-6) + vp / 500.0
+    assert vp == pytest.approx(np.asarray(v.v("c"))[j + 1], rel=1e-9)
+    assert i_s == pytest.approx(i_truth, rel=1e-6)
+    d = _cap_share("dsed")
+    vd, _, kd = _limits(d)
+    assert np.asarray(vd.i("S"))[kd[0] + 1] == pytest.approx(
+        np.asarray(vd.v("a"))[kd[0] + 1] * i_truth / vp, rel=1e-6)
+
+
+def test_a_gate_edge_on_a_resume_seam_records_its_right_limit():
+    """D7: a gate edge exactly at a resume's t_start is an event of the
+    resumed run (the snapshot carries the pre-edge mask): its right-limit row
+    is the uninterrupted run's."""
+    def build():
+        b = p.CircuitBuilder()
+        b.add_voltage_source("V", "vin", "gnd", 10.0)
+        b.add_ideal_switch("S", "vin", "a", 0.0, 0.0)
+        b.add_resistor("R", "a", "c", 1.0)
+        b.add_capacitor("C", "c", "gnd", 1e-6, 0.0)
+        return b
+    def gate(t):
+        m = p.SwitchStateMask(1)
+        m.set(0, t >= T_E)
+        return m
+    full = _quiet(p.simulate, build(), t_end=6e-6, dt=DT, switch_fn=gate, **RULE)
+    vf, tf, kf = _limits(full)
+    (t_e,) = tf[kf]   # the sampled edge: the seam goes there
+    first = _quiet(p.simulate, build(), t_end=t_e, dt=DT, switch_fn=gate, **RULE)
+    rest = _quiet(p.simulate, build(), t_end=6e-6, dt=DT, switch_fn=gate,
+                  resume_from=first.final_snapshot, **RULE)
+    vr, tr, kr = _limits(rest)
+    assert tr[kr] == pytest.approx([t_e], rel=1e-12)
+    for col in ("a", "c"):
+        assert np.asarray(vr.v(col))[kr[0] + 1] == pytest.approx(
+            np.asarray(vf.v(col))[kf[0] + 1], rel=1e-9, abs=1e-12)
