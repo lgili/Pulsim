@@ -323,7 +323,7 @@ struct NonlinearCapacitor {
     /// Gauss–Legendre (5 points × 32 panels) for the others.
     [[nodiscard]] static Real jump_energy(const Params& p, Real a, Real b) noexcept {
         const Real qa = charge(p, a);
-        if (p.law == ChargeLawKind::Junction && p.m != Real{2} &&
+        if (p.law == ChargeLawKind::Junction &&   // (m < 1: validate)
             u_of(p, a) == a / p.V0 && u_of(p, b) == b / p.V0) {
             const Real e = Real{1} - p.m, e2 = Real{2} - p.m;
             auto F = [&](Real v) {   // ∫Q dv
@@ -332,6 +332,8 @@ struct NonlinearCapacitor {
             };
             return F(b) - F(a) - qa * (b - a);
         }
+        // shortcut: fixed quadrature, no error estimate (smooth laws: ~1e-12
+        // relative; a table's kinks less); upgrade to adaptive if a table needs it.
         constexpr Real xg[5] = {0.0, -0.5384693101056831, 0.5384693101056831,
                                 -0.9061798459386640, 0.9061798459386640};
         constexpr Real wg[5] = {0.5688888888888889, 0.4786286704993665,

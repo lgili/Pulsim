@@ -107,3 +107,30 @@ def test_no_record_without_the_switch():
     """The source opening at T_O (no current through it) is no jump: no record."""
     r = _run(engine="pwl", discontinuity_restart=True)
     assert [x.t for x in r.reinit_records if x.t < T_C - DT] == []
+
+
+@pytest.mark.parametrize("i2", [0.224, 0.230, 0.236, 0.244])
+def test_a_constant_current_through_a_steep_law_is_no_jump(i2):
+    """Reviewer's case: -i2 into a tanh-law capacitor (C 10 nF -> 0.1 nF across the knee),
+    an unrelated switch edge at 150 ns. q(t) is a straight line (no jump in charge); in
+    voltage the stages curve 100x and a voltage test read a jump (the base refused it by
+    name). The test runs in charge: no record."""
+    b = p.CircuitBuilder()
+    b.add_pwl_current_source("I", "c", "gnd", [0, 1e-9, 1e-7, 1e-7 + 1e-9, 1.0],
+                             [0, 0.2, 0.2, -i2, -i2])
+    b.add_resistor("Rbig", "c", "gnd", 1e9)
+    b.add_nonlinear_capacitor("C", "c", "gnd", p.ChargeLaw.tanh(10e-9, 0.1e-9, 1.0))
+    b.add_voltage_source("V", "s", "gnd", 1.0)
+    b.add_switch("S", "s", "r", 1e3, 1e-12)
+    b.add_resistor("R", "r", "gnd", 1e3)
+    n, k = b.graph.num_switches, b.switch_index_of("S")
+
+    def fn(t):
+        m = p.SwitchStateMask(n)
+        m.set(k, t >= 150e-9 - 1e-15)
+        return m
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(b, t_end=200e-9, dt=1e-8, switch_fn=fn, engine="pwl",
+                       discontinuity_restart=True)
+    assert list(r.reinit_records) == []

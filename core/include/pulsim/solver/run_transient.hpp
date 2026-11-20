@@ -2175,13 +2175,9 @@ inline SimulationResult run_transient(
                     models::TwoWindingTransformer::mutual_inductance(tc.params);
                 e_jump += m * ip_d[2 * tc.p_entry_idx] * ip_d[2 * tc.s_entry_idx];
             }
-            // A saturable core's current and a nonlinear capacitor's voltage
-            // are states too, under the same rule (ẋ(0−) from the law:
-            // V_L / L(i), i / C(v)).
-            auto law_jumps = [&](Real s0, Real r0, auto&& st, bool amp) {
-                const Real s1 = st(ip_x1);
-                const Real tol = Real{1e-8} * (Real{1} + std::abs(s0) + std::abs(s1)) +
-                                 (amp ? tol_i : Real{0}) + dt_loc * std::abs(r0);
+            // A saturable core's current and a nonlinear capacitor's charge
+            // are states too, under the same rule (ẋ(0−) from the law).
+            auto law_jumps = [&](Real s0, Real s1, auto&& st, Real tol) {
                 return solved && jumps(s0, s1, st(ip_x2m), st(x), tol) &&
                        jumps(s0, s1, st(ip_x2), st(ip_x3f), tol);
             };
@@ -2201,18 +2197,25 @@ inline SimulationResult run_transient(
             for (const auto& e : hs.get<pwl::SaturableInductorHistory>().entries()) {
                 const Real l0 = models::SaturableInductor::inductance(e.i_L_old, e.params);
                 auto st = [&](const Vector& y) { return y[e.branch_var_id]; };
-                if (law_jumps(e.i_L_old, l0 > Real{0} ? e.V_L_old / l0 : Real{0}, st, true)) {
+                const Real s1 = st(ip_x1);
+                const Real tol = Real{1e-8} * (Real{1} + std::abs(e.i_L_old) + std::abs(s1)) +
+                                 tol_i + dt_loc * std::abs(l0 > Real{0} ? e.V_L_old / l0 : Real{0});
+                if (law_jumps(e.i_L_old, s1, st, tol)) {
                     refuse_jump(e.branch_id, Real{2} * st(ip_x1) - st(ip_x2m) - e.i_L_old,
                                 "saturable_inductor", "A",
                                 "the consistent restart carries a jump on capacitors "
                                 "(linear or nonlinear) and linear inductors only");
                 }
             }
-            // A nonlinear capacitor (F-S-6): detected on its voltage as any
-            // state, jumped in CHARGE, the quantity the event conserves. The
+            // A nonlinear capacitor (F-S-6): tested and jumped in CHARGE, the
+            // quantity the event conserves (in voltage a smooth constant-current
+            // charge through a law whose C changes 100x reads as a jump). The
             // stages are charge-form solves of the law (each conserves the
-            // charge of a capacitor cut-set exactly, so does d_q); the whole
-            // jump J_q = d_q/(1 − a)² as for a linear state, x0+ =
+            // charge of a capacitor cut-set exactly, so does d_q); the noise
+            // floor is the voltage one times C(v1), the allowance δt_loc·|i(0−)|.
+            // The whole jump J_q = d_q/(1 − a)² as for a linear state (shortcut,
+            // as there: a per state; two modes of different a in one cut-set
+            // do not conserve its charge — a per connected group would), x0+ =
             // Q⁻¹(q0 + J_q), and its energy from the law (jump_energy: ∫(Q −
             // Q(v0)) dv), never ½·C·ΔV² with a frozen C. ip_nc per device:
             // (v0+, q0+, jumped).
@@ -2225,14 +2228,15 @@ inline SimulationResult run_transient(
                     return stamping::read_node_voltage(y, e.from) -
                            stamping::read_node_voltage(y, e.to);
                 };
-                const Real c0 = models::NonlinearCapacitor::capacitance(e.params, e.v_prev);
-                if (!law_jumps(e.v_prev, c0 > Real{0} ? e.i_prev / c0 : Real{0}, v, false)) {
-                    continue;
-                }
                 auto q = [&](const Vector& y) {
                     return models::NonlinearCapacitor::charge(e.params, v(y));
                 };
-                const Real q1 = q(ip_x1), q2 = q(ip_x2m);
+                const Real v1 = v(ip_x1), q1 = q(ip_x1);
+                const Real tol = models::NonlinearCapacitor::capacitance(e.params, v1) * Real{1e-8} *
+                                     (Real{1} + std::abs(e.v_prev) + std::abs(v1)) +
+                                 dt_loc * std::abs(e.i_prev);
+                if (!law_jumps(e.q_prev, q1, q, tol)) continue;
+                const Real q2 = q(ip_x2m);
                 const Real dq = Real{2} * q1 - q2 - e.q_prev;
                 const Real a = dq != Real{0}
                     ? std::clamp((Real{2} * q2 - q1 - q(x)) / dq, Real{0},
