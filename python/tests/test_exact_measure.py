@@ -228,28 +228,29 @@ TAU_F = 1e-4
 WINDOW = 1e-2                                    # the engine's declared parasitic window
 
 
-def collapse_case(*, reported, settle=0.0, right=0.0, window=WINDOW, drift=0.0):
+def collapse_case(*, reported, settle=0.0, right=0.0, window=WINDOW, drift=0.0, shape=None, events=()):
     tau = 0.5
 
     def after(s):
         s = np.asarray(s, dtype=float)
+        if shape is not None:
+            return shape(s)
         return settle + (1.0 - settle) * np.exp(-s / TAU_F) + drift * s
     t = GRID
     truth = np.where(t <= tau, 1.0, after(np.maximum(t - tau, 0.0)))
     y = np.where(t <= tau, 1.0, settle)
     eng = [(tau, "D-", 1.0, right, 1.0, 1.0, reported)]
     return metrics.exact_parts(
-        t, y, truth[:, None], span=1.0, h=H, truth_events=[(tau, "D-", 1.0, 1.0)], engine_events=eng,
+        t, y, truth[:, None], span=1.0, h=H, truth_events=[(tau, "D-", 1.0, 1.0), *events], engine_events=eng,
         truth_after=lambda te, s: after(s), parasitic=window, limits_tol=1e-3)
 
 
 def test_a_reported_projection_the_truth_reaches_is_priced_as_a_collapsed_transient():
     r = collapse_case(reported=True)
     assert r["n_projected"] == 1 and r["projected"] == [0.5]
-    assert r["limits"] <= 2 * metrics.PROJECTION_SETTLE        # what is left once the truth settled
-    # tau_eff: the settling time (20.7 TAU_F to 1e-9), on a 2x grid
-    lo, hi = TAU_F * np.log(1e9), 2 * TAU_F * np.log(1e9)
-    assert np.sqrt(lo / 1.0) <= r["instants"] <= np.sqrt(hi / 1.0)
+    assert r["limits"] <= 2e-6                                 # what is left once the truth settled (1e-6 of the jump)
+    # the true L2 cost of the collapse: ∫ e^(-2s/τ) ds = τ/2, over T = 1
+    assert r["instants"] == pytest.approx(np.sqrt(TAU_F / 2 / 1.0), rel=1e-3)
     assert r["part"] == "instants" and r["smooth"] < 1e-12
 
 
@@ -265,12 +266,29 @@ def test_without_a_projection_record_the_right_value_is_a_wrong_limit():
     assert r["limits"] == pytest.approx(1.0, rel=1e-12) and r["part"] == "limits"
 
 
-@pytest.mark.parametrize("case", [dict(settle=0.5),                # settles, but at 0.5, not 0.0
-                                  dict(window=10 * TAU_F),         # reaches 0.0 only after the window
-                                  dict(drift=1.0)])                # never settles inside the window
+@pytest.mark.parametrize("case", [
+    dict(settle=0.5),                                    # settles, but at 0.5, not 0.0
+    dict(window=TAU_F / 40),                             # slower than the engine's declared window
+    dict(drift=1.0),                                     # never settles
+    dict(events=[(0.5 + 2 * TAU_F, "S+", 0.0, 0.0)]),    # another truth event inside the transient
+    # a ringing 10x the span whose period is a dyadic fraction of the reach (reviewer case A)
+    dict(shape=lambda s: 10 * np.exp(-s / (32 * WINDOW / 3)) * np.cos(2 * np.pi * s / (32 * WINDOW / 8))),
+], ids=["elsewhere", "slow", "drift", "event", "ringing"])
 def test_a_truth_that_does_not_settle_at_the_recorded_value_leaves_the_limit_wrong(case):
     r = collapse_case(reported=True, **case)
     assert r["n_projected"] == 0 and r["limits"] == pytest.approx(1.0, rel=1e-12)
+
+
+def test_an_overshoot_is_priced_by_its_size_not_by_the_jump():
+    """Reviewer case C: (1 + 500 s/τ) e^(-s/τ) peaks at 184x the span; the
+    jump² τ_eff charge read it as a 1-span decay."""
+    tf = TAU_F / 10
+    shape = lambda s: (1.0 + 500.0 * s / tf) * np.exp(-s / tf)     # noqa: E731
+    r = collapse_case(reported=True, shape=shape)
+    assert r["n_projected"] == 1
+    s = np.linspace(0.0, 60 * tf, 200001)
+    honest = np.sqrt(np.trapezoid(shape(s) ** 2, s) / 1.0)
+    assert r["instants"] == pytest.approx(honest, rel=1e-2)
 
 
 def test_an_impulse_the_truth_makes_too_is_not_a_collapse():

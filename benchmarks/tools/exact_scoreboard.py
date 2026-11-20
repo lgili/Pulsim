@@ -58,12 +58,14 @@ OUT_JSON = ROOT / "exact_scoreboard.json"
 DELTA = 1e-3                     # the OLD measure's snap window (exact_old only), in netlist steps
 SELF_N = 5000                    # self-score: the smooth part's rows, strided to at most this many
 ONSET = 0.05                     # the error's onset: first sample off by 5 % of tol
-# rule (1): each engine's declared parasitic window, in netlist steps. The exact engine projects
-# every mode with Re(λ) < -100 / dt_max at an event (dsed/scheduler.hpp `project_`; the harness
-# passes dt, so dt_max = dt and the output rule's cut does not apply): a transient shorter than
-# dt / 100. The fixed engine's L-stable step collapses one shorter than its step h. trbdf2 records
-# no right limit (nothing to apply the rule to).
-PARASITIC = {"dsed": 1e-2, "pwl": 1.0}
+# rule (1): each engine's declared parasitic window W (the longest time constant it collapses at an
+# event), in netlist steps; the truth is followed to metrics.PROJECTION_REACH (32) W. The exact
+# engine projects every mode with Re(λ) < -100 / dt_max (dsed/scheduler.hpp `project_`; the harness
+# passes dt, so dt_max = dt and the output rule's cut does not apply): W = dt / 100. The fixed
+# engine's L-stable step collapses what settles within its step: W = h / 32, followed to h
+# (shortcut: the split rule's remainder step after an inner event is shorter; take the step actually
+# taken if pwl ever reports a projection there). trbdf2 records no right limit.
+PARASITIC = {"dsed": 1e-2, "pwl": 1.0 / 32}
 # solved directly (20,000 schedule events, ~20 s); `truth` writes no record for it (its dt/32 CSV is 3.2 M rows)
 EXTRA = ("circuits/thermal/long_run_drift_buck.yaml",)
 # Scored here only, never by the strict reference gate (reference_status.CONFIGS):
@@ -102,7 +104,20 @@ MEASURE_TEXT = [
     "- **limits**: the largest distance of a one-sided value the engine records after t = 0 (its left "
     "value at each of its event instants, every right-limit row, matched or not) from the truth's limit "
     "on that side at the truth's instant (at the engine's own instant when there is no match). An "
-    "engine without right limits (trbdf2) is graded on its left values only.", "",
+    "engine without right limits (trbdf2) is graded on its left values only.",
+    "- **rule (1), a projected transient**: at a matched event where the engine REPORTS a projection "
+    "(a `reinit_records` entry at its instant) and records a right value the truth does not have at its "
+    "instant, the truth is followed to 32 W (W = the engine's declared parasitic window: dt/100 for the "
+    "exact engine, whose event projection removes every mode faster than that; h/32 for pwl), on offsets "
+    "32 W 2^-k cut at irrational fractions, and not past the next truth event. If it settles there and "
+    "every value from its settling offset tau_eff on is within the cell's tol of the engine's value, that "
+    "value is a transient collapsed in time, not a wrong limit: charged in `instants` by its true L2 cost "
+    "(the integral of (truth - engine)^2 over [t_e, t_e + tau_eff], once per instant), its residual "
+    "against the settled truth kept in `limits`; the cell counts it (`n_projected`, `p<n>` after `by` in "
+    "the full table). Without the record, or when the truth settles elsewhere or later, the limit stands. "
+    "A fixed-engine impulse record whose jump the truth makes too is not this (the truth's own right "
+    "limit is already the value: nothing collapsed). No engine writes such a record at the events the "
+    "rule was made for yet (finding F-SB-3).", "",
     "Cell = the largest part of the worst column (`by` names it); a non-finite value anywhere scores inf. "
     "Classes (< 1e-3 / 1e-6 / 1e-9) are read from it. Events at the run's first or last instant are not "
     "graded. Source breaks without a device flip are not events here: the engine is given their instant, "
@@ -344,7 +359,7 @@ def grade(sol, tr, cols, sp, dt, tol, self_score=True, names=None, parasitic=0.0
                limits_worst=dict(zip(("value", "col"), part_max("limits"))) | (
                    {"t": per[part_max("limits")[1]]["limits_worst_t"]} if part_max("limits")[1] else {}),
                n_matched=w["n_matched"], n_initial=w["n_initial"], smooth_rows=w["smooth_rows"],
-               n_projected=max(p.get("n_projected", 0) for p in per.values()),
+               n_projected=len(set().union(*(p.get("projected", []) for p in per.values()))),
                missing=w["missing"][:20], n_missing=len(w["missing"]),
                spurious=w["spurious"][:20], n_spurious=len(w["spurious"]),
                exact_old=old[max(old, key=old.get)], exact_old_col=max(old, key=old.get), exact_old_per_col=old,

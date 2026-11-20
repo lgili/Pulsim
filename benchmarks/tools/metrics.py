@@ -192,41 +192,53 @@ def err_exact(t, y, cand, *, span: float, gap=None, exclude_t0: bool = True) -> 
 # calls it: the accuracy summary, the rehearsal, the tests).
 
 EVENT_WINDOW = 2.0          # matching window, in units of h
-PROJECTION_SETTLE = 1e-9    # rule (1): the truth has settled when one doubling of the offset moves it less (of span)
-PROJECTION_STEPS = 60       # rule (1): offsets W·2^-k, k < this, at which the truth is evaluated after the event
+PROJECTION_SETTLE = 1e-9    # rule (1): settling tolerance, of span (or 1e-6 of the jump, the larger)
+PROJECTION_STEPS = 60       # rule (1): dyadic offsets R·2^-k, k < this, ...
+PROJECTION_SUB = 8          # ... each interval cut in this many at irrational fractions (no aliasing on 2^-k)
+PROJECTION_REACH = 32.0     # rule (1): the truth is followed to this many windows (W bounds τ; ~21 τ settle)
 
 
-def _trailing_true(ok):
-    """Index where the trailing all-True run of ``ok`` starts (ok.size: none)."""
-    return 0 if ok.all() else ok.size - int(np.argmin(ok[::-1]))
-
-
-def collapsed_transient(right, truth_right, truth_after, t_truth, window, atol, settle):
+def collapsed_transient(right, truth_right, truth_after, t_truth, window, atol, settle, horizon=np.inf):
     """Rule (1), the projected transient. ``right``: the engine's recorded
     right value at an event where it reports a projection; ``truth_right``:
     the truth's right limit at its instant ``t_truth``; ``truth_after(t, s)``:
     the truth's right-side values at ``t + s``; ``window``: the engine's
-    declared parasitic window (s); ``atol``: the limits tolerance (absolute);
-    ``settle``: an absolute settling tolerance.
+    declared parasitic window W (s: the longest time constant it projects);
+    ``atol``: the limits tolerance; ``settle``: the settling tolerance (both
+    absolute); ``horizon``: the time to the next truth event (the truth is
+    one transient only up to there).
 
-    Returns ``(tau_eff, residual)`` when the truth itself goes to the engine's
-    value inside the window: on the offsets ``window·2^-k`` it SETTLES (from
-    tau_eff on, each doubling of the offset moves it by at most ``settle``)
-    and every settled value is within ``atol`` of ``right``; ``residual`` =
-    |right − truth(t_truth + tau_eff)|, what is left of the limit once the
-    transient is over (graded in ``limits``). tau_eff is an upper bound of
-    the settling time, within 2x. None otherwise: the truth does not settle
-    in the window, or settles elsewhere (a wrong limit), or its own right
-    limit is already within ``atol`` (no transient collapsed: an impulse the
+    The truth is evaluated on R = min(PROJECTION_REACH·W, horizon) times
+    2^-k, each interval cut at irrational fractions. Returns ``(tau_eff,
+    cost, residual)`` when the truth itself goes to the engine's value: from
+    the dyadic offset tau_eff on, one doubling moves it by at most
+    ``settle`` and EVERY evaluated value up to R is within ``atol`` of
+    ``right``. ``cost`` = ∫_0^tau_eff (truth − right)² ds (trapezoid on the
+    evaluated offsets: an overshoot or a ringing is priced by its size, not
+    by the jump), ``residual`` = |right − truth(tau_eff)|, what is left of the
+    limit once the transient is over. None otherwise: the truth does not
+    settle there, or settles elsewhere (a wrong limit), or its own right
+    limit is already within ``atol`` (nothing collapsed: an impulse the
     truth makes too)."""
-    if abs(right - truth_right) <= atol or not window > 0.0:
+    reach = min(PROJECTION_REACH * window, horizon)
+    if abs(right - truth_right) <= atol or not reach > 0.0:
         return None
-    s = window * 2.0 ** -np.arange(PROJECTION_STEPS - 1, -1, -1, dtype=float)   # ascending, ends at window
+    nodes = reach * 2.0 ** -np.arange(PROJECTION_STEPS - 1, -1, -1, dtype=float)   # ascending, ends at reach
+    frac = np.sort((np.arange(1, PROJECTION_SUB) * 0.6180339887498949) % 1.0)
+    lo = np.r_[0.0, nodes[:-1]]
+    s = np.sort(np.r_[nodes, (lo[:, None] + (nodes - lo)[:, None] * frac[None, :]).ravel()])
+    s = s[s > 0.0]
     v = np.asarray(truth_after(t_truth, s), dtype=float)
-    k = _trailing_true(np.abs(np.diff(v)) <= settle)     # v[k:] settled (pairs k..k+1, ...)
-    if k >= v.size - 1 or not np.all(np.abs(v[k:] - right) <= atol):
+    vn = v[np.searchsorted(s, nodes)]
+    ok = np.abs(np.diff(vn)) <= settle
+    k = 0 if ok.all() else ok.size - int(np.argmin(ok[::-1]))      # vn[k:] settled
+    if k >= vn.size - 1:
         return None
-    return float(s[k]), float(abs(right - v[k]))
+    i = int(np.searchsorted(s, nodes[k]))
+    if not np.all(np.abs(v[i:] - right) <= atol):
+        return None
+    ss, e2 = np.r_[0.0, s[:i + 1]], np.r_[truth_right - right, v[:i + 1] - right] ** 2
+    return float(nodes[k]), float(np.sum(np.diff(ss) * (e2[1:] + e2[:-1]) / 2)), float(abs(right - v[i]))
 
 
 def match_events(truth, engine, window: float):
@@ -311,9 +323,10 @@ def exact_parts(t, y, cand, *, span: float, h: float, truth_events=(), engine_ev
       (:func:`collapsed_transient`: within ``limits_tol`` of span, settled
       to PROJECTION_SETTLE of span, after tau_eff), that right value is a
       transient collapsed in time, not a wrong limit: it is charged in
-      ``instants`` as a displaced event, (truth right − engine right)² ·
-      tau_eff, and in ``limits`` by its distance to the settled truth at
-      t + tau_eff (the part of it that IS a wrong limit). Counted in
+      ``instants`` by its true L2 cost ∫(truth − engine right)² over
+      [t, t + tau_eff] (once per truth instant), and in ``limits`` by its
+      distance to the settled truth at t + tau_eff (the part of it that IS a
+      wrong limit). Counted in
       ``n_projected`` (``projected``: the truth instants). Either condition
       failing leaves the right value graded as a limit.
 
@@ -383,12 +396,15 @@ def exact_parts(t, y, cand, *, span: float, h: float, truth_events=(), engine_ev
         ev = engine_events[j]
         if len(ev) > 6 and ev[6] and ev[3] is not None and truth_after is not None and ev[0] > t0p:
             ti, tr_ = truth_events[i][0], truth_events[i][3]
+            # one transient only up to the next truth event (any device)
+            nxt = [e[0] for e in truth_events if e[0] > ti + 4 * np.spacing(abs(ti))]
+            horizon = min(nxt, default=np.inf) - ti
             c = collapsed_transient(ev[3], tr_, truth_after, ti, parasitic, limits_tol * span,
-                                    PROJECTION_SETTLE * span)
+                                    max(PROJECTION_SETTLE * span, 1e-6 * abs(tr_ - ev[3])), horizon)
             if c is not None:
-                collapsed[j] = (c[0], (tr_ - ev[3]) ** 2 * c[0], c[1], ti)
-    out["n_projected"] = len({c[3] for c in collapsed.values()})
+                collapsed[j] = (c[0], c[1], c[2], ti)
     out["projected"] = sorted({float(c[3]) for c in collapsed.values()})
+    out["n_projected"] = len(out["projected"])
 
     # (b) instants: per matched truth instant, its largest displacement
     worst = {}
@@ -410,7 +426,10 @@ def exact_parts(t, y, cand, *, span: float, h: float, truth_events=(), engine_ev
             jmp = truth_events[i][3] - truth_events[i][2]
             miss[te] = max(miss.get(te, 0.0), jmp * jmp * d)
         cost += sum(miss.values())
-        cost += sum(c[1] for c in collapsed.values())
+        coll = {}                      # one transient per truth instant: its devices share it
+        for _, c, _, ti in collapsed.values():
+            coll[ti] = max(coll.get(ti, 0.0), c)
+        cost += sum(coll.values())
         out["instants"] = float(np.sqrt(cost / T) / span) if T > 0 else 0.0
         dmax = max(worst.values(), key=lambda x: abs(x[0]))[0] if worst else 0.0
         out["max_dt_s"] = dmax
