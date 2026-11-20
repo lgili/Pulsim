@@ -542,3 +542,26 @@ def test_h3_a_gate_fired_turn_on_on_a_landed_crossing_is_solved():
     (j,) = [j for j in kk if t[j] > 5e-3]
     assert t[j] == pytest.approx(tg, rel=1e-12)
     assert np.asarray(v.i("T"))[j + 1] == pytest.approx(10.0 / (1.0 + 1e-3), rel=1e-6)
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "open (restart line STATUS, final review): an ideal element's jump and an unresolved "
+    "fast RC at one event: the structural path pins C3 by history correction at an eps "
+    "near its tau and records the ideal share only: row v_a 9.091 V, 4.5 % of the charge "
+    "lost; C3's collapse (4.14e-6 J) reported nowhere"))
+def test_an_ideal_jump_beside_a_fast_rc_keeps_the_charge_in_the_row():
+    """C1 1 uF (10 V) -ideal S- node c: C2 50 nF || (R3 1 mohm - C3 100 nF at 0 V).
+    At t_e+ the ideal loop shares C1, C2: v_a = v_c = 10*C1/(C1 + C2) (closed
+    form, from the left value); C3 sits behind R3 and is continuous: v_d = 0."""
+    b = p.CircuitBuilder()
+    b.add_capacitor("C1", "a", "gnd", 1e-6, 10.0)
+    b.add_ideal_switch("S", "a", "c", 0.0, 0.0)
+    b.add_capacitor("C2", "c", "gnd", 50e-9, 0.0)
+    b.add_resistor("R3", "c", "d", 1e-3)
+    b.add_capacitor("C3", "d", "gnd", 100e-9, 0.0)
+    r = _quiet(p.simulate, b, t_end=6e-6, dt=DT, switch_fn=_gate(b, "S", False), **RULE)
+    v, t, k = _limits(r)
+    (j,) = k
+    want = np.asarray(v.v("a"))[j] * 1e-6 / (1e-6 + 50e-9)
+    assert np.asarray(v.v("a"))[j + 1] == pytest.approx(want, rel=1e-6)
+    assert abs(np.asarray(v.v("d"))[j + 1]) <= 1e-6
