@@ -68,3 +68,15 @@ def test_f4_rule_ratio_flow_reads_each_chord_as_one_smooth_piece():
     r = metrics.rule_ratio_flow(t, y, td, np.exp(-3 * td), rtol=1.0, atol=0.0)
     worst = np.max(np.abs(0.5 * (y[:-1] + y[1:]) - np.exp(-3 * 0.5 * (t[:-1] + t[1:]))))
     assert abs(r * (1.0 - np.exp(-3.0)) - worst) < 1e-9
+
+
+def test_f4_rule_ratio_flow_never_extrapolates_one_short_dense_piece():
+    """One dense sample 1.8 ns into a 985 ns chord (ll09 after its 24 us edge): the quadratic
+    through it and the chord's ends extrapolated the fast piece's curvature over the long one
+    (5.8x on a chord within 0.02 of its tolerance); the dense run's own chord is read instead."""
+    t = np.array([0.0, 1.0])
+    y = np.array([0.0, 1.0])            # a straight flow ...
+    td = np.array([0.0, 1.8e-3, 1.0])   # ... whose dense sample sits a little above it
+    yd = np.array([0.0, 1.8e-3 + 1e-6, 1.0])
+    r = metrics.rule_ratio_flow(t, y, td, yd, rtol=1e-3, atol=0.0)
+    assert r < 1e-3

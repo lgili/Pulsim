@@ -194,7 +194,7 @@ def rule_ratio_flow(t, y, td, yd, *, rtol: float, atol: float, exclude=()) -> fl
         m = 0.5 * (lo[q] + hi[q])
         ts = np.r_[lo[q], td[i0[q]:i1[q]], hi[q]]
         ys = np.r_[y[k], yd[i0[q]:i1[q]], y[k + 1]]
-        if ts.size > 3:   # bracket m (never extrapolate): the nearest on each side + the next nearest
+        if ts.size >= 3:   # bracket m (never extrapolate): the nearest on each side + the next nearest
             j = int(np.searchsorted(ts, m))
             c = [j - 1, j]
             c.append(j - 2 if j + 1 >= ts.size or (j >= 2 and m - ts[j - 2] < ts[j + 1] - m) else j + 1)
@@ -202,6 +202,7 @@ def rule_ratio_flow(t, y, td, yd, *, rtol: float, atol: float, exclude=()) -> fl
             h1, h2 = ts[c[1]] - ts[c[0]], ts[c[2]] - ts[c[1]]
             # a lopsided stencil extrapolates a short piece's curvature over a long one:
             # there the dense run's own chord (its promise: within its smaller rtol) is read
+            # (also with ONE dense sample inside: ll09's 1.8 ns + 985 ns stencil read 5.8x)
             c = c if max(h1, h2) <= 4.0 * min(h1, h2) else [j - 1, j]
             ts, ys = ts[c], ys[c]
         if ts.size < 3:
