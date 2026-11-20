@@ -8,22 +8,28 @@ against the truth, beside the strict ``interp`` verdict of the harness.
     exact_scoreboard.py render [--previous REV]     # EXACT_SCOREBOARD.md + exact_scoreboard.json
                                                     # (+ cells moved > 2x against REV's json)
 
-The ``exact`` measure (``metrics.err_exact``): per graded column, the
-time-weighted RMS over the engine's OWN samples of the distance to the
-truth evaluated exactly at those times (``exact_truth.Solver.at_float``),
-divided by the truth's peak-to-peak over the run (floored like the gate at
-1e-3 of its peak; raised to the truth's range at the engine's samples).
-Every truth segment within DELTA = 1e-3 dt of a sample is a candidate (its
-formula continued to the sample time), so a sample on an event is compared
-with its own one-sided limit, left (dsed) or right; a sample that matches a
-branch across an event is charged the event's displacement, jump^2 x gap
-(its true L2 cost), so the window hides no timing error. The first sample
-is excluded (as the gate). Only the samples are graded: a `measure` verdict
-says the engine's samples are right, not that it resolves the waveform
-between them. Input columns (a node a source
-drives, no circuit unknown in it, e.g. V(ctrl)) are not graded. The cell is
-the worst graded column. The strict gate, its tolerances and freezes are
-untouched: this is a second measure next to it.
+The ``exact`` measure (``metrics.exact_parts``, one implementation for every
+tool that grades against the truth): per graded column, three parts, each a
+fraction of the truth's peak-to-peak (floored like the gate at 1e-3 of its
+peak; raised to the truth's range at the engine's samples):
+
+- smooth: time-weighted RMS over the engine's STORED rows of the distance to
+  the truth at those times (``exact_truth.Solver.at_float``, no snap window),
+  leaving out the initial instant, the 0+ row and every row whose step on
+  either side holds a device event, truth's or engine's;
+- instants: each engine device event matched to the truth's (same device and
+  direction, in order, within EVENT_WINDOW netlist steps); the displacement's
+  L2 cost sqrt(sum jump^2 |delta| / T), and max |delta| / dt;
+- limits: max distance of every one-sided value the engine records (left at
+  its event instants, every right limit) from the truth's limits at the
+  truth's instant (the engine's own when unmatched).
+
+The cell is the largest part of the worst column (``exact``, ``exact_part``).
+Unmatched events are listed, not priced. ``exact_old`` is the previous
+definition (``metrics.err_exact``, snap window DELTA = 1e-3 dt), kept for one
+release. Input columns (a node a source drives, no circuit unknown in it,
+e.g. V(ctrl)) are not graded. The strict gate, its tolerances and freezes
+are untouched: this is a second measure next to it.
 """
 
 from __future__ import annotations
@@ -47,7 +53,7 @@ ROOT = Path(__file__).resolve().parents[1]
 RAW = ROOT.parent / ".scratch" / "exact_scoreboard"
 OUT_MD = ROOT / "EXACT_SCOREBOARD.md"
 OUT_JSON = ROOT / "exact_scoreboard.json"
-DELTA = 1e-3                     # snap window, in netlist steps
+DELTA = 1e-3                     # the OLD measure's snap window (exact_old only), in netlist steps
 SELF_N = 5000                    # self-score: the smooth part's rows, strided to at most this many
 ONSET = 0.05                     # the error's onset: first sample off by 5 % of tol
 # solved directly (20,000 schedule events, ~20 s); `truth` writes no record for it (its dt/32 CSV is 3.2 M rows)
@@ -61,6 +67,45 @@ EXTRA = ("circuits/thermal/long_run_drift_buck.yaml",)
 EXTRA_CONFIGS = {"trbdf2+esdirk43": ("trbdf2", dict(nd.EXTRA["esdirk43"][1]), False),
                  **{f"{e}+next": (e, nd.profile_kwargs(e), True) for e in ("pwl", "trbdf2", "dsed")}}
 THRESHOLDS = (1e-3, 1e-6, 1e-9)
+MEASURE = "three-part 2026-11"   # json tag: a --previous file without it holds the old definition
+PARTS = ("smooth", "instants", "limits")
+MEASURE_TEXT = [
+    "## The measure", "",
+    "`exact` (`benchmarks/tools/metrics.py`, `exact_parts`), per graded column, three parts, each a "
+    "fraction of `span` (the truth's peak-to-peak, floored at 1e-3 of its peak):", "",
+    "- **smooth**: sqrt(sum w_i e_i^2 / sum w_i) over the engine's STORED rows, e_i the distance to the "
+    "truth at t_i (two one-sided candidates only when t_i is a truth event instant; either is right), w_i "
+    "trapezoid time weights; left out: the initial instant, the right limit at t = 0+, and every row whose "
+    "step on either side holds a device event (the truth's or the engine's). No snap window, no timing charge.",
+    "- **instants**: engine device events (changes of the switch record of `pulsim.with_event_limits(res)`: "
+    "stored rows, the split's inner events, right limits; the instant is the row before the change) "
+    "matched to the truth's by device and direction, in order, the nearest within "
+    "2 netlist steps; cost sqrt(sum_e jump_e^2 |delta_e| / T), the true L2 of each displacement (jump from "
+    "the truth's two limits; |delta| within 4 ulp counts 0). `max δ/h`: the largest |delta| in units of the "
+    "netlist dt, the same unit for every engine (the fixed engine's step; the output grid of the "
+    "variable-step and exact engines, which place events by root finding). Missing and spurious events are "
+    "counted and named in the json, not priced: what they do to the trajectory is in `smooth`. `n/a`: "
+    "the run exposes no switch record.",
+    "- **limits**: the largest distance of a one-sided value the engine records after t = 0 (its left "
+    "value at each of its event instants, every right-limit row, matched or not) from the truth's limit "
+    "on that side at the truth's instant (at the engine's own instant when there is no match). An "
+    "engine without right limits (trbdf2) is graded on its left values only.", "",
+    "Cell = the largest part of the worst column (`by` names it); a non-finite value anywhere scores inf. "
+    "Classes (< 1e-3 / 1e-6 / 1e-9) are read from it. Events at the run's first or last instant are not "
+    "graded. Source breaks without a device flip are not events here: the engine is given their instant, "
+    "and the rows around them stay in `smooth`. Input columns (only a source in them) are not graded.", "",
+    "**What changed and why (this release).** The previous `exact` (kept as `exact_old`, column `old`) was "
+    "one time-weighted RMS over every row of the two-sided trace with a snap window of 1e-3 dt. Two flaws: "
+    "(1) it dropped only rows at t == t[0], so the right limit at t = 0+ (5e-324) was graded against the "
+    "truth's initial value: on `three_phase_diode_rectifier` pwl+restart that one row (V(out) 17.22 V, a "
+    "quadrature line start, against 0 V) was 99 % of the score, 0.0127 against 0.000998 without it; the "
+    "strict gate already drops it. (2) An event the engine places delta away from the truth's, beyond "
+    "the snap window, was charged jump^2 x the row's trapezoid weight instead of jump^2 x |delta|: "
+    "`vcswitch_resistor` pwl+split switches 0.005 h early and read 0.0316 (half a step, 100x the true "
+    "cost in the square; 0 before the right-limit rows existed), against 0.0032 now; adding or "
+    "removing a row at the event changed the charge by a factor unrelated to accuracy. Both flaws "
+    "mispriced all engines whenever an event is displaced; the snap window and its charge are gone.",
+]
 TWINS = ("circuits/diodes/diode_rectifier.yaml", "circuits/switching/isolated/flyback_converter.yaml")
 
 
@@ -400,8 +445,9 @@ def render(previous=None):
             c["class"] = _cls(c)
     head = _git("rev-parse", "--short=8", "HEAD").strip()
     configs = {k: dict(engine=defs[k][0], kwargs=defs[k][1], form="branch" if defs[k][2] else None) for k in cfgs}
-    OUT_JSON.write_text(json.dumps(dict(delta_steps=DELTA, commit=head, configs=configs, circuits=recs, twins=twin),
-                                   indent=1) + "\n", encoding="utf-8")
+    OUT_JSON.write_text(json.dumps(dict(measure=MEASURE, event_window_steps=metrics.EVENT_WINDOW,
+                                        old_delta_steps=DELTA, commit=head, configs=configs, circuits=recs,
+                                        twins=twin), indent=1) + "\n", encoding="utf-8")
     cells = [(r, cfg, r["cells"][cfg]) for r in recs for cfg in cfgs if cfg in r["cells"]]
     selfs = [c.get("self") for _, _, c in cells if c.get("self") is not None]
     selfs += [r["reference"]["self"] for r in recs if "self" in r.get("reference", {})]
@@ -414,29 +460,29 @@ def render(previous=None):
          "| configuration | engine | simulate() keywords | builder form |", "|---|---|---|---|",
          *[f"| {k} | {v['engine']} | {', '.join(f'`{a}={b!r}`' for a, b in v['kwargs'].items()) or '(defaults)'} "
            f"| {v['form'] or '(default)'} |" for k, v in configs.items()], "",
-         "`exact`: per graded column, sqrt(sum w_i e_i^2 / sum w_i) / span over the engine's own "
-         "samples (w_i trapezoid time weights, first sample excluded), e_i the distance to the "
-         f"nearest one-sided truth value at t_i (every truth segment within {DELTA:g} dt, continued "
-         "to t_i; a sample matched across an event is charged jump^2 x its time gap, the true L2 "
-         "of that displacement, beyond 4 ulp), span the truth's peak-to-peak (floored at 1e-3 of "
-         "its peak). Input columns (only a source in them) are not graded. Cell = worst column; a "
-         "non-finite sample scores inf. No interpolation of the engine trace: what it does between "
-         "its samples is not graded, so `measure` below means the engine's samples are right "
-         "(the strict gate's interpolation floor, or its reference, is what disagrees).", "",
-         f"No floor: the truth itself (mpmath `Solver.sample`) graded on each engine's own grid "
-         f"scores at most {max(selfs):.1e} over {len(selfs)} grids (median {np.median(selfs):.1e}).", ""]
+         *MEASURE_TEXT, "",
+         f"No floor: the truth itself (mpmath `Solver.sample`) graded by the smooth part on each engine's "
+         f"own rows scores at most {max(selfs):.1e} over {len(selfs)} grids (median {np.median(selfs):.1e}).", ""]
     L += findings(recs, cfgs)
     L += ["", "## Summary per configuration", "",
-          "`graded` = cells that ran and were graded; `not graded` = refused / error (no `exact`).", "",
-          "| configuration | graded | not graded | exact < 1e-3 | < 1e-6 | < 1e-9 | >= 1e-2 | worst five |",
-          "|---|---:|---:|---:|---:|---:|---:|---|"]
+          "`graded` = cells that ran and were graded; `not graded` = refused / error (no `exact`). "
+          "`old` = the same cells under the previous definition (`exact_old`). `set by` = how many cells' "
+          "summary each part set (smooth / instants / limits).", "",
+          "| configuration | graded | not graded | exact < 1e-3 | < 1e-6 | < 1e-9 | >= 1e-2 "
+          "| old < 1e-3 / 1e-6 / 1e-9 | set by s / i / l | worst five |",
+          "|---|---:|---:|---:|---:|---:|---:|---:|---:|---|"]
     for cfg in cfgs:
-        xs = sorted(((c["exact"], r["circuit"]) for r, k, c in cells if k == cfg and "exact" in c), reverse=True)
-        e = np.array([x for x, _ in xs])
+        xs = sorted(((c["exact"], r["circuit"], c) for r, k, c in cells if k == cfg and "exact" in c),
+                    key=lambda x: -x[0])
+        e = np.array([x for x, _, _ in xs])
+        o = np.array([c["exact_old"] for _, _, c in xs])
         ng = sum(1 for _, k, c in cells if k == cfg and "exact" not in c)
-        top = ", ".join(f"{Path(n).stem} {x:.2g}" for x, n in xs[:5])
+        top = ", ".join(f"{Path(n).stem} {x:.2g} {c['exact_part'][0]}" for x, n, c in xs[:5])
+        by = " / ".join(str(sum(c["exact_part"] == p for _, _, c in xs)) for p in PARTS)
         L.append(f"| {cfg} | {len(xs)} | {ng} | " + " | ".join(str(int((e < t).sum())) for t in THRESHOLDS)
-                 + f" | {int((e >= 1e-2).sum())} | {top} |")
+                 + f" | {int((e >= 1e-2).sum())} | " + " / ".join(str(int((o < t).sum())) for t in THRESHOLDS)
+                 + f" | {by} | {top} |")
+    L += class_changes(cells, cfgs)
     if previous:
         L += moved_section(recs, cfgs, previous)
     dis = [(r, k, c) for r, k, c in cells if c["outcome"] == "disagree"]
@@ -488,20 +534,28 @@ def render(previous=None):
                 L.append(f"| {rel.removeprefix('circuits/')} | {x['run']} | {_g(x.get('exact'))} "
                          f"| {x.get('exact_col', x.get('error', ''))} | {_g(d.get('t'))} "
                          f"| {_g(e.get('t'))} {e.get('cause', '')} {e.get('flips', '')} |")
-    L += ["", "## Full table", "", "exact (strict verdict, interp err).", "",
-          "| circuit | ref exact | " + " | ".join(cfgs) + " |", "|---|---:|" + "---|" * len(cfgs)]
+    L += ["", "## Full table", "",
+          "`exact` = the summary, `by` = the part that set it (s smooth, i instants, l limits); `max δ/h` = the "
+          "largest matched displacement in netlist steps (signed: engine − truth); `unmatched` = missing / "
+          "spurious device events (`-` instants: no event record); `old` = `exact_old`; strict = the gate's "
+          "verdict and interp error.", "",
+          "| circuit | configuration | exact | by | smooth | instants | max δ/h | limits | unmatched | old | strict |",
+          "|---|---|---:|---|---:|---:|---:|---:|---|---:|---|"]
     for r in recs:
-        row = []
         for k in cfgs:
             c = r["cells"].get(k)
             if c is None:
-                row.append("")
-            elif "exact" not in c:
-                row.append(c["outcome"])
-            else:
-                row.append(f"{c['exact']:.2g} ({c['outcome'][:3]} {_g(c.get('err_rms'))})")
-        L.append(f"| {r['circuit'].removeprefix('circuits/')} | {_g(r.get('reference', {}).get('exact'))} | "
-                 + " | ".join(row) + " |")
+                continue
+            name = r["circuit"].removeprefix("circuits/")
+            if "exact" not in c:
+                L.append(f"| {name} | {k} | {c['outcome']} |||||||||")
+                continue
+            L.append(f"| {name} | {k} | {_g(c['exact'])} | {c['exact_part'][0]} | {_g(c['smooth'])} "
+                     f"| {_g(c['instants']) if c['instants_available'] else 'n/a'} | {_g(c['max_dt_h'])} "
+                     f"| {_g(c['limits'])} | {c['n_missing']} / {c['n_spurious']} | {_g(c['exact_old'])} "
+                     f"| {c['outcome'][:3]} {_g(c.get('err_rms'))} |")
+    L += ["", "Reference column (the harness reference graded the same way), per circuit: "
+          + "; ".join(f"{Path(r['circuit']).stem} {_g(r.get('reference', {}).get('exact'))}" for r in recs) + "."]
     skipped = [json.loads(f.read_text(encoding="utf-8")) for f in sorted(RAW.glob("*.json")) if not f.name.startswith("_")]
     skipped = [s for s in skipped if "cells" not in s]
     if skipped:
@@ -515,6 +569,10 @@ def moved_section(recs, cfgs, rev):
     """Cells whose `exact` moved by more than 2x against the json stored at git ``rev``."""
     old = json.loads(_git("show", f"{rev}:benchmarks/exact_scoreboard.json"))
     before = {(r["circuit"], k): c for r in old["circuits"] for k, c in r.get("cells", {}).items()}
+    same_def = old.get("measure") == MEASURE        # else compare the previous definition with itself
+    if not same_def:
+        recs = [dict(r, cells={k: (dict(c, exact=c["exact_old"]) if "exact" in c else c)
+                               for k, c in r["cells"].items()}) for r in recs]
     rows, same, quiet, quiet_worse, new = [], 0, 0, 0, 0
     rank = {"agree": 0, "unverified": 0, "disagree": 1, "refused": 2, "error": 3}
     for r in recs:
@@ -548,6 +606,9 @@ def moved_section(recs, cfgs, rev):
     L = ["", "## Cells moved by more than 2x against the previous scoreboard", "",
          f"Previous: `benchmarks/exact_scoreboard.json` at `{rev}` "
          f"({old.get('commit', 'commit not recorded in that file')}). "
+         + ("" if same_def else "That file holds the previous definition: compared here with this run's "
+            "`exact_old` (the same definition), so this section shows engine changes only; the change of "
+            "definition is the section above. ") +
          f"{sum(x[4] == 'worse' for x in rows)} worse, {sum(x[4] == 'better' for x in rows)} better, "
          f"{same} within 2x (same outcome), {quiet} moved > 2x with both values < 1e-12 (not listed; "
          f"{quiet_worse} of them worse), {new} cells with no previous value (configuration new since), "
@@ -561,10 +622,41 @@ def moved_section(recs, cfgs, rev):
     return L
 
 
+def _bucket(x):
+    return sum(x >= t for t in THRESHOLDS)    # 0: < 1e-9 ... 3: >= 1e-3
+
+
+def class_changes(cells, cfgs):
+    """Every cell whose class (< 1e-9 / 1e-6 / 1e-3 / above) differs between ``exact_old`` and ``exact``."""
+    rows = [(r, k, c) for r, k, c in cells if "exact" in c and _bucket(c["exact"]) != _bucket(c["exact_old"])]
+    worse = [x for x in rows if x[2]["exact"] > x[2]["exact_old"]]
+
+    def why(c):
+        if c["exact"] < c["exact_old"]:
+            return (f"the old score came from rows the smooth part leaves out (the 0+ row, rows next to an "
+                    f"event charged at their weight); smooth {_g(c['smooth'])}")
+        p = c["exact_part"]
+        if p == "instants":
+            return f"instants: max δ = {c['max_dt_h']:.3g} h"
+        if p == "limits":
+            lw = c.get("limits_worst") or {}
+            return f"limits: worst one-sided value at t = {_g(lw.get('t'))} s ({lw.get('col')})"
+        return f"{p}: {c['n_missing']} missing / {c['n_spurious']} spurious events" if p == "smooth" else p
+    L = ["", "## Cells whose class changed with the definition", "",
+         f"{len(rows)} cells change class between `exact_old` and `exact` ({len(worse)} worse, "
+         f"{len(rows) - len(worse)} better). A worse cell is the measure now seeing a timing or one-sided "
+         "error the old one did not price: a candidate finding, not an artefact (`## Notes`).", "",
+         "| circuit | configuration | old | exact | by | why |", "|---|---|---:|---:|---|---|"]
+    for r, k, c in sorted(rows, key=lambda x: (x[2]["exact"] < x[2]["exact_old"], x[0]["circuit"], cfgs.index(x[1]))):
+        L.append(f"| {r['circuit'].removeprefix('circuits/')} | {k} | {_g(c['exact_old'])} | {_g(c['exact'])} "
+                 f"| {c['exact_part']} | {why(c)} |")
+    return L
+
+
 def findings(recs, cfgs):
     L = ["## Findings for the engine tracks", "",
          "The five largest engine errors per configuration (exact > tol). `onset`: the first "
-         f"sample whose own deviation exceeds {ONSET:g} tol (fraction of span), and the last truth "
+         f"smooth-part row whose own deviation exceeds {ONSET:g} tol (fraction of span), and the last truth "
          "event at or before it (time, cause, the devices that flip there): where the engine "
          "starts to depart. `departs`: the same at tol.", ""]
     for cfg in cfgs:
@@ -575,14 +667,14 @@ def findings(recs, cfgs):
         if not xs:
             L += ["None above tol.", ""]
             continue
-        L += ["| circuit | exact | column | onset [s] | truth event at onset | departs [s] | truth event there |",
-              "|---|---:|---|---:|---|---:|---|"]
+        L += ["| circuit | exact | part | column | onset [s] | truth event at onset | departs [s] | truth event there |",
+              "|---|---:|---|---|---:|---|---:|---|"]
 
         def ev(e):
             return f"{_g(e.get('t'))} {e.get('cause', '')}: {e.get('flips', '')}" if e else "start"
         for x, r, c in xs[:5]:
             d = c.get("departure") or {}
-            L.append(f"| {r['circuit'].removeprefix('circuits/')} | {x:.3g} | {c['exact_col']} | "
+            L.append(f"| {r['circuit'].removeprefix('circuits/')} | {x:.3g} | {c['exact_part']} | {c['exact_col']} | "
                      f"{_g(d.get('onset_t'))} | {ev(d.get('onset_event'))} | {_g(d.get('t'))} | "
                      f"{ev(d.get('event'))} |")
         L.append("")
