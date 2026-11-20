@@ -32,9 +32,12 @@ PWL_REL = dict(engine="pwl", discontinuity_restart=True,
 EXACT_REL = dict(engine="dsed", output_rtol=1e-5)
 
 F_44 = pytest.mark.xfail(strict=True, reason=(
-    "release finding F-4-4: the in-loop recorder (LoopFeed) is fed the restart step's "
-    "ends only; a capacitor reading is the companion's END current at every point, so "
-    "the step's lines need the stage currents (C·(X1 − x0)/(γh)) fed with them"))
+    "release finding F-4-4, rest: the window integrals are the integrator's quadrature "
+    "(test_release_findings_b2: step-end windows C·dv to 1e-11), but a window END inside "
+    "a restart step (or AT an event, keep='times' reading the right limit) reads the line's "
+    "start value 2·w1·X1 + (1 − 2·w1)·X2, the right limit to O(h²) only: buck window 0 "
+    "7.4e-4 at dt = 1 us (1.9e-4 at 0.5 us). Needs a true right limit (group A's "
+    "consistent start x0+) and a mid-step row keeping the quadrature"))
 
 def _quiet(fn, *a, **kw):
     with warnings.catch_warnings():
