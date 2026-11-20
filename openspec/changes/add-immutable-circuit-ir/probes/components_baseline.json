@@ -409,6 +409,10 @@
   "n": 14,
   "sha": "1cf336d7e4204f35"
  },
+ "benchmarks/circuits/switching/isolated/llc_half_bridge_zvs.yaml": {
+  "n": 13,
+  "sha": "2430f4d505882d9f"
+ },
  "benchmarks/circuits/switching/isolated/synchronous_flyback.yaml": {
   "n": 9,
   "sha": "377df63d45a1220c"

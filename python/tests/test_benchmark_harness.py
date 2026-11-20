@@ -214,7 +214,7 @@ def test_unmapped_construct_is_named():
 
 def test_triage_lists_every_circuit_on_disk():
     on_disk = {p.relative_to(BENCH).as_posix() for p in (BENCH / "circuits").rglob("*.yaml")}
-    assert len(on_disk) == 126
+    assert len(on_disk) == 127
     assert set(TRIAGE) == on_disk
     assert {e["status"] for e in TRIAGE.values()} <= {"runs", "skipped", "error"}
     for rel, e in TRIAGE.items():
