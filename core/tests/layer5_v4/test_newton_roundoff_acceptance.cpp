@@ -243,13 +243,88 @@ TEST_CASE("Roundoff acceptance: a period-7 cycle is accepted at every phase",
     }
 }
 
+TEST_CASE("Roundoff acceptance: a solve that converged and then sat at the "
+          "floor is accepted",
+          "[v2][newton][roundoff]") {
+    // ll13_active_clamp_forward on trbdf2 (DECISIONS 11 amendment): Newton
+    // converged (||dx|| 3e-2 -> 1.8e-5) and then sat at 1.19e-8 for 15
+    // iterations at omega 0.31 eps. Compared as two windows of 16, the older
+    // window held the convergence, so the floor read as "still contracting";
+    // the decline sent the run into an h_min abort. Here: 17 halving steps
+    // 2^19 .. 2^3 u, then +-1 u. The windows of kw = 13..16 decline it at
+    // budgets 26..33; a split of 8 sees the floor in both windows.
+    Graph g;
+    g.add_node("n0");
+    g.add_branch(0, g.ground(), BranchKind::Source);
+    g.add_branch(0, g.ground(), BranchKind::PassiveLinear);
+    DevicePool pool;
+    pool.add_voltage_source(0, {.V = 1e9});
+    pool.add_resistor(1, {.G = 1.0});
+    PwlStateSpaceCache cache(g, pool);
+    cache.build();
+    const auto& seg = cache.lookup(SwitchStateMask(0));
+    std::vector<long> s;
+    for (int k = 0; k < 17; ++k) s.push_back((k % 2 == 0 ? 1L : -1L) << (19 - k));
+    for (int k = 0; k < 40; ++k) s.push_back(k % 2 == 0 ? 1 : -1);
+    const Path settle(s);
+    for (Size iters = 26; iters <= 33; ++iters) {
+        NewtonRoundoffAcceptance ro;
+        ro.enabled = true;
+        INFO(iters);
+        const Vector x = solve_with_newton_b_extra(
+            seg, settle, g, pool, x_start(seg),
+            Vector::Zero(seg.state_size), iters, 1e-9, 1e-9, false, false,
+            nullptr, &ro);
+        REQUIRE(ro.accepted);
+        REQUIRE(ro.omega <= ro.omega_max);
+    }
+}
+
+TEST_CASE("Roundoff acceptance: one small step inside a cycle does not read "
+          "as contraction",
+          "[v2][newton][roundoff]") {
+    // ll13 again: a cycle at 1.2-1.4e-6 with ONE step of 5.4e-8 among the
+    // last 16 made the newer window's minimum 23x below the older's. Here:
+    // steps 21, 19 u with one step of 1 u (step 17 of the path); at budgets
+    // 25..32 it lies 8..15 iterations back, inside the newer window of kw
+    // and inside the OLDER window of the split 8.
+    Graph g;
+    g.add_node("n0");
+    g.add_branch(0, g.ground(), BranchKind::Source);
+    g.add_branch(0, g.ground(), BranchKind::PassiveLinear);
+    DevicePool pool;
+    pool.add_voltage_source(0, {.V = 1e9});
+    pool.add_resistor(1, {.G = 1.0});
+    PwlStateSpaceCache cache(g, pool);
+    cache.build();
+    const auto& seg = cache.lookup(SwitchStateMask(0));
+    std::vector<long> s;
+    for (int k = 0; k < 8; ++k) { s.push_back(21); s.push_back(-19); }
+    s.push_back(1);
+    s.push_back(20);
+    for (int k = 0; k < 20; ++k) { s.push_back(-19); s.push_back(21); }
+    const Path dip(s);
+    for (Size iters = 25; iters <= 32; ++iters) {
+        NewtonRoundoffAcceptance ro;
+        ro.enabled = true;
+        INFO(iters);
+        (void)solve_with_newton_b_extra(
+            seg, dip, g, pool, x_start(seg),
+            Vector::Zero(seg.state_size), iters, 1e-9, 1e-9, false, false,
+            nullptr, &ro);
+        REQUIRE(ro.accepted);
+        REQUIRE(ro.omega <= ro.omega_max);
+    }
+}
+
 TEST_CASE("Roundoff acceptance: slow convergence near the floor is declined",
           "[v2][newton][roundoff]") {
     // The protected case: the residual is at roundoff (12 u, omega 1.6 eps)
     // but ||dx|| still falls geometrically at rate 0.7, so the iterate is
     // still moving toward its root. The two-step rule accepted it (0.49 of
     // ||dx_{k-2}|| is "no net contraction by 4"); the window minimum falls
-    // by 0.7^k (k = 10..15 here) and it is declined while it contracts.
+    // by 0.7^k for every split k = 8..15 compared here (0.7^8 = 0.058 < 1/4)
+    // and it is declined while it contracts.
     Graph g;
     g.add_node("n0");
     g.add_branch(0, g.ground(), BranchKind::Source);

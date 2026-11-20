@@ -258,6 +258,7 @@ inline void solve_with_newton_in_place(
     // ||dx|| of the last 2·kRoWindow iterations, newest first, and how
     // many were recorded.
     constexpr int kRoWindow = 16;
+    constexpr int kRoMinSplit = 8;   // shortest window compared (DECISIONS 11)
     Real ro_dx[2 * kRoWindow];
     int ro_n = 0;
     std::fill(std::begin(ro_dx), std::end(ro_dx),
@@ -726,28 +727,41 @@ inline void solve_with_newton_in_place(
     std::string ro_note;
     if (ro_on && ro_set && ro_scaled) {
         const Vector& ro_f = w.ro_f;
-        // No improvement, judged over two WINDOWS of k = min(16,
-        // iterations/2) steps (DECISIONS 11): the smallest ||dx|| of the
-        // newer window is not 4x below the smallest of the older one. A
-        // roundoff limit cycle of period <= k repeats its minimum in both
-        // windows; convergence, even linear at any rate r < 4^(-1/k), cuts
-        // it by 4. A two-step test read the period-6/7/10 cycles of F-S-5
-        // as "still contracting" at some of their phases.
+        // No improvement, judged over two WINDOWS of k steps (DECISIONS
+        // 11): the smallest ||dx|| of the newer window (the last k) is not
+        // 4x below the smallest of the older one (the k before), and its
+        // largest is not over twice the older's (a limit cycle repeats its
+        // maxima; a diverging iterate does not). A roundoff limit cycle of
+        // period <= k repeats its minimum in both windows; convergence at
+        // any rate r < 4^(-1/k) cuts it by 4. Stagnated if that holds for
+        // SOME split k from min(8, kw) to kw = min(16, iterations/2): one
+        // fixed k = kw read a solve that converged and then sat at the floor
+        // for 15 iterations as "still contracting" (its older window held
+        // the convergence), and a single low ||dx|| inside a cycle likewise
+        // (ll13_active_clamp_forward, DECISIONS 11 amendment). Every k >= 8
+        // still declines a monotone rate r < 4^(-1/8) = 0.84.
         const int kw = std::min(kRoWindow, ro_n / 2);
         Real b_new = std::numeric_limits<Real>::infinity(), b_old = b_new;
         Real m_new = 0, m_old = 0;
-        for (int k = 0; k < kw; ++k) {
-            b_new = std::min(b_new, ro_dx[k]);
-            m_new = std::max(m_new, ro_dx[k]);
-            b_old = std::min(b_old, ro_dx[kw + k]);
-            m_old = std::max(m_old, ro_dx[kw + k]);
+        bool stagnated = false;
+        for (int kk = kw; kk >= std::max(2, std::min(kRoMinSplit, kw)); --kk) {
+            Real bn = std::numeric_limits<Real>::infinity(), bo = bn;
+            Real mn = 0, mo = 0;
+            for (int k = 0; k < kk; ++k) {
+                bn = std::min(bn, ro_dx[k]);
+                mn = std::max(mn, ro_dx[k]);
+                bo = std::min(bo, ro_dx[kk + k]);
+                mo = std::max(mo, ro_dx[kk + k]);
+            }
+            if (kk == kw) {   // the full windows, for the decline message
+                b_new = bn; b_old = bo; m_new = mn; m_old = mo;
+            }
+            if (bn >= Real{0.25} * bo && mn <= Real{2} * mo) {
+                stagnated = true;
+                break;
+            }
         }
-        const bool no_contraction = kw >= 2 && b_new >= Real{0.25} * b_old;
-        // ...and no growth: the largest of the newer window is at most
-        // twice the largest of the older (a limit cycle repeats its
-        // maxima; a diverging iterate does not).
-        const bool growing = !(m_new <= Real{2} * m_old);
-        const bool stagnated = no_contraction && !growing;
+        const bool growing = kw >= 2 && !(m_new <= Real{2} * m_old);
         const Real dx_cap = roundoff->dx_rel_max
             * std::max(Real{1}, w.ro_x0_inf);
         const Vector& scale = w.ro_scale;
@@ -791,17 +805,28 @@ inline void solve_with_newton_in_place(
                                          roundoff->consecutive);
             return;
         }
-        ro_note = std::format(
-            " Roundoff acceptance declined: row backward error {:.2g} eps "
-            "at {} (limit {:.2g} eps), ||dx|| {} 1e-6·|x_0|, last steps "
-            "{} (||dx|| {:.3e}, {:.3e}, {:.3e}).",
-            omega / std::numeric_limits<Real>::epsilon(),
-            row_equation_label(graph, pool, row),
-            roundoff->omega_max / std::numeric_limits<Real>::epsilon(),
-            ro_dx[0] <= dx_cap ? "within" : "above",
-            growing ? "growing" : (no_contraction ? "stagnated"
-                                                  : "still contracting"),
-            ro_dx[2], ro_dx[1], ro_dx[0]);
+        ro_note = kw < 2
+            ? std::format(
+                " Roundoff acceptance declined: row backward error {:.2g} eps "
+                "at {} (limit {:.2g} eps), ||dx|| {} 1e-6·|x_0|, {} "
+                "iterations: too few for two windows.",
+                omega / std::numeric_limits<Real>::epsilon(),
+                row_equation_label(graph, pool, row),
+                roundoff->omega_max / std::numeric_limits<Real>::epsilon(),
+                ro_dx[0] <= dx_cap ? "within" : "above", ro_n)
+            : std::format(
+                " Roundoff acceptance declined: row backward error {:.2g} eps "
+                "at {} (limit {:.2g} eps), ||dx|| {} 1e-6·|x_0|, {} over "
+                "windows of {} to {} iterations (last {}: ||dx|| min {:.3e} "
+                "max {:.3e}; the {} before: min {:.3e} max {:.3e}).",
+                omega / std::numeric_limits<Real>::epsilon(),
+                row_equation_label(graph, pool, row),
+                roundoff->omega_max / std::numeric_limits<Real>::epsilon(),
+                ro_dx[0] <= dx_cap ? "within" : "above",
+                stagnated ? "stagnated"
+                          : (growing ? "growing" : "still contracting"),
+                std::min(kRoMinSplit, kw), kw, kw, b_new, m_new, kw, b_old,
+                m_old);
     }
 
     // Report the norms RELATIVE to the circuit's own scale as well as

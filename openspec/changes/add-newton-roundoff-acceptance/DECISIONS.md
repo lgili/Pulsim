@@ -156,3 +156,23 @@ conservative option was taken.
    scan test and `test_newton_stall_and_mask_chatter.py`'s spurious-root
    test stay green); the absolute tol_dx is untouched; the run budget
    (10d) and the state kept (10c) are as before.
+   AMENDMENT (2026-11-20, session 3, ll13 regression): the comparison is
+   made for every split k from min(8, kw) to kw, and the solve counts as
+   stagnated if ANY split shows no improvement and no growth (k = kw alone
+   was rule 11 as first written; every solve it accepted is still
+   accepted). Traced on ll13_active_clamp_forward (trbdf2): the first solve
+   the two rules decided differently (#85, t = 5.500006 us, h = 3.2e-13 s)
+   CONVERGED (||dx|| 3.1e-2 -> 1.8e-5) and then sat at 1.19e-8 V for 15
+   iterations at omega 0.31 eps; its older window of 16 held the
+   convergence, so the floor read as "still contracting" and the decline
+   walked the run into a genuine Newton failure at 41 us. A second shape
+   (#112, #266): a cycle at 1.2-1.4e-6 with ONE step of 5.4e-8 inside the
+   newer window. Both are accepted by the split of 8. Monotone protection:
+   at every k >= 8 a geometric rate r is declined while r^8 < 1/4, i.e.
+   r < 0.84 (rule 8 accepted r >= 0.5; the rate-0.7 C++ test is still
+   declined). Not changed: the 8 eps limit, the absolute tol_dx, the dx cap
+   1e-6·max(1,|x_0|) (largest ||dx_k||/cap over ll13's accepts 0.04: not
+   the cause), the state kept (x_k: it was the best-omega iterate of its
+   window in 291 of 345 accepts; where not, both were below 7 eps).
+   The decline message now prints the windows' minima and maxima (and
+   "too few for two windows" under four iterations).

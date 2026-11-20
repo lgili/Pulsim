@@ -292,3 +292,51 @@ NEXT STEPS (in order):
    NOT run. The rule adds a 32-entry shift per Newton iteration only when the
    acceptance is on (transient Newton solves), nothing on linear circuits.
 - Full pytest on the 1428a5e3 tree (extension of 6e5241a6): 6434 passed, 114 skipped, 18 xfailed, 0 failed (6 min 39 s). ll13 is not covered by a pytest; only trbdf2_identity sees it.
+
+## Session 3 (2026-11-20): the ll13 regression traced and fixed (WIP at this tip)
+
+Trace build (TEMP, removed; env-switched old two-step rule vs window rule,
+both evaluated on every budget-exhausted solve). ll13_active_clamp_forward,
+trbdf2 defaults: old rule 382 budget-exhausted solves (342 both accept, 3
+only old, 3 only window); the old-rule run reproduces 14b0c81a (345 accepts,
+1538 steps).
+- FIRST DIVERGING SOLVE #85: t = 5.500006 us, h(dt_use) = 3.24e-13 s, 50
+  iterations. Newton CONVERGED (||dx|| 3.1e-2 -> 1.8e-5) then sat at
+  1.19e-8 V (node drain) for 15 iterations, omega 0.31 eps at every one.
+  Window kw = 16: newer min 1.143e-8 / max 1.77e-5, older min 3.35e-5 /
+  max 3.10e-2 -> "still contracting": the window rule DECLINED, the old
+  rule ACCEPTED. The kept iterate is the window's best-omega iterate
+  (omega 0.31 eps, relative dx 2e-10): a good state. The decline walked the
+  run into a genuine Newton failure at 41 us.
+- Second shape (#112 t = 11.5 us, #266 t = 37.5 us): a cycle at 1.2-1.4e-6
+  with ONE step of 5.4e-8 (resp. 1.95e-8) 8-9 iterations back: the newer
+  window's min fell 23x -> declined.
+- Not the cause: the dx cap (largest ||dx_k||/cap over accepts 0.04; the
+  x_0 of 1e6 V are the linear-solve retry starts, re-measured by the
+  engine's second solve), the worst phase (x_k not the window's best-omega
+  iterate in 54 of 345 accepts, all < 7 eps).
+- Reference: engine='pwl' + discontinuity_restart, dt 5e-10 (dsed refuses
+  the Shockley diodes). Its own error vs dt 1e-9: 1.6e-8 of range on the
+  states at 25 smooth instants (4k+1, 4k+3 us). The trbdf2 run has ~1e8 V
+  spikes of ~1e-13 s at the dead times (inductor current into roff 1e7) that
+  pwl steps over; states agree away from the edges.
+
+FIX (in the tree, `pwl/nonlinear_solve.hpp`): stagnated if, for SOME split
+k from min(8, kw) to kw, the newer k ||dx|| are not 4x below the older k's
+minimum and not over 2x their maximum (k = kw alone was rule 11; every solve
+it accepted is still accepted). Monotone rate r declined while r < 4^(-1/8)
+= 0.84 (rate-0.7 test still declined). Decline message prints the windows'
+min/max ("too few for two windows" under 4 iterations). DECISIONS 11
+amended. Two new C++ tests (converge-then-floor; one dip inside a cycle).
+With the fix (trace build, same arithmetic): ll13 RUNS, 1555 steps, 359
+roundoff accepts; 0 solves the old rule accepted are declined; state error
+at the 25 instants vs the reference 1.9738e-5 = the 14b0c81a run's
+1.9738e-5 (identical to 5 digits).
+
+RUNNING at this tip: the final extension build (TEMP removed), then C++
+layer5_v4/v3/step/sim/dsed (`.scratch/f5w/cxx.sh`).
+NEXT: ll08 vs pwl+restart dt 5e-9 (own error 1.5e-5 vs 1e-8 on i_L1);
+sweeps `.scratch/f5w/sweep.py len|tol|rand 200`; `.scratch/b14/rec.sh new
+compare`; `.scratch/ll13/heavy.py` (circuits > 50 accepts -> pytest);
+Python ll13 regression test; cut-set rtol 1e-9 strict xfail; cost; stateful
+and error-norm test files; full pytest; reviewer.
