@@ -363,3 +363,48 @@ definition`, long-form full table; `--previous` compares `exact_old` with an old
   accuracy_summary.py`, log `.scratch/sbm/run2.log` (ends `done <rc>`), twins
   `.scratch/sbm/twins2.log`. When `done 0`: check `accuracy_summary.py --check`, commit the
   three files, then the remaining steps above from step 2.
+
+### Rule (1) and the triage (d2f9968f .. , 2026-11-20)
+
+**Rule (1), a projected transient** (decided by the orchestrator; `metrics.collapsed_transient`,
+`exact_parts(truth_after=, parasitic=, limits_tol=)`, `exact_scoreboard.PARASITIC`,
+`event_record` flags an engine event when a `reinit_records` entry lies within 4 ulp of its
+instant; the rehearsal passes the same window). Condition (i): a projection record at the
+event. Condition (ii): the truth, at t_e + W·2^-k (k < 60, W = dt/100 for dsed, h for pwl),
+settles (a doubling of the offset moves it ≤ 1e-9 of span) within the cell's tol of the
+engine's right value. Then: instants += (truth right − engine right)²·tau_eff; limits for that
+value = its distance to the settled truth; `n_projected` counts it (`p<n>` in the full table).
+Tests: `test_exact_measure.py` (the reported case; the residual kept in limits; no record;
+settles elsewhere / after the window / drifts; an impulse the truth makes too).
+
+**The field.** `res.reinit_records` (`ReinitRecord.t`, `.dW`, `.states`, `.sample`). It is the
+only per-event projection report; the exact engine writes it only for the constraint re-init
+(`builder_adapter.hpp`, above 1e-9 of the scale), never for the slow-manifold projection
+(`scheduler.hpp` `project_` → `project_slow`) that produces `diode_half_wave_rl_load`'s
+−3.1e-6 V. So rule (1) changes no cell today (F-SB-3). Forced in a probe (every event flagged):
+dsed 0.0304 limits → 3.40e-5 instants, limits 3.05e-7 (the projected value −3.14e-6 V against
+the settled truth −6.28e-6 V: the projection freezes the source, missing L·g_off·dv/dt).
+
+**Impulse vs projection.** A fixed-engine impulse record (restart rule) books a jump of
+STATES that the truth makes too: the truth's own right limit is already the recorded value
+(`collapsed_transient` returns None at once: nothing collapsed), and its dW is the jump energy.
+A projection's value is reached by the truth only after tau_eff > 0, and the only energy it
+changes is the transient's dissipation.
+
+**Triage** (`.scratch` probe = `event_record` + `exact_parts`, worst column; F-SB-1 test = each
+unpaired right-limit row (restart-window step, no event) replaced by the engine's left value
+there, re-graded):
+
+| cell | rows that set it | F-SB-1 test | verdict |
+|---|---|---|---|
+| ll06_buck_vcswitch pwl+restart 0.999 | V(sw) right value at D1 turn-off (1.72 ms): 48.0 V, truth 0 V (continuous; i_L = g_off·48 there), truth reaches 48 V within h through a τ = L1·(g_off,S1+g_off,D1) = 13.6 ns transient | 0.999 → 0.999 | not F-SB-1: F-SB-3 (collapsed sub-step transient, no record; other turn-offs read between −24 V and 27 V) |
+| ll06_buck_vcswitch pwl+split / pwl+next 0.581 | V(sw) right value at D1 turn-off (108.8 µs): 27.9 V, truth 0 V; truth at t_e + h = 44.8 V: neither limit nor settled value | 0.581 → 0.639 | not F-SB-1 by the test: F-SB-3 (the value is consistent with a quadrature-line start at the event's own restart step, which the test does not replace) |
+| chopper_with_rc_snubber pwl+restart 0.069 | V(sw) left value at Dfw+ (300.3 µs): 1.373 V vs the truth's left limit 0 V at 300.397 µs; the truth AT the engine's instant is 1.373 V | 0.069 → 0.069 | not F-SB-1, not new: the restart rule takes the event's step in the new mode from its start (δ = −0.97 h); V(sw) is continuous there, so instants prices 0 and limits reads the slope over δ. pwl+split locates it (1.5e-5) |
+| boost_pfc_open_loop pwl+restart 0.061 | V(out) left values near 6 ms: 82.46 V vs 77.65 V (the engine's trajectory is off: smooth 0.030, 286 missing / 324 spurious events) | 0.061 → 0.061 | not F-SB-1, not new: the trajectory error the old measure saw (exact_old 0.0304; plain pwl the same); limits is its max-norm reading. pwl+split 7.8e-5 |
+| diode_rectifier pwl+split / pwl+next 0.016 | V(out) right value at every D1+ (24.6028 µs, ...): 9.969 V vs the truth's 9.808 V at its instant 24.3754 µs | 0.0161 → 0.0161 | not F-SB-1: F-SB-4 (D1+ located 0.227 h late; V(out) continuous, so instants prices 0 and limits reads the drift; dsed: δ ~ 1e-12 h) |
+| vcswitch_resistor pwl+split 0.0032 / pwl+restart 0.063 | the instants part: gate edge 20.0005 µs (threshold at mid-ramp), split δ = −0.005 h, restart +0.995 h | n/a | F-SB-2 (minimal case: builder + make_pwm_switch_fn; split with control_tick='state' is exact) |
+
+Findings pinned (strict xfail, `python/tests/test_restart_scoreboard_findings.py`): F-SB-2
+(split and restart variants), F-SB-3 (ll06 restart, ll06 split, rl_load dsed), F-SB-4.
+`test_exact_scoreboard.py` pins vcswitch_resistor pwl+split as F-SB-2 and
+diode_half_wave_rl_load dsed as F-SB-3 (floors), the other cells as ceilings with their part.

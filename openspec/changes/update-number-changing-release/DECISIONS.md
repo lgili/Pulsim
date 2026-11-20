@@ -423,3 +423,46 @@ Paralleled bridges, 20 ms, conductance-form diodes (the test as written):
   enters each bisection probe with exp(Re λ·d), and a non-finite probe does not fit (43a1f7c3).
 - Left as noted: the per-mode cache in `ExactLTI` is `mutable` and not thread-safe (same as the
   propagator caches before it); a step floored at 64ε still counts as a cut toward the budget.
+
+## 6. The exact scoreboard's measure in three parts, and rule (1), 2026-11-20
+
+Branch `feat/core-scoreboard-measure`. Evidence only: no library file changes, no default number
+moves. The measure, the old one kept beside it, the tests and the triage are in
+`fixes/restart-scoreboard.md` ("Measure v2"); the scoreboard's `## The measure` states it.
+
+1. **Definition.** `exact` = the largest of three parts of the worst column, each a fraction of
+   the truth's span: smooth (the engine's stored rows, minus the initial instant, the 0+ row and
+   the rows inside a matched event's displacement), instants (sqrt(Σ jump²·|δ| / T), a missing
+   event charged as displaced to the device's next event, at most 2 h), limits (max distance of
+   every recorded one-sided value from the truth's). The previous definition is kept as
+   `exact_old` for this release (json and table), and a `--previous` json without the measure
+   tag is compared on `exact_old`.
+2. **Rule (1), a projected transient (decided by the orchestrator).** At a matched event where
+   the engine REPORTS a projection (a `reinit_records` entry within 4 ulp of its instant) and
+   records a right value the truth does not have at its instant, the truth is evaluated at
+   t_e + W·2^-k (k < 60; W = the engine's declared parasitic window, `PARASITIC`: dt/100 for the
+   exact engine, from `project_`'s threshold 100/dt_max with dt_max = dt in the harness; h for
+   pwl). If it settles inside W (one doubling of the offset moves it by at most 1e-9 of span)
+   within the cell's tol of the engine's value, the right value is a transient collapsed in time:
+   priced in instants as (truth right − engine right)²·tau_eff (tau_eff = the settling offset, an
+   upper bound within 2x), its residual against the settled truth kept in limits, counted in
+   `n_projected`. Either condition failing leaves the limit as it is. A fixed-engine impulse
+   record is told apart by the data: the truth makes that jump too (its own right limit is
+   already the recorded value, carrying the jump energy dW the record books), so nothing is
+   collapsed and the rule does not apply; a projection's record would carry only the transient's
+   dissipation, and the truth reaches its value only after tau_eff.
+3. **What rule (1) changed: no cell.** No engine writes a record at the events it was made
+   for. The exact engine's slow-manifold projection (`scheduler.hpp` `project_` →
+   `project_slow`) writes none; `reinit_records` comes only from the constraint re-init
+   (`builder_adapter.hpp`), and only above 1e-9 of the circuit's scale. On
+   `diode_half_wave_rl_load` dsed the rule WOULD apply (forced in a probe: 0.030 limits →
+   3.4e-5 instants, limits 3.0e-7 = the frozen-source error of the projected value, −3.1e-6 V
+   against the settled truth's −6.3e-6 V; 3 turn-offs). Finding F-SB-3.
+4. **Triage of the cells the one-sided-limits part set.** See `fixes/restart-scoreboard.md`
+   ("Triage"). F-SB-1's test (each right-limit row at a restart-window step with no event
+   replaced by the engine's own left value, re-graded) moved none of them: none is F-SB-1.
+   New findings, strict xfails in `python/tests/test_restart_scoreboard_findings.py`: F-SB-2
+   (a switch_fn edge inside a step: split applies it from the step start, restart from the next
+   step), F-SB-3 (a diode turn-off behind a sub-step transient: a right limit the truth does not
+   have, no projection record), F-SB-4 (the split rule locates diode_rectifier's D1 turn-on
+   0.227 h late).
