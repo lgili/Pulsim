@@ -2721,6 +2721,7 @@ inline SimulationResult run_transient_trbdf2(
                 && t_stop - (t + h) <= Real{64} * h_min
                 && (!landed_on_bp || bp_t >= t_stop)
                 && !(t_next_tick > t && t_next_tick < t_stop - h_min)) {
+                if (sens.on()) [[unlikely]] sens.edge_past_end(t + h, sw_now, switch_fn(t_stop));
                 h = t_stop - t;
                 landed_on_edge = false;
                 gates_flat = true;

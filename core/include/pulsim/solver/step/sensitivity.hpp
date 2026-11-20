@@ -387,6 +387,23 @@ public:
         add_pending_(tau, dtau, "a gate edge");
     }
 
+    /// A gate edge at τ ≈ t_end that no step after it opened (trbdf2's
+    /// no-final-sliver rule, 64 h_min; pwl's restart rule at the last grid
+    /// point): x(t_end) is then the pre-edge side, one-sided in p when the
+    /// edge moves with a duty (dv/dD read 0 against 7.38): refused, as
+    /// `finish` refuses a pending event.
+    [[gnu::noinline]] void edge_past_end(Real tau, const topology::SwitchStateMask& before,
+                                         const topology::SwitchStateMask& after) const {
+        for (const Param& p : params_) {
+            if (p.kind == Param::Kind::Duty && p.field < before.size()
+                && p.field < after.size() && before.get(p.field) && !after.get(p.field)) {
+                refuse_step(tau, std::format("an event (a gate edge) at t = {} whose "
+                                             "jump in the derivative was not applied: "
+                                             "the run ends at it", tau));
+            }
+        }
+    }
+
     /// A PWL diode's crossing at τ, found by the engine's locator. The
     /// crossing signal reads x[var] (an ON branch-form diode) or the node
     /// voltage difference from − to (slope 1). `fac`, `a` are a factor of the

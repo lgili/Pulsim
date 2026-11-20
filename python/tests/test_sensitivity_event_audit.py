@@ -27,8 +27,9 @@ import pytest
 
 import pulsim as p
 
-from .test_sensitivity_events import (C0, GOFF, GON, GS_OFF, GS_ON, R0, R2, T_END_ON,
-                                      TAU_ON, TP, V, VS, VTH, _diode_on, _pulse_rc)
+from .test_sensitivity_events import (C0, D0, GOFF, GON, GS_OFF, GS_ON, R0, R2, T_END_ON,
+                                      TAU_ON, TP, V, VS, VTH, _cstep, _diode_on,
+                                      _pulse_closed, _pulse_rc, _truth_on)
 
 scipy_integrate = pytest.importorskip("scipy.integrate")
 
@@ -247,4 +248,73 @@ def test_every_cell_is_a_true_number_or_a_refusal_by_name(kind, dev, eng):
         assert s == pytest.approx(ref, rel=1e-6), (s, ref)
         return
     truth = _truth(kind, dev, t_last, name)
+    assert s == pytest.approx(truth, rel=1e-5), (s, truth)
+
+
+# The event AT t_end (DECISIONS 16, the reviewer's finding): an event within
+# the time resolution of the run's end, its jump never applied, read the left
+# limit (dv/dD 0.000 against 7.38; dv/dR -6.7e-4 against +4.4e-3). The pwl
+# grid is made to end at t_end (dt = t_end / n), so the event lies in its last
+# step. Each cell is a refusal by name or the truth; the same event one and a
+# half steps before t_end stays a number wherever the engine gives one.
+NOT_APPLIED = "whose jump in the derivative was not applied"
+END_EVENTS = {"duty_edge": ("S.duty", D0 * TP, 1e-7), "diode_turn_on": ("R.R", TAU_ON, 1e-8)}
+
+
+def _end_expected(kind, where, eng):
+    if eng == "pwl":
+        # plain pwl's own trajectory (first order from the start, 1e-4 V
+        # off) has not crossed yet: no event in its run, the number is
+        # that of its own map (h = 1e-4 R would step over its crossing)
+        return None if (kind, where) == ("diode_turn_on", "at_t_end") else (
+            STAIRCASE if kind == "duty_edge" else NOT_LOCATED)
+    if eng == "pwl+restart":
+        return NOT_APPLIED if (kind, where) == ("duty_edge", "at_t_end") else (
+            STAIRCASE if kind == "duty_edge" else NOT_LOCATED)
+    if eng == "esdirk43" and kind == "diode_turn_on":
+        return LANDING
+    return NOT_APPLIED if where == "at_t_end" else None
+
+
+@pytest.mark.parametrize("kind", list(END_EVENTS))
+@pytest.mark.parametrize("where", ["at_t_end", "before_t_end"])
+@pytest.mark.parametrize("eng", list(ENGINES))
+def test_an_event_at_t_end_is_refused_by_name_or_true(kind, where, eng):
+    name, tau, dt = END_EVENTS[kind]
+    t_end = tau * (1 + 1e-11) if where == "at_t_end" else tau + 1.5 * dt
+    engine, kw = ENGINES[eng]
+    kw = dict(kw)
+    if engine == "pwl":
+        kw["dt"] = t_end / round(t_end / dt)
+    want = _end_expected(kind, where, eng)
+
+    def run(R=R0, sens=True):
+        if kind == "duty_edge":
+            b = _pulse_rc(R=R)
+            sf = p.make_pwm_switch_fn(1 / TP, D0, b.switch_index_of("S"), b.graph.num_switches)
+        else:
+            b, sf = _diode_on(R=R), None
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            return p.simulate(b, t_end, engine=engine, switch_fn=sf,
+                              **kw, **({"sensitivities": [name]} if sens else {}))
+
+    try:
+        r = run()
+    except p.UnsupportedError as e:
+        assert want is not None, f"refused, the table expects a number: {e}"
+        assert want in str(e), str(e)
+        return
+    assert want is None, f"a number came back where the table expects a refusal ({want})"
+    s = float(r.sens("c", name)[-1])
+    t_last = float(r.sensitivity.times[-1])
+    assert t_last > tau
+    if eng == "pwl":   # the derivative of its own map
+        h = 1e-6 * R0
+        ref = (float(np.asarray(run(R0 + h, False).v("c"))[-1])
+               - float(np.asarray(run(R0 - h, False).v("c"))[-1])) / (2 * h)
+        assert s == pytest.approx(ref, rel=1e-6), (s, ref)
+        return
+    truth = (_cstep(lambda d: _pulse_closed(R0, C0, d, t_last), D0) if kind == "duty_edge"
+             else _truth_on(name, t_last))
     assert s == pytest.approx(truth, rel=1e-5), (s, truth)

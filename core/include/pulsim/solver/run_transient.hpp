@@ -3345,7 +3345,13 @@ inline SimulationResult run_transient(
             (void)step::run<step::Trapezoidal>(clock, body);
         };
         run_twin();
-        if (sens.on()) sens.finish(t_reached, x);
+        if (sens.on()) {
+            // an edge AT the last grid point under the restart rule (gates
+            // read at t_prev): no step follows to open it (sens_open)
+            const topology::SwitchStateMask g_last = gate_at(gate_t);
+            sens.edge_past_end(t_reached, g_last, gate_at(t_reached));
+            sens.finish(t_reached, x);
+        }
         if (hook_step) hooks->flush_steps();   // the step sink's batched steps
         if (diag && rd_steps > 0) {
             rd.unestimated_fraction =
