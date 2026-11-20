@@ -138,3 +138,47 @@ next two window steps) is resolved per stage, on the grid. diode_rectifier's D1 
 (`locate_islands`' refinement) in `restart_lined`'s stages, with trial solves of the SDIRK
 stage (as TR-BDF2's ESDIRK trial is a re-step of the method itself), then a split of that
 interval.
+
+## Gates (tip b0523a49 + notes; default options)
+
+- Byte compares vs the base build (`.scratch/bl.sh`): goldens, stateful 41, engines (incl. dsed),
+  step sequences, trbdf2_identity 377/377, pwl_identity default entries: IDENTICAL; the only
+  default-path difference is two NEW counter keys (`n_gate_events_bisected`,
+  `split_locator_trials`, 0) in the counters dict.
+- Moved, option-on only: golden `vsi_pwl_restart` (restart side), steps `vsi_pwl_split`,
+  pwl_identity 47 pwl+restart / pwl+split entries + static `pwm_src_restart` (list in
+  `.scratch/logs/bl_compare/pwlid.log`).
+- reference_status (strict 'interp' gate), cells that moved: pwl+split: 30 cells, err within a
+  few % except diode_half_wave_rl_load 6.2e-5 -> 5.8e-4 (agree) and vcswitch_resistor
+  0.0193 -> 0.0332, agree -> DISAGREE. The latter is the gate's trace, not the engine: the
+  strict gate reads stored rows + right limits only (`with_right_limits`), so an edge the split
+  now places INSIDE a step (20.0005 us, exact) is a linear ramp across the step there (it was
+  snapped onto the grid point 20.0, a sharp edge 0.5 ns early). The three-part measure (inner
+  events included) prices it 0. pwl+restart (side change, floor instead of ceil, first order
+  either way): better vcswitch_resistor 0.0546 -> 0.0050 (disagree -> agree), boost_pfc_open_loop
+  0.0304 -> 0.0191 (disagree -> agree), cl_buck_pi, cl_buck_aggressive_pi, cl_boost_pi,
+  ll06_buck_vcswitch; worse ll15_boost_closed_loop 0.0485 -> 0.216 (disagree both; record now
+  'chatter'), ll14_buck_closed_loop 0.139 -> 0.194 (disagree both), interleaved_buck_3ph
+  0.0025 -> 0.0097 (agree both). An off-grid edge's grid error is its fraction f into the step
+  on plain pwl's side and 1 - f on the old side: which cells win depends on where their edges
+  fall; ll15's chatter was not investigated.
+
+## Review (fresh-context, opus) and state
+
+Found, fixed: the opaque-gate bisection had no iteration cap; with snap < ulp(t) (t_start = 1000
+s at dt = 1e-7) it never ended. Now capped at 64 halvings and stops when the midpoint stops
+moving.
+
+Found, OPEN (next step): the refinement refines only the EARLIEST chord's crossers. Two
+independent diodes in one step, one convex and one concave signal (sine sources with phases,
+closed-form onsets `t = (asin(E/10) - phi)/w`, dt = 1 us): D1 truth 4.75 us, D2 truth 4.20 us;
+the chords say D1 first, D1 is refined to 4.75 us, and D2 is taken at its unrefined chord (+0.53
+h) or, when D2's true crossing is inside sub-step 1 (solved with D2 held OFF), at D1's instant
+(+0.40 h). No counter. Fix: after refining, evaluate every other crosser's signal on the trial
+solve at the refined instant; any that changed sign crossed earlier: refine it on [a, t_new]
+with that trial as its upper end, and repeat (at most the number of diodes). Also silent: the
+locator's give-ups (failed trial, 40-iteration cap, non-bracketing summed signal, mixed
+directions) keep the chord without a counter; a stateful switch_fn (one that assumes time only
+moves forward) is now called at bisection midpoints that go backwards.
+
+Also open: the diode crossing inside an SDIRK interval (above), the right-limit record (F-SB-1).
