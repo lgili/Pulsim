@@ -291,3 +291,65 @@ confirmed. Found and fixed (each with a test in
   reported as `pl_clamp`, not the calling law; the replay ticks at
   offset + kT, not the run's jittered instant (the OFF-edge check catches
   a drift).
+
+## 15. The stage recurrence on pwl and trbdf2 (group 5, 4.4; 2026-11-20)
+
+- Where: one header, `core/include/pulsim/solver/step/sensitivity.hpp`
+  (`step::StageSensitivity`). Every scheme describes a stage by its ψ
+  coefficients only (`StagePsi`: q̇ = a·(q − ψ), ψ a combination of q_n,
+  q̇_n and the earlier stages' q, q̇): `psi_trapezoidal`,
+  `psi_backward_euler_on`, `psi_bdf2_stage2`, `psi_sdirk_stage2`,
+  `psi_esdirk43`. The engines call `start / begin_step / stage / commit /
+  finish`; they never hand over their history objects, so the engines'
+  state is not touched (states bit-identical, tested). `core/tests/step/
+  test_sensitivity.cpp` checks each ψ against the scheme's own stage
+  derivative (ESDIRK: the Butcher rows on y' = λy).
+- Per stage: J·S = a(dψ/dp − ∂q/∂p) − ∂f/∂p; dq = q_x·S + ∂q/∂p,
+  dq̇ = a(dq − dψ). q_x = C_split/2 from `SegmentAssembler::split` (the
+  engine matrix is G + C_split/factor_dt, a = 2/factor_dt). ∂f/∂p and
+  ∂q/∂p: R (−G²·v), C (v), uncoupled L (−i, sign read from q_x), and the
+  four static Newton laws through `device::seed_params` (the law's AD
+  tangent, field names `L::kParamNames`). Start: S = 0, dq = ∂q/∂p(x0),
+  dq̇ = 0 (every engine starts from zero derivative slots).
+- No added factorization (5.5): a linear stage solves on the cache's
+  resident factor (`SegmentCache::resident_factor`, new: no build, no
+  refactor, no LRU touch); a Newton stage on the workspace factor of its
+  last iteration (J(x_k), X = x_{k+1}) and refines r = rhs − (J_lin +
+  J_nl(X))·S to `tol_newton_dx` relative (5.2); J_nl(X) from the
+  interface static refresh into a private matrix.
+- Counters (5.3): `n_sens_solves` and `n_sens_iterations` count the
+  accepted steps' back-substitutions, so `n_sens_solves = n_p × stages ×
+  accepted steps` holds on any linear run; a rejected attempt's work goes
+  to `n_sens_discarded` (TR-BDF2 RC at rtol 1e-8: 28 = 7 rejects × 2
+  stages × 2 params). Measured: Shockley rectifier on pwl, 20 000 solves,
+  20 620 iterations (≤ 2 per stage holds, 1.03 mean).
+- Contiguity, not a list of cases: `begin_step` and `finish` require the
+  step to start from the bits this object committed. Any step the
+  recurrence did not produce (an event landing, a zero-time settle, a
+  split, a retry, a restart, the freeze guard) fails that check and is
+  refused by name (`UnsupportedError(engine, "sensitivities")`, "group
+  6"); a mode change between stages is refused the same way. On pwl the
+  step's own flags (split, restart, retry, events, iters ≠ 1) refuse
+  before. Events are group 6.
+- Snapshot: the sensitivity state is NOT carried; `resume_from` with
+  sensitivities is refused by name on both engines (tested). If the
+  integration batch wants it, it is a new appended block (S, dq_n, dq̇_n,
+  t_last, x_last) — the block index is left to that batch. Also refused:
+  pwl `start_from_dc_op` (x0 would depend on p), the static pwl path,
+  stateful kinds (nonlinear C, saturable L, Lauritzen, machines,
+  external, IGBT L1 — a tail history), a coupled winding's L, > 64
+  parameters, and in Python a run that does not go through `Simulation`
+  (callbacks, closed loops, control ticks).
+- Truths (macOS arm64, Eigen 5):
+  RC at t = RC on TR-BDF2 rtol 1e-8 vs the closed form: 8.1e-8 (R and
+  C); on ESDIRK43: 2.1e-13 / 3.0e-13. Shockley rectifier on pwl (dt
+  1e-5, 40 ms) vs central differences of the same scheme: R 4.6e-9, C
+  3.7e-11, Rl 4.2e-10, I_S 1.27e-7, n 4.3e-9 (prototype worst 3.4e-7;
+  test 1e-6). Shockley on TR-BDF2 rtol 1e-9, 10 ms, vs central
+  differences of scipy Radau rtol 1e-12: R 6.8e-6, C 3.0e-8, Rl 3.6e-9,
+  I_S 1.3e-7, n 6.8e-7; ESDIRK43: 1.2e-7, 1.8e-10, 1.0e-10, 3.8e-8,
+  3.7e-9 (test 1e-4: TR-BDF2's own truncation error of the state is
+  the floor there, not the recurrence). MOSFET L1 (K, V_T) on pwl vs
+  central differences: within 1e-6.
+- 4.4 partial: the saturable inductor (L_0, I_sat) keeps a flux history
+  and is refused by name; Shockley and MOSFET L1 are covered.
