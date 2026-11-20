@@ -321,8 +321,9 @@ paralleled through `R_on = 0`) runs on `pwl` with
 `discontinuity_restart=True` and on `trbdf2` (re-initialised by three
 SDIRK(2,2) steps and recorded in `res.reinit_records`, the same record
 on both); on `pwl` without the rule it is refused with
-`feature='dependent_states'`, as on `trbdf2` with a stateful device
-history (Coss, Lauritzen, IGBT tail, PMSM, saturable inductor). On
+`feature='dependent_states'` (on `trbdf2` it also runs next to a
+stateful device history since the release fix group D2; a nonlinear state
+INSIDE the dependent set is still refused by name). On
 `trbdf2` no diode crossing is located inside the re-initialisation step
 itself (a diode left on its forbidden side is re-decided at the next
 step's start; one that crosses and returns inside it is missed). The

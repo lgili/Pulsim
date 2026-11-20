@@ -95,3 +95,29 @@ moves every trbdf2 gate edge, see below).
    gate edge (all trbdf2 goldens), which this slice cannot truth-back case
    by case. The fixed engine's E_oss booking stays a strict xfail
    (untouched, `run_transient.hpp` belongs to another agent).
+
+## F-S-1 — esdirk43 aborts at t = 0 with a current-driven nonlinear capacitor
+
+Minimal case (copied from `test_soft_switching_validation.py` on
+`feat/core-soft-switching-validation` 45076ddb): 0 V source, 1 mΩ,
+`add_nonlinear_capacitor(C0 = 1 nF, m = 0)` (a linear charge law), 10 A
+into the node. Truth: v = −I·R·(1 − exp(−t/RC)), tau = 1 ps, end −0.01 V
+(the brief's I·t/C does not apply: the 1 mΩ path carries the steady current).
+
+On the base: esdirk43 aborts at t = 0 (Newton at h_min, ||dx|| 8.7e-14,
+residual 9.3e-7 on KCL sw); TR-BDF2 runs (its q rows join only after the
+first commit) with max error 1.8e-3 V in the first ps; `add_capacitor` runs
+on both. Cause: the same inconsistent-slot start as F-3-4 — the stateful
+kinds' derivative slots start at init's zeros, ESDIRK's explicit first
+stage reads q' = 0 where the capacitor carries −10 A, and its q-row
+estimate (live from the first step, DECISIONS 17) is O(h) at every h down to
+h_min, where Newton stalls on round-off. Fix: a run that starts (not a
+resume) with a stateful kind takes its first step as the SDIRK(2,2) restart
+step of F-3-4 (`sdirk_left ≥ 1`), whose backward-Euler stages read no slot;
+the commit stores the consistent one. After: both integrators run; end
+−0.01 V; error after 50 ps < 1e-8 V. Left: the first step (h_init = 3e-12 s
+= 3 tau) is not error-controlled on the q rows (an SDIRK step's estimate
+covers the linear entries only), so the first ps is unresolved (max error
+1.19e-3 V on both integrators, overshoot to −0.01069 V at 3 ps).
+F-S-1's strict xfail on `feat/core-soft-switching-validation` turns XPASS
+when that branch meets this one: remove the mark at the merge.

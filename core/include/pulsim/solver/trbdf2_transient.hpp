@@ -2122,6 +2122,13 @@ inline SimulationResult run_transient_trbdf2(
         event_sample_t = tp;
     };
     Size sdirk_left = has_diodes ? opts.sdirk_after_settle : Size{0};
+    // A run start with a stateful kind is an SDIRK restart step: the kinds'
+    // derivative slots are init's zeros, not the current they carry (a
+    // current-driven nonlinear capacitor: esdirk43's explicit first stage
+    // read q' = 0, the q-row estimate was O(h) at any h and Newton stalled at
+    // h_min, F-S-1). Its backward-Euler stages read no slot; the commit
+    // stores the consistent one.
+    if (hs.any() && resume_from == nullptr) sdirk_left = std::max(sdirk_left, Size{1});
     std::vector<pwl::HistoryEntry> hist_snap, hist_s1, hist_s2, hist_f;
     std::vector<Real> est_v, est_sc;
     sparse::Matrix noise_J;

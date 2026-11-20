@@ -78,3 +78,24 @@ def test_dependent_states_next_to_a_stateful_kind_run_on_trbdf2():
     m = t > t0 + 1e-9
     assert len(r.reinit_records) == 1
     assert np.abs(i[m] - ip * np.exp(-R * (t[m] - t0) / (L2 + L))).max() < 1e-7
+
+
+@pytest.mark.parametrize("integrator", ["trbdf2", "esdirk43"])
+def test_a_current_driven_nonlinear_capacitor_starts(integrator):
+    """F-S-1: esdirk43 aborted at t = 0 (Newton at h_min) with a nonlinear
+    capacitor (m = 0: a LINEAR charge law) fed by 10 A: the kinds' derivative
+    slots start at zero, its explicit first stage read q' = 0 where the
+    capacitor carries 10 A, and the q-row estimate was O(h) at any h. The
+    run's first step is now an SDIRK restart step (no slot read). Closed
+    form v = -I·R·(1 - exp(-t/(R·C))), tau = 1 ps."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "a", "gnd", 0.0)
+    b.add_resistor("R", "a", "sw", 1e-3)
+    b.add_nonlinear_capacitor("C", "sw", "gnd", 1e-9, 25.0, 0.0)
+    b.add_current_source("I", "gnd", "sw", 10.0)
+    kw = {"integrator": integrator} if integrator == "esdirk43" else {}
+    r = p.simulate(b, t_end=3e-7, engine="trbdf2", **kw)
+    t, v = np.asarray(r.times), np.asarray(r.v("sw"))
+    assert v[-1] == pytest.approx(-0.01, rel=1e-6)
+    m = t > 5e-11   # past the unresolved first picoseconds (the restart step is 3 tau)
+    assert np.abs(v[m] + 0.01 * (1 - np.exp(-t[m] / 1e-12))).max() < 1e-8
