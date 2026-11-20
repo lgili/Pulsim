@@ -2549,6 +2549,7 @@ private:
                 && loc_t_tol_ > Real{0} && system_.has_exact_step()) {
                 advance_(t_event, x, loc_t_tol_, loc_dx_);
                 loc_dx_ -= x;
+                loc_dt_ = root_time_error_(t_event, x, aux_index);
             }
         }
 
@@ -2575,8 +2576,10 @@ private:
         const MaskT new_mask =
             effective_mask_(switch_fn_(advance_past(t_event)));
 
-        // Drop spurious same-mask gate edges silently.
-        if (ptype == PredicateType::GateEdge && new_mask == old_mask) {
+        // Drop spurious same-mask gate edges silently — unless a diode is undecided
+        // there (a source corner on its zero: F5 (a)).
+        if (ptype == PredicateType::GateEdge && new_mask == old_mask
+            && !undecided_at_time_event_(t_event, x)) {
             // F-X-1: a poll landing of a gate that names no edge, which changed
             // nothing, is not a time event: as one it made resolved_scale_ the time
             // left to t_end, so the parasitic cluster shrank as the run neared its
@@ -2654,6 +2657,7 @@ private:
         }
         settle_decisions_ = false;
         loc_dx_.resize(0);
+        loc_dt_ = Real{0};
 
         // Consistent reinitialization (Phase-3 item 2). The event
         // deposits x off the new mode's slow manifold — a µA of
@@ -2679,6 +2683,65 @@ private:
             // trial records truncated): left under old_mask, right under final_mask
             if (hook_event) hooks_->event(t_event, hook_x_left_, old_mask, x, final_mask);
         }
+    }
+
+    /// The located root's TIME error (F5 (b)): the locator stops where the crossing
+    /// signal g is zero only to its significance bound B (signal_bound_ at the
+    /// root), so the root is known to t_tol + B / |ġ| (ġ the signal's slope there
+    /// along the pre-event mode, read as the secant to the first significant rung
+    /// of the ladder). A decision in another mode reads its own signal over that
+    /// window as noise (ladder_sign_'s dt0): the OFF mode of a conductance diode
+    /// amplifies the ON signal's B by 1 + R·g_on (1e5: +1.35e-10 V at a located
+    /// turn-off on a falling ramp, which kept the diode ON while v_D fell at
+    /// −2.77e5 V/s). t_tol alone when the signal never becomes significant.
+    [[nodiscard]] Real root_time_error_(Real t, const Vector& x, int aux_index)
+        requires HasExactStep<System> {
+        const SchedulerDiode* d = aux_index >= 0 ? diode_of_(aux_index) : nullptr;
+        if (d == nullptr) return loc_t_tol_;
+        const bool on = diode_bits_.get(d->switch_idx);   // the pre-event mode
+        const auto prm = d->params();
+        const auto g_of = [&](Real tau, const Vector& xx) {
+            return models::SwitchedDiode::crossing_signal(on, law_v_(*d, tau, xx), prm);
+        };
+        const Real g0 = g_of(t, x);
+        Real dk = Real{0}, gk = Real{0};
+        if (ladder_sign_(t, x, *d, decision_cap_(t), g_of, dk, nullptr, Real{0}, &gk) == 0)
+            return loc_t_tol_;
+        const Real slope = std::abs(gk - g0) / dk;
+        const Real b = signal_bound_(*d, t, x, signal_scale_(*d, t, x), signal_abs_(*d, t, x));
+        return slope > Real{0} ? loc_t_tol_ + b / slope : loc_t_tol_;
+    }
+
+    /// A time event that keeps the mask (a source corner, a tick, a poll) still
+    /// changes every predicate's RATE (the source's new slope enters ġ), so a diode
+    /// whose signal sits in its zero band, or past its threshold, there is decided
+    /// as the settle cascade would (its first round: in band → by the sign of the
+    /// first non-vanishing derivative after t, zero_band_on_). The scan after the
+    /// event cannot: it leaves a zero start leaving on its event side to the mode
+    /// decision (locate_event_exact_), which a dropped event never ran — a pulse
+    /// rising from 0 V kept its diode OFF under 10 V (F5 (a)). True when a diode
+    /// would flip: the event then runs the full decision.
+    [[nodiscard]] bool undecided_at_time_event_(Real t, const Vector& x) {
+        if constexpr (HasNodePairVoltage<System>) {
+            if (!has_diodes_) return false;
+            const MaskT mask = system_.current_mask();
+            const Real tol = zero_band_tol_(t, x);
+            for (const auto& d : diodes_) {
+                const bool on = diode_bits_.get(d.switch_idx);
+                const Real v_d = law_v_(d, t, x);
+                const auto prm = d.params();
+                const bool by_value = models::SwitchedDiode::decide(on, v_d, prm);
+                const bool in_band =
+                    std::abs(models::SwitchedDiode::crossing_signal(on, v_d, prm))
+                    <= (d.reads_current() ? signal_bound_(d, t, x, Real{-1}, Real{0}) : tol);
+                if ((in_band || by_value != on)
+                    && zero_band_on_(t, x, d, mask, tol, in_band ? false : by_value) != on)
+                    return true;
+            }
+        } else {
+            (void)t; (void)x;
+        }
+        return false;
     }
 
     // ----- v2.0 Phase 3: diode-commutation machinery -----------------
@@ -2878,10 +2941,13 @@ private:
     /// decision, the settle cascade, the LCP re-settle and the guard's repair.
     template <class G>
     int ladder_sign_(Real t0, const Vector& x0, const SchedulerDiode& d, Real cap,
-                     G&& g_of, Real& d_out, const Vector* dx0 = nullptr)
+                     G&& g_of, Real& d_out, const Vector* dx0 = nullptr,
+                     Real dt0 = Real{0}, Real* g_out = nullptr)
         requires HasExactStep<System> {
         // dx0: the start's own error (a located root's): the signal moved by it
-        // along the mode, |g(x0 + dx0) − g(x0)|, is not significant either
+        // along the mode, |g(x0 + dx0) − g(x0)|, is not significant either.
+        // dt0: the same root's TIME error (root_time_error_): the signal moved
+        // along this mode over dt0, sources included, is not significant either
         if (dx0) x_offp_ = x0 + *dx0;
         // the trajectory's scale over the horizon: the propagated inputs'
         // rounding is relative to it, not to a state at rest
@@ -2897,8 +2963,13 @@ private:
                 advance_(t0, x_offp_, delta, x_lad2_);
                 b_loc = std::abs(g_of(t0 + delta, x_lad2_) - g);
             }
+            if (dt0 > Real{0}) {
+                advance_(t0, x0, delta + dt0, x_lad2_);
+                b_loc = std::max(b_loc, std::abs(g_of(t0 + delta + dt0, x_lad2_) - g));
+            }
             if (std::abs(g) > signal_bound_(d, t0 + delta, x_lad_, s0, v0) + b_loc) {
                 d_out = delta;
+                if (g_out) *g_out = g;
                 return g > Real{0} ? 1 : -1;
             }
         }
@@ -3085,7 +3156,7 @@ private:
                     [&](Real tau, const Vector& xx) {
                         return models::SwitchedDiode::crossing_signal(
                             false, system_.node_pair_voltage(d.from, d.to, tau, xx), prm);
-                    }, dj, dx0);
+                    }, dj, dx0, dx0 ? loc_dt_ : Real{0});
                 // no significant rung: zero to double precision up to the cap,
                 // the diode keeps its mode (rest and exact ties stay quiet)
                 on = sg > 0;
@@ -3519,6 +3590,7 @@ private:
     // The located root's time tolerance (locator) and the state error it
     // carries, x(t + t_tol) − x(t) in the pre-event mode (fire_event_).
     Real loc_t_tol_ = Real{0};
+    Real loc_dt_ = Real{0};   // root_time_error_ of the located diode event being decided
     Vector loc_dx_, x_lad2_, x_offp_;
     std::vector<Vector> scan_x_;
     Eigen::VectorXcd scan_zdd_;   // locate_event_exact_'s certificate: z̈ at the step start
