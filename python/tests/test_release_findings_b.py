@@ -341,3 +341,32 @@ def test_decimated_rule_run_keeps_no_event_limits():
     assert r.right_limit_index is None and r.inner_events is None
     r1 = _quiet(p.simulate, b, 2e-4, switch_fn=pwm, dt=T / 1000, **PWL_REL)
     assert r1.right_limit_index is not None and len(r1.right_limit_index) > 0
+
+
+# ---------------------------------------------------------------------------
+# Integration (batch 14q): the thermal summary hands its event-limit view to
+# the loss summary; the inner events must be inserted ONCE
+# ---------------------------------------------------------------------------
+
+def test_inner_events_are_inserted_once_through_the_thermal_summary():
+    """device_thermal_summary inserts the inner events, then calls
+    device_loss_summary on that view, which inserted them again (a view
+    reads every attribute it does not set from its base). Truth: the loss
+    summary of the result itself, read through the one shared conduction
+    function (group G). The bridge's diode turn-ons fall inside steps."""
+    b = _bridge(0.7)
+    r = _quiet(p.simulate, b, 0.02, dt=1e-5, **PWL_REL)
+    assert r.inner_events is not None and len(r.inner_events["times"]) > 0
+    once = p._result_views.with_inner_events(r)
+    twice = p._result_views.with_inner_events(once)
+    assert len(twice.times) == len(once.times)
+    loss = {e["name"]: e for e in _quiet(p.device_loss_summary, b, r)}
+    st = [p.FosterStage(R_th_K_per_W=1.0, tau_s=1e-4)]
+    diodes = [n for n, e in loss.items() if e.get("kind") == "diode"]
+    assert diodes
+    th = _quiet(p.device_thermal_summary, b, r,
+                thermal_specs={n: {"stages": st} for n in diodes})
+    assert len(th) == len(diodes)
+    for e in th:
+        assert e["P_cond_avg"] == pytest.approx(
+            p.losses.conduction_power_avg(loss[e["name"]]), rel=1e-9), e["name"]

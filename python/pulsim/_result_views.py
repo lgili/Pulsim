@@ -296,6 +296,7 @@ def with_inner_events(result):
     keep = np.ones(n + m, dtype=bool)
     keep[new_inner] = False
     out._inner_keep = keep
+    out.inner_events = None   # inserted as rows; a view would hand its base's on again
     sw = getattr(result, "switch_states", None)
     if sw is not None:
         out.switch_states = np.insert(np.asarray(sw, dtype=bool), pos,
