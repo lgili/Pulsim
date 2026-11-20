@@ -72,3 +72,30 @@ Implementation choices not covered by the design:
     by another change), `test_doc_snippets.py:375` (runtime budget). Not
     converted here: each needs its own count, and some files are being
     edited elsewhere.
+
+## Close-out (2026-11-20, branch feat/core-benchmark-harness-closeout over 77ce4a28)
+
+12. **Wall-clock assertions (task 4.4), every one of the inventory in 11.**
+    Re-inventoried with `grep -nE 'perf_counter|time\.time\(\)|monotonic|elapsed|timeit'`
+    over `python/tests` on 77ce4a28: nine of the ten were already converted
+    by 41794994 ("test: no test asserts wall time"); one was still live.
+
+    | site | old assertion | now |
+    |---|---|---|
+    | `test_dsed_diode_events.py` DCM buck | `elapsed < 5 s` | `rd.n_accept < 100_000` (10,158 measured; 41794994) |
+    | `test_dsed_stiff_sine.py` 3 cases | `elapsed < 5 s` | `rd.n_accept < 100_000` (~50.1k measured; 41794994) |
+    | `test_dsed_without_scipy.py` 5 ms buck | `elapsed < 5 s` | native result type + `0 < n_accept <= 10_000` (41794994) |
+    | `test_dsed_without_scipy.py` speed-up | wall ratio `> 2` | step ratio `5 · n_accept(dsed) <= n_steps(pwl)` (41794994) |
+    | `test_sampled_ac.py` cost vs points | time ratio `< 8` (later `< 2`) | `n_period_runs` equal for 10 and 400 points (41794994) |
+    | `test_shipped_yaml_examples.py` | `elapsed < 20 / 60 s` | rows `<= MAX_STEPS + 1` (THIS change: 41794994 only said "asserted above"; it was implied by the grid, now asserted) |
+    | `test_steady_state.py` brute force | `t_ss < 1 s` | `n_period_runs < 20` (27 under the regression below; 41794994) |
+    | `test_subsystems.py` build growth | time ratio `< 24`, `< 0.05 s` | REMOVED (41794994): the growth is printed only. The C++ builder exposes no operation counter, so linearity of `add_*` / `branch_id_of` is unguarded by any assertion; restoring it needs a C++-side counter or test (debt, not this change) |
+    | `test_doc_snippets.py` runtime budget | `total wall <= 60 s` | THIS change: rows returned by `pulsim.simulate` in all executed docs `<= 2,900,000` (2,175,414 measured, 33 % margin); wall time printed per doc |
+    | `test_sweep_path_aware.py:269`, `test_design_steady_and_batch.py:159` | `wall_time_s > 0`, `wall_s >= 0` | kept: field-presence checks, cannot fail under load |
+
+    Each converted gate was shown to FAIL on a deliberate regression in a
+    scratch copy (`.scratch/regress`, package + tests copied, not committed):
+    `steady_state(verify_periods=20)` default (was 8) → `assert 27 < 20`
+    fails; `frequency_response` running one extra period per frequency →
+    `assert 43 == 433` fails; tutorial 06 at `dt=5e-9` (was 2e-8) →
+    `3975414 <= 2900000` fails. The unmodified copies pass.

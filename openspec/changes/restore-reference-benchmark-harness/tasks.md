@@ -19,7 +19,7 @@
 - [ ] 4.1 `RunCounters` in `solver/result.hpp`; increments in the fixed and Newton paths; reuse `CacheMetrics`, `TrBdf2Stats`, DSED stats; bind as `result.counters`; stubs via `scripts/generate_stubs.py` — OPEN: no kernel change in this pass; the gate reads the counters the kernel already reports (DECISIONS 1)
 - [ ] 4.2 Gate: results of the whole existing suite are bit-identical with the counters added (they are increments only) — OPEN: nothing compiled in yet
 - [ ] 4.3 `benchmarks/manifests/perf_counters.yaml` for 12 circuits × engines; test: `pwl` counters ≤ frozen, `trbdf2` / `dsed` ≤ 1.02 × frozen; a deliberate extra factorisation per step in a scratch build makes it fail — OPEN: frozen for 12 circuits x engines and gated; non-vacuity is an injected extra refactor per step in memory, not a scratch build
-- [ ] 4.4 Inventory the wall-clock assertions in `python/tests`; convert each to a count or ratio or remove it; list them in the PR — OPEN: inventory in DECISIONS 11, not converted
+- [x] 4.4 Inventory the wall-clock assertions in `python/tests`; convert each to a count or ratio or remove it; list them in the PR — every site listed old → new in DECISIONS 12; nine converted by 41794994, the doc-snippet budget here (row count); subsystems growth removed (no builder counter); three gates shown to fail on a deliberate regression
 
 ## 5. Golden checkpoints
 - [x] 5.1 Golden format, `--update-goldens`, comparison (exact integers and digest, `atol + rtol·|g|` for values)
