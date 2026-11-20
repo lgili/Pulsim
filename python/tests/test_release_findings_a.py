@@ -168,6 +168,8 @@ def _psfb(primary):
 
 
 def _psfb_vout(primary, **kw):
+    """The output voltage v(vout) - v(rect_neg). The secondary floats: its common mode is
+    set by the diodes' g_off leaks alone (mV, rounding), not a circuit quantity."""
     b = _psfb(primary)
     sw = p.make_phase_shift_full_bridge_fn(
         switching_frequency=100e3, phase_shift=1.0, leg_a_hs_idx=0, leg_a_ls_idx=1,
@@ -175,22 +177,42 @@ def _psfb_vout(primary, **kw):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         res = p.simulate(b, t_end=0.2e-3, switch_fn=sw, **kw)
-    return float(np.asarray(res.v("vout"))[-1])
+    return float(np.asarray(res.v("vout"))[-1] - np.asarray(res.v("rect_neg"))[-1])
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "release finding F-3-7: traced, parked for group C (mode selection). Restart stage 1 at "
-    "the HS_A turn-off (44.90 us) is solved in the step-start diode mask (D_LS_A OFF): the "
-    "saturable L_leak is cut into g_off, Newton it 0 puts mid_a at -1.26e4 V, then rect_neg/vout "
-    "bounce 0.2-3.3 V at residual ~1e-9 for 50 iterations (round-off at that scale); the event "
-    "iteration never re-decides (it=0), each halving doubles |x| (803 V bounce at dt/64). "
-    "Restart-less 6.911 V, linear primary 6.890 V"))
-def test_f37_saturable_psfb_runs_under_the_restart_rule():
-    """Below its knee the saturable primary is the linear one: the restart rule must run it
-    and land with the linear primary (restart-less: 6.913 V vs 6.857 V linear)."""
-    v_lin = _psfb_vout("linear", dt=50e-9, **RESTART)
-    v_sat = _psfb_vout("saturable", dt=50e-9, **RESTART)
-    assert v_sat == pytest.approx(v_lin, rel=0.01), (v_sat, v_lin)
+# mpmath truth (benchmarks/tools/exact_truth.py of feat/core-soft-switching-validation, 30
+# digits) of the LINEAR primary at the switch_fn's exact gate edges (leg B at T/2pi: off the
+# 50 ns grid, so the split's landings), the secondary tied to ground by 1 GOhm: v_out(200 us).
+F37_LINEAR_TRUTH = 6.856714473154
+# The saturable primary, split, its own limit (dt 50 / 25 / 12.5 / 6.25 ns: 6.8655416568,
+# ...6940, ...7045, ...7064; the linear twin's errors against the truth at the same steps
+# -7.4e-8, -2.4e-8, -9.7e-9, -2.0e-9). Grounding the secondary (1 kOhm, short) gives the same
+# value to 10 digits.
+F37_SATURABLE_LIMIT = 6.86554171
+
+
+@pytest.mark.parametrize("selector", ["legacy", "auto"])
+def test_f37_saturable_psfb_runs_under_the_restart_rule(selector):
+    """F-3-7: restart stage 1 at a gate edge was solved by Newton in the step-start diode
+    mask (D_LS_A OFF): the saturable L_leak cut into g_off, mid_a at -1.26e4 V, the floating
+    secondary's iterate bouncing volts at that scale: abort. The edge's mode is now decided
+    before the Newton solve (on the stage's linearization at the pre-edge state). 'auto'
+    runs a Newton circuit on the settle; 'lcp' refuses it by name."""
+    split = dict(RESTART, mode_selection=selector, enable_substep_state_correction=True)
+    v_lin = _psfb_vout("linear", dt=50e-9, **split)
+    assert v_lin == pytest.approx(F37_LINEAR_TRUTH, abs=2e-7)
+    v_sat = _psfb_vout("saturable", dt=50e-9, **split)
+    assert v_sat == pytest.approx(F37_SATURABLE_LIMIT, abs=2e-7)
+    # without the split leg B's edges act at the grid (another circuit, no truth): it runs,
+    # and the saturable - linear difference is the split's to 1e-3 of it
+    plain = dict(RESTART, mode_selection=selector, enable_substep_state_correction=False)
+    d = _psfb_vout("saturable", dt=50e-9, **plain) - _psfb_vout("linear", dt=50e-9, **plain)
+    assert d == pytest.approx(F37_SATURABLE_LIMIT - F37_LINEAR_TRUTH, rel=0.05)
+
+
+def test_f37_lcp_refuses_the_saturable_psfb_by_name():
+    with pytest.raises(p.UnsupportedError, match="Newton device"):
+        _psfb_vout("saturable", dt=50e-9, mode_selection="lcp", **RESTART)
 
 
 # ---- F-3-1: restart + split not rounding-stable at a diode turn-on ----------------------------
