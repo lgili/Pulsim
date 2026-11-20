@@ -714,6 +714,9 @@ first" excuses real violations. The bridge1_vf07 / rule-on improvements listed a
 LOCATED crossing (run the scan of the settled mode from the event up to 1e4·h_e and judge only up to
 its first root), not by a transient length; and for lcp/auto the LCP's leakage-level port current
 classification. Strict xfail `test_the_overlap_of_d2_and_d6_is_kept[legacy|lcp|auto]`.
-The final tip's must-not-move numbers are those measured BEFORE (c) (the compares on 78b5…/1f9f1a05+
+The final tip's must-not-move numbers are those measured BEFORE (c) (the compares on 5613abbe, the
 poll scoping): goldens identical, bit-identity 36/36 + 36/36, 243 cells identical, rtol 111/0/15,
 rule-on boost_pfc 7.36e-10 → 2.95e-12; this revert restores that C++ exactly.
+Verified on 738acf8f: full pytest 6246 passed / 110 skipped / 12 xfailed; `-m reference` 383 passed;
+C++ dsed tests (Eigen 5) green; ruff check clean. Not run: Eigen 3.4.0, g++, full ctest, a second
+reviewer on 79330ab7..5613abbe (scoping + lazy root error came after the review).
