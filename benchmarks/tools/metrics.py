@@ -166,46 +166,46 @@ def rule_ratio(t, y, ref: Reference, *, rtol: float, atol: float, exclude=()) ->
     return float(np.abs(ym - rm).max() / (rtol * rng + atol))
 
 
-def exact_flow(td, yd, events=()):
-    """A callable reading a DENSE trace of the exact flow (the exact engine run at a
-    much smaller ``output_rtol``, the same events) at any instant: the quadratic
-    through the three dense samples nearest it inside its own inter-event segment
-    (``events``; a jump's right-limit row, at the event or one ulp after it, opens
-    the next segment), linear when the segment holds two. The rule's
-    promise is about the exact trajectory: a reference with its own chord error
-    (trbdf2 at rtol 1e-8, read linearly between its steps) put 48 of the 54
-    cells past 1 that sit at 0.96..0.9997 against this flow (group F, session 4)."""
+def rule_ratio_flow(t, y, td, yd, *, rtol: float, atol: float, exclude=()) -> float:
+    """:func:`rule_ratio` against a DENSE trace of the exact flow (the exact engine at a
+    much smaller ``output_rtol``, the same events): at each chord's midpoint the flow is
+    the quadratic through the three samples nearest it among the dense samples inside
+    the chord and the chord's own two ends (exact samples too) -- one smooth piece: a
+    rule chord holds no event and no source corner. The rule's promise is about the
+    exact trajectory: trbdf2 at rtol 1e-8 read linearly between its steps put 48 of the
+    54 cells past 1 that sit at 0.96..0.9997 against the flow (group F, session 4)."""
+    t = np.asarray(t, dtype=float)
+    y = np.asarray(y, dtype=float)
     td = np.asarray(td, dtype=float)
     yd = np.asarray(yd, dtype=float)
-    ev = np.sort(np.asarray(events, dtype=float))
-    seg = np.searchsorted(ev, td, side="left")   # ev[k-1] < t <= ev[k]: segment k
-    dup = np.zeros(td.size, bool)               # a jump's right limit (pulsim.with_right_limits
-    dup[1:] = ((td[1:] == td[:-1])               # puts it at nextafter(t)) opens the next segment
-               | ((td[1:] == np.nextafter(td[:-1], np.inf)) & np.isin(td[:-1], ev)))
-    seg[dup & np.isin(td, ev)] += 1
-    last = np.ones(td.size, bool)
-    last[:-1] = ~dup[1:]                         # an event sample with no right-limit row
-
-    def f(m):
-        m = np.atleast_1d(np.asarray(m, dtype=float))
-        out = np.empty_like(m)
-        for q, x in enumerate(m):
-            k = int(np.searchsorted(ev, x, side="left"))
-            j = int(np.searchsorted(td, x))
-            near = [i for i in range(max(j - 4, 0), min(j + 4, td.size))
-                    if seg[i] == k or (k > 0 and td[i] == ev[k - 1] and last[i])]
-            near = sorted(sorted(near, key=lambda i: abs(td[i] - x))[:3])
-            ts, ys = td[near], yd[near]
-            if len(near) < 3:
-                out[q] = np.interp(x, ts, ys)
-                continue
-            l0 = (x - ts[1]) * (x - ts[2]) / ((ts[0] - ts[1]) * (ts[0] - ts[2]))
-            l1 = (x - ts[0]) * (x - ts[2]) / ((ts[1] - ts[0]) * (ts[1] - ts[2]))
-            l2 = (x - ts[0]) * (x - ts[1]) / ((ts[2] - ts[0]) * (ts[2] - ts[1]))
-            out[q] = l0 * ys[0] + l1 * ys[1] + l2 * ys[2]
-        return out
-    f.samples = (td, yd)
-    return f
+    keep = np.flatnonzero(np.diff(t) > 0)
+    lo, hi = t[keep], t[keep + 1]
+    if len(exclude):
+        bad = np.zeros(lo.shape, bool)
+        for a, b in np.asarray(exclude, dtype=float).reshape(-1, 2):
+            bad |= (lo < b) & (hi > a)
+        keep, lo, hi = keep[~bad], lo[~bad], hi[~bad]
+    if not keep.size:
+        return float("nan")
+    i0 = np.searchsorted(td, lo, side="right")
+    i1 = np.searchsorted(td, hi, side="left")
+    worst = 0.0
+    for q, k in enumerate(keep):
+        m = 0.5 * (lo[q] + hi[q])
+        ts = np.r_[lo[q], td[i0[q]:i1[q]], hi[q]]
+        ys = np.r_[y[k], yd[i0[q]:i1[q]], y[k + 1]]
+        if ts.size > 3:
+            c = np.sort(np.argsort(np.abs(ts - m))[:3])
+            ts, ys = ts[c], ys[c]
+        if ts.size < 3:
+            f = 0.5 * (ys[0] + ys[-1])
+        else:
+            f = (ys[0] * (m - ts[1]) * (m - ts[2]) / ((ts[0] - ts[1]) * (ts[0] - ts[2]))
+                 + ys[1] * (m - ts[0]) * (m - ts[2]) / ((ts[1] - ts[0]) * (ts[1] - ts[2]))
+                 + ys[2] * (m - ts[0]) * (m - ts[1]) / ((ts[2] - ts[0]) * (ts[2] - ts[1])))
+        worst = max(worst, abs(0.5 * (y[k] + y[k + 1]) - f))
+    rng = max(float(np.ptp(yd)), 1e-3 * float(np.abs(yd).max()))
+    return float(worst / (rtol * rng + atol))
 
 
 def err_max(t, y, ref: Reference, *, abs_scale: float = 0.0, exclude_t0: bool = False,

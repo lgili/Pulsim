@@ -299,16 +299,15 @@ def rule_check(res, ref, cols, rtol, atol=1e-9, flow=None):
     the worst ratio over the observables, the steps that hold a switch-state change
     in either trace left out (the rule promises nothing across an event).
     ``flow``: the same run at a much smaller output_rtol (same events): the ratio is
-    then read against the exact flow it samples (metrics.exact_flow), not against
+    then read against the exact flow it samples (metrics.rule_ratio_flow), not against
     ``ref``'s own chord between its steps."""
     tr = traces(res, cols)
     t, ys, sa = tr
     if flow is not None:
         td, yd, _ = traces(flow, cols)
-        ev = np.asarray(res.event_times, dtype=float)
         excl = switching_steps(sa, t) + event_steps(res)
-        return float(np.nanmax([metrics.rule_ratio(t, ys[c], metrics.exact_flow(td, yd[c], ev), rtol=rtol,
-                                                   atol=atol, exclude=excl) for c in cols]))
+        return float(np.nanmax([metrics.rule_ratio_flow(t, ys[c], td, yd[c], rtol=rtol, atol=atol,
+                                                        exclude=excl) for c in cols]))
     tr_, yr, sb = ref
     excl = switching_steps(sa, t) + switching_steps(sb, tr_) + event_steps(res)
     if len(tr_) > 1:   # the reference's t0 sample is its given (maybe inconsistent) start

@@ -552,3 +552,61 @@ reference_status exit 0; ruff clean; `openspec validate --all --strict` 79/79;
 output_rtol 1e-4/1e-5/1e-6 on 100 benchmark circuits (26 skipped by the tool), forward converter
 and active clamp included. Not run: Eigen 3.4.0, Windows/MSVC, a second reviewer pass on the
 review fixes.
+
+## Session 4 — branch `fix/core-release-f4-chord-bound` (from 6cb51c00, C++ ffdf5007)
+
+### Item 1 — the output rule's promise: the diagnosis (evidence before code)
+
+`.scratch/f4/both.py` (auto+next cell, the 100 circuit units with a rule cell): the
+rule ratio against the harness's reference (trbdf2 rtol 1e-8, read linearly between its
+steps) and against the engine's OWN exact flow (the same cell at output_rtol/100, event
+times asserted bit-equal on all 100). Base tip ffdf5007:
+
+| | ratio vs trbdf2 ref > 1 | ratio vs exact flow > 1 |
+|---|---:|---:|
+| cells | 54 | 6 (ll06 635, lcc_resonant_inverter, active_clamp_forward, half_bridge_inverter_lc 6.4, chopper_with_rc_snubber 1.42; flying_capacitor 1.0002) |
+
+* **48 of the 54 are the reference's own error**, not the rule: against the exact flow
+  they sit at 0.96..0.9997 (high_q_rlc_ringdown 12.4 → 0.9998: the trbdf2 reference had
+  2 points in the chord the flow resolves with 80; sine_voltage_rc 3.11 → 0.19 (0 reference
+  points in the chord); ll09 59.6 → 0.988; ll10 93.5 → 0.982; ll07 8.16 → 0.995; the
+  rectifiers 3..5.4 → 0.96..0.998). The "34 cells within 1.25×" are this: the bound is
+  TIGHT (0.98–0.9997 of its tolerance against the flow), so any reference error tips them
+  over. Not a constant in d²/8, not the midpoint (the bound holds for every τ), not the
+  range (the engine's range so far ⊆ the run's range: its tolerance is the smaller one).
+* **The genuine violations are not the second derivative read at the interval start.** The
+  bound in `exact_chord_step` was already the rigorous per-mode form the brief asks for
+  (Σ_k |V_jk||z̈_k| max(1, e^{Re λ d}) with the exact-at-τ=0 refinements, Peano kernel ≤ d²/8)
+  — but per STATE. The stored samples are the RECOVERED vector y = R·x + R_osc·(sin, cos) +
+  R_b·b_pwl(t) (node voltages, branch currents). ll06, at the worst chord (28.38 µs, 5.47 ns):
+  I(L1) 0.82 of its tolerance, V(out) 1e-5, but V(sw) = V(n_l) **596 ×**: with switch and
+  diode both off V(sw) = (48 g_s − I(L1))/(g_s + g_d), 5 kΩ, so I(L1)'s admissible chord
+  error 5.75e-5 A reads 0.29 V on a node whose tolerance is 4.8e-4 V (32.76 V chord vs
+  33.0475 V flow; the dense flow's max|ÿ|·d²/8 = 723 × tol). Same cause on the inverter
+  LC / snubber nodes.
+* Two smaller defects found on the way: (a) a rule chord a sliver short of a step end was
+  STRETCHED to it by `near_time`'s 1e-12 s floor (ll06, a 1.46e-10 s chord after a diode
+  event: 1.007 ×); (b) the harness read the flow across a jump's right-limit row (one ulp
+  after the event) and across source corners (pulse edges) — its own artifacts (104 × on
+  the active clamp, 5e6 on a 1 ns pulse edge), not the engine.
+
+### Item 1 — the fix
+
+* `exact_chord_step` bounds the rows of a row map P = O·V cached on the mode
+  (`ExactLTI::chord_P_re/im`; empty: P = V as before), O = [I; R, R_osc] built by the
+  adapter (`LTIEntry::recover_osc` = R_b·stamp·amp·(cos φ, sin φ) per oscillator, next to
+  q_sin / q_cos). The piecewise-linear sources' direct share is linear in τ (no chord
+  error); the sines' direct share is an oscillator mode like any other (its |λ|² = ω²
+  enters the same sums). The scheduler tracks each recovered row's range
+  (`output_ylo_/yhi_`) and passes its tolerance in `ChordWork::ty` (same rule: rtol ×
+  max(range, 1e-3·peak), floored at atol, and at the row's own evaluation error
+  16·u·κ·(|R||x| + |R_osc|) — a balanced three-phase neutral, exactly 0 with 3.4e-7 V of
+  rounding, held to atol spent the whole 2e6-sample budget).
+* The deferred-end gap check (F-X-4) also on the recovered rows (floored at the rounding).
+* `push_output_samples_`: no chord stretched past its bound to reach the step end — the
+  rest is halved; same for the thermal path's rule-cut step at a time event.
+* Harness: `metrics.rule_ratio_flow` — the rule's ratio against the exact flow: the same
+  cell at output_rtol × 0.05 (× 0.2 when the per-interval cap cuts it; capped twice or other
+  event times = not comparable, listed), read at each chord's midpoint by the quadratic
+  through the dense samples INSIDE the chord and the chord's two ends (one smooth piece).
+  The old reading against trbdf2 is kept as `rule_ratio_ref` (information).
