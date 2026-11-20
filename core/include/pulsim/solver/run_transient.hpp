@@ -851,6 +851,8 @@ inline SimulationResult run_transient(
     // Restart stage-1 state, kept for the stage-2 fallback (see
     // run_restart): x1, its diode bits and the histories at x0.
     Vector rs_x1, rs_x2;
+    Vector edge_xl;   // the edge's mode decision: a linearized solve (decide_edge_mode)
+    std::vector<bool> edge_bits;   // the diode bits after its stage
     std::vector<bool> rs_bits, rs_bits2, rs_bits_be, rs_solved2;
     std::vector<bool> rs_bits0;   // the diode bits at stage 1's start
     // The diode bits after stage 1 of a restart that starts at the step
@@ -1834,6 +1836,50 @@ inline SimulationResult run_transient(
             history.update_from_state_backward_euler(x, h_e);
             hs.commit(x, h_e, pwl::TrBdf2Stage::BackwardEuler);
         };
+        // The mode of a LOCATED event (restart stage 1 at a gate edge, a
+        // scheduled or located event at t_from) is decided before the
+        // stage's Newton solve: the diode set consistent with the
+        // pre-event state x0 in the new switch configuration, read on the
+        // stage's linearization at x0 (one Newton iteration from x0, kept
+        // nowhere), re-decided until no diode flips. Newton started in the
+        // step-start bits must never be what discovers the commutation:
+        // with an inductor cut it drives a node to kilovolts and stalls on
+        // the round-off there (release finding F-3-7: mid_a −1.26e4 V,
+        // abort). A linear stage IS its linearization: its event
+        // iteration's solves are that decision (one memoryless solve per
+        // mask, none kept from a stale mask), and 'lcp' decides at its
+        // site first. Returns the flips (rule-on path only; out of line, built
+        // once per run: a per-step closure cost the default path +1 %).
+        auto decide_edge_mode = [&](Real at_t, Real for_dt) PULSIM_STEP_DRIVER -> Size {
+            if (!nl_refresh_effective || !has_diodes) return 0;
+            step_ctx = step::BackwardEuler::on_factor(for_dt).ctx();   // as the stage
+            step_ctx.t = at_t;
+            const auto gates_e = gate_at(gate_t);
+            Size flips = 0;
+            while (flips < max_iters) {
+                const auto m = diodes.combine(gates_e);
+                const pwl::PwlSegment* seg_e = &retry_seg;
+                if (for_dt == opts.dt && !newton_only_rows) {
+                    seg_e = &nominal_segment(m);
+                } else {
+                    pwl::assemble_segment(graph, pool, m, for_dt, retry_seg.J,
+                                          retry_seg.b_constant);
+                    sparse::compress_in_place(retry_seg.J);
+                    retry_seg.state_size = state_size;
+                }
+                edge_xl = x;
+                try {   // one iteration: it throws "not converged", edge_xl kept
+                    pwl::solve_with_newton_in_place(*seg_e, nl_refresh_effective, graph,
+                                                    pool, edge_xl, b_extra, 1,
+                                                    opts.tol_newton_dx, opts.tol_newton_res);
+                } catch (const std::runtime_error&) {
+                }
+                if (!edge_xl.allFinite() || !events::redecide(diodes, edge_xl)) break;
+                ++flips;
+            }
+            return flips;
+        };
+
         // Consistent initialisation (release group A, F-5-1 / F-3-3): an
         // SDIRK step may only start from a consistent state. Stage 1 (BE of
         // γh from x0) relaxes every mode faster than γh; when x0 is
@@ -2918,8 +2964,16 @@ inline SimulationResult run_transient(
                 ln_pre = false;
                 accumulate_b_extra(t_from + h_s, dt_eq, true);
                 if (has_diodes) diodes.snapshot_on_bits_into(rs_bits0);
+                const Size edge_flips = loc < h_s ? decide_edge_mode(t_from + h_s, dt_eq) : 0;
                 run_event_iteration(t_from + h_s, dt_eq, true);
                 Size iters_1 = iters;
+                if (edge_flips > 0) {
+                    // the decision's flips are the stage's own (the impulse probe's
+                    // widening, the window), unless the settle ended on the entry
+                    // bits: a linearization's flip the converged state undid
+                    diodes.snapshot_on_bits_into(edge_bits);
+                    iters_1 = !flipped && edge_bits == rs_bits0 ? Size{1} : iters_1 + edge_flips;
+                }
                 bool breach_1 = flipped;
                 if (breach_1 && has_diodes && !last_solved_bits.empty()) {
                     diodes.restore_on_bits(last_solved_bits);
