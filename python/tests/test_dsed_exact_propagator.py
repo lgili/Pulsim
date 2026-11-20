@@ -206,7 +206,7 @@ def test_diode_resting_at_exactly_zero_does_not_spin():
     b.add_diode("D", "a", "gnd", GON, GOFF, 0.0)
     b.add_inductor("L", "a", "b", 1e-3)
     b.add_resistor("R2", "b", "gnd", 10.0)
-    r = _run(b, t_end=1e-3)
+    r = _run(b, t_end=1e-3, output_rtol=0)  # release: 0 = the rule off (the step-end samples)
     assert r.n_events == 0
     assert len(r.times) == 1001
     assert np.abs(np.asarray(r.states)).max() == 0.0

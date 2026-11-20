@@ -142,7 +142,7 @@ def test_pwm_voltage_source_routes_exact():
     assert all(row["exact"] for row in rep["segments"])
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        r = p.simulate(b, t_end=3e-4, engine="exact")
+        r = p.simulate(b, t_end=3e-4, engine="exact", output_rtol=0)
     assert r.n_exact_steps == len(r.times) - 1
 
 

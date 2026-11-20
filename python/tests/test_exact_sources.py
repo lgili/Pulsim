@@ -36,7 +36,7 @@ def test_sine_driven_rlc_is_exact():
     b.add_capacitor("C", "c", "gnd", C)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        r = p.simulate(b, t_end=0.06, engine="exact", integrator="rk45")
+        r = p.simulate(b, t_end=0.06, engine="exact", integrator="rk45", output_rtol=0)
     t = np.asarray(r.times)
     i_ref, v_ref = _closed_form(t)
     v = np.asarray(r.v("c"))
@@ -124,6 +124,7 @@ def _pulse(v0, v1, t0, rise, width, fall, period):
 def _run(b, t_end, **kw):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
+        kw.setdefault("output_rtol", 0)  # release: 0 = the rule off (the step-end samples)
         return p.simulate(b, t_end=t_end, engine="exact", **kw)
 
 
@@ -307,7 +308,7 @@ def test_a_left_limit_sample_reads_its_sources_left_limit():
     b.add_resistor("R", "in", "a", 10.0)
     b.add_diode("D", "a", "o", 1e3, 1e-9)
     b.add_capacitor("C", "o", "gnd", 1e-6)
-    r = p.simulate(b, t_end=3e-4, engine="exact")
+    r = p.simulate(b, t_end=3e-4, engine="exact", output_rtol=0)
     t = np.asarray(r.times)
     (k,) = np.flatnonzero(np.abs(t - 5e-5) < 1e-15)
     assert r.v("in")[k] == 5.0 and bool(np.asarray(r.switch_states)[k, 0])

@@ -28,7 +28,7 @@ def _run(b, t_end, **kw):
 
 
 def _kw(rt):
-    return {} if rt is None else {"output_rtol": rt}
+    return {"output_rtol": 0 if rt is None else rt}  # release: 0 = the rule off (the step-end samples)
 
 
 @pytest.mark.parametrize("rt", [None, 1e-4, 1e-5, 1e-8])
@@ -119,7 +119,7 @@ def test_f36_exact_steps_are_steps_not_samples():
     b.add_voltage_source("V", "a", "gnd", 5.0)
     b.add_resistor("R", "a", "o", 1e3)
     b.add_capacitor("C", "o", "gnd", 1e-6)
-    off = _run(b, 5e-3)
+    off = _run(b, 5e-3, output_rtol=0)
     on = _run(b, 5e-3, output_rtol=1e-6)
     assert on.n_exact_steps == off.n_exact_steps and on.n_rk45_steps == off.n_rk45_steps == 0
     assert len(on.times) <= len(off.times) + on.diagnostics["output_grid"]["n_output_samples"]
@@ -198,7 +198,7 @@ def test_fx1_ten_branch_form_bridges_run_under_the_rule(gate):
     n = _branch_bridges(10).graph.num_switches
     kw = {} if gate == "constant" else {"switch_fn": lambda t: p.SwitchStateMask(n)}
     on = _run(_branch_bridges(10), 0.02, output_rtol=1e-5, **kw)
-    off = _run(_branch_bridges(10), 0.02, **kw)
+    off = _run(_branch_bridges(10), 0.02, output_rtol=0, **kw)
     assert on.times[-1] == pytest.approx(0.02)
     eon, _, fon = _event_rows(on)
     eoff, _, foff = _event_rows(off)

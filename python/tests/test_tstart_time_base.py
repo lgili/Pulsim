@@ -133,6 +133,10 @@ def test_every_input_is_read_at_absolute_time(name, route):
     b, kw, f = _input(name)
     opts = {**ENGINES, **DSED_ROUTES}[route]
     exact = opts["engine"] in ("dsed", "exact")
+    if exact or opts["engine"] == "auto":
+        # read between the edges: the step-end samples, not the release's output
+        # rule (on a resistive leg it returns the event instants only)
+        opts = {**opts, "output_rtol": 0}
     if exact and name in TIMED_SOURCES:
         # the native adapter evaluates the circuit's sources on the engine's
         # clock from 0: refused by name, never shifted silently
@@ -398,7 +402,7 @@ def test_exact_engine_other_integrators_fresh_t_start_matches_the_tail(integrato
     """The per-mode 'auto' and the fixed-step 'bdf2' integrators (a leg with
     no loss port and no diode reaches them): a fresh run at T_MID from the
     state at T_MID reads the gate on the absolute clock."""
-    opts = dict(engine="dsed", integrator=integrator)
+    opts = dict(engine="dsed", integrator=integrator, output_rtol=0)  # release: 0 = the rule off (the step-end samples)
     circ = (lambda: _leg(port=False), 0.43e-3)
     full, probes = _run(circ, opts, T_END)
     first, _ = _run(circ, opts, 0.43e-3)
