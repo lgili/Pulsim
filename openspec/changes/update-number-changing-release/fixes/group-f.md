@@ -695,3 +695,9 @@ and …679 ms). Base merged them into one at 13.704043488297 ms (the guard's rep
 identical to print precision. Goldens identical; the 243 scoreboard default cells identical (the
 exact-engine row stays 81 / 77 / 70); rtol invariance 111 / 0 / 15 kept.
 C++ `pulsim_core_dsed_tests` (Eigen 5) on the final header: 41265 assertions / 142 cases pass.
+
+Rule-ON cells moved by the final tip (no dt, output_rtol 1e-4/1e-5/1e-6, each still invariant across
+the three), scoreboard `exact` vs the mpmath truth at 1e-5, base → tip: forward_converter 1.02e-9 →
+5.6e-12, boost_pfc_open_loop 7.36e-10 → 2.95e-12, flyback_converter 7.265e-7 → 7.262e-7. Their
+dsed / dsed+next / no-dt rule-off cells are identical to base. Cost was measured before (c) (the
+guard's extra ladder runs only on a judged violation); not re-measured on the final tip.
