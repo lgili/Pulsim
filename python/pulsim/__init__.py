@@ -2559,7 +2559,11 @@ def simulate(
         Fixed step for BDF2 segments under ``integrator='bdf2'`` or
         ``'auto'`` (default 1e-6).
     t_start, default 0.0
-        Start time, in seconds.
+        Start time, in seconds: an ABSOLUTE label. Gates, sources,
+        ``b_extra_fn`` and recorder windows are read at absolute ``t`` on
+        every engine, so the run equals the tail of a run from 0 started
+        from the same state. On the exact engine a fresh ``t_start`` run
+        refuses the circuit's time-varying sources and controllers by name.
     switch_fn
         Callable ``t -> SwitchStateMask`` controlling the
         switch state at each sample.  Defaults to all-closed.

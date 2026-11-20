@@ -882,8 +882,8 @@ def run_dsed_from_builder(
                 f"simulate(engine='dsed', integrator='bdf2'): the loss port of "
                 f"{_loss_names[0]!r} (set_device_losses) is read on the "
                 "event-driven integrator only. Drop integrator='bdf2'.")
-        # a fresh t_start run is the 0-start run relabelled by t_start (the
-        # engine's clock runs from 0): its loss events are shifted with it
+        # a fresh t_start run runs on the engine's clock from 0 (simulate()
+        # shifts the drive onto it): its loss events are relabelled by t_start
         integrator = "rk45"
     # update-number-changing-release: the output-grid rule cuts the
     # event-driven integrator's exact steps; 'auto' becomes 'rk45' as for
