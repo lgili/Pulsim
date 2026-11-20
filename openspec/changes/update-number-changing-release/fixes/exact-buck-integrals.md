@@ -478,3 +478,8 @@ The recorder's own share went from 0.22e9 to 1.76e9 per run: the exact
 ∫ / rms with the source modes (n + 2 states per piece, a Gramian per new
 step length on the Padé tier) instead of the trapezoid. R3 (a cache of
 the doubled Gramian per (mask, h)) is where that would come back.
+
+## Full pytest on 3a5949bc
+
+6135 passed, 110 skipped, 8 xfailed (11 min 46 s), build/python and
+python/pulsim the same .so. Not run: Eigen 3.4.0, g++, full ctest.
