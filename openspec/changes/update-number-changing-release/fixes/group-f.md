@@ -348,3 +348,21 @@ MET, and the cause is the F-X-4 deferral (the after-floor run a5b9a485 had none 
 Decision needed (orchestrator): F-X-4 (store only what the tolerance needs) and the rehearsal's
 2× bar cannot both hold; either the harness learns a 2-sample exact trace and the 2× bar is read
 against the rule's tolerance, or F-X-4 is reverted to "every step end stored".
+
+### Final verification (89b5d936)
+
+* Full pytest: 6116 passed, 110 skipped, 8 xfailed (12:56); `-m reference` 383 passed;
+  reference_status exit 0; ruff clean; openspec strict 79/79; stubs up to date.
+* C++ `pulsim_core_dsed_tests` (project CMake, Eigen 5, Release): 142 cases / 41 265 assertions pass.
+  Not built: Eigen 3.4.0, the other C++ targets, full ctest.
+* Goldens identical; dsed bit-identity 34/36 as at the PR head; Python-gate default runs equal to
+  the PR head's. Scoreboard dsed 81/81 < 1e-3, none worse than session 1's final; flips default
+  100/109, branch 100/109, ideal 85/100 (15 refused), outcomes identical; banks 1/9/10 unchanged
+  (12 refuses as before); bar scripts (fuzz10, fuzz, truths: ten banks iL0a 7.66e-12, orbit)
+  identical to session 1's logs; dsedall 340 passed.
+* ladder500: 22.6 s vs 11.4 s rule off (2.0×, the host loaded: rule off alone went 8.1 → 11.4 s);
+  DC 2 s: 2 000 002 samples rule off, 2 under the rule.
+* Instructions per accepted step, tip / PR head (min of 3, `/usr/bin/time -l` minus an
+  import-only run, 0.04 s runs): buck pwl 0.968, buck trbdf2 0.956, buck dsed 1.010,
+  bridge3 dsed 1.003. pwl/trbdf2 are not touched by this branch: their −3…−4 % is the method's
+  noise, so the 0.5 % bar cannot be read from these numbers.
