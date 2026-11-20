@@ -865,3 +865,17 @@ Tip at start dde945bd (extension = e88a06dc's C++, `build/python/pulsim` is a sy
   (`ctest_dsed_run_eigen5_reverted.log`). The two defects above (ten bridges, diode clamp)
   were measured on base075 too, so they hold on the reverted tip. Re-run chain:
   `.scratch/f7/chain_reverted.sh` (logs `R_*`).
+* **Re-run on the reverted tip (7d7f3bf6 / aaf0174c, .so = base075's)**: goldens ALL IDENTICAL,
+  bit-identity 36/36 default + 36/36 shadow (`R_bitid_goldens_ruleoff.log`); dsedall vs
+  075feac9 243 same / 0 moved; rule vs exact flow 99 comparable, 0 above 1, worst 0.99988,
+  stored sample counts equal to e88a06dc's build on 100/100 (`R_after_f7r.jsonl`); property
+  95/100 comparable, diode_clamp_overvoltage 9.64 × (same), all others ≤ 0.9976; `--truth`
+  6/6, worst 0.9406 (truth 0.9406); events gate 100 same / 0 diff (`R_events_gate.log`).
+* **ladder500_rc, rule on** (`R_ladder500.log`, `.scratch/f/fx3.py 500 2e-5`): finishes,
+  3 093 stored (3 072 rule samples), n_output_capped 0, no warning; 2.923e11 vs 1.623e11
+  instructions rule off (1.80 ×); wall 25.7 s vs 10.3 s (2.49 ×, loaded host).
+* Not run: the rehearsal tool (auto+next / dsed:output_grid / dsed+next, analytic 22) — its
+  cache was backed up to `.scratch/rehearsal_pre_f7` and `.scratch/f7/drop_rule_cells.py`
+  drops the three rule configurations so `next_defaults_rehearsal.py run` re-measures them
+  (render with `R.OUT` pointed into `.scratch`: `render()` writes the tracked
+  NEXT_DEFAULTS_REHEARSAL.md).
