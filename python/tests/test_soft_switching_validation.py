@@ -181,21 +181,6 @@ def _run(engine, case, frac=None):
     return b, fn, r
 
 
-F_S_6 = ("finding F-S-6: discontinuity_restart refuses by name an event that moves a "
-         "nonlinear capacitor (the low-side turn-on at 0.5 us moves Ch); ran at b9e46778, "
-         "refused since cedac36b")
-
-
-def _line_marks(request, engine, case):
-    """F-S-6, found when this suite was merged onto the integration line
-    (batch 14t). True when a mark was applied. (F-S-5, the trbdf2 / esdirk43
-    abort on case A, is fixed: its marks were removed in batch 14u.)"""
-    if engine == "pwl_restart":
-        request.applymarker(pytest.mark.xfail(strict=True, raises=p.UnsupportedError, reason=F_S_6))
-        return True
-    return False
-
-
 def _cross(t, v, level, t0, t1):
     k = np.nonzero((t >= t0) & (t <= t1))[0]
     for a, c in zip(k[:-1], k[1:]):
@@ -205,8 +190,11 @@ def _cross(t, v, level, t0, t1):
 
 
 def _window_loss(b, fn, r, t0, t1):
+    """The regular part plus the impulses booked in the window (the window /
+    impulse convention: a restart-rule jump is reported by its record)."""
     rows = device_loss_summary(b, r, switch_fn=fn, t_from=t0, t_to=t1)
-    return sum(e["E_total"] for e in rows if e["name"] in ("Sh", "Sl", "Dh", "Dl"))
+    return sum(e["E_total"] + e.get("E_impulse_total", 0.0)
+               for e in rows if e["name"] in ("Sh", "Sl", "Dh", "Dl"))
 
 
 # ------------------------------------------------------------------ tests --
@@ -234,7 +222,6 @@ def engine(request):
 
 @pytest.mark.parametrize("level", [300.0, 200.0, 100.0])
 def test_current_driven_transition_time_is_the_charge_closed_form(engine, level, request):
-    _line_marks(request, engine, "A")
     _, _, r = _run(engine, "A")
     t, v = np.asarray(r.times), np.asarray(r.v("sw"))
     t_off = 0.5 / FSW - DEAD_A
@@ -243,7 +230,6 @@ def test_current_driven_transition_time_is_the_charge_closed_form(engine, level,
 
 
 def test_zvs_fraction_soft_low_side_hard_high_side(engine, request):
-    _line_marks(request, engine, "A")
     b, fn, r = _run(engine, "A")
     t, v = np.asarray(r.times), np.asarray(r.v("sw"))
     gate = [fn(x) for x in t]
@@ -257,7 +243,8 @@ def test_zvs_fraction_soft_low_side_hard_high_side(engine, request):
 # trbdf2's overbooking (1381.7 uJ case A at b9e46778) is gone with the
 # state error norm: case B reads 1.6891 uJ (truth 1.6878); case A (F-S-5
 # fixed) reads trbdf2 62.8490 / esdirk43 62.9259 uJ (truth 62.8335).
-# pwl_restart (1.44 uJ case A at b9e46778) is refused now: F-S-6.
+# pwl_restart (1.44 uJ case A at b9e46778) books the hard turn-on as its
+# impulse record, the energy from the charge law (F-S-6, closed).
 KNOWN_LOSS = {
     "pwl": "known open item: the fixed engine books almost none of E_oss (unresolved RC collapse)",
 }
@@ -265,7 +252,7 @@ KNOWN_LOSS = {
 
 @pytest.mark.parametrize("case", ["A", "B"])
 def test_hard_turn_on_energy_is_booked(engine, case, request):
-    if not _line_marks(request, engine, case) and engine in KNOWN_LOSS:
+    if engine in KNOWN_LOSS:
         request.applymarker(pytest.mark.xfail(strict=True, reason=KNOWN_LOSS[engine]))
     tp, tq = 2e-9, 20e-9
     if case == "A":
@@ -282,7 +269,6 @@ def test_hard_turn_on_energy_is_booked(engine, case, request):
 
 
 def test_partial_zvs_trough_is_the_energy_closed_form(engine, request):
-    _line_marks(request, engine, "B")
     _, _, r = _run(engine, "B", 0.7)
     i0, i_off, t_off, sol = _case_B(0.7, DEAD_PART)
     v0 = mp.mpf(VDC) - mp.mpf(i_off) / GON
@@ -303,7 +289,6 @@ def test_partial_zvs_trough_is_the_energy_closed_form(engine, request):
 
 @pytest.mark.parametrize("frac", [0.7, 1.5])
 def test_resonant_trajectory_is_the_ode_truth(engine, frac, request):
-    _line_marks(request, engine, "B")
     _, _, r = _run(engine, "B", frac)
     dead = DEAD_PART if frac < 1 else DEAD_FULL
     _, _, t_off, sol = _case_B(frac, dead)
@@ -315,7 +300,6 @@ def test_resonant_trajectory_is_the_ode_truth(engine, frac, request):
 
 
 def test_full_zvs_low_side_turns_on_at_its_diode_clamp(engine, request):
-    _line_marks(request, engine, "B")
     if engine == "pwl":
         # the clamping diode's current alternates ~5 A / 0 A step by step
         # around i_L = 2.5 A (a trapezoidal ring of the 1 ps clamp under a

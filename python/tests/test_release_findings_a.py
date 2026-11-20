@@ -317,14 +317,32 @@ def _switched_junction(t_end, **kw):
         return p.simulate(b, t_end=t_end, dt=2e-8, switch_fn=fn, **kw)
 
 
-def test_a_nonlinear_capacitor_shorted_by_its_switch_is_refused_by_name():
+def test_a_nonlinear_capacitor_shorted_by_its_switch_is_carried_in_charge():
     """The rule reads a nonlinear capacitor's rate before the event from its law
-    (i_prev / C(v_prev)): the turn-off kink at 5 us passes, the 1 ps discharge at the
-    10 us turn-on is refused naming the capacitor."""
-    _switched_junction(9e-6, **RESTART)
-    with pytest.raises(p.UnsupportedError, match="nonlinear_capacitor 'Cj'") as ei:
-        _switched_junction(1.2e-5, **RESTART)
-    assert ei.value.device == "Cj" and ei.value.feature == "impulse"
+    (i_prev / C(v_prev)): the turn-off kink at 5 us is no record; the 1 ps discharge at
+    the 10 us turn-on (refused by name before F-S-6) is carried in charge. Truth: Cj goes
+    from 24 V + i_L/g_on (D1 freewheeling) to i_L/g_on (S on), i_L continuous; the moved
+    charge is Q(v+) - Q(v-) and the energy the law's int (Q(v) - Q(v-)) dv, with
+    Q(v) = 2 C0 V0 (sqrt(1 + v/V0) - 1) (m = 0.5)."""
+    assert list(_switched_junction(9e-6, **RESTART).reinit_records) == []
+    r = _switched_junction(1.2e-5, **RESTART)
+    recs = list(r.reinit_records)
+    assert len(recs) == 1 and recs[0].t == pytest.approx(1e-5) and list(recs[0].states) == ["Cj"]
+    t = np.asarray(r.times)
+    k = int(np.searchsorted(t, 1e-5 - 1e-12))
+    i_l = float(np.asarray(r.i("L"))[k])           # the slow state, 1e-3 V of offset
+    vm, vp = 24.0 + i_l / 1e3, i_l / 1e3
+
+    def q(v):
+        return 2e-9 * (np.sqrt(1.0 + v) - 1.0)
+
+    def iq(v):                                       # int Q dv
+        return 2e-9 * ((2.0 / 3.0) * (1.0 + v) ** 1.5 - v)
+    e = iq(vp) - iq(vm) - q(vm) * (vp - vm)
+    assert recs[0].lambda_ == pytest.approx(q(vp) - q(vm), rel=1e-6)
+    assert recs[0].dW == pytest.approx(e, rel=1e-6)
+    v_cj = np.asarray(r.v("vin")) - np.asarray(r.v("sw"))
+    assert v_cj[k + 1] == pytest.approx(vp, abs=1e-5)
     _switched_junction(1.2e-5, engine="pwl")
 
 
