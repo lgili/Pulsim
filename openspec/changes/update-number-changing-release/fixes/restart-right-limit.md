@@ -37,11 +37,19 @@ unknown solved in the event's mode there:
   For ideal elements both readings coincide.
 
 The algebraic solve: the ε → 0 limit of a backward-Euler solve of ε from those
-states in stage 1's mode (sources at t_e + ε, i.e. a source edge's right
-value), as two single solves of ε and 2ε and Richardson 2·x(ε) − x(2ε)
-(the O(ε) motion cancels; ε = 1e-9·γh). Exact to rounding for every mode
-slower than ε; a mode with τ near ε keeps O((ε/τ)²) (the 1 ps cut at dt
-0.5 µs: 4e-9 relative on i_L). Everything the solves touch is put back (x,
+states in stage 1's mode (sources and gates at t_e + ε, read with no left-bias window,
+i.e. a source edge's right value even when t/h > 2e4), as two SINGLE solves
+(`run_event_iteration(..., single = true)`: the mode selector's caches and
+counters — mode_guard, lcp `mode_answers`, shadow — are the run's and are not
+touched) of ε, 2ε, 4ε, 8ε and Richardson (below). The ε solve is re-decided
+(≤ max_event_iterations rounds; the others keep its bits) — a located
+DCM turn-off's residual current otherwise spikes through g_off (1.6 kV in the
+boost diode-audit test). Event-factor thrash is avoided by an aux event table
+(`PwlCache::swap_aux_events`), and `n_restart_factorizations` is put back
+(the one-factor-per-mask test holds). A solve that throws (runtime_error, or
+an UnsupportedError refusal) records no right limit; the run goes on.
+Richardson: the motion cancels to O(ε^4); ε = 5e-4·γh (1e-9·γh at a conductance-form impulse). A mode with τ ≫ ε keeps
+64·(ε/τ)^4; rounding grows as 1/ε (the L/ε, C/ε entries). Everything the solves touch is put back (x,
 b_extra, histories, stateful histories, diode bits, iteration flags, the Newton
 round-off budget and its counters); the step's trajectory does not change.
 
@@ -78,3 +86,24 @@ fixed engine's finalize path already calls it (`_auto_check_voltage_sanity`
 and `sim::Simulation::check_voltage_`), so the check costs no Python bytecode:
 the overhead gate does not move. On a result without event limits the scan is
 one bool test.
+
+## Review findings (fresh reviewer on 452c2556) and their state
+
+| id | finding | state |
+|---|---|---|
+| D1 | ε solves read a source edge on its pre side when t/h > 2e4 (64-ulp left bias) | fixed: sources read at t_e + ε with lb = 0 |
+| D2 | the non-single event iteration ran the mode selector (mode_guard counters, lcp `mode_answers`, shadow): an lcp bridge trajectory moved | fixed: single solves + the settle's own `events::redecide` (no mode machinery); `gate_t` = t_e + ε inside, restored |
+| D3 | UnsupportedError (invalid_argument) escaped the ε solves | fixed: caught, no row |
+| D4 | constraint currents of ideal dependent states amplified ~1/ε | reduced: ε = 5e-4·γh (1e-9·γh only for a conductance-form impulse); see ll10 below. Not separately tested |
+| D5 | `rl_want` stays set if `run_restart` throws | fixed: read and cleared at the top of `run_restart` |
+| D6 | a non-split source-edge trigger inside the step (rs_trig_loc > 0) records a row at t_prev; split clusters read gates at ev_s, sources at ev_t + ε | open |
+| D7 | a gate edge exactly on a resume seam (t_prev == t_start) records no row | open |
+
+ll10 (found by the scoreboard re-grade, after D2): with every switch OFF in
+the dead time the two legs float on 1 MΩ bleeds; at ε = 1e-9·γh the L/ε entry
+(1.4e13) took the common mode (row v_a = −73326 V, v_b = 2 V; truth −36664 /
+36668 V). Now ε = 5e-4·γh and a fourth-order Richardson
+(64x(ε) − 56x(2ε) + 14x(4ε) − x(8ε))/21: conditioning 5e5 better, truncation
+64·(ε/τ)^4 of a mode τ (a third-order one left 2.5e-10 V on the 1 µs RC of the
+closing test: error ∝ (h/τ)³, measured). A conductance-form impulse keeps ε = 1e-9·γh (its
+ps mode must not relax inside ε: F-5-10's micro right limit).
