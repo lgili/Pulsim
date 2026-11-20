@@ -1804,13 +1804,21 @@ def orbit_sensitivities(res, solver, names, n_steps=50):
 # The time-stepping engines (group 5): the kernel's stage recurrence
 # ----------------------------------------------------------------------
 
+def _opt_err(message):
+    """An OptionsError (a ValueError) naming `sensitivities`."""
+    from ._pulsim import OptionsError
+    err = OptionsError(message)
+    err.option = "sensitivities"
+    return err
+
+
 def _step_names(names, engine):
     if isinstance(names, str):
         names = [names]
     names = list(names)
     if not names:
-        raise ValueError("sensitivities: give at least one parameter name "
-                         "('<component>.<field>').")
+        raise _opt_err("sensitivities: give at least one parameter name "
+                       "('<component>.<field>').")
     if len(names) > _MAX_PARAMS:
         raise _unsup(
             "sensitivities", f"sensitivities: {len(names)} parameters; "
@@ -1818,7 +1826,7 @@ def _step_names(names, engine):
             "the request.", engine=engine)
     for nm in names:
         if not isinstance(nm, str) or "." not in nm:
-            raise ValueError(
+            raise _opt_err(
                 f"sensitivities: {nm!r} is not '<component>.<field>'.")
     return names
 
@@ -1858,13 +1866,13 @@ class StepSensitivityResult:
         try:
             j = self.params.index(param)
         except ValueError:
-            raise ValueError(f"sensitivity: {param!r} was not requested "
-                             f"(requested: {self.params}).") from None
+            raise _opt_err(f"sensitivity: {param!r} was not requested "
+                           f"(requested: {self.params}).") from None
         if isinstance(signal, (int, np.integer)):
             row = int(signal)
         else:
             row = int(self._builder.node_id_of(signal))
             if row < 0:
-                raise ValueError(f"sensitivity: {signal!r} is not a node "
-                                 "(pass a state index for a branch current).")
+                raise _opt_err(f"sensitivity: {signal!r} is not a node "
+                               "(pass a state index for a branch current).")
         return self.states[:, row, j].copy()
