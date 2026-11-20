@@ -2741,17 +2741,19 @@ def simulate(
         should_continue, closed_loops, live_stream, mmc_arms, on_cache,
         controller_period, resume_from, control_tick, solver, sensitivities,
         mode_selection, allow_implicit_segments, undriven, recorders, output_rtol)))
-    if sensitivities is not None and plan.engine != "dsed":
+    if sensitivities is not None:
         return _step_sensitivities(plan, sensitivities)
     return _finalize(_ENGINES[plan.engine](plan), plan)
 
 
 def _step_sensitivities(plan, names):
-    """simulate(engine='pwl' / 'trbdf2', sensitivities=[...]): the kernel's
+    """simulate(sensitivities=[...]) on 'pwl' / 'trbdf2': the kernel's
     stage recurrence (add-parameter-sensitivities group 5) carried by the
     run itself; ``res.sensitivity`` / ``res.sens`` as on the exact path."""
     from .sensitivity import StepSensitivityResult, _step_names
     engine = plan.engine
+    if engine == "dsed":   # the exact path's post-pass, planned in _plan_run
+        return _finalize(_ENGINES[engine](plan), plan)
     names = _step_names(names, engine)
     d = plan.drive
     ctl = d.control
