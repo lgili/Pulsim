@@ -223,3 +223,83 @@ def test_f31_split_turn_on_is_rounding_stable():
     w0 = run(0)
     for k in (1, 2, 3, 4, 5):
         assert np.max(np.abs(run(k) - w0)) <= 1e-9, k
+
+
+# ---- the impulse rule: one criterion, its edges ----------------------------------------------
+
+def _rectifier_from_rest(**kw):
+    """A switched-diode half-wave rectifier from rest: C = 100 uF through g_on = 1e3 S
+    (tau = 0.1 us << dt) follows the 400 V sine from t = 0. A fast mode TRACKING its
+    forcing, not a jump: the probe (two BE stages, sources advanced) extrapolates the
+    stages' line back to x0 itself."""
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("Vac", "ac", "gnd", 0.0, 400.0, 60.0)
+    b.add_diode("D", "ac", "vout", 1e3, 1e-9)
+    b.add_resistor("R", "vout", "gnd", 50.0)
+    b.add_capacitor("C", "vout", "gnd", 100e-6)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return p.simulate(b, t_end=0.02, dt=1e-4, **kw)
+
+
+def test_fast_mode_that_tracks_its_source_is_not_an_impulse():
+    res = _rectifier_from_rest(**RESTART)
+    assert list(res.reinit_records) == []
+
+
+def _pathless_saturable(**kw):
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "in", "gnd", 10.0)
+    b.add_switch("S", "in", "a", 1e3, 1e-9)
+    b.add_saturable_inductor("Lsat", "a", "gnd", 1e-3, 30.0, 1e-4)
+    n, k = b.graph.num_switches, b.switch_index_of("S")
+
+    def fn(t):
+        m = p.SwitchStateMask(n)
+        m.set(k, t < 5e-6)
+        return m
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return p.simulate(b, t_end=1e-5, dt=1e-7, switch_fn=fn, **kw)
+
+
+def test_a_saturable_core_cut_by_its_switch_is_refused_by_name():
+    """The consistent start moves linear C / L histories only; a saturable core's current
+    cut into g_off (5e-2 A -> leakage) is refused, naming the core, not integrated from the
+    reversed pseudo-state."""
+    with pytest.raises(p.UnsupportedError, match="saturable_inductor 'Lsat'") as ei:
+        _pathless_saturable(**RESTART)
+    assert ei.value.device == "Lsat" and ei.value.feature == "impulse"
+    _pathless_saturable(engine="pwl")    # restart-less: the rule is not on
+
+
+def _two_rectifiers(which, dt=1e-4):
+    """Two INDEPENDENT half-wave rectifiers, the second's sine 0.1 dt late: their turn-offs
+    fall in the same grid step."""
+    import math
+    b = p.CircuitBuilder()
+    for k, dly in (("1", 0.0), ("2", 0.1 * dt)):
+        if k not in which:
+            continue
+        b.add_sine_voltage_source("V" + k, "s" + k, "gnd", 0.0, 100.0, 50.0,
+                                  -2 * math.pi * 50 * dly)
+        b.add_diode("D" + k, "s" + k, "o" + k, 1e3, 1e-9)
+        b.add_capacitor("C" + k, "o" + k, "gnd", 1e-4)
+        b.add_resistor("R" + k, "o" + k, "gnd", 100.0)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return p.simulate(b, t_end=0.04, dt=dt, enable_substep_state_correction=True,
+                          **RESTART)
+
+
+def test_split_locates_independent_diodes_on_their_own_signals():
+    """Only diodes at one FLOATING island share a summed signal (the floating bridge of
+    F-3-1). Two grounded rectifiers crossing in one step keep their own crossings: the
+    first is located where it is alone, and its waveform is the lone run's bit for bit
+    (the summed signal put both at a common time between them)."""
+    alone, both = _two_rectifiers("1"), _two_rectifiers("12")
+    d1 = [e.t_estimated for e in alone.commutation_events]
+    b1 = [e.t_estimated for e in both.commutation_events if e.branch_id == 1]
+    assert len(d1) == len(b1) >= 3
+    np.testing.assert_allclose(b1, d1, rtol=0, atol=1e-12)
+    np.testing.assert_array_equal(np.asarray(both.v("o1")), np.asarray(alone.v("o1")))

@@ -1,38 +1,50 @@
 # Group A — impulsive events under the restart rule (F-5-1, F-3-3, F-3-7, F-3-1, F-5-10)
 
-> **HAND-OFF, end of second session (2026-11-19) — read this first [M unless marked].**
-> Branch tip = this commit (WIP). Pushed fix 43c76065; this commit adds detector refinements whose
-> verification run was IN FLIGHT when the budget ended (it re-ran the 9 test files below + the
-> F-5-1/F-3-3/F-3-1 drivers after: (a) skipping the consistent start whenever the stage-1 mode has ANY
-> structural dependent structure — not only a gated entry, (b) the absolute visibility floor 1e-6 -> 1e-4
-> A/V, (c) a stored-energy floor e_jump > 1e-6·Σ½C·max(s0²,s1²)). UNVERIFIED at this tip.
->
-> Full pytest on 43c76065 (+ review fixes, energy ratio 0.25): 6086 passed / 10 failed / 9 xfailed.
-> Failures and reading: (1) test_branch_form_reinit cutset — x0+ removed the structural pulse sample the
-> test pins (959 V) -> fixed by skipping structural modes (verified); (2,3) test_restart_stiff_overshoot
-> flyback secondary [restart, split] — overwriting rs_bits0 with x0+'s bits disabled the stage-2 undo
-> guard -> fixed by keeping rs_bits0 at x0 (verified); (4,5) forward converter [restart, split] 5.1499 vs
-> 5.1370 ± 0.002 — fixed by the same (verified); (6) test_run_plan: the previous session's
-> `_check_right_limit_voltage` is a swallowing helper -> added to the allow-list (verified);
-> (7) test_restart_review_fixes failed-retry pins (10 / 37.2032 V) — the rectifier's zero-start charge
-> (τ = 5 µs, γ·dt = 15 µs) was an "impulse" at energy ratio 0.25; with ratio 0.81 (|λ|γh > 9) the
-> original pins pass again (verified; test restored to the PR head). STILL FAILING after those (before (a)-(c)):
-> (8) test_fixed_step_event_splitting::test_dt_retry_of_a_step_that_holds_an_edge (dt_retries at 4..23 ms
-> instead of 21,22,23: a Newton-diode rectifier from rest — the probe / x0+ re-solve changes the retry
-> ladder; untraced), (9,10) test_ideal_loop_release[clamp, cutset] (2-3 records of 1e-14 J where the test
-> wants none: diode-entered structural modes; addressed by (a), unverified), (11) test_induction_machine_mna
-> free acceleration (errors 1.62e-4, 1.28e-4, 1.00e-5: not 2nd order at dt 4e-5; a 1.8e-12 J record on the
-> rotor-bar capacitor M_Crb at t = 0, λ = 1.9e-6 C; addressed by (b), unverified).
->
-> Status: F-5-1 FIXED, F-3-3 FIXED, F-3-1 FIXED (numbers below, measured on 43c76065; the refinements only
-> restrict detection, F-5-1/F-3-3 are far above every floor), F-3-7 OPEN.
-> **Verification of this tip finished after the commit [M]:** of the 9 files only
-> `test_dt_retry_of_a_step_that_holds_an_edge` still fails (ideal_loop_release x2 and the induction
-> machine now pass); F-5-1 / F-3-3 / F-3-1 drivers give the same numbers as below.
-> NEXT: rebuild this tip, re-run the 9 files (branch_form_reinit, fixed_step_event_splitting,
-> ideal_loop_release, induction_machine_mna, restart_stiff_overshoot, run_plan, release_findings_a,
-> fixed_step_discontinuity_order, restart_review_fixes) and `.scratch/a2.py`, `.scratch/f31.py`; trace
-> (8) if it still fails; then full pytest, byte compares (`.scratch/baseA.sh fix compare`), reference_status.
+> **THIRD SESSION (2026-11-20) — the impulse detector is ONE rule [M].** The second session's stack
+> (energy ratio 0.81, 1e-6 stored-energy floor, 1 % of the kind's magnitude, 1e-4 A/V floor) is gone.
+> - **Probe.** x2 = a second BE stage of γh from x1 (stage 1's bits frozen, BUILT-IN sources moved to
+>   t2 = t + 2γh unless one of them jumps in (t1, t2]; a `b_extra_fn` keeps its t1 value — it is called
+>   once per solve time), x0+ = 2·x1 − x2. The second session's probe re-solved the SAME stage (sources
+>   frozen at t1): a fast mode that TRACKS its forcing then extrapolates to x0 + γh·ẋ, i.e. reads its own
+>   O(h) motion as a jump. Trace (`test_dt_retry_of_a_step_that_holds_an_edge`, Newton rectifier from
+>   rest, dt 1 ms): frozen probe t = 0 / 1 / 2 ms d = 43.1 / 40.2 / 30.5 V on C, classified impulsive,
+>   histories moved, the dt-retry ladder then fired at 4, 5, 6 ms; advanced probe d = −0.31 / 2.3 / 3.7 V
+>   against the bound 149 / 144 / 102 V: no impulse, retries 21, 22, 23 ms (the test passes).
+> - **Rule** (per state: capacitor voltage, inductor current; linear algebra and constants in the
+>   `consistent_start` comment): impulsive iff some state has
+>   |x0+ − x0| > h·max(|ẋ(0−)|, |x2 − x1|/γh) + 1e-8·(1 + |x0| + |x1|) [+ G_off·(1 + V_max) for currents].
+>   The rate term: a consistent start has x0+ − x0 = O(γ²h²ẍ), bounded by the state's motion over the
+>   restart step h at its rate before (history slot i/C, v/L) or after (x2 − x1) the event. A linear mode
+>   relaxed from a jump J gives |d| = (r/(1+r))²|J| against r/(γ(1+r)²)|J|, r = |λ|γh: a jump when
+>   r > 1/γ (τ < γ²h ≈ 0.09 h) — derived, not tuned. The tolerance: 1e-8 relative with a one-unit floor is
+>   the event services' noise (`events::held_tolerance`), which holds the Newton tolerance (1e-9) and the
+>   round-off; for currents also its leakage scale, G_off = Σ g_off of the conductance-form switches and
+>   diodes times the node voltages (the CCM buck's zero start: i_L 0 -> 2.4e-8 A through two g_off at 24 V
+>   was a "jump" of 2.9e-20 J that re-routed the start: 8 restart factorizations instead of 4 and one
+>   stage-2 retry; under the tolerance 5e-8 A it is not). Ideal-element (structural) modes stay with the
+>   tracker's projection and record (one service per jump, not two records): routing, not a threshold.
+> - **Device histories (reviewer item).** Stage 1 is re-solved with the stateful device histories at x0
+>   (restored), not x1: their states (junction / tail charge, machine flux) are continuous through the
+>   event, and their laws would read x0+'s extrapolated algebraic entries (F-5-1: v_sw −6.8e8 V). The O(h)
+>   lag of "start from x1" is gone. Not measured on a circuit with a stateful device AT an impulse.
+> - **Saturable inductors / nonlinear capacitors (reviewer item): refused by name.** Their state (core
+>   current, capacitor voltage) is probed by the same rule (rate after the event; no history slot); their
+>   histories cannot be moved to x0+ (λ(i), q(v) read x0+), so a jump on one raises
+>   `UnsupportedError(feature='impulse', device=<name>, kind='saturable_inductor'|'nonlinear_capacitor')`
+>   under the rule. Test: a saturable core cut by its switch.
+> - **Split: summed signal only on a FLOATING island (reviewer item).** Diodes the decided mode flips that
+>   touch the same node island (union of every branch but the OFF diodes) with no path to ground share
+>   one summed signal (the island's common mode is set by the OFF diodes' leakage alone: F-3-1's
+>   floating bridge). Every other diode keeps its own crossing. Measured: two grounded rectifiers whose
+>   turn-offs fall 0.1 dt apart in one step — D1 located at 59.822078 dt, as alone (bit-identical o1
+>   waveform); the summed rule put both at a common time. D2 (inside the restart remainder, not located,
+>   pre-existing: one located event per step) error vs dt/32: 1.61e-3 V combined vs 1.52e-3 V alone.
+>   F-3-1 still passes (1-ulp sensitivity 1.8e-12 .. 2.4e-11 V).
+> - **Numbers on this rule** (F-5-1 / F-3-3 unchanged): F-5-1 i_L 100 -> −3.8e-5 A, one record dW
+>   4.99999881 J (truth 5 J); F-3-3 peak 16.381985087 / 16.381988999 / 16.381990009 A at dt 10 / 5 / 2.5 ns
+>   (exact 16.381990162), min +1.5e-7 A. 9 restart files + release_findings_a: all pass (F-3-7 xfail).
+> - **F-3-7** still open: with this rule the saturable PSFB aborts at t = 44.95 us (Newton ||dx|| 803 V at
+>   rect_neg, residual 9e-7); restart-less 6.911 V, linear primary 6.890 V.
 
 > **Second session — results (2026-11-19) [M]** (measured on 43c76065 + review fixes, energy ratio 0.25; the byte-compare, pwl_identity and reference_status numbers below are from that build, NOT from the tip):
 > - **F-5-1 FIXED.** Restart: i_L 100 -> -141.42135 A before; after 100 -> -3.8e-5 A (max |i_L[1:]| 3.3e-4 A),
