@@ -309,8 +309,11 @@ public:
                 bdf2_state.y_prev = resume->bdf2_prev;
                 bdf2_state.y_prev_t = resume->bdf2_prev_t;
             }
+            hook_start_(x);   // the committed instant first, as on PEDSimulator
             landed = resume_landing_(t, x, h_rk45, choice, last_exact, rk_state, bdf2_state,
                                      result);
+        } else {
+            hook_start_(x);
         }
         ped_push_sample(result, t, x, system_.current_mask(),
                         landed ? row0_mask : system_.current_mask(),
@@ -397,6 +400,7 @@ public:
                         h_ex_f = t_gate - t;
                     }
                     step_mask = system_.current_mask();
+                    const Real t_step0 = t;
                     if constexpr (requires {
                                       system_.exact_advance_state_into(
                                           t, x, h_ex, x_ex_);
@@ -427,6 +431,7 @@ public:
                         plan_fast_samples_(
                             t, at_corner || !(system_.current_mask() == step_mask));
                     }
+                    hook_accepted_(t_step0, t, fired ? x_pre_ : x, step_mask);
                     ++step_idx;
                     if (step_idx % store_every_ == 0) {
                         // the pre-event state (x unless a dependent state
@@ -561,6 +566,7 @@ public:
             // stepping `continue`s above, so the mask in force now is
             // the one this step was integrated under.
             step_mask = system_.current_mask();
+            const Real t_step0 = t;
             t += h_use;
             x = std::move(x_new);
             if (choice == IntegratorChoice::DOPRI5) {
@@ -590,6 +596,8 @@ public:
                     h_rk45 = dt_init_;
                 }
             }
+
+            hook_accepted_(t_step0, t, fired ? x_pre_ : x, step_mask);
 
             // 5. Record
             ++step_idx;
@@ -643,7 +651,23 @@ public:
     /// The last run's committed end instant (snapshot / resume).
     [[nodiscard]] const AutoResumeState<MaskT>& final_state() const noexcept { return final_; }
 
+    /// Step hooks, with PEDSimulator's conventions (scheduler.hpp): `start`,
+    /// `event` from inside the step it ends, then that step's `accepted` with
+    /// the pre-event state. Pure observers: nothing stepped or stored changes.
+    void set_hooks(events::StepHooks* hooks) noexcept { hooks_ = hooks; }
+
 private:
+    void hook_start_(const Vector& x) {
+        if constexpr (std::is_same_v<MaskT, topology::SwitchStateMask>) {
+            if (hooks_ != nullptr) hooks_->start(x, system_.current_mask());
+        }
+    }
+    void hook_accepted_(Real t0, Real t, const Vector& x, const MaskT& mask) {
+        if constexpr (std::is_same_v<MaskT, topology::SwitchStateMask>) {
+            if (hooks_ != nullptr) hooks_->accepted(t0, t, x, mask);
+        }
+    }
+
     /// What the uninterrupted run did at its landing on t and the first run,
     /// stopping there, did not: a gate edge / source corner at t (asked of the
     /// oracles from t − time_margin(t), as the landing step asked from its
@@ -713,8 +737,15 @@ private:
         const MaskT new_mask = switch_fn_(advance_past(t_event));
         if (new_mask == old_mask) return;   // spurious
 
+        if constexpr (std::is_same_v<MaskT, topology::SwitchStateMask>) {
+            if (hooks_ != nullptr && hooks_->has_event()) hook_xl_ = x;
+        }
         system_.set_mask(new_mask);
         reinit_(t_event, x);
+        if constexpr (std::is_same_v<MaskT, topology::SwitchStateMask>) {
+            if (hooks_ != nullptr && hooks_->has_event())
+                hooks_->event(t_event, hook_xl_, old_mask, x, new_mask);
+        }
         // Discontinuous f → invalidate BOTH integrators' caches.
         rk_state.invalidate();
         bdf2_state.invalidate();
@@ -741,6 +772,8 @@ private:
     std::vector<Real> fast_t_;   // plan_fast_samples_
     std::size_t fast_k_ = 0;
     Vector x_pre_;                 // the state before a gate event
+    Vector hook_xl_;               // an event hook's left limit
+    events::StepHooks* hooks_ = nullptr;   // not owned
     AutoResumeState<MaskT> final_; // final_state()
     Real h_bdf2_;
     std::size_t store_every_;

@@ -4712,7 +4712,7 @@ def run_auto_native(system: typing.Any, switch_fn: typing.Any, x0: typing.Annota
     """
     Native PEDSimulatorAuto (per-mode RK45↔BDF2 dispatch via stiffness detector) running the C++ scheduler inner loop. Returns a dict that additionally includes n_rk45_steps + n_bdf2_steps for each mode-segment.
     """
-def run_auto_native_builder(adapter: _NativeCircuitBuilderAdapter, switch_fn: typing.Any, x0: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"], t_end: float, rtol: float = 1e-06, atol: float = 1e-09, dt_init: float = 1e-09, dt_max: float = 1e-05, h_bdf2: float = 1e-06, stiffness_threshold: float = 10.0, store_every: int = 1, event_log: bool = True, resume: SolverSnapshot | None = None) -> dict[typing.Any, typing.Any]:
+def run_auto_native_builder(adapter: _NativeCircuitBuilderAdapter, switch_fn: typing.Any, x0: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"], t_end: float, rtol: float = 1e-06, atol: float = 1e-09, dt_init: float = 1e-09, dt_max: float = 1e-05, h_bdf2: float = 1e-06, stiffness_threshold: float = 10.0, store_every: int = 1, event_log: bool = True, resume: SolverSnapshot | None = None, loop_feed: typing.Any = None) -> dict[typing.Any, typing.Any]:
     """
     Bridge.11 — native PEDSimulatorAuto over a NativeCircuitBuilderAdapter (per-mode RK45↔BDF2 dispatch).
     """
