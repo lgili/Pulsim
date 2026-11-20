@@ -64,7 +64,24 @@ cycle is the hard one; per switch P = f (E_on + E_off)(V/600)(I_pk/50)/pi
 
 One leg, P_sw HS / LS (W), truth from the closed form:
 
-RESULTS_LEG
+| Vm, td | truth HS / LS | dsed | trbdf2 | pwl = table path |
+|---|---|---|---|---|
+| 0, 1 us | 44.09965 / 0.16054 | 44.09878 / 0.16054 | 44.09878 / 0.16054 | 44.09931 / 0.16054 |
+| 0, 100 ns | 44.91891 / 0.16561 | 44.91802 / 0.16560 | 44.91802 / 0.16560 | - |
+| 0, 10 ns | 45.00085 / 0.16612 | 44.99996 / 0.16611 | 44.99996 / 0.16611 | - |
+| 0, 0 | 44.84563 / 0 | 44.84698 / 0 (was 45.14) | 44.84698 / 0 (was 45.14) | 44.84751 / 0 (was 45.14) |
+| 300, 1 us | 1.05201 / 1.05201 | 1.05203 / 1.05199 | 1.05204 / 1.05199 | 1.05003 / 1.04999 |
+| 300, 100 ns | 1.05203 / 1.05203 | 1.05205 / 1.05201 | 1.05205 / 1.05201 | - |
+| 300, 10 ns | 1.05203 / 1.05203 | 1.05205 / 1.05201 | 1.05206 / 1.05201 | - |
+| 300, 0 | 1.04913 / 1.04913 | 1.04915 / 1.04911 (was 2.248) | 1.04916 / 1.04911 | 1.04715 / 1.04711 (was 2.244) |
+
+pwl reads one 100 ns step either side (first order; 0.19 % at the 1.5 A
+edges of Vm = 300). Vm = 600 (i < 0) is the mirror, in the test.
+
+Cost (instructions per accepted step, min of six, same Release+LTO
+build flags, base .so vs tip .so): port off buck_pwl 3094.3 -> 3087.2
+(-0.23 %), vsi_pwl 4772.6 -> 4761.5 (-0.23 %); port on (the leg, pwl)
+3294.0 -> 3298.8 (+0.15 %).
 
 VSI 3.7, dead 0: table/pwl 11.6068 / 10.9900, trbdf2 11.6082 / 11.0035,
 dsed 11.6080 / 10.9888; leg 22.60 W vs closed form 22.65 W (0.2 %:
@@ -122,3 +139,32 @@ update in `test_period_kernel_kpis.py`.
 - Synchronous rectification (channel in reverse): zero dead time, the
   SR channel's edges are soft and the main switch's hard (the buck_pareto
   example); with dead time the body diode clamps it, charged at V_f.
+
+## Reviewer (fresh context, opus, read-only) and what is left
+
+Asked to construct a leg where the rule charges zero for a physically hard
+edge. Found none in a well-resolved topology (AC switch pairs, matrix /
+CSI reverse-blocking, NPC / T-type both current signs, overlap, one-step
+dead time all classify correctly). Left open, with what each needs:
+
+1. NOISE-FLOOR EDGES (medium-low). A hard edge at ~0 A (a DCM turn-on, a
+   zero crossing) has a current whose sign is rounding noise (dsed /
+   trbdf2 right limit) or already reversed (pwl, one step late); about
+   half of them now read soft and lose the table's E(v, 0) intercept
+   (the output-capacitance energy of a real datasheet table). With
+   tables that vanish at 0 A (all shipped tests and the guide) the
+   effect is nil (DCM boost test: 3e-9 J of 4.4e-4 J). Fix: soft only
+   when |i_closed| exceeds the device's own off-state current g_off |v|
+   — needs g_off plumbed into all four callers (tracker: the law;
+   design batch: SwitchingEntry; `_commutation_points`: an argument;
+   losses.py: the component's params).
+2. A switch that closes a capacitor loop reads a delta current after the
+   edge (-8397 A on dsed, `test_exact_loss_port`): its table E_on is now
+   0 (was the table at 8 V). E_impulse (1/2 C dV^2) is unchanged.
+3. An infinite reading against a finite current of opposite sign is now
+   soft (v = 0) instead of refused / fallback, identically in all four
+   callers.
+4. User-visible: with specs on only one switch of a leg (buck_pareto's
+   Q1), the hard edge of a soft commutation lands on the switch without
+   a spec, so that energy is not reported at all. Correct per device;
+   give both switches of a leg their tables.

@@ -1905,7 +1905,8 @@ def device_loss_summary(
         convention) is soft and costs 0 J: the switch would deliver
         energy passing from one to the other, so the complementary
         device commutated the current (``thermal::commutation_point``,
-        the rule of the in-kernel loss port). Reports ``E_sw_on_total``,
+        the rule of the in-kernel loss port), so give both switches of
+        a leg a spec. Reports ``E_sw_on_total``,
         ``E_sw_off_total``, ``E_sw_total``, ``P_sw_avg``, plus
         ``n_turn_on_events`` / ``n_turn_off_events`` (soft edges
         included) / ``f_sw_estimate``.
