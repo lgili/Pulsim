@@ -225,3 +225,84 @@ TEST_CASE("segment integrals: probe programs compose to degree <= 2 or refuse",
     CHECK(dsed::seg::compose(std::vector<I>{{Op::Param, 0, 0}, {Op::Param, 0, 1}, {Op::Div}}, at, 3)
               .deg == -1);
 }
+
+// ----------------------------------------------------------------------------
+// Time-varying sources (fixes/exact-buck-integrals.md, "Time-varying
+// sources"): the source as exosystem states appended to x. A lossless LC
+// [i, v] (ω0 = 3e5) driven by an oscillator (s, c) at ω = ω0 (a defective
+// pair: secular t·sin terms), 1e-8 and 1e-3 off it, and 3ω0; a damped one at
+// ω0 over a piece; an RC-like pair driven by a level with a slope (a Jordan
+// block at 0: the ramp). Truths: .scratch/src/seg_truth_exo.py of the branch
+// fix/core-exact-integrals-sources (mp.quad on mp.expm, 50 digits, no pulsim).
+namespace {
+
+std::vector<dsed::SegForm> forms5() {
+    Vector l(5);
+    l << 1.5, -0.7, 0.4, -0.2, 0.3;
+    DenseMatrix Q(5, 5);
+    Q << 1, .5, .25, 0, .1, .5, -2, .1, .2, 0, .25, .1, 3, 0, -.3, 0, .2, 0, 1, .05, .1, 0, -.3,
+        .05, .5;
+    dsed::SegForm q;
+    q.deg = 2;
+    q.Q = Q;
+    return {dsed::seg::linear(l), q};
+}
+
+DenseMatrix lc_osc(Real w, Real damp) {
+    DenseMatrix A = DenseMatrix::Zero(4, 4);
+    A(0, 1) = 3e5;
+    A(1, 0) = -3e5;
+    A(0, 0) = A(1, 1) = -damp;
+    A(0, 2) = 2e5;
+    A(1, 3) = -1e5;
+    A(2, 3) = w;
+    A(3, 2) = -w;
+    return A;
+}
+
+void check5(const DenseMatrix& A, const Vector& b, Real s0, Real s1, std::array<Real, 4> truth,
+            Real tol, const char* name) {
+    INFO(name);
+    dsed::SegmentMode sm(mode_of(A, b), forms5());
+    UNSCOPED_INFO("modal " << sm.mode().modal << " kappa " << sm.mode().kappa);
+    Vector x0(4);
+    x0 << 0.2, -0.1, 0.6, 0.8;
+    sm.start(x0);
+    Real out[4], mag[2];
+    const char* why = nullptr;
+    REQUIRE(sm.integrate(0, s0, s1 - s0, out, mag, &why));
+    CHECK(rel(out[0], truth[0], tol));
+    CHECK(rel(out[1], truth[1], tol));
+    REQUIRE(sm.integrate(1, s0, s1 - s0, out, mag, &why));
+    CHECK(rel(out[0], truth[2], tol));
+    CHECK(rel(out[1], truth[3], tol));
+}
+
+}  // namespace
+
+TEST_CASE("segment integrals: a sine source on, near and far from a circuit mode",
+          "[dsed][segment_integrals]") {
+    Vector b = Vector::Zero(4);
+    b[1] = 5e4;
+    const Real w0 = 3e5;
+    check5(lc_osc(w0, 0), b, 0, kH,
+           {1.5018899969057051201e-5, 2.447935692917102015e-5, 1.9224855136590328985e-5,
+            4.2444034928498981331e-5},
+           1e-12, "resonant (defective)");
+    check5(lc_osc(w0 * (1 + 1e-8), 0), b, 0, kH,
+           {1.5018899886993118629e-5, 2.4479356735050010652e-5, 1.9224855227240143529e-5,
+            4.2444035202051070899e-5},
+           1e-12, "1e-8 off");
+    check5(lc_osc(w0 * (1 + 1e-3), 0), b, 0, kH,
+           {1.5010684682315535464e-5, 2.4459938720877245309e-5, 1.9233946305245175688e-5,
+            4.24715067257056404e-5},
+           1e-12, "1e-3 off");
+    check5(lc_osc(3 * w0, 0), b, 0, kH,
+           {7.1604311103000989637e-6, 7.8409595687509123875e-6, 2.4391079390311776128e-5,
+            6.4949132418209810465e-5},
+           1e-12, "far (modal)");
+    check5(lc_osc(w0, 1e3), b, 0.25 * kH, 0.9 * kH,
+           {1.1354402446931820074e-5, 2.0305533525271573785e-5, 1.137523939458945324e-5,
+            2.3929616238125319774e-5},
+           1e-12, "resonant, damped, a piece inside the step");
+}

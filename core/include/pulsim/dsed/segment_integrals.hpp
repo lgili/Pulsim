@@ -57,9 +57,17 @@
 // form (a numeric step, a corrected state) is never integrated as one. (Not
 // per probe against the recorder's samples: a reading like v(in, sw) = 12 −
 // 11.999999999 carries the sample's own cancellation, 1e-6 relative.) A piece with no closed form (that check; a probe that is
-// not a polynomial of degree ≤ 2 of such readings; time-varying sources,
-// whose input is not the mode's constant b) is the recorder's line and is
-// COUNTED (`n_line`, first reason kept): simulate() warns by name.
+// not a polynomial of degree ≤ 2 of such readings; a user b_extra_fn) is the
+// recorder's line and is COUNTED (`n_line`, first reason kept): simulate()
+// warns by name.
+//
+// Time-varying sources (make_exo_mode): every source the engine propagates
+// exactly is a state of an autonomous exosystem u' = S·u appended to x —
+// a sine's (sin ωt, cos ωt) pair (modes ±jω), a PWL source's level (mode 0)
+// and, on a step where it ramps, its slope (a Jordan block at 0: degree 1,
+// the engine's level + ramp). The forced response is then part of the modal
+// sums; resonance (ω on a circuit mode) is a defective As and takes the
+// matrix form by the same u·κ^p rule, as does every ramp step.
 // A pure observer: nothing here moves a state; with no recorder nothing is built.
 
 #include "pulsim/dsed/period_integrals.hpp"
@@ -235,6 +243,45 @@ inline void gram_doubling(const DenseMatrix& A, Real L, std::span<const DenseMat
     }
 }
 
+/// make_period_mode for a circuit with time-varying sources: the state is
+/// (x, u) with u the adapter's exosystem (sine oscillators, PWL levels and,
+/// under `ramp`, slopes), energy scale 1 on u, so
+/// As = d·[[A, Bx, b_dc], [0, S, 0], [0, 0, 0]]·d⁻¹ and x_full = [Rx, Ru]·(x, u) + rc.
+/// The sources are then modes like the circuit's (±jω, 0) and every closed
+/// form of SegmentMode (and its conditioning rule) applies unchanged.
+template <class AdapterT, class MaskT>
+[[nodiscard]] detail::PeriodMode make_exo_mode(AdapterT& ad, const MaskT& mask,
+                                               const std::vector<PeriodObservable>& obs,
+                                               bool ramp) {
+    ad.set_mask(mask);
+    const auto ex = ad.exo_inputs(ramp);
+    detail::PeriodMode e;
+    const DenseMatrix A = ad.A_matrix();
+    const Index nx = A.rows();
+    const Index q = ex.S.rows();
+    const Index n = nx + q;
+    e.n = n;
+    e.A = DenseMatrix::Zero(n, n);
+    e.A.topLeftCorner(nx, nx) = A;
+    e.A.topRightCorner(nx, q) = ex.Bx;
+    e.A.bottomRightCorner(q, q) = ex.S;
+    e.b = Vector::Zero(n);
+    e.b.head(nx) = ex.b_dc;
+    e.d = Vector::Ones(n + 1);
+    e.d.head(nx) = ad.energy_scale();
+    e.Rx = DenseMatrix(ex.Ru.rows(), n);
+    e.Rx.leftCols(nx) = ad.recover_from_state();
+    e.Rx.rightCols(q) = ex.Ru;
+    e.rc = ex.rc;
+    const Vector di = e.d.cwiseInverse();
+    e.As = DenseMatrix::Zero(n + 1, n + 1);
+    e.As.topLeftCorner(n, n) = e.d.head(n).asDiagonal() * e.A * di.head(n).asDiagonal();
+    e.As.topRightCorner(n, 1) = e.d.head(n).cwiseProduct(e.b);
+    detail::modal_basis(e);
+    detail::observable_rows(e, obs, mask);
+    return e;
+}
+
 }  // namespace seg
 
 /// One mode's closed forms of a set of probe forms (in x̄): the modal
@@ -304,16 +351,17 @@ public:
             return true;
         }
         // the modal sums of a product of p modal expansions carry u·κ^p:
-        // degree 1 ∫y² and degree 2 ∫y are p = 2, degree 2 ∫y² is p = 4
+        // degree 1 ∫y² and degree 2 ∫y are p = 2, degree 2 ∫y² is p = 4;
+        // and the sums' own cancellation (sums_ok_) is checked after them
         if (dg == 1) {
-            if (modal_ok_(2)) return modal_(g, dg, s0, L, out, mag, true);
+            if (modal_ok_(2) && modal_(g, dg, s0, L, out, mag, true)) return true;
             return matrix_(g, dg, s0, L, out, mag);
         }
-        if (modal_ok_(4)) return modal_(g, dg, s0, L, out, mag, true);
+        if (modal_ok_(4) && modal_(g, dg, s0, L, out, mag, true)) return true;
         if (e_.n + 1 <= kKronMax) return matrix_(g, dg, s0, L, out, mag);
         // too large for the Kronecker square: ∫y closed, ∫y² the line
-        const bool ok = modal_ok_(2) ? modal_(g, dg, s0, L, out, mag, false)
-                                     : matrix_(g, dg, s0, L, out, mag);
+        const bool ok = (modal_ok_(2) && modal_(g, dg, s0, L, out, mag, false))
+                        || matrix_(g, dg, s0, L, out, mag);
         if (ok) *why = kNoFourth;
         return ok;
     }
@@ -386,6 +434,9 @@ private:
             zp = &zeta_;
         }
         Kern& k = kern_of_(L);
+        // the state at both ends (the sums' natural scale, sums_ok_)
+        const Vector xa = (e_.V * *zp).real();
+        const Vector xb = (e_.V * zp->cwiseProduct(k.E)).real();
         if (dg == 1) {
             alpha_ = r_[g].cwiseProduct(*zp);
             out[0] = alpha_.cwiseProduct(k.p1).sum().real();
@@ -394,7 +445,11 @@ private:
             out[3] = alpha_.cwiseProduct(k.E).sum().real();
             mag[0] = alpha_.cwiseAbs().sum();
             mag[1] = alpha_.cwiseProduct(k.E).cwiseAbs().sum();
-            return true;
+            const Vector la = lt_[g].cwiseAbs();
+            const Real ys = std::max(la.dot(xa.cwiseAbs()), la.dot(xb.cwiseAbs()));
+            const Vector aa = alpha_.cwiseAbs();
+            return sums_ok_(aa.dot(k.p1.cwiseAbs()), ys * L)
+                   && sums_ok_(aa.dot(k.P2.cwiseAbs() * aa), ys * ys * L);
         }
         beta_ = B_[g].cwiseProduct(*zp * zp->transpose());
         out[0] = beta_.cwiseProduct(k.P2).sum().real();
@@ -403,6 +458,10 @@ private:
         out[3] = beta_.cwiseProduct(EE).sum().real();
         mag[0] = beta_.cwiseAbs().sum();
         mag[1] = beta_.cwiseProduct(EE).cwiseAbs().sum();
+        const DenseMatrix Qa = Qt_[g].cwiseAbs();
+        const Real ys = std::max(xa.cwiseAbs().dot(Qa * xa.cwiseAbs()),
+                                 xb.cwiseAbs().dot(Qa * xb.cwiseAbs()));
+        if (!sums_ok_(beta_.cwiseAbs().cwiseProduct(k.P2.cwiseAbs()).sum(), ys * L)) return false;
         if (!sq) {
             out[1] = std::numeric_limits<Real>::quiet_NaN();
             return true;
@@ -414,7 +473,18 @@ private:
             for (Index j = i; j < n1; ++j) gam[p++] = i == j ? beta_(i, i) : beta_(i, j) + beta_(j, i);
         }
         out[1] = (gam.transpose() * k.P4 * gam)(0).real();
-        return true;
+        const Vector ga = gam.cwiseAbs();
+        return sums_ok_(ga.dot(k.P4.cwiseAbs() * ga), ys * ys * L);
+    }
+
+    // A modal sum whose terms (|·| summed: `terms`) cancel by more than
+    // 1e-10/u against the probe's own scale over the piece (`natural`, from
+    // the states at its ends) is taken in the matrix form. κ₂(V) does not
+    // see it: near a resonance the source's forced response and the free
+    // response are each 30x the state (a series LC 1e-3 off its frequency:
+    // the degree-2 square's modal sum was 6.6e-10 off with κ = 10).
+    [[nodiscard]] static bool sums_ok_(Real terms, Real natural) noexcept {
+        return kExactRoundoff * terms <= kExactTierBound * natural;
     }
 
     // the matrix form (no modal basis): degree 1, and degree 2's ∫y
@@ -517,10 +587,10 @@ class ExactSegmentSource final : public record::SegmentSource {
 public:
     using MaskT = topology::SwitchStateMask;
 
-    ExactSegmentSource(AdapterT& ad, const record::LoopFeed& feed) : ad_{ad} {
-        if (ad.has_dynamic_sources()) {
-            off_ = "the circuit has time-varying sources (a step's input is not its mode's "
-                   "constant b)";
+    ExactSegmentSource(AdapterT& ad, const record::LoopFeed& feed)
+        : ad_{ad}, dyn_{ad.has_dynamic_sources()} {
+        if (ad.has_user_source_fn()) {
+            off_ = "the circuit has a user source function (b_extra_fn: no closed form)";
         }
         using L = record::DeviceCurrent::Law;
         const auto obs_of = [](const record::LinearReading& r) {
@@ -556,7 +626,12 @@ public:
                 rd.c = ad.pool().current_source_params(r.dev.branch).I;
                 rd.deg = r.dev.power ? 1 : 0;
                 if (r.dev.power) rd.a = add_(obs_of(r.a));
-            }   // else: a capacitor's companion, a Newton law, a waveform (deg −1)
+            } else if (r.dev.law == L::Waveform && dyn_) {
+                // its value is a row of the exosystem (exo_current_row)
+                rd.wave = r.dev.branch;
+                rd.deg = r.dev.power ? 2 : 1;
+                if (r.dev.power) rd.b = add_(obs_of(r.a));
+            }   // else: a capacitor's companion, a Newton law (deg −1)
             readings_.push_back(rd);
         }
         for (const auto& rec : feed.recorders()) {
@@ -581,8 +656,18 @@ public:
     void begin(Real t0, Real t1, const Vector& x0, const Vector& x1, const MaskT& m) {
         t0_ = t0;
         t1_ = t1;
-        x0_ = x0;
-        x1_ = &x1;
+        if (dyn_) {   // (x, u): the exosystem's state at both ends
+            ad_.exo_state(t0, u0_, ramp_);
+            ad_.exo_advance(t1, t1 - t0, ramp_, u0_, u1_);
+            x0_.resize(x0.size() + u0_.size());
+            x0_ << x0, u0_;
+            x1a_.resize(x1.size() + u1_.size());
+            x1a_ << x1, u1_;
+            x1_ = &x1a_;
+        } else {
+            x0_ = x0;
+            x1_ = &x1;
+        }
         m_ = m;
         step_ok_ = -1;
         sm_ = nullptr;
@@ -616,6 +701,7 @@ private:
         int deg = -1;
         std::size_t a = 0, b = 0;   // observables (deg 1: a; deg 2: a × b)
         Real c = 1;                 // deg 0: the value; deg ≤ 1: a's factor
+        Index wave = -1;            // a waveform current source: its value replaces a
     };
     struct ProbeProg {
         std::vector<ir::Expr::Instr> prog;
@@ -624,15 +710,17 @@ private:
     };
 
     AdapterT& ad_;
+    bool dyn_ = false;   // time-varying sources: the state is (x, u)
+    bool ramp_ = false;  // this step's PWL sources have a slope (the modes differ)
     std::string off_;
     std::vector<PeriodObservable> obs_;
     std::vector<Reading> readings_;
     std::vector<ProbeProg> probes_;
     std::vector<Size> base_;
-    std::map<MaskT, std::unique_ptr<SegmentMode>> modes_;
+    std::map<std::pair<MaskT, bool>, std::unique_ptr<SegmentMode>> modes_;
     SegmentMode* sm_ = nullptr;
     Real t0_ = 0, t1_ = 0;
-    Vector x0_;
+    Vector x0_, u0_, u1_, x1a_;
     const Vector* x1_ = nullptr;
     int step_ok_ = -1;   // the step's end check: −1 not yet made
     MaskT m_{0};
@@ -658,14 +746,16 @@ private:
 
     SegmentMode& mode_() {
         if (sm_ != nullptr) return *sm_;
-        auto it = modes_.find(m_);
+        const std::pair<MaskT, bool> key{m_, ramp_};
+        auto it = modes_.find(key);
         if (it == modes_.end()) {
             struct Restore {   // the engine's mask, even if the build throws
                 AdapterT& ad;
                 MaskT keep;
                 ~Restore() { ad.set_mask(keep); }
             } restore{ad_, ad_.current_mask()};
-            auto e = detail::make_period_mode(ad_, m_, obs_, true);
+            auto e = dyn_ ? seg::make_exo_mode(ad_, m_, obs_, ramp_)
+                          : detail::make_period_mode(ad_, m_, obs_, true);
             const Index n1 = e.n + 1;
             std::vector<SegForm> rf(readings_.size());
             for (std::size_t j = 0; j < readings_.size(); ++j) {
@@ -673,7 +763,14 @@ private:
                 const auto row = [&](std::size_t o) -> Vector {
                     return e.C.row(static_cast<Index>(o)).transpose();
                 };
-                if (rd.deg == 0) rf[j] = seg::constant(n1, rd.c);
+                if (rd.wave >= 0) {   // (0 on x, the source's row over (u, 1))
+                    const Vector w = ad_.exo_current_row(rd.wave, ramp_);
+                    if (w.size() == 0 || w.size() > n1) continue;
+                    Vector l = Vector::Zero(n1);
+                    l.tail(w.size()) = w;
+                    rf[j] = rd.deg == 1 ? seg::linear(std::move(l))
+                                        : seg::product(seg::linear(row(rd.b)), seg::linear(std::move(l)));
+                } else if (rd.deg == 0) rf[j] = seg::constant(n1, rd.c);
                 else if (rd.deg == 1) rf[j] = seg::linear(rd.c * row(rd.a));
                 else if (rd.deg == 2) rf[j] = seg::product(seg::linear(row(rd.a)), seg::linear(row(rd.b)));
             }
@@ -685,7 +782,7 @@ private:
                 for (const Size j : pp.atoms) at.push_back(j < rf.size() ? rf[j] : SegForm{});
                 forms.push_back(seg::compose(pp.prog, at, n1));
             }
-            it = modes_.emplace(m_, std::make_unique<SegmentMode>(std::move(e), forms)).first;
+            it = modes_.emplace(key, std::make_unique<SegmentMode>(std::move(e), forms)).first;
         }
         sm_ = it->second.get();
         if (x0_.size() != sm_->n()) throw std::runtime_error("state size");
