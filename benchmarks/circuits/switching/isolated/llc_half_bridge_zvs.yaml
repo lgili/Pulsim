@@ -8,8 +8,8 @@ benchmark:
     switch, 300 ns dead time, f_s = 125 kHz below f_r = 132.6 kHz (L_r = 60 uH,
     C_r = 24 nF), L_m = 300 uH, the rectified load as its
     first-harmonic equivalent R_ac = 150 Ohm across L_m (the commutation is
-    on the primary; the exact tool cannot settle a transformer-coupled
-    rectifier at a gate edge, see FINDINGS).
+    on the primary; chosen while the exact tool could not settle a
+    transformer-coupled rectifier, F-S-3, since fixed: the PSFB has one).
     Truth: benchmarks/tools/exact_truth.py (independent mpmath engine); the
     ZVS check is python/tests/test_soft_switching_validation.py.
   observables:

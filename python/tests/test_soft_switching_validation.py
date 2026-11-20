@@ -452,3 +452,287 @@ def test_llc_zvs_fraction_kpi(llc_engine):
     # 8, 16, 24, 32 us (+ 40 us when the grid ends on it)
     assert hi["zvs_fraction"] == 1.0 and hi["total_turn_on_events"] >= 4.0
     assert lo["zvs_fraction"] == 1.0 and lo["total_turn_on_events"] == 5.0
+
+
+# ------------------------------- the exact-truth tool itself (F-S-3, fixed) --
+TOOLS = Path(__file__).resolve().parents[2] / "benchmarks" / "tools"
+PSFB_YAML = LLC_YAML.with_name("psfb_full_bridge_zvs.yaml")
+
+
+def _et():
+    pytest.importorskip("yaml")
+    sys.path.insert(0, str(TOOLS))
+    import exact_truth as et
+    return et
+
+
+def _diode_law_holds(sol, rel=1e-9):
+    """The truth obeys its own diode law (V_f = V_th = 0, conductance form)
+    at the midpoint of every segment: an OFF diode is not forward biased, an
+    ON one carries forward current (i = g_on v >= 0). Before F-S-3's fix the
+    LLC below kept its rectifier OFF with 17.7 V forward for 2.5 us."""
+    ck = sol.ck
+    for seg in sol.segs:
+        x = seg.dyn.X * seg.y(seg.tau / 2)
+        tol = rel * max(abs(v) for v in x)
+        for dv, on in zip(ck.devs, seg.mode):
+            if dv["kind"] == "D":
+                v = sum(s * x[ck._vi(n)] for n, s in ((dv["a"], 1), (dv["k"], -1)) if n != "gnd")
+                assert (v >= -tol) if on else (v <= tol), (dv["name"], on, float(seg.t0), float(v))
+
+
+def _expm_rel(sol, A, cols, x_of, seg_t0, tau_end):
+    """max relative distance between the tool and x(tau) = expm(A tau) x0
+    (x0 = the tool's right limit at seg_t0) at 1/4, 1/2, 3/4, 0.999 of
+    [seg_t0, seg_t0 + tau_end]; x_of maps the tool's columns to the state."""
+    s = sol.sample(cols, [seg_t0, seg_t0])
+    x0 = mp.matrix(x_of({c: s[c][1] for c in cols}) + [1])
+    worst = mp.mpf(0)
+    for f in ("0.25", "0.5", "0.75", "0.999"):
+        tau = mp.mpf(f) * tau_end
+        want = mp.expm(A * tau) * x0
+        got = x_of({c: v[0] for c, v in sol.sample(cols, [seg_t0 + tau]).items()})
+        worst = max([worst] + [abs(g - want[i]) / max(abs(want[i]), 1) for i, g in enumerate(got)])
+    return worst, x0
+
+
+def test_exact_tool_settles_the_llc_with_a_transformer_rectifier():
+    """F-S-3. The netlist of llc_half_bridge_zvs.yaml with R_ac replaced by an
+    ideal 4:1 transformer, a diode bridge, C_o = 10 uF (48 V) and R_o = 10 Ohm.
+    Before the fix the tool raised "no consistent diode mode" at the first
+    gate-off (3.7 us) at dps 30 -- after a silently wrong 3.7 us: z, the
+    slow coordinates, were columns of Eh^(index+1), aligned to the slowest
+    mode to ~1e-27, so a 400 V state was a difference of ~1e18 numbers and
+    every root test's noise bound read 3e4 V.
+
+    Independent check, by hand: in the dead time (switches and every diode
+    OFF, each a g_off = 1e-9 conductance) the secondary loads the winding with
+    g_off (v_s1 + v_s2 = v_o, i_w = g_off n v_p), i.e. the primary with
+    G_p = n^2 g_off, n = 1/4; with v_c = v_mid - v_a (C_r):
+        (C_hi + C_lo) v_mid' = 2 g_off (V_dc - v_mid) - 2 g_off v_mid - i_r
+        C_r v_c' = i_r,  L_r i_r' = v_mid - v_c - v_p,  L_m i_m' = v_p,
+        v_p = (i_r - i_m) / G_p,  C_o v_o' = -(g_off + 1/R_o) v_o.
+    x(tau) = expm(A tau) x0 from the tool's state at the gate edge, held to
+    1e-9 relative; the rectifier turns on (D2 and D3 together) when
+    n v_p = -v_o, held to 1e-9 of the interval."""
+    import yaml
+    et = _et()
+    d = yaml.safe_load(LLC_YAML.read_text(encoding="utf-8"))
+    d["simulation"]["tstop"] = 3.75e-6
+    d["components"] = [c for c in d["components"] if c["name"] != "Rac"] + [
+        {"type": "transformer", "name": "T1", "nodes": ["p", 0, "s1", "s2"], "turns_ratio": 4.0},
+        *({"type": "diode", "name": n, "nodes": nd, "g_on": 1000.0, "g_off": 1e-9}
+          for n, nd in (("D1", ["s1", "out"]), ("D2", ["s2", "out"]), ("D3", [0, "s1"]), ("D4", [0, "s2"]))),
+        {"type": "capacitor", "name": "Co", "nodes": ["out", 0], "value": 10e-6, "ic": 48.0},
+        {"type": "resistor", "name": "Ro", "nodes": ["out", 0], "value": 10.0}]
+    sol = et.Solver(et.Circuit(d), 30).run()          # the predecessor's failing call (dps 30)
+    _diode_law_holds(sol)
+    first = next(e for e in sol.events if e["cause"].endswith("root"))
+    assert first["cause"] in ("D1 root", "D4 root") and first["t"] < 1e-9   # the rectifier conducts at once
+    te = min((e["t"] for e in sol.events if e["cause"] == "schedule"), key=lambda t: abs(t - mp.mpf("3.7e-6")))
+    seg = next(s for s in sol.segs if s.t0 == te)
+    assert not any(seg.mode)                           # dead time, every diode OFF
+    g, Ch, Cl, Cr, Lr, Lm, n, Co, Ro, V = (mp.mpf(x) for x in (1e-9, 200e-12, 200e-12, 24e-9, 60e-6,
+                                                                300e-6, 0.25, 10e-6, 10.0, 400))
+    Gp, Cm = n ** 2 * g, Ch + Cl
+    A = mp.matrix([[-4 * g / Cm, 0, -1 / Cm, 0, 0, 2 * g * V / Cm],
+                   [0, 0, 1 / Cr, 0, 0, 0],
+                   [1 / Lr, -1 / Lr, -1 / (Lr * Gp), 1 / (Lr * Gp), 0, 0],
+                   [0, 0, 1 / (Lm * Gp), -1 / (Lm * Gp), 0, 0],
+                   [0, 0, 0, 0, -(g + 1 / Ro) / Co, 0],
+                   [0] * 6])
+    cols = ["V(mid)", "V(a)", "I(Lr)", "I(Lm)", "V(out)"]
+    worst, x0 = _expm_rel(sol, A, cols, lambda s: [s["V(mid)"], s["V(mid)"] - s["V(a)"], s["I(Lr)"],
+                                                   s["I(Lm)"], s["V(out)"]], te, seg.tau)
+    assert worst < 1e-9
+    assert any(e["t"] == te + seg.tau and e["cause"] in ("D2 root", "D3 root") for e in sol.events)
+
+    def u_plus_vo(tau):
+        y = mp.expm(A * tau) * x0
+        return n * (y[2] - y[3]) / Gp + y[4]
+    t_on = mp.findroot(u_plus_vo, (seg.tau * mp.mpf("0.99"), seg.tau * mp.mpf("1.01")), solver="anderson")
+    assert abs(t_on - seg.tau) < 1e-9 * seg.tau
+
+
+@pytest.fixture(scope="module")
+def psfb_truth():
+    """psfb_full_bridge_zvs.yaml solved by the exact tool (dps 30, ~7 s)."""
+    return _et().solve(str(PSFB_YAML), dps=30)
+
+
+def test_exact_tool_psfb_lagging_leg_transition_closed_form(psfb_truth):
+    """The lagging leg's first turn-off (S3 at 2.92 us) on the tool against
+    a hand closed form. The segment from the rectifier's freewheel onset
+    (D5..D8 all ON, the secondary shorted) to D4's turn-on: S1 and D1 ON
+    (g_on = 1e3 each, vin - a), every other bridge device OFF (g_off). With
+    all four rectifier diodes at G = g_on: v_s1 + v_s2 = -i_o/G, v_r = -i_o/G,
+    the winding sees G, the primary G_s = n^2 G (n = 1/4):
+        2C v_a' = 2G (V_dc - v_a) - 2 g_off v_a - i_lk
+        2C v_b' = 2 g_off (V_dc - v_b) - 2 g_off v_b + i_lk
+        L_lk i_lk' = v_a - v_b - i_lk / G_s
+        L_o i_o' = -i_o / G - v_o,   C_o v_o' = i_o - v_o / R_o.
+    Held to 1e-9 relative (1 V / 1 A floors); D4 turns on at v_b = 0 within
+    1e-9 of the 57 ns interval. The tool's diode law holds on every segment."""
+    sol = psfb_truth
+    _diode_law_holds(sol)
+    ck = sol.ck
+    want = {"S1", "D1", "D5", "D6", "D7", "D8"}
+    seg = next(s for s in sol.segs if s.t0 > mp.mpf("2.9e-6")
+               and {dv["name"] for dv, b in zip(ck.devs, s.mode) if b} == want)
+    assert 50e-9 < seg.tau < 60e-9
+    g, G, C, L, Lo, Co, Ro, n, V = (mp.mpf(x) for x in (1e-9, 1000, 200e-12, 10e-6, 20e-6, 20e-6, 2.0, 0.25, 400))
+    Gs = n ** 2 * G
+    A = mp.matrix([[-(2 * G + 2 * g) / (2 * C), 0, -1 / (2 * C), 0, 0, 2 * G * V / (2 * C)],
+                   [0, -4 * g / (2 * C), 1 / (2 * C), 0, 0, 2 * g * V / (2 * C)],
+                   [1 / L, -1 / L, -1 / (L * Gs), 0, 0, 0],
+                   [0, 0, 0, -1 / (Lo * G), -1 / Lo, 0],
+                   [0, 0, 0, 1 / Co, -1 / (Co * Ro), 0],
+                   [0] * 6])
+    cols = ["V(a)", "V(b)", "I(Llk)", "I(Lo)", "V(out)"]
+    worst, x0 = _expm_rel(sol, A, cols, lambda s: [s[c] for c in cols], seg.t0, seg.tau)
+    assert worst < 1e-9
+    t_on = mp.findroot(lambda tau: (mp.expm(A * tau) * x0)[1], (seg.tau * mp.mpf("0.99"), seg.tau * mp.mpf("1.01")),
+                       solver="anderson")
+    assert abs(t_on - seg.tau) < 1e-9 * seg.tau
+    assert any(e["t"] == seg.t0 + seg.tau and e["cause"] == "D4 root" for e in sol.events)
+
+
+# -------------------------------------- PSFB full bridge, exact truth (3.x) --
+PSFB_T, PSFB_DEAD = 10e-6, 80e-9
+# (switch, its node, the body diode that clamps the node after its turn-off, first turn-off)
+PSFB_LEGS = (("S1", "a", "D2", 4.92e-6), ("S2", "a", "D1", 9.92e-6),
+             ("S3", "b", "D4", 2.92e-6), ("S4", "b", "D3", 7.92e-6))
+PSFB_ON = {"S1": 0.0, "S2": 5e-6, "S3": 8e-6, "S4": 3e-6}        # gate-on instants mod T
+PSFB_KNOWN = "known: trap 9 -- without restart the fixed engine reads the gate at the step's end " \
+             "(one 10 ns step early at every edge) and dumps C_oss in about one step"
+
+
+def _psfb_edges(sol):
+    """(node, t_off, i_Llk(t_off), t_clamp): every gate-off in [0, 30 us] and
+    the instant the opposite body diode turns on (v_DS = 0 on the switch the
+    dead time ends on)."""
+    rows = []
+    for _, node, dio, t1 in PSFB_LEGS:
+        for k in range(3):
+            te = min((e["t"] for e in sol.events if e["cause"] == "schedule"),
+                     key=lambda t: abs(t - mp.mpf(t1 + k * PSFB_T)))
+            tc = min(e["t"] for e in sol.events if e["cause"] == f"{dio} root" and e["t"] > te)
+            rows.append((node, te, sol.sample(["I(Llk)"], [te])["I(Llk)"][0], tc))
+    return rows
+
+
+def test_psfb_truth_is_zvs_on_every_edge(psfb_truth):
+    """Leading leg (a) on the reflected load current: ~32-35 ns; lagging leg
+    (b) on the L_lk energy alone (rectifier shorted): ~47-57 ns; both under
+    the 80 ns dead time, and the body diode still conducts at the gate (the
+    node sits within 0.01 V of its rail 1 ns before the switch turns on)."""
+    rows = _psfb_edges(psfb_truth)
+    assert len(rows) == 12
+    for node, te, i, tc in rows:
+        assert tc - te < PSFB_DEAD and abs(i) > 3.0, (node, float(te))
+        v = psfb_truth.sample([f"V({node})"], [te + mp.mpf(PSFB_DEAD - 1e-9)])[f"V({node})"][0]
+        assert min(abs(v), abs(v - 400)) < 0.01, (node, float(te), float(v))
+
+
+PSFB_ENGINES = {**LLC_ENGINES}
+
+
+@functools.lru_cache(maxsize=None)
+def _psfb_run(engine):
+    sys.path.insert(0, str(TOOLS))
+    import v1_reader
+    kw = dict(PSFB_ENGINES[engine])
+    eng = kw.pop("engine")
+    kw.pop("dt", None)          # the netlist's dt (10 ns) is the fixed engine's step
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return v1_reader.load(PSFB_YAML).run(eng, **kw)
+
+
+@pytest.fixture(params=list(PSFB_ENGINES))
+def psfb_engine(request):
+    return request.param
+
+
+def test_psfb_dead_time_commutation_against_exact_truth(psfb_truth, psfb_engine, request):
+    """i_Llk at each of the 12 gate-off edges within 5e-3 A (1e-3 of its
+    ~5 A peak) and every engine sample inside each transition within 0.5 V
+    of the truth (1.25e-3 of the bus). Seen: pwl+restart 6.7e-4 A / 0.46 V
+    (second order on its own 10 ns grid), trbdf2 1.7e-5 A / 0.026 V,
+    esdirk43 6.0e-6 A / 0.010 V, dsed 1.8e-7 A / 2e-5 V; pwl without
+    restart 0.11 A / 245 V (trap 9)."""
+    if psfb_engine == "pwl":
+        request.applymarker(pytest.mark.xfail(strict=True, reason=PSFB_KNOWN))
+    sol = psfb_truth
+    r = _psfb_run(psfb_engine)
+    t, il = np.asarray(r.times), np.asarray(r.i("Llk"))
+    for node, te, i, tc in _psfb_edges(sol):
+        assert np.interp(float(te), t, il) == pytest.approx(float(i), abs=5e-3), float(te)
+        k = np.nonzero((t > te) & (t < tc))[0]
+        assert len(k) >= 1
+        want = np.array([float(x) for x in sol.sample([f"V({node})"], [mp.mpf(float(s)) for s in t[k]])[f"V({node})"]])
+        assert np.max(np.abs(np.asarray(r.v(node))[k] - want)) <= 0.5, float(te)
+
+
+def test_psfb_time_weighted_means_against_exact_truth(psfb_truth, psfb_engine, request):
+    """V(out) and I(Lo) averaged over the last period, [20, 30] us, time
+    weighted (pulsim.time_average: trbdf2 / dsed grids cluster at events),
+    within 1e-3 of the truth's exact window mean (the scoreboard's pass
+    grade). Seen: pwl+restart 2.8e-5 / 1.3e-4, trbdf2 1.2e-6 / 4.1e-6,
+    esdirk43 3.6e-7 / 2.8e-6, dsed 1.2e-8 / 4.1e-7; pwl 1.2e-3 / 2.4e-3
+    (one step early at each of the 8 edges of the window: trap 9)."""
+    if psfb_engine == "pwl":
+        request.applymarker(pytest.mark.xfail(strict=True, reason=PSFB_KNOWN))
+    w = psfb_truth.window(["V(out)", "I(Lo)"], mp.mpf("20e-6"), mp.mpf("30e-6"))
+    r = _psfb_run(psfb_engine)
+    t = np.asarray(r.times)
+    got = {"V(out)": p.time_average(t, np.asarray(r.v("out")), t_from=20e-6, t_to=30e-6),
+           "I(Lo)": p.time_average(t, np.asarray(r.i("Lo")), t_from=20e-6, t_to=30e-6)}
+    for c, v in got.items():
+        assert v == pytest.approx(float(w[c]["mean"]), rel=1e-3), c
+
+
+def test_psfb_zvs_fraction_kpi(psfb_engine, request):
+    """Every turn-on of all four switches at |v_DS| < 5 V (one sample
+    before the gate): leading and lagging leg 100 %, as in the truth."""
+    if psfb_engine == "pwl":
+        # S3 at 8 us: v_DS -0.004 / 8.53 / -0.001 V on three steps -- the
+        # body-diode clamp rings step by step (trap 9): 2 of 3 counted ZVS
+        request.applymarker(pytest.mark.xfail(strict=True, reason=PSFB_KNOWN))
+    r = _psfb_run(psfb_engine)
+    t, va, vb = np.asarray(r.times), np.asarray(r.v("a")), np.asarray(r.v("b"))
+    vds = {"S1": 400.0 - va, "S2": va, "S3": 400.0 - vb, "S4": vb}
+    for sw, t_on in PSFB_ON.items():
+        gate = [((x - t_on) % PSFB_T) < PSFB_T / 2 - PSFB_DEAD for x in t]
+        k = compute_zvs_fraction(gate, list(vds[sw]), threshold_v=5.0)
+        assert k["zvs_fraction"] == 1.0 and k["total_turn_on_events"] >= 2.0, (sw, k)
+
+
+@pytest.mark.xfail(strict=True, reason="finding F-S-4: the exact engine drops an inductor's initial "
+                                       "current at a rectifier start (L_o 24 A -> 0, no warning)")
+def test_exact_engine_keeps_the_output_inductor_current_at_a_rectifier_start():
+    """Minimal (11 elements, from the PSFB's power-transfer start): 400 V ->
+    L_lk (10 uH, 0 A) -> ideal 4:1 primary (p, b); b to ground through 1 mOhm
+    (S4 ON) || its body diode || 200 pF; secondary full bridge into L_o (20 uH,
+    24 A) to ground. Consistent: the four rectifier diodes share L_o (12 A
+    each), L_lk ramps at 40 A/us. At b9e46778 ``engine='dsed'`` starts L_o at
+    -2.8e-9 A and reaches i_Llk(200 ns) = 0.2424 A (truth 6.0605 A); without
+    the 200 pF or the body diode it agrees; with a diode b -> 400 V added it
+    raises DiodeModeInconsistentError (the body diode ON at -1.2e-4 A at
+    0.2 ns: the predecessor's PSFB failure)."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Va", "a", "gnd", 400.0)
+    b.add_resistor("S4", "b", "gnd", 1e-3)
+    b.add_diode("D4", "gnd", "b", 1000.0, 1e-9)
+    b.add_capacitor("C4", "b", "gnd", 200e-12)
+    b.add_inductor("Llk", "a", "p", 10e-6, 0.0)
+    b.add_ideal_transformer("T1", "p", "b", "s1", "s2", 0.25)
+    for name, an, ca in (("D5", "s1", "r"), ("D6", "s2", "r"), ("D7", "gnd", "s1"), ("D8", "gnd", "s2")):
+        b.add_diode(name, an, ca, 1000.0, 1e-9)
+    b.add_inductor("Lo", "r", "gnd", 20e-6, 24.0)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(b, t_end=2e-7, dt=1e-9, engine="dsed")
+    # truth (exact tool, same netlist): i_Lo(0) = 24 A, i_Llk(200 ns) = 6.06050914 A
+    assert r.i("Lo")[0] == pytest.approx(24.0, abs=1e-6)
+    assert np.interp(2e-7, np.asarray(r.times), np.asarray(r.i("Llk"))) == pytest.approx(6.06050914, rel=1e-6)

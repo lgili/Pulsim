@@ -1,0 +1,56 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: psfb_full_bridge_zvs
+  category: soft_switching
+  description: >
+    Phase-shifted full bridge, 400 V, f_s = 100 kHz, leg B lagging leg A by
+    0.3 T (power transfer 0.2 T per half period), 80 ns dead time, a linear
+    C_oss (200 pF) and a body diode across each switch, leakage L_lk = 10 uH
+    in series with an ideal 4:1 transformer, a full-bridge diode rectifier,
+    L_o = 20 uH, C_o = 20 uF, R_o = 2 Ohm. Started near its periodic state
+    (L_lk -4 A, L_o 18 A, C_o 36 V: all four rectifier diodes conduct, a
+    consistent start). The leading leg (A) commutes on the reflected load
+    current (~35 ns), the lagging leg (B) on the L_lk energy alone while the
+    rectifier shorts the secondary (~57 ns): both reach v_DS = 0 before
+    their gate on every edge of the truth.
+    Truth: benchmarks/tools/exact_truth.py (independent mpmath engine); the
+    ZVS checks are python/tests/test_soft_switching_validation.py.
+  observables:
+    - column: V(a)
+    - column: V(b)
+    - column: I(Llk)
+    - column: I(Lo)
+    - column: V(out)
+simulation:
+  tstart: 0.0
+  tstop: 30e-6
+  dt: 10e-9
+  uic: true
+components:
+  - {type: voltage_source, name: Vdc, nodes: [vin, 0], waveform: {type: dc, value: 400.0}}
+  - {type: voltage_source, name: Vg1, nodes: [g1, 0], waveform: {type: pwm, v_high: 10.0, v_low: 0.0, frequency: 100000, duty: 0.5, dead_time: 80e-9, phase: 0.0}}
+  - {type: voltage_source, name: Vg2, nodes: [g2, 0], waveform: {type: pwm, v_high: 10.0, v_low: 0.0, frequency: 100000, duty: 0.5, dead_time: 80e-9, phase: 0.5}}
+  - {type: voltage_source, name: Vg3, nodes: [g3, 0], waveform: {type: pwm, v_high: 10.0, v_low: 0.0, frequency: 100000, duty: 0.5, dead_time: 80e-9, phase: 0.2}}
+  - {type: voltage_source, name: Vg4, nodes: [g4, 0], waveform: {type: pwm, v_high: 10.0, v_low: 0.0, frequency: 100000, duty: 0.5, dead_time: 80e-9, phase: 0.7}}
+  - {type: vcswitch, name: S1, nodes: [g1, vin, a], v_threshold: 5.0, g_on: 1000.0, g_off: 1e-9}
+  - {type: vcswitch, name: S2, nodes: [g2, a, 0], v_threshold: 5.0, g_on: 1000.0, g_off: 1e-9}
+  - {type: vcswitch, name: S3, nodes: [g3, vin, b], v_threshold: 5.0, g_on: 1000.0, g_off: 1e-9}
+  - {type: vcswitch, name: S4, nodes: [g4, b, 0], v_threshold: 5.0, g_on: 1000.0, g_off: 1e-9}
+  - {type: diode, name: D1, nodes: [a, vin], g_on: 1000.0, g_off: 1e-9}
+  - {type: diode, name: D2, nodes: [0, a], g_on: 1000.0, g_off: 1e-9}
+  - {type: diode, name: D3, nodes: [b, vin], g_on: 1000.0, g_off: 1e-9}
+  - {type: diode, name: D4, nodes: [0, b], g_on: 1000.0, g_off: 1e-9}
+  - {type: capacitor, name: C1, nodes: [vin, a], value: 200e-12, ic: 0.0}
+  - {type: capacitor, name: C2, nodes: [a, 0], value: 200e-12, ic: 400.0}
+  - {type: capacitor, name: C3, nodes: [vin, b], value: 200e-12, ic: 0.0}
+  - {type: capacitor, name: C4, nodes: [b, 0], value: 200e-12, ic: 400.0}
+  - {type: inductor, name: Llk, nodes: [a, p], value: 10e-6, ic: -4.0}
+  - {type: transformer, name: T1, nodes: [p, b, s1, s2], turns_ratio: 4.0}
+  - {type: diode, name: D5, nodes: [s1, r], g_on: 1000.0, g_off: 1e-9}
+  - {type: diode, name: D6, nodes: [s2, r], g_on: 1000.0, g_off: 1e-9}
+  - {type: diode, name: D7, nodes: [0, s1], g_on: 1000.0, g_off: 1e-9}
+  - {type: diode, name: D8, nodes: [0, s2], g_on: 1000.0, g_off: 1e-9}
+  - {type: inductor, name: Lo, nodes: [r, out], value: 20e-6, ic: 18.0}
+  - {type: capacitor, name: Co, nodes: [out, 0], value: 20e-6, ic: 36.0}
+  - {type: resistor, name: Ro, nodes: [out, 0], value: 2.0}

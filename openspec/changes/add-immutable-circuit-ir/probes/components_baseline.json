@@ -413,6 +413,10 @@
   "n": 13,
   "sha": "2430f4d505882d9f"
  },
+ "benchmarks/circuits/switching/isolated/psfb_full_bridge_zvs.yaml": {
+  "n": 26,
+  "sha": "7802c63d9339dfa5"
+ },
  "benchmarks/circuits/switching/isolated/synchronous_flyback.yaml": {
   "n": 9,
   "sha": "377df63d45a1220c"

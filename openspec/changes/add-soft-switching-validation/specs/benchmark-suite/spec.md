@@ -35,3 +35,11 @@ The test suite SHALL check dead-time commutations with device output capacitance
 #### Scenario: LLC half-bridge against the exact truth
 - **WHEN** `llc_half_bridge_zvs` runs five switching periods
 - **THEN** the tank current at every turn-off and every sample inside each transition agree with `exact_truth.py` within 2.5e-4 A and 0.5 V, and the ZVS fraction is 100 % on both switches
+
+#### Scenario: PSFB against the exact truth
+- **WHEN** `psfb_full_bridge_zvs` runs three switching periods
+- **THEN** the leakage current at every gate-off agrees with `exact_truth.py` within 5e-3 A, every sample inside each transition within 0.5 V, the output voltage and inductor current averaged over the last period (time weighted) within 1e-3 relative, and the ZVS fraction is 100 % on all four switches
+
+#### Scenario: The truth tool settles a transformer-coupled rectifier
+- **WHEN** `exact_truth.py` solves a half-bridge or full bridge feeding an ideal transformer and a diode bridge through a gate edge
+- **THEN** it does not fail to find a consistent diode mode, its own diode law holds on every segment, and a dead-time interval agrees with a hand-derived matrix-exponential closed form within 1e-9 relative

@@ -164,6 +164,7 @@ circuits:
   # uic does, and it runs. trbdf2 1.3e-3: worst V(ctrl_main), err_max 0.99 = a PWM source
   # edge sampled between the two runs' grids (edge_rms 3.3e-5). pwl: V(clamp_node).
   circuits/switching/isolated/llc_half_bridge_zvs.yaml: {status: runs}
+  circuits/switching/isolated/psfb_full_bridge_zvs.yaml: {status: runs}
   circuits/switching/isolated/ll13_active_clamp_forward.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree, trbdf2: disagree}, known_err: {pwl: 4.51, pwl+restart: 0.335, pwl+split: 0.335, trbdf2: 0.00133}}
   circuits/switching/isolated/synchronous_flyback.yaml: {status: runs, known: {pwl: disagree}, known_err: {pwl: 0.207}}
   # pwm phase as a fraction (batch 6b): the B legs now switch half a period apart (twice the

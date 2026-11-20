@@ -32,19 +32,24 @@
 - [ ] 2.3 KPI: `kpi__zvs_fraction` (target 100 %), `kpi__avg_switching_loss_w` (target ≈ 0 W).
 
   (2.1 done in benchmarks/circuits/switching/isolated/ with linear C_oss and
-  R_ac for the rectifier (F-S-3); its truth is exact_truth.py, checked in
+  R_ac for the rectifier (chosen under F-S-3, since fixed); its truth is exact_truth.py, checked in
   test_llc_* . 2.2 baselines: not captured — the test computes the truth
   each run (16 s). 2.3: the ZVS fraction (100 %) is asserted; the average
   switching loss KPI is not (no YAML kpi block, the runner is dead: see the
   reconciliation note).)
 
 ## 3. PSFB ZVS benchmark
-- [ ] 3.1 Create `psfb_full_bridge_zvs.yaml`: phase-shifted full-bridge with leakage inductance providing ZVS for the lagging-leg switches.
-- [ ] 3.2 KPI: per-switch ZVS fraction (leading-leg ≈ 100 %, lagging-leg ≈ 100 % at full load).
-  (Not done 2026-11-20: no independent truth — the exact tool cannot settle
-  the transformer-coupled rectifier at a gate edge, F-S-3; engine agreement
-  is not a truth. A draft netlist lost lagging-leg ZVS at 20 and 25 us on
-  pwl+restart / trbdf2 / esdirk43 (170-232 V at turn-on) with L_lk 10 uH.)
+- [x] 3.1 Create `psfb_full_bridge_zvs.yaml`: phase-shifted full-bridge with leakage inductance providing ZVS for the lagging-leg switches.
+- [x] 3.2 KPI: per-switch ZVS fraction (leading-leg ≈ 100 %, lagging-leg ≈ 100 % at full load).
+  (2026-11-20: F-S-3 fixed in the truth tool (the slow basis lost ~18
+  digits), so the PSFB has an independent truth: in
+  benchmarks/circuits/switching/isolated/, 400 V, 100 kHz, 80 ns dead time,
+  L_lk 10 uH, ideal 4:1 + diode bridge, started in its freewheel state.
+  test_psfb_*: truth ZVS on all 12 edges, i_Llk at turn-off, transition
+  samples, time-weighted means and the per-switch ZVS fraction (100 % on
+  all four) on pwl+restart, trbdf2, esdirk43, dsed; pwl without restart
+  strict xfails (trap 9). F-S-4 (dsed drops L_o's initial current at a
+  power-transfer start) parked as a strict xfail.)
 
 ## 4. Hard-switched reference
 - [x] 4.1 Create `buck_hard_switching_loss_reference.yaml`: standard buck where ZVS is not achieved.
