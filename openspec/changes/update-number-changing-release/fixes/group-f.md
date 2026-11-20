@@ -156,3 +156,29 @@ remainder per component. Replica: 1 170 samples; C++: 1 170.
 **After.** ladder100 2 083 samples, 0.18 s, no cap, no warning; ladder500 3 072 samples,
 12.25 s vs 7.28 s rule off (1.7×), no cap, no warning. Test
 `test_fx3_ladder_far_nodes_are_held_to_the_absolute_floor`.
+
+### Rehearsal re-run (session 2, after the floor)
+
+`next_defaults_rehearsal.py run --configs dsed:output_grid,dsed+next,auto+next --jobs 1`, cache
+seeded from p1-linalg's cells (1e2b90ff, the table's tree) with these three cells dropped.
+dsed:output_grid and dsed+next: 122 agree / 14 refused, every cell bit-equal to the base (they
+run with a dt: the rule is not engaged). auto+next: 132 agree / 2 disagree / 2 error (base 133 /
+2 / 1). Against the base, two cells moved:
+
+* `switching/isolated/active_clamp_forward.yaml` agree (exact 2.5e-8) -> `DiodeModeInconsistentError`
+  (D_fw ON at -1.02e-2 A, 16.6595 µs). NOT the floor: it refuses at output_rtol 1e-4 / 1e-5 / 1e-6
+  alike (6 / 17 / 53 samples break the law) and runs at 1e30 (no sample there). Trace (law check
+  off): D_fw stays ON from 16.64 to 16.77 µs carrying down to -1.4e-2 A with NO event; the mpmath
+  truth (`benchmarks/truth/active_clamp_forward.json`) has D_fw OFF at 1.66354842e-5 and ON at
+  1.67126165e-5 (77 ns). The rule-free step's scan (`locate_event_exact_`, D3: an eighth of the
+  fastest under-damped period) misses this double crossing; before F-6-7 every rule sample was a
+  step and acted as a scan point, so the rule located it. The rule-off run (and the 1e30 run) is
+  silently wrong there; the rule's exact samples now reveal it and the law check refuses —
+  correctly. Fix needed (localisation, not the output rule): a rigorous no-crossing test per scan
+  interval — the chord bound of `exact_chord_step` applied to the predicate's row (|g − chord| ≤
+  Σ_k |c·V_k| |z̈_k| ...): an interval whose end values exceed the bound in the same sign cannot
+  hold a root, otherwise it is split. Left open (new finding F-X-4).
+* `switching/basic/snubber_rc.yaml` err_rms against the reference 2.16e-8 -> 6.92e-8 (3.2×, err_max
+  1.97e-7 -> 1.96e-7, tol 1e-3; no truth for this circuit). NOT the floor: with `atol=1e-14` (the
+  old floor rtol·atol = 1e-14, exactly) the cell is bit-equal (1 177 samples, 6.918e-8). From the
+  F-6-7 grid (samples read inside rule-free steps), at the reference's own noise level.
