@@ -74,7 +74,7 @@ Rehearsal at fe75ee01 (the regenerated report's header names the runs its sectio
 - [ ] R2.5.A Impulsive events / the restart rule: F-3-1, F-3-3, F-3-7, F-5-1, F-5-10, F-6-1 — IN PROGRESS (`fix/core-release-a-impulsive` a324a2db, not merged here)
 - [ ] R2.5.B Event samples and result integrals: F-2-2, F-4-4, F-5-4, F-5-5, F-5-6, F-5-7, F-6-2, F-6-4, F-6-5 — FIXED on the PR line (36836230), waits for PR batch 14q; still parked here
 - [ ] R2.5.C The new mode selection: F-2-3, F-3-2, F-4-1, F-4-2, F-4-3, F-5-3, F-5-9 — FIXED on the PR line (d014f049), waits for PR batch 14q; still parked here
-- [ ] R2.5.D trbdf2: F-3-4, F-4-5 — `fix/core-release-de-trbdf2-tick` 85637327 (F-4-5 fixed, F-3-4 traced and still OPEN); not merged here
+- [ ] R2.5.D trbdf2: F-3-4, F-4-5 — `fix/core-release-de-trbdf2-tick` 85637327 (F-3-4 traced, still OPEN; F-4-5 reproduced and bounded there, status per that branch's notes); not merged here
 - [ ] R2.5.E Control tick: F-3-5, F-4-7 — `fix/core-release-de-trbdf2-tick` 85637327 (F-4-7 fixed fc16563e); not merged here
 - [ ] R2.5.F The exact route / output rule: F-2-4, F-3-6, F-5-2, F-5-8, F-6-6, F-6-7, F-X-1, F-X-3, F-X-4 — IN PROGRESS (`fix/core-release-f-exact-output` a5b9a485); F-X-3 keeps `ladder500_rc` / dsed out of the counter freeze
 - [ ] R2.5.G Thermal summary on branch-form devices: F-2-1, F-6-3 — FIXED on the PR line (6db843c0), waits for PR batch 14q; still parked here
