@@ -580,6 +580,7 @@ ESDIRK / Newton refusals beyond the tests.
   pwl loop gained per-step `if (sens.on())` blocks (gate tracking, the
   inline-stage flag) and new lambdas; candidates: hoist the step's two
   sens blocks into one out-of-line call, check code layout.
+- Full pytest at e149fc47: 6286 passed, 110 skipped, 9 xfailed (0 failed). ruff clean; `openspec validate add-parameter-sensitivities --strict` valid.
 - NOT RUN: the C++ step-test target (pulsim_core_step_tests) — no build
   of the test tree this session; full ctest (track agent rule).
 - NEXT: (1) buck_pwl cost; (2) 6.3 at rtol 1e-9 (the floor-path bias
