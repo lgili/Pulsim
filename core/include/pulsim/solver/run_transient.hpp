@@ -883,7 +883,7 @@ inline SimulationResult run_transient(
     // record phase); and the event's right limit x0+ at event_rl_t (NaN: none
     // this step), for the event-sample storage to read.
     Vector ip_x1, ip_b, ip_h0, ip_h1, ip_x2, ip_x3f, ip_x2m, ip_s2, ip_s3;
-    std::vector<Real> ip_hist, ip_d, ip_r;
+    std::vector<Real> ip_hist, ip_d, ip_r, ip_nc;
     // An ideal element's jump (the tracker records it): stage 1 from x0+ for
     // the step's lines only (ln_pre), the run keeps its own stage 1.
     Vector ln_x1;
@@ -2176,51 +2176,103 @@ inline SimulationResult run_transient(
                 e_jump += m * ip_d[2 * tc.p_entry_idx] * ip_d[2 * tc.s_entry_idx];
             }
             // A saturable core's current and a nonlinear capacitor's voltage
-            // are states too, under the same rule. Their histories
-            // are not moved to x0+ (the laws λ(i), q(v) read x0+'s algebraic
-            // entries), so a jump on one is refused by name.
-            auto refuse_jump = [&](Index br, Real s0, Real r0, auto&& st, const char* kind,
-                                   const char* unit) {
-                const Real s1 = st(ip_x1), s2 = st(ip_x2m);
+            // are states too, under the same rule (ẋ(0−) from the law:
+            // V_L / L(i), i / C(v)).
+            auto law_jumps = [&](Real s0, Real r0, auto&& st, bool amp) {
+                const Real s1 = st(ip_x1);
                 const Real tol = Real{1e-8} * (Real{1} + std::abs(s0) + std::abs(s1)) +
-                                 (unit[0] == 'A' ? tol_i : Real{0}) + dt_loc * std::abs(r0);
-                if (!solved || !jumps(s0, s1, s2, st(x), tol) ||
-                    !jumps(s0, s1, st(ip_x2), st(ip_x3f), tol)) {
-                    return;
-                }
-                const Real dp = Real{2} * s1 - s2 - s0;
+                                 (amp ? tol_i : Real{0}) + dt_loc * std::abs(r0);
+                return solved && jumps(s0, s1, st(ip_x2m), st(x), tol) &&
+                       jumps(s0, s1, st(ip_x2), st(ip_x3f), tol);
+            };
+            auto refuse_jump = [&](Index br, Real dp, const char* kind, const char* unit,
+                                   const char* why) {
                 const std::string name(graph.branch_name(br));
                 throw UnsupportedError(
                     "pwl", "impulse", name, kind,
                     std::format("discontinuity_restart: at t = {} the event "
-                                "moves {} '{}' by {:.6g} {} in an instant; the "
-                                "consistent restart re-initialises linear "
-                                "capacitors and inductors only; run this "
-                                "circuit without discontinuity_restart.",
-                                t_from, kind, name, dp, unit));
+                                "moves {} '{}' by {:.6g} {} in an instant; {}; "
+                                "run this circuit without discontinuity_restart.",
+                                t_from, kind, name, dp, unit, why));
             };
-            // (ẋ(0−) from the law: V_L / L(i), i / C(v))
+            // A saturable core: refused by name. Its dual (flux conserved,
+            // i⁺ from λ(i)) is not this code: the hysteretic law's λ(i)
+            // depends on its (H, M) path and has no inverse here.
             for (const auto& e : hs.get<pwl::SaturableInductorHistory>().entries()) {
                 const Real l0 = models::SaturableInductor::inductance(e.i_L_old, e.params);
-                refuse_jump(e.branch_id, e.i_L_old, l0 > Real{0} ? e.V_L_old / l0 : Real{0},
-                            [&](const Vector& y) { return y[e.branch_var_id]; },
-                            "saturable_inductor", "A");
+                auto st = [&](const Vector& y) { return y[e.branch_var_id]; };
+                if (law_jumps(e.i_L_old, l0 > Real{0} ? e.V_L_old / l0 : Real{0}, st, true)) {
+                    refuse_jump(e.branch_id, Real{2} * st(ip_x1) - st(ip_x2m) - e.i_L_old,
+                                "saturable_inductor", "A",
+                                "the consistent restart carries a jump on capacitors "
+                                "(linear or nonlinear) and linear inductors only");
+                }
             }
-            for (const auto& e : hs.get<pwl::NonlinearCapacitorHistory>().entries()) {
+            // A nonlinear capacitor (F-S-6): detected on its voltage as any
+            // state, jumped in CHARGE, the quantity the event conserves. The
+            // stages are charge-form solves of the law (each conserves the
+            // charge of a capacitor cut-set exactly, so does d_q); the whole
+            // jump J_q = d_q/(1 − a)² as for a linear state, x0+ =
+            // Q⁻¹(q0 + J_q), and its energy from the law (jump_energy: ∫(Q −
+            // Q(v0)) dv), never ½·C·ΔV² with a frozen C. ip_nc per device:
+            // (v0+, q0+, jumped).
+            const auto& ncs = hs.get<pwl::NonlinearCapacitorHistory>().entries();
+            ip_nc.assign(3 * ncs.size(), Real{0});
+            bool nc_jumped = false;
+            for (Size k = 0; k < ncs.size(); ++k) {
+                const auto& e = ncs[k];
                 auto v = [&](const Vector& y) {
                     return stamping::read_node_voltage(y, e.from) -
                            stamping::read_node_voltage(y, e.to);
                 };
                 const Real c0 = models::NonlinearCapacitor::capacitance(e.params, e.v_prev);
-                refuse_jump(e.branch_id, e.v_prev, c0 > Real{0} ? e.i_prev / c0 : Real{0}, v,
-                            "nonlinear_capacitor", "V");
+                if (!law_jumps(e.v_prev, c0 > Real{0} ? e.i_prev / c0 : Real{0}, v, false)) {
+                    continue;
+                }
+                auto q = [&](const Vector& y) {
+                    return models::NonlinearCapacitor::charge(e.params, v(y));
+                };
+                const Real q1 = q(ip_x1), q2 = q(ip_x2m);
+                const Real dq = Real{2} * q1 - q2 - e.q_prev;
+                const Real a = dq != Real{0}
+                    ? std::clamp((Real{2} * q2 - q1 - q(x)) / dq, Real{0},
+                                 kGamma / (Real{1} + kGamma))
+                    : Real{0};
+                const Real qp = e.q_prev + dq / ((Real{1} - a) * (Real{1} - a));
+                const Real vp = models::NonlinearCapacitor::voltage_of_charge(e.params, qp, v(ip_x1));
+                if (!std::isfinite(vp)) {
+                    refuse_jump(e.branch_id, Real{2} * v(ip_x1) - v(ip_x2m) - e.v_prev,
+                                "nonlinear_capacitor", "V",
+                                "the charge after it lies outside the law's range");
+                }
+                ip_nc[3 * k] = vp;
+                ip_nc[3 * k + 1] = qp;
+                ip_nc[3 * k + 2] = Real{1};
+                nc_jumped = true;
+                const Real ek = models::NonlinearCapacitor::jump_energy(e.params, e.v_prev, vp);
+                e_jump += ek;
+                if (ek > dom_e) {
+                    dom_e = ek;
+                    dom = ne + k;   // ≥ ne: a nonlinear capacitor
+                }
             }
+            jumped = jumped || nc_jumped;
             // A mode with structural dependent states (ideal elements) keeps
             // the SDIRK x3 projection and the tracker's record (one service
             // owns an ideal element's re-initialisation; both would record
             // the same jump twice).
             const bool structural = structure.active() &&
                                     !structure.check(stamped_mask, true).dependent.empty();
+            if (structural && nc_jumped) {   // the tracker re-initialises linear states only
+                for (Size k = 0; k < ncs.size(); ++k) {
+                    if (ip_nc[3 * k + 2] != Real{0}) {
+                        refuse_jump(ncs[k].branch_id, ip_nc[3 * k] - ncs[k].v_prev,
+                                    "nonlinear_capacitor", "V",
+                                    "an ideal element's re-initialisation carries "
+                                    "linear capacitors and inductors only");
+                    }
+                }
+            }
             const bool impulsive = solved && jumped && !structural;
             if (!impulsive && solved && jumped && L) [[unlikely]] {
                 // the lines' stage 1 from x0+ (a window integral is the
@@ -2261,8 +2313,10 @@ inline SimulationResult run_transient(
             // The record (every non-structural device kind). dW =
             // ½·JᵀM·J > 0 by the test above (M is positive semidefinite).
             {
-                const auto& de = ents[dom];
-                const bool cut = de.kind != pwl::DevicePool::StoredKind::Capacitor;
+                const bool nl = dom >= ne;   // the dominant state: a nonlinear capacitor
+                const Index d_from = nl ? ncs[dom - ne].from : ents[dom].from;
+                const Index d_to = nl ? ncs[dom - ne].to : ents[dom].to;
+                const bool cut = !nl && ents[dom].kind != pwl::DevicePool::StoredKind::Capacitor;
                 solver::ReinitRecord rec;
                 rec.t = t_from;
                 rec.kind = cut ? "cut_set" : "capacitor_loop";
@@ -2271,8 +2325,14 @@ inline SimulationResult run_transient(
                         rec.states.emplace_back(graph.branch_name(ents[k].branch_id));
                     }
                 }
+                for (Size k = 0; k < ncs.size(); ++k) {
+                    if (ip_nc[3 * k + 2] != Real{0}) {
+                        rec.states.emplace_back(graph.branch_name(ncs[k].branch_id));
+                    }
+                }
                 // the flux (V·s) or charge (C) moved on the dominant state
-                rec.lambda = de.C_or_L * ip_d[2 * dom];
+                rec.lambda = nl ? ip_nc[3 * (dom - ne) + 1] - ncs[dom - ne].q_prev
+                                : ents[dom].C_or_L * ip_d[2 * dom];
                 for (const auto& tc : history.transformer_couplings()) {
                     const Real m =
                         models::TwoWindingTransformer::mutual_inductance(tc.params);
@@ -2297,7 +2357,7 @@ inline SimulationResult run_transient(
                         return stamping::node_is_active(n) &&
                                (br.from == n || br.to == n);
                     };
-                    if (!touches(de.from) && !touches(de.to)) continue;
+                    if (!touches(d_from) && !touches(d_to)) continue;
                     if (dev0 == kInvalidIndex) dev0 = b;
                     rec.devices.emplace_back(graph.branch_name(b));
                 }
@@ -2331,6 +2391,14 @@ inline SimulationResult run_transient(
             // x0 + J from the snapshot at x0)
             for (Size k = 0; k < ne; ++k) ip_hist[2 * k + (is_cap(ents[k]) ? 0 : 1)] += ip_d[2 * k];
             history.restore(ip_hist);
+            // a nonlinear capacitor that jumped starts from its (v0+, q0+)
+            auto& ncm = hs.get<pwl::NonlinearCapacitorHistory>().mutable_entries();
+            for (Size k = 0; k < ncm.size(); ++k) {
+                if (ip_nc[3 * k + 2] != Real{0}) {
+                    ncm[k].v_prev = ip_nc[3 * k];
+                    ncm[k].q_prev = ip_nc[3 * k + 1];
+                }
+            }
             history.compute_b_extra_backward_euler(h_s, ip_h1);
             b_extra = ip_b - ip_h0 + ip_h1;
             x = ip_x1;   // the solve's start (Newton): the relaxed stage

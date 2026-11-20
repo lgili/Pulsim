@@ -184,17 +184,12 @@ def _run(engine, case, frac=None):
 F_S_5 = ("finding F-S-5: trbdf2 / esdirk43 abort at t = 0 on case A (Newton at h_min, "
          "||dx|| 7.9e-7 at I(Vdc)); ran at b9e46778, trbdf2 aborts at 1 us since be5454f3 "
          "and both at t = 0 since cedac36b")
-F_S_6 = ("finding F-S-6: discontinuity_restart refuses by name an event that moves a "
-         "nonlinear capacitor (the low-side turn-on at 0.5 us moves Ch); ran at b9e46778, "
-         "refused since cedac36b")
 
 
 def _line_marks(request, engine, case):
-    """F-S-5 / F-S-6, found when this suite was merged onto the integration
-    line (batch 14t). True when a mark was applied."""
-    if engine == "pwl_restart":
-        request.applymarker(pytest.mark.xfail(strict=True, raises=p.UnsupportedError, reason=F_S_6))
-        return True
+    """F-S-5, found when this suite was merged onto the integration line
+    (batch 14t; F-S-6, the restart rule's refusal, is closed). True when a
+    mark was applied."""
     if engine in ("trbdf2", "esdirk43") and case == "A":
         request.applymarker(pytest.mark.xfail(strict=True, raises=p.SimulationAborted, reason=F_S_5))
         return True
@@ -210,8 +205,11 @@ def _cross(t, v, level, t0, t1):
 
 
 def _window_loss(b, fn, r, t0, t1):
+    """The regular part plus the impulses booked in the window (the window /
+    impulse convention: a restart-rule jump is reported by its record)."""
     rows = device_loss_summary(b, r, switch_fn=fn, t_from=t0, t_to=t1)
-    return sum(e["E_total"] for e in rows if e["name"] in ("Sh", "Sl", "Dh", "Dl"))
+    return sum(e["E_total"] + e.get("E_impulse_total", 0.0)
+               for e in rows if e["name"] in ("Sh", "Sl", "Dh", "Dl"))
 
 
 # ------------------------------------------------------------------ tests --
@@ -261,7 +259,8 @@ def test_zvs_fraction_soft_low_side_hard_high_side(engine, request):
 
 # trbdf2's overbooking (1381.7 uJ case A at b9e46778) is gone with the
 # state error norm: case B reads 1.6891 uJ (truth 1.6878); case A is F-S-5.
-# pwl_restart (1.44 uJ case A at b9e46778) is refused now: F-S-6.
+# pwl_restart (1.44 uJ case A at b9e46778) books the hard turn-on as its
+# impulse record, the energy from the charge law (F-S-6, closed).
 KNOWN_LOSS = {
     "pwl": "known open item: the fixed engine books almost none of E_oss (unresolved RC collapse)",
 }

@@ -39,8 +39,10 @@
 #include "pulsim/models/charge_table.hpp"
 #include "pulsim/numeric/types.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <format>
+#include <limits>
 #include <memory>
 #include <numbers>
 #include <stdexcept>
@@ -284,6 +286,65 @@ struct NonlinearCapacitor {
         const Real e = Real{1} - p.m;
         return p.C0 * p.V0 / e
                * (std::pow(Real{1} + u, e) - Real{1});
+    }
+
+    /// The voltage at charge q (Q is non-decreasing in v): bracketed
+    /// Newton from v_guess. NaN when no voltage reaches q (below a
+    /// clamped floor, where Q is flat).
+    [[nodiscard]] static Real voltage_of_charge(const Params& p, Real q,
+                                                Real v_guess) noexcept {
+        const Real step0 = Real{1e-3} * std::max(std::abs(v_guess), std::abs(p.V0));
+        Real lo = v_guess, hi = v_guess, step = step0;
+        for (int k = 0; charge(p, lo) > q; ++k, step *= 2) {
+            if (k == 200) return std::numeric_limits<Real>::quiet_NaN();
+            lo -= step;
+        }
+        step = step0;
+        for (int k = 0; charge(p, hi) < q; ++k, step *= 2) {
+            if (k == 200) return std::numeric_limits<Real>::quiet_NaN();
+            hi += step;
+        }
+        Real v = std::clamp(v_guess, lo, hi);
+        for (int k = 0; k < 100; ++k) {
+            const Real f = charge(p, v) - q;
+            if (f == Real{0}) return v;
+            (f > Real{0} ? hi : lo) = v;
+            Real vn = v - f / capacitance(p, v);
+            if (!(vn > lo && vn < hi)) vn = Real{0.5} * (lo + hi);
+            if (std::abs(vn - v) <= Real{1e-15} * (Real{1} + std::abs(v))) return vn;
+            v = vn;
+        }
+        return v;
+    }
+
+    /// The energy a charge-conserving jump a → b dissipates in the path
+    /// that carries it: ∫ₐᵇ (b − v)·C(v) dv = ∫ₐᵇ (Q(v) − Q(a)) dv
+    /// (½·C·(b − a)² for a linear law). Closed form for the junction law,
+    /// Gauss–Legendre (5 points × 32 panels) for the others.
+    [[nodiscard]] static Real jump_energy(const Params& p, Real a, Real b) noexcept {
+        const Real qa = charge(p, a);
+        if (p.law == ChargeLawKind::Junction && p.m != Real{2} &&
+            u_of(p, a) == a / p.V0 && u_of(p, b) == b / p.V0) {
+            const Real e = Real{1} - p.m, e2 = Real{2} - p.m;
+            auto F = [&](Real v) {   // ∫Q dv
+                return p.C0 * p.V0 / e *
+                       (p.V0 * std::pow(Real{1} + v / p.V0, e2) / e2 - v);
+            };
+            return F(b) - F(a) - qa * (b - a);
+        }
+        constexpr Real xg[5] = {0.0, -0.5384693101056831, 0.5384693101056831,
+                                -0.9061798459386640, 0.9061798459386640};
+        constexpr Real wg[5] = {0.5688888888888889, 0.4786286704993665,
+                                0.4786286704993665, 0.2369268850561891,
+                                0.2369268850561891};
+        constexpr int n = 32;
+        const Real hp = (b - a) / n;
+        Real s = 0;
+        for (int j = 0; j < n; ++j) {
+            const Real c = a + (j + Real{0.5}) * hp;
+            for (int g = 0; g < 5; ++g) s += wg[g] * (charge(p, c + Real{0.5} * hp * xg[g]) - qa);
+        }
+        return Real{0.5} * hp * s;
     }
 
     /// The CHARGE-EQUIVALENT capacitance over [0, V]: Q(V)/V. This
