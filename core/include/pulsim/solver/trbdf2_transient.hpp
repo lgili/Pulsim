@@ -1863,8 +1863,13 @@ inline SimulationResult run_transient_trbdf2(
     // post-edge; a sliver step to t_end may still follow).
     Real slots_only_t = std::numeric_limits<Real>::quiet_NaN();
     Size sdirk_left = 0;       // SDIRK restart steps still owed (set below)
+    const bool sdirk_ok = opts.sdirk_on_linear_circuits || nl_effective;
     bool sdirk_gate = false;   // the pending restart came from a gate edge
-    auto restart_after_gate_event =[&](bool settled, Real t_gates,
+    // Where and under which mode a gate edge re-solved the slots (x itself
+    // is the pre-edge solve): esdirk43's explicit stage may read them.
+    Real edge_slots_t = std::numeric_limits<Real>::quiet_NaN();
+    SwitchStateMask edge_slots_m;
+    auto restart_after_gate_event = [&](bool settled, Real t_gates,
                                         Real hp, bool commit) {
         if (!opts.refresh_after_event) {
             return;
@@ -1900,26 +1905,44 @@ inline SimulationResult run_transient_trbdf2(
         const Real dtp = last_probe_dt;
         ++st.n_derivative_refreshes;
         post_event_pending = true;
-        // The step after the edge is the SDIRK(2,2) restart from the
-        // committed x, as after a diode event: its backward-Euler stages
-        // read no derivative slot, so it starts from the consistent x0+
-        // (the states are continuous at the edge; the algebraic unknowns
-        // follow in the new mode). The probe used to be COMMITTED as a
-        // trapezoidal step of h_p = 1e-6 x the pre-edge step, whose first
-        // slot is the PRE-edge derivative: across a channel / C_oss loop of
-        // tau = 0.6 ps it stopped at 38.94 V where the ODE is at 30.67 V,
-        // and the loss port booked it from the right limit's 2.3 MW
-        // (+4.4 % conduction energy, release group D3).
-        sdirk_left = std::max(sdirk_left, Size{1});
-        sdirk_gate = true;
-        // No sample across t_end or a controller tick (the step to it
-        // starts from x anyway): replace the slots only, for a snapshot.
-        if (!commit || t + dtp >= opts.t_end - h_min
-            || t + dtp >= queue.next_of(events::Kind::ControlTick) - h_min) {
+        // The step after an edge starts from the consistent x0+: the states
+        // are continuous, the algebraic unknowns and the derivative slots
+        // are those of the NEW mode at the edge. The probe used to be
+        // COMMITTED as a trapezoidal step of h_p = 1e-6 x the pre-edge step
+        // whose first slot is the PRE-edge derivative: across a channel /
+        // C_oss loop of tau = 0.6 ps it stopped at 38.94 V where the ODE is
+        // at 30.67 V, and the loss port booked it from the right limit's
+        // 2.3 MW (+4.4 % conduction energy, release group D3).
+        //  - A circuit whose diode events restart by the SDIRK(2,2) step (a
+        //    Newton law or a stateful kind): the same restart from x; its
+        //    backward-Euler stages read no slot, its commit stores the new
+        //    mode's.
+        //  - A linear circuit: the slots from the probe, which KCL balances
+        //    under the new mode at t + h_p (the probe's companion current, not
+        //    the stale slot), and the next step is TR-BDF2 from x. (The SDIRK
+        //    step there cost +40 .. +90 % accepted steps on PWM circuits for no
+        //    measured gain: its embedded estimate is first order.)
+        const bool lin = !sdirk_ok;
+        if (lin) {
             history.refresh_derivatives(x_trial, dtp);
             if (lt) lt->slots_rewritten();
-            hs.refresh_derivatives(x_trial, dtp);
-            slots_only_t = t + dtp;   // where the unused probe reached
+            edge_slots_t = t;
+            edge_slots_m = m_probe;
+        } else {
+            sdirk_left = std::max(sdirk_left, Size{1});
+            sdirk_gate = true;
+        }
+        const Real t_plus = t + dtp;
+        // No sample across t_end or a controller tick (the step to it
+        // starts from x anyway): the slots only, for a snapshot.
+        if (!commit || t_plus >= opts.t_end - h_min
+            || t_plus >= queue.next_of(events::Kind::ControlTick) - h_min) {
+            if (!lin) {
+                history.refresh_derivatives(x_trial, dtp);
+                if (lt) lt->slots_rewritten();
+                hs.refresh_derivatives(x_trial, dtp);
+            }
+            slots_only_t = t_plus;   // where the unused probe reached
             return;
         }
         // The toggle is at the edge, not at the next step's start.
@@ -1929,17 +1952,17 @@ inline SimulationResult run_transient_trbdf2(
             gate.learn_toggles(diodes.num_gated() > 0 ? switch_fn(t_gates)
                                                       : m_probe, t);
         }
-        // The probe is recorded, not committed (as a diode event's): the
-        // trace shows the edge as a jump, not a ramp across the restart
+        // The right limit is recorded, not committed (as a diode event's):
+        // the trace shows the edge as a jump, not a ramp across the first
         // step (losses and charges integrated over the samples, DECISIONS 7).
         x_sig = x_trial;
         gates_decided = m_probe;
         drop_superseded_event_sample(t);
-        push_time(t + dtp, "post-edge");
+        push_time(t_plus, "post-edge");
         result.states.push_back(x_trial);
         result.event_iteration_count.push_back(0);
         result.record_switch_state(m_probe);
-        event_sample_t = t + dtp;
+        event_sample_t = t_plus;
     };
 
     // ---- L-stable SDIRK(2,2) restart (Alexander, gamma_s = 1 - 1/sqrt2) ----
@@ -1951,7 +1974,6 @@ inline SimulationResult run_transient_trbdf2(
     // The stateful kinds' q rows take the same BE stages (ed_sdirk_base /
     // ed_hs_commit, shared with esdirk43): every circuit can restart.
     const Real gs = Real{1} - Real{1} / std::sqrt(Real{2});
-    const bool sdirk_ok = opts.sdirk_on_linear_circuits || nl_effective;
     // ---- the SDIRK restart after a diode turn-off on a linear circuit ----
     // A diode with g_off > 0 that turns off leaves the inductor it carried
     // on a g_off path: an L*g_off mode (tau ~ 2e-13 s on the DCM buck) the
@@ -2133,7 +2155,46 @@ inline SimulationResult run_transient_trbdf2(
     // read q' = 0, the q-row estimate was O(h) at any h and Newton stalled at
     // h_min, F-S-1). Its backward-Euler stages read no slot; the commit
     // stores the consistent one.
-    if (hs.any() && resume_from == nullptr) sdirk_left = std::max(sdirk_left, Size{1});
+    // A CONSISTENT start needs no restart (a sine from zero into a saturable
+    // L: v_L(0) = 0 is the slot; the first-order restart step cost it 5 % of
+    // its error): a probe at t_start under the start mode gives each q row's
+    // derivative there, and when no row's slot is off by more than its
+    // tolerance over the first step, that step is the integrator's own.
+    auto start_consistent = [&]() {
+        const Size nq = hs.stage_rows();
+        if (nq == 0) return false;
+        std::vector<Real> q0(nq), f0(nq), f1(nq), sc(nq);
+        hs.stage_start(Real{1}, q0.data(), f0.data());
+        x_trial = x;
+        try {
+            if (!probe_solve(mask_at(opts.t_start + Real{0.5} * h_min), t,
+                             h_probe_floor, x_trial)
+                || !x_trial.allFinite()) {
+                return false;
+            }
+        } catch (const pwl::NewtonRoundoffBudgetExceeded&) {
+            throw;
+        } catch (const std::runtime_error&) {
+            return false;
+        }
+        pwl::StatefulHistories::Snapshot snap;
+        hs.snapshot_into(snap);
+        hs.refresh_derivatives(x_trial, last_probe_dt);
+        hs.stage_start(Real{1}, q0.data(), f1.data());
+        hs.restore(snap);
+        hs.q_scales(sc.data());
+        for (Size r = 0; r < nq; ++r) {
+            if (sc[r] < Real{0}) continue;   // no q entry
+            if (!(std::abs(f1[r] - f0[r]) * h
+                  <= opts.atol * sc[r] + opts.rtol * std::abs(q0[r]))) {
+                return false;
+            }
+        }
+        return true;
+    };
+    if (hs.any() && resume_from == nullptr && !start_consistent()) {
+        sdirk_left = std::max(sdirk_left, Size{1});
+    }
     std::vector<pwl::HistoryEntry> hist_snap, hist_s1, hist_s2, hist_f;
     std::vector<Real> est_v, est_sc;
     sparse::Matrix noise_J;
@@ -2717,6 +2778,7 @@ inline SimulationResult run_transient_trbdf2(
         auto tb_take = [&]<bool kE = false>() PULSIM_STEP_PHASE {
             // names read only under kE, captured by reference outside it (MSVC)
             (void)ed_take; (void)ed_forced; (void)ed_sf; (void)ed_sdirk_base; (void)ed_hs_snap;
+            (void)edge_slots_t; (void)edge_slots_m;
 
             // Step mask: sampled at the midpoint — piecewise-
             // constant gates are constant over (t, t+h) by the
@@ -2756,7 +2818,11 @@ inline SimulationResult run_transient_trbdf2(
                 // SDIRK(2,2) step (backward-Euler stages, no slot read): its
                 // commit leaves slots consistent with this mode (item (v)).
                 ed_forced = !sdirk;
-                if (!sdirk && mask_step == x_mask) return ed_take();
+                // (or the slots a gate edge re-solved under this mode at t)
+                if (!sdirk && (mask_step == x_mask
+                               || (edge_slots_t == t && mask_step == edge_slots_m))) {
+                    return ed_take();
+                }
                 if (!sdirk) {
                     sdirk = true;
                     h_pt = gs * h;
