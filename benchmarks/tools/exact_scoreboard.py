@@ -584,7 +584,8 @@ def render(previous=None):
             if "exact" not in c:
                 L.append(f"| {name} | {k} | {c['outcome']} |||||||||")
                 continue
-            L.append(f"| {name} | {k} | {_g(c['exact'])} | {c['exact_part'][0]} | {_g(c['smooth'])} "
+            proj = f" p{c['n_projected']}" if c.get("n_projected") else ""
+            L.append(f"| {name} | {k} | {_g(c['exact'])} | {c['exact_part'][0]}{proj} | {_g(c['smooth'])} "
                      f"| {_g(c['instants']) if c['instants_available'] else 'n/a'} | {_g(c['max_dt_h'])} "
                      f"| {_g(c['limits'])} | {c['n_missing']} / {c['n_spurious']} | {_g(c['exact_old'])} "
                      f"| {c['outcome'][:3]} {_g(c.get('err_rms'))} |")
