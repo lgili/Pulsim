@@ -48,6 +48,7 @@
 // rank-reduced in the ZERO_CURRENT mode. This is the seed of the Gate 4
 // linear-solve hook for partial_refactor projection.
 
+#include <array>
 #include <algorithm>
 #include <chrono>
 #include <concepts>
@@ -1393,6 +1394,18 @@ private:
         loc_t_tol_ = t_tol;
 
         const auto& preds = predictor_.predicates();
+        // F-X-5: a no-crossing certificate per scan interval. Between events a
+        // diode's predicate is affine in the state, g = Re Σ_k q_k z_k(τ) + d(τ),
+        // q_k = c·V_k, with d affine over the step (piecewise-linear sources) and
+        // z̈_k(τ) = z̈_k(0) e^{λ_k τ}; so |g − chord| on [a, a + δ] is at most
+        // E = Σ_k |q_k z̈_k(a)| min(δ²/8 · e^{max(0, Re λ_k) δ}, 2/|λ_k|²) (the output
+        // rule's per-mode bound, exact_chord_step: curvature, or the decaying
+        // term's amplitude). Ends of one sign with min(|g_a|, |g_b|) > E hold no
+        // root; otherwise the interval is halved (a double crossing, two sign
+        // changes, leaves the ends' signs equal: the D3 scan alone missed one in
+        // active_clamp_forward). Tier-1 modes without sine sources only.
+        const ExactLTI* cert = nullptr;
+        bool cert_tried = false;
         for (std::size_t ip = 0; ip < preds.size(); ++ip) {
             const auto& p = preds[ip];
             if (p.required_bit >= 0 &&
@@ -1401,6 +1414,49 @@ private:
             }
             Real ga = p.value(t0, x0);
             ++result.n_predicate_evals;
+            bool aq_ready = false;
+            const auto aq_of = [&]() -> bool {
+                if (aq_ready) return true;
+                if (!cert_tried) {
+                    cert_tried = true;
+                    if constexpr (requires { system_.exact_scan_modes(t0, x0, scan_zdd_); })
+                        cert = system_.exact_scan_modes(t0, x0, scan_zdd_);
+                }
+                if (cert == nullptr) return false;
+                const auto n = x0.size();
+                if (cert->scan_q.size() < preds.size()) cert->scan_q.resize(preds.size());
+                Eigen::VectorXcd& q = cert->scan_q[ip];
+                if (q.size() != n) {   // once per mode and predicate: g is affine in x
+                    q.resize(n);
+                    x_tmp_.setZero(n);
+                    const Real g0 = p.value(t0, x_tmp_);
+                    for (Eigen::Index k = 0; k < n; ++k) {
+                        x_tmp_ = cert->V_re.col(k);
+                        const Real re = p.value(t0, x_tmp_) - g0;
+                        x_tmp_ = cert->V_im.col(k);
+                        q[k] = {re, p.value(t0, x_tmp_) - g0};
+                    }
+                    result.n_predicate_evals += static_cast<Size>(2 * n + 1);
+                }
+                scan_aq_.resize(n);
+                for (Eigen::Index k = 0; k < n; ++k) scan_aq_[k] = std::abs(q[k]) * std::abs(scan_zdd_[k]);
+                aq_ready = true;
+                return true;
+            };
+            const auto certified = [&](Real a, Real g_a, Real b, Real g_b) {
+                const Real tau = a - t0, d = b - a;
+                Real e = Real{0};
+                for (Eigen::Index k = 0; k < scan_aq_.size(); ++k) {
+                    const std::complex<Real> lam = cert->lambda[k];
+                    const Real re = lam.real();
+                    Real c = d * d / Real{8};
+                    if (re > Real{0}) c *= std::exp(re * d);
+                    const Real r2 = std::norm(lam);
+                    if (re <= Real{0} && r2 > Real{0}) c = std::min(c, Real{2} / r2);
+                    e += (tau > Real{0} ? scan_aq_[k] * std::exp(re * tau) : scan_aq_[k]) * c;
+                }
+                return std::min(std::abs(g_a), std::abs(g_b)) > e;
+            };
             Real ta0 = t0;
             Size scan_from = 0;
             const SchedulerDiode* dio = admissible_sign_(p.type) != 0 ? diode_of_(p.aux_index) : nullptr;
@@ -1505,6 +1561,31 @@ private:
                             : locate_root_bracket([&](Real tau) { return g_at(tau) + off; },
                                                   ta, tb, ga_s, gb + off, t_tol,
                                                   output_rtol_ == Real{0});
+                    }
+                } else if (dio && ga * gb > Real{0} && static_cast<Real>(s) * ga > Real{0}
+                           && aq_of() && !certified(ta, ga, tb, gb)
+                           && std::abs(ga) > bound_at(ta, xa())
+                           && std::abs(gb) > bound_at(tb, x_at(k + 1))) {
+                    // F-X-5: halve until each piece is certified or holds a significant
+                    // sign change (the first in time); a piece at the depth cap or
+                    // touching zero inside the band is left (no event, as before)
+                    struct Piece { Real a, ga, b, gb; int depth; };
+                    std::array<Piece, 48> st{};
+                    int sp = 0, budget = 256;   // halvings per scan interval
+                    st[static_cast<std::size_t>(sp++)] = Piece{ta, ga, tb, gb, 0};
+                    while (sp > 0 && !root && budget-- > 0) {
+                        const Piece v = st[static_cast<std::size_t>(--sp)];
+                        if (v.depth > 0 && certified(v.a, v.ga, v.b, v.gb)) continue;
+                        if (v.depth >= 40 || !(v.b - v.a > t_tol)) continue;
+                        const Real m = Real{0.5} * (v.a + v.b);
+                        const Real gm = g_at(m);
+                        if (gm * v.ga < Real{0} && std::abs(gm) > bound_at(m, x_tmp_)) {
+                            root = locate_root_bracket(g_at, v.a, m, v.ga, gm, t_tol,
+                                                       output_rtol_ == Real{0});
+                            break;
+                        }
+                        st[static_cast<std::size_t>(sp++)] = Piece{m, gm, v.b, v.gb, v.depth + 1};
+                        st[static_cast<std::size_t>(sp++)] = Piece{v.a, v.ga, m, gm, v.depth + 1};
                     }
                 }
                 ga = gb;
@@ -3402,6 +3483,8 @@ private:
     Real loc_t_tol_ = Real{0};
     Vector loc_dx_, x_lad2_, x_offp_;
     std::vector<Vector> scan_x_;
+    Eigen::VectorXcd scan_zdd_;   // locate_event_exact_'s certificate: z̈ at the step start
+    Vector scan_aq_;              // |q_k z̈_k(0)| of one predicate
 };
 
 }  // namespace pulsim::dsed

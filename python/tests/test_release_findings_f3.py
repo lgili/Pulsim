@@ -2,6 +2,8 @@
 
 F-X-6  a trial mode's partial projection survived the settle under the output rule
        (forward converter, I(L_o) +0.585 A in 0.2 ps).
+F-X-5  the exact step's event scan missed a double crossing (active-clamp forward).
+F-X-4  the rehearsal harness reads a short trace; the output rule's bar is its promise.
 """
 
 import json
@@ -58,6 +60,25 @@ def test_fx6_forward_converter_keeps_the_inductor_current_at_the_switch_off(rt):
     # under the rule (1.1e-5 V at 1e-5); the defect moved it by 0.131 V
     tol = 1e-2 if rt is None else 100 * rt
     assert abs(mean - float(truth["windows"]["full"]["V(out)"]["mean"])) < tol
+
+
+ACF = "circuits/switching/isolated/active_clamp_forward.yaml"
+# mpmath (exact_truth.py at fa4b5c71, dps 30): D_fw OFF then ON again 77 ns later
+ACF_TRUTH = (1.66354841887779847e-5, 1.67126164738377463e-5)
+
+
+@pytest.mark.parametrize("rt", [None, 1e-4, 1e-5, 1e-6])
+def test_fx5_a_double_crossing_inside_one_scan_interval_is_found(rt):
+    """Both sign changes of D_fw's predicate fell inside one exact step's scan interval
+    (no under-damped mode: the D3 scan is the step itself), so the end signs agreed and
+    no event was seen: rule off, D_fw stayed ON at -1.4e-2 A (silently, 2.8 us from the
+    nearest event); under the rule the stored samples broke the diode law
+    (DiodeModeInconsistentError). The certificate halves an interval whose ends it
+    cannot prove root-free."""
+    r = _no_dt(_case(ACF), **({} if rt is None else {"output_rtol": rt}))
+    et = np.asarray(r.event_times)
+    for t in ACF_TRUTH:
+        assert np.min(np.abs(et - t)) < 1e-12
 
 
 def _tools():
