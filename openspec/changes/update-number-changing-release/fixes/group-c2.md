@@ -31,8 +31,9 @@ split event, a split-located crossing) first decides the diode set consistent wi
 in the new switch configuration: one Newton iteration from x0 (the stage's linearization at x0, written
 to a scratch vector, never kept), `events::redecide` on it, repeated until no diode flips (bounded by
 `max_event_iterations`). Newton then runs from x0 in that mode. The flips count as the stage's own
-(`iters`), so the impulse probe's widening and the restart window behave as when the settle flipped them.
-Only Newton stages run it (a linear stage IS its linearization); default path untouched (no restart).
+(`iters`), so the impulse probe's widening and the restart window behave as when the settle flipped them
+— unless the settle ends on the stage's entry bits (a linearization's flip the converged state undid:
+iters 1, no widening; reviewer M2). Only Newton stages run it (a linear stage IS its linearization); default path untouched (no restart).
 
 **Selectors.** Newton circuit: `'legacy'` → the settle + this decision; `'auto'` resolves to the settle
 for a Newton device on pwl → the same; `'lcp'` refuses a Newton device by name (unchanged, tested).
@@ -49,8 +50,19 @@ common mode, mV — the old test compared absolute node voltages; it now compare
   6.8926854 V (no truth for it); the old "restart-less truth 6.911 V" is that quantized circuit's
   restart-less run at 50 ns, not a truth.
 - SATURABLE primary, split: 6.8655416568 / ...6940 / ...7045 / ...7064 at dt 50 / 25 / 12.5 / 6.25 ns:
-  own limit 6.86554171 ± 1e-9 (the linear twin converges the same way to its truth). Second reference:
-  see below (esdirk43). Before the fix: abort at 61.55 µs (split) / 21.55 µs (no split).
+  own limit 6.86554171 ± 1e-9 (the linear twin converges the same way to its truth). Before the fix:
+  abort at 61.55 µs (split) / 21.55 µs (no split).
+- Second, independent reference for the saturable value: NONE at the 1e-7 level. trbdf2 (rtol 1e-8) and
+  esdirk43 (rtol 1e-7, 1e-9) on `fix/core-release-d2-trbdf2-stateful-restart` (cad6ab6b, built in
+  `.scratch`, deleted) abort on the saturable variant at t = 0 (floating) / 5 µs (secondary grounded),
+  Newton at h_min — the same edge class on trbdf2 (not this slice). Their linear twins: esdirk43 grounded
+  6.85671455 (+7.6e-8 vs truth), floating 6.85671757 (+3.1e-6, not controlled by rtol: the floating
+  island). Cross-check by a different integrator: leg B moved onto the grid (phase 2π·0.16, edges at
+  1.5 / 1.6 µs), secondary grounded, the DEFAULT trapezoidal path (no restart) at dt 10 / 5 / 2.5 /
+  1.25 ns: saturable − linear = 0.0096424, 0.0089608, 0.0089035, 0.0089680 V against the restart+split's
+  0.0089752 V (dt 50 ns) / 0.0089751 (12.5 ns); the trapezoid scatters ±6e-5 on this circuit (its
+  ringing at commutations), so it confirms the saturable increment to ~1e-5 only. The test pins the
+  saturable value to its own limit (stated as such in the test), and the linear one to the truth.
 - Not fixed (default path, not the rule): restart-less pwl at dt 5 ns on the floating saturable variant
   aborts at 1.495 µs; trbdf2 / esdirk43 abort at t = 0 (floating) / 5 µs (grounded) on the saturable
   variant on this tree. Both are the floating-island / saturable Newton class, outside the restart rule.

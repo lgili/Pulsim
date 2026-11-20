@@ -85,6 +85,7 @@
 #include <optional>
 #include <stdexcept>
 #include <unordered_map>
+#include <utility>
 
 namespace pulsim::solver {
 
@@ -843,6 +844,7 @@ inline SimulationResult run_transient(
     // run_restart): x1, its diode bits and the histories at x0.
     Vector rs_x1, rs_x2;
     Vector edge_xl;   // the edge's mode decision: a linearized solve (run_event_iteration)
+    std::vector<bool> edge_bits0, edge_bits1;   // its diode bits before / after the stage
     std::vector<bool> rs_bits, rs_bits2, rs_bits_be, rs_solved2;
     std::vector<bool> rs_bits0;   // the diode bits at stage 1's start
     // The diode bits after stage 1 of a restart that starts at the step
@@ -2578,6 +2580,7 @@ inline SimulationResult run_transient(
             // (adversarial-review finding P0-R1).
             last_solved_bits.clear();
             loop_released.clear();
+            const bool edge_now = std::exchange(edge_decide, false);
             // add-complementarity-mode-selection: every non-single linear
             // site is a decision site of the selector.
             const bool mode_site = mode_ports.has_value() && !single &&
@@ -2624,11 +2627,13 @@ inline SimulationResult run_transient(
             // stage the linearization IS the stage, so the loop below is that
             // decision (one memoryless solve per mask, none kept from a stale
             // mask); 'lcp' decides at its site above. The flips count as the
-            // stage's own (iters), as the settle would have counted them.
+            // stage's own (iters), as the settle would have counted them —
+            // unless the settle ends on the entry bits (a linearization's flip
+            // the converged state undid: no mode change, iters 1).
             Size edge_flips = 0;
-            if (edge_decide) {
-                edge_decide = false;
+            if (edge_now) {
                 if (nl_refresh_effective && has_diodes && !single) {
+                    diodes.snapshot_on_bits_into(edge_bits0);
                     const auto gates_e = gate_at(restart_rule ? gate_t : at_t);
                     while (edge_flips < max_iters) {
                         const auto m = diodes.combine(gates_e);
@@ -2772,7 +2777,10 @@ inline SimulationResult run_transient(
                 flipped = !single && has_diodes && events::redecide(diodes, x);
                 ++iters;
             } while (flipped && iters < max_iters);
-            iters += edge_flips;
+            if (edge_flips > 0) {
+                diodes.snapshot_on_bits_into(edge_bits1);
+                iters = !flipped && edge_bits1 == edge_bits0 ? Size{1} : iters + edge_flips;
+            }
             if (mode_site) {
                 const topology::SwitchStateMask gates =
                     gate_at(restart_rule ? gate_t : at_t);
