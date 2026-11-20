@@ -680,3 +680,107 @@ tip before the reviewer fixes, harness `rule_ratio_flow` with its first stencil)
   (|Σ q z̈| + δ|Σ q z̈ λ| + δ²/2 Σ|q z̈||λ|²) with z̈(a) = z̈(t0)e^{λτ} is the sharper E; for the
   sines the predicate's direct oscillator share is (recover_osc[from] − recover_osc[to]) ×
   its gain, which lets `exact_scan_modes` drop its `aug_omegas.empty()` refusal.
+
+## Session 5 — output rule (branch `fix/core-release-f4-chord-bound`; stopped by the coordinator at its context budget)
+
+### Item 1 — ll09's 7.3x: a HARNESS artifact, fixed (fe78e327)
+
+* The chord is [24.013458151530692 µs, 25 µs] of V(out) / V(load_mid) (and the I(Lload) chord
+  [1.050278676 ms, 1.074 ms]). The dense flow (output_rtol × 0.05) has exactly ONE sample inside
+  it, at 24.0152271 µs (1.8 ns after the chord's start, where the post-edge fast mode is still
+  alive). `metrics.rule_ratio_flow` applied its lopsided-stencil guard only when the chord held
+  ≥ 2 dense samples; with one it fitted the quadratic through (start, +1.8 ns, end) and
+  extrapolated the fast piece's curvature over 985 ns: 5.8 (V(out)) / 6.9 (I(Lload)).
+* The engine's chord is within its promise: tolerance = 1e-5 × 1960 V (V(out)'s range includes the
+  −979 V right after the 24 µs edge) = 0.0196 V; the chord's midpoint error against the dense flow
+  is 4.1e-4 V (0.02 of it). Every ll09 chord read against the dense flow LINEARLY at 14 fractions
+  (1e-3 … 0.997) of each chord: worst 0.989 (V(mid)/V(out)/V(load_mid)), 0.942 (I(Lload)).
+  No engine path emitted an uncertified chord; no flag was wrong. (The predecessor's 10.8 in
+  after2.jsonl was the tip before the reviewer's rounding-floor fix; on 075feac9 the engine part
+  was already gone and only the stencil artifact remained.)
+* Fix: the guard also for a one-sample stencil (`ts.size >= 3`); test
+  `test_f4_rule_ratio_flow_never_extrapolates_one_short_dense_piece`.
+* Rule vs exact flow on 075feac9 (after.py, auto+next, the 100 circuit units): 99 comparable,
+  98 ≤ 1 (worst ≤ 0.99988), ll09 7.27 = the artifact above (now ≤ 0.989); 1 not comparable
+  (three_phase_balanced_rl_load: the dense flow hit its 2e6-sample budget at 4.53 ms). NOT re-run
+  with the fixed harness on the 100.
+* Paths that emit a chord, audited BY READING `scheduler.hpp` (no hole found): regular step
+  (`push_output_samples_`: each cut certified by `output_step_`, the last chord's certification
+  returned; uncertified = cap / budget / unbounded → the end is stored and counted); the chord
+  into an event (t1 = located root, end stored as the event sample, state = the same flow);
+  the first chord after an event (starts at the stored post-settle state, which is `x`); slivers
+  (halved, `min(d, h/2)`, also on the thermal path); deferred step ends (`output_pend_`: bound
+  re-evaluated from the last STORED sample over [ts, t1] in the current mode, only when the step
+  had no event, `out_transparent` (no mask/state change at a poll), no kick, not at t_end, plus the
+  state and recovered-row gap checks; ticks / zero-length edges / numeric steps flush first);
+  the last chord of the run (stored, never deferred near t_end); a resumed run's first chord
+  (ranges restart, so the tolerance is tighter; no chord crosses the resume). Not checked by a
+  test: the deferral after a `ControlTick` that fires without a mask change (flushed at the top
+  of the loop by `tick_due_`).
+
+### Item 3 — WIP in the tree at this tip (built, NOT verified)
+
+* `chord_row_bound` (exact_lti.hpp): exact_chord_step's bound for ONE row (F split, three forms,
+  growing modes); the event scan's certificate now uses it (z̈(a) = z̈(t0)e^{λτ}, complex). It is
+  ≤ the old certificate bound everywhere (same F part, S part min of three forms instead of the
+  triangle one), so fewer halvings, never a certificate the old bound refused for a wrong reason.
+  C++ test "the scan certificate's row bound is the output rule's bound" (test_exact_lti.cpp)
+  pins it to exact_chord_step's `w.eb` per row — NOT built / run.
+* Sine sources: `exact_scan_modes` no longer refuses augmented modes (z, z̈ on (x, sin, cos));
+  the predicate's direct sine share is `node_pair_osc(from, to)` (recover_osc rows; an ON
+  branch-form diode reads its current row `var`), added to the probed row; the affine check
+  subtracts that share's value at t0. Shortcut: assumes the diode predicate is v_D − const
+  (gain 1, `crossing_signal`); a predicate of another gain would get a wrong sine share.
+* THE THREE-PHASE BRIDGE IS NOT A CERTIFICATE DEFECT (evidence on this build, debug print since
+  removed): truth (fa4b5c71's exact_truth, to 6 ms): events 0.3719356718626846 ms (D1),
+  1.490258218668964 ms (D5), 5.000000250912935 ms (D2 ON), 5.001350943090825 ms (D6 OFF — the
+  notes' "D5" is D6). The engine: the settle at 5.0000002509 ms keeps D6 ON (v_D = 1.6e-7 V,
+  band 5.4e-10, next = ON), then the MODE GUARD repairs it: `diagnostics['mode_guard']` repairs 1
+  at 0.005000000250912887, diode D6, violation 0.12 V — `judge_` reads the settled mode at
+  1e2·h_e and 1e4·h_e (capped at the next time event) and calls D6's legitimate turn-off 1.35 µs
+  later a violation of the mode, and the LCP turns D6 OFF at once. `mode_selection='lcp'` merges
+  them too. The fix belongs in `judge_` / `guard_check_` (a law that holds significantly at t+
+  and breaks later is a crossing the scan locates, not a violation) — settle territory, not done.
+  Also seen: the engine's D1 event 0.3719354704753909 ms vs truth 0.3719356718626846 ms (2e-10 s).
+
+### Build being waited for at the stop
+
+The extension build of this tip (item 3 WIP, debug print removed). It was meant to check
+`dsedall` (the 243 default cells) tip vs base — the base hashes are recorded in
+`.scratch/f4/dsedall_base5.json` (base = 075feac9's extension saved in `.scratch/base075/`).
+Also recorded with that base: goldens + dsed bit-identity (`.scratch/golden_s5base`,
+`.scratch/bitid_s5base.npz`; check: `BASE=s5base zsh .scratch/bitid5.sh check`). Chain script for
+the rest: `.scratch/f4/chain1.sh` (dsedall cmp, bitid, cost vs base075, run5.sh = rule vs flow on
+100, property test on 100 + `--truth` on six with fa4b5c71's truth tool in `.scratch/f4/truthtool`,
+events gate).
+
+### Item 2 acceptance — status at this tip
+
+| check | status |
+|---|---|
+| property test ≥ 30 circuits, 200 random instants | NOT run (tool ready: `.scratch/f4/prop_truth.py`, 100 units in `prop_units_all.txt`) |
+| `--truth` on six | NOT run |
+| rehearsal tool auto+next / dsed:output_grid / dsed+next, analytic 22 | NOT run |
+| evgate 1e-4/1e-5/1e-6 on 100 | NOT run |
+| goldens / dsed bit-identity 36/36 default + shadow | baseline recorded, check NOT run |
+| scoreboard exact-engine row 81/77/70 | NOT run (dsedall base recorded) |
+| samples before/after, ladder500 | NOT run |
+| instructions (rule on, five circuits; rule off ±0.5 %) | NOT run |
+| pulsim_core_dsed_tests (Eigen 5) | NOT built |
+| exact test files, `-m reference`, full pytest | NOT run (only test_release_findings_f4.py: 3 passed) |
+| ruff | run on the two harness files: clean |
+| openspec validate --strict | NOT run |
+| rule vs exact flow on 100 (075feac9, old harness) | run: 99 comparable, 98 ≤ 1, ll09 = harness artifact |
+
+### Next steps (successor)
+
+1. Run `dsedall` tip vs `dsedall_base5.json`; every moved cell graded against the truth
+   (`.scratch/f3/grade.py`); bit-identity check. If anything moves on a circuit without sine
+   sources, the sharper certificate changed a located root: explain it before keeping it.
+2. Build + run `pulsim_core_dsed_tests` (tree `.scratch/build-ctest`): the new chord_row_bound case
+   and the recovered-row case.
+3. Cost (`.scratch/f3/cost10.sh <tip python> .scratch/base075`): the forward converters' certificate
+   cost vs the old certificate; the ≤ 3 % target is vs pre-certificate (b08f4e4e), not built here.
+4. The three-phase bridge: fix the mode guard's judge horizon (above), then the strict xfail of
+   fix/core-exact-integrals-sources with the two truth instants.
+5. Item 2's list above on the final tip; then item 4 only if context remains.
