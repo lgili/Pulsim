@@ -3952,65 +3952,70 @@ def _run_dsed(plan):
     # preflight report on the way out, so `result._preflight` —
     # which the warning tells every user to read — is not a
     # PWL-only attribute.
-    if sensitivities is not None:
-        if s.output_rtol is not None:
-            raise _unsupported(
-                "dsed", "output_rtol",
-                "simulate(engine='exact', sensitivities=..., output_rtol=...): the "
-                "sensitivity run keeps its own grid. Drop output_rtol, or pass dt.")
-        from .sensitivity import simulate_sensitivities
-        if switch_fn is None and plan.undriven is not None:
-            from .sensitivity import _ConstSchedule  # an edge oracle (inf)
-            switch_fn = _ConstSchedule(builder.graph.num_switches,
-                                       plan.undriven[0] == "closed")
-        _dsed_res = simulate_sensitivities(
-            builder, t_end, sensitivities=sensitivities, dt=dt,
-            t_start=t_start, switch_fn=switch_fn,
-            initial_state=None if _ic_from_builder else initial_state,
-            ic_from_builder=_ic_from_builder, dt_init=dt_init,
-            b_extra_fn=b_extra_fn, integrator=integrator,
-            ticks=[(f, p, o) for (f, p), o in zip(
-                _plan.ticks, _plan.tick_offsets or [0.0] * len(_plan.ticks))])
-        if _mode_auto is not None:
-            _diag = getattr(_dsed_res, "diagnostics", None)
-            if isinstance(_diag, dict):
-                _diag["mode_selection_auto"] = _mode_auto
-            else:
-                try:
-                    _dsed_res.diagnostics = {"mode_selection_auto": _mode_auto}
-                except AttributeError:
-                    pass  # a result without diagnostics: the record has nowhere to go
-    else:
-        _dsed_res = _dsed.run_dsed_from_builder(
-            builder=builder,
-            t_end=t_end,
-            dt=dt,
-            rtol=rtol,
-            atol=atol,
-            dt_init=dt_init,
-            integrator=integrator,
-            stiffness_threshold=stiffness_threshold,
-            h_bdf2=h_bdf2,
-            t_start=t_start,
-            switch_fn=switch_fn,
-            b_extra_fn=b_extra_fn,
-            # Builder ICs (c0= / i0=) are a full-MNA vector: the
-            # dispatcher maps them per device onto the reduced state.
-            initial_state=None if _ic_from_builder else initial_state,
-            builder_initial_state=initial_state if _ic_from_builder else None,
-            progress=progress,
-            mode_selection=mode_selection,
-            allow_implicit_segments=bool(allow_implicit_segments),
-            output_rtol=s.output_rtol,
-            ticks=[(f, p, o) for (f, p), o in zip(
-                _plan.ticks, _plan.tick_offsets or [0.0] * len(_plan.ticks))],
-            resume_from=i.resume_from,
-            tick_origins=_resume_tick_origins(i.resume_from, len(_plan.ticks)),
-            tick_next_k=_resume_tick_next_k(i.resume_from, len(_plan.ticks)),
-            undriven=plan.undriven[0] if plan.undriven is not None else None,
-            mode_auto=_mode_auto,
-        )
-        _save_control_state(_plan.graphs, _dsed_res)   # the snapshot's controllers
+    try:
+        if sensitivities is not None:
+            if s.output_rtol is not None:
+                raise _unsupported(
+                    "dsed", "output_rtol",
+                    "simulate(engine='exact', sensitivities=..., output_rtol=...): the "
+                    "sensitivity run keeps its own grid. Drop output_rtol, or pass dt.")
+            from .sensitivity import simulate_sensitivities
+            if switch_fn is None and plan.undriven is not None:
+                from .sensitivity import _ConstSchedule  # an edge oracle (inf)
+                switch_fn = _ConstSchedule(builder.graph.num_switches,
+                                           plan.undriven[0] == "closed")
+            _dsed_res = simulate_sensitivities(
+                builder, t_end, sensitivities=sensitivities, dt=dt,
+                t_start=t_start, switch_fn=switch_fn,
+                initial_state=None if _ic_from_builder else initial_state,
+                ic_from_builder=_ic_from_builder, dt_init=dt_init,
+                b_extra_fn=b_extra_fn, integrator=integrator,
+                ticks=[(f, p, o) for (f, p), o in zip(
+                    _plan.ticks, _plan.tick_offsets or [0.0] * len(_plan.ticks))])
+            if _mode_auto is not None:
+                _diag = getattr(_dsed_res, "diagnostics", None)
+                if isinstance(_diag, dict):
+                    _diag["mode_selection_auto"] = _mode_auto
+                else:
+                    try:
+                        _dsed_res.diagnostics = {"mode_selection_auto": _mode_auto}
+                    except AttributeError:
+                        pass  # a result without diagnostics: the record has nowhere to go
+        else:
+            _dsed_res = _dsed.run_dsed_from_builder(
+                builder=builder,
+                t_end=t_end,
+                dt=dt,
+                rtol=rtol,
+                atol=atol,
+                dt_init=dt_init,
+                integrator=integrator,
+                stiffness_threshold=stiffness_threshold,
+                h_bdf2=h_bdf2,
+                t_start=t_start,
+                switch_fn=switch_fn,
+                b_extra_fn=b_extra_fn,
+                # Builder ICs (c0= / i0=) are a full-MNA vector: the
+                # dispatcher maps them per device onto the reduced state.
+                initial_state=None if _ic_from_builder else initial_state,
+                builder_initial_state=initial_state if _ic_from_builder else None,
+                progress=progress,
+                mode_selection=mode_selection,
+                allow_implicit_segments=bool(allow_implicit_segments),
+                output_rtol=s.output_rtol,
+                ticks=[(f, p, o) for (f, p), o in zip(
+                    _plan.ticks, _plan.tick_offsets or [0.0] * len(_plan.ticks))],
+                resume_from=i.resume_from,
+                tick_origins=_resume_tick_origins(i.resume_from, len(_plan.ticks)),
+                tick_next_k=_resume_tick_next_k(i.resume_from, len(_plan.ticks)),
+                undriven=plan.undriven[0] if plan.undriven is not None else None,
+                mode_auto=_mode_auto,
+            )
+            _save_control_state(_plan.graphs, _dsed_res)   # the snapshot's controllers
+    except Exception as e:
+        if t_start and i.resume_from is None:   # the engine's clock: relabel
+            _dsed.relabel_failure(e, float(t_start))
+        raise
     return _planning.new(_planning.RunOutcome, (
         _dsed_res, builder, switch_fn, b_extra_fn, None, None, None, None,
         None))

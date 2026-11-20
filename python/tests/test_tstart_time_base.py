@@ -391,3 +391,74 @@ def test_exact_engine_other_integrators_fresh_t_start_matches_the_tail(integrato
     for pr in probes:
         np.testing.assert_allclose(got.recorded["r"].windows[pr]["avg"],
                                    full.recorded["r"].windows[pr]["avg"], rtol=tol, atol=tol * scale)
+
+
+# ------------------------------------------------- the reviewer's cases
+
+class _AfterEdge:
+    """A gate that switches strictly AFTER each edge (on for t in
+    (k/F, (k + 0.3)/F], ``t > t_on`` style): the engine must read it past
+    each edge, which ``tau + t0`` alone rounds back onto once ulp(t0) is
+    larger than the engine's margin past an edge (t0 = 20 s)."""
+
+    @staticmethod
+    def _k(t):
+        k = math.floor(t * F)
+        while k / F >= t:
+            k -= 1
+        while (k + 1) / F < t:
+            k += 1
+        return k
+
+    def __call__(self, t):
+        k = self._k(t)
+        m = p.SwitchStateMask(1)
+        m.set(0, t <= (k + 0.3) / F)
+        return m
+
+    def next_edge_after(self, t):
+        k = self._k(t)
+        return next(c for c in ((k + 0.3) / F, (k + 1) / F, (k + 1.3) / F) if c > t)
+
+
+def _on_time(r, t0, t1):
+    """Seconds HS conducts in [t0, t1]: the event instants and the masks
+    between them (no sampling)."""
+    t, sw = np.asarray(r.times), np.asarray(r.switch_states)[:, 0]
+    rl = dict(zip(np.asarray(r.right_limit_index), np.asarray(r.right_limit_switch_states)[:, 0]))
+    on = 0.0
+    for k in range(len(t) - 1):
+        state = rl.get(k, sw[k]) if k else sw[k]   # the mask the step from t[k] ran under
+        on += (t[k + 1] - t[k]) * bool(state)
+    return on / (t1 - t0)
+
+
+@pytest.mark.parametrize("t0", [20.00001, 20.00005, 1.00003])   # 1.00003: ON an edge
+def test_gate_switching_after_its_edges_at_a_large_or_edge_t_start(t0):
+    T1 = t0 + 5e-4
+    r = _sim(_leg_r(), t_end=T1, t_start=t0, engine="dsed", switch_fn=_AfterEdge())
+    assert _on_time(r, t0, T1) == pytest.approx(0.3, abs=1e-9)
+    ev = np.asarray(r.event_times)
+    want = [e for e in sorted({(k + o) / F for k in range(int(t0 * F) - 1, int(T1 * F) + 2)
+                               for o in (0.0, 0.3)}) if t0 + 1e-9 < e < T1 - 1e-9]
+    np.testing.assert_allclose(ev, want, rtol=0, atol=1e-12 * t0)   # every edge after t0
+
+
+def test_a_gate_that_follows_a_controller_is_refused_with_t_start_by_name():
+    sch = p.make_pwm_switch_fn(F, 0.3, 0, 1)
+
+    class FollowsController:   # as the bind_* helpers mark theirs
+        _closed_loop = "bind_pi_to_duty_callable"
+
+        def __call__(self, t):
+            return sch(t)
+
+        def next_edge_after(self, t):
+            return sch.next_edge_after(t)
+
+    b = _leg_r()
+    b.add_capacitor("C", "a", "gnd", 1e-6)
+    for kw in ({}, dict(sensitivities=["R.R"])):
+        with pytest.raises(p.UnsupportedError, match="follows a controller|controller"):
+            _sim(b, t_end=TS + 3e-4, t_start=TS, engine="dsed",
+                 switch_fn=FollowsController(), **kw)

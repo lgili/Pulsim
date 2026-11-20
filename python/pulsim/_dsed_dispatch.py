@@ -36,6 +36,7 @@ reference scenarios.
 
 from __future__ import annotations
 
+import bisect as _bisect
 import re
 import warnings
 
@@ -640,39 +641,67 @@ _TIMED_SOURCE_KINDS = frozenset((
 
 class _OnAbsoluteClock:
     """A gate / ``b_extra_fn`` read at the absolute time ``tau + t0`` while
-    the exact engine's clock ``tau`` runs from 0. An edge handed to the engine
-    as ``tau_e = e - t0`` is read back at ``e`` itself: ``(e - t0) + t0`` can
-    round below ``e`` and read the mask before the edge."""
+    the exact engine's clock ``tau`` runs from 0."""
 
-    __slots__ = ("fn", "t0", "_edges")
+    __slots__ = ("fn", "t0")
 
     def __init__(self, fn, t0: float):
-        self.fn, self.t0, self._edges = fn, t0, {}
+        self.fn, self.t0 = fn, t0
+
+    def __call__(self, tau):
+        return self.fn(tau + self.t0)
+
+
+class _OnAbsoluteClockEdges:
+    """A gate with an edge oracle on the absolute clock. Each edge ``e`` is
+    handed to the engine as ``te = e - t0``; a read at ``tau`` keeps its order
+    with every handed-out edge (``te`` reads ``e``, a later ``tau`` reads after
+    ``e``, an earlier one before it): ``tau + t0`` alone rounds onto or across
+    ``e`` once ulp(t0) exceeds the engine's own margin past an edge (a gate
+    switching strictly after its edges ran inverted at t0 = 20 s)."""
+
+    __slots__ = ("fn", "t0", "_te", "_e")
+
+    def __init__(self, fn, t0: float):
+        self.fn, self.t0, self._te, self._e = fn, t0, [], []
 
     def _abs(self, tau: float) -> float:
-        e = self._edges.get(tau)
-        return tau + self.t0 if e is None else e
+        a = tau + self.t0
+        k = _bisect.bisect_right(self._te, tau)
+        if k:                                   # the last edge at or before tau
+            if self._te[k - 1] == tau:
+                return self._e[k - 1]
+            a = max(a, _np.nextafter(self._e[k - 1], _np.inf))
+        if k < len(self._te):                   # the first edge after tau
+            a = min(a, _np.nextafter(self._e[k], -_np.inf))
+        return a
 
     def __call__(self, tau):
         return self.fn(self._abs(tau))
-
-
-class _OnAbsoluteClockEdges(_OnAbsoluteClock):
-    """... and its edge oracle, shifted the same way."""
-
-    __slots__ = ()
 
     def next_edge_after(self, tau):
         e = float(self.fn.next_edge_after(self._abs(tau)))
         if not (e < float("inf")):
             return e
-        te = e - self.t0
-        if te <= tau:       # rounding: the edge is still after tau
-            te = _np.nextafter(tau, _np.inf)
-        if len(self._edges) > 4096:   # an edge is read back right after it is handed out
-            self._edges.clear()
-        self._edges[te] = e
+        te = max(e - self.t0, _np.nextafter(tau, _np.inf))   # still after tau
+        k = _bisect.bisect_left(self._te, te)
+        if k == len(self._te) or self._te[k] != te:
+            if len(self._te) >= 4096 and k:      # keep the recent edges, in order
+                del self._te[:k // 2], self._e[:k // 2]
+                k -= k // 2
+            self._te.insert(k, te)
+            self._e.insert(k, e)
         return te
+
+
+def relabel_failure(e: BaseException, t0: float) -> None:
+    """A typed give-up of a fresh ``t_start`` run (``ConvergenceError``,
+    ``DiodeModeInconsistentError``): its ``t_failed`` is on the engine's
+    clock; relabel it as the result's times are (the message text is the
+    kernel's and keeps the engine's clock)."""
+    t = getattr(e, "t_failed", None)
+    if isinstance(t, float):
+        e.t_failed = t + t0
 
 
 def on_absolute_clock(builder, t0: float, switch_fn, b_extra_fn):
@@ -694,9 +723,26 @@ def on_absolute_clock(builder, t0: float, switch_fn, b_extra_fn):
                 f"run {t0!r} s early). Start at t_start=0 (resume_from a snapshot "
                 "continues on the absolute clock), or use engine='pwl' / 'trbdf2'.")
     if switch_fn is not None:
-        cls = (_OnAbsoluteClockEdges if _has_edge_oracle(switch_fn)
-               else _OnAbsoluteClock)
-        switch_fn = cls(switch_fn, t0)
+        from .periodic_steady_state import _closed_loop_source
+        src = _closed_loop_source(switch_fn)
+        if src:   # its controller would run on the engine's clock (and the wrapper
+            # would hide it from the sensitivity path's own refusal)
+            raise unsupported(
+                "dsed", "t_start", message=
+                f"simulate(engine='dsed', t_start={t0!r}): switch_fn comes from "
+                f"{src}: the exact engine runs a fresh run on its own clock from 0, "
+                "and a gate that follows a controller is not shifted onto it. Start "
+                "at t_start=0, or use engine='pwl' / 'trbdf2'.")
+        if _has_edge_oracle(switch_fn):
+            w = _OnAbsoluteClockEdges(switch_fn, t0)
+            # t0 ON an edge: the start reads the mask after it, as the
+            # uninterrupted run reads it after its edge at t0 (a gate that
+            # switches strictly after its edges kept the old mask a period)
+            if float(switch_fn.next_edge_after(_np.nextafter(t0, -_np.inf))) == t0:
+                w._te, w._e = [0.0], [_np.nextafter(t0, _np.inf)]
+            switch_fn = w
+        else:
+            switch_fn = _OnAbsoluteClock(switch_fn, t0)
     if b_extra_fn is not None:
         b_extra_fn = _OnAbsoluteClock(b_extra_fn, t0)
     return switch_fn, b_extra_fn
