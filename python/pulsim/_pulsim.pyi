@@ -2275,6 +2275,11 @@ class SimulationResult:
         Resolution diagnostics of a pwl run (None when off, and for trbdf2/dsed). See pulsim.ResolutionWarning.
         """
     @property
+    def sensitivity_trace(self) -> typing.Any:
+        """
+        Forward parameter sensitivities of a pwl / trbdf2 run (add-parameter-sensitivities group 5): a dict with 'params', 'times' (the start and every accepted step), 'states' (sample, param, state) and the counters 'n_sens_solves', 'n_sens_iterations' (of accepted steps), 'n_sens_discarded' (back-substitutions of rejected attempts); None without sensitivities.
+        """
+    @property
     def states(self) -> typing.Any:
         """
         Recorded state samples as a read-only (num_steps, state_size) numpy view — zero-copy over the kernel's contiguous buffer. Use `.copy()` for a mutable array.
@@ -4233,6 +4238,12 @@ class RunOptions:
         ...
     @rtol.setter
     def rtol(self, arg0: float | None) -> None:
+        ...
+    @property
+    def sensitivities(self) -> list[str]:
+        ...
+    @sensitivities.setter
+    def sensitivities(self, arg0: collections.abc.Sequence[str]) -> None:
         ...
     @property
     def stiffness_threshold(self) -> float | None:
