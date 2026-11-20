@@ -254,7 +254,8 @@ def exact_parts(t, y, cand, *, span: float, h: float, truth_events=(), engine_ev
       weights of the grid; no snap window, no timing charge. None if no row
       is left.
     instants: ``sqrt(Σ_e jump_e² |δ_e| / T)``, δ_e = engine − truth instant
-      of each matched truth instant (the largest over its devices), jump_e the
+      of each matched truth instant (the largest over its devices; 0 within
+      4 ulp of the instant, a float time's own resolution), jump_e the
       truth's right − left: the L2 cost of the displacement. Also max |δ|/h.
       None (not available) when the engine exposes no event record.
     limits: ``max |engine − truth|`` over every one-sided value the engine
@@ -263,7 +264,8 @@ def exact_parts(t, y, cand, *, span: float, h: float, truth_events=(), engine_ev
       an unmatched engine event and at every other right-limit row, against
       the truth's limits at the engine's instant.
 
-    Unmatched events are listed (``missing`` / ``spurious``), never priced:
+    Events at or after the last stored row are not graded (the record ends
+    there). Unmatched events are listed (``missing`` / ``spurious``), never priced:
     what they do to the trajectory is in ``smooth``. Engine events at the
     initial instant without a match are the engine's initial mode selection
     (``n_initial``), not spurious. ``summary`` = the largest part, ``part``
@@ -278,6 +280,9 @@ def exact_parts(t, y, cand, *, span: float, h: float, truth_events=(), engine_ev
     t0 = t[0]
     t0p = np.nextafter(t0, np.inf)
     T = float(t[-1] - t0)
+    # the record ends at the last stored row: an event there or later is not graded on either side
+    truth_events = [e for e in truth_events if e[0] < t[-1]]
+    engine_events = [e for e in engine_events if e[0] < t[-1]]
     pairs, missing, spurious = match_events([(e[0], e[1]) for e in truth_events],
                                             [(e[0], e[1]) for e in engine_events], window * h)
     initial = [j for j in spurious if engine_events[j][0] <= t0p]
@@ -316,6 +321,8 @@ def exact_parts(t, y, cand, *, span: float, h: float, truth_events=(), engine_ev
     for i, j in pairs:
         d = float(engine_events[j][0] - truth_events[i][0])
         te = float(truth_events[i][0])
+        if abs(d) <= 4 * np.spacing(abs(te)):
+            d = 0.0                    # below the float time's own resolution
         if te not in worst or abs(d) > abs(worst[te][0]):
             worst[te] = (d, truth_events[i][3] - truth_events[i][2])
     if events_available:

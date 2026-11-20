@@ -157,3 +157,17 @@ def test_a_non_finite_recorded_value_scores_inf():
     f = np.zeros(GRID.size)
     r = metrics.exact_parts(GRID, f, f[:, None], span=1.0, h=H, right_rows=[(0.5, np.nan, 0.0)])
     assert r["summary"] == np.inf and r["part"] == "non-finite"
+
+
+def test_float_instants_and_the_record_end_are_not_graded():
+    """An engine instant one ulp from the truth's is not a timing error, and a
+    truth event at the run's end (three_phase_diode_rectifier: Dal- at
+    t_end) cannot be recorded by any engine."""
+    tau = 0.5
+    cand, tev = step_truth(tau)
+    y = np.where(GRID <= tau, 0.0, 1.0)
+    eng = [(np.nextafter(tau, 1.0), "S+", 0.0, 1.0, 0.0, 1.0)]
+    r = metrics.exact_parts(GRID, y, cand(GRID), span=1.0, h=H, truth_events=tev + [(1.0, "D+", 0.0, 0.0)],
+                            engine_events=eng)
+    assert r["instants"] == 0.0 and r["max_dt_h"] == 0.0
+    assert r["missing"] == [] and r["summary"] == 0.0

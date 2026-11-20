@@ -157,12 +157,21 @@ def switching_steps(s, t):
     return [(t[i], t[i + 1]) for i in k if t[i + 1] > t[i]]
 
 
+class Trace(tuple):
+    """``(t, {col: y}, switch record)`` that also keeps the run (``.result``):
+    the exact measure reads the engine's stored rows and event record from it."""
+    result = None
+
+
 def traces(res, cols):
     """``(t, {col: y}, switch record or None)``, every jump two-sided."""
+    raw = res
     res = with_right_limits(res)
     t = np.asarray(res.times, dtype=float)
-    return (t, {c: np.asarray(v1_reader.observable(res, c), dtype=float) for c in cols},
-            switch_record(res, t))
+    tr = Trace((t, {c: np.asarray(v1_reader.observable(res, c), dtype=float) for c in cols},
+                switch_record(res, t)))
+    tr.result = raw
+    return tr
 
 
 EDGE_CAP = 0.10   # excluded fraction above which the edge diagnostic is not a number

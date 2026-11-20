@@ -48,7 +48,7 @@ RAW = ROOT.parent / ".scratch" / "exact_scoreboard"
 OUT_MD = ROOT / "EXACT_SCOREBOARD.md"
 OUT_JSON = ROOT / "exact_scoreboard.json"
 DELTA = 1e-3                     # snap window, in netlist steps
-SELF_N = 5000                    # self-score: samples kept besides those near events
+SELF_N = 5000                    # self-score: the smooth part's rows, strided to at most this many
 ONSET = 0.05                     # the error's onset: first sample off by 5 % of tol
 # solved directly (20,000 schedule events, ~20 s); `truth` writes no record for it (its dt/32 CSV is 3.2 M rows)
 EXTRA = ("circuits/thermal/long_run_drift_buck.yaml",)
@@ -122,46 +122,166 @@ def event_near(sol, t):
     return dict(t=float(e["t"]), cause=e["cause"], flips=et.flips(sol.ck, e["prev"], e["mode"]))
 
 
-def grade(sol, tr, cols, sp, dt, tol, self_score=True):
-    """The exact measure of one two-sided trace ``(t, {col: y}, _)``."""
-    import mpmath as mp
+def _old_exact(sol, tr, cols, sp, dt):
+    """The previous definition (``metrics.err_exact`` on the two-sided trace,
+    snap window DELTA, 0+ row graded), kept for one release beside the new
+    one. Returns (per-column score, span per column)."""
     t = tr[0]
     keep = t <= float(sol.ck.t_end) + DELTA * dt
     t = t[keep]
     cand, gap = sol.at_float(cols, t, DELTA * dt, gaps=True)
     own = np.argmin(np.where(np.isnan(gap), np.inf, gap), axis=1)
     sp = {c: max(sp[c], float(np.ptp(cand[c][np.arange(t.size), own]))) for c in cols}  # peaks between span-grid points
-    per, dep, worst_pt = {}, None, 0.0
-    k0 = int(np.searchsorted(t, t[0], side="right"))
+    return {c: metrics.err_exact(t, tr[1][c][keep], cand[c], span=sp[c], gap=gap) for c in cols}, sp
+
+
+def _one_sided(sol, cols, ts):
+    """{col: (left, right)} of the truth at float instants ``ts`` (equal where it is continuous)."""
+    ts = np.asarray(ts, dtype=float)
+    if not ts.size:
+        return {c: (np.zeros(0), np.zeros(0)) for c in cols}
+    cand = sol.at_float(cols, ts, 0.0)
+    out = {}
     for c in cols:
-        y = tr[1][c][keep]
-        per[c] = metrics.err_exact(t, y, cand[c], span=sp[c], gap=gap)
-        e = metrics.exact_dev(y, cand[c])[k0:] / sp[c]
-        worst_pt = max(worst_pt, float(e.max()))
+        v = cand[c]
+        last = v.shape[1] - 1 - np.argmax(np.isfinite(v[:, ::-1]), axis=1)
+        out[c] = (v[:, 0], v[np.arange(ts.size), last])
+    return out
+
+
+def switch_names(sol):
+    """Device name of each switch-record column (``builder.switch_index_of``)."""
+    import v1_reader
+    b, _, _ = v1_reader.load(sol.ck.path).build()
+    names = {}
+    for dv in sol.ck.devs:
+        try:
+            names[b.switch_index_of(dv["name"])] = dv["name"]
+        except Exception:  # noqa: BLE001 - a device the builder does not index: its flips are not matched
+            pass
+    return names
+
+
+def event_record(sol, res, cols, t_end, names):
+    """The truth's device events and the engine's, with this column's
+    one-sided values, for ``metrics.exact_parts``.
+
+    Truth: every event (``sol.events``) where a device flips; a source break
+    with no flip is not an event here (the engine is handed its instant, and
+    the rows around it stay in the smooth part). Engine: every change of the
+    switch record between consecutive rows of ``with_event_limits(res)``
+    (stored rows, the split's inner events, right limits one ulp after);
+    the instant is the earlier row's time (the step after it ran in the new
+    state), the left value that row, the right value the later row when it
+    is a right limit (one ulp later), else not recorded. Every other right
+    limit is a ``right_rows`` entry. Returns per column the keyword
+    arguments of ``exact_parts`` besides the rows."""
+    import v1_reader
+    from pulsim._result_views import with_event_limits
+    ck = sol.ck
+    tev = [(float(e["t"]), f"{dv['name']}{'+' if b else '-'}")
+           for e in sol.events[1:] if float(e["t"]) <= t_end
+           for dv, a, b in zip(ck.devs, e["prev"], e["mode"]) if a != b]
+    view = with_event_limits(res)
+    tv = np.asarray(view.times, dtype=float)
+    sv = getattr(view, "switch_states", None)
+    sv = None if sv is None else np.asarray(sv, dtype=bool)
+    available = sv is not None and sv.ndim == 2 and sv.shape[0] == tv.size and sv.shape[1] > 0
+    is_right = np.r_[False, tv[1:] == np.nextafter(tv[:-1], np.inf)]
+    eev, paired = [], set()
+    if available:
+        for i in np.flatnonzero(np.any(sv[1:] != sv[:-1], axis=1)):
+            if tv[i] > t_end:
+                continue
+            for j in np.flatnonzero(sv[i + 1] != sv[i]):
+                if int(j) in names:
+                    eev.append((float(tv[i]), f"{names[int(j)]}{'+' if sv[i + 1, j] else '-'}",
+                                int(i), int(i + 1) if is_right[i + 1] else None))
+                    if is_right[i + 1]:
+                        paired.add(int(i + 1))
+    rr = [int(r) for r in np.flatnonzero(is_right) if int(r) not in paired and tv[r - 1] <= t_end]
+    yv = {c: np.asarray(v1_reader.observable(view, c), dtype=float) for c in cols}
+    tl = _one_sided(sol, cols, sorted({x[0] for x in tev}))
+    tl_at = {c: dict(zip(sorted({x[0] for x in tev}), zip(*tl[c]))) for c in cols}
+    inst = sorted({e[0] for e in eev} | {float(tv[r - 1]) for r in rr})
+    el = _one_sided(sol, cols, inst)
+    el_at = {c: dict(zip(inst, zip(*el[c]))) for c in cols}
+    out = {}
+    for c in cols:
+        y = yv[c]
+        out[c] = dict(
+            truth_events=[(te, k, *tl_at[c][te]) for te, k in tev],
+            engine_events=[(te, k, float(y[i]), None if r is None else float(y[r]), *el_at[c][te])
+                           for te, k, i, r in eev],
+            right_rows=[(float(tv[r - 1]), float(y[r]), el_at[c][float(tv[r - 1])][1]) for r in rr],
+            events_available=bool(available or not tev))
+    return out
+
+
+def grade(sol, tr, cols, sp, dt, tol, self_score=True, names=None):
+    """The exact measure of one run: ``tr`` = ``differential_runner.traces(res, cols)``.
+
+    ``exact`` = the cell's summary: per column ``metrics.exact_parts`` (smooth,
+    instants, limits; the largest), the worst column; ``exact_part`` names the
+    part that set it. ``exact_old`` = the previous definition (one release)."""
+    import mpmath as mp
+    import v1_reader
+    res = tr.result
+    old, sp = _old_exact(sol, tr, cols, sp, dt)
+    t_end = float(sol.ck.t_end)
+    t = np.asarray(res.times, dtype=float)
+    keep = t <= t_end + DELTA * dt                  # rows past the run's end (a float t_end) are not graded
+    t = t[keep]
+    cand = sol.at_float(cols, t, 0.0)
+    ev = event_record(sol, res, cols, t_end, switch_names(sol) if names is None else names)
+    per, dep, worst_pt = {}, None, 0.0
+    for c in cols:
+        y = np.asarray(v1_reader.observable(res, c), dtype=float)[keep]
+        p = metrics.exact_parts(t, y, cand[c], span=sp[c], h=dt, **ev[c])
+        kept = p.pop("kept")             # the same rows for every column (events are per circuit)
+        per[c] = p
+        e = metrics.exact_dev(y, cand[c]) / sp[c]
+        e = np.where(kept, e, 0.0)
+        worst_pt = max(worst_pt, float(e.max()), p["limits"] or 0.0)
         over = np.flatnonzero(e > tol)
-        if over.size and (dep is None or t[k0 + over[0]] < dep["t"]):
-            dep = dict(t=float(t[k0 + over[0]]), col=c, dev=float(e[over[0]]))
+        if over.size and (dep is None or t[over[0]] < dep["t"]):
+            dep = dict(t=float(t[over[0]]), col=c, dev=float(e[over[0]]))
         low = np.flatnonzero(e > ONSET * tol)
-        if over.size and low.size and (dep.get("onset_t") is None or t[k0 + low[0]] < dep["onset_t"]):
-            dep["onset_t"] = float(t[k0 + low[0]])
+        if over.size and low.size and (dep.get("onset_t") is None or t[low[0]] < dep["onset_t"]):
+            dep["onset_t"] = float(t[low[0]])
     if dep:
-        dep["event"] = event_near(sol, dep["t"] + DELTA * dt)
+        dep["event"] = event_near(sol, dep["t"])
         if dep.get("onset_t") is not None:
-            dep["onset_event"] = event_near(sol, dep["onset_t"] + DELTA * dt)
-    worst = max(per, key=per.get)
-    rec = dict(exact=per[worst], exact_col=worst, exact_per_col=per, exact_max_pt=worst_pt,
-               n_samples=int(t.size), departure=dep)
+            dep["onset_event"] = event_near(sol, dep["onset_t"])
+    worst = max(per, key=lambda c: per[c]["summary"])
+    w = per[worst]
+
+    def part_max(name):
+        xs = [(p[name], c) for c, p in per.items() if p.get(name) is not None]
+        return max(xs) if xs else (None, None)
+    rec = dict(exact=w["summary"], exact_col=worst, exact_part=w["part"],
+               exact_per_col={c: p["summary"] for c, p in per.items()},
+               smooth=part_max("smooth")[0], instants=part_max("instants")[0], limits=part_max("limits")[0],
+               instants_available=w["instants_available"],
+               max_dt_h=max((p.get("max_dt_h", 0.0) for p in per.values()), key=abs),
+               limits_worst=dict(zip(("value", "col"), part_max("limits"))) | (
+                   {"t": per[part_max("limits")[1]]["limits_worst_t"]} if part_max("limits")[1] else {}),
+               n_matched=w["n_matched"], n_initial=w["n_initial"], smooth_rows=w["smooth_rows"],
+               missing=w["missing"][:20], n_missing=len(w["missing"]),
+               spurious=w["spurious"][:20], n_spurious=len(w["spurious"]),
+               exact_old=old[max(old, key=old.get)], exact_old_col=max(old, key=old.get), exact_old_per_col=old,
+               exact_max_pt=worst_pt, n_samples=int(t.size), departure=dep)
     if self_score:
-        # the truth itself (mpmath `sample`, a different code path) on this grid: every
-        # sample near an event, the rest strided to <= SELF_N (expm segments cost one expm each)
-        near = np.isfinite(gap).sum(axis=1) > 1
-        keep_s = near | (np.arange(t.size) % max(1, t.size // SELF_N) == 0)
-        keep_s[:2] = True
-        ts = t[keep_s]
-        v = sol.sample(cols, [mp.mpf(float(x)) for x in ts])
-        rec["self"] = max(metrics.err_exact(ts, np.array([float(x) for x in v[c]]), cand[c][keep_s],
-                                            span=sp[c], gap=gap[keep_s]) for c in cols)
-        rec["self_n"] = int(ts.size)
+        # the truth itself (mpmath `sample`, a different code path) on the smooth part's
+        # rows, strided to <= SELF_N (expm segments cost one expm each)
+        idx = np.flatnonzero(kept)
+        idx = np.r_[0, idx[:: max(1, idx.size // SELF_N)]]
+        ts = t[idx]
+        rec["self"], rec["self_n"] = None, int(ts.size)
+        if ts.size >= 2:
+            v = sol.sample(cols, [mp.mpf(float(x)) for x in ts])
+            rec["self"] = max(metrics.exact_parts(ts, np.array([float(x) for x in v[c]]), cand[c][idx],
+                                                  span=sp[c], h=dt)["smooth"] for c in cols)
     return rec
 
 
@@ -233,8 +353,8 @@ def twins():
                     rows.append(dict(run=label, error=f"{type(ex).__name__}: {ex}"[:200]))
                     continue
             r = grade(sol, dr.traces(res, g), g, sp, case.dt, 1e-3, self_score=False)
-            rows.append(dict(run=label, exact=r["exact"], exact_col=r["exact_col"], n=r["n_samples"],
-                             departure=r["departure"]))
+            rows.append(dict(run=label, exact=r["exact"], exact_col=r["exact_col"], exact_part=r["exact_part"],
+                             exact_old=r["exact_old"], n=r["n_samples"], departure=r["departure"]))
             print(rel, label, r["exact"], flush=True)
         out[rel] = rows
     RAW.mkdir(parents=True, exist_ok=True)
