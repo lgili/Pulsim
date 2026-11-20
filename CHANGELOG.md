@@ -6,6 +6,33 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Thermal summary: one conduction reading; refusals where there was silence
+
+* **Fixed** `device_thermal_summary` on a branch-form device (`form='branch'`,
+  `R_on > 0`) with `conduction_specs`: its `P_cond_avg` and its junction
+  trace ignored the conduction model and read the solved `v·i` (a DC diode,
+  `V_f0 = 0.7`, `r_on = 0.02`, 10 A: 0.0998 W where `V_f0·I + r_on·I²` and
+  `device_loss_summary` give 8.98901 W; a buck's diode 0.0203 W against
+  2.576 W). Both summaries now read a device's conduction power through one
+  function, `pulsim.losses.conduction_power_avg` (the device's loss-summary
+  entry), and the junction trace follows the same model. The conductance
+  form (the default) is unchanged.
+* **Changed (a refusal where there was silence; today's defaults)**
+  `device_thermal_summary` refuses by name (`OptionsError`, option
+  `thermal_specs`) a device in `thermal_specs` whose kind it has no loss
+  model for — a source, a capacitor, a Lauritzen diode, a saturable
+  inductor, a machine, `excess_loss` (its core loss is in
+  `device_loss_summary`'s `core_loss`, not in a junction model). It used to
+  return no row for that device.
+* **Changed** `device_loss_summary` warns by name where it leaves a device
+  out (a level-1 IGBT with a tail; a switch with neither a recorded mask nor
+  `switch_fn=`), and `device_thermal_summary` warns for a supported device
+  the loss summary left out. Both used to skip it silently.
+* **Fixed** `control_tick='state'`: a control graph whose rate does not fit
+  the fixed step is refused before the run as `ControlGraphBuildError`, as
+  under `control_tick='label'` (it arrived as `SimulationAborted` from
+  inside the run).
+
 ### Excess core loss in the permeance network
 
 * **Added** `CircuitBuilder.add_excess_loss(name, m_a, m_b, c, eps)`:
