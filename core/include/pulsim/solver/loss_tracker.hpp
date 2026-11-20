@@ -112,9 +112,14 @@ struct StepLines {
     // charge; `v0` the capacitor voltages a restart (sub)step starts from
     std::vector<Real> c_start, v0;
     std::array<std::vector<Real>, kMax> c_left, c_right;
+    // the last restart (sub)step's end currents when its stage 1 was re-taken
+    // from x0+ for the lines (an ideal element's jump): not the run's i_prev
+    std::vector<Real> c_end;
+    bool end_own = false;
     void clear() noexcept {
         start = false;
         n = 0;
+        end_own = false;
     }
     [[nodiscard]] bool empty() const noexcept { return !start && n == 0; }
 };

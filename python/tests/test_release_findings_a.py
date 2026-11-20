@@ -325,15 +325,11 @@ def _cut_smaller_than_the_old_rate(i0):
         return p.simulate(b, t_end=1e-6, dt=1e-7, switch_fn=fn, **RESTART)
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "reviewer A1 (third session): the impulse bound h*max(|xdot(0-)|, ...) reads the OLD mode's "
-    "rate, h*V/L = 10 A here, so the 8 A cut passes as a kink: no record, i_L 8 -> -8.38 A "
-    "through Db (truth 0). Dropping the old rate at grid events fixes it but flags the DCM "
-    "buck's 47 uF output C (36 uV, 3e-14 J records; buck_dcm error 3.4e-6 -> 5.0e-6). Needs a "
-    "jump/kink test that does not read the old rate's magnitude"))
 def test_a_cut_smaller_than_h_times_the_old_rate_is_an_impulse():
-    """At an event AT the step start the old mode's rate h*V/L = 10 A must not mask the cut:
-    the 8 A cut came back as -8.38 A through Db with no record (reviewer, third session)."""
+    """The old mode's rate h*V/L = 10 A must not mask the cut: the 8 A cut came back as
+    -8.38 A through Db with no record (reviewer A1, third session). The jump test reads no
+    rate before the event: d = -8 A, d' = 5e-7 A. Truth: no path, i_L -> 0 by an impulse
+    of 1/2*L*i^2 (i = 7.9997 A at the cut)."""
     r = _cut_smaller_than_the_old_rate(-2.0)
     i = np.asarray(r.i("L"))
     assert len(r.reinit_records) == 1 and list(r.reinit_records[0].states) == ["L"]
@@ -371,3 +367,230 @@ def test_split_locates_independent_diodes_on_their_own_signals():
     assert len(d1) == len(b1) >= 3
     np.testing.assert_allclose(b1, d1, rtol=0, atol=1e-12)
     np.testing.assert_array_equal(np.asarray(both.v("o1")), np.asarray(alone.v("o1")))
+
+
+def _rectifier_and_unrelated_pulse(pulse):
+    """The rectifier from rest, plus (pulse=True) a 1 V pulse into its own resistor with its
+    edge at 0.4 dt: inside the probe's (t1, t2] (t1 = 0.29 dt, t2 = 0.59 dt)."""
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("Vac", "ac", "gnd", 0.0, 400.0, 60.0)
+    b.add_diode("D", "ac", "vout", 1e3, 1e-9)
+    b.add_resistor("R", "vout", "gnd", 50.0)
+    b.add_capacitor("C", "vout", "gnd", 100e-6)
+    if pulse:
+        b.add_pulse_voltage_source("Vp", "p", "gnd", 0.0, 1.0, t_start=0.4e-4,
+                                   pulse_width=1.0, period=10.0, rise_time=0.0, fall_time=0.0)
+        b.add_resistor("Rp", "p", "gnd", 1.0)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return p.simulate(b, t_end=0.02, dt=1e-4, **RESTART)
+
+
+def test_a_source_edge_inside_the_probe_is_read_at_its_left_limit():
+    """Reviewer A3 (third session): the edge left only the frozen reading, which reads the
+    capacitor tracking its sine as a 4.39 V jump (0.96 mJ record at t = 0). The moved
+    reading takes the edge's left limit: no record, and the rectifier is the pulse-free
+    run's (the pulse drives nothing of it)."""
+    with_pulse, alone = _rectifier_and_unrelated_pulse(True), _rectifier_and_unrelated_pulse(False)
+    assert list(with_pulse.reinit_records) == []
+    np.testing.assert_allclose(np.asarray(with_pulse.v("vout")), np.asarray(alone.v("vout")),
+                               rtol=0, atol=1e-9)
+
+
+def test_the_dcm_buck_has_no_impulse():
+    """The DCM buck has no impulsive event: its diode turns the inductor off at ZERO current
+    and its 47 uF output capacitor is in series with the inductor at every edge. Two false
+    records the probe produced: the capacitor at its extremum at a gate edge (d = 6.4e-7 V
+    against a rate after the event of ~0; the curvature term d' = 6.3e-7 V says it is a
+    trajectory), and the inductor at each diode turn-off (0.4-1.5 mA: the motion before a
+    stop inside stage 1, an unlocated state event: allowance gamma*h*|di/dt(0-)|)."""
+    from analytic import BY_ID   # benchmarks/ (conftest puts it on the path)
+    c = BY_ID["buck_dcm"]
+    b, fn = c.build(1.0)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(b, t_end=c.t_end, dt=c.dt, switch_fn=fn, **RESTART)
+    assert list(r.reinit_records) == []
+
+
+def _freewheel_into(i0, split, L=1e-6, V=100.0, dt=1e-7):
+    """L freewheels through D into V from i0: di/dt = -V/L until i = 0 at t_c = i0*L/V,
+    where D turns off at ZERO current (no impulse; reviewer, fourth session)."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "vo", "gnd", V)
+    b.add_diode("D", "gnd", "a", 1e3, 1e-9)
+    b.add_inductor("L", "a", "vo", L, i0=i0)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return p.simulate(b, t_end=2e-6, dt=dt, enable_substep_state_correction=split,
+                          **RESTART)
+
+
+@pytest.mark.parametrize("split", [False, True])
+@pytest.mark.parametrize("i0", [12.0, 15.0, 22.0, 51.5, 55.0])
+def test_a_diode_turning_an_inductor_off_at_zero_current_is_not_an_impulse(i0, split):
+    """Truth (closed form, R_on = 1 mOhm of the ON diode): i(t) = (i0 + V/R) e^(-Rt/L) - V/R
+    until it reaches 0, then 0. The stop inside stage 1 of a window step (t_c = 1.2, 1.5,
+    2.2 dt) read as a jump of up to 3.1 uJ; it is the motion gamma*h*V/L of an unlocated
+    crossing, not a jump."""
+    L, V, R = 1e-6, 100.0, 1e-3
+    r = _freewheel_into(i0, split)
+    assert list(r.reinit_records) == []
+    t, i = np.asarray(r.times), np.asarray(r.i("L"))
+    ic = np.maximum((i0 + V / R) * np.exp(-R * t / L) - V / R, 0.0)
+    t_c = -L / R * np.log((V / R) / (i0 + V / R))
+    far = np.abs(t - t_c) > 1e-7   # the step that holds the crossing is first order
+    assert np.max(np.abs(i - ic)[far]) < 1e-6 * i0, np.max(np.abs(i - ic)[far])
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "release group A, open: the stop lies inside stage 1 of the FIRST step (t_c = 0.25 dt); "
+    "the allowance's rate before the event is the history slot, which is 0 at a start from "
+    "initial conditions (no trajectory before t = 0), so the stop reads as a jump of "
+    "1/2 L i0^2 = 3.1 uJ. The pre-flip stage-1 solve is not that rate at a time event (it "
+    "holds the event's own cut: F-3-3). Needs the start's rate in its initial mode."))
+def test_a_stop_within_gamma_h_of_a_start_from_initial_conditions_is_not_an_impulse():
+    assert list(_freewheel_into(2.5, False).reinit_records) == []
+
+
+def _buck_freewheel(saturable, split, edge_at=None):
+    """S charges 1 uH from 100 V into Vo = 49.08 V until 0.4 us; D then freewheels it to 0 at
+    t_c = 0.815 us (reviewer, fourth session). The saturable core has L_sat = L0: linear.
+    edge_at: an UNRELATED switch S2 (own source, own load) closes then, a time event whose
+    restart step holds the stop (reviewer, fifth session)."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", 100.0)
+    b.add_voltage_source("Vo", "vo", "gnd", 49.08)
+    b.add_switch("S", "vin", "a", 1e3, 1e-9)
+    b.add_diode("D", "gnd", "a", 1e3, 1e-9)
+    if saturable:
+        b.add_saturable_inductor("L", "a", "vo", 1e-6, 1e3, 1e-6)
+    else:
+        b.add_inductor("L", "a", "vo", 1e-6)
+    b.add_voltage_source("V2", "v2", "gnd", 10.0)
+    b.add_switch("S2", "v2", "q", 1e3, 1e-9)
+    b.add_resistor("R2", "q", "gnd", 10.0)
+    n, k, k2 = b.graph.num_switches, b.switch_index_of("S"), b.switch_index_of("S2")
+
+    def fn(t):
+        m = p.SwitchStateMask(n)
+        m.set(k, t < 0.4e-6 - 1e-15)
+        m.set(k2, edge_at is not None and t >= edge_at - 1e-15)
+        return m
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return p.simulate(b, t_end=1.2e-6, dt=1e-7, switch_fn=fn,
+                          enable_substep_state_correction=split, **RESTART)
+
+
+@pytest.mark.parametrize("split", [False, True])
+@pytest.mark.parametrize("saturable", [False, True])
+@pytest.mark.parametrize("edge_at", [None, 0.8e-6])
+def test_a_dcm_freewheel_is_neither_recorded_nor_refused(saturable, split, edge_at):
+    """Truth (closed form, R_on = 1 mOhm neglected: < 1e-3 relative): i rises at
+    (100 - 49.08)/L to 20.368 A at 0.4 us, falls at 49.08/L to 0 at 0.815 us and stays
+    there. The saturable core (linear here) was refused by name at the turn-off."""
+    r = _buck_freewheel(saturable, split, edge_at)
+    assert list(r.reinit_records) == []
+    t, i = np.asarray(r.times), np.asarray(r.i("L"))
+    ip = 50.92e6 * 0.4e-6
+    ic = np.where(t <= 0.4e-6, 50.92e6 * t, np.maximum(ip - 49.08e6 * (t - 0.4e-6), 0.0))
+    far = np.abs(t - (0.4e-6 + ip / 49.08e6)) > 1e-7
+    np.testing.assert_allclose(i[far], ic[far], rtol=0, atol=2e-3 * ip)
+
+
+def _igbt_gate_fall(t_off, fall, split=False, dt=1e-9):
+    """F-5-1's IGBT (100 A in 1 mH) with its free-wheeling diode, which cannot carry this
+    current's direction: the gate falls 15 -> 0 V at t_off in `fall` (a continuous source,
+    no jump to trigger a restart)."""
+    b = p.CircuitBuilder()
+    b.add_pulse_voltage_source("Vg", "g", "gnd", 15.0, 0.0, t_start=t_off, pulse_width=1.0,
+                               period=10.0, rise_time=fall, fall_time=0.0)
+    b.add_inductor("L", "sw", "gnd", 1e-3, i0=-100.0)
+    b.add_igbt_level1("QL", "sw", "gnd", "g", 1.5, 0.05, 5.0, with_fwd=True)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return p.simulate(b, t_end=12e-9, dt=dt, enable_substep_state_correction=split,
+                          **RESTART)
+
+
+@pytest.mark.parametrize("split", [False, True])
+def test_a_gate_fall_inside_a_restart_window_step_is_an_impulse(split):
+    """The 1 ps gate fall lands at 1.02 ns, inside window step 2 of the first step's
+    restart (no trigger, no diode bit): it was not probed and i_L went -100 -> +140.6 A
+    through the FWD. Truth: no path for i_L < 0, so i_L -> 0 by an impulse of
+    1/2 L i^2 = 5 J (the IGBT's drop moves i by < 1e-5 A before the fall)."""
+    r = _igbt_gate_fall(1.02e-9, 1e-12, split)
+    t, i = np.asarray(r.times), np.asarray(r.i("L"))
+    recs = list(r.reinit_records)
+    assert len(recs) == 1 and list(recs[0].states) == ["L"], recs
+    assert 1e-9 <= recs[0].t <= 1.02e-9
+    assert recs[0].dW == pytest.approx(5.0, rel=1e-5)
+    assert np.max(np.abs(i[t > 2e-9])) < 1e-2, i
+
+
+def _snubber(Rs, Cs=1e-9, dt=1e-7, Rs2=None):
+    """100 V, S vin -> a (R_on 1 mOhm), load 10 Ohm a -> gnd, snubber Rs + Cs across S; S
+    off at 0.5 us, on again at 1.0 us (a gate edge on the grid: a TIME event)."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "vin", "gnd", 100.0)
+    b.add_switch("S", "vin", "a", 1e3, 1e-9)
+    b.add_resistor("Rl", "a", "gnd", 10.0)
+    b.add_resistor("Rs", "vin", "m", Rs)
+    b.add_capacitor("Cs", "m", "a", Cs)
+    if Rs2 is not None:   # a second snubber across S
+        b.add_resistor("Rs2", "vin", "m2", Rs2)
+        b.add_capacitor("Cs2", "m2", "a", Cs)
+    n, k = b.graph.num_switches, b.switch_index_of("S")
+
+    def fn(t):
+        m = p.SwitchStateMask(n)
+        m.set(k, not (5e-7 - 1e-15 <= t < 1e-6 - 1e-15))
+        return m
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return p.simulate(b, t_end=2e-6, dt=dt, switch_fn=fn, **RESTART)
+
+
+def test_a_snubber_faster_than_the_grid_records_the_whole_jump():
+    """At the 1 us turn-on Cs (charged to J above its new equilibrium) discharges through
+    Rs + R_on||Rl, tau' = 1.001 ns << dt = 100 ns: a jump on the grid's scale. Closed form
+    on that one linear mode: the probe's d = -J (1 - a)^2 and d' = a d, a = 1/(1 + gamma
+    h/tau'); the rule takes the whole jump J = d/(1 - a)^2, so the record is the energy
+    the discharge dissipates in Rs, 1/2 Cs J^2 (5.04 uJ), and Cs starts the step at its
+    equilibrium. (Recording d alone gave (1-a)^4 of it, 4.40 uJ, and left the rest to
+    stage 2's pseudo-state.)"""
+    Cs, Ron, Rl, V = 1e-9, 1e-3, 10.0, 100.0
+    r = _snubber(1.0)
+    t, v = np.asarray(r.times), np.asarray(r.v("m")) - np.asarray(r.v("a"))
+    k = int(np.argmin(np.abs(t - 1e-6)))
+    v_on = V * Ron / (Ron + Rl)   # the ON equilibrium
+    J = v[k] - v_on
+    recs = [x for x in r.reinit_records if x.t == pytest.approx(1e-6)]
+    assert len(recs) == 1 and list(recs[0].states) == ["Cs"], list(r.reinit_records)
+    assert recs[0].lambda_ / Cs == pytest.approx(-J, rel=1e-6)
+    assert recs[0].dW == pytest.approx(0.5 * Cs * J**2, rel=1e-6)
+    assert abs(v[k + 1] - v_on) < 1e-6 * J
+
+
+def test_a_snubber_the_grid_resolves_is_not_an_impulse():
+    """tau = Rs Cs = dt: a mode the grid resolves (r = gamma h / tau = 0.29 < 1/gamma)."""
+    assert list(_snubber(100.0).reinit_records) == []
+
+
+def test_two_snubbers_each_take_their_whole_jump():
+    """A second snubber (Rs2 = 5 Ohm, tau' = 5 ns, a = 0.146) beside the first: each state
+    takes its own J = d/(1 - a)^2. One a for the event (the dominant state's) recorded
+    80 % of the energy and left Cs2 at -3.4 V after the step (truth 0.01 V)."""
+    Cs, Ron, Rl, V = 1e-9, 1e-3, 10.0, 100.0
+    r = _snubber(1.0, Rs2=5.0)
+    t = np.asarray(r.times)
+    k = int(np.argmin(np.abs(t - 1e-6)))
+    v_on = V * Ron / (Ron + Rl)
+    J = [np.asarray(r.v(m))[k] - np.asarray(r.v("a"))[k] - v_on for m in ("m", "m2")]
+    recs = [x for x in r.reinit_records if x.t == pytest.approx(1e-6)]
+    assert len(recs) == 1 and sorted(recs[0].states) == ["Cs", "Cs2"], list(r.reinit_records)
+    assert recs[0].dW == pytest.approx(0.5 * Cs * (J[0] ** 2 + J[1] ** 2), rel=1e-4)
+    for m, j in zip(("m", "m2"), J):
+        v = np.asarray(r.v(m)) - np.asarray(r.v("a"))
+        assert abs(v[k + 1] - v_on) < 1e-4 * j, (m, v[k + 1])

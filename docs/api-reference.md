@@ -400,6 +400,11 @@ r.feeding, res.recorder_feed                       # 'in-loop' | 'stored-arrays'
 - A window that starts exactly on an event starts from the right limit,
   one that ends on an event ends on the left limit, and min / max see
   both limits of events inside it.
+- An impulse (an ideal switch closing a capacitor onto a source, a
+  restart's jump) is a Dirac: `integral` is the regular part on every
+  engine, and the jump is reported by `res.reinit_records` (charge or
+  flux `lambda_`, energy `dW`), counted in a window that contains its
+  instant or starts at it.
 - Event rows say how the right value was obtained (`event_resolution`):
   `'exact'` — the exact engine's right limit at the instant; `'settled'`
   — trbdf2's settled post-event state at the instant (the next line starts

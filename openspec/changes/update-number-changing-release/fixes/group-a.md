@@ -378,3 +378,230 @@ test_simulate_overhead, test_engine_auto: 68 passed, 4 xfailed; ruff clean; stub
 The byte compares of the earlier section no longer apply: with the C++ reverted every case is the
 PR head's own extension (identical by construction); the Python change only adds a warning on
 `engine='dsed'` results whose right limits breach the voltage bound.
+
+## Fourth session (2026-11-20): the jump test without the old rate (A1), A3 [M]
+
+Branch `fix/core-release-a4-jump-test` from 1cec4e8b. Code tip 0bd28e03 (criterion below is IN the code).
+
+**The orchestrator's J = 2·D(h/2) − D(h) is the probe's existing d.** With D1 = x1 − x0 (one BE stage of
+γh) and D2 = x2 − x0 (two stages), d = 2·x1 − x2 − x0 = 2·D1 − D2 is the same Richardson estimate
+(steps γh / 2γh instead of h/2 / h): per mode d = −J·(r/(1+r))², O(r²) slow, → −J fast. No new solve
+gives J; the question was only the BOUND it is compared with. Compared with the noise floor alone it
+flags every curved trajectory: the DCM buck's C at a gate edge has d = 6.4e-7 V = (γh)²ẍ (ẍ ≈ 3e9
+V/s²) against tol 2.9e-7 V. So "J vs noise" is refuted by the buck_dcm trace.
+
+**Criterion in the code (0bd28e03).** A third BE stage x3 (same factor, discarded) gives
+d' = Δ2 − Δ3 (Δk = xk − x(k−1)); per mode d' = a·d (a = 1/(1+r)); on a smooth trajectory d' ≈ d.
+Impulsive iff, in both readings (frozen / moved),
+  |d| > max(|Δ2|/γ, (1 + 1/γ)·|d'|) + 1e-8·(1 + |x0| + |x1|) [+ G_off·(1 + V_max) for currents].
+For one mode both terms give the predecessor's threshold τ < γ²h; |Δ2|/γ covers an inflection,
+(1+1/γ)|d'| an extremum. No r0. Same rule for saturable L / nonlinear C (their r0 from the law removed).
+Domain: the probe runs only when the restart's start may be inconsistent — a trigger at t_prev, a split
+event, the first step, a stage-1 flip (breach_1), or after a non-restart (trapezoid) solve
+(`prev_be`/`step_fresh`/`rs_fresh`). Not at window steps 2–3 that start from a restart solve's end.
+A3: a source jump in (t1, T] is read at its left limit (`add_source_rows(out, t_jump, T, left_by)`);
+a second jump in the interval -> frozen reading only. NB `source_jump_in(a, b)` counts [a, b).
+
+**Builds.** b1: trace prints only (1cec4e8b numbers). b2: the d' criterion + third stage — segfault
+(unsized `ip_s2/ip_s3`, found at b3). b3: [t1,T) interval fix. b4: vectors sized — A1, A3, DCM pass;
+`test_a_nonlinear_capacitor_shorted_by_its_switch_is_refused_by_name` FAILED: refused at 5.02 µs,
+Cj d = −1.529e-3 V, d' = −4e-8 V (a real 1 ps-mode residual the 5.0 µs restart step left: SDIRK
+|R(z)| at z = 2e4 times the 24 V transient). b5: refuse_jump trace (diagnosis above). b6: the
+fresh-start domain — all of test_release_findings_a passes (12 passed, F-3-7 xfail). b7: same code,
+trace stripped (building when this was written).
+
+**Measured (b4–b6 builds, the committed rule; trace d / d' / |Δ2|/γ):**
+| case | d | d' | result |
+|---|---|---|---|
+| A1 (1 µH, 100 V, dt 0.1 µs, 8 A cut) | −8.000 A | −5.5e-7 A | 1 record 3.19976e-5 J; truth ½·L·7.9997² = 3.19976e-5 J (7.9997 A: closed form with R_on 1 mΩ); i_L -> 2.0e-7 A (was −8.38 A) |
+| DCM buck C at gate edge t = 223.1 µs | 6.4e-7 V | 6.3e-7 V | no record (extremum: Δ2 = −1e-8 V) |
+| DCM buck L at diode turn-offs (5 events) | −4e-4 .. −1.5e-3 A | ~−1e-8 A | recorded, 7.8e-12 .. 1.2e-10 J (real discrete cut; masked before by h·r0 = 7e-3 A). buck_dcm analytic err_rms pwl+restart 5.3158e-8 -> 5.3074e-8 (better) |
+| snubber Rs 1 Ω + Cs 1 nF, τ = 1 ns, dt 100 ns, turn-on 1 µs | −93.8 V | −3.1 V | recorded (as before), 4.40 µJ of ½·C·100.36² = 5.04 µJ: the fraction (r/(1+r))² = 0.876 the grid cannot resolve; the rest is integrated |
+| snubber Rs 100 Ω (τ = dt) | — | — | no record (r = 0.29 < 1/γ) |
+| F-5-1 | −100 A | −4.7e-6 A | 1 record 4.999998812 J (unchanged) |
+| A3 rectifier + 1 V pulse edge at 0.4 dt | −1.44e-2 V (moved) | 1.0e-3 V | no record; equals the pulse-free run to 5.7e-14 V (was 0.96 mJ record) |
+Without the domain restriction (b4) the snubber also recorded the SDIRK residuals at the window steps
+(1.1 µs: 0.27 V, 3.6e-11 J), and the waveform stopped ringing (−0.278, 0.0108, 0.0100 vs truth 0.0100);
+with it (b6) those records and that improvement are gone (old waveform: 0.0227, 0.0094, 0.0105 ...).
+
+Analytic set (27 cases × pwl+restart / pwl+split) on b4: identical to the predecessor's refstat_t7 except
+buck_dcm restart (above). NOT re-run on b6/b7.
+
+**Verified at 0bd28e03 (b6 build = committed code + inert trace):** test_release_findings_a 12 passed 1 xfailed.
+**NOT verified yet:** the 48 restart/split test files; full pytest; byte compares (default path —
+expected identical: the change is inside the rule's probe plus two bool stores per step); cost
+(default path gains `prev_be = committed_be` and one `step_fresh` assignment per step — must be measured,
+buck_pwl was at the 0.5 % gate); reference_status differential; group numbers F-3-3 / F-3-1 on this tip
+(script `.scratch/group_nums.py`); dt-retry test, mos_l1, `everything` stateful case; reviewer; ruff on
+the header-free files is clean.
+
+**Next steps for a successor.** 1) build ext (`.scratch/build.sh ext`, ccache launcher now set);
+2) `python .scratch/group_nums.py`; the 48 files `grep -l 'discontinuity_restart\|enable_substep_state_correction' python/tests/*.py`;
+3) byte compares `.scratch/baseA.sh t8 compare` (baselines = PR head; the predecessor's 32 pwl_identity
+restart/split entries already differ — classify any NEW differences); 4) `.scratch/cost.sh` (needs
+`so_head_same.so` = 1cec4e8b build, not available: build 1cec4e8b ext once or compare to the PR head's
+`so_<hash>`); 5) reference_status `--json` vs `.scratch/refstat_t7.json` cell by cell (save and restore
+benchmarks/REFERENCE_STATUS.md, the tool rewrites it); 6) reviewer; 7) full pytest.
+Open by design: a jump on a smooth Newton device region change at a window step without a diode flip
+is no longer probed (no bits to see it); the window-step residual of a restart solve is integrated,
+not recorded.
+
+### Fourth session, verification at 0bd28e03 (b7 = committed header, no trace) [M] — and why the tip is NOT ready
+
+- Group numbers held: F-5-1 one record 4.999998812 J, i_L 100 -> −3.8e-5 A; F-3-3 peak 16.381985087 /
+  16.381988999 / 16.381990009 A at dt 10 / 5 / 2.5 ns (exact 16.381990162; errors −5.1e-6, −1.2e-6,
+  −1.5e-7: order 2.1, 2.9), min +1.5e-7 A; F-3-1 1-ulp sensitivity 2.4e-11 .. 1.8e-12 V; A1 record
+  3.199759e-5 J vs ½·L·7.9997² = 3.199760e-5 J, max|i_L[2:]| 2.0e-7 A.
+- The 48 files using discontinuity_restart / enable_substep_state_correction: 1276 passed, 5 skipped,
+  6 xfailed (A1 no longer xfail).
+- Byte compares vs the PR-head baselines (default options): goldens identical except buck_pwl_restart
+  (states max|d| 13.94, switch states differ) and vsi_pwl_restart (counter cache.event_hits only);
+  stateful identical except everything_pwl_restart; engines / steps differ only on buck_pwl_restart;
+  pwl_identity 326/379, every differing entry is pwl+restart (29) or pwl+split (24) — the predecessor
+  had 32; trbdf2_identity 371/371. Default path: no difference anywhere. buck_pwl_restart's 13.94 is
+  NOT yet checked against the exact engine (it is the reviewer's false-record mechanism below until
+  shown otherwise).
+- NOT run: cost (default path has two bool stores per step), reference_status differential, full
+  pytest, mos_l1 / dt-retry spot checks beyond the 48 files (they passed inside them).
+
+**Reviewer (opus, fresh context) on 0bd28e03 — two defects, both reproduced by its scripts
+(scratchpad q1.py, q1b.py, q2.py of session 659b4e0a):**
+1. FALSE records / refusals: a diode turning an inductor off at zero current INSIDE stage 1 (0, γh)
+   is a kink inside the probe: Δ2 ≈ 0 and d' ≈ 0, so d ≈ the motion before the stop reads as a
+   jump. L 1 µH freewheeling into 100 V, dt 0.1 µs: records 1.105 µJ and 3.09 µJ (= ½·L·i(t0)²);
+   with split 2e-15..8e-15 J. Buck-like freewheel: linear L 2.65e-7 J record; SATURABLE L (far from
+   saturation) now REFUSED ("moves saturable_inductor 'L' by −0.7277 A"; 3.09e-5 A with split) —
+   any DCM circuit with a saturable inductor is refused under the rule. The DCM buck "L cuts" this
+   session called real (0.4–1.5 mA) are this mechanism. The d' criterion cannot see a stop inside
+   (0, γh): it needs the state's motion before the event.
+2. MISSED real jump (the domain restriction): F-5-1's circuit with the FWD, gate 15 -> 0 V through a
+   pulse with 1 ps fall landing at a restart-window step (t = 1.02 ns): no trigger (a ramp is not a
+   source jump), no diode bit (IGBT level 1 is smooth), so the probe is skipped: i_L −100 -> +140.6 A
+   through the FWD, no record (the −√2 reversal of F-5-1). 1cec4e8b probed every restart step and
+   would have flagged it (inferred from its bound, not run). Also dt-retry sub-steps j > 0 skip the
+   probe. Also (older, not this diff): x0+ = x0 − (1−a)²J leaves a(2−a)J unrelaxed (trigger case:
+   0.69 A of 100 A left, FWD holds 0.955 A, truth 0).
+
+**Next steps (precise).**
+a) Revert the domain restriction (`rs_fresh`/`step_fresh`/`prev_be`: probe every restart step as
+   1cec4e8b did) — it fixes reviewer 2 and the dt-retry gap and removes the default-path stores.
+b) Add to the bound the motion a kink inside stage 1 can produce: γh·|ẋ(0−)| (the state stops inside
+   (0, γh) after moving at most γh times its rate before) — i.e.
+   |d| > max(γh·|ẋ(0−)|, |Δ2|/γ, (1+1/γ)|d'|) + tol. Derivation: a stop at θ ∈ (0, γh) gives
+   |d| ≤ θ·|ẋ(0−)| ≤ γh·|ẋ(0−)|. A1 still passes (8 A > γh·V/L = 2.93 A); cuts below γh·|ẋ(0−)| are
+   missed (12x narrower than the old h·|ẋ(0−)|, which the A1 test fixes at 8 A vs 10 A). With (a) the
+   Cj 5.02 µs residual (d = 1.53e-3 V) must then pass by this term (γh·r0 with r0 ≈ 1.2e9 V/s ≈ 7 V):
+   re-check `test_a_nonlinear_capacitor_shorted_by_its_switch_is_refused_by_name`.
+c) Replace `test_a_capacitor_at_its_extremum_is_not_an_impulse` (it asserts the DCM L records exist)
+   by: buck_dcm under the rule has NO records; add the reviewer's freewheel (linear: no record;
+   saturable: no refusal) and its IGBT gate-ramp window case (i_L -> 0 with a record) as tests.
+d) Rebuild, re-run group_nums.py, the 48 files, baseA.sh compare (check buck_pwl_restart vs exact
+   engine), cost (needs a 1cec4e8b extension: build it once), reference_status vs refstat_t7.json,
+   one reviewer, one full pytest.
+A3's left-limit source reading (src_move) and the third stage are independent of (a)/(b) and stay.
+
+## Fifth session (2026-11-20): event-time allowance, every restart step probed, the whole jump [M]
+
+Branch `fix/core-release-a4-jump-test`, code 5fe40868 (from 0bd28e03).
+
+**The criterion (in `consistent_start`, ONE place).** Probe stages x1 (stage 1), x2, x3 (BE of γh, same
+factor, discarded), per state d = Δ1 − Δ2, d' = Δ2 − Δ3; impulsive iff, in both source readings,
+  |d| > max(|Δ2|/γ, (1 + 1/γ)|d'|) + 1e-8·(1 + |x0| + |x1|) [+ G_off·(1 + V_max) for currents] + δt_loc·|ẋ(0−)|.
+ẋ(0−): history slot i/C, v/L (L⁻¹v for a transformer pair), the law's V_L/L(i), i/C(v) for saturable L /
+nonlinear C. δt_loc, ONE number per restart from its caller (`run_restart(t_from, h, loc)`):
+- 0 at a TIME event: a trigger at the step start (`rs_trig_t == t_prev`: gate mask change, unknown
+  start, source / b_extra jump within snap), a scheduled split event (`ev_s − ev_t`, the merge offset);
+  without the split a source / b_extra jump inside the step gives its offset (≤ γh);
+- `snap` at a split-located diode crossing (its declared resolution: both the at-a and the inside branch);
+- γh when the event is not located: a window step (no trigger) and every dt-retry sub-step j > 0;
+- a stage-1 diode flip widens it to γh for EVERY state of that step (mixed trigger; shortcut, comment
+  in the code: a real jump below γh·|ẋ(0−)| at a gate edge whose stage 1 also flips a diode is
+  integrated, not recorded).
+Derivation: a kink at θ inside the probe moves the extrapolated start by |d| ≤ θ·|ẋ(0−)|; an
+unlocated event lies in the probe window, θ ≤ γh (a later kink shows in x2 only: |d| ≤ (2γh − θ)|ẋ|).
+The fresh-start domain of 0bd28e03 is gone (no per-step stores on the default path; the trigger block
+writes `rs_trig_t` / `rs_trig_loc` only when a trigger fires).
+
+**The whole jump.** Per mode d = −J(1 − a)², d' = a·d. Each JUMPING state's record entry and x0+ take
+J = d/(1 − a)², a = d'/d of that state (moved reading), clamped to [0, γ/(1+γ)] (factor ≤ 1.67); the
+other states keep d. With d alone the residual a(2 − a)·J came back reversed through stage 2's
+pseudo-state: the gate fall below kept 0.955 A in the FWD (a = 0.0034: the cut mode τ = L·g_off = 1 ps
+at dt 1 ns). `event_rl_x` keeps the line 2·x1 − x2; the histories are set to x0 + J from the snapshot at
+x0. Shortcut: a per state (exact for a state one mode moves). First version (5fe40868) used ONE a for
+the event (the dominant state's): the reviewer's two snubbers (Rs 1 Ω and 5 Ω across one switch)
+recorded 80 % of ½C(J1² + J2²) and left Cs2 at −3.4 V (truth 0.01 V) — fixed by the per-state a.
+
+**Reviewer (opus, fresh context) on 5fe40868** — scripts `.scratch/rev5/`:
+1. FALSE record / refusal (FIXED): the stage-1 widening read `breach_1` (= `flipped`, true only for an
+   UNSETTLED event iteration), so a settled diode stop inside stage 1 of a TIME-event step was a jump:
+   freewheel i0 = 2.5 A at t = 0 (3.1 µJ); the buck freewheel + an unrelated switch edge at 0.8 µs
+   (2.6e-7 J; saturable L refused by name). Now widened on `iters_1 > 1` (the event iteration changed
+   the bits). Test: the unrelated-edge variant (linear / saturable, split off / on). STILL OPEN (strict
+   xfail): the stop within γh of a START FROM INITIAL CONDITIONS (i0 = 2.5 A, t = 0) — the history slot
+   is 0 there (no trajectory before t = 0), so ẋ(0−) = 0; the pre-flip stage-1 solve is not the rate at
+   a time event (it holds the event's own cut, F-3-3). Needs the start's rate in its initial mode.
+2. MISSED jump (OPEN, cause established): the probe sees an event in (t_from, t1] only (t1 = t_from + γh).
+   (a) a source JUMP in (t1, t] of a restart step without the split (gate pulse with rise 0 at 5.6 / 5.95 ns,
+   restart at 5 ns): no record, i_L −100 → −0.34 → +0.478 A held by the FWD (truth 0, 5 J). The moved
+   reading reads it at its left limit (A3), the frozen reading never reaches it. With the split ON (the
+   release profile turns it on with the rule) it is a split event: 4.999996 J recorded (reviewer).
+   (b) a CONTINUOUS 1 ps gate fall in (t1, t] of a restart step (window steps 2–3, or the first step at
+   0.45 ns), split on or off: no record, i_L ends +0.478 A. Same class as the same ramp OUTSIDE the
+   window (6.02 ns: no restart at all, −100 → −0.20 / +0.28 A): a smooth Newton device's region change
+   is not an event of the fixed engine. The next window step does not see it either: its rate before the
+   event (history v_L/L) is the cut's own voltage, so δt_loc·|ẋ(0−)| covers it. Needs a state event for
+   Newton-device region changes (or a moved-reading-only jump located inside (t1, t3)); not in this slice.
+3. One a per event (FIXED, above).
+
+(verification of this section in progress; numbers below.)
+
+**Numbers at 27d83718 [M]** (truth in brackets):
+- F-5-1: one record 4.999999743 J [½·L·i0² = 5 J], i_L 100 → −3.3e-5 A [0].
+- F-3-3: peak 16.381985394 / 16.381989075 / 16.381990028 A at dt 10 / 5 / 2.5 ns [exact engine
+  16.381990162]: errors −4.8e-6, −1.1e-6, −1.3e-7 (order 2.1, 3.0); min i_p +1.57e-7 A.
+- F-3-1: 1-ulp sensitivity 1.8e-12 .. 2.4e-11 V. A1: record 3.1997599e-5 J [½·L·7.9997² = 3.1997600e-5],
+  i_L → 2e-7 A. A3: no record (test). F-5-10: test passes.
+- Snubber τ = 1 ns, dt 100 ns: record 5.0349e-6 J = ½·Cs·J² [closed form, rel 1e-6], Cs at its ON
+  equilibrium after the step (was 4.40 µJ, the (1 − a)⁴ fraction, and a ringing residual); τ = dt: none.
+  (Also a 5e-14 J record at t = 0: the zero start's Cs, 0 → 0.01 V through τ = 1 ns: a real jump.)
+- 1 ps gate fall at 1.02 ns (window step 2) and 2.02 ns (step 3), split off / on: one record 4.9999994 J
+  [5 J], i_L → 0 (was +140.6 A unrecorded; 1cec4e8b: 4.93 J and 0.955 A held by the FWD).
+- Freewheels (linear / saturable, t_c in window steps, with / without an unrelated gate edge, split off /
+  on): no record, no refusal, currents on the closed form (test). DCM buck: no records. mos_l1 golden: 0
+  records. Cj: 5.02 µs passes, 10 µs refused naming 'Cj' (−24.0 V). dt-retry test: in the 48 files.
+- `buck_pwl_restart` golden vs the exact engine (dsed, auto, output_rtol 1e-9), p99 |dv_out| / |di_L|:
+  1cec4e8b 1.955e-5 V / 7.18e-6 A, 0bd28e03 1.032e-5 / 3.53e-6 (9 records), 27d83718 1.955e-5 / 7.18e-6
+  (identical to 1cec4e8b on these metrics, 0 records). The tip's 2× better samples came from its 9 FALSE
+  records: at the DCM diode turn-offs it projected the late-detected crossing's residual current to the
+  consistent value (and booked it as an impulse). Projection without a record when the jump-shaped d is
+  within the event-time allowance and stage 1 did not flip would keep that gain; not done (it moves every
+  such restart's numbers; needs its own reference_status pass).
+- Cost, instructions per accepted step vs a 1cec4e8b build (min of six, default path unchanged since
+  5fe40868): buck_pwl 1.0036, vsi_pwl 0.9988, buck_trbdf2 1.0002, bridge_trbdf2 0.9989; rule on
+  buck_pwl_restart 1.0306, vsi_pwl_restart 1.0134 (third probe stage, every restart step probed).
+- Byte compares vs the PR-head baselines (default options): goldens ALL identical (buck_pwl_restart and
+  vsi_pwl_restart states identical too, counter `cache.event_hits` only), stateful identical except
+  `everything_pwl_restart` (refused by name since the third session), engines ALL identical, steps ALL
+  identical, trbdf2_identity 371/371, pwl_identity 341/379 — all 38 differing entries are pwl+restart /
+  pwl+split (1cec4e8b: 32, 0bd28e03: 53); default entries identical.
+- Reviewer's open (2) on 27d83718: a gate pulse with rise 0 at 5.6 / 5.95 ns (restart at 5 ns, no split):
+  no record, i_L → +0.478 A [0]; split on: 4.999996 J, i_L → 0. 1 ps continuous fall at 1.30–1.90 ns:
+  no record, +0.478 A; at 1.28 ns (before t1): 4.999999 J, i_L → 0. 1cec4e8b had the same misses.
+- reference_status (rule on) cell by cell vs the first predecessor's `refstat_t7.json`: outcomes
+  identical in every cell (differential pwl+restart 89/19/1, pwl+split 91/17/1 — the same as t7). err_rms
+  moved in 28 cells: 18 down (ll15 boost closed loop 0.0649 → 0.0541 restart, 0.0500 → 0.0350 split;
+  forward 2.57e-6 → 2.46e-6; flyback; half_bridge_transformer_dc), 10 UP: synchronous_flyback 1.287e-6 →
+  1.618e-6 (+26 %, both configs, still agree), active_clamp_forward 3.70e-3 → 3.75e-3 (+1.5 %),
+  cascaded_boost_buck split +0.4 %, ll14 (disagree) +0.04 %, stiff_two_timescale_rc, buck_boost split
+  ≤ +0.04 %. NOT traced (context budget): which change (every-step probing, the whole jump, or the
+  allowance) moves synchronous_flyback; that is the next step before merge.
+- The 48 restart/split test files on 27d83718: 1299 passed, 5 skipped, 7 xfailed. test_release_findings_a:
+  35 passed, 2 xfailed (F-3-7; the t = 0 start-from-initial-conditions stop). Full pytest on 27d83718:
+  6126 passed, 110 skipped, 10 xfailed, 0 failed. ruff clean;
+  no binding signature changed (stubs not re-checked). No C++ test target touched (none covers the probe).
+
+**State and next steps (end of the fifth session).** Code tip 27d83718, notes 3c79bd73+. NOT mergeable
+yet: (1) trace synchronous_flyback's +26 % (pwl+restart and pwl+split, 1.287e-6 → 1.618e-6) — run it with
+1cec4e8b's extension (`.scratch/so_1cec.so`) and this one, list its records and where the samples move;
+(3) open with cause: a jump in (t1, t] of a restart step (reviewer 2), the
+t = 0 stop (strict xfail); (4) the projection-without-record option for the buck_pwl_restart accuracy.
