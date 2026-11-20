@@ -329,8 +329,22 @@ def test_stateful_kinds_through_diode_events_agree_with_a_fine_trbdf2():
                                  integrator=integ, rtol=1e-9, atol=1e-12, dt=dt)
     ref, run = runs[None], runs["esdirk43"]
     s0, s1 = ref._trbdf2_stats, run._trbdf2_stats
-    assert (s1["n_diode_events"], s1["n_gate_events"]) == (
-        s0["n_diode_events"], s0["n_gate_events"])
+    assert s1["n_gate_events"] == s0["n_gate_events"]
+    # The diodes' net transitions, not n_diode_events: at the first turn-on
+    # D still carries i_L (v_D = +4 mV) and turns off when C_oss lifts v_sw
+    # through zero, 1.9e-16 s after the edge. The edge's cascade decides it
+    # OFF on its probe; the 2 ns reference's first post-edge step is cut to
+    # 2e-17 s (the 1 ps C_oss transient), still before that zero, so it
+    # re-decides D ON at the edge and lands the turn-off 1.9e-16 s later:
+    # 21 events for the same 20 transitions (release D3: the edge's probe is
+    # no longer committed as a step that crossed the zero first).
+    def flips(r):   # D's column of the record (S is column 0)
+        t, s = np.asarray(r.times), np.asarray(r.switch_states)[:, 1]
+        k = np.flatnonzero(s[1:] != s[:-1])
+        return t[k + 1], s[k + 1]
+    (ta, sa), (te, se) = flips(ref), flips(run)
+    np.testing.assert_array_equal(se, sa)
+    np.testing.assert_allclose(te, ta, rtol=0, atol=1e-9)
     assert s1["n_sdirk_steps"] >= s1["n_diode_events"] > 0
     dv = abs(run.v("out")[-1] - ref.v("out")[-1]) / 24.0
     di = abs(run.i("L")[-1] - ref.i("L")[-1]) / np.max(np.abs(ref.i("L")))

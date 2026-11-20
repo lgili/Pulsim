@@ -723,3 +723,16 @@ The open questions of `design.md` had no answer and none was marked
    for all-inductor nodes is NOT viable as tried (a simple rule flags
    ~35 of 109 healthy reference circuits: `_inductor_only_nodes` marks
    49 nodes, every buck/boost/half-bridge switch node).
+
+22. **The gate-edge probe is recorded, not committed (release group D3,
+    2026-11-20).** The committed trapezoidal probe started from the
+    pre-edge slots; across a C_oss loop of tau = 0.6 ps it booked +3.9 %
+    conduction energy on the release C_oss buck. Now: with a stateful kind
+    the next step is the SDIRK(2,2) restart (as after a diode event);
+    without one the slots come from the probe's own companion values and
+    TR-BDF2 steps from x (SDIRK there cost +40 to +90 % steps on linear PWM
+    circuits and moved ll12 and ll10 from agree to disagree). A probe that
+    Newton retook 100x longer than requested stays committed: its slots
+    are about 20 time constants past the edge (ll13). A start whose slots
+    already balance the circuit to tolerance takes no restart step.
+    Details: `update-number-changing-release/fixes/group-d3.md`.
