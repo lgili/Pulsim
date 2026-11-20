@@ -249,6 +249,10 @@ struct RunOptions {
     // Every engine.
     bool auto_regularize = true;
     std::optional<Real> voltage_sanity_factor;
+
+    /// add-parameter-sensitivities group 5: names on pwl / trbdf2 (the
+    /// exact engine's run is composed in Python).
+    std::vector<std::string> sensitivities;
 };
 
 /// A run option that is invalid whatever the engine.
@@ -361,6 +365,7 @@ to_simulation_options(const RunOptions& o) {
     s.mode_selection = static_cast<int>(o.mode_selection);
     s.mode_guard = o.mode_guard;
     s.device_path = o.device_path;
+    s.sensitivities = o.sensitivities;
     if (o.resolution_diagnostics) {
         s.resolution_diagnostics = *o.resolution_diagnostics;
     }
@@ -418,6 +423,7 @@ to_trbdf2_options(const RunOptions& o) {
     s.device_path = o.device_path;
     s.mode_selection = static_cast<int>(o.mode_selection);
     s.integrator = o.integrator_esdirk43 ? 1 : 0;
+    s.sensitivities = o.sensitivities;
     return s;
 }
 
