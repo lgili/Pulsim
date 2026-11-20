@@ -465,6 +465,57 @@ public:
         return pulsim::dsed::exact_scan_step(current_entry_->exact);
     }
 
+    /// The event scan's no-crossing certificate data (F-X-5): the current mode's
+    /// tier-1 propagator and z̈(0) = Λ(Λz + w + V⁻¹c0) + V⁻¹c1 at (t, x), z = V⁻¹x
+    /// (exact_chord_step's modal second derivative; c0 / c1 the piecewise-linear
+    /// sources' level and slope at t). nullptr when the mode has no tier-1 basis or
+    /// sine sources (augmented state: the predicate's own source term is not affine).
+    [[nodiscard]] const ExactLTI* exact_scan_modes(Real t, const Vector& x, Eigen::VectorXcd& z,
+                                                   Eigen::VectorXcd& zdd) const {
+        ensure_current_resolved_();
+        ensure_exact_built_(*current_entry_);
+        const LTIEntry& le = *current_entry_;
+        const ExactLTI& e = le.exact;
+        const auto n = x.size();
+        if (!e.valid || e.tier != 1 || !le.aug_omegas.empty() || e.V_re.rows() != n) return nullptr;
+        e.z_re.noalias() = e.Vinv_re * x;
+        e.z_im.noalias() = e.Vinv_im * x;
+        z.resize(n);
+        zdd.resize(n);
+        for (Index k = 0; k < n; ++k) {
+            z[k] = std::complex<Real>{e.z_re[k], e.z_im[k]};
+            zdd[k] = e.lambda[k] * z[k] + e.w[k];
+        }
+        if (!pwl_sources_.empty()) {
+            const auto m = static_cast<Index>(pwl_sources_.size());
+            Vector& v = scan_v_;
+            Vector& s = scan_s_;
+            v.resize(m);
+            s.resize(m);
+            for (Index j = 0; j < m; ++j) {
+                const auto [vj, sj] = pwl_value_slope_(pwl_sources_[static_cast<Size>(j)], t);
+                v[j] = vj;
+                s[j] = sj;
+            }
+            scan_c0_.noalias() = le.pwl_cols * v;
+            scan_c1_.noalias() = le.pwl_cols * s;
+            const Vector& c0 = scan_c0_;
+            const Vector& c1 = scan_c1_;
+            e.z_re.noalias() = e.Vinv_re * c0;
+            e.z_im.noalias() = e.Vinv_im * c0;
+            for (Index k = 0; k < n; ++k) zdd[k] += std::complex<Real>{e.z_re[k], e.z_im[k]};
+            for (Index k = 0; k < n; ++k) zdd[k] *= e.lambda[k];
+            e.z_re.noalias() = e.Vinv_re * c1;
+            e.z_im.noalias() = e.Vinv_im * c1;
+            for (Index k = 0; k < n; ++k) zdd[k] += std::complex<Real>{e.z_re[k], e.z_im[k]};
+            return &e;
+        }
+        for (Index k = 0; k < n; ++k) zdd[k] *= e.lambda[k];
+        return &e;
+    }
+
+    mutable Vector scan_v_, scan_s_, scan_c0_, scan_c1_;   // exact_scan_modes' work
+
     /// Output instants resolving the current mode's fast transient after
     /// an event at t_e (exact_fast_samples).
     void exact_fast_samples(Real t_e, Real h, std::vector<Real>& out) const {
@@ -645,6 +696,51 @@ public:
             rec.projection_gap = gap;
             reinit_log_.push_back(std::move(rec));
         }
+    }
+
+    /// The start's projection, reported (F-S-4's leftover): a given state x0 that
+    /// the start mode's settle / projection moved to x is a state jump at t like
+    /// any other, so it gets a record (kind "start_projection", the moved states,
+    /// dW = ½ΔᵀWΔ with Δ = x0 − x: the energy-weighted distance of the jump, which
+    /// in the ideal limit is the energy the jump dissipates INCLUDING the sources'
+    /// impulsive work, as for the dependent-state records above: an ideal 10 V
+    /// closing onto 1 µF at 0 V loses ½CV²). Significant: a move above 1e-6 of
+    /// max(|x0_i|, the circuit's scale of its kind, port_scale_state) -- not the
+    /// dependent-state records' 1e-9: a start from rest that the projection only
+    /// gives its g_off leakage (10 V · 1 nS = 1e-8 A in a 1 A circuit) needs no
+    /// report, and writes none. Not written when the
+    /// start already wrote dependent-state records (`mark`: the jump is reported).
+    /// W: the mode's energy weight when it has one, else diag(C, L) (shortcut: a
+    /// coupled winding's mutual term is left out of dW there; upgrade when the
+    /// extraction gives every mode its weight).
+    void record_start_projection(Real t, const Vector& x0, const Vector& x, std::size_t mark) {
+        if (reinit_log_.size() > mark || x0.size() != x.size()) return;
+        ensure_current_resolved_();
+        const LTIEntry& e = *current_entry_;
+        const auto n = x.size();
+        const auto sc = port_scale_state(x0);
+        const Vector d = x0 - x;
+        ReinitRecord rec;
+        rec.t = t;
+        rec.kind = "start_projection";
+        for (Index i = 0; i < n; ++i) {
+            const bool cap = static_cast<Size>(i) < e.state_is_cap.size() && e.state_is_cap[static_cast<Size>(i)];
+            const Real xs = std::max(std::abs(x0[i]), cap ? sc.vscale : sc.iscale);
+            if (!(std::abs(d[i]) > Real{1e-6} * xs)) continue;
+            if (static_cast<Size>(i) < e.state_labels.size())
+                rec.states.push_back(e.state_labels[static_cast<Size>(i)]);
+            else
+                rec.states.push_back("x" + std::to_string(i));
+        }
+        if (rec.states.empty()) return;
+        if (e.energy_weight.rows() == n && e.energy_weight.cols() == n) {
+            rec.dW = Real{0.5} * d.dot(e.energy_weight * d);
+        } else {
+            for (Index i = 0; i < n && static_cast<Size>(i) < e.state_mass.size(); ++i)
+                rec.dW += Real{0.5} * e.state_mass[static_cast<Size>(i)] * d[i] * d[i];
+        }
+        rec.projection_gap = d.cwiseAbs().maxCoeff();
+        reinit_log_.push_back(std::move(rec));
     }
 
     /// Records so far, and dropping those of a projection the scheduler

@@ -423,3 +423,21 @@ Paralleled bridges, 20 ms, conductance-form diodes (the test as written):
   enters each bisection probe with exp(Re λ·d), and a non-finite probe does not fit (43a1f7c3).
 - Left as noted: the per-mode cache in `ExactLTI` is `mutable` and not thread-safe (same as the
   propagator caches before it); a step floored at 64ε still counts as a cut toward the budget.
+
+## 6. The rehearsal's bar for cells under the output rule (orchestrator, 2026-11-20)
+
+- KEPT: F-X-4 ("a step end the rule's chord already covers is not stored"). A DC circuit under
+  the rule stores its two ends; a slow stretch keeps few samples.
+- The bar "no cell worse than 2x the base" (section 5's verification) is REPLACED, for every cell
+  that ran under the output rule (the exact engine without `dt`, `diagnostics['output_grid']`;
+  the rehearsal writes `rule_ratio`), by: no cell changes class (outcome rank), and every cell
+  within what the rule promises -- the linear interpolation of its samples within
+  `output_rtol`*range + `atol` of the reference at every interval midpoint between events
+  (`metrics.rule_ratio` <= 1; range = the reference's range, at least 1e-3 of its peak). The base
+  looked better only because the 1 us gate poll (`dt_max / 10`, kept: decision of the same day)
+  stored extra points. Other cells keep the 2x rules.
+- The harness compares a short trace: dropping the initial sample is skipped when it would
+  leave fewer than two (`metrics.first_kept`); the reference is then read from its own first
+  kept sample. `undersampled` is reserved for a trace that cannot be compared, with the reason.
+- The opaque-gate poll stays at `dt_max / 10` (1 us with the defaults); the documents that said
+  10 us now say so. No number moves.

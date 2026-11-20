@@ -180,7 +180,7 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | linear/voltage_divider_3stage.yaml | 0 | 0 | 0 | 0 | 0 |
 | magnetics/core_loss_steinmetz_sine.yaml | 0.000228 | 0.000227 | 0.000227 | 0.000123 | 3.5e-06 |
 | magnetics/coupled_inductor_step.yaml | 0.00032 | 0.00032 | 0.00032 | 3.76e-06 | 6.72e-06 |
-| magnetics/half_bridge_transformer_dc.yaml | 0.101 | 0.000128 | 0.000127 | 2.08e-05 | 3.41e-06 |
+| magnetics/half_bridge_transformer_dc.yaml | 0.101 | 0.000128 | 0.000127 | 2.08e-05 | 1.22e-06 |
 | magnetics/inductor_chain_step.yaml | 0.00231 | 5.2e-06 | 5.2e-06 | 9.05e-07 | 4.89e-07 |
 | magnetics/transformer_leakage.yaml | 0.0041 | 0.00408 | 0.00408 | 0.000231 | 3.11e-05 |
 | magnetics/transformer_step_up.yaml | 4.64e-06 | 4.64e-06 | 4.64e-06 | 0 | 5.1e-06 |
@@ -207,7 +207,7 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | switching/basic/snubber_rc.yaml | 0.000561 | 0.000561 | 0.000561 | 1.65e-07 | 1.73e-07 |
 | switching/basic/vcswitch_resistor.yaml | 0.0332 | 0.0546 | 0.0193 | 0 | 3.16e-06 |
 | switching/boost/boost_classic.yaml | 0.000313 | 1.04e-06 | 3.98e-07 | 9.53e-06 | 7.02e-07 |
-| switching/boost/boost_pfc_open_loop.yaml | 0.0304 | 0.0304 | 1.06e-05 | 1.72e-07 | 4.16e-07 |
+| switching/boost/boost_pfc_open_loop.yaml | 0.0304 | 0.0304 | 1.06e-05 | 1.72e-07 | 4.47e-07 |
 | switching/boost/boost_switching_complex.yaml | 0.00192 | 0.000334 | 2.93e-05 | 1.05e-05 | 2.99e-05 |
 | switching/boost/cascaded_boost_buck.yaml | 0.000399 | 3.94e-06 | 2.2e-06 | 5.95e-05 | 2.24e-06 |
 | switching/boost/ll07_boost_vcswitch.yaml | 0.0984 | 0.0548 | 0.0445 | 0.000117 | 0.000181 |
@@ -240,7 +240,7 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | switching/inverter/ll10_full_bridge_inverter_lc.yaml | 0.05 | 0.000127 | 0.000127 | 9.18e-05 | 0.000127 |
 | switching/isolated/active_clamp_forward.yaml | 0.00425 | 0.00375 | 0.00374 | 0.000117 | 1.24e-06 |
 | switching/isolated/dual_active_bridge.yaml | 0.000265 | 2.35e-06 | 2.35e-06 | 3.49e-05 | 1.86e-06 |
-| switching/isolated/flyback_converter.yaml | 0.949 | 5.61e-06 | 5.61e-06 | 4.29e-05 | 2.7e-06 |
+| switching/isolated/flyback_converter.yaml | 0.949 | 5.61e-06 | 5.61e-06 | 4.29e-05 | 1.13e-06 |
 | switching/isolated/forward_converter.yaml | 0.707 | 7.69e-06 | 7.64e-06 | 2.17e-05 | 1.12e-06 |
 | switching/isolated/full_bridge_dc.yaml | 0.0828 | 2.66e-05 | 2.66e-05 | 0.000141 | 2.66e-05 |
 | switching/isolated/ll11_llc_resonant_converter.yaml | error | error | error | error | refused |

@@ -2608,7 +2608,9 @@ def simulate(
         omitted → variable-step TR-BDF2 (non-uniform ``result.times``),
         or a ``ValueError`` naming what keeps the circuit off it. ``engine='pwl'``: the fixed step, required.
         ``engine='trbdf2'`` / ``'dsed'``: the step CEILING (``dsed``
-        defaults to 10 µs); the grid is variable either way.
+        defaults to 10 µs, and steps every ``dt_max / 10`` = 1 µs when the
+        gate names no edge: no ``switch_fn``, or a plain callable without
+        ``next_edge_after``); the grid is variable either way.
     engine
         ``'auto'`` (default), ``'trbdf2'``, ``'pwl'`` or ``'exact'`` —
         see above. ``'exact'`` is the canonical name of the event-driven
@@ -2784,7 +2786,8 @@ def simulate(
 
     output_rtol
         ``engine='exact'`` only, default ``None`` (today's samples: one per
-        10 us step cap without ``dt``). Without ``dt``, ``store_every`` or
+        step — the 10 us step cap without ``dt``, or its 1 us gate poll
+        (``dt_max / 10``) when the gate names no edge). Without ``dt``, ``store_every`` or
         recorders, the exact engine returns every event instant (both
         limits where the state jumps) and between events samples spaced so
         that, between events, linear interpolation of the returned samples
@@ -4637,6 +4640,13 @@ def _finalize(out, plan):
         # recorded after the run): 'error' refuses the run as pwl's kernel
         # does at the event, 'warn' warns.
         _recs = list(getattr(res, "reinit_records", None) or ())
+        if _recs and on_impulse == "error" and _recs[0].kind == "start_projection":
+            r0 = _recs[0]
+            raise _unsupported(
+                "dsed", "impulse",
+                f"on_impulse='error': the given initial state is not a state of the start "
+                f"mode: projecting it moves {', '.join(r0.states)} by up to "
+                f"{r0.projection_gap:.6g} at t = {r0.t:g} and removes {r0.dW:.6g} J.")
         if _recs and on_impulse == "error":
             r0 = _recs[0]
             cut = r0.kind == "cut_set"

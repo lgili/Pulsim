@@ -8,7 +8,9 @@ within / outside the tolerance), ``refused`` (the engine's typed refusal:
 available: ``trbdf2`` at
 ``rtol = 1e-8``, ``pwl`` at ``dt/4`` when ``dt/2`` and ``dt/4`` agree within
 a quarter of the tolerance. The first stored sample is excluded from every
-comparison (on pwl / trbdf2 it is the initial state, not t = 0+). A result
+comparison (on pwl / trbdf2 it is the initial state, not t = 0+), unless that
+leaves fewer than two samples (``metrics.first_kept``: a short trace is compared
+whole; ``undersampled`` is kept for a trace that cannot be compared, with why). A result
 that records right limits (the exact engine: its sample at an event is the
 left limit) is read two-sided, the right limit one ulp after the event
 (``pulsim._result_views.with_right_limits``), so a jump is compared side for
@@ -241,8 +243,7 @@ def diagnose(tr, ref, cols, scale, forced=(), step=None):
     observable)."""
     t, _, sa = tr
     tr_, _, sb = ref
-    lo = max(t[np.searchsorted(t, t[0], side="right")],
-             tr_[np.searchsorted(tr_, tr_[0], side="right")])
+    lo = max(t[metrics.first_kept(t, True)], tr_[metrics.first_kept(tr_, True)])
     hi = min(t[-1], tr_[-1])
     excl = switching_steps(sa, t) + switching_steps(sb, tr_)
     frac = _covered(excl, lo, hi) / (hi - lo) if hi > lo else 1.0
@@ -272,11 +273,39 @@ def diagnose(tr, ref, cols, scale, forced=(), step=None):
 def classify(rec, res, case, cols, ref, tol, step=None):
     """Fill ``rec`` with the gate outcome and the edge diagnostic."""
     tr = traces(res, cols)
-    er, em = compare(tr, ref, cols, 1e-3)
+    try:
+        er, em = compare(tr, ref, cols, 1e-3)
+    except ValueError as ex:   # a trace that cannot be compared says why
+        rec.update(measure="interp", outcome="disagree", edge=f"undersampled: {ex}")
+        return rec
     rec.update(measure="interp", err_rms=er, err_max=em,
                outcome="agree" if er <= tol else "disagree",
                **diagnose(tr, ref, cols, 1e-3, source_forced(case), step))
     return rec
+
+
+def event_steps(res):
+    """The run's own event instants as exclude intervals [e, e+ulp]: the trace's
+    sample at an event is its left limit (a jump's right limit is in the result's
+    right-limit arrays), so the chord leaving it is not covered by the rule, even
+    for an event with no switch-state column (a diode, a vcswitch, a reinit)."""
+    te = getattr(res, "event_times", None)
+    return [(float(e), float(np.nextafter(e, np.inf)))
+            for e in np.asarray(te if te is not None else [], dtype=float)]
+
+
+def rule_check(res, ref, cols, rtol, atol=1e-9):
+    """The output rule's promise on a cell that ran under it (metrics.rule_ratio):
+    the worst ratio over the observables, the steps that hold a switch-state change
+    in either trace left out (the rule promises nothing across an event)."""
+    tr = traces(res, cols)
+    t, ys, sa = tr
+    tr_, yr, sb = ref
+    excl = switching_steps(sa, t) + switching_steps(sb, tr_) + event_steps(res)
+    if len(tr_) > 1:   # the reference's t0 sample is its given (maybe inconsistent) start
+        excl.append((float(tr_[0]), float(tr_[1])))
+    return float(np.nanmax([metrics.rule_ratio(t, ys[c], (tr_, yr[c]), rtol=rtol, atol=atol, exclude=excl)
+                            for c in cols]))
 
 
 def reference(case, cols, tol):

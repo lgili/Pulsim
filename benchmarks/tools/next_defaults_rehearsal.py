@@ -168,6 +168,15 @@ def route_next(build, t_end, profile=True, **kw):
     return ("dsed", None) if r["exact"] else ("trbdf2", f"segment not exact: {r['reason']}")
 
 
+def _rule_rtol(res):
+    """The output_rtol a result ran under (the exact engine without dt, the rule
+    engaged: diagnostics['output_grid']), else None."""
+    d = getattr(res, "diagnostics", None) or {}
+    if not isinstance(d, dict) or "output_grid" not in d:
+        return None
+    return nd.profile_kwargs("dsed").get("output_rtol")
+
+
 def _diag(res):
     d = getattr(res, "diagnostics", None) or {}
     m = d.get("mode_selection_auto") if isinstance(d, dict) else None
@@ -244,6 +253,9 @@ def circuit_worker(unit, names, emit):
             rec.update(outcome="error", message="no converged reference")
         else:
             dr.classify(rec, res, case, cols, ref, tol, case.dt if eng == "pwl" else None)
+            rt = _rule_rtol(res)
+            if rt:
+                rec["rule_ratio"] = dr.rule_check(res, ref, cols, rt)
         dr.mark_suspect(rec, entry)
         if kind == "ran" and sol is not None and g:
             try:
@@ -288,6 +300,10 @@ def analytic_worker(unit, names, emit):
             e = metrics.err_rms(np.asarray(r.times), c.observe(r), c.exact,
                                 abs_scale=c.abs_scale, exclude_t0=c.exclude_t0)
             rec.update(err_rms=e, outcome="agree" if e <= ceil else "disagree", tol=ceil, **_diag(r))
+            rt = _rule_rtol(r)
+            if rt:
+                rec["rule_ratio"] = metrics.rule_ratio(np.asarray(r.times), c.observe(r), c.exact, rtol=rt,
+                                                     atol=1e-9, exclude=dr.event_steps(r))
         except dr.REFUSAL as ex:
             rec.update(outcome="refused", message=f"{type(ex).__name__}: {ex}"[:300])
         except Exception as ex:  # noqa: BLE001 - classified
@@ -417,12 +433,27 @@ def judge(a, b):
     'worse' / 'better' / None; basis 'outcome' (the harness reference), 'truth'
     (`exact` beyond 2x; an improvement only when the strict error did not grow
     past 2x, so a sparser grid cannot count as better) or 'reference' (the strict
-    err_rms beyond 2x of the base's, above 1 % of the tolerance)."""
+    err_rms beyond 2x of the base's, above 1 % of the tolerance); a cell under the
+    output rule ('rule_ratio') is worse only by outcome or past the rule's promise
+    (basis 'rule')."""
     if a is None or b is None or "n/a" in (a["outcome"], b["outcome"]):
         return None, None
     ra, rb = RANK[a["outcome"]], RANK[b["outcome"]]
     if rb != ra:
         return ("worse" if rb > ra else "better"), "outcome"
+    if b.get("rule_ratio") is not None:
+        # a cell under the exact engine's output rule (DECISIONS, F-X-4 / rehearsal bar):
+        # no class change (above) and within what the rule promises -- never "2x the
+        # base": the base's extra samples (the 1 us poll) are not a promise
+        r = b["rule_ratio"]
+        if r == r:
+            return ("worse", "rule") if r > 1 else (None, None)
+        # NaN: no interval between switching steps to read the chord on; the truth
+        # (`exact`, below) still judges, the 2x reference bar does not
+        ea, eb = a.get("exact"), b.get("exact")
+        if ea is not None and eb is not None and max(ea, eb) > 1e-12 and eb > 2 * ea:
+            return "worse", "truth"
+        return None, None
     sa, sb = a.get("err_rms"), b.get("err_rms")
     big = sa is not None and sb is not None and max(sa, sb) > (b.get("tol") or 1e-3) / 100
     up, down = big and sb > 2 * sa, big and sa > 2 * sb
@@ -475,7 +506,8 @@ def changes(units_, eng):
 WORSE_CLASSES = ("fails (refused / error / timeout)", "samples wrong (truth)", "disagree, no truth",
                  "less accurate at the samples (truth, > 2x), still agrees",
                  "strict gate only (disagrees; RMS error of the samples against the truth within tol)",
-                 "strict error > 2x the base's, still agrees")
+                 "strict error > 2x the base's, still agrees",
+                 "output rule: interpolation beyond output_rtol*range + atol of the reference")
 
 
 def worse_class(b, basis="truth"):
@@ -487,6 +519,8 @@ def worse_class(b, basis="truth"):
         if ex is None:
             return 2
         return 1 if ex > b.get("tol", 1e-3) else 4
+    if basis == "rule":
+        return 6
     return 3 if basis == "truth" else 5
 
 
@@ -550,7 +584,10 @@ def render():
     L += ["## Worse under the full profile than under today's default for that engine", "",
           "Worse = outcome rank up (agree/unverified < disagree < refused < error < timeout), or the",
           "`exact` error (truth; for the analytic set the closed-form err_rms) more than 2x larger,",
-          "or the strict err_rms more than 2x the base's (above 1 % of the tolerance). Responsible =",
+          "or the strict err_rms more than 2x the base's (above 1 % of the tolerance). A cell that ran",
+          "under the exact engine's output rule (`rule_ratio` set) is judged by the rule's promise",
+          "instead: no outcome change, and its interpolation within `output_rtol`*range + atol of the",
+          "reference at every interval midpoint between events (`rule_ratio` <= 1). Responsible =",
           "the single options (b) that alone make the same cell worse; `combination` when none does.", "",
           "| circuit | engine | today | full profile | responsible | class; message |", "|---|---|---|---|---|---|"]
     for e in rows:
@@ -571,7 +608,7 @@ def render():
                          f"{b['outcome']} {_err(b)} | {', '.join(resp) or 'combination'} | {basis} |")
     L += ["", "## engine='auto' under the profile", "",
           "`auto` = today (no dt: trbdf2, or a refusal naming the blocker); `auto+next` = the",
-          "release route (no dt). The exact engine without dt samples at its 10 us default ceiling,",
+          "release route (no dt). The exact engine without dt samples at its 10 us default ceiling (1 us when the gate names no edge),",
           "so its strict cell can disagree where `dsed+next` (netlist dt as the output grid) agrees.", "",
           "| circuit | today: engine / outcome | next: engine / outcome | route reason |", "|---|---|---|---|"]
     moved = 0
@@ -638,7 +675,7 @@ def blockers(allu, rows):
                             if exs else "") +
                          (("On `auto` the exact engine runs without dt: "
                            + (f"the `output_rtol` = {nd.PROFILE['dsed']['output_rtol'].value!r} output grid; "
-                              if "output_rtol" in nd.PROFILE["dsed"] else "10 us default output ceiling; ")
+                              if "output_rtol" in nd.PROFILE["dsed"] else "10 us default output ceiling (1 us gate poll without edges); ")
                            + "the strict gate interpolates linearly between those samples. ")
                           if all(x[1] == "auto" for x in grp) else "") +
                          "Circuits (today -> profile): "

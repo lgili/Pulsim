@@ -56,7 +56,7 @@ today's samples; the other engines SHALL refuse the keyword by name.
   and with `output_rtol=1e-4`
 - **THEN** its samples score below 1e-7 of span against the mpmath truth
   (the D1 turn-off right limit included) and the strict gate, interpolating
-  linearly, agrees where the 10 µs default grid disagreed
+  linearly, agrees where the default grid (the 10 µs step ceiling) disagreed
 
 #### Scenario: A parasitic mode at rounding does not set the step
 
