@@ -181,22 +181,17 @@ def _run(engine, case, frac=None):
     return b, fn, r
 
 
-F_S_5 = ("finding F-S-5: trbdf2 / esdirk43 abort at t = 0 on case A (Newton at h_min, "
-         "||dx|| 7.9e-7 at I(Vdc)); ran at b9e46778, trbdf2 aborts at 1 us since be5454f3 "
-         "and both at t = 0 since cedac36b")
 F_S_6 = ("finding F-S-6: discontinuity_restart refuses by name an event that moves a "
          "nonlinear capacitor (the low-side turn-on at 0.5 us moves Ch); ran at b9e46778, "
          "refused since cedac36b")
 
 
 def _line_marks(request, engine, case):
-    """F-S-5 / F-S-6, found when this suite was merged onto the integration
-    line (batch 14t). True when a mark was applied."""
+    """F-S-6, found when this suite was merged onto the integration line
+    (batch 14t). True when a mark was applied. (F-S-5, the trbdf2 / esdirk43
+    abort on case A, is fixed: its marks were removed in batch 14u.)"""
     if engine == "pwl_restart":
         request.applymarker(pytest.mark.xfail(strict=True, raises=p.UnsupportedError, reason=F_S_6))
-        return True
-    if engine in ("trbdf2", "esdirk43") and case == "A":
-        request.applymarker(pytest.mark.xfail(strict=True, raises=p.SimulationAborted, reason=F_S_5))
         return True
     return False
 
@@ -260,7 +255,8 @@ def test_zvs_fraction_soft_low_side_hard_high_side(engine, request):
 
 
 # trbdf2's overbooking (1381.7 uJ case A at b9e46778) is gone with the
-# state error norm: case B reads 1.6891 uJ (truth 1.6878); case A is F-S-5.
+# state error norm: case B reads 1.6891 uJ (truth 1.6878); case A (F-S-5
+# fixed) reads trbdf2 62.8490 / esdirk43 62.9259 uJ (truth 62.8335).
 # pwl_restart (1.44 uJ case A at b9e46778) is refused now: F-S-6.
 KNOWN_LOSS = {
     "pwl": "known open item: the fixed engine books almost none of E_oss (unresolved RC collapse)",
