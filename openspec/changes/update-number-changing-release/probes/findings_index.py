@@ -130,10 +130,17 @@ F = [
      "steps counted", "n_rk45_steps 1005", "0"),
     ("F-6-7", "F", "W", "exact engine: the trajectory depends on the output grid",
      "`simulate(_paralleled_bridges(10), t_end=1e-4, engine='exact')` (test_exact_route)",
-     "i(L0a)(1e-4) = 0.12972284951463489 A (mpmath)", "2.6e-10 off (output_rtol=0)", "6.6e-8 off (default rule); 2.1e-6 at output_rtol=1e-8"),
+     "i(L0a)(1e-4) = 0.12972284951463489 A (mpmath)", "2.6e-10 off (output_rtol=0)", "6.6e-8 off (default rule, before the cost fix 1e2b90ff); 2.1e-6 at output_rtol=1e-8. "
+     "After the merge of the cost fix the default run is within the test's 1e-8 bound (the test passes, so it stays unparked); "
+     "the dependence on the grid at output_rtol=1e-8 was NOT re-measured"),
     ("F-X-1", "F", "R", "ten paralleled bridges refused at 19.969 ms under the full profile",
      "`simulate(_paralleled_bridges(10), t_end=0.02, engine='exact')` (test_exact_route)",
-     "runs (agrees with pwl dt 1e-7)", "runs (output_rtol=0)", "DiodeModeInconsistentError at 19.969 ms"),
+     "runs (agrees with pwl dt 1e-7)", "runs (output_rtol=0)", "DiodeModeInconsistentError at 19.969 ms (Db8b OFF forward-biased 0.73 V; "
+     "reproduced on the merged release tip with the cost fix, both selections)"),
+    ("F-X-3", "F", "R", "the output rule's chord bound does not finish a 500-state RC ladder (counters.py's 88-minute case)",
+     "`benchmarks/tools/counters.py` `ladder500_rc` on `engine='dsed', integrator='rk45'` without dt (t_end 2e-5)",
+     "a 2e-5 s RC run (pwl / trbdf2 take 0.1 s)", "seconds (old grid)", "> 29 min with the cost fix merged, stopped by PID; "
+     "`sample`: dsed::exact_chord_step / ChordWork / ExactLTI (the integrator's own work is not the cost)"),
     ("F-X-2", "H", "C", "the `auto` routing costs 4745 bytecodes per call",
      "`test_simulate_overhead` no-dt script", "ceiling 3760 bytecodes", "3683 (trbdf2 route)", "5456 (pulsim.exact_route alone 4745)"),
 ]
