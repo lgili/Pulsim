@@ -802,6 +802,7 @@ def _diode_turn_offs(trace, times: np.ndarray,
                      other_flip: "Optional[np.ndarray]" = None,
                      i_peak: "Optional[float]" = None,
                      controlled: bool = False,
+                     interpolable: bool = False,
                      ) -> List[Dict[str, float]]:
     """Turn-off instants of one diode, read from its recorded
     conduction-state trace (``pulsim._diode_state``).
@@ -853,7 +854,10 @@ def _diode_turn_offs(trace, times: np.ndarray,
     and ``I_F >= 0.1 · I_F_peak``: the voltage jumped at the turn-off and
     any reading inside the step is the plateau) or ``controlled`` (an
     error-controlled trace, trbdf2: its step after the turn-off record
-    would have shrunk on a ring; a fixed step can alias one). :func:`device_loss_summary`
+    would have shrunk on a ring; a fixed step can alias one). ``interpolable``
+    (an exact-engine run under ``output_rtol``: exact samples whose chords
+    are within the rule) reads ``v_D`` on the step line from the right limit
+    and is never unresolved. :func:`device_loss_summary`
     counts and warns about the unresolved ones.
 
     ``Q_F`` exists for the stretches that are not a
@@ -877,6 +881,8 @@ def _diode_turn_offs(trace, times: np.ndarray,
     t = np.asarray(times, dtype=float)
     ks = np.nonzero(closed[:-1] & ~closed[1:])[0] + 1
     v = np.asarray(trace.v, dtype=float)
+    v_st = np.asarray(getattr(trace, "v_start", None) if getattr(trace, "v_start", None) is not None
+                      else v, dtype=float)
     i = np.asarray(trace.current, dtype=float)
     i_fwd = np.maximum(i, 0.0)
     # Where each step starts (the right limit at an engine='dsed'
@@ -910,8 +916,22 @@ def _diode_turn_offs(trace, times: np.ndarray,
         t_off = float(t[k - 1])
         t_blk = float(t[end - 1])
         t_eval = min(t_off + t_rr, t_blk)
-        v_read, flat = _reverse_voltage_at(t, v, k, end, t_eval,
-                                           flat_atol)
+        if interpolable:
+            # exact samples whose chords are within output_rtol (the exact
+            # engine's output rule): v_D on the step line from the step's
+            # start (the right limit at an event) to its end. The midpoint
+            # pairing below is the fixed engine's; on these samples it read
+            # the left limit at the turn-off and drew lines through the next
+            # gate edge's jump (F-5-8: 11.45 V against 19.87 V).
+            j = min(max(int(np.searchsorted(t, t_eval)), k), max(end - 1, k))
+            v0, v1 = float(v_st[j - 1]), float(v[j])
+            dt_j = float(t[j] - t[j - 1])
+            v_read = (v0 if dt_j <= 0.0 else
+                      v0 + (v1 - v0) * min(max((t_eval - float(t[j - 1])) / dt_j, 0.0), 1.0))
+            flat = None
+        else:
+            v_read, flat = _reverse_voltage_at(t, v, k, end, t_eval,
+                                               flat_atol)
         # Reverse bias only: a diode that stopped conducting inside its
         # 0 < v_D < V_th band blocks no voltage yet.
         V_R = max(-v_read, 0.0)
@@ -947,7 +967,8 @@ def _diode_turn_offs(trace, times: np.ndarray,
         flat_after = (controlled or forced) and k_e > k and abs(float(v[k_e] - v[k_e - 1])) <= (
             _RR_FLAT_RTOL * max(abs(float(v[k_e])), abs(float(v[k_e - 1])))
             + flat_atol)
-        unresolved = (float(t[k_e] - t[k_e - 1]) > t_rr * (1.0 + 1e-9)
+        unresolved = (not interpolable
+                      and float(t[k_e] - t[k_e - 1]) > t_rr * (1.0 + 1e-9)
                       and not flat_after
                       and not (forced and bool(flat)))
         out.append({"t": float(t[k]), "t_off": t_off, "V_R": float(V_R),
@@ -2336,7 +2357,8 @@ def device_loss_summary(
                 offs = _diode_turn_offs(
                     d_trace, times, t_rr=t_rr, other_flip=d_flip,
                     i_peak=None if win.whole else entry["i_peak"],
-                    controlled=getattr(result, "engine_used", None) == "trbdf2")
+                    controlled=getattr(result, "engine_used", None) == "trbdf2",
+                    interpolable="output_grid" in (getattr(result, "diagnostics", None) or {}))
                 if not win.whole:
                     offs = [ev for ev in offs
                             if win.a <= ev["t_off"] < win.b]

@@ -652,6 +652,9 @@ py::dict ped_result_to_dict(
     d["n_reject"] = res.n_reject;
     d["n_events"] = res.n_events;
     d["n_exact_steps"] = res.n_exact_steps;
+    // the event integrator's other steps are its DOPRI5 ones (F-3-6)
+    d["n_rk45_steps"] = res.n_accept - res.n_exact_steps;
+    d["n_output_samples"] = res.n_output_samples;
     d["n_predicate_evals"] = res.n_predicate_evals;
     d["cpu_time_seconds"] = res.cpu_time_seconds;
     event_arrays(res, d);

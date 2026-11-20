@@ -187,6 +187,7 @@ struct PEDResult {
     std::size_t n_reject = 0;
     std::size_t n_events = 0;
     std::size_t n_exact_steps = 0;   // closed-form LTI propagator
+    std::size_t n_output_samples = 0;   // the output rule's samples (no step)
     std::size_t n_predicate_evals = 0;  // exact path (D10)
     Real cpu_time_seconds = Real{0};
     ModeShadowReport mode_shadow;      // mode_selection='shadow' / 'lcp'
@@ -642,7 +643,6 @@ public:
                     if (fast_k_ < fast_t_.size()) {
                         h_ex = std::min(h_ex, fast_t_[fast_k_] - t);
                     }
-                    if (output_rtol_ > Real{0}) h_ex = output_step_(t, x, h_ex, result.n_events, t_target);
                     // no sliver step short of the edge (scheduler_auto.hpp)
                     if (h_ex < t_target - t && near_time(t + h_ex, t_target)) {
                         h_ex = t_target - t;
@@ -655,6 +655,11 @@ public:
                         evt = locate_event_exact_(t, x, h_ex, x_new_,
                                                   result);
                     }
+                    // the output rule's samples inside the step, read from its start
+                    // (the step itself is the rule-free one: F-6-7)
+                    if (output_rtol_ > Real{0})
+                        push_output_samples_(t, x, evt ? evt->t_event : t + h_ex,
+                                             result.n_events, t_target, result);
                     // An event at the very end of the step fires too:
                     // the next step starts past the crossing and could
                     // never see it again.
@@ -3212,6 +3217,30 @@ private:
         }
         (void)t; (void)x; (void)n_events; (void)t_target;
         return h;
+    }
+    Vector output_x_;   // push_output_samples_: the sample being read
+
+    /// The output rule's samples strictly inside the exact step [t0, t1) taken
+    /// from (t0, x0). Each is EVALUATED from the step's start, x(τ) = Φ(τ − t0)·x0,
+    /// never propagated from the sample before it: the run's state, its steps
+    /// and every event located on them are the rule-free run's, whatever is
+    /// sampled (F-6-7: a chained Φ(δ) per sample accumulated a rounding of the
+    /// mode's basis each, 6.6e-8 A on ten bridges at 1e-5, 2.1e-6 A at 1e-8).
+    void push_output_samples_(Real t0, const Vector& x0, Real t1, std::size_t n_events,
+                              Real t_target, PEDResult<MaskT>& result) {
+        const MaskT mask = system_.current_mask();
+        Real tau = t0;
+        output_x_ = x0;
+        for (;;) {
+            const Real h = t1 - tau;
+            const Real d = output_step_(tau, output_x_, h, n_events, t_target);
+            // no sample a sliver short of the step's end (the end is a sample)
+            if (!(d < h) || near_time(tau + d, t1)) return;
+            tau += d;
+            advance_(t0, x0, tau - t0, output_x_);
+            ped_push_sample(result, tau, output_x_, mask, mask, nullptr);
+            ++result.n_output_samples;
+        }
     }
     Real probe_t_end_ = std::numeric_limits<Real>::infinity();   // next_time_event_
     std::size_t reinit_mark_ = 0;   // reinit_log_size_() before the settle

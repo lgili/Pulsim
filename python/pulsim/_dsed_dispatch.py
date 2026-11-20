@@ -482,6 +482,8 @@ def _result_from_native(native_res, t_start: float):
             res.diagnostics[key] = native_res[key]
     if "n_output_capped" in native_res:   # the output-grid rule (output_rtol)
         og = {k: int(native_res[k]) for k in ("n_output_capped", "n_output_unbounded")}
+        # the rule's samples: read from a step's start, not steps (n_exact_steps)
+        og["n_output_samples"] = int(native_res.get("n_output_samples", 0))
         tb = native_res["output_budget_t"]
         og["output_budget_t"] = None if tb != tb else tb + t_start   # NaN: not spent
         res.diagnostics["output_grid"] = og
