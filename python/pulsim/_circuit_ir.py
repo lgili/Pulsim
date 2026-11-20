@@ -220,6 +220,9 @@ def control_decls(builder) -> list:
     lists a builder instance still carries. A C block's step function and
     its wiring are opaque: its content hash covers its name, its input and
     output COUNTS and its rate only."""
+    if not getattr(builder, "_c_blocks", None) \
+            and not getattr(builder, "_graph_driven", None):
+        return []   # (the common case: simulate() asks several times per run)
     out = []
     for i, h in enumerate(getattr(builder, "_c_blocks", None) or ()):
         # A duck-typed block may lack these; the engines' refusals must
@@ -247,7 +250,14 @@ def _controls(obj, kind) -> list:
 
 def c_blocks_of(obj) -> list:
     """The CBlockHandles a Circuit or builder carries."""
-    return [d[3] for d in _controls(obj, "c_block")]
+    # _controls(obj, "c_block") without its second walk when the builder's
+    # side list is empty (its c_block rows come from `_c_blocks` only):
+    # simulate() asks this three or four times per run
+    out = [d[3] for d in (obj.controls() if hasattr(obj, "controls") else ())
+           if d[1] == "c_block"]
+    if getattr(obj, "_c_blocks", None):
+        out += [d[3] for d in control_decls(obj) if d[1] == "c_block"]
+    return out
 
 
 def graph_driven_of(obj) -> list:
