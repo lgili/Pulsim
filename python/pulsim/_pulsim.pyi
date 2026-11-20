@@ -761,8 +761,16 @@ class CircuitBuilder:
         with 50 sections); a finite edge needs
         :func:`recommend_line_sections` sections to stay near 5 %.
 
-        ``model="bergeron"`` (exact delay) needs a kernel device that does
-        not exist yet and is refused by name.
+        ``model="bergeron"``: the kernel's travelling-wave line (openspec
+        add-realistic-passives D18), exact for a lossless line: branches
+        ``{name}`` (port ``k``) and ``{name}.b`` (port ``m``) carry the current
+        INTO the line. ``R`` is lumped as R/4 - R/2 - R/4 around two half
+        lines (``R <= Z0``). ``pwl`` needs ``dt <= delay`` (exact when ``delay``
+        is a multiple of ``dt``; otherwise the far end is interpolated, first
+        order on a front, plateaus exact); ``trbdf2`` caps its step at
+        ``delay``; the AC sweep stamps the exact two-port; a wire at DC. The
+        exact engine, ``bdf1``, ``integrator='esdirk43'`` and periodic
+        shooting refuse it by name. ``sections`` is not used.
 
         Sub-elements: ``{name}.l{k}``, ``{name}.c{k}``, ``{name}.r{k}``;
         internal nodes ``{name}.n{k}``; ``{name}.ret`` (0 V source) joins
@@ -1250,6 +1258,8 @@ class StoredKind:
       ExternalDevice
 
       ExcessLoss
+
+      TransmissionLine
     """
     CCCS: typing.ClassVar[StoredKind]
     CCVS: typing.ClassVar[StoredKind]
@@ -1278,6 +1288,7 @@ class StoredKind:
     SineCurrentSource: typing.ClassVar[StoredKind]
     SineVoltageSource: typing.ClassVar[StoredKind]
     Switch: typing.ClassVar[StoredKind]
+    TransmissionLine: typing.ClassVar[StoredKind]
     VCCS: typing.ClassVar[StoredKind]
     VCVS: typing.ClassVar[StoredKind]
     VoltageSource: typing.ClassVar[StoredKind]
@@ -2877,7 +2888,7 @@ class SolverSnapshot:
     `initial_state=` restores only the MNA vector and then INVENTS the companion history from it (a capacitor gets i_prev = 0, an inductor v_prev = 0), so resuming from it does NOT reproduce the run — a continuous 2T RLC and a T-then-resume differ by 2.3e-4 where a true resume is ~1e-15. A snapshot carries what was missing: the trapezoidal companion history, the state of every stateful device (saturable / gapped / hysteretic inductors, charge-based Coss, Lauritzen diodes, IGBT tails, MNA PMSMs) and the solver-owned diode bits. Pass it as simulate(resume_from=...): exact on engine='pwl', to tolerance on engine='trbdf2'. Pickles.
     """
     valid: bool
-    def __getstate__(self) -> tuple[str, int, float, typing.Annotated[numpy.typing.NDArray[numpy.float64], "[m, 1]"], list[float], list[int], int, list[bool], list[bool], int, bool, typing.Any, typing.Any, tuple[float, int, float, bool], typing.Any, list[float], list[int], list[float], typing.Any]:
+    def __getstate__(self) -> tuple[typing.Any, ...]:
         ...
     def __init__(self) -> None:
         ...
@@ -2993,6 +3004,14 @@ class SolverSnapshot:
         """
         Hash of the block names and counts; a resume refuses a snapshot whose layout is not the circuit's, naming the block.
         """
+    @property
+    def line_state(self) -> list[float]:
+        """
+        The transmission lines' committed past (pickle field 19, present only with a line): per line Z0, delay, n, then n x (t, w_a, w_b). Empty: no line.
+        """
+    @line_state.setter
+    def line_state(self, arg0: collections.abc.Sequence[float]) -> None:
+        ...
     @property
     def mask(self) -> list[bool]:
         """

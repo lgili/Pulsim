@@ -737,9 +737,12 @@ of R, L, C (YAML reads `esr`, `esl`, `c_par` and `rac:` ladder cells;
 an `(f, R_ac)` curve is refused by name). The MLCC DC-bias capacitor
 (`fit_mlcc_dc_bias`, YAML `nonlinear_capacitor` with `dc_bias:`) is a
 Newton device (pwl / trbdf2) integrating the small-signal curve (no
-hysteresis). Not done: YAML `transmission_line` and the Bergeron line
-(a stateful kernel kind, deferred to the unified device interface;
-`model="bergeron"` is refused).
+hysteresis). `model="bergeron"` is the exact travelling-wave line (kind
+`TransmissionLine`; YAML `transmission_line`): pwl and trbdf2 (step
+capped at the delay; its interpolation error is not in the trbdf2 error
+estimate, so set `dt=` to resolve the waves), the AC sweep, DC as a wire;
+esdirk43, the exact engine, bdf1 and `periodic_steady_state` refuse it
+by name (`docs/transmission-line.md`).
 The π line overshoots an ideal step by 27 % at any section count (the
 exact line does not): give the source a rise time and use
 `recommend_line_sections`. A fitted ladder reproduces its own data; it

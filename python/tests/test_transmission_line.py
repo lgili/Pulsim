@@ -267,3 +267,178 @@ def test_quarter_wave_transient_steady_state_matches_the_sweep():
     c = np.linalg.lstsq(a, v[keep], rcond=None)[0]
     z_ac = _sweep(b, "k", "k", [f_q])[0] * 1e-3
     assert np.hypot(c[0], c[1]) == pytest.approx(abs(z_ac), rel=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# surfaces: refusals by name, YAML, losses, DC posedness
+# ---------------------------------------------------------------------------
+
+def test_capability_row():
+    row = p.engine_capabilities()["TransmissionLine"]
+    assert row == {"class": "LinearDelay", "pwl": True, "trbdf2": True,
+                   "dsed": False, "bdf1": False, "ac_sweep": True}
+
+
+@pytest.mark.parametrize("engine", ["exact", "dsed", "bdf1"])
+def test_engines_without_a_line_refuse_it_by_name(engine):
+    b = _line(Z0)
+    with pytest.raises(p.UnsupportedError) as ei:
+        if engine == "bdf1":   # the retired engine has no simulate() name
+            from pulsim import _pulsim as k
+            k.run_transient_bdf1(b, k.SimulationOptions(t_start=0.0, t_end=2 * TAU, dt=1e-9),
+                                 lambda _t: p.SwitchStateMask(0))
+        else:
+            p.simulate(b, t_end=2 * TAU, dt=1e-9, engine=engine)
+    assert (ei.value.device, ei.value.kind) == ("T", "TransmissionLine")
+
+
+def test_periodic_steady_state_refuses_the_line():
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("V", "s", "gnd", 0.0, 1.0, 1e6)
+    b.add_resistor("Rs", "s", "k", Z0)
+    b.add_transmission_line("T", "k", "gnd", "m", "gnd", Z0=Z0, delay=TAU,
+                            model="bergeron")
+    b.add_resistor("RL", "m", "gnd", Z0)
+    with pytest.raises(p.UnsupportedError) as ei:
+        p.periodic_steady_state(b, period=1e-6)
+    assert (ei.value.device, ei.value.kind) == ("T", "TransmissionLine")
+
+
+def test_losses_lossless_none_lossy_in_its_resistors():
+    r = p.simulate(_line(Z0, load=Z0, R=1.0), t_end=6 * TAU, dt=1e-9, engine="pwl")
+    rows = p.device_loss_summary(_line(Z0, load=Z0, R=1.0), r)
+    names = {x["name"] for x in rows}
+    assert {"T.ra", "T.rm", "T.rb"} <= names
+    assert not any(n in ("T", "T.b", "T.h1.b", "T.h2") for n in names)
+    b0 = _line(Z0, load=Z0)
+    r0 = p.simulate(b0, t_end=6 * TAU, dt=1e-9, engine="pwl")
+    assert not {"T", "T.b"} & {x["name"] for x in p.device_loss_summary(b0, r0)}
+
+
+def test_yaml_type_and_ir_round_trip():
+    y = ("circuit:\n  devices:\n"
+         "    - {type: voltage_source, name: V, from: s, to: gnd, V: 1.0}\n"
+         "    - {type: resistor, name: Rs, from: s, to: k, R: 10.0}\n"
+         "    - {type: transmission_line, name: T, a_pos: k, a_neg: gnd, b_pos: m, "
+         "b_neg: gnd, Z0: 50.0, delay: 1.0e-7}\n"
+         "    - {type: resistor, name: RL, from: m, to: gnd, R: 40.0}\n")
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "s", "gnd", 1.0)
+    b.add_resistor("Rs", "s", "k", 10.0)
+    b.add_transmission_line("T", "k", "gnd", "m", "gnd", Z0=Z0, delay=TAU,
+                            model="bergeron")
+    b.add_resistor("RL", "m", "gnd", 40.0)
+    assert p.load_yaml_string(y).builder.build().value_hash() == b.build().value_hash()
+    c = b.build()
+    text = c.to_yaml()
+    assert "kind: transmission_line" in text
+    assert p.load_yaml_string(text).builder.build().value_hash() == c.value_hash()
+    with pytest.raises(Exception, match="delay"):
+        p.load_yaml_string(y.replace(", delay: 1.0e-7", ""))
+    rows = {r["name"]: r for r in p.device_fields("transmission_line")}
+    assert rows["Z0"]["unit"] == "Ohm" and rows["delay"]["unit"] == "s"
+
+
+def test_dc_ideal_loop_through_the_line_is_refused_by_name():
+    # 1 V at port a, 2 V at port b: at DC the line is a wire, no solution
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V1", "k", "gnd", 1.0)
+    b.add_transmission_line("T", "k", "gnd", "m", "gnd", Z0=Z0, delay=TAU,
+                            model="bergeron")
+    b.add_voltage_source("V2", "m", "gnd", 2.0)
+    with pytest.raises(p.UnsupportedError) as ei:
+        p.simulate(b, t_end=2 * TAU, dt=1e-9, engine="pwl", start_from_dc_op=True)
+    assert "T" in str(ei.value)
+    # the transient alone is well posed: each port is Z0 behind a source
+    r = p.simulate(b, t_end=2 * TAU, dt=1e-9, engine="pwl")
+    assert np.isfinite(np.asarray(r.i("T"))).all()
+
+
+def test_in_loop_recorder_reads_both_ports():
+    # matched both ends, 1 V step: after the front, 0.5 V and 10 mA at each
+    # port; the power enters at a and leaves at b (lossless)
+    rec = p.Recorder("tl", ["i(T)", "p(T)", "p(T.b)"], windows=[(3 * TAU, 5 * TAU)])
+    res = p.simulate(_line(Z0, load=Z0), t_end=6 * TAU, dt=1e-9, engine="pwl",
+                     recorders=[rec])
+    w = res.recorded["tl"].windows
+    assert w["i(T)"]["avg"][0] == pytest.approx(0.01, rel=1e-9)
+    assert w["p(T)"]["avg"][0] == pytest.approx(5e-3, rel=1e-9)
+    assert w["p(T.b)"]["avg"][0] == pytest.approx(-5e-3, rel=1e-9)
+
+
+# ---------------------------------------------------------------------------
+# trbdf2: the step is capped at tau; source corners + k tau are breakpoints
+# ---------------------------------------------------------------------------
+
+def _rc_far(rs=10.0, line=True):
+    """1 V step (1 ns edges) behind rs into the line; far end 50 ohm || 100 pF.
+    line=False: the same circuit without the line (rs straight to the load)."""
+    b = p.CircuitBuilder()
+    b.add_pulse_voltage_source("V", "s", "gnd", 0.0, 1.0, T_EDGE, 1.0, 0.0, 1e-9, 1e-9)
+    b.add_resistor("Rs", "s", "k", rs)
+    if line:
+        b.add_transmission_line("T", "k", "gnd", "m", "gnd", Z0=Z0, delay=TAU,
+                                model="bergeron")
+    else:
+        b.add_resistor("Rw", "k", "m", 1e-9)
+    b.add_resistor("RL", "m", "gnd", Z0)
+    b.add_capacitor("CL", "m", "gnd", 100e-12)
+    return b
+
+
+@pytest.mark.parametrize("rtol", [1e-4, 1e-8])
+def test_trbdf2_lattice_and_the_step_bound(rtol):
+    # dt is trbdf2's step ceiling; 10 tau is clamped to tau by the line
+    r = p.simulate(_line(10.0), t_end=7 * TAU, engine="trbdf2", rtol=rtol, dt=10 * TAU)
+    for n, v in [(0, 5 / 3), (1, 5 / 9), (2, 35 / 27)]:
+        assert _at(r, "m", T_EDGE + (2 * n + 1) * TAU + TAU / 2) == pytest.approx(v, rel=1e-9)
+    assert np.diff(np.asarray(r.times)).max() <= TAU * (1 + 1e-12)
+
+
+def test_trbdf2_counts_the_steps_the_line_bounds():
+    # DC source, line at rest, resistive load: nothing but the line limits
+    # the step, so it settles at tau (10 tau asked)
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "s", "gnd", 1.0)
+    b.add_resistor("Rs", "s", "k", 10.0)
+    b.add_transmission_line("T", "k", "gnd", "m", "gnd", Z0=Z0, delay=TAU,
+                            model="bergeron")
+    b.add_resistor("RL", "m", "gnd", 200.0)
+    r = p.simulate(b, t_end=40 * TAU, engine="trbdf2", dt=10 * TAU)
+    assert np.diff(np.asarray(r.times)).max() <= TAU * (1 + 1e-12)
+    assert r._trbdf2_stats.get("n_line_bound_steps", 0) >= 5
+    # the lattice of a 10 ohm source into 200 ohm: the far end settles to
+    # 200/210 V once the reflections (Gamma_s Gamma_L = -2/3 * 3/5) died out
+    assert float(np.asarray(r.v("m"))[-1]) == pytest.approx(200 / 210, rel=1e-6)
+
+
+def test_trbdf2_converges_with_rtol_on_a_reflecting_line():
+    # mismatched line into an RC load: the reflections are curved, not
+    # source corners; the far end against pwl at dt = 0.05 ns at nine
+    # plateau points. Worst point measured 9.4e-5, 2.4e-5, 1.7e-5, 1.1e-6 at
+    # rtol 1e-3 .. 1e-6 (the floor near 1e-6 is the reference's own error)
+    ref = p.simulate(_rc_far(), t_end=7 * TAU, dt=0.05e-9, engine="pwl")
+    tq = np.array([T_EDGE + (2 * n + 1) * TAU + f * TAU for n in range(3)
+                   for f in (0.25, 0.5, 0.9)])
+    want = np.interp(tq, np.asarray(ref.times), np.asarray(ref.v("m")))
+    errs = []
+    for rtol in (1e-3, 1e-6):
+        r = p.simulate(_rc_far(), t_end=7 * TAU, engine="trbdf2", rtol=rtol, dt=10 * TAU)
+        errs.append(np.max(np.abs(np.interp(tq, np.asarray(r.times), np.asarray(r.v("m")))
+                                  - want)))
+    assert errs[0] < 2e-4 and errs[1] < 3e-6, errs
+
+
+@pytest.mark.parametrize("rtol", [1e-3, 1e-4, 1e-6])
+def test_trbdf2_matched_line_rejects_as_the_circuit_without_it(rtol):
+    # measured equal (6/6, 4/4, 2/2); without the c + tau breakpoint the
+    # arriving front was rejected: 17 vs 6, 27 vs 4, 30 vs 2
+    rej = [p.simulate(_rc_far(Z0, line), t_end=7 * TAU, engine="trbdf2", rtol=rtol,
+                      dt=TAU)._trbdf2_stats["n_reject"] for line in (True, False)]
+    assert rej[0] <= 2 * rej[1] + 2, rej
+
+
+def test_trbdf2_refuses_esdirk43_by_name():
+    with pytest.raises(p.UnsupportedError) as ei:
+        p.simulate(_line(10.0), t_end=TAU, engine="trbdf2", integrator="esdirk43")
+    assert (ei.value.feature, ei.value.device) == ("integrator=esdirk43", "T")

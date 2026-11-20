@@ -357,3 +357,104 @@ per-step branch or copy for circuits without a line; to be measured at
 the cost gate). Loop hunks expected: that one call in the shared phase;
 the commit rides the existing `StatefulKinds::commit`; the step bound is
 in the plan.
+
+### Implemented (2026-11-20, branch feat/core-p5-transmission-line): where the code departs from the design, with evidence
+
+- **No variable-length stateful block (D17's extensions not built).** The
+  line's past lives in `pwl::LineHistory` (`pwl/transmission_line_history.hpp`),
+  one object per run, owned by the engine, outside `StatefulKinds`. Each
+  engine makes one `std::optional<LineHistory>`, plus a pointer that is null
+  when there is no line. The hot path pays one null-pointer test per solve
+  (`inject`) and per commit. Measured on line-free circuits (instruction
+  counts, min of 6, interleaved): buck pwl +0.22 %, vsi pwl +0.14 %,
+  buck trbdf2 +0.15 %, bridge trbdf2 +0.05 %. Byte compares unchanged:
+  goldens 22/22, stateful, engines and steps identical, pwl_identity
+  390/390, trbdf2_identity 371/371. The new public snapshot attribute
+  `line_state` (empty) and the stats key `n_line_bound_steps` (written
+  only when non-zero) are ignored when they are absent from the baseline.
+- **Stamp: Thevenin per port, not Norton.** Each port is a `Source` branch
+  with its own current unknown: row `v − Z0·i = E(t)` (−Z0 on the
+  diagonal of the cached matrix; E into b). Same law as (1), and both
+  `res.i("T")` and `res.i("T.b")` are state columns. Port names: `name`
+  and `name.b`.
+- **pwl commit: at the outer step end only.** `step_commit` writes the
+  buffer once per output sample. The dt-retry sub-steps, restart stages and
+  event iterations READ it, but their intermediate states are not committed.
+  So on the fixed engine the buffer grid is the output grid, and a front
+  inside a step is smeared over that step (the plateaus stay exact).
+  Truth: lattice 5/3, 5/9, 35/27 V to 2.2e-16. Non-integer τ/dt = 100.5:
+  plateaus exact; the sine far-end error falls with order 1.97 and 1.99
+  (5.93e-5, 1.51e-5, 3.82e-6 at τ/dt = 25.5, 50.5, 100.5).
+- **pwl start rule.** The waves come from x when the run starts from a DC
+  point or a given `initial_state`. Otherwise the line is at rest (zero
+  waves). The static (no-reactive) path and `dt > τ` are refused by name.
+- **trbdf2.** `h_max = min(h_max, τ_min)` at setup. The commit is the
+  first line of `device_state_once`, the funnel every commit site calls,
+  and a repeat at the same t is ignored. `inject` sits in
+  `accumulate_sources`. `n_line_bound_steps` (stats) counts the commits
+  that advanced by ≥ τ_min·(1 − 1e-12). esdirk43 is refused by name
+  (feature `integrator=esdirk43`).
+- **trbdf2 landings: kinks of the recorded waves, not source corners + τ
+  (D18 (2) corrected).** The design's rule (every landed event schedules
+  t_e + τ, one hop) fails on the evidence:
+  - With one hop (source corners only), the rejects of a matched line
+    + RC load equalled the line-free circuit's (38/6 vs 36/6, 61/4 vs
+    59/4, 188/2 vs 180/2 accepts/rejects at rtol 1e-3, 1e-4, 1e-6;
+    before any landing 46/17, 78/27, 210/30). A mismatched line still
+    lost its second arrival. The reflection the far end's RC sends back
+    is not a source corner, the near end is resistive, so trbdf2 stepped
+    over [2τ, 3τ] in one step of τ.
+  - With eight hops (c + k·τ): the plateau error after 3τ was 0.24 V at
+    every rtol.
+  - Implemented instead, two rules:
+    1. Source corner c + τ (one hop), landed and restarted as the corner
+       itself is.
+    2. A committed sample k where a recorded wave, at either port,
+       changes slope by Δs with |Δs|·h_max/4 > atol + rtol·|w| (the error
+       of stepping over it) lands a step at t_k + τ, with no restart
+       (`LineHistory::next_kink_after`, in `tb_clamp`). This covers
+       reflections, curved transients and fronts from switch or diode
+       events, and it decays with the waves.
+  - Two rejected variants:
+    - A chord-deviation test missed a corner whose restart probe sits
+      0.1 fs after it: the resistive lattice was off by 0.46 at rtol 1e-3.
+    - Restarting at every kink: rejects 13/11/8 vs 6/4/2, loose-rtol error
+      7.9e-4, resume off by 2e-6.
+  - Evidence for the final rules:
+    - Matched line + RC load, accepts/rejects: 123/6 vs 36/6, 139/4 vs
+      59/4, 390/2 vs 180/2 at rtol 1e-3, 1e-4, 1e-6. The rejects are
+      equal; the extra accepts are the landings.
+    - Mismatched line + RC load, far end against pwl at dt = 0.05 ns, worst
+      of nine plateau points: 9.4e-5, 2.4e-5, 1.7e-5, 1.1e-6 at rtol 1e-3,
+      1e-4, 1e-5, 1e-6. The floor near 1e-6 is the reference's own error.
+    - Resistive lattice 5/3, 5/9, 35/27 V exact to 2.2e-16 at rtol 1e-3
+      to 1e-8.
+    - Resume vs uninterrupted run: 1.1e-15.
+- **What the error control does not see (a limit, documented).** The
+  line's interpolation error is not part of the TR-BDF2 estimate, and the
+  landings above only carry what a step already recorded. On a circuit
+  whose only dynamics is the line, a smooth wave is never refined: a
+  3.3 MHz sine through 100 ns is off by 6.6e-3 V (of 0.5 V) at rtol 1e-3
+  and 1e-6 alike (0.207 V before the kink landings). The cure is the
+  user's step ceiling (`dt=`) or pwl. An error estimate for the line's
+  interpolant is the upgrade.
+- **Snapshot.** Pickle field 19 (0-based; the 20th field), `line_state`
+  = [n_lines, per line Z0, τ, n, n × (t, w_a, w_b)]. It is appended only
+  when non-empty, so a line-free snapshot keeps its 19-field tuple. The
+  reader accepts 17 to 20 fields. A mismatch (count, Z0, τ, truncation, no
+  state) is refused by name. For the integration batch: if another branch
+  also takes index 19, renumber; the line block is the only one that is
+  optional by length.
+- **AC.** As (5), stamped as a per-ω correction (G's rows of the two
+  ports are replaced by the ABCD rows). The lossy line is the builder
+  composite, so its AC model is the five-matrix product, as designed.
+- **DC.** As (5). Port b's row is `v_b − v_a = 0` and port a's is
+  `i_a + i_b = 0`. The voltage-loop finder treats port b as a 1:1 winding
+  of port a, and the structure analysis gives port b ZeroImp at DC, as for
+  the ideal transformer.
+- **Exact engine.** `engine='auto'` never routes to the exact engine
+  (`_route`: "'auto' never routes to dsed"), so there is no route to
+  record; `engine='exact'|'dsed'` and bdf1 refuse it through the table.
+- **R ≤ Z0.** The lossy composite refuses R > Z0 by name (the lumped
+  thirds are then a poor line). The `R ≪ Z0` warning of task 5.1 is this
+  refusal.

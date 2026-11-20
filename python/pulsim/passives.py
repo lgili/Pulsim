@@ -283,9 +283,9 @@ def add_transmission_line(self, name: str, k_pos: str, k_neg: str,
     impedance is lumped into the forward one).
     """
     who = f"add_transmission_line({name!r})"
-    if model not in ("pi", "bergeron"):
-        raise ValueError(f"{who}: model must be 'pi' or 'bergeron' "
-                         f"(got {model!r}).")
+    if model not in ("pi", "bergeron") or (model == "bergeron" and sections is not None):
+        raise ValueError(f"{who}: model must be 'pi' or 'bergeron' (got {model!r}); "
+                         "sections is a model='pi' parameter.")
     per_m = (L_per_m, C_per_m, length)
     if any(v is not None for v in per_m):
         if Z0 is not None or delay is not None or None in per_m:
@@ -306,8 +306,6 @@ def add_transmission_line(self, name: str, k_pos: str, k_neg: str,
                          f"(got {delay!r}).")
     r_tot = _nonneg(who, "R", R)
     if model == "bergeron":
-        if sections is not None:
-            raise ValueError(f"{who}: sections is a model='pi' parameter.")
         native = type(self).add_transmission_line._pulsim_native
         return native(self, name, k_pos, k_neg, m_pos, m_neg, z0, tau, r_tot)
     if sections is None or int(sections) != sections or int(sections) < 1:

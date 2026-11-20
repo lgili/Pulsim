@@ -905,6 +905,13 @@ struct DCVoltageLoop {
             fixed = false;
             break;
         }
+        case SK::TransmissionLine:   // a wire at DC: port b = port a, 1:1
+            if (pool.is_line_port_b(b_id)) {
+                const auto& pa = graph.branch(pool.line_partner(b_id));
+                xfmrs.push_back({b_id, pa.from, pa.to, Real{1}, false, false});
+            }
+            fixed = false;
+            break;
         default:
             fixed = false;
             break;

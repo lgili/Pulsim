@@ -57,6 +57,7 @@ public:
             l.rb = pool.branch_var_id_for_source(lp.b, graph);
             lines_.push_back(std::move(l));
         }
+        tau_min_ = tau_min();
     }
 
     [[nodiscard]] bool empty() const noexcept { return lines_.empty(); }
@@ -67,6 +68,39 @@ public:
         Real m = std::numeric_limits<Real>::infinity();
         for (const auto& l : lines_) m = std::min(m, l.tau);
         return m;
+    }
+    /// The distinct delays (ascending).
+    [[nodiscard]] std::vector<Real> taus() const {
+        std::vector<Real> v;
+        for (const auto& l : lines_) v.push_back(l.tau);
+        std::sort(v.begin(), v.end());
+        v.erase(std::unique(v.begin(), v.end()), v.end());
+        return v;
+    }
+
+    /// The earliest t_k + tau after `after` for a committed sample k (with
+    /// both neighbours committed) where the wave, at either port, changes
+    /// slope by Δs with |Δs|·h/4 > atol + rtol·|w| (h/4·|Δs|: the error of
+    /// a linear interpolant over a step h that steps over the kink): where
+    /// a variable step must land (+inf if none is known yet).
+    [[nodiscard]] Real next_kink_after(Real after, Real h, Real rtol, Real atol) const {
+        Real best = std::numeric_limits<Real>::infinity();
+        for (const auto& l : lines_) {
+            const auto first = l.t.begin() + static_cast<std::ptrdiff_t>(l.head);
+            // strictly after `after`, beyond rounding (a kink just landed on)
+            const Real snap = Real{64} * std::numeric_limits<Real>::epsilon()
+                * (std::abs(after) + l.tau);
+            Size k = static_cast<Size>(
+                std::upper_bound(first, l.t.end(), after - l.tau + snap) - l.t.begin());
+            for (k = std::max(k, l.head + 1); k + 1 < l.t.size(); ++k) {
+                if (!(l.t[k] + l.tau < best)) break;
+                if (l.kink(l.wa, k, h, rtol, atol) || l.kink(l.wb, k, h, rtol, atol)) {
+                    best = l.t[k] + l.tau;
+                    break;
+                }
+            }
+        }
+        return best;
     }
     [[nodiscard]] const std::string& tau_min_name() const {
         const auto it = std::min_element(lines_.begin(), lines_.end(),
@@ -100,7 +134,12 @@ public:
     /// Append the committed state `x` at time `t` (ignored at or before
     /// the last sample), then drop what no later query can reach.
     void commit(Real t, const Vector& x) {
+        bool at_bound = false;
         for (auto& l : lines_) {
+            if (l.tau == tau_min_ && t > l.t.back()
+                && t - l.t.back() >= tau_min_ * (Real{1} - Real{1e-12})) {
+                at_bound = true;
+            }
             if (!(t > l.t.back())) continue;
             l.t.push_back(t);
             l.wa.push_back(wave_(x, l.af, l.at, l.ra, l.Z0));
@@ -113,7 +152,12 @@ public:
                     "than the delay); raise the minimum step or shorten the line.");
             }
         }
+        if (at_bound) ++n_at_bound_;
     }
+
+    /// Committed steps as long as the shortest delay (the line set the
+    /// step: TR-BDF2's h_max is clamped to it).
+    [[nodiscard]] Size n_at_bound() const noexcept { return n_at_bound_; }
 
     /// Snapshot: per line Z0, tau, n, then n × (t, w_a, w_b).
     [[nodiscard]] std::vector<Real> save() const {
@@ -208,6 +252,13 @@ private:
         }
         void pick(Size k, Real& wa_o, Real& wb_o) const { wa_o = wa[k]; wb_o = wb[k]; }
 
+        [[nodiscard]] bool kink(const std::vector<Real>& w, Size k, Real h, Real rtol,
+                                Real atol) const {
+            const Real ds = (w[k + 1] - w[k]) / (t[k + 1] - t[k])
+                - (w[k] - w[k - 1]) / (t[k] - t[k - 1]);
+            return Real{0.25} * h * std::abs(ds) > atol + rtol * std::abs(w[k]);
+        }
+
         /// Keep from the last sample at or before `t_old` (the earliest
         /// time a later solve reads, minus nothing: solves move forward).
         void prune(Real t_old) {
@@ -230,6 +281,8 @@ private:
     }
 
     std::vector<Line> lines_;
+    Real tau_min_ = 0;
+    Size n_at_bound_ = 0;
 };
 
 }  // namespace pulsim::pwl
