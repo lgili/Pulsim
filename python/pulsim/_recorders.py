@@ -19,10 +19,10 @@ FEEDING MODES (``Recording.feeding``, ``result.recorder_feed``):
   of the state vector alone: ``v()``, ``i()`` of a state column or a
   resistor, ``p()`` of those.
 * ``'stored-arrays'`` — a kernel-side pass over the stored result
-  (``pulsim._pulsim._record_pass``): the exact engine's routes without step
-  hooks (``integrator='auto'`` / ``'bdf2'``), its junction temperature loop,
-  a fresh exact run with ``t_start``, routes that bypass the object, other
-  readings. With ``store_every > 1`` such a run is refused (the arrays
+  (``pulsim._pulsim._record_pass``): the exact engine's route without step
+  hooks (``integrator='bdf2'``), its junction temperature loop, a fresh
+  exact run with ``t_start`` (both warn when a recorder has windows or
+  periods), routes that bypass the object, other readings. With ``store_every > 1`` such a run is refused (the arrays
   would alias).
 
 The arithmetic is the kernel recorder's (``record/recorder.hpp``): windows
@@ -594,8 +594,9 @@ def _resume_state(plan):
 
 class ExactFeedSlot:
     """``attach_loop_feed``'s ``sim`` on the exact engine: it holds the feed
-    the event-driven integrator drives (``run_ped_native_builder(loop_feed=)``
-    binds the circuit and attaches it to the scheduler's hooks)."""
+    the exact engine's integrators drive (``run_ped_native_builder`` /
+    ``run_auto_native_builder(loop_feed=)`` bind the circuit and attach it to
+    the scheduler's hooks)."""
 
     def __init__(self, builder):
         self.builder = builder

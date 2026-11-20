@@ -643,3 +643,32 @@ pair + the constant) and, for the degree-2 probe v·i, the quartic γᵀP4γ
 (28 × 28 complex). Next step if wanted: real arithmetic over conjugate
 mode pairs (half the work) or reusing the period piece for the window when
 they coincide.
+
+## Reviewer (fresh context, opus, medium, read only) — found / done
+
+No correctness defect: the hooks follow PEDSimulator in every branch (start
+before a resume's landing; event then accepted with the pre-event state;
+zero-length fires event-only; rejected / NaN-retried DOPRI5 steps no hook);
+caches cannot go stale (z_ written only by start(), which clears the ends;
+slots recompute on reassignment); no output value can change. It checked a
+resume mid-step and on a gate edge (within 4e-15 of the uninterrupted run).
+Done: the route test now asserts WHICH binding ran (auto / ped / bdf2);
+the strict xfail of the 3-phase bridge names `raises=AssertionError`; the
+stale `_recorders.py` docstrings. Left: no test of auto route + recorders +
+resume_from (the reviewer's experiment passes); a Bridge.10 fallback after
+a mid-run error could report a partly fed record (pre-existing pattern of
+the rk45 route; windows refuse, periods could truncate); the source part of
+the end check is tautological (u1 from exo_advance(u0)) — a wrong source
+piece is caught through the circuit state; the warning always says
+engine='exact'.
+
+## Run / not run (this section)
+
+Run: extension build; `pulsim_core_dsed_tests` (150 cases, 41398
+assertions) and `pulsim_core_record_tests` (18 cases) on Eigen 5, all
+passed; the exact-engine / dsed / recorder pytest files (481 passed before
+the RC value update, then 36/36 test_recorders); the new files 16 passed +
+3 strict xfails; byte compares above; cost above; ruff; stubs --check
+(regenerated: `run_auto_native_builder(loop_feed=)` and a docstring the
+predecessor had changed). Not run: Eigen 3.4.0, g++, full ctest. Item 6
+(exact interior extrema, keep='times' from the flow): not done, left.

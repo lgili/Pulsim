@@ -174,19 +174,24 @@ def _halfwave():
     return b, None
 
 
-ROUTES = {   # name: (circuit, options, expected recorder path)
-    "auto (diode-free)": (_sync_buck, {}, "closed"),
-    "rk45": (_sync_buck, {"integrator": "rk45"}, "closed"),
-    "auto -> rk45 (diode)": (_halfwave, {}, "closed"),
-    "output_rtol": (_sync_buck, {"output_rtol": 1e-6}, "closed"),
-    "bdf2": (_sync_buck, {"engine": "dsed", "integrator": "bdf2"}, "stored"),
-    "t_start": (_sync_buck, {"t_start": 1e-5}, "stored"),
+ROUTES = {   # name: (circuit, options, expected recorder path, the binding that runs)
+    "auto (diode-free)": (_sync_buck, {}, "closed", "auto"),
+    "rk45": (_sync_buck, {"integrator": "rk45"}, "closed", "ped"),
+    "auto -> rk45 (diode)": (_halfwave, {}, "closed", "ped"),
+    "output_rtol": (_sync_buck, {"output_rtol": 1e-6}, "closed", "ped"),
+    "bdf2": (_sync_buck, {"engine": "dsed", "integrator": "bdf2"}, "stored", "bdf2"),
+    "t_start": (_sync_buck, {"t_start": 1e-5}, "stored", "auto"),
 }
 
 
 @pytest.mark.parametrize("route", list(ROUTES))
-def test_every_route_is_closed_form_or_a_counted_warned_fallback(route):
-    make, kw, expect = ROUTES[route]
+def test_every_route_is_closed_form_or_a_counted_warned_fallback(route, monkeypatch):
+    make, kw, expect, sched = ROUTES[route]
+    ran = []
+    for name in ("auto", "ped", "bdf2"):
+        fn = getattr(p._pulsim, f"run_{name}_native_builder")
+        monkeypatch.setattr(p._pulsim, f"run_{name}_native_builder",
+                            lambda *a, _f=fn, _n=name, **k: (ran.append(_n), _f(*a, **k))[1])
     kw = {"engine": "exact", **kw}
     t_end = 0.4e-3
 
@@ -198,7 +203,7 @@ def test_every_route_is_closed_form_or_a_counted_warned_fallback(route):
         return res, [w for w in caught if "recorders" in str(w.message)]
 
     base, w0 = run(None)
-    assert not w0
+    assert not w0 and ran == [sched], ran   # the route is the scheduler named
     rec = p.Recorder("w", ["i(L)"], keep="none", windows=[(0.1e-3, 0.3e-3)])
     res, w1 = run([rec])
     # the feed observes: what is stepped and stored does not move

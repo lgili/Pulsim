@@ -216,7 +216,7 @@ def test_a_turn_off_on_a_falling_ramp_is_kept():
     assert np.all(np.asarray(res.i("D1"))[after] >= -1e-9)
 
 
-@pytest.mark.xfail(strict=True, reason=(
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
     "engine finding: on the three-phase bridge with line inductance the truth "
     "(benchmarks/tools/exact_truth.py, 40 digits) has D2 ON at 5.000000250912935 ms "
     "with D5 still ON, and D5 OFF 1.350692 us later (the same at 11.6667 ms); the "
