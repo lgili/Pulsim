@@ -325,15 +325,11 @@ def _cut_smaller_than_the_old_rate(i0):
         return p.simulate(b, t_end=1e-6, dt=1e-7, switch_fn=fn, **RESTART)
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "reviewer A1 (third session): the impulse bound h*max(|xdot(0-)|, ...) reads the OLD mode's "
-    "rate, h*V/L = 10 A here, so the 8 A cut passes as a kink: no record, i_L 8 -> -8.38 A "
-    "through Db (truth 0). Dropping the old rate at grid events fixes it but flags the DCM "
-    "buck's 47 uF output C (36 uV, 3e-14 J records; buck_dcm error 3.4e-6 -> 5.0e-6). Needs a "
-    "jump/kink test that does not read the old rate's magnitude"))
 def test_a_cut_smaller_than_h_times_the_old_rate_is_an_impulse():
-    """At an event AT the step start the old mode's rate h*V/L = 10 A must not mask the cut:
-    the 8 A cut came back as -8.38 A through Db with no record (reviewer, third session)."""
+    """The old mode's rate h*V/L = 10 A must not mask the cut: the 8 A cut came back as
+    -8.38 A through Db with no record (reviewer A1, third session). The jump test reads no
+    rate before the event: d = -8 A, d' = 5e-7 A. Truth: no path, i_L -> 0 by an impulse
+    of 1/2*L*i^2 (i = 7.9997 A at the cut)."""
     r = _cut_smaller_than_the_old_rate(-2.0)
     i = np.asarray(r.i("L"))
     assert len(r.reinit_records) == 1 and list(r.reinit_records[0].states) == ["L"]
@@ -371,3 +367,48 @@ def test_split_locates_independent_diodes_on_their_own_signals():
     assert len(d1) == len(b1) >= 3
     np.testing.assert_allclose(b1, d1, rtol=0, atol=1e-12)
     np.testing.assert_array_equal(np.asarray(both.v("o1")), np.asarray(alone.v("o1")))
+
+
+def _rectifier_and_unrelated_pulse(pulse):
+    """The rectifier from rest, plus (pulse=True) a 1 V pulse into its own resistor with its
+    edge at 0.4 dt: inside the probe's (t1, t2] (t1 = 0.29 dt, t2 = 0.59 dt)."""
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("Vac", "ac", "gnd", 0.0, 400.0, 60.0)
+    b.add_diode("D", "ac", "vout", 1e3, 1e-9)
+    b.add_resistor("R", "vout", "gnd", 50.0)
+    b.add_capacitor("C", "vout", "gnd", 100e-6)
+    if pulse:
+        b.add_pulse_voltage_source("Vp", "p", "gnd", 0.0, 1.0, t_start=0.4e-4,
+                                   pulse_width=1.0, period=10.0, rise_time=0.0, fall_time=0.0)
+        b.add_resistor("Rp", "p", "gnd", 1.0)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return p.simulate(b, t_end=0.02, dt=1e-4, **RESTART)
+
+
+def test_a_source_edge_inside_the_probe_is_read_at_its_left_limit():
+    """Reviewer A3 (third session): the edge left only the frozen reading, which reads the
+    capacitor tracking its sine as a 4.39 V jump (0.96 mJ record at t = 0). The moved
+    reading takes the edge's left limit: no record, and the rectifier is the pulse-free
+    run's (the pulse drives nothing of it)."""
+    with_pulse, alone = _rectifier_and_unrelated_pulse(True), _rectifier_and_unrelated_pulse(False)
+    assert list(with_pulse.reinit_records) == []
+    np.testing.assert_allclose(np.asarray(with_pulse.v("vout")), np.asarray(alone.v("vout")),
+                               rtol=0, atol=1e-9)
+
+
+def test_a_capacitor_at_its_extremum_is_not_an_impulse():
+    """The DCM buck's 47 uF output capacitor at a gate edge sits at an extremum (stage
+    differences 6.2e-7 V then -1e-8 V): d = 6.4e-7 V against a rate after the event of
+    ~0, but d' = 6.3e-7 V, the same curvature one stage later. Its only records are the
+    inductor's residual current cut at the DCM diode turn-offs (a real jump of the
+    discrete model: 0.4-1.5 mA, d' < 1e-7 of it)."""
+    from analytic import BY_ID   # benchmarks/ (conftest puts it on the path)
+    c = BY_ID["buck_dcm"]
+    b, fn = c.build(1.0)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(b, t_end=c.t_end, dt=c.dt, switch_fn=fn, **RESTART)
+    recs = list(r.reinit_records)
+    assert recs and all(list(x.states) == ["L"] and x.kind == "cut_set" for x in recs)
+    assert max(x.dW for x in recs) < 0.5 * 100e-6 * (2e-3) ** 2
