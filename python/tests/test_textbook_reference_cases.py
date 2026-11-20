@@ -34,8 +34,9 @@ Two separate assertions per case:
    - ``dsed`` (exact engine) solves each mode in closed form: limited only
      by event location and float64.
 
-Citations (edition and chapter checked; section numbers are the proposal's
-where the book was not at hand, and say so):
+Citations name edition and chapter only: the books were not at hand to
+verify section, equation or figure numbers, so none is quoted. Every
+formula used is written out, so a reader can check it without the book.
 
 * R. W. Erickson, D. Maksimovic, *Fundamentals of Power Electronics*,
   3rd ed., Springer 2020. Ch. 2 (buck ripple: dI_pp = (Vg - V) D Ts / L,
@@ -55,6 +56,10 @@ from __future__ import annotations
 
 import functools
 import math
+import os
+import subprocess
+import sys
+import textwrap
 
 import mpmath as mp
 import numpy as np
@@ -598,3 +603,104 @@ def test_spwm_engine_matches_truth(cfg):
     }
     tol = engine_tol(cfg, SP_DT * S["mf"] * S["f1"], grid_events=False)
     assert max(err.values()) <= tol, f"spwm on {cfg}: {err} > {tol:.1e}"
+
+
+# ------------------------------------- resonant charging (Mohan ch. 9) ----
+# Vin -> L -> diode -> C: the diode conducts one half-cycle of the series
+# resonance and turns off at zero current with v_C ~= 2 Vin.
+
+RES = dict(Vin=100.0, L=10e-6, C=1e-6, gon=1e3)
+RES_GOFF, RES_DT = 1e-9, 1e-8
+
+
+def resonant_truth(Vin, L, C, gon):
+    """Underdamped series R'LC from rest (R' = 1 / g_on, the diode):
+    i = Vin / (wd L) e^(-a t) sin(wd t), off at t_off = pi / wd, where
+    v_C = Vin (1 + e^(-a pi / wd)); a = R' / (2 L), wd = sqrt(1/(LC) - a^2).
+    After t_off the diode blocks Vin (leak g_off Vin = 1e-7 A: 1e-7 V)."""
+    Vin, L, C = mp.mpf(Vin), mp.mpf(L), mp.mpf(C)
+    a = 1 / mp.mpf(gon) / (2 * L)
+    wd = mp.sqrt(1 / (L * C) - a**2)
+    t_off = mp.pi / wd
+    return dict(t_off=t_off, vC=Vin * (1 + mp.exp(-a * t_off)),
+                i=lambda t: Vin / (wd * L) * mp.exp(-a * t) * mp.sin(wd * t))
+
+
+def test_truth_resonant_charging_matches_mohan():
+    """Mohan ch. 9 (basic resonant circuit): v_C,peak = 2 V_d, the half
+    period pi sqrt(L C) = 9.935 us, peak current V_d / Z0 = 31.6 A."""
+    tr = resonant_truth(**RES)
+    Z0 = math.sqrt(RES["L"] / RES["C"])
+    assert float(tr["vC"]) == pytest.approx(2 * RES["Vin"], rel=0.02)
+    assert float(tr["t_off"]) == pytest.approx(math.pi * math.sqrt(RES["L"] * RES["C"]), rel=0.02)
+    assert float(tr["i"](tr["t_off"] / 2)) == pytest.approx(RES["Vin"] / Z0, rel=0.02)
+
+
+@pytest.mark.parametrize("cfg", list(ENGINES))
+def test_resonant_charging_engine_matches_truth(cfg):
+    tr = resonant_truth(**RES)
+    t_off = float(tr["t_off"])
+
+    def build():
+        b = p.CircuitBuilder()
+        b.add_voltage_source("Vin", "in", "gnd", RES["Vin"])
+        b.add_inductor("L", "in", "a", RES["L"], i0=0.0)
+        b.add_diode("D", "a", "c", RES["gon"], RES_GOFF)
+        b.add_capacitor("C", "c", "gnd", RES["C"], c0=0.0)
+        return b
+    res = run(build, cfg, 2.5 * t_off, RES_DT)
+    i_pk = float(tr["i"](tr["t_off"] / 2))
+    err = {
+        "i(t_off/2)": abs(at(res, t_off / 2, res.i("L")) - i_pk) / i_pk,
+        "vC(end)": abs(at(res, 2.5 * t_off, res.v("c")) / float(tr["vC"]) - 1),
+        "i(end)": abs(at(res, 2.5 * t_off, res.i("L"))) / i_pk,
+    }
+    tol = engine_tol(cfg, RES_DT / t_off, grid_events=False)
+    assert max(err.values()) <= tol, f"resonant on {cfg}: {err} > {tol:.1e}"
+
+
+# ------------------------------------------------------------- findings ----
+
+_HANG = textwrap.dedent("""
+    import pulsim as p
+
+    class Gate:  # next_edge_after returns t itself: not strictly after t
+        def __init__(self, n, i):
+            self.n, self.i = n, i
+        def __call__(self, t):
+            m = p.SwitchStateMask(self.n)
+            m.set(self.i, (t % 1e-5) < 5e-6)
+            return m
+        def next_edge_after(self, t):
+            return t
+
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "a", "gnd", 10.0)
+    b.add_switch("S", "a", "o", 1e3, 1e-9)
+    b.add_resistor("R", "o", "gnd", 10.0)
+    b.add_capacitor("C", "o", "gnd", 1e-6)
+    try:
+        p.simulate(b, t_end=1e-4, engine="dsed",
+                   switch_fn=Gate(b.graph.num_switches, b.switch_index_of("S")))
+        print("RETURNED")
+    except p.PulsimError as e:
+        print("REFUSED", e)
+""")
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "finding F-T-2: engine='dsed' never returns when a switch_fn's "
+    "next_edge_after(t) returns t (trbdf2 returns, periodic_steady_state "
+    "refuses it by name)"))
+def test_dsed_finishes_on_a_non_advancing_next_edge_after():
+    """Found while writing BipolarGate: a float round-off made its
+    next_edge_after return t at an edge, and the exact engine spun at
+    100 % CPU (killed after minutes; 30 s here, the run itself takes
+    milliseconds). Either a refusal by name or a result passes."""
+    env = dict(os.environ, PYTHONPATH=os.path.dirname(os.path.dirname(p.__file__)))
+    try:
+        out = subprocess.run([sys.executable, "-c", _HANG], capture_output=True,
+                             text=True, encoding="utf-8", timeout=30, env=env)
+    except subprocess.TimeoutExpired:
+        pytest.fail("simulate(engine='dsed') did not finish within 30 s")
+    assert out.stdout.startswith(("RETURNED", "REFUSED")), out.stderr[-500:]
