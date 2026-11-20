@@ -2864,7 +2864,14 @@ inline SimulationResult run_transient_trbdf2(
                     solve_dispatch(mask_step, hg, b_stage, x_1);
                 ++st.n_solves;
             }
-            // no stage leaves a trace; the commit re-applies ψ
+            // the q rows' stage-2 increment q(x_1) − ψ for the estimate, read
+            // under the stage's own last stamp; then no stage leaves a trace
+            // (the commit re-applies ψ, and the rollback also drops the γ
+            // capture, so trbdf2_increments cannot serve a restart step)
+            if (sdirk && ed_sf && stage_ok) {
+                q_d1.resize(hs.stage_rows());
+                hs.stage_increment(x_1, ed_spsi5.data(), q_d1.data());
+            }
             if (sdirk && ed_sf) { hs.restore(ed_hs_snap); hs.stage_clear(); }
             if (stage_singular) {
                 ++st.n_reject;
@@ -3043,7 +3050,8 @@ inline SimulationResult run_transient_trbdf2(
             // |q_1|) with s the device's capacitance / inductance / time
             // constant (`q_scales`), so a row that stays 0 keeps a finite
             // scale. On an SDIRK restart step the rows take the entries'
-            // embedded first-order estimate h(1-gs)(k1 - k2) on q (without
+            // embedded first-order estimate h(1-gs)(k1 - k2) on q, k1 = (ψ5 −
+            // q_n)/(r gs h), k2 = (q(x_1) − ψ5)/(gs h), r = (1-gs)/gs (without
             // it a restart left a saturable inductor's flux uncontrolled: the
             // boost example's i_L error 3.4x). That step reads no derivative
             // slot, so its estimate also holds at the run's first step.
@@ -3053,7 +3061,7 @@ inline SimulationResult run_transient_trbdf2(
                     q_atol.resize(nq);
                     hs.q_scales(q_atol.data());
                 }
-                if (!kE || sdirk) {
+                if (!kE && !sdirk) {
                     q_n.resize(nq);
                     q_fn.resize(nq);
                     q_dg.resize(nq);
@@ -3065,10 +3073,9 @@ inline SimulationResult run_transient_trbdf2(
                     if (q_atol[r] < Real{0}) continue;   // an external row with no q entry
                     Real ee, q0, q1;
                     if (sdirk) {
-                        // k1 = d_g/(gs h), k2 = (d_1 - r d_g)/(gs h), r = (1-gs)/gs
-                        ee = (Real{1} - gs) / gs * (q_dg[r] / gs - q_d1[r]);
-                        q0 = q_n[r];
-                        q1 = q0 + q_d1[r];
+                        ee = ed_sdpsi5[r] - (Real{1} - gs) / gs * q_d1[r];
+                        q0 = ed_sq0[r];
+                        q1 = ed_spsi5[r] + q_d1[r];
                     } else if constexpr (kE) {
                         using E = step::Esdirk43;
                         ee = E::err_explicit_weight() * ed_shd0[r];
