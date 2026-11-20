@@ -91,3 +91,50 @@ the NEXT grid point, while plain pwl (sampling at the step end) takes it at the 
    on-grid edge then fired one step early (7.3e-4 A). A grid-indexed `round(t/dt)` closure
    reads the same index as plain pwl (it read one step earlier). Same on the static path
    (`st_gate_t`).
+
+## Convergence against truth (tip)
+
+F-SB-4, delta/h of the located turn-on (`.scratch/sel/table.py`; trials = `split_locator_trials`
+of the whole run):
+
+| case | truth | dt | dt/2 | dt/4 | before (dt, dt/2, dt/4) |
+|---|---|---|---|---|---|
+| minimal onset (closed form, mpmath) | 4.298251016 us | -5.4e-9 (10 trials) | -6.9e-9 (9) | -1.1e-8 (9) | +0.203, +0.078, +0.030 |
+| diode_rectifier D1+ (exact_truth, mpmath) | 24.3754231 us | -1.39e-4 (17) | +1.7e-6 (18) | +4.8e-8 (16) | +0.227 at dt |
+
+The minimal case sits at the locator's resolution (its state error at the onset is 4e-9 V: the
+OFF interval is one exponential the trapezoid follows closely); diode_rectifier converges at
+order ~6 in delta/h from dt to dt/4 (the state error at the onset, over the signal's slope, is
+what is left). Bound justified by the locator: the located instant is within `snap` = 1e-6 h
+of the crossing of the trapezoidal sub-step trajectory; its distance to the truth is the
+state's global error over the signal's slope, O(h^2) / s'.
+
+F-SB-2, delta/h at h = 100 ns (edge 0.005 h / 0.3 h / 0.995 h into a step), tip:
+
+| config | oracle | opaque |
+|---|---|---|
+| pwl | -0.005 / -0.3 / -0.995 | same |
+| pwl+restart | -0.005 / -0.3 / +0.005 (within dt/100 of t_k: taken there) | same |
+| pwl+split | 0 / 0 / 0 | 1.1e-7 / 1.9e-7 / 8.4e-7 (bisected; `n_gate_events_bisected` 2) |
+
+## Left and right values at the located event (what is NOT fixed here)
+
+Minimal onset, V(out) at the located instant minus the truth 9.757967538 V (continuous there):
+left -3.7e-9 / -2.4e-9 / -1.9e-9 V at dt / dt/2 / dt/4; RIGHT +0.167 / +4.9e-5 / +4.9e-5 V.
+diode_rectifier D1+ at dt: left 9.808027 V (truth 9.808 V at its instant), right 9.9397 V; at
+dt/2 and dt/4 right 9.80612 V. The left values are at the engine's order; the recorded RIGHT
+limit after a split diode event is not the state at the event: at dt it matches the start of
+the restart sub-step's quadrature line, 2 w1 X1 + (1 - 2 w1) X2 (with X1 the stage value at
+t_e + gamma dt2 and X2 at t, w1 ~ 0.31 fits 9.9397), i.e. F-SB-1's mechanism (the record of a
+restart step; owned by the record track, `event_right_limit` / `record_lines`). So the
+limits part of diode_rectifier pwl+split stays at the right-limit record's error, not at the
+smooth level, until F-SB-1 is fixed.
+
+Also left open (design, add-fixed-step-event-splitting DECISIONS "Diode location only in a
+trapezoidal interval"): a diode crossing inside an SDIRK interval (the split's remainder or the
+next two window steps) is resolved per stage, on the grid. diode_rectifier's D1 turn-off
+(~25.02 us, 0.65 us after the turn-on) falls in that window at every dt tried and is recorded at
+25.000 us (-0.02 h at dt, -0.04 h at dt/2, -0.08 h at dt/4). Fix needed: the same locator
+(`locate_islands`' refinement) in `restart_lined`'s stages, with trial solves of the SDIRK
+stage (as TR-BDF2's ESDIRK trial is a re-step of the method itself), then a split of that
+interval.
