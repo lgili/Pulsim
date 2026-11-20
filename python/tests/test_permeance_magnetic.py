@@ -832,7 +832,7 @@ def test_fit_core_loss_elements_round_trip():
     # mean|cos|^1.5 = Gamma(5/4)/(sqrt(pi)*Gamma(7/4)) = 0.5564178944 (the
     # closeout's 0.5563852309 was 5.9e-5 off; test_excess_loss.py runs it)
     K15 = math.gamma(1.25) / (math.sqrt(math.pi) * math.gamma(1.75))
-    assert K15 == pytest.approx(0.5564178944493822, rel=1e-12)
+    assert K15 == pytest.approx(0.5564178944493822, rel=1e-10)   # math.gamma: libm
     want_c = 1.8 * seg_l / ((2 * math.pi) ** 1.5 * K15 * math.sqrt(A))
     assert fit.c == pytest.approx(want_c, rel=1e-6)
     assert fit.residual < 1e-6
