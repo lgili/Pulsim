@@ -19,7 +19,6 @@
 
 #include "pulsim/numeric/dense.hpp"
 
-#include <algorithm>
 #include <cmath>
 #include <complex>
 
@@ -34,9 +33,12 @@ inline Real jump_series_fit(const DenseMatrix& dw, Index m, Vector& c) {
 }
 
 /// g with J = [D_1 … D_m]·g, from the fit `c` of D_{m+1}: (I − H)⁻²·e_1, H the
-/// companion matrix (subdiagonal ones, last column c). Each Ritz value ρ of H is
-/// held as the scalar rule holds a: a real one in [0, ρ_max], a complex one
-/// (a ringing fast mode) at modulus ≤ ρ_max. False if no finite g.
+/// companion matrix (subdiagonal ones, last column c). A Ritz value ρ of H inside
+/// the rule's fast range (real in [0, ρ_max]; complex — a ringing fast mode — of
+/// modulus ≤ ρ_max) takes its whole jump 1/(1 − ρ)²; one outside it (a mode the
+/// grid integrates, slow content, a negative round-off value) is held at ρ = 0,
+/// factor 1: its share of D_1 is kept as the rule keeps d of a state that does not
+/// jump. False if no finite g.
 inline bool jump_series_coeffs(const Vector& c, Real rho_max, Vector& g) {
     const Index m = c.size();
     DenseMatrix h = DenseMatrix::Zero(m, m);
@@ -53,11 +55,9 @@ inline bool jump_series_coeffs(const Vector& c, Real rho_max, Vector& g) {
         for (Index i = 0; i < m; ++i) {
             const Cx l = lam[i];
             Cx lh = l;
-            if (l.imag() == Real{0}) {
-                lh = Cx(std::clamp(l.real(), Real{0}, rho_max), Real{0});
-            } else if (std::abs(l) > rho_max) {
-                lh = l * (rho_max / std::abs(l));
-            }
+            const bool fast = l.imag() == Real{0} ? (l.real() >= Real{0} && l.real() <= rho_max)
+                                                  : std::abs(l) <= rho_max;
+            if (!fast) lh = Cx(Real{0}, Real{0});
             if (lh != l) held = true;
             lam[i] = lh;
         }

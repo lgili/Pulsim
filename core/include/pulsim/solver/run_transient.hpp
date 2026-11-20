@@ -887,9 +887,10 @@ inline SimulationResult run_transient(
     std::vector<Real> ip_hist, ip_d, ip_r, ip_nc;
     // the jump's vector series (consistent_start): the reading's x3, the later
     // stages and their sources; the start mode's probe (ip_y1, ip_bits1, ip_m1)
-    Vector ip_x3m, ip_xk, ip_sk, ip_y1, ip_w, ip_c, ip_g;
-    DenseMatrix ip_S, ip_Dw;
-    std::vector<Real> ip_m1, ip_f0;
+    Vector ip_x3m, ip_xk, ip_sk, ip_y1, ip_y2, ip_w, ip_c, ip_g;
+    std::vector<Vector> ip_xs;   // the series' stages 4, 5, …
+    DenseMatrix ip_Dw;
+    std::vector<Real> ip_m1, ip_f0, ip_s0, ip_s0v;
     std::vector<Size> ip_js;
     std::vector<bool> ip_bits1;
     // An ideal element's jump (the tracker records it): stage 1 from x0+ for
@@ -2208,7 +2209,8 @@ inline SimulationResult run_transient(
             // source moving a node 0.7 V in 80 ps until a diode clamps it: a
             // state event the step does not locate, not a jump; ẋ(0−) = 0 there,
             // the switch held the node). That rate is the start mode's own probe
-            // after its fast modes: two single stages from x0 in it, Δ2 = γh·ẋ.
+            // after its fast modes: three single stages from x0 in it, Δ2 = γh·ẋ where its own
+            // test finds no jump.
             // A real jump is a fast mode of the start mode and leaves Δ2 at the
             // slow rate (a capacitor dumped through a switch whose stage 1 also
             // turns a diode is still recorded). Measured only when the test
@@ -2224,7 +2226,7 @@ inline SimulationResult run_transient(
                     hs.restore(ip_hs);
                     b_extra = ip_b;
                     x = ip_x1;
-                    bool m1_ok = true;
+                    bool m1_ok = true, y3_ok = false;
                     try {
                         run_event_iteration(t1, dt_eq, true, true);
                     } catch (const pwl::NewtonRoundoffBudgetExceeded&) {
@@ -2236,18 +2238,57 @@ inline SimulationResult run_transient(
                         ip_y1 = x;
                         stage_from(ip_y1, nullptr, t1);
                         m1_ok = solved;
+                        ip_y2 = x;
+                        if (m1_ok) stage_from(ip_y2, nullptr, t1);   // x: y3
+                        y3_ok = m1_ok && solved;   // may leave the law's range: below
+                        if (!y3_ok) x = ip_y2;
                         solved = true;
                     }
+                    history.restore(ip_hist);   // x0's histories: s0 below
+                    hs.restore(ip_hs);
                     if (m1_ok) {
+                        // per state, over one stage of the start mode: a smooth move
+                        // (no jump of that mode by the rule's d-test, |Δ1 − Δ2| ≤ |Δ2|/γ
+                        // + noise) is bounded by |Δ2|. A jump of that mode (Δk = s +
+                        // f·ρ^(k−1): one fast mode of factor ρ, tail f, slow motion s)
+                        // only by its slow rate, Aitken's s = (Δ1Δ3 − Δ2²)/(Δ1 + Δ3 −
+                        // 2Δ2), held to ≤ |Δ2|: |Δ2| there holds the fast tail
+                        // c·ρ(1 − ρ), and at ρ ≈ 0.18..0.23 it hid a real 4.93 µJ share
+                        // (review). (Not the full d'-test: the start mode's later
+                        // stages leave the state's range — a 14 V stage of the clamp's
+                        // ramp reaches a junction law's floor at stage 3, whose
+                        // Newton solve then fails: no third stage, no Aitken.)
+                        auto m1 = [&](Real s0, Real a1, Real a2, Real a3, Real noise) {
+                            const Real d1 = a1 - s0, d2 = a2 - a1, d3 = a3 - a2;
+                            if (!(std::abs(d1 - d2) > std::abs(d2) / kGamma + noise)) return std::abs(d2);
+                            if (!y3_ok) return Real{0};   // a jump of the start mode, no s
+                            const Real den = d1 + d3 - Real{2} * d2;
+                            const Real sl = std::abs(den) > Real{1e-12} * (std::abs(d1) + std::abs(d2) + std::abs(d3))
+                                ? (d1 * d3 - d2 * d2) / den
+                                : d3;
+                            return std::min(std::abs(sl), std::abs(d2));
+                        };
                         for (Size k = 0; k < ne; ++k) {
-                            ip_m1[k] = std::abs(state(ents[k], x) - state(ents[k], ip_y1));
+                            const auto& e = ents[k];
+                            const Real s0 = is_cap(e) ? e.v_prev : e.i_prev;
+                            const Real a1 = state(e, ip_y1);
+                            ip_m1[k] = m1(s0, a1, state(e, ip_y2), state(e, x),
+                                          Real{1e-8} * (Real{1} + std::abs(s0) + std::abs(a1)) +
+                                              (is_cap(e) ? Real{0} : tol_i));
                         }
                         for (Size k = 0; k < nn; ++k) {
-                            ip_m1[ne + k] = std::abs(ncq(ncs[k], x) - ncq(ncs[k], ip_y1));
+                            const auto& e = ncs[k];
+                            const Real v1 = ncv(e, ip_y1);
+                            ip_m1[ne + k] = m1(e.q_prev, ncq(e, ip_y1), ncq(e, ip_y2), ncq(e, x),
+                                               models::NonlinearCapacitor::capacitance(e.params, v1) *
+                                                   Real{1e-8} * (Real{1} + std::abs(e.v_prev) + std::abs(v1)));
                         }
                         for (Size k = 0; k < sats.size(); ++k) {
-                            const Index br = sats[k].branch_var_id;
-                            ip_m1[ne + nn + k] = std::abs(x[br] - ip_y1[br]);
+                            const auto& e = sats[k];
+                            const Index br = e.branch_var_id;
+                            ip_m1[ne + nn + k] = m1(e.i_L_old, ip_y1[br], ip_y2[br], x[br],
+                                                    Real{1e-8} * (Real{1} + std::abs(e.i_L_old) +
+                                                                  std::abs(ip_y1[br])) + tol_i);
                         }
                     }
                     diodes.restore_on_bits(ip_bits1);
@@ -2350,107 +2391,143 @@ inline SimulationResult run_transient(
             // the same jump twice).
             const bool structural = structure.active() &&
                                     !structure.check(stamped_mask, true).dependent.empty();
-            // The whole jump as a VECTOR (two or more jumping states; derivation
-            // in solver/jump_series.hpp and fixes/jump-conservation.md): the
-            // stages' second differences D_k (D1 = d, D2 = d') are a Krylov
-            // sequence of the stage map, J = [D1 … Dm]·(I − H)⁻²·e1. The per-state
-            // a is that series for one mode per state; two modes of different
-            // a in one floating island (C1 –1 mΩ– C2 –R2– C3) took a different
-            // multiple per state and left the island's charge off by 3.4 %. J
-            // lies in span{D_k}, so every charge (flux) each stage conserves J
-            // conserves to rounding. m modes take m + 2 stages: m grows while
+            // The whole jump as a VECTOR (derivation in solver/jump_series.hpp and
+            // fixes/jump-conservation.md): the stages' second differences D_k
+            // (D1 = d, D2 = d') are a Krylov sequence of the stage map, J = [D1 …
+            // Dm]·(I − H)⁻²·e1. The per-state a is that series for one mode per
+            // state; two modes of different a in one floating island (C1 –1 mΩ–
+            // C2 –R2– C3) took a different multiple per state and left the
+            // island's charge off by 3.4 %. J lies in span{D_k} with ONE
+            // coefficient vector for every state, so each charge (flux) the stages
+            // conserve J conserves to rounding — over ALL states: a state of the
+            // island the test does not flag (a mode the grid resolves) takes the
+            // same combination (ladders of five or more capacitors lost 8 % of
+            // their charge when only the flagged states did — review). A Ritz value
+            // outside the rule's fast range (ρ > γ/(1 + γ): a mode the grid
+            // integrates, slow content) keeps factor 1, as the rule's d keeps a
+            // state that does not jump. m modes take m + 2 stages: m grows while
             // the fit of D_{m+1} is above the stages' noise (the rule's floor),
-            // to m = #states ≤ 6; the energy norm weights the fit. Extra stages
-            // continue the reading the rule took (moved / frozen sources).
-            // shortcut: above 6 unresolved modes the per-state a is kept (exact
-            // for uncoupled modes, not conserving when coupled); upgrade if a
-            // circuit shows more than six distinct coupled fast modes.
-            if (solved && !structural && ip_js.size() >= 2) {
+            // to m = 6. Fallbacks, in order (each conserves less): the fit over the
+            // flagged states only (more than six modes over all states); the
+            // per-state a (a stage failed, a source jump inside the extra stages,
+            // or more than six modes among the flagged states). shortcut: those
+            // fallbacks do not conserve an island's charge that involves states
+            // outside the fit; upgrade if a circuit shows them (more than six
+            // distinct modes at one event).
+            ip_xs.clear();
+            bool stages_ok = true;
+            // x0 per entry, read now: each extra stage moves the histories
+            ip_s0.resize(ne + nn);
+            for (Size k = 0; k < ne; ++k) ip_s0[k] = is_cap(ents[k]) ? ents[k].v_prev : ents[k].i_prev;
+            for (Size k = 0; k < nn; ++k) ip_s0[ne + k] = ncs[k].q_prev;
+            ip_s0v.resize(nn);
+            for (Size k = 0; k < nn; ++k) ip_s0v[k] = ncs[k].v_prev;
+            // the stage values of entry k (k < ne: linear; else a nonlinear
+            // capacitor's charge) at stage j (0 = x0, 1..3 the probe, 4.. ip_xs)
+            auto sval = [&](Size k, Index j) -> Real {
+                if (j == 0) return ip_s0[k];
+                const Vector& y = j == 1 ? ip_x1 : j == 2 ? ip_x2m : j == 3 ? ip_x3m
+                                                                       : ip_xs[static_cast<Size>(j - 4)];
+                return k < ne ? state(ents[k], y) : ncq(ncs[k - ne], y);
+            };
+            auto stage_to = [&](Index j) {   // stages up to j exist (ip_xs)
+                while (stages_ok && 3 + static_cast<Index>(ip_xs.size()) < j) {
+                    const Index have = 3 + static_cast<Index>(ip_xs.size());
+                    const Vector& prev = have == 3 ? ip_x3m : ip_xs.back();
+                    const Real tk = t1 + static_cast<Real>(have) * h_s;
+                    if (moved && !src_move(ip_sk, tk)) {
+                        stages_ok = false;
+                        break;
+                    }
+                    ip_xk = prev;
+                    x = ip_xk;
+                    stage_from(ip_xk, moved ? &ip_sk : nullptr, moved ? tk : t1);
+                    if (!solved) {
+                        solved = true;
+                        stages_ok = false;
+                        break;
+                    }
+                    ip_xs.push_back(x);
+                }
+                return stages_ok;
+            };
+            // the series over the entries in ip_js; writes J into ip_d / ip_nc
+            auto series = [&](bool all) -> bool {
                 const Size ns = ip_js.size();
-                const Index mmax = static_cast<Index>(std::min<Size>(ns, 6));
-                ip_S.resize(static_cast<Index>(ns), mmax + 3);
-                ip_w.resize(static_cast<Index>(ns));
+                const auto nsi = static_cast<Index>(ns);
+                ip_w.resize(nsi);
                 Real thr2 = 0;
-                auto val = [&](Size i, const Vector& y) {
-                    const Size k = ip_js[i];
-                    return k < ne ? state(ents[k], y) : ncq(ncs[k - ne], y);
-                };
                 for (Size i = 0; i < ns; ++i) {
                     const Size k = ip_js[i];
-                    const auto ii = static_cast<Index>(i);
-                    Real s0 = 0, w = 0, noise = 0;
+                    Real w = 0, noise = 0;
                     if (k < ne) {
                         const auto& e = ents[k];
-                        s0 = is_cap(e) ? e.v_prev : e.i_prev;
                         w = std::sqrt(e.C_or_L);
-                        noise = Real{1e-8} * (Real{1} + std::abs(s0) + std::abs(state(e, ip_x1))) +
+                        noise = Real{1e-8} * (Real{1} + std::abs(sval(k, 0)) + std::abs(sval(k, 1))) +
                                 (is_cap(e) ? Real{0} : tol_i);
                     } else {
                         const auto& e = ncs[k - ne];
-                        s0 = e.q_prev;
                         const Real v1 = ncv(e, ip_x1);
                         const Real c1 = models::NonlinearCapacitor::capacitance(e.params, v1);
                         w = Real{1} / std::sqrt(c1);
-                        noise = c1 * Real{1e-8} * (Real{1} + std::abs(e.v_prev) + std::abs(v1));
+                        noise = c1 * Real{1e-8} * (Real{1} + std::abs(ip_s0v[k - ne]) + std::abs(v1));
                     }
-                    ip_S(ii, 0) = s0;
-                    ip_S(ii, 1) = val(i, ip_x1);
-                    ip_S(ii, 2) = val(i, ip_x2m);
-                    ip_S(ii, 3) = val(i, ip_x3m);
-                    ip_w[ii] = w;
+                    ip_w[static_cast<Index>(i)] = w;
                     thr2 += (w * noise) * (w * noise);
                 }
-                // D_{j+1} (column j) = 2 s_{j+1} − s_j − s_{j+2}, weighted or not
-                auto second = [&](Index j) {
-                    return Vector(Real{2} * ip_S.col(j + 1) - ip_S.col(j) - ip_S.col(j + 2));
+                auto second = [&](Index j, Vector& out) {   // D_{j+1}, unweighted
+                    out.resize(nsi);
+                    for (Size i = 0; i < ns; ++i) {
+                        const Size k = ip_js[i];
+                        out[static_cast<Index>(i)] =
+                            Real{2} * sval(k, j + 1) - sval(k, j) - sval(k, j + 2);
+                    }
                 };
-                bool ok = true;
-                Index have = 3;   // the last stage in ip_S
-                ip_xk = ip_x3m;
+                const Index mmax = std::min<Index>(nsi, 6);
                 Index m = 1;
                 Real r2 = 0;
                 for (;; ++m) {
-                    while (ok && have < m + 2) {   // stage have + 1 at t_from + (have + 1)γh
-                        const Real tk = t1 + static_cast<Real>(have) * h_s;
-                        if (moved && !src_move(ip_sk, tk)) {
-                            ok = false;
-                            break;
-                        }
-                        x = ip_xk;
-                        stage_from(ip_xk, moved ? &ip_sk : nullptr, moved ? tk : t1);
-                        if (!solved) {
-                            solved = true;
-                            ok = false;
-                            break;
-                        }
-                        ip_xk = x;
-                        ++have;
-                        for (Size i = 0; i < ns; ++i) ip_S(static_cast<Index>(i), have) = val(i, ip_xk);
+                    if (!stage_to(m + 2)) return false;
+                    ip_Dw.resize(nsi, m + 1);
+                    for (Index j = 0; j <= m; ++j) {
+                        second(j, ip_sk);
+                        ip_Dw.col(j) = ip_sk.cwiseProduct(ip_w);
                     }
-                    if (!ok) break;
-                    ip_Dw.resize(static_cast<Index>(ns), m + 1);
-                    for (Index j = 0; j <= m; ++j) ip_Dw.col(j) = second(j).cwiseProduct(ip_w);
                     r2 = solver::jump_series_fit(ip_Dw, m, ip_c);
                     if (!(r2 > thr2) || m == mmax) break;
                 }
-                history.restore(ip_hist);
-                hs.restore(ip_hs);
-                if (ok && !(r2 > thr2 && static_cast<Index>(ns) > mmax) &&
-                    solver::jump_series_coeffs(ip_c, kGamma / (Real{1} + kGamma), ip_g)) {
-                    Vector jv = Vector::Zero(static_cast<Index>(ns));
-                    for (Index j = 0; j < m; ++j) jv += ip_g[j] * second(j);
-                    if (jv.allFinite()) {
-                        for (Size i = 0; i < ns; ++i) {
-                            const Size k = ip_js[i];
-                            const Real ji = jv[static_cast<Index>(i)];
-                            if (k < ne) {
-                                ip_d[2 * k] = ji;
-                            } else {
-                                ip_nc[3 * (k - ne) + 1] = ncs[k - ne].q_prev + ji;
-                            }
-                        }
+                if (r2 > thr2 && nsi > mmax) return false;
+                if (!solver::jump_series_coeffs(ip_c, kGamma / (Real{1} + kGamma), ip_g)) return false;
+                Vector jv = Vector::Zero(nsi);
+                for (Index j = 0; j < m; ++j) {
+                    second(j, ip_sk);
+                    jv += ip_g[j] * ip_sk;
+                }
+                if (!jv.allFinite()) return false;
+                for (Size i = 0; i < ns; ++i) {
+                    const Size k = ip_js[i];
+                    const Real ji = jv[static_cast<Index>(i)];
+                    if (k < ne) {
+                        ip_d[2 * k] = ji;
+                    } else {
+                        ip_nc[3 * (k - ne) + 1] = ip_s0[k] + ji;
+                        // carried by the series without the rule's flag: moved, unrecorded
+                        if (all && ip_nc[3 * (k - ne) + 2] == Real{0}) ip_nc[3 * (k - ne) + 2] = Real{3};
                     }
                 }
+                return true;
+            };
+            if (solved && !structural && moving && ne + nn >= 2) {
+                ip_f0.assign(ip_js.begin(), ip_js.end());   // the flagged entries
+                ip_js.resize(ne + nn);
+                for (Size k = 0; k < ne + nn; ++k) ip_js[k] = k;
+                if (!series(true) && ip_f0.size() >= 2) {
+                    ip_js.resize(ip_f0.size());
+                    for (Size i = 0; i < ip_f0.size(); ++i) ip_js[i] = static_cast<Size>(ip_f0[i]);
+                    (void)series(false);
+                }
+                history.restore(ip_hist);
+                hs.restore(ip_hs);
             }
             Real e_jump = 0;
             Size dom = 0;
@@ -2468,6 +2545,7 @@ inline SimulationResult run_transient(
             for (const auto& tc : history.transformer_couplings()) {
                 const Real m =
                     models::TwoWindingTransformer::mutual_inductance(tc.params);
+                if (ip_d[2 * tc.p_entry_idx + 1] == Real{2} || ip_d[2 * tc.s_entry_idx + 1] == Real{2}) continue;
                 e_jump += m * ip_d[2 * tc.p_entry_idx] * ip_d[2 * tc.s_entry_idx];
             }
             // A nonlinear capacitor that jumps: v0+ = Q⁻¹(q0+), its energy from
@@ -2486,7 +2564,7 @@ inline SimulationResult run_transient(
                 }
                 ip_nc[3 * k] = vp;
                 nc_jumped = true;
-                if (ip_nc[3 * k + 2] == Real{2}) continue;   // a move: no loss
+                if (ip_nc[3 * k + 2] >= Real{2}) continue;   // a move / carried: no loss
                 const Real ek = models::NonlinearCapacitor::jump_energy(e.params, e.v_prev, vp);
                 e_jump += ek;
                 if (ek > dom_e) {
