@@ -334,6 +334,19 @@ TEST_CASE("Named refusals of the mode selection", "[modes][refusal]") {
             CHECK(e.kind() == "VCVS");
         }
     }
+    SECTION("F-3-2: .device is the user's names, the labels stay in the message") {
+        const auto s = select_neg_identity(2, true);
+        const std::vector<std::string> labels{"D1 (branch #3)", "D2 (branch #4)"};
+        try {
+            const auto plain = names(2);
+            raise_if_refused(s, "pwl", 0.0, labels, {}, &plain);
+            FAIL("no refusal");
+        } catch (const pulsim::UnsupportedError& e) {
+            CHECK(e.feature() == "consistent_mode");
+            CHECK(e.device() == "D1, D2");
+            CHECK(std::string(e.what()).find("D1 (branch #3), D2 (branch #4)") != std::string::npos);
+        }
+    }
     SECTION("a solution raises nothing") {
         ModeSelection ok;
         CHECK_NOTHROW(raise_if_refused(ok, "dsed", 0.0, names(1), vcvs));

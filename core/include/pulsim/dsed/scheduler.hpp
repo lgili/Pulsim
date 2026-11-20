@@ -1579,21 +1579,56 @@ private:
         // a decision that rejected a candidate as an ideal loop and then found no
         // admissible mode is refused by the loop's name: that loop is the cause
         rejected_loop_.reset();
+        last_select_ray_ = false;
         try {
             decide_modes_impl_(t, x, mask, gates_prev, prev_bits, rec, result);
         } catch (const UnsupportedError& e) {
+            // only a selection that ended on a secondary ray (pwl's rule), not a
+            // consistent_mode thrown after a successful one (stale q_he_)
+            if (e.feature() == "consistent_mode" && !rejected_loop_ && last_select_ray_)
+                classify_refusal_(gates_prev, prev_bits, rec);
             if (e.feature() == "consistent_mode" && rejected_loop_) {
                 const UnsupportedError loop = *rejected_loop_;
                 rejected_loop_.reset();
+                // the loop's own advice, not consistent_mode's ("add the missing
+                // path" is wrong for a loop: F-4-1)
                 throw UnsupportedError("dsed", loop.feature(), loop.device(), loop.kind(),
-                                       std::string{loop.what()} + " No other mode is admissible: "
-                                       + e.what());
+                                       std::string{loop.what()}
+                                       + " No other mode of the diodes is admissible.");
             }
             throw;
         }
         rejected_loop_.reset();
     }
     std::optional<UnsupportedError> rejected_loop_;
+    bool last_select_ray_ = false;   // the last run_selector_ ended on a secondary ray
+    /// F-4-1: a failed selection is classified on the selector's closure candidate
+    /// (every ideal diode the posed network does not reverse-bias closed), the rule
+    /// pwl uses: a loop of sources there names the refusal, not `consistent_mode`.
+    void classify_refusal_(const MaskT& gates_prev, const MaskT& prev_bits, const MaskT& rec) {
+        if constexpr (HasNodePairVoltage<System> && HasExactStep<System>) {
+            if (shadow_ports_.size() != diodes_.size()) return;
+            std::vector<char> base(diodes_.size());
+            for (std::size_t j = 0; j < diodes_.size(); ++j)
+                base[j] = prev_bits.get(diodes_[j].switch_idx) ? 1 : 0;
+            const auto cand = selector_.closure_candidate(shadow_ports_, base,
+                                                          selector_.tol * last_scale_.vscale);
+            MaskT m = gates_prev;
+            for (std::size_t j = 0; j < diodes_.size(); ++j)
+                m.set(diodes_[j].switch_idx, cand[j] != 0);
+            system_.set_mask(m);
+            try {
+                (void)system_.has_exact_step();
+            } catch (const UnsupportedError& e) {
+                if (candidate_refusal_(e)) rejected_loop_ = e;
+            } catch (const std::exception&) {
+                // another refusal of that mode: not a structure, consistent_mode stands
+            }
+            system_.set_mask(rec);
+        } else {
+            (void)gates_prev; (void)prev_bits; (void)rec;
+        }
+    }
     /// A candidate mode the extraction cannot pose: an ON ideal diode closing a
     /// loop of sources and closed ideal elements, or a capacitor loop through a
     /// time-varying source. The candidate is rejected and the search goes on; the
@@ -1685,6 +1720,9 @@ private:
                     d.var >= 0 ? d.R_on : Real{1} / d.g_on, d.g_off, d.V_f, d.V_th});
                 shadow_nodes_.emplace_back(d.from, d.to);
                 shadow_labels_.push_back(d.label);
+                // the user's name (.device of a refusal, F-3-2): the label without its branch
+                const auto cut = d.label.rfind(" (branch #");
+                shadow_names_.push_back(cut == std::string::npos ? d.label : d.label.substr(0, cut));
             }
         }
         std::vector<char> prev(diodes_.size());
@@ -1710,7 +1748,12 @@ private:
                 Real worst = Real{0};
                 int c = 0;
                 try {
-                    c = judge_(gates_prev, m, t, x_held, sc, worst);
+                    // F-5-3: the horizons skip the parasitic transient, where an
+                    // OFF pin dumps its inductor current into g_off (a 1 ps gate
+                    // pulse lost): a pin OFF and forward-biased at t+ is not consistent
+                    // (the LCP's decisions only: the default guard's repair keeps its judge)
+                    c = lcp_decides_ && off_forward_at_(gates_prev, m, t, x_held, sc)
+                            ? 0 : judge_(gates_prev, m, t, x_held, sc, worst);
                 } catch (const UnsupportedError& e) {
                     if (!candidate_refusal_(e)) throw;
                     rejected_loop_ = e;
@@ -1741,6 +1784,7 @@ private:
         rep.released += static_cast<std::size_t>(sel.released);
         rep.enumerations += static_cast<std::size_t>(sel.enumerations);
         rep.nonunique_modes += static_cast<std::size_t>(sel.nonunique_modes);
+        last_select_ray_ = sel.status == events::LcpStatus::SecondaryRay;
         last_scale_ = sc;
         return sel;
     }
@@ -1751,14 +1795,14 @@ private:
                      const MaskT& prev_bits, const MaskT& rec, ModeShadowReport& rep)
         requires HasNodePairVoltage<System> {
         const auto sel = run_selector_(t, x_held, gates_prev, prev_bits, rec, rep);
-        events::raise_if_refused(sel, "dsed", t, shadow_labels_, passivity_);
+        events::raise_if_refused(sel, "dsed", t, shadow_labels_, passivity_, &shadow_names_);
         rejected_loop_.reset();   // a mode was selected: a later refusal is not that loop's
         for (std::size_t j = 0; j < diodes_.size(); ++j)
             diode_bits_.set(diodes_[j].switch_idx, sel.on[j] != 0);
         MaskT m = gates_prev.overlay(diode_bits_, diode_owned_);
         system_.set_mask(m);
         pose_or_open_loops_(t, x_held, gates_prev, m);
-        release_band_ties_(t, x_held, m);
+        release_band_ties_(t, x_held, m, sel.tied);
         pose_or_open_loops_(t, x_held, gates_prev, m);
         return m;
     }
@@ -1825,7 +1869,13 @@ private:
     /// one pass per diode. A gated bridge from rest (sine through D1, D4)
     /// kept D1 OFF, its signal rising 3e4 V/s from exactly 0, while a pin
     /// held D4 ON: the predicate starts on its event side and never fires.
-    void release_band_ties_(Real t, const Vector& x, MaskT& mask)
+    /// Only the selector's remaining ties (`tied`): a port a pass DECIDED OFF
+    /// (its gap clear of tol_w) is not reopened by a signal that sits in the
+    /// band at t (F-4-3: the ideal PSFB's D1 decided OFF with a 3.4e-4 V gap,
+    /// its C_j state at 1.3e-13 V, the ladder read that residue as forward and
+    /// D1 went ON into a reverse current). Empty `tied`: every OFF diode (the
+    /// default guard's repair, unchanged).
+    void release_band_ties_(Real t, const Vector& x, MaskT& mask, const std::vector<char>& tied)
         requires HasNodePairVoltage<System> {
         // The band on the circuit's scale (sources included): from rest every node
         // is 0 V and zero_band_tol_ is 0, so a rounding-level look-ahead (1e-20 V)
@@ -1833,8 +1883,9 @@ private:
         const Real tol = tie_band_(t, x);
         for (std::size_t pass = 0; pass < diodes_.size(); ++pass) {
             bool flipped = false;
-            for (const auto& d : diodes_) {
-                if (diode_bits_.get(d.switch_idx)) continue;
+            for (std::size_t jd = 0; jd < diodes_.size(); ++jd) {
+                const auto& d = diodes_[jd];
+                if (diode_bits_.get(d.switch_idx) || (!tied.empty() && !tied[jd])) continue;
                 const Real sig = models::SwitchedDiode::crossing_signal(
                     false, system_.node_pair_voltage(d.from, d.to, t, x), d.params());
                 const MaskT before = mask;
@@ -1925,7 +1976,7 @@ private:
         events::ModeSelection sel;
         try {
             sel = run_selector_(t, shadow_x_, gates_prev, prev_bits, rec, g.lcp);
-            events::raise_if_refused(sel, "dsed", t, shadow_labels_, passivity_);
+            events::raise_if_refused(sel, "dsed", t, shadow_labels_, passivity_, &shadow_names_);
             rejected_loop_.reset();   // a mode was selected: a later refusal is not that loop's
         } catch (const UnsupportedError& e) {
             throw UnsupportedError(
@@ -1959,7 +2010,8 @@ private:
         mask = gates_prev.overlay(diode_bits_, diode_owned_);
         system_.set_mask(mask);
         pose_or_open_loops_(t, shadow_x_, gates_prev, mask);
-        release_band_ties_(t, shadow_x_, mask);
+        // the default guard (no LCP decisions) keeps releasing every band tie
+        release_band_ties_(t, shadow_x_, mask, lcp_decides_ ? sel.tied : std::vector<char>{});
         pose_or_open_loops_(t, shadow_x_, gates_prev, mask);
         x = shadow_x_;
         undo_reinit_records_();
@@ -3008,6 +3060,24 @@ private:
         }
     }
 
+    /// Some diode OFF in `mode` breaks its law at t itself on `x` (the right limit
+    /// of the event in that mode, before any parasitic transient). Leaves the
+    /// system's mask at the mode's.
+    bool off_forward_at_(const MaskT& gates, const std::vector<char>& mode, Real t,
+                         const Vector& x, const events::CircuitScale& sc)
+        requires HasNodePairVoltage<System> {
+        MaskT m = gates;
+        for (std::size_t j = 0; j < diodes_.size(); ++j)
+            m.set(diodes_[j].switch_idx, mode[j] != 0);
+        for (std::size_t j = 0; j < diodes_.size(); ++j) {
+            if (mode[j]) continue;
+            system_.set_mask(m);
+            if (breaks_law_(diodes_[j], false, t, x) && !held_across_ideal_path_(diodes_[j], m, t, x, sc))
+                return true;
+        }
+        return false;
+    }
+
     /// An OFF ideal diode whose ON mode would close a loop of closed ideal
     /// elements sits across a closed path: v_D = 0 structurally, and its
     /// rounding (the recovery's, not bounded by the node pair's own scale) is
@@ -3241,7 +3311,7 @@ private:
     bool guard_refuses_ = false; // guard off: refuse what it would repair
     events::PassivityClass passivity_;
     events::CircuitScale last_scale_;
-    std::vector<std::string> shadow_labels_;
+    std::vector<std::string> shadow_labels_, shadow_names_;
     events::ModeSelector selector_;
     std::vector<events::DiodePort> shadow_ports_;
     std::vector<std::pair<Index, Index>> shadow_nodes_;

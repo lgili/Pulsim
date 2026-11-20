@@ -914,7 +914,7 @@ inline SimulationResult run_transient(
     std::optional<pwl::PwlModePorts> mode_ports;
     events::ModeSelector mode_selector;
     events::PassivityClass mode_passivity;
-    std::vector<std::string> mode_diode_names;
+    std::vector<std::string> mode_diode_names, mode_device_names;
     Vector mode_x0, mode_xj, mode_u, mode_xs;
     DenseMatrix mode_Z;
     std::vector<bool> mode_bits0, mode_bits;
@@ -965,8 +965,10 @@ inline SimulationResult run_transient(
         } else {
             mode_passivity = pwl::passivity_of(graph, pool);
             mode_selector.passive = mode_passivity.passive();
-            for (const auto& e : diodes.entries())
+            for (const auto& e : diodes.entries()) {
                 mode_diode_names.push_back(pwl::branch_label(graph, e.branch_id));
+                mode_device_names.emplace_back(graph.branch_name(e.branch_id));
+            }
         }
     }
     result.mode_report.mode = mode_ports ? opts.mode_selection : 0;
@@ -1128,6 +1130,9 @@ inline SimulationResult run_transient(
         if (x_start && (!ideal_on || mode_selector.passive) &&
             mode_quiet(mode_bits0, start_mask, for_dt, h_site, bx, *x_start)) {
             x = *x_start;
+            // the step stores what the LCP decided on: the islands' KCL imposed
+            // (F-2-3: a rounded common mode read a decided-OFF diode forward-biased)
+            mode_ports->correct(start_mask, for_dt, bx, x);
             stamped_mask = start_mask;
             stamped_known = true;
             last_solved_bits = mode_bits0;
@@ -1144,6 +1149,7 @@ inline SimulationResult run_transient(
                 solve(cmask, mode_xc);
                 if (mode_quiet(it->second, cmask, for_dt, h_site, bx, mode_xc)) {
                     x = mode_xc;
+                    mode_ports->correct(cmask, for_dt, bx, x);
                     mode_bits = it->second;
                     stamped_mask = cmask;
                     stamped_known = true;
@@ -1183,7 +1189,7 @@ inline SimulationResult run_transient(
                         if (ms.loop_diodes[m] == bj) loop = ms.loop_texts[m];
                 }
                 throw UnsupportedError(
-                    "pwl", "ideal_voltage_loop", mode_diode_names[j], "Diode",
+                    "pwl", "ideal_voltage_loop", mode_device_names[j], "Diode",
                     std::format("engine 'pwl': at t = {} the ideal diode {} (R_on = 0) "
                                 "closes a loop of voltage sources and closed ideal "
                                 "elements (loop: {}) that forward-biases it by {} V "
@@ -1199,12 +1205,8 @@ inline SimulationResult run_transient(
             if (structure.active() && sel.status == events::LcpStatus::SecondaryRay) {
                 const auto sc = mode_ports->scale(mode_x0);
                 const Real tol_w = mode_selector.tol * sc.vscale;
-                std::vector<char> on_f = mode_coords;
-                for (std::size_t j = 0; j < mode_diode_names.size(); ++j) {
-                    const auto jj = static_cast<Index>(j);
-                    if (mode_ports->ideal(j) && mode_u[jj] - mode_ports->ports()[j].V_f > -tol_w)
-                        on_f[j] = 1;
-                }
+                const std::vector<char> on_f =
+                    mode_selector.closure_candidate(mode_ports->ports(), mode_coords, tol_w);
                 const auto& ms = structure.check(
                     combine_masks(gates, mode_mask_of(on_f), diode_owned), for_dt > Real{0});
                 if (!ms.loop_diodes.empty()) {
@@ -1220,7 +1222,8 @@ inline SimulationResult run_transient(
                 }
             }
         }
-        events::raise_if_refused(sel, "pwl", at_t, mode_diode_names, mode_passivity);
+        events::raise_if_refused(sel, "pwl", at_t, mode_diode_names, mode_passivity,
+                                 &mode_device_names);
         mode_bits.assign(sel.on.begin(), sel.on.end());
         diodes.restore_on_bits(mode_bits);
         const auto mask = combine_masks(gates, diodes.current_diode_mask(), diode_owned);
@@ -1247,6 +1250,7 @@ inline SimulationResult run_transient(
         } else {
             solve(mask, x);
         }
+        mode_ports->correct(mask, for_dt, bx, x);
         stamped_mask = mask;
         stamped_known = true;
         last_solved_bits = mode_bits;
@@ -2074,6 +2078,13 @@ inline SimulationResult run_transient(
                 const topology::SwitchStateMask gates =
                     gate_at(restart_rule ? gate_t : at_t);
                 auto solve = [&](const topology::SwitchStateMask& m, Vector& out) {
+                    // the settle's structural pass before a mode's solve: a
+                    // floating node / source loop is refused by its name, not
+                    // as a singular factor (F-4-1: one classification)
+                    if (structure.active()) {
+                        (void)structure.check(m, for_dt > Real{0});
+                        result.mode_structure_checks = structure.checks_run();
+                    }
                     mode_solve(m, for_dt, backward_euler, out);
                 };
                 if (capture_first) {
