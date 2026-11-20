@@ -5095,6 +5095,16 @@ def _auto_check_voltage_sanity(res, builder, factor):
                 builder.graph, builder.pool,
                 list(_np.asarray(res.times, dtype=float)),
                 _np.asarray(res.states, dtype=float), f)
+        # The right limits at the events (the exact engine stores them apart):
+        # an inductor current cut into g_off is a spike there and nowhere else
+        # (release finding F-5-10: 2.4e9 V at the right limit, 48 V sampled).
+        rl = getattr(res, "right_limit_index", None)
+        if (volt is None or volt.node < 0) and rl is not None and len(rl):
+            import numpy as _np
+            volt = _k.find_implausible_voltage(
+                builder.graph, builder.pool,
+                list(_np.asarray(res.times, dtype=float)[_np.asarray(rl, dtype=int)]),
+                _np.asarray(res.right_limit_states, dtype=float), f)
     except Exception:  # pragma: no cover — never break a good run
         return
     if volt is not None and volt.node >= 0:

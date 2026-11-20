@@ -843,7 +843,6 @@ inline SimulationResult run_transient(
     // run_restart): x1, its diode bits and the histories at x0.
     Vector rs_x1, rs_x2;
     std::vector<bool> rs_bits, rs_bits2, rs_bits_be, rs_solved2;
-    std::vector<bool> rs_bits0;   // the diode bits at stage 1's start
     // The diode bits after stage 1 of a restart that starts at the step
     // start: a branch-form flip already there was forced at t_prev.
     std::vector<bool> rs_bits_first;
@@ -2316,7 +2315,6 @@ inline SimulationResult run_transient(
                 const Real dt_eq = Real{2} * h_s;
                 be_commit_h = h_s;
                 accumulate_b_extra(t_from + h_s, dt_eq, true);
-                if (has_diodes) diodes.snapshot_on_bits_into(rs_bits0);
                 run_event_iteration(t_from + h_s, dt_eq, true);
                 const Size iters_1 = iters;
                 const bool breach_1 = flipped;
@@ -2340,28 +2338,22 @@ inline SimulationResult run_transient(
                 accumulate_b_extra(t_from + h, dt_eq, true);
                 run_event_iteration(t_from + h, dt_eq, true);
                 const Size iters_2 = iters;
-                // A diode stage 1 conducts and stage 2 turns off, with no
-                // diode turning on: the overshoot mechanism (`on_to_off`
-                // also covers the undo below). A
-                // turn-on in stage 2 (e.g. round-off at a zero start,
-                // buck CCM at t = 0) keeps the SDIRK stage, unless it
-                // undoes stage 1's turn-off of a diode that conducted at
-                // the interval start: R(z) < 0 for z < -1/(1-2γ) flips the
-                // sign of a stiff residual (a transformer cut by its
-                // switch, g_off) and the flip forward-biases the diode
-                // again. Kept, the flyback trapped 0.04-0.12 A in its
-                // secondary at every switch-off (exact error 0.11, not
-                // converging with dt).
+                // Stage 2 changed the diode mode: its solve starts from the
+                // pseudo-state x0* = x0 + ((1 − γ)/γ)(x1 − x0), which after a
+                // stiff stage 1 lies PAST the relaxed state (−√2·x0 for a
+                // fully relaxed one: R(z) < 0 for z < −1/(1−2γ)); the mode
+                // decided on it may be one no physical state reaches. Two
+                // cases, one test: a diode stage 1 conducts turns off (the
+                // rectifier's overshoot), or a diode off at x0 and in stage 1
+                // turns on (release finding F-3-3: the flyback's MOSFET cut
+                // with i_p = 14.8 A, stage 1 relaxes it to 0, stage 2's
+                // x0* = −20.9 A turned its body diode on and kept the
+                // reversed current). The backward-Euler re-take from x1
+                // below decides whether the change is real.
                 bool on_to_off = false;
                 if (has_diodes && iters_2 > 1) {
                     diodes.snapshot_on_bits_into(rs_bits2);
-                    for (Size q = 0; q < rs_bits.size(); ++q) {
-                        if (!rs_bits[q] && rs_bits2[q] && !rs_bits0[q]) {
-                            on_to_off = false;
-                            break;
-                        }
-                        on_to_off = on_to_off || (rs_bits[q] != rs_bits2[q]);
-                    }
+                    on_to_off = rs_bits2 != rs_bits;
                 }
                 if (on_to_off) {
                     // Stage 2 changed the mode. Re-take it as backward
