@@ -68,6 +68,9 @@ def _run(make, t_end, losses=False, **kw):
         names = _switch_names(b) if make is _vsi else ["Q1", "D1"]
         for n in names:
             b.set_device_losses(n, Tj=125.0, E_on=e_on, E_off=e_off)
+    # legacy subject: continuity at common instants needs the old grid on both runs (a run resumed
+    # under the release default output_rtol=1e-5 samples its own grid: test_exact_output_rule_combinations)
+    kw.setdefault("output_rtol", 0)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         return p.simulate(b, t_end, switch_fn=fn, engine="exact", **kw)
@@ -175,8 +178,9 @@ def test_a_closed_loop_resumed_on_its_tick_continues_the_uninterrupted_run():
     from .test_control_graph_queue_resume import SPLITS, T2, _duty
     from .test_control_graph_queue_resume import _run as crun
     from .test_control_graph_queue_resume import _split as csplit
-    (_b, loop_f), rf = crun("exact", T2)
-    loop_s, r2 = csplit("exact", SPLITS["on_tick"], pickled=True, fresh=True)
+    # legacy subject: the old output grid on both runs (see _run)
+    (_b, loop_f), rf = crun("exact", T2, output_rtol=0)
+    loop_s, r2 = csplit("exact", SPLITS["on_tick"], pickled=True, fresh=True, output_rtol=0)
     np.testing.assert_allclose(_duty(loop_s), _duty(loop_f), rtol=1e-12, atol=0)
     tf, vf = np.asarray(rf.times), np.asarray(rf.v("out"))
     t2, v2 = np.asarray(r2.times), np.asarray(r2.v("out"))
@@ -256,9 +260,11 @@ def test_a_run_on_a_route_that_keeps_no_snapshot_names_why_at_resume():
 
 
 def test_an_explicit_auto_that_would_not_continue_the_snapshot_is_refused():
-    a = p.simulate(_rc(), 2e-3, engine="dsed", integrator="rk45")
+    # legacy subject: integrator 'auto' on the old output grid (output_rtol=0)
+    a = p.simulate(_rc(), 2e-3, engine="dsed", integrator="rk45", output_rtol=0)
     with pytest.raises(p.UnsupportedError) as ei:
-        p.simulate(_rc(), 4e-3, engine="dsed", integrator="auto", resume_from=a.final_snapshot)
+        p.simulate(_rc(), 4e-3, engine="dsed", integrator="auto", resume_from=a.final_snapshot,
+                   output_rtol=0)
     assert ei.value.feature == "resume_from" and "integrator='auto'" in str(ei.value)
     # where 'auto' itself routes to the event-driven integrator (diodes), it runs
     s = _run(_ccm, 100e-6)

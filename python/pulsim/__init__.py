@@ -2726,6 +2726,7 @@ def simulate(
     if recorders:
         # a recorder samples on its own grid: the output-grid rule stays off
         _kw = {k: v for k, v in locals().items() if k not in ("recorders", "output_rtol")}
+        _kw["output_rtol"] = 0   # 0 = off: None would take the release default (1e-5)
         from ._recorders import simulate_with_recorders as _with_rec
         return _with_rec(simulate, _kw, recorders)
     # add-kernel-simulation-object Stage A: plan -> engine table -> finalize.

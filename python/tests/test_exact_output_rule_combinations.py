@@ -88,7 +88,7 @@ def test_junction_temperatures_do_not_depend_on_the_output_grid():
     heat plus impulses at events: cutting the steps finer changes T_j only by
     rounding at the instants both grids stored."""
     b, fn, names = _buck()
-    a = _sim(b, 202.5e-6, fn)
+    a = _sim(b, 202.5e-6, fn, output_rtol=0)   # the old grid (the release default is OUT)
     b, fn, _ = _buck()
     r = _sim(b, 202.5e-6, fn, output_rtol=OUT)
     assert len(r.times) != len(a.times)            # the grid did change

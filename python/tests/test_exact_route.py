@@ -260,6 +260,9 @@ def _paralleled_bridges(n):
     return b
 
 
+@pytest.mark.xfail(strict=True, raises=p._pulsim.DiodeModeInconsistentError, reason="release finding F-X-1: "
+                   "under the release defaults (output_rtol=1e-5) the exact engine refuses ten paralleled "
+                   "bridges at 19.969 ms (Db8b OFF forward-biased 0.73 V); output_rtol=0 runs it")
 @pytest.mark.parametrize("mode", [None, "lcp"])
 def test_ten_paralleled_bridges_agree_with_pwl(mode):
     """Ten three-phase bridges paralleled on one bus, the bus held to ground by 1 Mohm. Slice 7

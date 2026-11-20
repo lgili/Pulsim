@@ -39,6 +39,9 @@ def _chopper():
 
 def _run(t_end, **kw):
     b, fn = _chopper()
+    # legacy subject: integrator 'auto' runs on the old output grid; the release default
+    # output_rtol=1e-5 runs rk45 (its snapshot is the event-driven one, test_exact_resume.py)
+    kw.setdefault("output_rtol", 0)
     return p.simulate(b, t_end, switch_fn=fn, engine="dsed", **kw)
 
 
