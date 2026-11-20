@@ -47,5 +47,21 @@ only, m grows from 1 while the fit's residual of D_{m+1} is above the stages' no
 up to m = min(#states, 6); one jumping state keeps the rule's scalar code bit for bit (it IS the m = 1 case).
 Above 6 unresolved modes the per-state a is kept (shortcut: exact for uncoupled modes, not conserving when coupled).
 
-## The fast move that stops inside stage 1 [D]
-(see the section below once measured)
+## The fast move that stops inside stage 1 [R][M][D]
+Reproduction (`.scratch/jc/clamp.py`, test `test_a_fast_move_that_a_diode_stops_inside_stage_1_is_no_jump`):
+a 10 A source pulls node n; Sl (1 mΩ) holds n at −0.01 V; Dl (V_f 0.7 V) clamps at −0.71 V; C 2 nF.
+Sl opens at 1 µs (a TIME event, δt_loc = 0): n falls 0.7 V at I/C in 140 ps, then Dl conducts.
+Base: a record of 4.9000e-10 J = ½·2 nF·0.7² exactly (linear; 4.9241e-10 the junction law), split
+on and off — i.e. the allowance was ZERO.
+Cause: the allowance is δt_loc·|ẋ(0−)| and ẋ(0−) is read from the history slot BEFORE the event:
+i_C = 0, Sl held the node. The stage-1 widening (δt_loc → γh on a stage-1 diode flip) applies, but
+multiplies zero. The rate that bounds a stop inside stage 1 is the rate AFTER the event in the mode
+the event started in (the new gates, the diode bits before stage 1: Dl off): |d| ≤ θ·|ẋ(0+)|, θ ≤ γh.
+A finite-rate move has ẋ(0+) = I/C there; a real jump is a fast mode of that start mode, after which
+its rate is the slow one — so the start mode's own probe separates them: two single stages from x0
+in it, Δ2 = γh·ẋ(0+) after its fast modes. Fix: when the test fired and stage 1's diode bits differ
+from the event start's, that probe runs (two solves; only then), and each state's allowance is
+max(δt_loc·|ẋ(0−)|, |Δ2 of the start mode|). A state over the old bound but within the new one is a
+MOVE: carried to x0 + J like a jump (else stage 2's pseudo-state carries it: −0.71067 V at the next
+sample instead of −0.71, measured with a version that left it unmoved), recorded by nobody, no
+right limit at t_from.

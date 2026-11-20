@@ -101,8 +101,13 @@ def test_an_island_of_two_fast_modes_keeps_its_charge(R2, nl, split):
     def qsum(i):
         return float(sum(_q(n, vs[n][i], nl) for n in LAWS))
 
-    # the charge of the floating island over the event and the rest of the run
-    assert abs(qsum(len(t) - 1) - qsum(kb)) < 1e-12 * float(q0)
+    # the island's charge over the event's step: to rounding plus what Ssrc's OFF leakage
+    # carries in one step (1e-12 S x 100 V x dt = 1e-18 C, measured 7e-19 C); a junction
+    # law's stages are Newton solves of the charge (tolerance 1e-9); over the rest of the
+    # run the steps' own KCL rounding and that leakage
+    leak = 1e-12 * V1 * DT
+    assert abs(qsum(kb + 1) - qsum(kb)) < (1e-9 if nl else 1e-12) * float(q0) + leak
+    assert abs(qsum(len(t) - 1) - qsum(kb)) < 1e-7 * float(q0)
     for n in names:   # after the step (both modes dead) and at the end
         assert vs[n][kb + 1] == pytest.approx(vinf, abs=1e-6 * V1), (n, vs[n][kb + 1], vinf)
         assert vs[n][-1] == pytest.approx(vinf, abs=1e-6 * V1)
@@ -110,7 +115,10 @@ def test_an_island_of_two_fast_modes_keeps_its_charge(R2, nl, split):
         assert abs(vs["C3"][-1]) < 1e-3
     recs = [x for x in r.reinit_records if x.t == pytest.approx(T_CLOSE)]
     assert len(recs) == 1 and sorted(recs[0].states) == sorted(names), list(r.reinit_records)
-    assert recs[0].dW == pytest.approx(e_loss, rel=1e-6)
+    # linear: the series is exact for two modes (measured 1e-13); a junction law's stage
+    # map is not linear, the series fits its secant: 9e-8 / 2.4e-6 at R2 = 0.4 / 0.8 (was
+    # +1.7 % with the per-state a)
+    assert recs[0].dW == pytest.approx(e_loss, rel=1e-5 if nl else 1e-9)
 
 
 def _dual(Rm, split):
