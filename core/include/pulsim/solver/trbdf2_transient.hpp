@@ -1903,7 +1903,8 @@ inline SimulationResult run_transient_trbdf2(
         if (hooks != nullptr && hooks->has_event() && !(m_probe == x_mask)) {
             hooks->event(t, x, x_mask, x_trial, m_probe);
         }
-        if (lt && !(m_probe == x_mask)) lt->event(t, x, x_mask, x_trial, m_probe);
+        // also under the same mask (a source corner): the readings jump
+        if (lt) lt->event(t, x, x_mask, x_trial, m_probe);
         const Real dtp = last_probe_dt;
         ++st.n_derivative_refreshes;
         post_event_pending = true;
@@ -2365,6 +2366,12 @@ inline SimulationResult run_transient_trbdf2(
         Real h_ctrl = Real{0};
         Real bp_t = Real{0};
         Real h_pre_bp = Real{0};
+        // The instant the clamp landed the step on (a tick, a source corner,
+        // a gate edge: the number the queue or the locator returned), NaN
+        // when none: the commit sets t TO it, not to t + h, which can miss
+        // it by an ulp (release D3: an edge at t_end missed by 1.8e-18 s on
+        // esdirk43 was never landed; one an ulp short is landed twice).
+        Real t_land = std::numeric_limits<Real>::quiet_NaN();
         Real hg = Real{0};
         Real h_pt = Real{0};
         Real err = Real{0};
@@ -2754,26 +2761,30 @@ inline SimulationResult run_transient_trbdf2(
         // clamp: the landings (tick, source breakpoint, gate edge) and the
         // no-final-sliver rule; returns the step
         auto tb_clamp = [&]() PULSIM_STEP_PHASE {
-            // Land the next tick exactly, like a gate edge.
+            // ONE landing rule for ticks, source corners and gate edges: an
+            // instant at or before t + h + h_min/2 ends the step, and the
+            // commit puts t exactly on it (t_land). A step ending within
+            // h_min/2 short of it would not land it: the corner's search
+            // skips it (next_breakpoint_after looks past t + h_min/2) and
+            // the step read the snapped source's RIGHT limit (ll12, ll10);
+            // an edge at t_end was never counted (release D3).
+            t_land = std::numeric_limits<Real>::quiet_NaN();
+            auto lands = [&](Real at) {
+                if (!(at > t && at <= t + h + Real{0.5} * h_min)) return false;
+                h = std::max(at - t, h_min);
+                t_land = at - t < h_min ? std::numeric_limits<Real>::quiet_NaN() : at;
+                return true;
+            };
             const Real t_next_tick =
                 queue.next_of(events::Kind::ControlTick);
-            if (t_next_tick > t && t_next_tick - t < h) {
-                h = std::max(t_next_tick - t, h_min);
-            }
+            lands(t_next_tick);
             // ---- source-breakpoint landing ----
             landed_on_bp = false;
             bp_t = Real{0};
             h_pre_bp = h;
             if (!corners.empty() || has_iwave) {
                 bp_t = next_breakpoint_after(t);
-                // A step ending within h_min/2 short of the jump lands on
-                // it: the next step's search skips it (next_breakpoint_after),
-                // and the step read the snapped source's RIGHT limit there
-                // (ll12 and ll10 on a step grid of the PWM period, release D3).
-                if (bp_t <= t + h + Real{0.5} * h_min) {
-                    h = std::max(bp_t - t, h_min);
-                    landed_on_bp = true;
-                }
+                landed_on_bp = lands(bp_t);
             }
 
             // ---- gate-edge landing ----
@@ -2796,11 +2807,7 @@ inline SimulationResult run_transient_trbdf2(
             }
             // The oracle is asked again only when its edge is passed or
             // a tick invalidated it; a located edge is dropped when passed.
-            const Real next_edge_t = queue.next_after(edge_src, t);
-            if (next_edge_t > t && next_edge_t <= t + h) {
-                h = std::max(next_edge_t - t, h_min);
-                landed_on_edge = true;
-            }
+            if (lands(queue.next_after(edge_src, t))) landed_on_edge = true;
             // True when every switch_fn sample over (t, t + h] equals
             // sw_now, so the step's gate mask IS sw_now (the midpoint
             // was one of the samples).
@@ -2812,7 +2819,7 @@ inline SimulationResult run_transient_trbdf2(
                     gate.locate(switch_fn, sw_now, t, h, hi);
                 gates_flat = !edge_found;
                 if (edge_found) {
-                    h = std::max(hi - t, h_min);
+                    if (!lands(hi)) h = std::max(hi - t, h_min);
                     landed_on_edge = true;
                     queue.locate(edge_src, hi);
                 }
@@ -2834,6 +2841,7 @@ inline SimulationResult run_transient_trbdf2(
                 && (!landed_on_bp || bp_t >= t_stop)
                 && !(t_next_tick > t && t_next_tick < t_stop - h_min)) {
                 h = t_stop - t;
+                t_land = std::numeric_limits<Real>::quiet_NaN();
                 landed_on_edge = false;
                 gates_flat = true;
             }
@@ -4143,7 +4151,8 @@ inline SimulationResult run_transient_trbdf2(
                 const Real t_pre = t;
                 x = x_1;
                 x_sig = x;
-                t += h;
+                // a landed step ends ON its instant (h was set from it)
+                t = h == t_land - t ? t_land : t + h;
                 newton_at_start = false;
                 // the slots are this step's own, not a refresh-only probe's;
                 // a sliver step after a landed edge keeps the flag (its

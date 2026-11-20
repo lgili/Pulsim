@@ -342,7 +342,18 @@ public:
         for (auto& d : devs_) {
             const auto bit = static_cast<Size>(d.law.bit);
             const bool on_l = m_l.get(bit), on_r = m_r.get(bit);
-            if (on_l == on_r) continue;
+            if (on_l == on_r) {
+                // not flipped, but its readings jump with the circuit's (an
+                // off switch's v when its leg commutes): the next step starts
+                // from the right limit, as the flipped devices' do (release D3:
+                // the left limit at the step's start weight drifted 4e-5 of a
+                // VSI's conduction energy once the edge's probe was no step)
+                if (!(d.ev_pending && d.ev_t == t)) {
+                    d.v = v_of_(d, x_r);
+                    d.i = i_of_(d, x_r, on_r);
+                }
+                continue;
+            }
             // the same flip already booked at t (a stale left mask after a
             // landing, re-reported by the settle at a coincident gate edge)
             if (d.ev_pending && d.ev_t == t && d.ev_on == on_r) continue;
