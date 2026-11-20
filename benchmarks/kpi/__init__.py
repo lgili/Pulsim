@@ -396,27 +396,50 @@ def compute_switching_loss_per_event(
     v_ds_samples: Sequence[float],
     i_d_samples: Sequence[float],
     times: Sequence[float],
+    window_s: float,
 ) -> Dict[str, float]:
-    """Average switching loss in W. At each switch state transition, treats
-    the local V·I product as the switching loss of one event:
-    E_event = ½ · V_DS · I_D (the pre-transition sample). Energy summed
-    over all events ÷ total simulated time = average loss in W.
+    """Switching energy E = int v_DS * i_D dt over window_s after each
+    state transition (trapezoidal over the samples, the window end
+    interpolated), summed and divided by the span: the average switching
+    loss in W.
+
+    The window must cover the transition and stop before the next one; it
+    includes the conduction of that window. An edge the solver does not
+    resolve (a capacitor collapsing through milliohms inside one step) is
+    not in the samples, so it is not in this integral either: book it from
+    the stored-energy change instead.
+
+    (Before 2026-11 this returned sum(0.5*|v*i|) / span over the
+    pre-transition samples: watts divided by seconds, not an energy.)
     """
+    if not window_s > 0:
+        raise ValueError(f"window_s must be > 0 s, got {window_s!r}")
     n = min(len(switch_states), len(v_ds_samples), len(i_d_samples), len(times))
     if n < 2:
-        return {"switching_loss_w_avg": 0.0, "switching_event_count": 0.0}
+        return {"switching_loss_w_avg": 0.0, "switching_event_count": 0.0,
+                "switching_energy_j": 0.0}
     total_time = max(1e-18, times[n - 1] - times[0])
+    p = [v_ds_samples[k] * i_d_samples[k] for k in range(n)]
     energy = 0.0
     events = 0
     for k in range(1, n):
-        if switch_states[k] != switch_states[k - 1]:
-            v = v_ds_samples[k - 1]
-            i = i_d_samples[k - 1]
-            energy += 0.5 * abs(v * i)
-            events += 1
+        if switch_states[k] == switch_states[k - 1]:
+            continue
+        events += 1
+        t0 = times[k - 1]
+        t1 = t0 + window_s
+        j = k - 1
+        while j + 1 < n and times[j + 1] <= t1:
+            energy += 0.5 * (p[j] + p[j + 1]) * (times[j + 1] - times[j])
+            j += 1
+        if j + 1 < n and times[j + 1] > times[j] and t1 > times[j]:
+            f = (t1 - times[j]) / (times[j + 1] - times[j])
+            p1 = p[j] + f * (p[j + 1] - p[j])
+            energy += 0.5 * (p[j] + p1) * (t1 - times[j])
     return {
         "switching_loss_w_avg": energy / total_time,
         "switching_event_count": float(events),
+        "switching_energy_j": energy,
     }
 
 
