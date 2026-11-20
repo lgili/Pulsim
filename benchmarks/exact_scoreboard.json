@@ -1,6 +1,6 @@
 {
  "delta_steps": 0.001,
- "commit": "2b7b4b7c",
+ "commit": "05321d69",
  "configs": {
   "pwl": {
    "engine": "pwl",
@@ -72,7 +72,7 @@
  "circuits": [
   {
    "circuit": "circuits/switching/isolated/active_clamp_forward.yaml",
-   "truth_s": 21.3,
+   "truth_s": 28.4,
    "n_events": 825,
    "dt": 1e-07,
    "graded": [
@@ -98,7 +98,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.006,
+     "wall_s": 0.01,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -162,7 +162,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.014,
+     "wall_s": 0.009,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -196,7 +196,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.053,
+     "wall_s": 0.064,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -227,7 +227,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.063,
+     "wall_s": 0.074,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -258,7 +258,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.023,
+     "wall_s": 0.029,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -291,7 +291,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.011,
+     "wall_s": 0.016,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -328,7 +328,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.063,
+     "wall_s": 0.083,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -363,7 +363,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.059,
+     "wall_s": 0.089,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -455,7 +455,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -488,7 +488,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -553,7 +553,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.059,
+     "wall_s": 0.051,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -654,7 +654,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -689,7 +689,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.07,
+     "wall_s": 0.071,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -781,7 +781,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -910,7 +910,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.003,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -980,7 +980,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -1015,7 +1015,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.008,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -1076,7 +1076,7 @@
      "config": "pwl",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.0,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -1205,7 +1205,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.007,
+     "wall_s": 0.003,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -1341,7 +1341,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.003,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -1376,7 +1376,7 @@
   },
   {
    "circuit": "circuits/switching/boost/boost_classic.yaml",
-   "truth_s": 1.2,
+   "truth_s": 1.1,
    "n_events": 191,
    "dt": 2e-07,
    "graded": [
@@ -1433,7 +1433,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.005,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -1500,7 +1500,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.002,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -1531,7 +1531,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.012,
+     "wall_s": 0.013,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -1562,7 +1562,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.005,
+     "wall_s": 0.003,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -1595,7 +1595,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.006,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -1667,7 +1667,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.008,
+     "wall_s": 0.007,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -1702,7 +1702,7 @@
   },
   {
    "circuit": "circuits/switching/boost/boost_pfc_open_loop.yaml",
-   "truth_s": 69.0,
+   "truth_s": 88.0,
    "n_events": 4185,
    "dt": 2e-06,
    "graded": [
@@ -1728,7 +1728,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.008,
+     "wall_s": 0.014,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -1774,7 +1774,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.019,
+     "wall_s": 0.024,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -1822,7 +1822,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.02,
+     "wall_s": 0.026,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -1856,7 +1856,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.052,
+     "wall_s": 0.064,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -1887,7 +1887,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.167,
+     "wall_s": 0.33,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -1918,7 +1918,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.068,
+     "wall_s": 0.121,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -1951,7 +1951,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.035,
+     "wall_s": 0.049,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -1988,7 +1988,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.059,
+     "wall_s": 0.103,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -2023,7 +2023,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.237,
+     "wall_s": 0.427,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -2058,7 +2058,7 @@
   },
   {
    "circuit": "circuits/switching/boost/boost_switching_complex.yaml",
-   "truth_s": 0.4,
+   "truth_s": 0.7,
    "n_events": 139,
    "dt": 2e-07,
    "graded": [
@@ -2155,7 +2155,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -2220,7 +2220,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.007,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -2251,7 +2251,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.004,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -2284,7 +2284,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.003,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -2321,7 +2321,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -2356,7 +2356,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.007,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -2546,7 +2546,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.003,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -2577,7 +2577,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.0,
+     "wall_s": 0.001,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -2682,7 +2682,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.0,
+     "wall_s": 0.001,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -2717,7 +2717,7 @@
   },
   {
    "circuit": "circuits/switching/buck_boost/buck_boost.yaml",
-   "truth_s": 0.8,
+   "truth_s": 1.2,
    "n_events": 193,
    "dt": 2e-07,
    "graded": [
@@ -2774,7 +2774,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.005,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -2807,7 +2807,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.005,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -2872,7 +2872,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.006,
+     "wall_s": 0.009,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -2903,7 +2903,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.004,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -2973,7 +2973,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.002,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -3008,7 +3008,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.007,
+     "wall_s": 0.013,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -3043,7 +3043,7 @@
   },
   {
    "circuit": "circuits/switching/buck/buck_dcm.yaml",
-   "truth_s": 0.7,
+   "truth_s": 0.8,
    "n_events": 113,
    "dt": 2e-07,
    "graded": [
@@ -3100,7 +3100,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -3133,7 +3133,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.004,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -3198,7 +3198,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.005,
+     "wall_s": 0.004,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -3229,7 +3229,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.005,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -3299,7 +3299,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.002,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -3426,7 +3426,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -3524,7 +3524,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.006,
+     "wall_s": 0.003,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -3555,7 +3555,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.003,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -3695,7 +3695,7 @@
   },
   {
    "circuit": "circuits/switching/buck/buck_switching.yaml",
-   "truth_s": 0.3,
+   "truth_s": 0.4,
    "n_events": 42,
    "dt": 2e-07,
    "graded": [
@@ -3721,7 +3721,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -3752,7 +3752,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -3819,7 +3819,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -3850,7 +3850,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.004,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -3914,7 +3914,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -4240,7 +4240,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -4312,7 +4312,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.004,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -4373,7 +4373,7 @@
      "config": "pwl",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.0,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -4509,7 +4509,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.006,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -4680,7 +4680,7 @@
   },
   {
    "circuit": "circuits/switching/boost/cascaded_boost_buck.yaml",
-   "truth_s": 5.4,
+   "truth_s": 5.9,
    "n_events": 478,
    "dt": 2e-07,
    "graded": [
@@ -4706,7 +4706,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.006,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -4737,7 +4737,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.009,
+     "wall_s": 0.01,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -4770,7 +4770,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.009,
+     "wall_s": 0.014,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -4835,7 +4835,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.03,
+     "wall_s": 0.031,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -4866,7 +4866,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.011,
+     "wall_s": 0.01,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -4899,7 +4899,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.015,
+     "wall_s": 0.008,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -4936,7 +4936,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.009,
+     "wall_s": 0.01,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -4971,7 +4971,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.034,
+     "wall_s": 0.032,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -5063,7 +5063,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.005,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -5096,7 +5096,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -5161,7 +5161,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.005,
+     "wall_s": 0.003,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -5225,7 +5225,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -5262,7 +5262,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -5297,7 +5297,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.008,
+     "wall_s": 0.012,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -5332,7 +5332,7 @@
   },
   {
    "circuit": "circuits/switching/multilevel/cascaded_h_bridge_5level.yaml",
-   "truth_s": 0.1,
+   "truth_s": 0.2,
    "n_events": 29,
    "dt": 2e-07,
    "graded": [
@@ -5358,7 +5358,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.004,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -5404,7 +5404,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.021,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -5471,7 +5471,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.001,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -5502,7 +5502,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.02,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -5533,7 +5533,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.005,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -5603,7 +5603,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.002,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -5673,7 +5673,7 @@
   },
   {
    "circuit": "circuits/switching/basic/chopper_with_rc_snubber.yaml",
-   "truth_s": 0.9,
+   "truth_s": 1.7,
    "n_events": 21,
    "dt": 1e-07,
    "graded": [
@@ -5699,7 +5699,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.009,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -5745,7 +5745,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.011,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -5843,7 +5843,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.011,
+     "wall_s": 0.023,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -5874,7 +5874,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.006,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -5907,7 +5907,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.005,
+     "wall_s": 0.004,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -5979,7 +5979,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.016,
+     "wall_s": 0.033,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -6104,7 +6104,7 @@
      "config": "pwl+split",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.007,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -6138,7 +6138,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.006,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -6169,7 +6169,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.006,
+     "wall_s": 0.018,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -6233,7 +6233,7 @@
      "config": "pwl+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.0,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -6305,7 +6305,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.006,
+     "wall_s": 0.018,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -6340,7 +6340,7 @@
   },
   {
    "circuit": "circuits/switching/buck_boost/cuk_converter.yaml",
-   "truth_s": 4.0,
+   "truth_s": 4.9,
    "n_events": 286,
    "dt": 2e-07,
    "graded": [
@@ -6366,7 +6366,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -6430,7 +6430,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.007,
+     "wall_s": 0.003,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -6495,7 +6495,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.016,
+     "wall_s": 0.012,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -6559,7 +6559,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.005,
+     "wall_s": 0.004,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -6596,7 +6596,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.006,
+     "wall_s": 0.004,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -6631,7 +6631,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.022,
+     "wall_s": 0.012,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -6852,7 +6852,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.0,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -7082,7 +7082,7 @@
      "config": "pwl+split",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -7147,7 +7147,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.028,
+     "wall_s": 0.019,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -7283,7 +7283,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.031,
+     "wall_s": 0.019,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -7449,7 +7449,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.0,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -7511,7 +7511,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.0,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -7651,7 +7651,7 @@
   },
   {
    "circuit": "circuits/diodes/diode_bridge_rectifier.yaml",
-   "truth_s": 0.7,
+   "truth_s": 0.5,
    "n_events": 19,
    "dt": 5e-05,
    "graded": [
@@ -7677,7 +7677,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.0,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -7708,7 +7708,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.0,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -7741,7 +7741,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.0,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -7775,7 +7775,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -7806,7 +7806,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.032,
+     "wall_s": 0.026,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -7837,7 +7837,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.001,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -7942,7 +7942,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.04,
+     "wall_s": 0.028,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -7977,7 +7977,7 @@
   },
   {
    "circuit": "circuits/diodes/diode_half_wave_rl_load.yaml",
-   "truth_s": 0.4,
+   "truth_s": 0.3,
    "n_events": 5,
    "dt": 2e-05,
    "graded": [
@@ -8146,7 +8146,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -8192,7 +8192,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.045,
+     "wall_s": 0.03,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -8272,7 +8272,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -8359,7 +8359,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.034,
+     "wall_s": 0.033,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -8409,7 +8409,7 @@
   },
   {
    "circuit": "circuits/diodes/diode_rectifier.yaml",
-   "truth_s": 1.4,
+   "truth_s": 0.9,
    "n_events": 199,
    "dt": 1e-06,
    "graded": [
@@ -8513,7 +8513,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -8547,7 +8547,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.005,
+     "wall_s": 0.002,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -8578,7 +8578,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.03,
+     "wall_s": 0.021,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -8679,7 +8679,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.002,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -8714,7 +8714,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.035,
+     "wall_s": 0.022,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -8775,7 +8775,7 @@
      "config": "pwl",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -8813,7 +8813,7 @@
      "config": "pwl+restart",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -8894,7 +8894,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.009,
+     "wall_s": 0.006,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -8925,7 +8925,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.094,
+     "wall_s": 0.061,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -8956,7 +8956,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -8990,7 +8990,7 @@
      "config": "pwl+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -9034,7 +9034,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.009,
+     "wall_s": 0.006,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -9069,7 +9069,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.08,
+     "wall_s": 0.061,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -9104,7 +9104,7 @@
   },
   {
    "circuit": "circuits/switching/isolated/dual_active_bridge.yaml",
-   "truth_s": 0.3,
+   "truth_s": 0.2,
    "n_events": 239,
    "dt": 2e-07,
    "graded": [
@@ -9130,7 +9130,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -9161,7 +9161,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.006,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -9194,7 +9194,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -9259,7 +9259,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.003,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -9290,7 +9290,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.002,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -9323,7 +9323,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.007,
+     "wall_s": 0.003,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -9395,7 +9395,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.007,
+     "wall_s": 0.003,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -9585,7 +9585,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -9756,7 +9756,7 @@
   },
   {
    "circuit": "circuits/switching/isolated/flyback_converter.yaml",
-   "truth_s": 4.0,
+   "truth_s": 3.5,
    "n_events": 398,
    "dt": 1e-07,
    "graded": [
@@ -9824,7 +9824,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.008,
+     "wall_s": 0.005,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -9857,7 +9857,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.011,
+     "wall_s": 0.007,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -9891,7 +9891,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.019,
+     "wall_s": 0.022,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -9922,7 +9922,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.021,
+     "wall_s": 0.025,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -9953,7 +9953,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.016,
+     "wall_s": 0.012,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -9986,7 +9986,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.007,
+     "wall_s": 0.006,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -10023,7 +10023,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.026,
+     "wall_s": 0.025,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -10058,7 +10058,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.029,
+     "wall_s": 0.026,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -10161,7 +10161,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -10228,7 +10228,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -10430,7 +10430,7 @@
   },
   {
    "circuit": "circuits/switching/isolated/forward_converter.yaml",
-   "truth_s": 11.9,
+   "truth_s": 13.8,
    "n_events": 598,
    "dt": 1e-07,
    "graded": [
@@ -10456,7 +10456,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.01,
+     "wall_s": 0.005,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -10502,7 +10502,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.013,
+     "wall_s": 0.011,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -10569,7 +10569,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.032,
+     "wall_s": 0.03,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -10600,7 +10600,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.036,
+     "wall_s": 0.05,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -10631,7 +10631,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.019,
+     "wall_s": 0.028,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -10664,7 +10664,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.021,
+     "wall_s": 0.029,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -10701,7 +10701,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.031,
+     "wall_s": 0.047,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -10736,7 +10736,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.055,
+     "wall_s": 0.12,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -10771,7 +10771,7 @@
   },
   {
    "circuit": "circuits/switching/isolated/full_bridge_dc.yaml",
-   "truth_s": 0.7,
+   "truth_s": 0.8,
    "n_events": 98,
    "dt": 2e-07,
    "graded": [
@@ -10797,7 +10797,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.003,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -10843,7 +10843,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -10876,7 +10876,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.005,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -10910,7 +10910,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.004,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -10941,7 +10941,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.008,
+     "wall_s": 0.011,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -11077,7 +11077,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.01,
+     "wall_s": 0.017,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -11138,7 +11138,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.005,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -11169,7 +11169,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.004,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -11202,7 +11202,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.007,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -11298,7 +11298,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.002,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -11331,7 +11331,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.004,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -11368,7 +11368,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.002,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -11403,7 +11403,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.005,
+     "wall_s": 0.007,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -11464,7 +11464,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.014,
+     "wall_s": 0.02,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -11495,7 +11495,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.016,
+     "wall_s": 0.036,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -11528,7 +11528,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.013,
+     "wall_s": 0.04,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -11562,7 +11562,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.011,
+     "wall_s": 0.009,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -11593,7 +11593,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.035,
+     "wall_s": 0.044,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -11695,7 +11695,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.007,
+     "wall_s": 0.009,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -11730,7 +11730,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.028,
+     "wall_s": 0.032,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -11791,7 +11791,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -11822,7 +11822,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -11855,7 +11855,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.003,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -11920,7 +11920,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.002,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -11984,7 +11984,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -12091,7 +12091,7 @@
   },
   {
    "circuit": "circuits/magnetics/half_bridge_transformer_dc.yaml",
-   "truth_s": 13.3,
+   "truth_s": 16.5,
    "n_events": 447,
    "dt": 1e-07,
    "graded": [
@@ -12196,7 +12196,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.007,
+     "wall_s": 0.011,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -12230,7 +12230,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.02,
+     "wall_s": 0.025,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -12261,7 +12261,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.043,
+     "wall_s": 0.052,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -12292,7 +12292,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.013,
+     "wall_s": 0.018,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -12362,7 +12362,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.036,
+     "wall_s": 0.029,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -12397,7 +12397,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.06,
+     "wall_s": 0.052,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -12458,7 +12458,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.0,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -12489,7 +12489,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.0,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -12587,7 +12587,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.017,
+     "wall_s": 0.016,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -12618,7 +12618,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -12723,7 +12723,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.014,
+     "wall_s": 0.013,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -12758,7 +12758,7 @@
   },
   {
    "circuit": "circuits/switching/buck/high_freq_gan_buck.yaml",
-   "truth_s": 0.2,
+   "truth_s": 0.1,
    "n_events": 400,
    "dt": 1e-08,
    "graded": [
@@ -12784,7 +12784,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.003,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -12815,7 +12815,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.01,
+     "wall_s": 0.005,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -12848,7 +12848,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.012,
+     "wall_s": 0.008,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -12913,7 +12913,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.009,
+     "wall_s": 0.015,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -12977,7 +12977,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.01,
+     "wall_s": 0.007,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -13014,7 +13014,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.005,
+     "wall_s": 0.01,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -13049,7 +13049,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.012,
+     "wall_s": 0.015,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -13110,7 +13110,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -13156,7 +13156,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.003,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -13204,7 +13204,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.005,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -13253,7 +13253,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.004,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -13299,7 +13299,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.054,
+     "wall_s": 0.047,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -13416,7 +13416,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.005,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -13467,7 +13467,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.039,
+     "wall_s": 0.051,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -13502,7 +13502,7 @@
   },
   {
    "circuit": "circuits/three_phase/interleaved_buck_3ph.yaml",
-   "truth_s": 4.1,
+   "truth_s": 5.8,
    "n_events": 269,
    "dt": 2e-07,
    "graded": [
@@ -13592,7 +13592,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.007,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -13657,7 +13657,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.011,
+     "wall_s": 0.026,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -13688,7 +13688,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.005,
+     "wall_s": 0.012,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -13793,7 +13793,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.015,
+     "wall_s": 0.034,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -13918,7 +13918,7 @@
      "config": "pwl+split",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -13983,7 +13983,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.025,
+     "wall_s": 0.051,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -14014,7 +14014,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.003,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -14084,7 +14084,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.004,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -14119,7 +14119,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.026,
+     "wall_s": 0.146,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -14154,7 +14154,7 @@
   },
   {
    "circuit": "circuits/switching/inverter/lcc_resonant_inverter.yaml",
-   "truth_s": 0.0,
+   "truth_s": 0.1,
    "n_events": 39,
    "dt": 5e-08,
    "graded": [
@@ -14180,7 +14180,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.003,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -14211,7 +14211,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -14244,7 +14244,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -14278,7 +14278,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.007,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -14374,7 +14374,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -14446,7 +14446,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.005,
+     "wall_s": 0.004,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -14610,7 +14610,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.0,
+     "wall_s": 0.001,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -14642,7 +14642,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.013,
+     "wall_s": 0.02,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -14746,7 +14746,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.0,
+     "wall_s": 0.001,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -14782,7 +14782,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.009,
+     "wall_s": 0.01,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -14818,7 +14818,7 @@
   },
   {
    "circuit": "circuits/switching/buck/ll06_buck_vcswitch.yaml",
-   "truth_s": 2.1,
+   "truth_s": 1.9,
    "n_events": 286,
    "dt": 2e-07,
    "graded": [
@@ -14854,7 +14854,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.004,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -14956,7 +14956,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.007,
+     "wall_s": 0.004,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -15059,7 +15059,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.023,
+     "wall_s": 0.014,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -15094,7 +15094,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.005,
+     "wall_s": 0.007,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -15188,7 +15188,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.008,
+     "wall_s": 0.006,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -15242,7 +15242,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.014,
+     "wall_s": 0.012,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -15281,7 +15281,7 @@
   },
   {
    "circuit": "circuits/switching/boost/ll07_boost_vcswitch.yaml",
-   "truth_s": 1.8,
+   "truth_s": 1.6,
    "n_events": 399,
    "dt": 2e-07,
    "graded": [
@@ -15317,7 +15317,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.006,
+     "wall_s": 0.003,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -15419,7 +15419,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.005,
+     "wall_s": 0.004,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -15493,7 +15493,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.026,
+     "wall_s": 0.012,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -15528,7 +15528,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.005,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -15565,7 +15565,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.012,
+     "wall_s": 0.006,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -15646,7 +15646,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.021,
+     "wall_s": 0.016,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -15722,7 +15722,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -15772,7 +15772,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.009,
+     "wall_s": 0.003,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -15877,7 +15877,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.012,
+     "wall_s": 0.009,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -15912,7 +15912,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.007,
+     "wall_s": 0.006,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -15984,7 +15984,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.01,
+     "wall_s": 0.005,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -16040,7 +16040,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.012,
+     "wall_s": 0.01,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -16079,7 +16079,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.013,
+     "wall_s": 0.007,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -16118,7 +16118,7 @@
   },
   {
    "circuit": "circuits/switching/inverter/ll10_full_bridge_inverter_lc.yaml",
-   "truth_s": 0.1,
+   "truth_s": 0.0,
    "n_events": 119,
    "dt": 2.5e-07,
    "graded": [
@@ -16170,7 +16170,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.007,
+     "wall_s": 0.003,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -16219,7 +16219,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.014,
+     "wall_s": 0.004,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -16255,7 +16255,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.012,
+     "wall_s": 0.005,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -16341,7 +16341,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.019,
+     "wall_s": 0.006,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -16375,7 +16375,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.002,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -16426,7 +16426,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.005,
+     "wall_s": 0.006,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -16466,7 +16466,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -16504,7 +16504,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.013,
+     "wall_s": 0.007,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -16542,7 +16542,7 @@
   },
   {
    "circuit": "circuits/thermal/long_run_drift_buck.yaml",
-   "truth_s": 7.5,
+   "truth_s": 5.1,
    "n_events": 19999,
    "dt": 1e-06,
    "graded": [
@@ -16568,7 +16568,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.024,
+     "wall_s": 0.016,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -16599,7 +16599,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.072,
+     "wall_s": 0.054,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -16632,7 +16632,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.082,
+     "wall_s": 0.093,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -16666,7 +16666,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.161,
+     "wall_s": 0.097,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -16697,7 +16697,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.103,
+     "wall_s": 0.115,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -16728,7 +16728,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.216,
+     "wall_s": 0.261,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -16761,7 +16761,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.066,
+     "wall_s": 0.07,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -16798,7 +16798,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.141,
+     "wall_s": 0.159,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -16833,7 +16833,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.077,
+     "wall_s": 0.095,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -16868,7 +16868,7 @@
   },
   {
    "circuit": "circuits/switching/multilevel/mmc_4cell_chain.yaml",
-   "truth_s": 0.3,
+   "truth_s": 0.2,
    "n_events": 29,
    "dt": 2e-07,
    "graded": [
@@ -16894,7 +16894,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -16940,7 +16940,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -17038,7 +17038,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.005,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -17069,7 +17069,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.002,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -17102,7 +17102,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.006,
+     "wall_s": 0.003,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -17139,7 +17139,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -17174,7 +17174,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.005,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -17235,7 +17235,7 @@
      "config": "pwl",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -17273,7 +17273,7 @@
      "config": "pwl+restart",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -17371,7 +17371,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.019,
+     "wall_s": 0.017,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -17435,7 +17435,7 @@
      "config": "pwl+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -17507,7 +17507,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.028,
+     "wall_s": 0.015,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -17632,7 +17632,7 @@
      "config": "pwl+split",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -17697,7 +17697,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.043,
+     "wall_s": 0.036,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -17728,7 +17728,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.001,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -17761,7 +17761,7 @@
      "config": "pwl+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -17833,7 +17833,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.043,
+     "wall_s": 0.036,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -17932,7 +17932,7 @@
      "config": "pwl+restart",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -18030,7 +18030,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.04,
+     "wall_s": 0.036,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -18061,7 +18061,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -18094,7 +18094,7 @@
      "config": "pwl+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -18166,7 +18166,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.047,
+     "wall_s": 0.032,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -18201,7 +18201,7 @@
   },
   {
    "circuit": "circuits/switching/multilevel/npc_three_level_halfbridge.yaml",
-   "truth_s": 1.6,
+   "truth_s": 1.1,
    "n_events": 59,
    "dt": 2e-07,
    "graded": [
@@ -18227,7 +18227,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -18356,7 +18356,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.007,
+     "wall_s": 0.008,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -18387,7 +18387,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.002,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -18420,7 +18420,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.003,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -18457,7 +18457,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -18492,7 +18492,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.011,
+     "wall_s": 0.009,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -18553,7 +18553,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.0,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -18595,7 +18595,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.0,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -18628,7 +18628,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.0,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -18693,7 +18693,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.003,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -18794,7 +18794,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.0,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -18921,7 +18921,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -18954,7 +18954,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -18988,7 +18988,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -19019,7 +19019,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.04,
+     "wall_s": 0.026,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -19083,7 +19083,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -19120,7 +19120,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -19155,7 +19155,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.037,
+     "wall_s": 0.025,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -19216,7 +19216,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -19247,7 +19247,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -19345,7 +19345,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.036,
+     "wall_s": 0.031,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -19481,7 +19481,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.037,
+     "wall_s": 0.033,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -19573,7 +19573,7 @@
      "config": "pwl+restart",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -19671,7 +19671,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.013,
+     "wall_s": 0.027,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -19807,7 +19807,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.014,
+     "wall_s": 0.02,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -19868,7 +19868,7 @@
      "config": "pwl",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.0,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -19932,7 +19932,7 @@
      "config": "pwl+split",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.0,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -19997,7 +19997,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.005,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -20028,7 +20028,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -20061,7 +20061,7 @@
      "config": "pwl+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.0,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -20133,7 +20133,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.006,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -20265,7 +20265,7 @@
      "config": "pwl+split",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.0,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -20299,7 +20299,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.0,
+     "wall_s": 0.001,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -20361,7 +20361,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -20431,7 +20431,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.0,
+     "wall_s": 0.001,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -20466,7 +20466,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -20591,7 +20591,7 @@
      "config": "pwl+split",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -20625,7 +20625,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.004,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -20656,7 +20656,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.046,
+     "wall_s": 0.056,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -20720,7 +20720,7 @@
      "config": "pwl+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -20792,7 +20792,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.038,
+     "wall_s": 0.077,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -20827,7 +20827,7 @@
   },
   {
    "circuit": "circuits/switching/buck_boost/sepic.yaml",
-   "truth_s": 4.3,
+   "truth_s": 3.7,
    "n_events": 290,
    "dt": 2e-07,
    "graded": [
@@ -20853,7 +20853,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.004,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -20917,7 +20917,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.007,
+     "wall_s": 0.004,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -20951,7 +20951,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.005,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -20982,7 +20982,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.012,
+     "wall_s": 0.014,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -21083,7 +21083,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.008,
+     "wall_s": 0.005,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -21118,7 +21118,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.013,
+     "wall_s": 0.014,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -21179,7 +21179,7 @@
      "config": "pwl",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.0,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -21210,7 +21210,7 @@
      "config": "pwl+restart",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.0,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -21243,7 +21243,7 @@
      "config": "pwl+split",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.0,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -21308,7 +21308,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.015,
+     "wall_s": 0.011,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -21372,7 +21372,7 @@
      "config": "pwl+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.0,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -21444,7 +21444,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.014,
+     "wall_s": 0.011,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -21479,7 +21479,7 @@
   },
   {
    "circuit": "circuits/stress/stiff_rc_high_freq_switching.yaml",
-   "truth_s": 0.2,
+   "truth_s": 0.1,
    "n_events": 500,
    "dt": 1e-07,
    "graded": [
@@ -21603,7 +21603,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.003,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -21770,7 +21770,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.008,
+     "wall_s": 0.004,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -21895,7 +21895,7 @@
      "config": "pwl+split",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.0,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -21991,7 +21991,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -22188,7 +22188,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -22387,7 +22387,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -22514,7 +22514,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.012,
+     "wall_s": 0.006,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -22547,7 +22547,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.009,
+     "wall_s": 0.007,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -22612,7 +22612,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.014,
+     "wall_s": 0.011,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -22643,7 +22643,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.007,
+     "wall_s": 0.005,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -22748,7 +22748,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.015,
+     "wall_s": 0.011,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -22840,7 +22840,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -22907,7 +22907,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -22938,7 +22938,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.001,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -23074,7 +23074,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.002,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -23135,7 +23135,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.008,
+     "wall_s": 0.003,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -23181,7 +23181,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.011,
+     "wall_s": 0.005,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -23214,7 +23214,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.012,
+     "wall_s": 0.006,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -23248,7 +23248,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.028,
+     "wall_s": 0.035,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -23279,7 +23279,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.022,
+     "wall_s": 0.037,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -23310,7 +23310,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.014,
+     "wall_s": 0.039,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -23380,7 +23380,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.036,
+     "wall_s": 0.03,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -23415,7 +23415,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.018,
+     "wall_s": 0.014,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -23450,7 +23450,7 @@
   },
   {
    "circuit": "circuits/switching/multilevel/t_type_3level_halfbridge.yaml",
-   "truth_s": 0.1,
+   "truth_s": 0.0,
    "n_events": 59,
    "dt": 2e-07,
    "graded": [
@@ -23476,7 +23476,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -23522,7 +23522,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -23555,7 +23555,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -23620,7 +23620,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.002,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -23651,7 +23651,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -23684,7 +23684,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -23721,7 +23721,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.001,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -23791,7 +23791,7 @@
   },
   {
    "circuit": "circuits/switching/boost/textbook_erickson_boost_ccm.yaml",
-   "truth_s": 1.0,
+   "truth_s": 0.9,
    "n_events": 191,
    "dt": 2e-07,
    "graded": [
@@ -23946,7 +23946,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.007,
+     "wall_s": 0.008,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -24117,7 +24117,7 @@
   },
   {
    "circuit": "circuits/switching/buck/textbook_erickson_buck_ccm.yaml",
-   "truth_s": 4.7,
+   "truth_s": 4.0,
    "n_events": 739,
    "dt": 2e-07,
    "graded": [
@@ -24143,7 +24143,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.006,
+     "wall_s": 0.004,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -24174,7 +24174,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.008,
+     "wall_s": 0.006,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -24207,7 +24207,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.01,
+     "wall_s": 0.007,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -24241,7 +24241,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.008,
+     "wall_s": 0.007,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -24272,7 +24272,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.024,
+     "wall_s": 0.022,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -24336,7 +24336,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.01,
+     "wall_s": 0.008,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -24373,7 +24373,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.008,
+     "wall_s": 0.007,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -24408,7 +24408,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.029,
+     "wall_s": 0.025,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -24629,7 +24629,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -24734,7 +24734,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.049,
+     "wall_s": 0.047,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -24769,7 +24769,7 @@
   },
   {
    "circuit": "circuits/three_phase/three_phase_diode_rectifier.yaml",
-   "truth_s": 2.0,
+   "truth_s": 1.8,
    "n_events": 97,
    "dt": 5e-05,
    "graded": [
@@ -24881,7 +24881,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -24922,7 +24922,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -24953,7 +24953,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.117,
+     "wall_s": 0.093,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -25096,7 +25096,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.129,
+     "wall_s": 0.106,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -25195,7 +25195,7 @@
      "config": "pwl+restart",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.0,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -25235,7 +25235,7 @@
      "config": "pwl+split",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.0,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -25276,7 +25276,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.002,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -25307,7 +25307,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.005,
+     "wall_s": 0.004,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -25512,7 +25512,7 @@
      "config": "pwl",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.0,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -25576,7 +25576,7 @@
      "config": "pwl+split",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.0,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -25641,7 +25641,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.014,
+     "wall_s": 0.011,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -25672,7 +25672,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -25742,7 +25742,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.0,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -25777,7 +25777,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.013,
+     "wall_s": 0.011,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -25812,7 +25812,7 @@
   },
   {
    "circuit": "circuits/switching/buck/triple_sync_buck.yaml",
-   "truth_s": 0.3,
+   "truth_s": 0.2,
    "n_events": 149,
    "dt": 2e-07,
    "graded": [
@@ -25869,7 +25869,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -25902,7 +25902,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -25936,7 +25936,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -25967,7 +25967,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.003,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -25998,7 +25998,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.002,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -26031,7 +26031,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.006,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -26103,7 +26103,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.003,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -26138,7 +26138,7 @@
   },
   {
    "circuit": "circuits/switching/boost/two_phase_interleaved_boost.yaml",
-   "truth_s": 5.7,
+   "truth_s": 4.4,
    "n_events": 491,
    "dt": 2e-07,
    "graded": [
@@ -26228,7 +26228,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.007,
+     "wall_s": 0.005,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -26293,7 +26293,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.035,
+     "wall_s": 0.021,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -26324,7 +26324,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.015,
+     "wall_s": 0.008,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -26394,7 +26394,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.008,
+     "wall_s": 0.006,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -26429,7 +26429,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.033,
+     "wall_s": 0.026,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -26490,7 +26490,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.0,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -26521,7 +26521,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.0,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -26569,7 +26569,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.0,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -26713,7 +26713,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.0,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -26751,7 +26751,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.0,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -26945,7 +26945,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.0,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -27147,7 +27147,7 @@
   },
   {
    "circuit": "circuits/diodes/voltage_doubler.yaml",
-   "truth_s": 0.4,
+   "truth_s": 0.3,
    "n_events": 19,
    "dt": 5e-05,
    "graded": [
@@ -27204,7 +27204,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.0,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -27237,7 +27237,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.0,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -27302,7 +27302,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.02,
+     "wall_s": 0.016,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -27403,7 +27403,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -27438,7 +27438,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.037,
+     "wall_s": 0.018,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
