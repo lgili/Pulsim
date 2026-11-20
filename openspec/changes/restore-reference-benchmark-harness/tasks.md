@@ -24,7 +24,7 @@
 ## 5. Golden checkpoints
 - [x] 5.1 Golden format, `--update-goldens`, comparison (exact integers and digest, `atol + rtol·|g|` for values)
 - [x] 5.2 Freeze the 20 analytic circuits and at least 20 triaged circuits on `pwl`, after `fix-control-tick-semantics`, `update-composite-diode-forward-drop` and `fix-nonlinear-diode-passivity`, or re-freeze in those pull requests — 45 goldens (20 analytic + 25 triaged) frozen BEFORE the three Phase 0 changes; those pull requests re-freeze
-- [ ] 5.3 Set each `rtol` from a run on the three CI platforms; caps 1e-9 (no Newton device) and 1e-6 — OPEN: generated and checked on macOS arm64 only; caps used as rtol until the reference-smoke job has run on Linux and Windows
+- [ ] 5.3 Set each `rtol` from a run on the three CI platforms; caps 1e-9 (no Newton device) and 1e-6 — OPEN: generated and checked on macOS arm64 only. ORCHESTRATOR: let the `reference-smoke` job of `ci.yml` run on Linux, Windows and macOS on one head, download its golden-comparison output and set each golden's `rtol` to ≥ 5× the largest relative deviation seen across the three (cap 1e-9 / 1e-6)
 - [x] 5.4 Non-vacuity: changing one resistor by 1e-6 relative fails the linear goldens
 
 ## 6. CI
@@ -36,13 +36,13 @@
 - [x] 7.1 `benchmarks/README.md`: layout, how to add an analytic case, how to re-freeze goldens and counters, what the legacy baselines are
 - [x] 7.2 `CHANGELOG.md` [Unreleased]: harness restored, `result.counters` — no `result.counters` (4.1 open)
 - [x] 7.3 `KNOWN_LIMITATIONS.md`: the triage summary (how many of 126 run, the skip reasons); first sample of algebraic nodes
-- [ ] 7.4 `python/pulsim/AI_GUIDE.md`: `result.counters`; "compare engines with a time-weighted metric" — OPEN: `result.counters` does not exist yet; the guide already says to time-weight (AI_GUIDE.md:19)
+- [x] 7.4 `python/pulsim/AI_GUIDE.md`: `result.counters`; "compare engines with a time-weighted metric" — section 4: cost measured by counts (`res.stats.n_factorizations` etc., `res.counters` on pwl), never time; time-weighting already in the short version (trap 2, `p.time_average`). 32,753 / 32,768 bytes: `test_ai_guide.py` + `test_doc_snippets.py` 47 passed
 - [x] 7.5 `CONTRIBUTING.md`: the reference-smoke job is part of the verification set
 
 ## 8. Verification
 - [x] 8.1 `ruff check` (including `benchmarks/tools`) — the new tools are clean; `benchmark_runner.py` keeps its 4 pre-existing E741, as at HEAD
 - [x] 8.2 `pytest python/tests` — 2352 passed, 4 skipped, 8 xfailed
-- [ ] 8.3 `ctest -j2` — not run: this change touches no C++
+- [ ] 8.3 `ctest -j2` — not run: this change touches no C++ (the close-out neither)
 - [x] 8.4 `openspec validate --all --strict`
 - [x] 8.5 Stub check
-- [ ] 8.6 One manual nightly run through `workflow_dispatch`; attach its summary table to the PR
+- [ ] 8.6 One manual nightly run through `workflow_dispatch`; attach its summary table to the PR — OPEN. ORCHESTRATOR: `gh workflow run nightly-reference.yml --ref <PR head>`; read the uploaded artifact's summary table (per circuit × engine outcome, ngspice version) and the issue it opens/comments on any outcome change; attach the table to PR #147
