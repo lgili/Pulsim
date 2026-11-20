@@ -426,6 +426,17 @@ base b08f4e4e): buck_ccm dsed 0.979, bridge3 dsed 0.998, forward_converter 1.001
 boost_pfc_open_loop 0.992, active_clamp_forward 1.111 (4 more events, 10 more samples, the halvings
 around the double crossing). The per-step price is one O(n²) z̈ per exact step with an armed diode
 predicate and O(n) per predicate per scan interval; nothing measurable on the circuits above.
+**Cost, corrected (final tip)**: the single-run figures above are inside the import's noise
+(±70 M instructions on a 3.2 G import). Ten runs per process, same method, base b08f4e4e, no-dt
+route (rule off), final tip ffdf5007: buck_ccm 1.018, bridge3 1.000, boost_pfc_open_loop 0.999,
+forward_converter 1.111, active_clamp_forward 1.134 (an intermediate tip, before the affinity change: 1.015 / 1.000 /
+0.999 / 1.139 / 1.132; the base's own spread across the two runs is up to 2.7 % on the forward
+converter). The price is the halvings where the certificate does not hold: each midpoint is a
+state sample plus a predicate read at a new instant (a source b-vector build); predicate reads
++12 % (forward, 6 813 → 7 644) and +18 % (active clamp, 22 261 → 26 170). This misses the 0.5 %
+cost gate on the two forward converters and on buck_ccm (+1.5..1.8 %); it is the stated price of F-X-5 (a tighter bound, e.g.
+the exact |z̈| along the interval instead of its start value × e^{Re λ τ}, would cut the halvings;
+not done).
 
 ### F-X-4 harness and the new bar — DONE (decision taken)
 
