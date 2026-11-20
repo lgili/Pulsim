@@ -97,7 +97,7 @@ NOT verified: full pytest, ctest, the instruction-count cost of the four
 cases (the change adds work only on restart steps: one state copy at stage 1
 and one axpy), stubs `--check` (new properties: regenerate
 `_pulsim.pyi`), reviewer pass, Eigen 3.4.0. Byte compares: see the commit
-after this note.
+
 
 Next three steps for a successor:
 1. F-4-4: feed the LoopFeed the step's lines. In `step_record`, when
@@ -114,3 +114,9 @@ Next three steps for a successor:
 3. Cost: instructions per accepted step on buck/vsi pwl and buck/bridge
    trbdf2 (rule off must be unchanged: `lines` is touched only when
    `restart_rule`).
+
+Byte compares against the PR-head baseline (`.scratch/base_b.sh`, default
+options): golden, stateful, engines, steps all byte-identical. pwl_identity
+(1/390) and trbdf2_identity (152/371) differ only by `inner_events` /
+`right_limit_*` being present on one side; with those lines excluded the diff
+is empty, so the trajectories are unchanged. The 151 MB baseline was deleted.
