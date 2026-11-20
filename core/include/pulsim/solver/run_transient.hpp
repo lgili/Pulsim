@@ -882,7 +882,7 @@ inline SimulationResult run_transient(
     bool ip_jump = false, ip_struct = false, rl_want = false;
     std::vector<Real> ip_hist_p, rl_hist, rl_hcur;
     Vector rl_x1, rl_b0, rl_b, rl_h, rl_xa;
-    std::vector<bool> rl_bits, rl_last;
+    std::vector<bool> rl_bits, rl_last, rl_lsb;
     pwl::StatefulHistories::Snapshot rl_hs;
     // The OFF state's leakage conductance in total (conductance-form
     // switches and diodes): the restart rule's current resolution
@@ -2272,11 +2272,11 @@ inline SimulationResult run_transient(
         // x0 + J where an ideal element's constraint moves it (the probe's
         // J, the structural record's jump) — and every other unknown the
         // event's mode solved there: the ε → 0 limit of a backward-Euler
-        // solve of ε from those states, its mode decided there by the event
-        // iteration (a diode still carrying a located turn-off's residual
-        // current stays ON: no spike through its g_off); two solves, ε and
-        // 2ε, Richardson: the O(ε) motion cancels, O(ε²) is left, ε =
-        // 1e-9·γh (one mode for both, else the ε solve alone). A
+        // solve of ε from those states in stage 1's mode (single solves: the
+        // mode selector's caches and counters are the run's), an OFF diode
+        // forward-biased there turned ON (a located turn-off's residual
+        // current: no spike through its g_off); two solves, ε and 2ε,
+        // Richardson: the O(ε) motion cancels, O(ε²) is left, ε = 1e-9·γh. A
         // conductance-form element's unresolved mode that the impulse rule
         // records is not relaxed here: its right limit is the model's own
         // (i_L continuous, v = i_L/g_off: the exact engine's, F-5-10), the
@@ -2293,7 +2293,7 @@ inline SimulationResult run_transient(
             const bool cycle_s = mask_cycle;
             const auto stamped_s = stamped_mask;
             if (has_diodes) diodes.snapshot_on_bits_into(rl_bits);
-            rl_last = last_solved_bits;
+            rl_lsb = last_solved_bits;
             history.snapshot_into(rl_hcur);
             hs.snapshot_into(rl_hs);
             // the run's Newton round-off budget and its counters are not the
@@ -2336,38 +2336,56 @@ inline SimulationResult run_transient(
                 ~AuxEvents() { c.swap_aux_events(); }
             };
             std::optional<AuxEvents> aux_events(std::in_place, cache);
-            for (int i = 0; i < 2 && ok; ++i) {
-                const Real e = eps * static_cast<Real>(i + 1);
+            // One single solve (no mode machinery: its caches and counters are
+            // the run's); `bits`: an OFF conductance-form diode the solve
+            // forward-biases above V_th is turned ON and the solve repeated
+            // (a located turn-off's residual current: no spike through g_off)
+            auto solve_eps = [&](Real e, bool decide) {
                 const Real te = t_from + e;
                 history.compute_b_extra_backward_euler(e, rl_h);
                 b_extra = rl_b + rl_h;
-                add_source_rows(b_extra, te, te, left_by);
+                // the post side of an edge at t_from (lb = 0: te is within the
+                // edge test's ulps of t_from on a long run)
+                add_source_rows(b_extra, te, te, Real{0});
                 if (has_iwave) {
                     sources::compute_current_waveform_b_extra(pool, graph, te, be_iwave,
-                                                              left_by);
+                                                              Real{0});
                     b_extra += be_iwave;
                 }
-                x = rl_x1;
-                try {
-                    rei(te, Real{2} * e, true);   // the mode decided at t_e+
-                } catch (const std::runtime_error&) {
-                    ok = false;   // no right limit recorded; the run goes on
+                for (int round = 0; round < 3; ++round) {
+                    x = rl_x1;
+                    rei(te, Real{2} * e, true, true);
+                    if (!decide || !has_diodes) return;
+                    diodes.snapshot_on_bits_into(rl_last);
+                    bool flip = false;
+                    const auto ents = diodes.entries();
+                    for (Size j = 0; j < ents.size(); ++j) {
+                        const auto& d = ents[j];
+                        if (rl_last[j] || d.var >= 0) continue;
+                        if (stamping::read_node_voltage(x, d.from) -
+                                stamping::read_node_voltage(x, d.to) > d.V_th) {
+                            rl_last[j] = true;
+                            flip = true;
+                        }
+                    }
+                    if (!flip) return;
+                    diodes.restore_on_bits(rl_last);
                 }
-                if (i == 0) {
-                    rl_xa = x;
-                    m_out = stamped_mask;
-                }
+            };
+            try {
+                solve_eps(eps, true);
+                rl_xa = x;
+                m_out = stamped_mask;
+                solve_eps(Real{2} * eps, false);
+            } catch (const std::runtime_error&) {
+                ok = false;   // no right limit recorded; the run goes on
+            } catch (const std::invalid_argument&) {
+                ok = false;   // a refusal (UnsupportedError) of the ε mode
             }
             aux_events.reset();
             restart_factorizations = rf_s;
-            if (ok) {
-                // the two solves in one mode: Richardson; else the ε solve
-                // (O(ε·ẋ), 1e-9 of a step's motion)
-                if (stamped_mask == m_out) {
-                    out = Real{2} * rl_xa - x;
-                } else {
-                    out = rl_xa;
-                }
+            if (ok) {   // the two solves in one mode (single): Richardson
+                out = Real{2} * rl_xa - x;
                 ok = out.allFinite();
             }
             history.restore(rl_hcur);
@@ -2379,7 +2397,7 @@ inline SimulationResult run_transient(
             mask_cycle = cycle_s;
             stamped_mask = stamped_s;
             if (has_diodes) diodes.restore_on_bits(rl_bits);
-            last_solved_bits = rl_last;
+            last_solved_bits = rl_lsb;
             newton_roundoff_run = nr_s;
             result.newton_roundoff_accepts = nr_n;
             result.newton_roundoff_omega_max = nr_w;
@@ -3049,6 +3067,8 @@ inline SimulationResult run_transient(
             //
             // loc: δt_loc of the event at t_from (consistent_start)
             auto run_restart = [&](Real t_from, Real h, Real loc) {
+                const bool rl_ev = rl_want;
+                rl_want = false;
                 const Real h_s = kGamma * h;
                 const Real dt_eq = Real{2} * h_s;
                 be_commit_h = h_s;
@@ -3077,7 +3097,7 @@ inline SimulationResult run_transient(
                     L->be_kept = false;
                     // F-SB-1: the right limit, only where something happens
                     // (the caller's event, a probed jump)
-                    L->rl_ok = (rl_want || ip_jump) &&
+                    L->rl_ok = (rl_ev || ip_jump) &&
                                event_right_limit(run_event_iteration, t_from, h_s, L->rl_x,
                                                  L->rl_m);
                 }
@@ -3241,9 +3261,8 @@ inline SimulationResult run_transient(
                 }
                 lines.m_a = stamped_mask;   // the mode the (sub)step starts in
                 lines.end_own = false;
-                rl_want = ev;
+                rl_want = ev;   // read and cleared by run_restart
                 run_restart(a, h, loc);
-                rl_want = false;
                 if (inner && j >= StepLines::kMax) return;
                 if (inner) {   // the event's right limit (state value)
                     lines.held[j] = false;
