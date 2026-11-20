@@ -85,16 +85,47 @@ See "Selectors and the flyback" below.
    a resume's decision reads an integrated mask and is unchanged) reads that scale.
    Shared by `lcp_apply_` (lcp / auto) and the guard's repair (legacy), so one place
    fixes all three selectors.
-3. `PEDSimulator::resettle_projected_` (scheduler.hpp): a flip found on the projected
-   state is confirmed on the mode's trajectory from the HELD state `x_held` (it was
-   the projected `x`). This is the post-decision re-settle of every LCP decision and
-   guard repair, at every event, not only at t = 0.
+3. `PEDSimulator::resettle_projected_` (scheduler.hpp): at the START decision only, a
+   flip found on the projected state is confirmed on the mode's trajectory from the
+   held (given) state. Tried first at every event: 8 of 162 scoreboard cells moved
+   from `ran` to `DiodeModeInconsistentError` (forward_converter, half_bridge_
+   transformer_dc, boost_pfc_open_loop, active_clamp_forward, flyback_converter):
+   after an event the projected state IS the jump's physics (the forward converter's
+   collapsed transformer current, the function's own comment), so the general form
+   was wrong and was reverted to start-only.
+4. `PEDSimulator::refuse_lost_start_state_` (new, scheduler.hpp): the rule "a
+   projection that changes a state the user supplied is never silent", as a refusal
+   by name. After the t = 0 decision, a NONZERO given state moved by more than 1e-6
+   of itself with no re-initialisation record raises
+   `UnsupportedError('dsed', 'consistent_start', <state label>, 'State')` with the
+   given and kept values and the stored energy removed. Example (new test): 1 A
+   given in L1 whose only onward path is a reverse-biased diode — the head
+   continued from 0 A silently on all selectors (trbdf2 shows the 1 A decaying
+   through g_off). Not covered: states given as 0 (the parasitic relaxation of a
+   start from rest moves them by 1e-8..1.6e-5 in 13 tests of the exact test files:
+   physics of the start's fast cluster, not a lost given value) — a report of those
+   as records would change `reinit_records` / `on_impulse='error'` for every such
+   start and is left out. Survey (temporary fprintf, all `test_dsed*` / `test_exact*`
+   files): no nonzero given state is moved by more than 1e-9 relative at t = 0.
+   `NativeCircuitBuilderAdapter::state_label` / `state_mass` (new) name it.
 
 ## Functions touched (for the merge with the output-rule branch)
 
-* `core/include/pulsim/dsed/builder_adapter.hpp`: `port_scale_state` (new),
-  `port_scale_full` (two defaulted floor parameters).
-* `core/include/pulsim/dsed/scheduler.hpp`: `simulate()` (two lines around the t = 0
+* `core/include/pulsim/dsed/builder_adapter.hpp`: `port_scale_state`, `state_label`,
+  `state_mass` (new), `port_scale_full` (two defaulted floor parameters).
+* `core/include/pulsim/dsed/scheduler.hpp`: `simulate()` (the t = 0 block around
   `decide_modes_`, one reset next to `settle_decisions_ = false`), `run_selector_`
-  (the scale), `resettle_projected_` (one argument), one member `start_decision_`.
+  (the scale), `resettle_projected_` (the confirmation's state at the start),
+  `refuse_lost_start_state_` (new), one member `start_decision_`.
   No change in the output rule, `exact_lti.hpp`, the stepping or the sampling.
+
+## Selectors and the flyback
+
+* legacy (today's default): failed with C4 + D4 and with the rail diode, through the
+  guard's LCP repair (the same scale). Fixed by 1.
+* `'lcp'` and `'auto'`: failed on all four variants. Fixed by 1 (mode) + 3 (D4).
+* The flyback "v_out 0 V on the legacy selector" (group C's side observation,
+  `_flyback(False, 1.0)` of test_saturable_transformer, 100 kHz, 1 ms) is a DIFFERENT
+  defect: it happens at every gate-off, not at the start, and the start's scale is
+  not involved. On this tip: legacy v_out(0.8-1 ms) = -4.3e-14 V (unchanged),
+  'auto' 16.365091 V (truth 16.365).

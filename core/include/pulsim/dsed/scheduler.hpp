@@ -516,6 +516,7 @@ public:
         law_settled_.clear();
         // a run that threw inside fire_event_ must not leak its event context
         settle_decisions_ = false;
+        start_decision_ = false;
         has_event_sample_ = false;
         loc_dx_.resize(0);
         // the output rule's state is per run: a resumed run rebuilds it (its
@@ -528,7 +529,12 @@ public:
             MaskT m0 = system_.current_mask();
             const MaskT prev0 = diode_bits_;
             const MaskT old0 = m0;
+            start_decision_ = true;
+            const Vector x_given = x;
+            const std::size_t n_rec0 = reinit_log_size_();
             decide_modes_(t, x, m0, old0, prev0, old0, result);
+            start_decision_ = false;
+            refuse_lost_start_state_(x_given, x, n_rec0);
             // The ticks at t = 0 run before the first sample; the gate is
             // sampled again with what they wrote.
             if (run_due_ticks_(t, x)) {
@@ -1691,7 +1697,14 @@ private:
         for (std::size_t j = 0; j < diodes_.size(); ++j)
             prev[j] = prev_bits.get(diodes_[j].switch_idx) ? 1 : 0;
         system_.set_mask(rec);
-        const events::CircuitScale sc = system_.port_scale(t, x_held);
+        // the start's `rec` is a guess, never integrated: its recovery map can turn a
+        // given inductor current into g_off volts (F-S-4); the state's own scale there
+        events::CircuitScale sc;
+        if constexpr (requires { system_.port_scale_state(x_held); }) {
+            sc = start_decision_ ? system_.port_scale_state(x_held) : system_.port_scale(t, x_held);
+        } else {
+            sc = system_.port_scale(t, x_held);
+        }
         selector_.passive = passivity_.passive();
         const auto sel = selector_.select(
             shadow_ports_, prev,
@@ -1968,6 +1981,35 @@ private:
         resettle_projected_(t, x, mask, shadow_x_, mk);
     }
 
+    /// The start keeps the state it was GIVEN (F-S-4): a decision at t = 0 that
+    /// changed a nonzero given state by more than 1e-6 of it, with no
+    /// re-initialisation record accounting for it, is refused by name — a mode
+    /// the given state is not consistent with was chosen, and its projection
+    /// would continue the run silently from another state (L_o's 24 A became
+    /// -2.8e-9 A). Parasitic relaxations of states given as 0 are not covered.
+    void refuse_lost_start_state_(const Vector& xg, const Vector& x, std::size_t n_rec0) {
+        if (reinit_log_size_() > n_rec0 || xg.size() != x.size()) return;
+        for (Index i = 0; i < x.size(); ++i) {
+            if (xg[i] == Real{0}) continue;
+            const Real d = std::abs(x[i] - xg[i]);
+            if (!(d > Real{1e-6} * std::abs(xg[i]))) continue;   // NaN refuses too
+            std::string who = "state " + std::to_string(i);
+            Real m = Real{0};
+            if constexpr (requires { system_.state_label(i); system_.state_mass(i); }) {
+                who = system_.state_label(i);
+                m = system_.state_mass(i);
+            }
+            throw UnsupportedError(
+                "dsed", "consistent_start", who, "State",
+                "dsed at t = 0: the start's mode decision moved the given " + who
+                + " from " + sci_(xg[i]) + " to " + sci_(x[i]) + " (stored energy "
+                + sci_(Real{0.5} * m * (xg[i] * xg[i] - x[i] * x[i])) + " J removed) with "
+                "no re-initialisation to account for it: the diode mode chosen is not "
+                "consistent with the given state. Use engine='pwl' with "
+                "discontinuity_restart=True or engine='trbdf2'.");
+        }
+    }
+
     /// After the LCP's mode is projected: the projection jumps over the mode's
     /// fast transient, and a diode whose bias the jump reverses beyond the band
     /// is flipped by its value law, then projected again (at most four rounds;
@@ -2024,8 +2066,16 @@ private:
                 if (by_value == on
                     || std::abs(models::SwitchedDiode::crossing_signal(on, v_d, prm)) <= tol)
                     continue;
-                // confirmed on the OFF-mode trajectory, as the settle confirms a flip
-                if (zero_band_on_(t, x, d, mask, tol, by_value) == on) continue;
+                // confirmed on the OFF-mode trajectory, as the settle confirms a flip. At
+                // t = 0 from the GIVEN state: no event precedes it, and the projection's
+                // slow-manifold asymptote lags the trajectory by the parasitic time
+                // constant (F-S-4: 200 pF across 1 mOhm under a 40 A/us ramp sits at
+                // -8e-9 V, while v_b(t) = R i' (t - tau (1 - e^(-t/tau))) >= 0 from the given
+                // state: the body diode was turned ON and carried -4 mA). After an event
+                // the projected state is the jump's physics (the forward converter below);
+                // reading the held state there broke 8 scoreboard cells.
+                if (zero_band_on_(t, start_decision_ ? x_held : x, d, mask, tol, by_value) == on)
+                    continue;
                 if (pass == 4) { flipped = d.label; break; }
                 diode_bits_.set(d.switch_idx, !on);
                 flipped = d.label;
@@ -3264,6 +3314,7 @@ private:
     };
     Vector x_set_, x_off_;     // settled_: the cascade's and the OFF probe's
     bool settle_decisions_ = false;   // fire_event_: a located diode event
+    bool start_decision_ = false;     // the t = 0 decision: its mask is a guess (F-S-4)
     Vector event_sample_;             // D1: the settled state stored at a located diode event
     bool has_event_sample_ = false;
     std::vector<std::pair<std::size_t, Vector>> law_settled_;   // D1: (sample, settled state)
