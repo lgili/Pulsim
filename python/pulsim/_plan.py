@@ -117,14 +117,14 @@ class ResolvedFrom(Mapping):
         return self._d
 
     def __getitem__(self, key: str) -> str:
-        if self._d is None:
+        defaults = self._defaults
+        if self._d is None and len(defaults) == len(self._args):
             # one key, as _dict() reads it, without building all of them (the
             # exact engine reads 'output_rtol' on every run: ~700 bytecodes)
             src = self._marks.get(key)
             if src is not None:
                 return src
-            defaults = self._defaults
-            if key in defaults and len(defaults) == len(self._args):
+            if key in defaults:
                 d = defaults[key]
                 v = self._args[list(defaults).index(key)]
                 return ("default" if v is d or (
