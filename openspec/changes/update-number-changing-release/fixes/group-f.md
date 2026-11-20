@@ -610,3 +610,73 @@ times asserted bit-equal on all 100). Base tip ffdf5007:
   event times = not comparable, listed), read at each chord's midpoint by the quadratic
   through the dense samples INSIDE the chord and the chord's two ends (one smooth piece).
   The old reading against trbdf2 is kept as `rule_ratio_ref` (information).
+
+### Session 4 reviewer (fresh context, opus, read only) — fixed / left
+
+The reviewer fuzzed a numpy port of `exact_chord_step` (400 random systems with growing
+modes, output rows up to 1e3, ramps: worst 0.9994 × tol; monotone in d on 3000 cases),
+checked the sine stamp convention of `recover_osc` against `compute_sine_b_extra` /
+`current_stamp_` (right), and found the rule-off path byte-identical by construction.
+* FIXED (medium) — the sliver halving could still stretch: with near_time's 1e-12 s floor
+  and d < h/2 it stepped h/2 > d (a 1e11 rad/s ring, d ≈ 9e-14 s). Now `min(d, h/2)`, also
+  on the thermal path.
+* FIXED (medium) — the first rounding floor (16·u·κ·|R||x|) was far too loose (κ is a
+  worst case): it let ll06 / ll09 / rlc_parallel_step back to 16 / 11 / 3. The floor is now
+  the row's actual evaluation magnitude, 16·u·Σ_k |P_jk||z_k| (computed in
+  `exact_chord_step`, `ChordWork::tyf`); the deferral check reads the same floor.
+* FIXED (low) — a bisection whose 1e-12·h probe does not fit returned it as a certified
+  step; it is now `bounded = false` (counted in `n_output_unbounded`, the chord is the step).
+* FIXED (harness) — a dense flow with `n_output_unbounded` > 0 is not a flow (not compared).
+* LEFT (low) — the time-resolution floor `max(d, 64·u·max(1,|t|))` stretches a chord at
+  large t (a 1 GHz ring at t = 100 s, rtol 1e-6) with no counter. Not seen on the set.
+* LEFT (medium, stated) — when the rounding floor binds, the promise is
+  max(rtol·range, atol, the row's own rounding); no counter reports it.
+* LEFT (harness, decided bar) — `rule_ratio_flow` reads chord MIDPOINTS (the bar of
+  DECISIONS 6); for a fast decaying mode the maximum is nearer the start (the midpoint reads
+  0.5–0.62 of it). The property tool reads random instants, which covers it.
+
+### Session 4 — state at hand-off (context budget reached)
+
+Measured (auto+next, the 100 circuit units with a rule cell; `.scratch/f4/after2.jsonl`,
+tip before the reviewer fixes, harness `rule_ratio_flow` with its first stencil):
+* ratio vs the exact flow ≤ 1 on 97 / 100 comparable; the three over 1 were re-read after the
+  stencil fixes (bracketing, linear on a lopsided stencil): ll06 0.998, rlc_parallel_step
+  0.981 — and **ll09_half_bridge_inverter_leg 7.3 (OPEN, genuine)**: the chord
+  [24.013458 µs, 25 µs] starts 13 ns after the 24 µs event, where a fast mode is still
+  alive (V(out) rises 0.82 mV in the first 1.8 ns of the chord, then 0.16 mV over the rest);
+  the chord reads 47.61979 → 47.62077 V straight, the flow 47.62061 V at +1.8 ns. The STATE
+  row I(Lload) reads 6.9 × too, so this is not the recovered-row defect: the bound (or the
+  path that stores the chord: the fast-sample step ends of `plan_fast_samples_`, the F-X-4
+  deferral) let a 1 µs chord through with the fast mode's amplitude 2|γ| ≈ 1.6 mV above
+  the tolerance (≈ 7e-5). NEXT STEP: print, in `push_output_samples_` / the deferral block,
+  (t0, t1, d, output_certified_, out_defer) for ll09 between 24.0 and 24.1 µs; check whether
+  the chord came from the deferral check (`output_step_(ts, states.back(), …, false)`) with
+  a stale `ts` / tolerance, or from a step whose rule call returned h uncounted.
+* sample counts after / before (ratio): min 1.00, median 1.00, p75 1.25, p90 4.65, max 14.2
+  (19 of 100 above 2×: boost_pfc_open_loop 13 531 → 191 771, buck_dcm 891 → 8 590,
+  textbook_erickson_buck_ccm 6 946 → 48 104, ll06 2 943 → 18 251, cl_buck_pi 20 228 →
+  97 726 …: the switch-node / high-impedance rows that were never held before — the buck
+  DCM's V(sw) ring binds at 0.991 of its tolerance). three_phase_balanced_rl_load 5 153 →
+  8 038 (after the rounding floor; 2.1e6 without it). ladder500 NOT re-measured.
+* property tool (`benchmarks/tools/output_rule_property.py`, dt grid = median chord / 100,
+  200 random grid instants per circuit, events within 1e-12 s): on the earlier tip 26 of 34
+  comparable, worst 0.9968, none over 1 (8 not comparable: event offsets 1e-17..1e-13 s —
+  now accepted below 1e-12 s — and two with other events, half_bridge_transformer_dc /
+  forward_converter, rule-off projection). The `--truth` (mpmath) run on six solved
+  circuits (`.scratch/f4/truth_units.txt`) and the 30-circuit re-run on the final tip were
+  NOT run. `.scratch/f4/run3.sh` runs all of it plus the output_rtol events gate
+  (`.scratch/f4/evgate.py`).
+* NOT run on the final tip: the rehearsal tool itself (its rule column now reads
+  `rule_ratio_flow`, the old one is `rule_ratio_ref`), goldens / dsed bit-identity /
+  scoreboard default cells (rule-off is unchanged by construction: every change sits behind
+  output_rtol > 0 — the reviewer confirmed — but not measured), `pulsim_core_dsed_tests`
+  (tree configured at `.scratch/build-ctest`, not built; the new C++ case is in
+  test_exact_lti.cpp), full pytest, instructions per run.
+* Item 2 (certificate cost, the sines in the certificate — coordinator's addition: the
+  three-phase bridge with line inductance, D2 ON at 5.000000250912935 ms with D5 still ON,
+  D5 OFF at 5.001350943090826 ms; the engine flips both at the D2 instant) and item 3 (the
+  t_end-dependent parasitic cut): NOT started. For item 2 the shared object is ready: the
+  certificate's row q_k = c·V_k is a `chord_P` row; `exact_chord_step`'s second-order form
+  (|Σ q z̈| + δ|Σ q z̈ λ| + δ²/2 Σ|q z̈||λ|²) with z̈(a) = z̈(t0)e^{λτ} is the sharper E; for the
+  sines the predicate's direct oscillator share is (recover_osc[from] − recover_osc[to]) ×
+  its gain, which lets `exact_scan_modes` drop its `aug_omegas.empty()` refusal.

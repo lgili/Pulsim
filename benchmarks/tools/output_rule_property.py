@@ -3,7 +3,8 @@
 For each circuit: the auto+next run (the rule on, no dt) and the SAME route with a
 ``dt`` grid (the rule off: every stored sample is the exact flow at k·dt). At up to
 ``--points`` random grid instants strictly inside a rule chord that holds no event,
-the chord's linear interpolation must be within the promise,
+the chord's linear interpolation must be within the promise (``--truth``: also
+against the mpmath truth, exact_truth.py, on the scoreboard's solved circuits),
 ``|interp − flow| ≤ output_rtol·range + atol`` (range: the flow's own range over
 the run, at least 1e-3 of its peak), for every observable. Events of the two runs
 must agree (else the circuit is listed as not comparable, never as passing).
@@ -27,8 +28,11 @@ import next_defaults_rehearsal as R  # noqa: E402
 import v1_reader  # noqa: E402
 
 
+EVENT_TOL = 1e-12   # s: two runs whose events differ by more are not compared
+
+
 def check(unit: str, points: int = 200, dt_factor: float = 100.0, max_grid: int = 400_000,
-          seed: int = 0) -> dict:
+          seed: int = 0, truth: bool = False) -> dict:
     warnings.simplefilter("ignore")
     case = v1_reader.load(R.ROOT / unit)
     cols = dr.observables_of(case)
@@ -48,8 +52,8 @@ def check(unit: str, points: int = 200, dt_factor: float = 100.0, max_grid: int 
         warnings.simplefilter("ignore")
         kw = {k: v for k, v in nd.profile_kwargs(eng).items() if k != "output_rtol"}
         rg = R._no_dt_run(case, eng, dt=dt, **kw)
-    if not np.array_equal(np.asarray(res.event_times), np.asarray(rg.event_times)):
-        ea, eb = np.asarray(res.event_times), np.asarray(rg.event_times)
+    ea, eb = np.asarray(res.event_times), np.asarray(rg.event_times)
+    if ea.size != eb.size or (ea.size and float(np.abs(ea - eb).max()) > EVENT_TOL):
         n = min(ea.size, eb.size)
         return dict(unit=unit, comparable=False, dt=dt,
                     why=f"events differ: {ea.size} vs {eb.size}, max |dt_e| "
@@ -69,6 +73,7 @@ def check(unit: str, points: int = 200, dt_factor: float = 100.0, max_grid: int 
     k = np.searchsorted(ev, tg, side="left")
     prev, nxt = evp[k], evp[k + 1]
     ok &= (prev < lo) & (nxt >= hi)   # no event strictly inside (lo, hi)
+    ok &= (tg - prev > EVENT_TOL) & (nxt - tg > EVENT_TOL)   # nor within the runs' event offset
     for a, b in excl:
         ok &= ~((lo < b) & (hi > a))
     idx = np.flatnonzero(ok)
@@ -77,6 +82,13 @@ def check(unit: str, points: int = 200, dt_factor: float = 100.0, max_grid: int 
     rng = np.random.default_rng(seed)
     idx = rng.choice(idx, size=min(points, idx.size), replace=False)
     worst, where = 0.0, None
+    sol = None
+    if truth:
+        import exact_scoreboard as sb
+        import exact_truth as et
+        if unit in sb.solved_circuits():
+            sol = et.Solver(et.Circuit(R.ROOT / unit), sb.truth_dps(unit)).run()
+    tworst = None
     for c in cols:
         y, f = ys[c], yg[c]
         r = max(float(np.ptp(f)), 1e-3 * float(np.abs(f).max()))
@@ -87,8 +99,14 @@ def check(unit: str, points: int = 200, dt_factor: float = 100.0, max_grid: int 
         q = int(np.argmax(e))
         if e[q] > worst:
             worst, where = float(e[q]), (c, float(tg[idx][q]))
+        if sol is not None:   # the same instants against the mpmath truth
+            cand, gap = sol.at_float([c], tg[idx], 0.0, gaps=True)
+            own = np.argmin(np.where(np.isnan(gap), np.inf, gap), axis=1)
+            tv = cand[c][np.arange(idx.size), own]
+            et_ = float(np.nanmax(np.abs(lin - tv)) / tol)
+            tworst = et_ if tworst is None else max(tworst, et_)
     return dict(unit=unit, comparable=True, ratio=worst, at=where, n_points=int(idx.size), dt=dt,
-                n_rule=int(t.size), rtol=rt)
+                n_rule=int(t.size), rtol=rt, truth_ratio=tworst)
 
 
 def main(argv=None) -> int:
@@ -98,10 +116,11 @@ def main(argv=None) -> int:
     ap.add_argument("--out", required=True)
     ap.add_argument("--points", type=int, default=200)
     ap.add_argument("--dt-factor", type=float, default=100.0)
+    ap.add_argument("--truth", action="store_true", help="also against the mpmath truth (solved circuits)")
     a = ap.parse_args(argv)
     for u in Path(a.units).read_text(encoding="utf-8").split():
         try:
-            rec = check(u, a.points, a.dt_factor)
+            rec = check(u, a.points, a.dt_factor, truth=a.truth)
         except Exception as ex:  # noqa: BLE001 - reported per circuit
             rec = dict(unit=u, comparable=False, why=f"{type(ex).__name__}: {ex}"[:200])
         with open(a.out, "a", encoding="utf-8") as fh:

@@ -242,7 +242,7 @@ def _dense_flow(case, name, res, rt):
         if not np.array_equal(np.asarray(res.event_times), np.asarray(rd.event_times)):
             return None, "dense flow: other event times"
         og = (getattr(rd, "diagnostics", None) or {}).get("output_grid") or {}
-        if not og.get("n_output_capped") and og.get("output_budget_t") is None:
+        if not og.get("n_output_capped") and not og.get("n_output_unbounded") and og.get("output_budget_t") is None:
             return rd, None
         why = f"dense flow capped at {f}: {og}"[:200]
     return None, why

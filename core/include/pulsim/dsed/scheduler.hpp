@@ -664,8 +664,8 @@ public:
                     // no sliver step short of the edge (scheduler_auto.hpp)
                     if (h_ex < t_target - t && near_time(t + h_ex, t_target)) {
                         // a rule-cut step is not stretched past its bound: halve the rest
-                        h_ex = out_steps && output_certified_ ? Real{0.5} * (t_target - t)
-                                                              : t_target - t;
+                        h_ex = out_steps && output_certified_
+                                   ? std::min(h_ex, Real{0.5} * (t_target - t)) : t_target - t;
                     }
                     const MaskT mask_before = system_.current_mask();
                     advance_(t, x, h_ex, x_new_);
@@ -3499,7 +3499,7 @@ private:
             // ... nor a chord stretched past the bound to reach it (near_time's 1e-12 s
             // floor is 0.7 % of a 1.5e-10 s chord: ll06's ring read 1.007 × the
             // tolerance): halve the rest instead, each half within d
-            tau += near_time(tau + d, t1) ? Real{0.5} * h : d;
+            tau += near_time(tau + d, t1) ? std::min(d, Real{0.5} * h) : d;
             advance_(t0, x0, tau - t0, output_x_);
             ped_push_sample(result, tau, output_x_, mask, mask, nullptr);
             ++result.n_output_samples;

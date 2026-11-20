@@ -565,20 +565,12 @@ public:
                 e.exact.chord_P_im = O * e.exact.V_im;
             }
             w.ta.conservativeResize(n + 2 * k + w.ty.size());
-            // floored at the row's own evaluation error (u·κ of the modal basis times the
-            // terms it sums): a balanced three-phase neutral (exactly 0, 3.4e-7 V of
-            // rounding) held to atol = 1e-9 spent the run's whole sample budget
-            const Real ux = Real{16} * kExactRoundoff * std::max(Real{1}, e.exact.kappa);
-            // (written back: the caller's deferred-end check reads the same tolerance)
-            w.tyf = ux * (e.recover_from_state.cwiseAbs() * x.cwiseAbs()
-                          + (k > 0 && e.recover_osc.rows() == w.ty.size()
-                                 ? Vector(e.recover_osc.cwiseAbs().rowwise().sum())
-                                 : Vector::Zero(w.ty.size())));
-            w.ty = w.ty.cwiseMax(w.tyf);
-            w.ta.tail(w.ty.size()) = w.ty;
+            w.ta.tail(w.ty.size()) = w.ty;   // floored in exact_chord_step (w.tyf)
         }
         if (pwl_sources_.empty()) {
-            return exact_chord_step(e.exact, w.xa, nullptr, nullptr, w.ta, h, bounded, w);
+            const Real d = exact_chord_step(e.exact, w.xa, nullptr, nullptr, w.ta, h, bounded, w);
+            if (w.tyf.size() == w.ty.size()) w.ty = w.ty.cwiseMax(w.tyf);
+            return d;
         }
         const auto m = static_cast<Index>(pwl_sources_.size());
         w.v.resize(m);
@@ -592,7 +584,9 @@ public:
         }
         w.c0.head(n).noalias() = e.pwl_cols * w.v;
         w.c1.head(n).noalias() = e.pwl_cols * w.s;
-        return exact_chord_step(e.exact, w.xa, &w.c0, &w.c1, w.ta, h, bounded, w);
+        const Real d = exact_chord_step(e.exact, w.xa, &w.c0, &w.c1, w.ta, h, bounded, w);
+        if (w.tyf.size() == w.ty.size()) w.ty = w.ty.cwiseMax(w.tyf);   // the deferral check's
+        return d;
     }
 
     /// The current mode's settle length for decisions (exact_settle_length).

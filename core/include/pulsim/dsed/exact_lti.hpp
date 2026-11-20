@@ -109,7 +109,7 @@ struct ExactLTI {
 struct ChordWork {
     Vector xa, ta, c0, c1, v, s;            // the adapter's augmented state / sources
     Vector cr, ci, a;                       // V⁻¹c (re, im); |z̈_k| (decaying / zero modes)
-    Vector ty, tyf;                         // tolerance of each recovered row (empty: none); its rounding floor
+    Vector ty, tyf, te;                     // tolerance of each recovered row (empty: none); its rounding floor; the effective tol
     Vector gB, gC, gD;                      // the growing modes' terms at one probe
     Vector eb;                              // the bound at one probe
     std::vector<Eigen::Index> grow;         // modes with Re λ > 0
@@ -947,12 +947,30 @@ inline constexpr Real kSettleTau = Real{40};
                    .matrix();
         return true;
     };
+    // a recovered row (P's rows past the state's) cannot be held below its own evaluation
+    // error, 16·u·Σ_k |P_jk||z_k| (the sums its samples are made of): a balanced three-phase
+    // neutral, exactly 0 with 3.4e-7 V of rounding, held to atol spent the run's whole budget
+    const Real* te = tol.data();
+    if (rows_p && r > n) {
+        w.cr = (e.z_re.array().square() + e.z_im.array().square()).sqrt().matrix();
+        w.tyf.noalias() = e.chord_vabs.bottomRows(r - n) * w.cr;
+        w.tyf *= Real{16} * kExactRoundoff;
+        w.te = tol;
+        w.te.tail(r - n) = w.te.tail(r - n).cwiseMax(w.tyf);
+        te = w.te.data();
+    } else {
+        w.tyf.resize(0);
+    }
+    const Eigen::Map<const Vector> tol_e(te, r);
     // whether step d satisfies the bound for every component
-    auto fits = [&](Real d) { return bound(d) && (w.eb.array() <= tol.array()).all(); };
+    auto fits = [&](Real d) { return bound(d) && (w.eb.array() <= tol_e.array()).all(); };
     if (fits(h)) return h;
     // bisect in log d; lo always fits, so the result is a bound whatever the split does
     Real lo = h * Real{1e-12}, hi = h;
-    if (!fits(lo)) return lo;
+    if (!fits(lo)) {   // not even 1e-12·h fits: no bound (counted as unbounded)
+        bounded = false;
+        return h;
+    }
     for (int it = 0; it < 60 && hi > lo * Real{1.01}; ++it) {
         const Real mid = std::sqrt(lo * hi);
         (fits(mid) ? lo : hi) = mid;

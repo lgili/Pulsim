@@ -169,7 +169,7 @@ def rule_ratio(t, y, ref: Reference, *, rtol: float, atol: float, exclude=()) ->
 def rule_ratio_flow(t, y, td, yd, *, rtol: float, atol: float, exclude=()) -> float:
     """:func:`rule_ratio` against a DENSE trace of the exact flow (the exact engine at a
     much smaller ``output_rtol``, the same events): at each chord's midpoint the flow is
-    the quadratic through the three samples nearest it among the dense samples inside
+    the quadratic through three samples bracketing it among the dense samples inside
     the chord and the chord's own two ends (exact samples too) -- one smooth piece: a
     rule chord holds no event and no source corner. The rule's promise is about the
     exact trajectory: trbdf2 at rtol 1e-8 read linearly between its steps put 48 of the
@@ -194,11 +194,18 @@ def rule_ratio_flow(t, y, td, yd, *, rtol: float, atol: float, exclude=()) -> fl
         m = 0.5 * (lo[q] + hi[q])
         ts = np.r_[lo[q], td[i0[q]:i1[q]], hi[q]]
         ys = np.r_[y[k], yd[i0[q]:i1[q]], y[k + 1]]
-        if ts.size > 3:
-            c = np.sort(np.argsort(np.abs(ts - m))[:3])
+        if ts.size > 3:   # bracket m (never extrapolate): the nearest on each side + the next nearest
+            j = int(np.searchsorted(ts, m))
+            c = [j - 1, j]
+            c.append(j - 2 if j + 1 >= ts.size or (j >= 2 and m - ts[j - 2] < ts[j + 1] - m) else j + 1)
+            c = sorted(c)
+            h1, h2 = ts[c[1]] - ts[c[0]], ts[c[2]] - ts[c[1]]
+            # a lopsided stencil extrapolates a short piece's curvature over a long one:
+            # there the dense run's own chord (its promise: within its smaller rtol) is read
+            c = c if max(h1, h2) <= 4.0 * min(h1, h2) else [j - 1, j]
             ts, ys = ts[c], ys[c]
         if ts.size < 3:
-            f = 0.5 * (ys[0] + ys[-1])
+            f = ys[0] + (ys[-1] - ys[0]) * (m - ts[0]) / (ts[-1] - ts[0])
         else:
             f = (ys[0] * (m - ts[1]) * (m - ts[2]) / ((ts[0] - ts[1]) * (ts[0] - ts[2]))
                  + ys[1] * (m - ts[0]) * (m - ts[2]) / ((ts[1] - ts[0]) * (ts[1] - ts[2]))
