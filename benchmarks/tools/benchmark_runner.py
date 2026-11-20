@@ -21,9 +21,12 @@ except ImportError:  # pragma: no cover - optional dependency
 # restore-reference-benchmark-harness: scenarios run through the harness
 # v1 reader and `pulsim.simulate` (the old backend module, never in the
 # repository, is gone).
+import sys
 import time as _time
 
-import v1_reader
+# `kpi` is the package benchmarks/kpi: reachable when run as a script, not only from tests
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import v1_reader  # noqa: E402
 
 # Onda 1 of the bench-tool refresh: optional rich-based terminal UI.
 # `benchmarks/_console.py` exposes BenchProgress + rendering helpers
@@ -185,6 +188,30 @@ def apply_runtime_defaults(netlist: Dict[str, Any]) -> None:
         simulation["step_mode"] = "fixed"
 
 
+def v2_refusal(simulation: Any, variable: Optional[bool] = None) -> Optional[str]:
+    """Why a v1 scenario's solver selection cannot run on 2.0, or None.
+
+    The runner maps a v1 file to ``pwl`` (fixed step, trapezoidal) or
+    ``trbdf2`` (variable step); a benchmarks.yaml scenario that selects
+    another integrator, an iterative linear solver or Newton-Krylov would
+    otherwise run as that default under the scenario's name.
+    """
+    sim = simulation if isinstance(simulation, dict) else {}
+    if variable is None:
+        variable = str(sim.get("step_mode", "")).lower() == "variable" or bool(sim.get("adaptive_timestep"))
+    integ = str(sim.get("integrator", "trapezoidal")).lower()
+    if integ not in ("trapezoidal", "trap") and not (integ == "trbdf2" and variable):
+        return f"v1 integrator {integ!r}{' (fixed step)' if integ == 'trbdf2' else ''} has no 2.0 equivalent here"
+    solver = sim.get("solver") if isinstance(sim.get("solver"), dict) else {}
+    order = [str(x).lower() for x in solver.get("order") or []]
+    if any(x != "klu" for x in order) or "iterative" in solver:
+        return f"v1 linear solver {order or ['iterative']} has no 2.0 equivalent (2.0 picks its own)"
+    newton = sim.get("newton") if isinstance(sim.get("newton"), dict) else {}
+    if newton.get("enable_newton_krylov"):
+        return "v1 Newton-Krylov has no 2.0 equivalent"
+    return None
+
+
 def run_pulsim(
     netlist_path: Path,
     output_path: Path,
@@ -198,7 +225,7 @@ def run_pulsim(
     here and is refused; ``use_initial_conditions`` is read from the file.
     """
     if preferred_mode is not None:
-        raise RuntimeError(f"periodic mode {preferred_mode!r} is not run by the v2 harness")
+        raise v1_reader.Unmapped(f"periodic mode {preferred_mode!r} is not run by the v2 harness")
     case = v1_reader.load(netlist_path)
     sim = load_yaml(netlist_path).get("simulation") or {}
     variable = str(sim.get("step_mode", "")).lower() == "variable" or bool(sim.get("adaptive_timestep"))
@@ -538,6 +565,16 @@ def run_benchmarks(
             use_initial_conditions = bool(
                 simulation_cfg.get("uic", False) if isinstance(simulation_cfg, dict) else False
             )
+            # only a SCENARIO's solver override is refused: a file's own `integrator:` (29 say
+            # bdf1) is history, and benchmark_ngspice / local_limit_suite call run_pulsim directly
+            refusal = v2_refusal((scenario_override or {}).get("simulation"), _is_variable)
+            if refusal is not None:
+                results.append(ScenarioResult(
+                    benchmark_id=benchmark_id, scenario=scenario_name, status="skipped",
+                    runtime_s=0.0, steps=0, max_error=None, rms_error=None,
+                    message=f"refused: {refusal}", telemetry={}))
+                _emit_progress_for_last()
+                continue
 
             with tempfile.TemporaryDirectory() as tmpdir:
                 tmpdir_path = Path(tmpdir)
@@ -558,16 +595,17 @@ def run_benchmarks(
                         use_initial_conditions=use_initial_conditions,
                     )
                 except Exception as exc:
+                    refused = isinstance(exc, v1_reader.Unmapped)
                     results.append(
                         ScenarioResult(
                             benchmark_id=benchmark_id,
                             scenario=scenario_name,
-                            status="failed",
+                            status="skipped" if refused else "failed",
                             runtime_s=0.0,
                             steps=0,
                             max_error=None,
                             rms_error=None,
-                            message=str(exc),
+                            message=f"refused: {exc}" if refused else str(exc),
                             telemetry={},
                         )
                     )
@@ -638,6 +676,10 @@ def run_benchmarks(
                             status = "failed"
                             message = str(exc)
                         else:
+                            # the first stored sample of an algebraic node is not solved
+                            # (KNOWN_LIMITATIONS; DECISIONS OQ8): never compared
+                            if times_eval and times_eval[0] == times[0]:
+                                times_eval, values_eval = times_eval[1:], values_eval[1:]
                             if validation_type == "analytical":
                                 try:
                                     max_error, rms_error = validate_analytical(

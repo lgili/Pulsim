@@ -1,8 +1,6 @@
 # Pulsim 2.x usage guide (for AI coding assistants)
 
-`python -m pulsim.guide` prints it with the installed version on the
-first line; `pulsim.ai_guide()` returns it. The guide beats
-your memory: Pulsim 2 changed behaviour but kept most 1.x names. Every
+`pulsim.ai_guide()` returns this text. It beats your memory: Pulsim 2 changed behaviour but kept most 1.x names. Every
 `python` block runs in the test suite; printed numbers are its output.
 
 Short version:
@@ -28,7 +26,7 @@ Short version:
 
 - `python -m pulsim.guide` (this text) and `python -m pulsim.guide --path`.
 - Native classes are pybind11 builtins (`inspect.signature` fails): read
-  the first `__doc__` line or the type stubs (`pulsim/_pulsim.pyi`).
+  `__doc__` or the stubs (`pulsim/_pulsim.pyi`).
 - `p.catalog()` lists every builder method and helper by category;
   `p.example("buck")` prints a runnable snippet (`"rc"`, `"boost"`,
   `"yaml"`, `"bode"`, ...).
@@ -450,11 +448,12 @@ datasheet ESR, ESL, C_par; fixed step `dt <= 1/(20*f_res)`. MLCC bias:
 `passives.fit_mlcc_dc_bias`. Lines: `model='bergeron'` is exact;
 `model='pi'` needs `recommend_line_sections`.
 Other `simulate` keywords: `switch_fn`, `t_start`, `store_every`,
-`auto_regularize`, `progress`.
+`auto_regularize`, `progress`. Measure cost by counts, not time:
+`res.stats.n_factorizations` etc. (0 if unreported), `res.counters` (pwl).
 
 ## 5. Traps
 
-Each row was measured on this version. The fix column is what to write.
+Measured on this version; the last column is the fix.
 
 | # | Wrong assumption | What actually happens | Do this instead |
 |---|---|---|---|
