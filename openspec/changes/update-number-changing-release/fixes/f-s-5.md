@@ -291,3 +291,4 @@ NEXT STEPS (in order):
 4. Cost (instructions per accepted step, stateless trbdf2/pwl, min of six):
    NOT run. The rule adds a 32-entry shift per Newton iteration only when the
    acceptance is on (transient Newton solves), nothing on linear circuits.
+- Full pytest on the 1428a5e3 tree (extension of 6e5241a6): 6434 passed, 114 skipped, 18 xfailed, 0 failed (6 min 39 s). ll13 is not covered by a pytest; only trbdf2_identity sees it.
