@@ -392,6 +392,11 @@ private:
         for (std::size_t di = 0; di < devs_.size(); ++di) {
             auto& d = devs_[di];
             const bool on1 = mask.get(static_cast<Size>(d.law.bit));
+            if (d.rl_pending && t0 >= d.rl_t) {   // an unflipped device's right limit
+                d.v = d.rl_v;
+                d.i = d.rl_i;
+                d.rl_pending = false;
+            }
             if (d.ev_pending && t0 >= d.ev_t) {
                 // the first step after an event: under its right side it
                 // starts from the right limit; otherwise the event is stale
@@ -490,9 +495,16 @@ public:
                 // from the right limit, as the flipped devices' do (release D3:
                 // the left limit at the step's start weight drifted 4e-5 of a
                 // VSI's conduction energy once the edge's probe was no step)
+                // Pending, not written now: at a diode landing the landing step
+                // itself is booked after this call and must end on its left
+                // limit (written at once, it started from the right limit: a
+                // first-order error per landing, 1.4e-4 J on a rectifier's
+                // off switch, review of the gate-edge merge).
                 if (!(d.ev_pending && d.ev_t == t)) {
-                    d.v = v_of_(d, x_r);
-                    d.i = i_of_(d, x_r, on_r);
+                    d.rl_pending = true;
+                    d.rl_t = t;
+                    d.rl_v = v_of_(d, x_r);
+                    d.rl_i = i_of_(d, x_r, on_r);
                 }
                 continue;
             }
@@ -607,8 +619,8 @@ public:
             // a network bind_ could not correct keeps the old rule
             if (d.node < 0 || !corrected_(d.node)) continue;
             const bool on = d.ev_pending ? d.ev_on : d.on;
-            const Real v = d.ev_pending ? d.ev_v : d.v;
-            const Real i = d.ev_pending ? d.ev_i : d.i;
+            const Real v = d.ev_pending ? d.ev_v : d.rl_pending ? d.rl_v : d.v;
+            const Real i = d.ev_pending ? d.ev_i : d.rl_pending ? d.rl_i : d.i;
             Real pw = 0;
             if (d.spec.conduction == thermal::ConductionHeat::Electrical) {
                 pw = v * i;
@@ -803,6 +815,9 @@ private:
         // an event() whose right limit the next accept_step() starts from
         bool ev_pending = false, ev_on = false;
         Real ev_t = 0, ev_v = 0, ev_i = 0, ev_e = 0;
+        // an unflipped device's right-limit reading at an event (no booking)
+        bool rl_pending = false;
+        Real rl_t = 0, rl_v = 0, rl_i = 0;
     };
 
     /// Undo the pending event's booking (its record, ledger and heat).
@@ -921,7 +936,9 @@ public:
             }
         }
         for (const auto& d : devs_) {
-            o.insert(o.end(), {Real(d.on), d.v, d.i, d.x_tj, Real(d.ev_pending),
+            // a pending right limit is the reading the resumed step starts from
+            o.insert(o.end(), {Real(d.on), d.rl_pending ? d.rl_v : d.v,
+                               d.rl_pending ? d.rl_i : d.i, d.x_tj, Real(d.ev_pending),
                                Real(d.ev_on), d.ev_t, d.ev_v, d.ev_i, d.ev_e});
             for (const auto* c : {&d.e_on, &d.e_off, &d.e_el, &d.e_tab, &d.e_imp}) {
                 o.push_back(c->s);
