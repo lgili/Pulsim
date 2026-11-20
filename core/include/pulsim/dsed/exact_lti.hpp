@@ -978,37 +978,6 @@ inline constexpr Real kSettleTau = Real{40};
     return lo;
 }
 
-/// exact_chord_step's bound for ONE row g = Re Σ_k q_k z_k over [a, a + d], from the
-/// modal second derivative at a, zdd_a[k] = z̈_k(a): the same split (F: the modes with
-/// s_k = 2/|λ_k|² < d²/8, at their amplitude) and the same three forms for the rest
-/// (triangle; first and second order about a), growing modes at e^{Re λ d}. The event
-/// scan's no-crossing certificate reads it (F-X-5): one bound for chords and crossings
-/// (pinned to exact_chord_step's per-row value by test_exact_lti.cpp).
-[[nodiscard]] inline Real chord_row_bound(const Eigen::VectorXcd& q, const Eigen::VectorXcd& zdd_a,
-                                          const Eigen::VectorXcd& lambda, Real d) {
-    const Real d8 = d * d / Real{8};
-    Real f = Real{0}, b = Real{0}, c = Real{0}, dd = Real{0};
-    std::complex<Real> a0{}, a1{};
-    for (Eigen::Index k = 0; k < q.size(); ++k) {
-        const std::complex<Real> lam = lambda[k];
-        const Real r2 = std::norm(lam);
-        const Real m = std::abs(q[k]) * std::abs(zdd_a[k]);
-        if (lam.real() <= Real{0} && r2 > Real{0} && Real{2} / r2 < d8) {
-            f += m * (Real{2} / r2);
-            continue;
-        }
-        const Real mg = lam.real() > Real{0} ? m * std::exp(lam.real() * d) : m;
-        b += mg;
-        c += mg * std::sqrt(r2);
-        dd += mg * r2;
-        const std::complex<Real> qz = q[k] * zdd_a[k];
-        a0 += qz;
-        a1 += qz * lam;
-    }
-    const Real r0 = std::abs(a0.real());
-    return f + d8 * std::min({b, r0 + d * c, r0 + d * std::abs(a1.real()) + d * d / Real{2} * dd});
-}
-
 /// A step's error per unit of state, as the propagator states it: tier 1
 /// u·κ₂(Ṽ) and the kept pairs' first-order defect (pair_quality); tier 2
 /// its Padé error estimate, or the tier's accepted level when not judged.

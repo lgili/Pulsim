@@ -1423,7 +1423,6 @@ private:
         // active_clamp_forward). Tier-1 modes without sine sources only.
         const ExactLTI* cert = nullptr;
         bool cert_tried = false;
-        scan_om_ = nullptr;
         for (std::size_t ip = 0; ip < preds.size(); ++ip) {
             const auto& p = preds[ip];
             if (p.required_bit >= 0 &&
@@ -1433,29 +1432,6 @@ private:
             Real ga = p.value(t0, x0);
             ++result.n_predicate_evals;
             const Real ga0 = ga;
-            const SchedulerDiode* dio = admissible_sign_(p.type) != 0 ? diode_of_(p.aux_index) : nullptr;
-            // the diode predicate's own node pair (an ON branch-form diode reads its current)
-            const auto pair_of = [&]() -> std::pair<Index, Index> {
-                if (p.type == PredicateType::DiodeOff && dio->reads_current()) return {dio->var, -1};
-                return {dio->from, dio->to};
-            };
-            // its direct sine share per oscillator coordinate (augmented modes only), and
-            // that share's value at t0 (the predicate's own reading at x = 0 carries it)
-            const auto osc_share = [&](Eigen::Index nx, Real& at_t0) -> bool {
-                at_t0 = Real{0};
-                if (scan_z_.size() == nx) return true;
-                if constexpr (requires { system_.node_pair_osc(Index{0}, Index{0}, scan_r_); }) {
-                    const auto [a, c] = pair_of();
-                    system_.node_pair_osc(a, c, scan_r_);
-                    if (scan_om_ == nullptr || scan_r_.size() != scan_z_.size() - nx) return false;
-                    for (Eigen::Index j = 0; j < scan_r_.size(); ++j) {
-                        const Real om = (*scan_om_)[static_cast<std::size_t>(j / 2)];
-                        at_t0 += scan_r_[j] * (j % 2 == 0 ? std::sin(om * t0) : std::cos(om * t0));
-                    }
-                    return true;
-                }
-                return false;
-            };
             bool aq_ready = false, aq_none = false;
             const auto aq_of = [&]() -> bool {
                 if (aq_ready) return true;
@@ -1465,34 +1441,26 @@ private:
                     cert_tried = true;
                     if constexpr (requires { system_.exact_scan_modes(t0, x0, scan_z_, scan_zdd_); })
                         cert = system_.exact_scan_modes(t0, x0, scan_z_, scan_zdd_);
-                    if constexpr (requires { system_.exact_scan_omegas(); })
-                        if (cert != nullptr) scan_om_ = &system_.exact_scan_omegas();
                 }
-                if (cert == nullptr || dio == nullptr) return false;
-                const auto nx = x0.size();
-                const auto n = scan_z_.size();   // nx, or nx + 2k with sine sources
+                if (cert == nullptr) return false;
+                const auto n = x0.size();
                 if (cert->scan_q.size() < preds.size()) cert->scan_q.resize(preds.size());
                 Eigen::VectorXcd& q = cert->scan_q[ip];   // n row entries (and g(0) at the probe's t)
                 if (q.size() != n + 1) {   // once per mode and predicate
-                    Real unused = Real{0};
-                    if (!osc_share(nx, unused)) return false;
                     q.resize(n + 1);
-                    scan_probe_.setZero(nx);
+                    scan_probe_.setZero(n);
                     const Real g0 = p.value(t0, scan_probe_);
                     for (Eigen::Index k = 0; k < n; ++k) {
-                        scan_probe_ = cert->V_re.col(k).head(nx);
-                        Real re = p.value(t0, scan_probe_) - g0;
-                        scan_probe_ = cert->V_im.col(k).head(nx);
-                        Real im = p.value(t0, scan_probe_) - g0;
-                        if (n > nx) {
-                            re += scan_r_.dot(cert->V_re.col(k).tail(n - nx));
-                            im += scan_r_.dot(cert->V_im.col(k).tail(n - nx));
-                        }
-                        q[k] = {re, im};
+                        scan_probe_ = cert->V_re.col(k);
+                        const Real re = p.value(t0, scan_probe_) - g0;
+                        scan_probe_ = cert->V_im.col(k);
+                        q[k] = {re, p.value(t0, scan_probe_) - g0};
                     }
                     q[n] = g0;
                     result.n_predicate_evals += static_cast<Size>(2 * n + 1);
                 }
+                scan_aq_.resize(n);
+                for (Eigen::Index k = 0; k < n; ++k) scan_aq_[k] = std::abs(q[k]) * std::abs(scan_zdd_[k]);
                 aq_ready = true;
                 aq_none = false;
                 return true;
@@ -1506,11 +1474,8 @@ private:
                 if (affine_ < 0) {
                     const Eigen::VectorXcd& q = cert->scan_q[ip];
                     const auto n = q.size() - 1;
-                    scan_probe_.setZero(x0.size());   // g(0) carries the sources: read at t0
-                    Real at_t0 = Real{0};
-                    affine_ = 0;
-                    if (!osc_share(x0.size(), at_t0)) return false;
-                    Real lin = p.value(t0, scan_probe_) - at_t0, mag = std::abs(lin) + std::abs(at_t0);
+                    scan_probe_.setZero(n);   // g(0) carries the sources: read at t0
+                    Real lin = p.value(t0, scan_probe_), mag = std::abs(lin);
                     ++result.n_predicate_evals;
                     for (Eigen::Index k = 0; k < n; ++k) {
                         const std::complex<Real> qz = q[k] * scan_z_[k];
@@ -1521,21 +1486,23 @@ private:
                 }
                 return affine_ == 1;
             };
-            // |g − chord| on [a, b] ≤ chord_row_bound (the output rule's bound, one row),
-            // z̈(a) = z̈(t0) e^{λ (a − t0)}
             const auto certified = [&](Real a, Real g_a, Real b, Real g_b) {
-                const Real tau = a - t0;
-                const Eigen::VectorXcd& q = cert->scan_q[ip];
-                const auto n = q.size() - 1;
-                scan_zdda_.resize(n);
-                for (Eigen::Index k = 0; k < n; ++k)
-                    scan_zdda_[k] = tau > Real{0} ? scan_zdd_[k] * std::exp(cert->lambda[k] * tau)
-                                                  : scan_zdd_[k];
-                const Real e = chord_row_bound(q.head(n), scan_zdda_, cert->lambda, b - a);
+                const Real tau = a - t0, d = b - a;
+                Real e = Real{0};
+                for (Eigen::Index k = 0; k < scan_aq_.size(); ++k) {
+                    const std::complex<Real> lam = cert->lambda[k];
+                    const Real re = lam.real();
+                    Real c = d * d / Real{8};
+                    if (re > Real{0}) c *= std::exp(re * d);
+                    const Real r2 = std::norm(lam);
+                    if (re <= Real{0} && r2 > Real{0}) c = std::min(c, Real{2} / r2);
+                    e += (tau > Real{0} ? scan_aq_[k] * std::exp(re * tau) : scan_aq_[k]) * c;
+                }
                 return std::min(std::abs(g_a), std::abs(g_b)) > e;
             };
             Real ta0 = t0;
             Size scan_from = 0;
+            const SchedulerDiode* dio = admissible_sign_(p.type) != 0 ? diode_of_(p.aux_index) : nullptr;
             // A diode predicate's value is information only beyond its own
             // significance bound B (signal_bound_). An exact zero is decided by
             // the ladder (ladder_sign_): leaving on its event side it is the mode
@@ -3602,9 +3569,7 @@ private:
     Eigen::VectorXcd scan_zdd_;   // locate_event_exact_'s certificate: z̈ at the step start
     Eigen::VectorXcd scan_z_;     // and z = V⁻¹x there
     Vector scan_probe_;           // the predicate row's probe state
-    Eigen::VectorXcd scan_zdda_;  // z̈ at a certified piece's start
-    Vector scan_r_;               // a predicate's direct sine share (augmented modes)
-    const std::vector<Real>* scan_om_ = nullptr;   // the mode's oscillator frequencies
+    Vector scan_aq_;              // |q_k z̈_k(0)| of one predicate
 };
 
 }  // namespace pulsim::dsed

@@ -471,33 +471,18 @@ public:
     /// The event scan's no-crossing certificate data (F-X-5): the current mode's
     /// tier-1 propagator and z̈(0) = Λ(Λz + w + V⁻¹c0) + V⁻¹c1 at (t, x), z = V⁻¹x
     /// (exact_chord_step's modal second derivative; c0 / c1 the piecewise-linear
-    /// sources' level and slope at t). With sine sources the modes are the augmented
-    /// state's (x, sin ωt, cos ωt): z and zdd have n + 2k entries, and a predicate's
-    /// direct sine share is node_pair_osc's row. nullptr when the mode has no tier-1 basis.
+    /// sources' level and slope at t). nullptr when the mode has no tier-1 basis or
+    /// sine sources (augmented state: the predicate's own source term is not affine).
     [[nodiscard]] const ExactLTI* exact_scan_modes(Real t, const Vector& x, Eigen::VectorXcd& z,
                                                    Eigen::VectorXcd& zdd) const {
         ensure_current_resolved_();
         ensure_exact_built_(*current_entry_);
         const LTIEntry& le = *current_entry_;
         const ExactLTI& e = le.exact;
-        const auto k_osc = static_cast<Index>(le.aug_omegas.size());
-        const auto n = x.size() + 2 * k_osc;
-        if (!e.valid || e.tier != 1 || e.V_re.rows() != n) return nullptr;
-        if (k_osc > 0) {
-            Vector& xa = scan_xa_;
-            xa.resize(n);
-            xa.head(x.size()) = x;
-            for (Index j = 0; j < k_osc; ++j) {
-                const Real om = le.aug_omegas[static_cast<Size>(j)];
-                xa[x.size() + 2 * j] = std::sin(om * t);
-                xa[x.size() + 2 * j + 1] = std::cos(om * t);
-            }
-            e.z_re.noalias() = e.Vinv_re * xa;
-            e.z_im.noalias() = e.Vinv_im * xa;
-        } else {
-            e.z_re.noalias() = e.Vinv_re * x;
-            e.z_im.noalias() = e.Vinv_im * x;
-        }
+        const auto n = x.size();
+        if (!e.valid || e.tier != 1 || !le.aug_omegas.empty() || e.V_re.rows() != n) return nullptr;
+        e.z_re.noalias() = e.Vinv_re * x;
+        e.z_im.noalias() = e.Vinv_im * x;
         z.resize(n);
         zdd.resize(n);
         for (Index k = 0; k < n; ++k) {
@@ -515,10 +500,8 @@ public:
                 v[j] = vj;
                 s[j] = sj;
             }
-            scan_c0_.setZero(n);   // the oscillator rows take no piecewise-linear input
-            scan_c1_.setZero(n);
-            scan_c0_.head(x.size()).noalias() = le.pwl_cols * v;
-            scan_c1_.head(x.size()).noalias() = le.pwl_cols * s;
+            scan_c0_.noalias() = le.pwl_cols * v;
+            scan_c1_.noalias() = le.pwl_cols * s;
             const Vector& c0 = scan_c0_;
             const Vector& c1 = scan_c1_;
             e.z_re.noalias() = e.Vinv_re * c0;
@@ -534,23 +517,7 @@ public:
         return &e;
     }
 
-    mutable Vector scan_v_, scan_s_, scan_c0_, scan_c1_, scan_xa_;   // exact_scan_modes' work
-
-    /// The current mode's oscillator frequencies (exact_scan_modes' augmented coordinates).
-    [[nodiscard]] const std::vector<Real>& exact_scan_omegas() const {
-        ensure_current_resolved_();
-        return current_entry_->aug_omegas;
-    }
-
-    /// The current mode's direct sine share of node_pair_voltage(from, to) per
-    /// oscillator coordinate (sin, cos), from recover_osc; empty without sine sources.
-    void node_pair_osc(Index from, Index to, Vector& r) const {
-        ensure_current_resolved_();
-        const DenseMatrix& R = current_entry_->recover_osc;
-        r.setZero(R.cols());
-        if (from >= 0 && from < R.rows()) r += R.row(from).transpose();
-        if (to >= 0 && to < R.rows()) r -= R.row(to).transpose();
-    }
+    mutable Vector scan_v_, scan_s_, scan_c0_, scan_c1_;   // exact_scan_modes' work
 
     /// Output instants resolving the current mode's fast transient after
     /// an event at t_e (exact_fast_samples).

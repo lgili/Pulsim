@@ -788,36 +788,3 @@ TEST_CASE("Exact: the output rule bounds the rows of an output map (a high-imped
         x = xd;
     }
 }
-
-TEST_CASE("Exact: the scan certificate's row bound is the output rule's bound",
-          "[v2][dsed][exact_lti][output_rule]") {
-    // group F session 5: ONE bound for chords and crossings. chord_row_bound (the event
-    // scan's no-crossing certificate) reads exactly exact_chord_step's per-row value
-    // (F split, three forms, growing modes), for decaying, resonant and growing modes.
-    DenseMatrix A1(2, 2), A2(2, 2), A3(2, 2);
-    A1 << -1e3, 0.0, 1e12, -1e12;
-    A2 << 0.0, 1.0, -4e8, -2e3;
-    A3 << 5e2, 0.0, 1e3, -1e4;
-    Vector b1(2), x(2);
-    b1 << 5e3, 0.0;
-    x << 0.3, 1.0;
-    ChordWork w;
-    for (const DenseMatrix* A : {&A1, &A2, &A3}) {
-        const auto e = make_exact_lti(*A, b1);
-        REQUIRE(e.tier == 1);
-        for (const Real h : {1e-13, 1e-9, 1e-6, 1e-4}) {
-            bool bounded = false;
-            // a tolerance every step fits: the call returns h with w.eb = the bound at h
-            const Real d = exact_chord_step(e, x, nullptr, nullptr, Vector::Constant(2, 1e300), h,
-                                            bounded, w);
-            REQUIRE(d == h);
-            for (Eigen::Index j = 0; j < 2; ++j) {
-                Eigen::VectorXcd q(2);
-                for (Eigen::Index k = 0; k < 2; ++k) q[k] = {e.V_re(j, k), e.V_im(j, k)};
-                const Real r = chord_row_bound(q, w.zdd, e.lambda, h);
-                INFO("A(1,0) = " << (*A)(1, 0) << " h = " << h << " row " << j);
-                REQUIRE(std::abs(r - w.eb[j]) <= 1e-12 * std::max(r, w.eb[j]) + 1e-300);
-            }
-        }
-    }
-}
