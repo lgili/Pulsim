@@ -160,3 +160,17 @@ note, reasoned, not shown).
 * LOW, left: at the start `zero_band_on_` reads `x_held` under the decided mask without
   `reinit_to_constraint` (a mode with dependent states judges an unconstrained state).
 * The scale change is at the cause; truth constants and the closed form checked.
+
+## Verified at the tip (macOS, Eigen 5, own extension build; conftest imports it)
+
+* extension build; `pulsim_core_dsed_tests` 41265 assertions / 142 cases pass;
+* `test_release_findings_fs4.py` 16 pass (failing on the PR head: 13 of them);
+  exact-engine test files (`test_dsed*`, `test_exact*`, `test_release_findings*`,
+  `test_mode_selection*`) 346 pass;
+* ONE full pytest: 6187 passed, 110 skipped, 8 xfailed, 0 failed;
+* byte compares vs the PR head's extension: listed under "Moved cases" (all identical);
+* ruff clean. Stubs: no binding signature changed (not run).
+
+NOT run: full ctest, Eigen 3.4.0, g++, the scoreboard's `run`/`render` (its dsed cells
+are byte-identical instead), openspec strict, cost tables (no time-loop change: the
+new code runs once per run).
