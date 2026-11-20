@@ -2671,7 +2671,9 @@ def simulate(
         of large states gets that absolute error, not ``output_rtol`` of
         itself). The
         samples are read from the exact steps the run takes without the rule
-        (``n_exact_steps`` counts steps, the samples are ``n_output_samples``);
+        (``n_exact_steps`` counts steps, the samples are ``n_output_samples``;
+        a step end that the chord from the last stored sample already covers
+        is not stored, so a slow or constant stretch keeps few samples);
         the event projection then removes only the parasitic cluster. Read
         ``res.diagnostics['output_grid']``: ``n_output_capped`` (intervals
         where the 4096-sample cap bit) and ``n_output_unbounded`` (steps of

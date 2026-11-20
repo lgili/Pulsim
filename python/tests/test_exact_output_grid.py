@@ -115,9 +115,10 @@ def test_the_rule_bounds_linear_interpolation():
         # the dense run's own chords are far finer: its interpolant is the truth here
         err = np.abs(np.interp(q, t, y) - np.interp(q, td, yd)).max() / scale
         assert err < 4 * rtol, (name, err)
-    # 10 us grid of today: the same circuit without the rule is coarser
+    # without the rule every step end (1 us here) is stored; the rule stores what its
+    # tolerance needs (a step end its chord covers is not stored, F-X-4)
     r0 = pulsim.simulate(build(), 2e-3, engine="exact")
-    assert len(r0.times) < len(t)
+    assert len(t) < len(r0.times)
 
 
 def test_default_and_explicit_dt_keep_todays_samples():
@@ -252,7 +253,7 @@ def test_the_run_budget_stops_the_rule_with_one_warning(monkeypatch):
     assert tb is not None and 0.0 < tb < 2e-3
     t = np.asarray(r.times)
     assert np.all(np.diff(t) > 0)
-    assert len(t) < len(full.times)
+    assert len(t) > len(full.times)   # past the budget every step end is stored again
     # past the budget the default grid of a run without the rule (the last step ends at t_end)
     grid = np.diff(np.asarray(pulsim.simulate(b, 2e-3, engine="exact").times)).max()
     assert np.diff(t[t > tb])[:-1].min() >= 0.99 * grid

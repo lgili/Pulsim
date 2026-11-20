@@ -497,6 +497,13 @@ def compute_junction_temperature(
     Model: C_th · dT_j/dt + (T_j − T_a)/R_th = P(t)
     Steady-state: T_j − T_a = R_th · P_avg.
 
+    P(t) is the linear interpolation of the samples and each interval is
+    solved exactly (θ = T_j − T_a, τ = R·C, e = exp(−h/τ)):
+    θ(h) = θ0·e + R·[P0·(1 − e) + s·(h − τ·(1 − e))], s the interval's slope.
+    Exact for any sample spacing: the explicit Euler step it replaces read a
+    tolerance-chosen grid (two samples over a DC run, F-X-4) as its time
+    step, and was unstable past h = 2τ.
+
     Returns:
         {"t_j_max_c", "t_j_final_c", "delta_t_j_c"}.
     """
@@ -511,11 +518,14 @@ def compute_junction_temperature(
     t_j = t_ambient_c
     t_max = t_j
     use_c = c_th_jc if c_th_jc > 0 else 1.0
+    tau = R_total * use_c
     for k in range(1, n):
-        dt = times[k] - times[k - 1]
-        p = power_dissipation_samples[k]
-        dtj = (p - (t_j - t_ambient_c) / R_total) * dt / use_c
-        t_j = t_j + dtj
+        h = times[k] - times[k - 1]
+        p0 = power_dissipation_samples[k - 1]
+        s = (power_dissipation_samples[k] - p0) / h if h > 0 else 0.0
+        one_m_e = -math.expm1(-h / tau)
+        theta = (t_j - t_ambient_c) * (1.0 - one_m_e) + R_total * (p0 * one_m_e + s * (h - tau * one_m_e))
+        t_j = t_ambient_c + theta
         if t_j > t_max:
             t_max = t_j
 

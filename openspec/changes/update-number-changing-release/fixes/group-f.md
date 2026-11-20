@@ -182,3 +182,27 @@ run with a dt: the rule is not engaged). auto+next: 132 agree / 2 disagree / 2 e
   1.97e-7 -> 1.96e-7, tol 1e-3; no truth for this circuit). NOT the floor: with `atol=1e-14` (the
   old floor rtol·atol = 1e-14, exactly) the cell is bit-equal (1 177 samples, 6.918e-8). From the
   F-6-7 grid (samples read inside rule-free steps), at the reference's own noise level.
+
+## F-X-4 (orchestrator's id) — a DC run stored 2 000 002 samples under the rule
+
+**Trace.** `electrothermal_resistor_self_heating` (5 V across 1 Ω, 2 s, no dt): the exact engine
+takes 2 000 001 steps of 1 µs with or without the rule, `n_output_samples` 0. The 1 µs is the
+poll of a gate that names no edge (`next_gate_edge_`: an infinite `next_edge_after`, the default
+all-closed mask included, lands every dt_max/10 and fires a same-mask "gate_edge" that returns
+at "Drop spurious same-mask gate edges"), not the rule. Every step end was stored.
+
+**Fix (rule on only; the steps are untouched).** A step end the chord from the last STORED
+sample still covers (certified by `exact_chord_step`, not by the cap / budget / an unbounded
+mode) is not stored; when a later chord needs it, it is stored first (`output_pend_`,
+`output_flush_`). A chain breaks at any predicate event, a source corner, a control tick, a
+gate change, a fire that moved x, and before any numeric step. Stored samples 2 000 002 -> 2,
+V(vin) = 5 V exactly; steps 2 000 001 both ways. The junction temperature the benchmark derives
+from the samples (benchmarks/kpi `compute_junction_temperature`) integrated the thermal RC by
+explicit Euler with the sample spacing as its step (unstable past 2τ = 1 s: on 2 samples a
+nonsense value); it now solves each interval exactly for P linear between samples: on 2 and on
+1 004 samples T_j(2 s) = 25 + 125(1 − e^-4) = 147.7105 °C to 1e-13 (test). Interpolation error
+of V(vin) against the closed form (constant): 0.
+
+Not changed (owner decision, default path): the poll itself — every exact run whose gate names
+no edge steps at dt_max/10 = 1 µs, not the documented 10 µs; treating an infinite answer as
+"no edge" would move every such default run's step grid.

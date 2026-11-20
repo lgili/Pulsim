@@ -39,7 +39,8 @@ def test_f67_ten_bridges_first_mode_is_the_truth_on_every_grid(rt):
     il = float(np.asarray(r.i("L0a"))[-1])
     assert abs(il - TRUTH_IL) <= 1e-9
     if rt is not None:
-        assert r.diagnostics["output_grid"]["n_output_samples"] == len(r.times) - r.n_accept - 1
+        # every stored point is a rule sample or a step end (ends the chord covers are not stored)
+        assert len(r.times) <= r.n_accept + 1 + r.diagnostics["output_grid"]["n_output_samples"]
 
 
 def _event_rows(r):
@@ -121,7 +122,7 @@ def test_f36_exact_steps_are_steps_not_samples():
     off = _run(b, 5e-3)
     on = _run(b, 5e-3, output_rtol=1e-6)
     assert on.n_exact_steps == off.n_exact_steps and on.n_rk45_steps == off.n_rk45_steps == 0
-    assert on.diagnostics["output_grid"]["n_output_samples"] == len(on.times) - len(off.times)
+    assert len(on.times) <= len(off.times) + on.diagnostics["output_grid"]["n_output_samples"]
 
 
 def _boost(R_load):
@@ -220,3 +221,54 @@ def test_fx3_ladder_far_nodes_are_held_to_the_absolute_floor():
     assert "n_output_uncertified" not in og
     assert og["n_output_samples"] < 10000
     assert np.array_equal(np.asarray(on.states)[-1], np.asarray(off.states)[-1])
+
+
+def test_fx4_a_dc_circuit_stores_what_the_tolerance_needs():
+    """F-X-4: a DC source across a resistor (the electrothermal benchmark's netlist), 2 s, no dt:
+    the exact engine steps 1 us (the poll of a gate that names no edge) and stored every step end,
+    2 000 002 samples, with the rule as without it. Under the rule a step end the chord from the
+    last stored sample covers is not stored: a constant is two samples, still exactly 5 V. The
+    steps (n_exact_steps) are the rule-free run's."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "vin", "gnd", 5.0)
+    b.add_resistor("R", "vin", "gnd", 1.0)
+    off = _run(b, 0.2)
+    on = _run(b, 0.2, output_rtol=1e-5)
+    assert on.n_exact_steps == off.n_exact_steps
+    assert len(on.times) <= 4
+    assert on.times[0] == 0.0 and on.times[-1] == pytest.approx(0.2)
+    assert np.all(np.asarray(on.v("vin")) == 5.0)
+
+
+def test_fx4_deferred_ends_keep_the_rule_on_an_rc():
+    """The deferred step ends do not loosen the rule: RC charging over many steps, every chord
+    between stored samples within output_rtol of the closed form at its midpoint, and far fewer
+    samples than steps once the charge flattens."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "a", "gnd", 5.0)
+    b.add_resistor("R", "a", "o", 1e3)
+    b.add_capacitor("C", "o", "gnd", 1e-6)
+    rt = 1e-5
+    r = _run(b, 2e-2, output_rtol=rt)
+    t = np.asarray(r.times)
+    v = np.asarray(r.v("o"))
+    assert len(t) < r.n_exact_steps
+    tm = 0.5 * (t[:-1] + t[1:])
+    err = np.abs(0.5 * (v[:-1] + v[1:]) - 5.0 * (1.0 - np.exp(-tm / 1e-3)))
+    assert err.max() <= rt * 5.0, (err.argmax(), err.max())
+
+
+def test_fx4_thermal_kpi_is_exact_on_any_sample_grid():
+    """The benchmark KPI integrates the thermal RC exactly per sample interval (P linear between
+    samples): on the two samples of the exact engine's DC run and on the 1 004 of the trbdf2
+    route it is the closed form 25 + 125 (1 - e^{-t/0.5}) (the explicit Euler it replaces read
+    the 2 s interval as its step: unstable)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "bench_kpi", Path(__file__).resolve().parents[2] / "benchmarks" / "kpi" / "__init__.py")
+    kpi = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(kpi)
+    truth = 25.0 + 125.0 * (1.0 - np.exp(-2.0 / 0.5))
+    for t in (np.array([0.0, 2.0]), np.linspace(0.0, 2.0, 1004)):
+        r = kpi.compute_junction_temperature(np.full(len(t), 25.0), t, 5.0, 0.1, 25.0)
+        assert r["t_j_final_c"] == pytest.approx(truth, rel=1e-13)

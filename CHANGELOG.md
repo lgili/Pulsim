@@ -24,7 +24,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   peak; `atol`: the run's one absolute tolerance, default 1e-9, an absolute
   floor — a state near 0 is not chased to rounding). Where that cannot be
   certified (sample cap, no diagonalising basis, budget) the run warns
-  (counters in `diagnostics['output_grid']`). Default
+  (counters in `diagnostics['output_grid']`). A step end that this chord
+  rule already covers is not stored: a DC stretch keeps two samples (a
+  2 s DC run stored 2 000 002 samples on the 1 µs step grid). Default
   `None` keeps today's samples; refused by name off the exact engine.
   A run resumed with it samples its own grid (the rule's state ranges
   restart at the snapshot instant); the events and states agree.
