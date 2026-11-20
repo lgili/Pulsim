@@ -183,6 +183,13 @@ What the engine should record (engine track's decision, not done here):
 
 ## Proposed measure (not applied: the scoreboard's definition changes by decision only)
 
+**Applied (branch `feat/core-scoreboard-measure`, by decision; DECISIONS section 6).** As
+implemented the rules differ from the proposal below in three places: the smooth part
+leaves out only the rows inside a matched event's displacement (the fresh-context review
+showed a one-step exclusion hides the row closing an off-grid event's step); a missing
+truth event is charged jump² × (time to that device's next event, at most the 2 dt
+window); `max δ/h` uses the netlist dt for every engine. Definition: `metrics.exact_parts`.
+
 Grade three things separately and show all three in the cell:
 
 1. **Smooth error E_s**: `err_exact` over the stored (left-limit) rows only, with
@@ -255,3 +262,86 @@ Not run: the scoreboard itself (no regeneration), the "before" scoreboard grades
 the base extension (the old trace is the head result without right rows: samples
 byte-identical per the batch notes, and the reconstructed old score equals the
 b9e46778 json value in every cell), ctest, the full pytest, any C++ change.
+
+## Measure v2 — state (branch `feat/core-scoreboard-measure`, 2026-11-20)
+
+### Definition as implemented (`benchmarks/tools/metrics.py`: `match_events`, `exact_parts`)
+
+Per graded column, three parts, each a fraction of `span` (the truth's peak-to-peak as before);
+cell = the largest part of the worst column (`exact`, `exact_part`, `exact_col`).
+
+- **smooth**: `sqrt(Σ w_i e_i² / Σ w_i)` over the engine's STORED rows (`res.times`, no
+  right-limit rows, so no 0+ row), e_i = distance to the truth at t_i (`at_float(..., 0.0)`, no
+  snap window; two candidates only where t_i is a truth event instant, nearest taken). Left out:
+  rows at t == t[0], and rows inside a MATCHED event's displacement `[min(t_eng, t_truth),
+  max(...)]`. Every other row is graded (an earlier one-step exclusion hid the row closing an
+  off-grid event's step: reviewer case).
+- **instants**: `sqrt((Σ_matched jump²·|δ| + Σ_missing jump²·d) / T) / span`; δ per truth instant =
+  largest over its devices, 0 within 4 ulp; a missing truth event charged with d = time to that
+  device's next truth event, capped at the window. `max_dt_h` = largest matched δ / h.
+  **h = the netlist dt for every engine** (pwl's step; the output grid / dt_max of trbdf2 and dsed).
+- **limits**: max |engine − truth| over every one-sided value the engine records after t0: at a
+  matched event its left value (row before the record change) and right value (the right-limit
+  row one ulp later, if any) against the truth's limits at the TRUTH's instant; spurious engine
+  events and every other right-limit row (F-SB-1's restart-window rows) against the truth at the
+  engine's instant. trbdf2 records no right limits: graded on left values only.
+- **Events**: truth = `sol.events` with a device flip (a source break without a flip is not an
+  event; rows around it stay in smooth). Engine = changes of the switch record of
+  `pulsim.with_event_limits(res)` (stored rows + split's inner events + right limits), instant =
+  the earlier row's time, columns named by `builder.switch_index_of` (verified for all 81
+  circuits, default and branch form). Key = device + new state. **Matching**: per key, in time
+  order, nearest within 2 h after the key's previous match (chattering -> extras spurious; a
+  cluster closer than h matched one by one). Unmatched engine events at t0 = initial mode
+  selection (`n_initial`), not spurious. Events at/after the last stored row are not graded.
+- **Not available**: `instants = None` (`n/a` in the table) when the run has no switch record but
+  the truth has device events; summary = max(smooth, limits); with no exclusions every row is graded.
+- Non-finite value anywhere (engine or truth) -> inf, part `non-finite`.
+- `exact_old` = previous definition (`metrics.err_exact`, unchanged code, on the two-sided trace);
+  reproduces the ad9ee191 json to ~1e-14 on the circuits probed.
+
+Scoreboard side: `exact_scoreboard.grade` (reads `tr.result`; `differential_runner.Trace` keeps
+the run), `event_record`, `switch_names`, `_old_exact`; render: `## The measure` (what changed
+and why), summary with old counts and `set by`, `## Cells whose class changed with the
+definition`, long-form full table; `--previous` compares `exact_old` with an old-definition json.
+`accuracy_summary.py` updated (part, set-by, old counts).
+
+### Tests (all pass on 39e68edf + head extension)
+
+- `python/tests/test_exact_measure.py` (18): each part on constructed traces, the old measure's
+  mispricing pinned, 0+ row, chattering, missing / spurious, no record, NaN truth, reviewer cases.
+- `python/tests/test_impulse_losses.py` caploop: matched-window identity rel 1e-13 abs 0 plus the
+  regular part; passes on head, fails at all five h on b9e46778 (package from `git archive` +
+  `so_b9e46778`, run without the repo conftest).
+- NOT yet re-run: `test_exact_scoreboard.py` (bounds need the new numbers),
+  `test_exact_output_grid.py`, `test_exact_truth_tool.py`, `test_accuracy_summary.py`, full pytest.
+
+### Running
+
+`exact_scoreboard.py run --force` then `twins` (head extension, `nice -n 15`), records in
+`/Users/lgili/pulsim_wt/p2-trbdf2/.scratch/exact_scoreboard/*.json` (+ `_twins.json`), log
+`.scratch/sbm/run.log` (ends with a `done <rc>` line), twins log `.scratch/sbm/twins.log`.
+
+### Remaining steps
+
+1. When `done 0`: `exact_scoreboard.py render --previous ad9ee191` (expect 0 moved: same
+   definition, same extension), then `accuracy_summary.py`; `--check` both; write `## Notes`.
+2. Old-vs-new class counts per configuration (old at b9e46778: pwl 38/11/8, restart+split
+   76/41/10, trbdf2 80/30/9, esdirk43 81/65/13, dsed 81/77/70) from the json.
+3. Every cell that changes class with the part (render section lists them); worse cells as
+   candidate findings. Already seen in probes: `vcswitch_resistor` pwl+split instants
+   δ = −0.005 h (gate at ramp start); plain pwl δ = −0.015 h at t ≈ 0; `diode_half_wave_rl_load`
+   dsed / pwl+split / pwl+next limits 0.030: the recorded right limit of V(out) at D1 turn-off is
+   the value after the 1 ns g_off/L transient (−3.1e-6 V), the truth's right limit is −0.314 V
+   (continuous); F-SB-1 in limits on pwl+restart / pwl+split / pwl+next (ll09 0.51,
+   three_phase 0.032).
+4. Re-pin `test_exact_scoreboard.py` bounds (each explained by its part); run
+   `test_exact_output_grid.py`, `test_exact_truth_tool.py`, `test_accuracy_summary.py`,
+   `test_benchmark_harness.py`.
+5. Docs: DECISIONS section 6 (this definition), tasks 4.3 note; CHANGELOG entry is written;
+   AI guide does not describe the scoreboard (nothing to change). Rehearsal cells stored on disk
+   are the old definition until it is re-run.
+6. Full pytest on the final tip (background, no commits while it runs), ruff,
+   `openspec validate update-number-changing-release --strict`.
+7. Reviewer pass done once (findings 1–4 fixed in 39e68edf; finding 5, the 2 h window cliff —
+   an event 2.1 h off becomes missing + spurious and its left value reads a full jump in
+   limits — documented, not changed). A second pass on the regenerated data is optional.
