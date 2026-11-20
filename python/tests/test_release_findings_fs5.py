@@ -254,8 +254,15 @@ _HEAVY = {
 }
 
 
-@pytest.mark.parametrize("name", sorted(_HEAVY))
-def test_roundoff_heavy_reference_circuit_runs_on_trbdf2(name):
+# ll13 at trbdf2 rtol 1e-7 and esdirk43 rtol 1e-6 aborted at h_min on 14f (and its
+# default on the gate-edge merge): a floating-point fixed point at the dead-time
+# spike (3.8e8 V, ||dx|| below one ulp) declined against the start-state row
+# scale. DECISIONS 12 of add-newton-roundoff-acceptance; measured 9.4e-6 /
+# 1.0e-4 of range against the reference.
+@pytest.mark.parametrize(("name", "kw"), [
+    ("ll08", {}), ("ll13", {}), ("ll13", {"rtol": 1e-7}),
+    ("ll13", {"rtol": 1e-6, "integrator": "esdirk43"})])
+def test_roundoff_heavy_reference_circuit_runs_on_trbdf2(name, kw):
     rel, dt_ref, period, offs, inductors, nodes = _HEAVY[name]
     bench = Path(__file__).resolve().parents[2] / "benchmarks"
     sys.path.insert(0, str(bench / "tools"))
@@ -263,7 +270,7 @@ def test_roundoff_heavy_reference_circuit_runs_on_trbdf2(name):
     case = v1_reader.load(bench / rel)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        r = case.run("trbdf2")
+        r = case.run("trbdf2", **kw)
         ref = case.run("pwl", dt=dt_ref, discontinuity_restart=True)
     t, tr = np.asarray(r.times), np.asarray(ref.times)
     assert t[-1] == pytest.approx(case.t_end, rel=1e-12)
@@ -274,3 +281,21 @@ def test_roundoff_heavy_reference_circuit_runs_on_trbdf2(name):
         y = f(ref)
         err = np.max(np.abs(np.interp(ts, t, f(r)) - np.interp(ts, tr, y))) / np.ptp(y)
         assert err < 1e-3
+
+
+# ------------- case A at a tight tolerance: the chatter floor (gate-edge line) --
+# Closed form 62.8335 uJ. At rtol 1e-8 the first steps after the 1 us hard
+# turn-on (Sh into a conducting Dl across C_oss, tau ~1 ps) exhaust the chatter
+# guard on Dl; h is then floored at h_chatter = 2.2e-13 s for 1e3 h_chatter,
+# and the transient is crossed by forced accepts (174 on trbdf2; 14f: 4).
+# Measured on the gate-edge merge: trbdf2 63.0154 uJ (+0.29 %; 14f 62.8368),
+# esdirk43 63.0065 uJ (+0.27 %; 14f 63.0082: the same floor, already there).
+# rtol 1e-7, 1e-9 and 1e-10 read the same 63.0154 / 63.008. The defaults
+# moved toward the truth (trbdf2 62.8490 -> 62.8386).
+@pytest.mark.xfail(strict=True, reason="open: chatter-floor forced accepts through the C_oss "
+                   "transient at rtol <= 1e-7 (+0.29 % trbdf2, +0.27 % esdirk43)")
+@pytest.mark.parametrize("eng", list(ENGINES))
+def test_hard_turn_on_energy_at_a_tight_tolerance(eng):
+    b, fn, r = _run(eng, rtol=1e-8)
+    e = _window_loss(b, fn, r, 1e-6 - 2e-9, 1e-6 + 20e-9)
+    assert e == pytest.approx(_e_hard_A(2e-9, 20e-9), rel=1e-3)
