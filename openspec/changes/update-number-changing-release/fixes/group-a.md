@@ -579,3 +579,19 @@ recorded 80 % of ½C(J1² + J2²) and left Cs2 at −3.4 V (truth 0.01 V) — fi
 - Cost, instructions per accepted step vs a 1cec4e8b build (min of six, default path unchanged since
   5fe40868): buck_pwl 1.0036, vsi_pwl 0.9988, buck_trbdf2 1.0002, bridge_trbdf2 0.9989; rule on
   buck_pwl_restart 1.0306, vsi_pwl_restart 1.0134 (third probe stage, every restart step probed).
+- Byte compares vs the PR-head baselines (default options): goldens ALL identical (buck_pwl_restart and
+  vsi_pwl_restart states identical too, counter `cache.event_hits` only), stateful identical except
+  `everything_pwl_restart` (refused by name since the third session), engines ALL identical, steps ALL
+  identical, trbdf2_identity 371/371, pwl_identity 341/379 — all 38 differing entries are pwl+restart /
+  pwl+split (1cec4e8b: 32, 0bd28e03: 53); default entries identical.
+- Reviewer's open (2) on 27d83718: a gate pulse with rise 0 at 5.6 / 5.95 ns (restart at 5 ns, no split):
+  no record, i_L → +0.478 A [0]; split on: 4.999996 J, i_L → 0. 1 ps continuous fall at 1.30–1.90 ns:
+  no record, +0.478 A; at 1.28 ns (before t1): 4.999999 J, i_L → 0. 1cec4e8b had the same misses.
+- reference_status (rule on) cell by cell vs the first predecessor's `refstat_t7.json`: outcomes
+  identical in every cell (differential pwl+restart 89/19/1, pwl+split 91/17/1 — the same as t7). err_rms
+  moved in 28 cells: 18 down (ll15 boost closed loop 0.0649 → 0.0541 restart, 0.0500 → 0.0350 split;
+  forward 2.57e-6 → 2.46e-6; flyback; half_bridge_transformer_dc), 10 UP: synchronous_flyback 1.287e-6 →
+  1.618e-6 (+26 %, both configs, still agree), active_clamp_forward 3.70e-3 → 3.75e-3 (+1.5 %),
+  cascaded_boost_buck split +0.4 %, ll14 (disagree) +0.04 %, stiff_two_timescale_rc, buck_boost split
+  ≤ +0.04 %. NOT traced (context budget): which change (every-step probing, the whole jump, or the
+  allowance) moves synchronous_flyback; that is the next step before merge.
