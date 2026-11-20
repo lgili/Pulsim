@@ -763,7 +763,7 @@ events gate).
 | rehearsal tool auto+next / dsed:output_grid / dsed+next, analytic 22 | NOT run |
 | evgate 1e-4/1e-5/1e-6 on 100 | NOT run |
 | goldens / dsed bit-identity 36/36 default + shadow | baseline recorded, check NOT run |
-| scoreboard exact-engine row 81/77/70 | NOT run (dsedall base recorded) |
+| scoreboard exact-engine row 81/77/70 | default cells RUN on e88a06dc's build: dsedall tip vs base (075feac9) — 243 same, 0 moved (81 circuits × dsed / dsed+next / no-dt rule off: times, states, events, reinit hashes); so the row cannot have moved. Scoreboard itself not re-rendered |
 | samples before/after, ladder500 | NOT run |
 | instructions (rule on, five circuits; rule off ±0.5 %) | NOT run |
 | pulsim_core_dsed_tests (Eigen 5) | NOT built |
@@ -774,9 +774,9 @@ events gate).
 
 ### Next steps (successor)
 
-1. Run `dsedall` tip vs `dsedall_base5.json`; every moved cell graded against the truth
-   (`.scratch/f3/grade.py`); bit-identity check. If anything moves on a circuit without sine
-   sources, the sharper certificate changed a located root: explain it before keeping it.
+1. DONE on e88a06dc: `dsedall` 243 same / 0 moved (the sine certificate and the sharper bound move
+   no default cell on the scoreboard set). Still to run: the goldens / bit-identity check
+   (`BASE=s5base zsh .scratch/bitid5.sh check`).
 2. Build + run `pulsim_core_dsed_tests` (tree `.scratch/build-ctest`): the new chord_row_bound case
    and the recovered-row case.
 3. Cost (`.scratch/f3/cost10.sh <tip python> .scratch/base075`): the forward converters' certificate
