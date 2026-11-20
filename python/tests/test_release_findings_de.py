@@ -281,24 +281,14 @@ _PAIRS = [("conductance", "conductance"), ("branch", "branch"),
 
 
 @pytest.mark.parametrize("forms,integrator", [
-    *[(f, "esdirk43") for f in _PAIRS], *[(f, "trbdf2") for f in _PAIRS[:3]],
-    pytest.param(("branch", "conductance"), "trbdf2", marks=pytest.mark.xfail(strict=True, reason=(
-        "release finding F-3-4: TR-BDF2 takes no L-stable restart after a diode "
-        "event when the circuit has a stateful kind (sdirk_possible = !hs.any(); "
-        "the saturable transformer), so the step after each of the 47 landings "
-        "reads the pre-event derivative slot of the leakage inductor T1.lp next "
-        "to the all-inductor node T1.pm: the estimate grows as h (err 16295 at "
-        "3.3e-9 s, 1632 at 3.3e-10) and every landing collapses h to 1e-13 .. "
-        "1e-14 s, where Newton's absolute dx test stalls on the 2L/h rows "
-        "(abort at the 46th, t = 0.47 ms; the other form pairs survive the same "
-        "collapse by luck). Needs the SDIRK restart for stateful kinds on the "
-        "TR-BDF2 stage pair (esdirk43 has it: all four pairs run, 15.31034 V)"))),
+    *[(f, "esdirk43") for f in _PAIRS], *[(f, "trbdf2") for f in _PAIRS],
 ])
 def test_branch_form_flyback_runs_on_trbdf2(forms, integrator):
     """F-3-4: SimulationAborted (Newton at h_min, t = 0.41 ms) with BOTH
     devices in the branch form (b9e46778); with the TR-BDF2 q rows merged
     (ecb07507) that pair runs and branch switch / conductance diode aborts
-    instead (t = 0.47 ms). Truth: the fixed engine at dt = 1e-8, 15.3095 V
+    instead (t = 0.47 ms). Fixed by the SDIRK restart with stateful kinds
+    (test_release_findings_d2.py). Truth: the fixed engine at dt = 1e-8, 15.3095 V
     (test_saturable_transformer); esdirk43 15.31034 V on all four pairs."""
     kw = {"integrator": "esdirk43"} if integrator == "esdirk43" else {}
     dc = _flyback_dc(*forms, engine="trbdf2", rtol=1e-6, atol=1e-9, **kw)

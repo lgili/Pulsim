@@ -1943,10 +1943,10 @@ inline SimulationResult run_transient_trbdf2(
     // equals 2C/(gamma h), so both stages are the trapezoidal companion
     // at dt = gamma*h with the DERIVATIVE slots zeroed and the STATE slots
     // set to the stage's base: the same factor, no new history method.
+    // The stateful kinds' q rows take the same BE stages (ed_sdirk_base /
+    // ed_hs_commit, shared with esdirk43): every circuit can restart.
     const Real gs = Real{1} - Real{1} / std::sqrt(Real{2});
-    const bool sdirk_possible = !hs.any();
-    const bool sdirk_ok = sdirk_possible
-                          && (opts.sdirk_on_linear_circuits || nl_effective);
+    const bool sdirk_ok = opts.sdirk_on_linear_circuits || nl_effective;
     // ---- the SDIRK restart after a diode turn-off on a linear circuit ----
     // A diode with g_off > 0 that turns off leaves the inductor it carried
     // on a g_off path: an L*g_off mode (tau ~ 2e-13 s on the DCM buck) the
@@ -1959,7 +1959,7 @@ inline SimulationResult run_transient_trbdf2(
     // stage factor W (Hosea-Shampine). Measured on the DCM buck: 7,608 ->
     // 4,212 accepted steps, 4,306 -> 2,753 rejects, no step below 1e-11 s
     // away from the event records (add-branch-form-ideal-switch DECISIONS 24).
-    const bool sdirk_off_lin = opts.sdirk_after_turn_off && sdirk_possible
+    const bool sdirk_off_lin = opts.sdirk_after_turn_off
                                && !nl_effective && !sdirk_ok;
     bool sdirk_event = false;   // the pending restart came from such an event
     auto restart_ok = [&]() { return sdirk_ok || sdirk_event; };
@@ -2261,8 +2261,9 @@ inline SimulationResult run_transient_trbdf2(
                                 name));
             }
         }
-        // the stateful kinds take the stages (their q rows below)
-        const bool ed_sf = esdirk && hs.any();
+        // the stateful kinds take the stages (their q rows below): every
+        // ESDIRK stage, and an SDIRK(2,2) restart step on both integrators
+        const bool ed_sf = hs.any();
         // The stages in entry space (capacitor v, inductor i): with a linear
         // q the stage combinations in x are those in q (design D2).
         std::vector<Real> ed_y0, ed_hd0, ed_psi;
@@ -2727,23 +2728,6 @@ inline SimulationResult run_transient_trbdf2(
                 reinit_new = reinit.entering(structure, mask_step, false);
             }
             reinit_step = !reinit_new.empty();
-            if (reinit_step && !sdirk_possible) {
-                const Index el = reinit_new.front()->elements.front();
-                throw UnsupportedError(
-                    "trbdf2", "dependent_states",
-                    std::string(graph.branch_name(el)),
-                    std::string(pwl::stored_kind_name(pool.kind_of(el))),
-                    std::format(
-                        "engine 'trbdf2': at t = {} the mode {} makes states "
-                        "dependent through the ideal element '{}'; their "
-                        "re-initialisation is the SDIRK x3 restart, which this "
-                        "engine does not take with a Coss, Lauritzen-diode, "
-                        "IGBT-tail, PMSM or saturable-inductor history. Use "
-                        "engine='pwl', or give '{}' R_on > 0 and g_off > 0.",
-                        t, mask_step.to_string(), graph.branch_name(el),
-                        graph.branch_name(el)));
-            }
-
             // ---- stage 1: TR over γh (or SDIRK stage 1, BE over γ_s h) ----
             const step::StageSpec stage0 = step::TrBdf2::stage(h, 0);
             hg = stage0.factor_dt;   // gamma * h
@@ -2781,11 +2765,9 @@ inline SimulationResult run_transient_trbdf2(
             x_g = x;                 // Newton warm start
             step_ctx = stage0.ctx();
             step_ctx.t = t + h_pt;
-            if constexpr (kE) {
-                if (sdirk && ed_sf) {   // the q rows: BE of gs·h, the linear entries' rule
-                    hs.snapshot_into(ed_hs_snap);
-                    step_ctx = {gs * h, pwl::TrBdf2Stage::BackwardEuler, t + h_pt};
-                }
+            if (sdirk && ed_sf) {   // the q rows: BE of gs·h, the linear entries' rule
+                hs.snapshot_into(ed_hs_snap);
+                step_ctx = {gs * h, pwl::TrBdf2Stage::BackwardEuler, t + h_pt};
             }
             // A step below the matrix's conditioning floor: 2C/h against
             // a node held only by g_off (a capacitor between two OFF
@@ -2865,21 +2847,18 @@ inline SimulationResult run_transient_trbdf2(
                 hs.capture_gamma(x_g);
                 step_ctx = step::TrBdf2::stage(h, 1).ctx();
                 step_ctx.t = t + h;
-                if constexpr (kE) {
-                    if (sdirk && ed_sf) {
-                        step_ctx.t = t + h_pt;   // q(x_g) at x_g's own time
-                        ed_sdirk_base(x_g, (Real{1} - gs) / gs);
-                        step_ctx = {gs * h, pwl::TrBdf2Stage::BackwardEuler, t + h};
-                    }
+                if (sdirk && ed_sf) {
+                    step_ctx.t = t + h_pt;   // q(x_g) at x_g's own time
+                    ed_sdirk_base(x_g, (Real{1} - gs) / gs);
+                    step_ctx = {gs * h, pwl::TrBdf2Stage::BackwardEuler, t + h};
                 }
                 x_1 = x_g;           // Newton warm start
                 stage_ok =
                     solve_dispatch(mask_step, hg, b_stage, x_1);
                 ++st.n_solves;
             }
-            if constexpr (kE) {   // no stage leaves a trace; the commit re-applies ψ
-                if (sdirk && ed_sf) { hs.restore(ed_hs_snap); hs.stage_clear(); }
-            }
+            // no stage leaves a trace; the commit re-applies ψ
+            if (sdirk && ed_sf) { hs.restore(ed_hs_snap); hs.stage_clear(); }
             if (stage_singular) {
                 ++st.n_reject;
                 ++st.n_conditioning_rejects;
@@ -3991,7 +3970,7 @@ inline SimulationResult run_transient_trbdf2(
                 // next step is the one the method produced (the
                 // hysteretic law integrates from the same base the
                 // converged BDF2 residual used, (H_γ, M_γ)).
-                if (kE && ed_sf) {   // the q rows under the rule their stages used
+                if ((kE || sdirk) && ed_sf) {   // the q rows under the rule their stages used
                     ed_hs_commit(x_1, (sdirk ? gs : step::Esdirk43::gamma) * h, h);
                 } else {
                 hs.commit(x_1, h, pwl::TrBdf2Stage::Bdf2Stage2);
