@@ -407,13 +407,15 @@ TEST_CASE("the junction charge is relative to Q near 0 V on both paths (F-S-5)",
             // Taylor about 0: Q = C0·v·(1 − m·u/2 + m(m+1)·u²/6), u = v/V0
             const Real u = v / 25.0;
             const Real ref = 1e-9 * v * (1 - m * u / 2 + m * (m + 1) * u * u / 6);
-            const Real tol = std::abs(ref) * (v < 1e-3 ? 1e-14 : 1e-5);
+            // 1e-12 relative, not a few ulp: expm1 / log1p differ between
+            // libms (CI lesson); the cancelling law is off by >= 2.7e-9 here.
+            const Real tol = std::abs(ref) * (v < 1e-3 ? 1e-12 : 1e-5);
             CHECK(std::abs(models::NonlinearCapacitor::charge(jn, v) - ref) <= tol);
             CHECK(std::abs(L::NonlinearCapacitor::charge<Real>(la, lp, v) - ref) <= tol);
         }
-        // m = 0 is the linear law C0·v to a few ulp
+        // m = 0 is the linear law C0·v ((1+u) − 1 was 1.8 % off here)
         if (m == 0.0) {
-            CHECK(std::abs(models::NonlinearCapacitor::charge(jn, 3e-13) - 3e-22) <= 3e-22 * 1e-15);
+            CHECK(std::abs(models::NonlinearCapacitor::charge(jn, 3e-13) - 3e-22) <= 3e-22 * 1e-12);
         }
     }
 }
