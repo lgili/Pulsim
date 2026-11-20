@@ -294,3 +294,59 @@ def test_a_sine_zero_on_the_diode_s_zero():
         assert len(ev) == len(want), ev
         assert np.max(np.abs(ev - want)) <= 1e-12, ev
         assert np.all(np.asarray(res.i("D1")) >= -_I_OFF)
+
+
+P3 = 2.0943951023931953
+
+
+def _bridge_3ph():
+    """Three-phase diode bridge with 0.5 mH line inductance (test_exact_integrals_sources)."""
+    b = p.CircuitBuilder()
+    for ph, n, ph0 in (("a", "Va", 0.0), ("b", "Vb", -P3), ("c", "Vc", P3)):
+        b.add_sine_voltage_source(n, "s" + ph, "gnd", 0.0, 325.0, 50.0, ph0)
+        b.add_inductor("L" + ph, "s" + ph, ph, 0.5e-3)
+    for nm, a, c in (("D1", "a", "dp"), ("D3", "b", "dp"), ("D5", "c", "dp"),
+                     ("D4", "dn", "a"), ("D6", "dn", "b"), ("D2", "dn", "c")):
+        b.add_diode(nm, a, c, G_ON, G_OFF)
+    b.add_capacitor("C", "dp", "dn", 220e-6)
+    b.add_resistor("RL", "dp", "dn", 40.0)
+    b.add_resistor("Rtie", "dn", "gnd", 1e6)
+    return b
+
+
+# benchmarks/tools/exact_truth.py (fa4b5c71), 40 digits, 0..6 ms: D1 OFF, D5 OFF, D2 ON with
+# D6 still ON, D6 OFF 1.35 us later; V(dp, dn)(6 ms)
+_BRIDGE_TRUTH = (3.7193567186268455e-4, 1.4902582186689645e-3,
+                 5.0000002509129349e-3, 5.0013509430908255e-3)
+_BRIDGE_V_END = 624.64746549969316
+
+
+def _bridge_events(selector):
+    res = p.simulate(_bridge_3ph(), 6e-3, engine="exact", mode_selection=selector)
+    return np.asarray(res.event_times), res
+
+
+def test_the_guard_keeps_the_overlap_of_d2_and_d6():
+    """(c) The mode guard judged the settled mode (D6 still ON at D2's turn-on) at
+    1e4 h_e and read D6's own turn-off 1.35 us later as a violation: it turned D6 OFF
+    at once (3 events, not 4). A law broken only after the diode first moved into its
+    admissible side past the parasitic transient is the mode's next event."""
+    ev, res = _bridge_events("legacy")
+    assert len(ev) == len(_BRIDGE_TRUTH), ev
+    for got, want in zip(ev[1:], _BRIDGE_TRUTH[1:]):
+        assert abs(got - want) <= 1e-12, (got, want)
+    # the first turn-off is 2e-10 s early on base and tip alike (open, not this rule)
+    assert abs(ev[0] - _BRIDGE_TRUTH[0]) <= 1e-9
+    v = np.asarray(res.v("dp")) - np.asarray(res.v("dn"))
+    assert abs(v[-1] - _BRIDGE_V_END) <= 1e-6
+
+
+@pytest.mark.parametrize("selector", ["lcp", "auto"])
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
+    "release finding F5 (c), lcp selection: the complementarity solve itself (run_selector_, "
+    "no ties) returns D6 OFF at D2's turn-on (5.000000250913 ms); with every upper diode OFF D6 "
+    "carries leakage-level current, a split the LCP does not resolve; the truth keeps D6 ON to "
+    "5.001350943091 ms. The guard rule fixes the legacy selector only"))
+def test_the_lcp_keeps_the_overlap_of_d2_and_d6(selector):
+    ev, _ = _bridge_events(selector)
+    assert len(ev) == len(_BRIDGE_TRUTH), ev
