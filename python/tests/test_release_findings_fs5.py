@@ -220,13 +220,10 @@ def _cut_set():
 
 @pytest.mark.parametrize("cfg", [
     ("esdirk43", {}), ("esdirk43", dict(rtol=1e-8)), ("trbdf2", {}),
-    pytest.param(("trbdf2", dict(rtol=1e-8)), marks=pytest.mark.xfail(
-        raises=p.SimulationAborted, strict=True,
-        reason="release finding F-S-5 (session 2): NOT the floor cycle — at "
-               "200 us Newton ends with ||dx|| 3.64e-9 at node b, omega 0.12 eps, "
-               "but its newer window's largest ||dx|| is over 2x the older one's "
-               "(declined 'growing'); open")),
-], ids=["esdirk43", "esdirk43-rtol1e-8", "trbdf2", "trbdf2-rtol1e-8"])
+    # Session 3: both aborted at 200 us under the single window of 16 ("growing"
+    # at omega 0.12 eps); the split windows (DECISIONS 11 amendment) run them.
+    ("trbdf2", dict(rtol=1e-8)), ("trbdf2", dict(rtol=1e-9)),
+], ids=["esdirk43", "esdirk43-rtol1e-8", "trbdf2", "trbdf2-rtol1e-8", "trbdf2-rtol1e-9"])
 def test_saturable_cut_set_opened_by_a_switch(cfg):
     """L1 (atan law) + L2 forced into series at 200 us. Flux conservation:
     lam1(i1-) + L2 i2- = lam1(i+) + L2 i+ with i1- = 1.882674, i2- = 1.9e-4
@@ -240,3 +237,40 @@ def test_saturable_cut_set_opened_by_a_switch(cfg):
     t = np.asarray(r.times)
     i = np.asarray(r.v("v")) - np.asarray(r.v("a"))
     assert abs(np.interp(2.001e-4, t, i) - 0.908907) < 1e-3
+
+
+# ------------- reference circuits that lean on the roundoff acceptance (session 3) --
+# Every benchmark circuit with more than 50 roundoff accepts on trbdf2 defaults
+# (ll13: 359, ll08: 117; no other circuit has more than 50). ll13 ran at
+# 14b0c81a and aborted at 41 us under the single window of 16. Accuracy: the
+# states at smooth instants against engine='pwl' + discontinuity_restart at a
+# small dt (measured: ll13 2.0e-5 of range, ll08 2.3e-6 = the reference's own
+# error); the bound is 50x looser.
+_HEAVY = {
+    "ll13": ("circuits/switching/isolated/ll13_active_clamp_forward.yaml", 2e-9, 4e-6,
+             (1e-6, 3e-6), ["Lout", "Lm_core", "Lleak_prim", "Lsec"], ["vout", "clamp_node"]),
+    "ll08": ("circuits/switching/buck/ll08_buck_mosfet.yaml", 1e-8, 5e-6,
+             (1e-6, 3e-6), ["L1"], ["out"]),
+}
+
+
+@pytest.mark.parametrize("name", sorted(_HEAVY))
+def test_roundoff_heavy_reference_circuit_runs_on_trbdf2(name):
+    rel, dt_ref, period, offs, inductors, nodes = _HEAVY[name]
+    bench = Path(__file__).resolve().parents[2] / "benchmarks"
+    sys.path.insert(0, str(bench / "tools"))
+    import v1_reader  # noqa: PLC0415
+    case = v1_reader.load(bench / rel)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = case.run("trbdf2")
+        ref = case.run("pwl", dt=dt_ref, discontinuity_restart=True)
+    t, tr = np.asarray(r.times), np.asarray(ref.times)
+    assert t[-1] == pytest.approx(case.t_end, rel=1e-12)
+    ts = np.array([n * period + o for n in range(int(case.t_end / period)) for o in offs])
+    sig = [(lambda x, k=k: np.asarray(x.i(k))) for k in inductors]
+    sig += [(lambda x, k=k: np.asarray(x.v(k))) for k in nodes]
+    for f in sig:
+        y = f(ref)
+        err = np.max(np.abs(np.interp(ts, t, f(r)) - np.interp(ts, tr, y))) / np.ptp(y)
+        assert err < 1e-3

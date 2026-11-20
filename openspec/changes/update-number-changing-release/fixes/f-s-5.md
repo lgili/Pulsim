@@ -351,3 +351,18 @@ Results on the FINAL build (TEMP removed):
   instants: tip 2.2730e-6, cedac36b 2.2730e-6 (max over v_out, i_L1); the
   reference's own error (dt 1e-8 vs 5e-9) is 2.3e-6, so both are at the
   reference's resolution: not worse.
+- Sweeps of case A on the final build: run lengths trbdf2 0/30, esdirk43
+  0/30; rtol 1e-4…1e-10 no abort on either (crossings and E_hard identical
+  to session 2's table); random 200 lengths 0 aborts on both.
+- C++ (Eigen 5): layer5_v4 26 cases (incl. the two new ones and the
+  rate-0.7 protected case), layer5_v3 35, step 32, sim 8, dsed 142: pass.
+- Roundoff-heavy reference circuits on trbdf2 (all 108 triage "runs"
+  circuits, `.scratch/ll13/heavy.py`): only ll13 (359) and ll08 (117) have
+  > 50 accepts; ll11_llc_resonant_converter aborts at 5 us as at cedac36b
+  (the known trbdf2 error cell). Both now have a pytest
+  (`test_roundoff_heavy_reference_circuit_runs_on_trbdf2`, bound 1e-3 of
+  range against pwl+restart).
+- Saturable cut-set on trbdf2: rtol 1e-8 AND 1e-9 now RUN (i(R) at 200.1 us
+  0.909368 at both, closed form 0.908907): the strict xfail is removed and
+  1e-9 is a passing case (the reviewer's 1e-9 abort is gone, so it does not
+  join an xfail).
