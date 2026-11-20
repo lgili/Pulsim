@@ -541,3 +541,14 @@ Harness fixes found by the re-run (committed): the trace's sample at an event is
 (analytic hard_switched_rc 5.0e4 → 0.995); the reference's first step (its given, possibly
 inconsistent, start) is excluded (vcswitch_resistor 2.5e4 → ≤ 1). Analytic cells pass their
 event instants.
+
+### Final verification (C++ ffdf5007; tip with docs/harness after it)
+
+Full pytest 6226 passed, 110 skipped, 9 xfailed (0 failed); `-m reference` 383 passed;
+reference_status exit 0; ruff clean; `openspec validate --all --strict` 79/79;
+`update-number-changing-release --strict` valid; stubs up to date; `pulsim_core_dsed_tests`
+(Eigen 5) 41265 assertions / 142 cases pass; goldens + bit-identity 36/36 default and shadow;
+243 default scoreboard cells identical to the pre-review tip; event times/states bit-equal across
+output_rtol 1e-4/1e-5/1e-6 on 100 benchmark circuits (26 skipped by the tool), forward converter
+and active clamp included. Not run: Eigen 3.4.0, Windows/MSVC, a second reviewer pass on the
+review fixes.
