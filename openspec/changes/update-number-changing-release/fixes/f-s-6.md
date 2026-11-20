@@ -121,3 +121,9 @@ into the clamped floor is carried (ΔΣQ 1e-17 C); default path bit-identical; C
   moved. Both runs exit 1 on the same two lines ("UNEXPECTED pwl llc_half_bridge_zvs /
   psfb_full_bridge_zvs: new outcome") — present on the base, not this change.
 - Byte compares re-run on 6a950022: identical (golden, pwl 396/396, trbdf2 377/377, bitid 36+36).
+- Full pytest on 8344de10 (code = 6a950022): 6786 passed, 133 skipped, 37 xfailed, 0 XPASS, 2 failed —
+  the same two `test_f24_exact_thermal_ratio…` that fail with the base extension.
+- NOT run: full ctest, Eigen 3.4.0, g++, openspec strict, stubs (no binding signature changed),
+  the restart/split files on 6a950022 beyond the three touched files (run on cdacdeed; 6a950022 only
+  changes the nonlinear-capacitor test, which none of the other circuits has at an event — byte
+  compares and reference_status identical confirm it).
