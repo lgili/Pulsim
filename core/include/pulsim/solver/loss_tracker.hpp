@@ -124,7 +124,9 @@ struct StepLines {
     // the mixed step's held-pieces row (quadrature, not an event).
     Vector rl_x, rl_start;
     topology::SwitchStateMask rl_m, rl_m_start;
-    bool rl_ok = false, rl_start_ok = false;
+    // rl_left / rl_start_left: a continuity point (a located V_f = 0
+    // crossing alone): the row is the left value
+    bool rl_ok = false, rl_start_ok = false, rl_left = false, rl_start_left = false;
     std::array<Vector, kMax> rl_right;
     std::array<topology::SwitchStateMask, kMax> rl_m_right;
     std::array<bool, kMax> rl_right_ok{}, held{};

@@ -174,12 +174,12 @@ def _half_wave_rl():
 
 @pytest.mark.parametrize("dt", [20e-6, 30e-6])   # the crossing lands on b / inside the step
 def test_a_located_turn_off_is_continuous_at_its_right_limit(dt):
-    """At a LOCATED crossing the state is continuous and the crossing
-    variable is at its crossing value: i_D = 0 at the turn-off, where the ON
-    and OFF laws meet (v_D = 0 for this diode). The located current is zero
-    only to the locator's tolerance (here ~26 uA); read through the OFF
-    mode's 1/g_off it was a 25.6 V spike (the scoreboard cell 9.6e-4 ->
-    5.5e-2). The row is solved with the crossing diode ON: V(out) = v_in."""
+    """At a LOCATED crossing where only V_f = 0 diodes flip and nothing else
+    happens, the ON and OFF laws meet (i = 0, v_D = 0): nothing jumps, the
+    right limit is the left (no solve, no mode forced). The located current
+    is zero only to the locator's tolerance (here ~26 uA); read through the
+    OFF mode's 1/g_off it was a 25.6 V spike (the scoreboard cell 9.6e-4 ->
+    5.5e-2)."""
     r = _quiet(p.simulate, _half_wave_rl(), t_end=12e-3, dt=dt,
                enable_substep_state_correction=True, **RULE)
     v, t, k = _limits(r)
@@ -254,3 +254,71 @@ def test_a_gate_edge_on_a_resume_seam_records_its_right_limit():
     for col in ("a", "c"):
         assert np.asarray(vr.v(col))[kr[0] + 1] == pytest.approx(
             np.asarray(vf.v(col))[kf[0] + 1], rel=1e-9, abs=1e-12)
+
+
+def _half_wave_rl_with(V_f=0.0, gate_at=None):
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("V", "in", "gnd", 0.0, 10.0, 50.0)
+    b.add_diode("D1", "in", "out", 200.0, 1e-6, 0.0, V_f)
+    b.add_resistor("R1", "out", "nl", 10.0)
+    b.add_inductor("L1", "nl", "gnd", 1e-3, 0.0)
+    fn = None
+    if gate_at is not None:   # an ideal switch ties out to 5 V from gate_at on
+        b.add_voltage_source("V5", "v5", "gnd", 5.0)
+        b.add_ideal_switch("S", "out", "v5", 0.0, 0.0)
+        k = b.switch_index_of("S")
+
+        def fn(t):
+            m = p.SwitchStateMask(k + 1)
+            m.set(k, t >= gate_at)
+            return m
+    return b, fn
+
+
+def test_r1_a_located_turn_off_beside_a_gate_edge_reads_the_decided_mode():
+    """R1: D1's turn-off is located within the last 1 % of the step and
+    landed on b = 10.1 ms, where an ideal switch closes onto 5 V. Forcing the
+    crossing diode ON there shorted the sine source against 5 V; the row is
+    the mode the step used (S ON, D1 OFF): V(out) = 5 V, i_L continuous. It is
+    not a continuity point, so it may be counted, never wrong."""
+    b, fn = _half_wave_rl_with(gate_at=10.1e-3 - 1e-9)
+    r = _quiet(p.simulate, b, t_end=10.2e-3, dt=20e-6, switch_fn=fn,
+               enable_substep_state_correction=True, **RULE)
+    v, t, k = _limits(r)
+    k = k[np.abs(t[k] - 10.1e-3) < 1e-9]
+    assert len(k) == 1
+    (j,) = k
+    assert np.asarray(v.v("out"))[j + 1] == pytest.approx(5.0, rel=1e-9)
+    il = np.asarray(v.i("L1"))
+    assert il[j + 1] == pytest.approx(il[j], rel=1e-9, abs=1e-15)
+
+
+def test_r2_a_v_f_turn_off_is_counted():
+    """R2: a V_f > 0 diode's laws do not meet at i = 0 (v_D jumps by V_f),
+    so its located turn-off is not a continuity point: the row is solved in
+    the decided (OFF) mode, where the locator's residual current goes through
+    1/g_off, and it is counted in n_right_limit_fallbacks."""
+    r = _quiet(p.simulate, _half_wave_rl_with(V_f=0.7)[0], t_end=12e-3, dt=30e-6,
+               enable_substep_state_correction=True, **RULE)
+    v, t, k = _limits(r)
+    assert len(k[np.abs(t[k] - 10.1e-3) < 0.5e-3]) == 1
+    assert r.n_right_limit_fallbacks >= 1
+
+
+def test_r3_a_mode_faster_than_the_limit_step_is_right_or_counted():
+    """R3: 10 V -> ideal S -> 1 ohm -> 1 fF (tau = 1 fs, far below every
+    eps the construction uses). The truth at the closing: v_C = 0
+    (continuous), i = 10 A. The row is that, or it is counted: an
+    unresolved mode never passes silently."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "vin", "gnd", 10.0)
+    b.add_ideal_switch("S", "vin", "a", 0.0, 0.0)
+    b.add_resistor("R", "a", "c", 1.0)
+    b.add_capacitor("C", "c", "gnd", 1e-15, 0.0)
+    r = _quiet(p.simulate, b, t_end=6e-6, dt=DT, switch_fn=_gate(b, "S", False), **RULE)
+    v, t, k = _limits(r)
+    (j,) = k
+    vc, i = np.asarray(v.v("c"))[j + 1], np.asarray(v.i("S"))[j + 1]
+    right = abs(vc) <= 1e-6 * 10.0 and i == pytest.approx(10.0, rel=1e-6)
+    assert right or r.n_right_limit_fallbacks >= 1, (vc, i, r.n_right_limit_fallbacks)
+
