@@ -141,6 +141,14 @@ F = [
      "`benchmarks/tools/counters.py` `ladder500_rc` on `engine='dsed', integrator='rk45'` without dt (t_end 2e-5)",
      "a 2e-5 s RC run (pwl / trbdf2 take 0.1 s)", "seconds (old grid)", "> 29 min with the cost fix merged, stopped by PID; "
      "`sample`: dsed::exact_chord_step / ChordWork / ExactLTI (the integrator's own work is not the cost)"),
+    ("F-X-4", "F", "C", "`auto` without dt writes 2,000,002 samples for a 2 s DC resistor (triage freeze migration)",
+     "`next_defaults_rehearsal._no_dt_run(v1_reader.load('benchmarks/circuits/thermal/electrothermal_resistor_self_heating.yaml'), 'auto')` "
+     "(5 V across 1 ohm, t_end 2 s, uic); graded by `reference_status.py` against trbdf2 rtol=1e-8",
+     "V(vin) = 5 V from t = 0+ (dsed with the netlist dt agrees, err_rms 0; 4002 samples)",
+     "auto routed to trbdf2: 1004 samples, agree",
+     "routes to dsed: 2,000,002 samples on a 1 us grid; V(vin) right, but the reference's uic sample "
+     "V(vin)(0) = 0 interpolated to 5 V at 2e-5 s spans 20 output samples: err_rms 1.78e-3 > tol 1e-3, err_max 1.0 "
+     "(disagree, frozen `auto` in v2_triage.yaml citing this id)"),
     ("F-X-2", "H", "C", "the `auto` routing costs 4745 bytecodes per call",
      "`test_simulate_overhead` no-dt script", "ceiling 3760 bytecodes", "3683 (trbdf2 route)", "5456 (pulsim.exact_route alone 4745)"),
 ]

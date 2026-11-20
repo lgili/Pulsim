@@ -566,3 +566,93 @@ Paralleled bridges, 20 ms, conductance-form diodes (the test as written):
 
 - `test_benchmark_harness.py` whole: 379 passed, 1 xfailed (`test_counter_gate[ladder500_rc]`, F-X-3).
 - **Step 5 evidence:** `REFERENCE_STATUS.md`, `EXACT_SCOREBOARD.md` + json, `IDEAL_SWITCH_FLIP_EVIDENCE.md`, `ACCURACY_SUMMARY.md` (`--check` rc 0) regenerated at the defaults, `@legacy` columns kept.
+
+## 9. Triage freeze migration (2026-11-20, R1.6 leftover)
+
+`reference_status.py` printed 72 `UNEXPECTED` lines at 4c6ba3cb: the `known:` / `known_err:` freezes of `benchmarks/manifests/v2_triage.yaml` were keyed by the pre-release configurations (`pwl`, `pwl+restart`, `pwl+split`, `trbdf2`), so every legacy-profile cell (`*@legacy`) and three `auto` cells read as new. Migrated one entry at a time from the cells of the step-3 run (`reference_status.py --json`, tree eac80cbf, extension `so_release_1b3f7ecc`; C++ unchanged since), re-annotated with `--from-json` (no re-run): 0 `UNEXPECTED`, exit 0, `REFERENCE_STATUS.md` regenerated.
+
+Classes: **a** the same failure under a renamed key (old key `K` -> `K@legacy`, or the engine `auto` lands on); the recorded cause comment kept; **a\*** the same failure, measured more than 2x below its old freeze (the tool's "re-freeze" prompt): frozen at the measured error; **b** the cell passes now: freeze removed; **c** new failure: a release finding.
+
+Counts over the 72 lines: a 69, a* 2, b 0 (none of the 72 passes: an `UNEXPECTED` line is a failing cell), c 1 (F-X-4).
+
+| # | circuit | cell | old key: frozen | measured | class | new key |
+|---:|---|---|---|---|---|---|
+| 1 | closed_loop/cl_boost_pi.yaml | pwl@legacy | `pwl`: disagree (0.0582) | disagree (0.0582) | a | `pwl@legacy` |
+| 2 | closed_loop/cl_boost_pi.yaml | pwl+restart@legacy | `pwl+restart`: disagree (0.0579) | disagree (0.0579) | a | `pwl+restart@legacy` |
+| 3 | closed_loop/ll14_buck_closed_loop.yaml | pwl@legacy | `pwl`: disagree (0.29) | disagree (0.249) | a | `pwl@legacy` |
+| 4 | closed_loop/ll14_buck_closed_loop.yaml | pwl+restart@legacy | `pwl+restart`: disagree (0.213) | disagree (0.221) | a | `pwl+restart@legacy` |
+| 5 | closed_loop/ll14_buck_closed_loop.yaml | pwl+split@legacy | `pwl+split`: disagree (0.178) | disagree (0.188) | a | `pwl+split@legacy` |
+| 6 | closed_loop/ll15_boost_closed_loop.yaml | pwl@legacy | `pwl`: disagree (0.3) | disagree (0.22) | a | `pwl@legacy` |
+| 7 | closed_loop/ll15_boost_closed_loop.yaml | pwl+restart@legacy | `pwl+restart`: disagree (0.0663) | disagree (0.0659) | a | `pwl+restart@legacy` |
+| 8 | closed_loop/ll15_boost_closed_loop.yaml | pwl+split@legacy | `pwl+split`: disagree (0.0484) | disagree (0.05) | a | `pwl+split@legacy` |
+| 9 | closed_loop/ll16_flyback_closed_loop.yaml | pwl@legacy | `pwl`: disagree (0.261) | disagree (0.112) | a* | `pwl@legacy` |
+| 10 | closed_loop/ll16_flyback_closed_loop.yaml | pwl+restart@legacy | `pwl+restart`: disagree (0.251) | disagree (0.208) | a | `pwl+restart@legacy` |
+| 11 | closed_loop/ll16_flyback_closed_loop.yaml | pwl+split@legacy | `pwl+split`: disagree (0.245) | disagree (0.115) | a* | `pwl+split@legacy` |
+| 12 | linear/current_source_rl_step.yaml | pwl@legacy | `pwl`: disagree (0.00577) | disagree (0.00577) | a | `pwl@legacy` |
+| 13 | linear/rl_natural_response.yaml | pwl@legacy | `pwl`: disagree (0.00577) | disagree (0.00577) | a | `pwl@legacy` |
+| 14 | magnetics/half_bridge_transformer_dc.yaml | pwl@legacy | `pwl`: disagree (0.151) | disagree (0.101) | a | `pwl@legacy` |
+| 15 | magnetics/transformer_leakage.yaml | pwl@legacy | `pwl`: disagree (0.0041) | disagree (0.0041) | a | `pwl@legacy` |
+| 16 | magnetics/transformer_leakage.yaml | pwl+restart@legacy | `pwl+restart`: disagree (0.00409) | disagree (0.00409) | a | `pwl+restart@legacy` |
+| 17 | magnetics/transformer_leakage.yaml | pwl+split@legacy | `pwl+split`: disagree (0.00409) | disagree (0.00409) | a | `pwl+split@legacy` |
+| 18 | stress/high_q_rlc_ringdown.yaml | pwl@legacy | `pwl`: disagree (0.0229) | disagree (0.0229) | a | `pwl@legacy` |
+| 19 | stress/high_q_rlc_ringdown.yaml | trbdf2@legacy | `trbdf2`: disagree (0.00566) | disagree (0.00566) | a | `trbdf2@legacy` |
+| 20 | switching/basic/vcswitch_resistor.yaml | pwl@legacy | `pwl`: disagree (0.0332) | disagree (0.0332) | a | `pwl@legacy` |
+| 21 | switching/basic/vcswitch_resistor.yaml | pwl+restart@legacy | `pwl+restart`: disagree (0.0682) | disagree (0.0682) | a | `pwl+restart@legacy` |
+| 22 | switching/basic/vcswitch_resistor.yaml | pwl+split@legacy | `pwl+split`: disagree (0.0332) | disagree (0.0332) | a | `pwl+split@legacy` |
+| 23 | switching/boost/boost_pfc_open_loop.yaml | pwl@legacy | `pwl`: disagree (0.0304) | disagree (0.0304) | a | `pwl@legacy` |
+| 24 | switching/boost/boost_pfc_open_loop.yaml | pwl+restart@legacy | `pwl+restart`: disagree (0.0304) | disagree (0.0304) | a | `pwl+restart@legacy` |
+| 25 | switching/boost/ll07_boost_vcswitch.yaml | pwl@legacy | `pwl`: disagree (0.0984) | disagree (0.0984) | a | `pwl@legacy` |
+| 26 | switching/boost/ll07_boost_vcswitch.yaml | pwl+restart@legacy | `pwl+restart`: disagree (0.0997) | disagree (0.111) | a | `pwl+restart@legacy` |
+| 27 | switching/boost/ll07_boost_vcswitch.yaml | pwl+split@legacy | `pwl+split`: disagree (0.0997) | disagree (0.0997) | a | `pwl+split@legacy` |
+| 28 | switching/boost/ll12_pfc_boost_continuous.yaml | pwl@legacy | `pwl`: disagree (0.083) | disagree (0.083) | a | `pwl@legacy` |
+| 29 | switching/boost/ll12_pfc_boost_continuous.yaml | pwl+restart@legacy | `pwl+restart`: disagree (0.0806) | disagree (0.114) | a | `pwl+restart@legacy` |
+| 30 | switching/boost/ll12_pfc_boost_continuous.yaml | pwl+split@legacy | `pwl+split`: disagree (0.0806) | disagree (0.0806) | a | `pwl+split@legacy` |
+| 31 | switching/buck/ll06_buck_vcswitch.yaml | pwl@legacy | `pwl`: disagree (0.0781) | disagree (0.0781) | a | `pwl@legacy` |
+| 32 | switching/buck/ll06_buck_vcswitch.yaml | pwl+restart@legacy | `pwl+restart`: disagree (0.118) | disagree (0.118) | a | `pwl+restart@legacy` |
+| 33 | switching/buck/ll06_buck_vcswitch.yaml | pwl+split@legacy | `pwl+split`: disagree (0.0704) | disagree (0.0704) | a | `pwl+split@legacy` |
+| 34 | switching/buck/ll08_buck_mosfet.yaml | pwl@legacy | `pwl`: disagree (0.227) | disagree (0.227) | a | `pwl@legacy` |
+| 35 | switching/buck/ll08_buck_mosfet.yaml | pwl+restart@legacy | `pwl+restart`: disagree (0.0842) | disagree (0.0843) | a | `pwl+restart@legacy` |
+| 36 | switching/buck/ll08_buck_mosfet.yaml | pwl+split@legacy | `pwl+split`: disagree (0.0842) | disagree (0.0843) | a | `pwl+split@legacy` |
+| 37 | switching/inverter/ll09_half_bridge_inverter_leg.yaml | pwl@legacy | `pwl`: disagree (0.0707) | disagree (0.0707) | a | `pwl@legacy` |
+| 38 | switching/inverter/ll09_half_bridge_inverter_leg.yaml | pwl+restart@legacy | `pwl+restart`: disagree (0.0587) | disagree (0.0587) | a | `pwl+restart@legacy` |
+| 39 | switching/inverter/ll09_half_bridge_inverter_leg.yaml | pwl+split@legacy | `pwl+split`: disagree (0.0587) | disagree (0.0587) | a | `pwl+split@legacy` |
+| 40 | switching/inverter/ll10_full_bridge_inverter_lc.yaml | pwl@legacy | `pwl`: disagree (0.05) | disagree (0.05) | a | `pwl@legacy` |
+| 41 | switching/inverter/ll10_full_bridge_inverter_lc.yaml | pwl+restart@legacy | `pwl+restart`: disagree (0.05) | disagree (0.05) | a | `pwl+restart@legacy` |
+| 42 | switching/inverter/ll10_full_bridge_inverter_lc.yaml | pwl+split@legacy | `pwl+split`: disagree (0.05) | disagree (0.05) | a | `pwl+split@legacy` |
+| 43 | switching/isolated/flyback_converter.yaml | pwl@legacy | `pwl`: disagree (0.949) | disagree (0.949) | a | `pwl@legacy` |
+| 44 | switching/isolated/forward_converter.yaml | pwl@legacy | `pwl`: disagree (0.707) | disagree (0.707) | a | `pwl@legacy` |
+| 45 | switching/isolated/full_bridge_dc.yaml | pwl@legacy | `pwl`: disagree (0.0828) | disagree (0.0828) | a | `pwl@legacy` |
+| 46 | switching/isolated/full_bridge_dc.yaml | pwl+restart@legacy | `pwl+restart`: disagree (0.0815) | disagree (0.0815) | a | `pwl+restart@legacy` |
+| 47 | switching/isolated/full_bridge_dc.yaml | pwl+split@legacy | `pwl+split`: disagree (0.0815) | disagree (0.0815) | a | `pwl+split@legacy` |
+| 48 | switching/isolated/ll11_llc_resonant_converter.yaml | auto | `trbdf2`: error | error | a | `auto` |
+| 49 | switching/isolated/ll11_llc_resonant_converter.yaml | pwl@legacy | `pwl`: error | error | a | `pwl@legacy` |
+| 50 | switching/isolated/ll11_llc_resonant_converter.yaml | pwl+restart@legacy | `pwl+restart`: error | error | a | `pwl+restart@legacy` |
+| 51 | switching/isolated/ll11_llc_resonant_converter.yaml | pwl+split@legacy | `pwl+split`: error | error | a | `pwl+split@legacy` |
+| 52 | switching/isolated/ll11_llc_resonant_converter.yaml | trbdf2@legacy | `trbdf2`: error | error | a | `trbdf2@legacy` |
+| 53 | switching/isolated/ll13_active_clamp_forward.yaml | auto | `trbdf2`: disagree (0.00133) | disagree (0.00155) | a | `auto` |
+| 54 | switching/isolated/ll13_active_clamp_forward.yaml | pwl@legacy | `pwl`: disagree (4.51) | disagree (4.51) | a | `pwl@legacy` |
+| 55 | switching/isolated/ll13_active_clamp_forward.yaml | pwl+restart@legacy | `pwl+restart`: disagree (0.335) | disagree (0.335) | a | `pwl+restart@legacy` |
+| 56 | switching/isolated/ll13_active_clamp_forward.yaml | pwl+split@legacy | `pwl+split`: disagree (0.335) | disagree (0.335) | a | `pwl+split@legacy` |
+| 57 | switching/isolated/ll13_active_clamp_forward.yaml | trbdf2@legacy | `trbdf2`: disagree (0.00133) | disagree (0.00133) | a | `trbdf2@legacy` |
+| 58 | switching/isolated/synchronous_flyback.yaml | pwl@legacy | `pwl`: disagree (0.207) | disagree (0.207) | a | `pwl@legacy` |
+| 59 | switching/multilevel/cascaded_h_bridge_5level.yaml | pwl@legacy | `pwl`: disagree (0.0274) | disagree (0.0274) | a | `pwl@legacy` |
+| 60 | switching/multilevel/cascaded_h_bridge_5level.yaml | pwl+restart@legacy | `pwl+restart`: disagree (0.0269) | disagree (0.0269) | a | `pwl+restart@legacy` |
+| 61 | switching/multilevel/cascaded_h_bridge_5level.yaml | pwl+split@legacy | `pwl+split`: disagree (0.0269) | disagree (0.0269) | a | `pwl+split@legacy` |
+| 62 | switching/multilevel/flying_capacitor_3level.yaml | pwl@legacy | `pwl`: disagree (0.0466) | disagree (0.0466) | a | `pwl@legacy` |
+| 63 | switching/multilevel/flying_capacitor_3level.yaml | pwl+restart@legacy | `pwl+restart`: disagree (0.05) | disagree (0.05) | a | `pwl+restart@legacy` |
+| 64 | switching/multilevel/flying_capacitor_3level.yaml | pwl+split@legacy | `pwl+split`: disagree (0.05) | disagree (0.05) | a | `pwl+split@legacy` |
+| 65 | switching/multilevel/mmc_4cell_chain.yaml | pwl@legacy | `pwl`: disagree (0.0268) | disagree (0.0268) | a | `pwl@legacy` |
+| 66 | switching/multilevel/mmc_4cell_chain.yaml | pwl+restart@legacy | `pwl+restart`: disagree (0.0264) | disagree (0.0264) | a | `pwl+restart@legacy` |
+| 67 | switching/multilevel/mmc_4cell_chain.yaml | pwl+split@legacy | `pwl+split`: disagree (0.0264) | disagree (0.0264) | a | `pwl+split@legacy` |
+| 68 | switching/multilevel/t_type_3level_halfbridge.yaml | pwl@legacy | `pwl`: disagree (0.0749) | disagree (0.0782) | a | `pwl@legacy` |
+| 69 | switching/multilevel/t_type_3level_halfbridge.yaml | pwl+restart@legacy | `pwl+restart`: disagree (0.0738) | disagree (0.0771) | a | `pwl+restart@legacy` |
+| 70 | switching/multilevel/t_type_3level_halfbridge.yaml | pwl+split@legacy | `pwl+split`: disagree (0.0738) | disagree (0.0771) | a | `pwl+split@legacy` |
+| 71 | thermal/electrothermal_resistor_self_heating.yaml | auto | `dsed`: none | disagree (0.00178) | c | `auto` (F-X-4) |
+| 72 | three_phase/three_phase_diode_rectifier.yaml | pwl@legacy | `pwl`: disagree (1.51) | disagree (1.51) | a | `pwl@legacy` |
+
+The default-profile keys of the same entries (not among the 72: none was `UNEXPECTED`) were migrated with them:
+- **b**, removed (the default cell agrees; the tool printed "now agree: drop the freeze"): `pwl` on `cl_boost_pi.yaml`, `current_source_rl_step.yaml`, `rl_natural_response.yaml`, `half_bridge_transformer_dc.yaml`, `high_q_rlc_ringdown.yaml`, `boost_pfc_open_loop.yaml`, `flyback_converter.yaml`, `forward_converter.yaml`, `synchronous_flyback.yaml`, `three_phase_diode_rectifier.yaml`.
+- kept, `pwl` frozen at the old `pwl+split` error (the release `pwl` default is the old `pwl+split` run; measured within 2x) on `ll14_buck_closed_loop.yaml`, `ll15_boost_closed_loop.yaml`, `transformer_leakage.yaml`, `vcswitch_resistor.yaml`, `ll07_boost_vcswitch.yaml`, `ll12_pfc_boost_continuous.yaml`, `ll06_buck_vcswitch.yaml`, `ll08_buck_mosfet.yaml`, `ll09_half_bridge_inverter_leg.yaml`, `ll10_full_bridge_inverter_lc.yaml`, `full_bridge_dc.yaml`, `ll13_active_clamp_forward.yaml`, `cascaded_h_bridge_5level.yaml`, `flying_capacitor_3level.yaml`, `mmc_4cell_chain.yaml`, `t_type_3level_halfbridge.yaml`; `ll16_flyback_closed_loop` `pwl` 0.245 -> 0.115 (measured, more than 2x below); `trbdf2` kept as is on `high_q_rlc_ringdown` (0.00566) and `ll13_active_clamp_forward` (0.00133, measured 0.00155); `ll11_llc_resonant_converter` `pwl` / `trbdf2` `error` kept.
+- The old `pwl+restart` / `pwl+split` keys are gone: those configurations exist only as `@legacy` columns now.
+- ll11 `auto`: the no-dt route aborts inside trbdf2 (`run_transient_trbdf2: Newton failed at t = 1e-5`), the same failure as the frozen `trbdf2` error: class a. ll13 `auto` lands on trbdf2 (1.55e-3, the `trbdf2` default cell measures the same): class a, frozen at the recorded trbdf2 error 1.33e-3.
+- **F-X-4** (class c): `electrothermal_resistor_self_heating` `auto` disagrees 1.78e-3 (tol 1e-3, err_max 1.0). The run is right (V(vin) = 5 V); without dt, `auto` now lands on dsed, whose output rule writes 2,000,002 samples (1 us) on this 2 s DC resistor (trbdf2 route before: 1004 samples), and the reference's uic sample V(vin)(0) = 0, interpolated to 5 V at 2e-5 s, spans 20 of them. dsed with the netlist dt agrees (err 0, 4002 samples). Group F (output rule), severity C; frozen `auto: disagree (0.00178)` citing the id.

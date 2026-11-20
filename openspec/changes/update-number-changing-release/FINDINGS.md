@@ -13,9 +13,9 @@ Severity: **W** wrong answer silently; **R** refusal / abort of something that u
 | C the new mode selection (`mode_selection='auto'`) | 3 | 2 | 2 | 7 |
 | D trbdf2 | 1 | 1 | 0 | 2 |
 | E control tick (`control_tick='state'`) | 1 | 0 | 1 | 2 |
-| F the exact route / output rule | 3 | 3 | 2 | 8 |
+| F the exact route / output rule | 3 | 3 | 3 | 9 |
 | G thermal summary on branch-form devices | 2 | 0 | 0 | 2 |
-| all | 23 | 7 | 6 | 36 |
+| all | 23 | 7 | 7 | 37 |
 
 Bucket-0 items (fixed by the integrator, not findings): `oracles/lcp_pulsim_bridge.py` builds `form='conductance'` (keyword `form=`); `next_defaults.legacy()` reads `dt` from the third positional argument; the branch-form refusal names `V_f` for `add_diode`.
 
@@ -301,6 +301,14 @@ Bucket-0 items (fixed by the integrator, not findings): `oracles/lcp_pulsim_brid
 - truth: a 2e-5 s RC run (pwl / trbdf2 take 0.1 s)
 - old: seconds (old grid)
 - new: > 29 min with the cost fix merged, stopped by PID; `sample`: dsed::exact_chord_step / ChordWork / ExactLTI (the integrator's own work is not the cost)
+- parked: none parked
+
+### F-X-4 [C] `auto` without dt writes 2,000,002 samples for a 2 s DC resistor (triage freeze migration)
+
+- call: `next_defaults_rehearsal._no_dt_run(v1_reader.load('benchmarks/circuits/thermal/electrothermal_resistor_self_heating.yaml'), 'auto')` (5 V across 1 ohm, t_end 2 s, uic); graded by `reference_status.py` against trbdf2 rtol=1e-8
+- truth: V(vin) = 5 V from t = 0+ (dsed with the netlist dt agrees, err_rms 0; 4002 samples)
+- old: auto routed to trbdf2: 1004 samples, agree
+- new: routes to dsed: 2,000,002 samples on a 1 us grid; V(vin) right, but the reference's uic sample V(vin)(0) = 0 interpolated to 5 V at 2e-5 s spans 20 output samples: err_rms 1.78e-3 > tol 1e-3, err_max 1.0 (disagree, frozen `auto` in v2_triage.yaml citing this id)
 - parked: none parked
 
 ## G — thermal summary on branch-form devices
