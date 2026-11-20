@@ -60,9 +60,11 @@
 >   stiff_two_timescale_rc (Ca at t = 0), boost_pfc_open_loop, ll12, ll09, active_clamp_forward, flyback,
 >   forward, ll13, synchronous_flyback). Three LOSE the `_implausible_voltage` warning the head had
 >   (half_bridge_transformer_dc, ll13, synchronous_flyback). Cost (instructions per accepted step, min of 3,
->   same tree): buck_pwl 1.0053 (first run 1.0006 on the same default path — re-measuring), vsi_pwl 1.0032,
->   buck_trbdf2 0.9999, bridge_trbdf2 0.9983; rule on: buck 1.0553, vsi 1.0207. NOT yet on this tip: one
->   full pytest, reference_status (last run before the two readings: no case worse, flyback 0.110 -> 2.3e-6
+>   same tree, two runs): buck_pwl 1.0053 / 1.0047, vsi_pwl 1.0032 / 1.0034, buck_trbdf2 0.9999 / 0.9993,
+>   bridge_trbdf2 0.9983 / 1.0008 (within 0.5 %, at the edge for buck_pwl; an earlier build of the same
+>   default path measured 1.0006: layout noise); rule on: buck 1.0553 / 1.0544, vsi 1.0207 / 1.0210.
+>   One full pytest on aa5d99f0: 6100 passed, 110 skipped, 9 xfailed; ruff clean; stubs up to date.
+>   NOT yet on this tip: reference_status (last run before the two readings: no case worse, flyback 0.110 -> 2.3e-6
 >   and forward 0.092 -> 2.6e-6 disagree -> agree), the reviewer.
 > - **F-3-7** still open: with this rule the saturable PSFB aborts at t = 44.95 us (Newton ||dx|| 803 V at
 >   rect_neg, residual 9e-7); restart-less 6.911 V, linear primary 6.890 V.
