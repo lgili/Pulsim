@@ -29,8 +29,10 @@ round-off in a periodic gate: `k*T1 + e[j]` equal to `t` at an edge) makes
 switch run, killed after 30 s; the same run with a correct gate takes
 milliseconds). `engine='trbdf2'` returns (with a warning);
 `periodic_steady_state` refuses such a gate by name. Expected: a refusal
-by name, or progress. Parked as strict xfail
-`test_dsed_finishes_on_a_non_advancing_next_edge_after`.
+by name, or progress. CLOSED on the integration line (batch 14t):
+`events::require_after` refuses such an oracle by name at once
+(`UnsupportedError`, 0.3 s); the test is now the direct assertion
+`test_dsed_refuses_a_non_advancing_next_edge_after`.
 
 ## Observations (not defects)
 

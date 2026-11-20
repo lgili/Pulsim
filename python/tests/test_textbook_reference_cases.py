@@ -60,10 +60,6 @@ from __future__ import annotations
 
 import functools
 import math
-import os
-import subprocess
-import sys
-import textwrap
 
 import mpmath as mp
 import numpy as np
@@ -670,46 +666,31 @@ def test_resonant_charging_engine_matches_truth(cfg):
 
 # ------------------------------------------------------------- findings ----
 
-_HANG = textwrap.dedent("""
-    import pulsim as p
+class _NonAdvancingGate:
+    """next_edge_after returns t itself: not strictly after t."""
 
-    class Gate:  # next_edge_after returns t itself: not strictly after t
-        def __init__(self, n, i):
-            self.n, self.i = n, i
-        def __call__(self, t):
-            m = p.SwitchStateMask(self.n)
-            m.set(self.i, (t % 1e-5) < 5e-6)
-            return m
-        def next_edge_after(self, t):
-            return t
+    def __init__(self, n, i):
+        self.n, self.i = n, i
 
+    def __call__(self, t):
+        m = p.SwitchStateMask(self.n)
+        m.set(self.i, (t % 1e-5) < 5e-6)
+        return m
+
+    def next_edge_after(self, t):
+        return t
+
+
+def test_dsed_refuses_a_non_advancing_next_edge_after():
+    """Finding F-T-2. Found while writing BipolarGate: a float round-off
+    made its next_edge_after return t at an edge, and the exact engine spun
+    at 100 % CPU. The integration line refuses such an oracle by name at
+    once (events::require_after), as periodic_steady_state does."""
     b = p.CircuitBuilder()
     b.add_voltage_source("V", "a", "gnd", 10.0)
     b.add_switch("S", "a", "o", 1e3, 1e-9)
     b.add_resistor("R", "o", "gnd", 10.0)
     b.add_capacitor("C", "o", "gnd", 1e-6)
-    try:
-        p.simulate(b, t_end=1e-4, engine="dsed",
-                   switch_fn=Gate(b.graph.num_switches, b.switch_index_of("S")))
-        print("RETURNED")
-    except p.PulsimError as e:
-        print("REFUSED", e)
-""")
-
-
-@pytest.mark.xfail(strict=True, reason=(
-    "finding F-T-2: engine='dsed' never returns when a switch_fn's "
-    "next_edge_after(t) returns t (trbdf2 returns, periodic_steady_state "
-    "refuses it by name)"))
-def test_dsed_finishes_on_a_non_advancing_next_edge_after():
-    """Found while writing BipolarGate: a float round-off made its
-    next_edge_after return t at an edge, and the exact engine spun at
-    100 % CPU (killed after minutes; 30 s here, the run itself takes
-    milliseconds). Either a refusal by name or a result passes."""
-    env = dict(os.environ, PYTHONPATH=os.path.dirname(os.path.dirname(p.__file__)))
-    try:
-        out = subprocess.run([sys.executable, "-c", _HANG], capture_output=True,
-                             text=True, encoding="utf-8", timeout=30, env=env)
-    except subprocess.TimeoutExpired:
-        pytest.fail("simulate(engine='dsed') did not finish within 30 s")
-    assert out.stdout.startswith(("RETURNED", "REFUSED")), out.stderr[-500:]
+    gate = _NonAdvancingGate(b.graph.num_switches, b.switch_index_of("S"))
+    with pytest.raises(p.UnsupportedError, match="next_edge_after"):
+        p.simulate(b, t_end=1e-4, engine="dsed", switch_fn=gate)
