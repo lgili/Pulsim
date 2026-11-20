@@ -1208,7 +1208,7 @@ inline SimulationResult run_transient_trbdf2(
     std::optional<pwl::PwlModePorts> mode_ports;
     events::ModeSelector mode_selector;
     events::PassivityClass mode_passivity;
-    std::vector<std::string> mode_diode_names;
+    std::vector<std::string> mode_diode_names, mode_device_names;
     ModeReport mode_rep;
     Vector mode_bx, mode_xj, mode_u, mode_xq;
     DenseMatrix mode_Z;
@@ -1247,8 +1247,10 @@ inline SimulationResult run_transient_trbdf2(
         mode_ports.emplace(cache, graph, pool, diodes);
         mode_passivity = pwl::passivity_of(graph, pool);
         mode_selector.passive = mode_passivity.passive();
-        for (const auto& e : diodes.entries())
+        for (const auto& e : diodes.entries()) {
             mode_diode_names.push_back(pwl::branch_label(graph, e.branch_id));
+            mode_device_names.emplace_back(graph.branch_name(e.branch_id));
+        }
         mode_rep.mode = opts.mode_selection;
         mode_rep.passivity = mode_passivity.name();
         mode_rep.passivity_device = mode_passivity.device;
@@ -1389,7 +1391,8 @@ inline SimulationResult run_transient_trbdf2(
             return false;
         }
         mode_note(sel);
-        events::raise_if_refused(sel, "trbdf2", t0, mode_diode_names, mode_passivity);
+        events::raise_if_refused(sel, "trbdf2", t0, mode_diode_names, mode_passivity,
+                                 &mode_device_names);
         diodes.restore_on_bits(std::vector<bool>(sel.on.begin(), sel.on.end()));
         m_site = mask_at(t_gates);
         require_probe(probe_solve(m_site, t0, dt_site, x_trial),

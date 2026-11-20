@@ -71,3 +71,87 @@ candidate mode; a candidate refusal — `ideal_voltage_loop` / `source_capacitor
 refusal's name, as `rejected_loop_` already did for the settle). pwl's LCP solves now go through the
 settle's structural pass first, so `floating_node` is named there too (it was a singular factor and
 an abort after 64 sub-steps).
+
+## F-4-2 — PSFB, branch form R_on = 1e-6, refused at 339 µs under 'auto' [M]
+
+Truth: conductance twin at g_on = 1e6, 24.071424 V; the settle (branch) 24.071411 V; at R_on = 1e-3
+both selectors agree (24.066152 / 24.066152). Trace of the refusal (env-guarded print of the first
+pass, not committed), t = 339.0278 µs, prev / anchor mode 00010110 (D_LS_B, D2, D3 ON), k = 8,
+h_e = 2.5e-13, Lemke status = secondary ray. The hybrid-coordinate matrix H has
+
+    H(5,5) = +4.66e-9,  H(6,6) = -1.28e-7  (D2, D3: ON ports, R_on = 1e-6)
+    H(4,4) = H(7,7) = 1.74e6               (D1, D4: OFF)
+    q(D2) = -1.06e-7 A, q(D3) = -9.6e-8 A  (the D2/D3 pair at its zero-current turn-off)
+
+A negative diagonal: H is not P0 / copositive-plus, so the ray proves nothing. Cause: an ON
+port's hybrid row is A − B·(I+ZΓ)⁻¹Z·Da with A = B = Da = 1/R_on, i.e. 1/R_on − (1/R_on)²·Z_jj; for
+a series pair behind 1e9 Ω of leaks Z_jj ≈ R_on and the result (~1e-9 S) is a difference of two
+1e6 S numbers through a solve of condition ~1e15: rounding. At R_on = 1e-3 the same cancellation
+leaves ~1e-4 relative error, which is why the shipped g_on = 1e3 runs. Not a degenerate tie rule,
+not the gauge: the first-pass port matrix itself is wrong in sign.
+
+Fix (selector, one place): before a first-pass failure (secondary ray / pivot cap) is believed, an
+anchored selector (the exact engine's) poses the LCP again with every port in OFF coordinates (z =
+i, H = Z_open + R_on: no 1/R_on term, no cancellation) — the anchor the ideal ports already use —
+and solves that. Only a run that would have been refused takes the new path (counter
+`ModeSelection::recoordinated`). The fixed engine's selector is not anchored (it poses its site
+once): not covered there; no fixed-engine refusal of this kind was found.
+
+## F-5-3 — a 1 ps gate pulse dropped by the exact engine under 'auto' [M]
+
+Not a merged simultaneity: both edges are events (799 event times on 400 periods, the falling edge
+at k·T + 1e-12 s on both selectors). Trace (`diagnostics['mode_selection']`, 3 periods): h_e = 1e-12,
+3 ties, 3 pin judgements, 0 leak pins. At the falling edge the inductor carries 2.4e-7 A
+(24 V · 1 ps / 100 µH); the stored samples show i_L 2.4e-7 A at the edge and 2.4e-8 A (= 24 V · g_off,
+the switch's leak) at the next — the pulse's current is gone, v_sw ≈ 0.
+- The selector's current tolerance at h_e is tol_i = tol·iscale + tol_w·C_max/h_e = 1.1 A (C_max =
+  47 µF, h_e = 1 ps); at 1e4·h_e still 1.1e-4 A. 2.4e-7 A is a tie at every pass.
+- The tie pins (removing it opens a gap i·R_jj ≫ tol_w), so the judge arbitrates: D1 OFF is judged
+  on the exact trajectory at 100·h_e and 1e4·h_e only, after the 0.2 ps g_off transient that
+  dissipates the current (τ = L·g_off): "consistent", and D1 goes OFF. The settle reads v_D at t+
+  (D1 OFF: v_sw = −i_L/(2 g_off) = −120 V, forward) and turns D1 ON.
+- Threshold measured (100 periods, v_out 'auto'/legacy): D = 1e-7 0.010, 1e-6 0.0010, 3e-6 3.4e-4,
+  1e-5 1.0e-4, 3e-5 3.5e-5 (every pulse up to 300 ps lost: its current is under the tie band);
+  D = 1e-4 (1 ns, 2.4e-6 A … the band's widened value): identical.
+Fix: the pin judge (the selector's `judge` on the exact engine, `run_selector_`) first checks the
+candidate at t itself (`off_forward_at_`: an OFF diode of the candidate breaking its law on the held
+state, the right limit before any parasitic transient); a candidate that does is inconsistent and
+the pins go ON. Only the pin arbitration changes (the guard's judge and the horizon are untouched).
+
+## Side observation — F-3-3 flyback on the exact engine with the LEGACY selector [M]
+
+`_flyback(False, 1.0)` of test_saturable_transformer, 100 kHz D = 0.5, `engine='dsed'`, 1 ms:
+legacy (today's default) peak i_p 2.0614 A, v_out(0.8–1 ms) 0.000 V (also at rtol 1e-9); 'auto'
+v_out 16.357 V. Independent truths: the restart fixed step on group A's branch (peak 16.38199 A at
+dt 10/5/2.5 ns, v_out 16.365 V) and bucket 3's exact-engine value 16.365 V. Every period legacy shows
+i_p 2.06 A at the gate-off and 9.6e-8 A at the next sample, the secondary current 0: the
+magnetising energy is lost at each turn-off. Mechanism [H, partly read]: at t+ with D1 OFF the
+secondary current is a state at 0, so v_D1 = 0 — the settle keeps D1 OFF; the forward bias exists
+only inside the 1e-14 s R_off transient (L_p / 1e9 Ω) in which the coupling would carry the current
+over, and the guard's judge (horizons past the parasitic transient) confirms the mode (5 checks, 0
+repairs). The LCP poses the BE companion over h_e, where the coupling is visible, and turns D1 ON.
+A default-path defect the release's flip to 'auto' fixes; not changed here (not a one-line fix).
+Test: `test_the_flyback_secondary_conducts_on_the_exact_engine` ('auto' passes, 'legacy' strict xfail).
+
+## F-4-3 — ideal PSFB with C_oss / C_j: D1 left ON at −2.2 A under 'auto' [M]
+
+Truth: the settle runs to 30 µs, v_out(27–30 µs) 1.0358473 V; the conductance twins at R_on = 1e-3 /
+1e-4 give 1.0357080 / 1.0358334 V on both selectors (Δ per decade 1.25e-4 → 1.25e-5: limit
+≈ 1.035846, the settle's value). So the circuit is well posed and the refusal was the selector's.
+
+Trace (`D1..D4` = the rectifier, bits in the order D1 D2 D3 D4): the two selectors pick different
+representatives of the rectifier overlap (all four conducting is a loop of ideal diodes; any three ON
+carry it): legacy 1011 → 1110 → 0110, 'auto' 1101 → 0111 → ?. At t = 14.96740 µs (auto: D4's current
+reaches 0 in 0111, the pair current is zero: the overlap ends; legacy ends it at the same instant)
+the LCP returns **0110** (D1 decided OFF with gap +3.4e-4 V at h_e, D4 OFF, D2/D3 ON — the settle's
+mode) but the applied mode was **1110**. Who wrote it: `release_band_ties_` (after `lcp_apply_`'s
+selection) — D1's signal at t is its C_j state, 1.31e-13 V, inside the tie band (1e-10 V), and the
+look-ahead `zero_band_on_` read the ladder's first rung (1.6e-20 s) as significant (the residue
+itself, not a slope) and turned D1 ON; D4, residue −, stayed OFF. In 1110 D1's current starts at 0
+and goes negative at once (−2.2 A after 20 ns); a predicate that starts on its event side never
+fires, and the end-of-run law check aborted the run.
+So: the LCP was right; its result was overridden by a post-step that is meant for the selector's
+remaining TIES (ports no pass decided) and reopened a port the first pass had decided OFF.
+
+Fix: `ModeSelection::tied` (per port: left OFF as a remaining tie); `release_band_ties_` considers only
+those ports (both callers: `lcp_apply_` and the guard's repair).
