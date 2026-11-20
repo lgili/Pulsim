@@ -5049,8 +5049,8 @@ void init_module(py::module_& m) {
             // re-acquire the GIL via pybind11 trampolines.
             StepObserverFn observer_eff = step_observer;
             const ShouldContinueFn should_continue = should_continue_arg.value_or(nullptr);
-             const auto live_ring = live_ring_arg.value_or(nullptr);
-             ShouldContinueFn continue_eff = should_continue;
+            const auto live_ring = live_ring_arg.value_or(nullptr);
+            ShouldContinueFn continue_eff = should_continue;
             if (live_ring) {
                 auto ring = live_ring;  // shared_ptr copy into closure
                 auto user_obs = step_observer;

@@ -14,7 +14,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Every `simulation:` key the file sets (`loaded.simulation_keys`) is now
   the keyword of the same name; a keyword you pass, then `solver=`, wins.
   A `loaded.options` field changed in Python that is no `simulation:` key
-  is refused by name (`OptionsError`).
+  is refused by name (`OptionsError`). **Behaviour change:** a YAML run
+  on an engine that honours these keys (`trbdf2`, `exact`) now uses them,
+  so its trace can move. A key the landing engine cannot honour (e.g.
+  `rtol` on the fixed step) is not used and raises one `RuntimeWarning`
+  naming it, so a file that ran still runs; the loader's placeholders
+  (`integrator: kernel`, `dt_init: 0`) and kernel-default values ask
+  nothing and pass without a word.
 * **Changed (BREAKING)** the channel arguments after the defaulted gains of
   `CxxBlockChain.add_sum`, `add_inverse_clarke`, `add_flux_mras_observer`
   and `add_sliding_mode_observer` are keyword-only (`py::kw_only()`), as

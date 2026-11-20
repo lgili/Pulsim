@@ -2255,6 +2255,49 @@ def _loaded_run_options(lc) -> dict:
     return out
 
 
+_YAML_PLACEHOLDER = {"integrator": ("kernel", "default"), "dt_init": (0.0,)}
+
+
+def _yaml_keys_not_honoured(filled, engine, dt, source) -> "list[str]":
+    """The YAML run keys of `filled` (name -> value, each filling a keyword
+    left unset) to drop: those an engine the run can land on cannot
+    honour. Before 12.15 simulate() never read them, so a file that ran
+    keeps running: they are dropped with one RuntimeWarning, never raised
+    on and never dropped silently. A value that asks nothing is dropped
+    without a word: the loader's placeholders (`integrator: kernel` /
+    `default`, `dt_init: 0`) and a value equal to the kernel default."""
+    eng = {"exact": "dsed"}.get(engine, engine)
+    # 'auto': an explicit dt requests the fixed step; without one the
+    # run may land on either MNA engine (a blocker routes it to pwl).
+    landing = (eng,) if eng in ("pwl", "trbdf2", "dsed") else (
+        ("pwl",) if dt is not None else ("pwl", "trbdf2"))
+    drop, loud = [], []
+    for k, v in filled.items():
+        if (v in _YAML_PLACEHOLDER.get(k, ())
+                or (_ro.DEFAULTS.get(k) is not None and v == _ro.DEFAULTS[k])):
+            drop.append(k)
+            continue
+        if k == "integrator":
+            ok = all(e == "dsed" or (e == "trbdf2" and v == "esdirk43")
+                     for e in landing)
+        else:
+            ok = all(_ro.honoured(k, e) or not _ro.is_requested(k, v, e)
+                     for e in landing)
+        if not ok:
+            drop.append(k)
+            loud.append(f"{k}={v!r}")
+    if loud:
+        import warnings
+        warnings.warn(
+            f"simulate({source!r}): the YAML simulation: key(s) "
+            f"{', '.join(loud)} are not used: this run can land on "
+            f"engine={'/'.join(landing)!r}, which cannot honour them "
+            "(pulsim.option_capabilities()). Pass engine= to choose the "
+            "engine that does, or remove the key(s).",
+            RuntimeWarning, stacklevel=3)
+    return drop
+
+
 # Stage A's plan.resolved_from: where each simulate() keyword's value came
 # from. 'explicit' = not the signature's default (an explicit default reads
 # 'default'); 'yaml' / 'solver' = filled from a LoadedCircuit / SolverOptions.
@@ -3321,6 +3364,7 @@ def _plan_run(
     _yaml_run = None
     if isinstance(builder, LoadedCircuit):
         _yaml_run = _loaded_run_options(builder)
+        _yaml_src = builder.source
         _was = (t_end, dt, t_start, store_every)
         builder, t_end, dt, t_start, store_every = _resolve_loaded_circuit(
             builder, t_end, dt, t_start, store_every)
@@ -3443,6 +3487,12 @@ def _plan_run(
                 "dt_init": dt_init}
         _now = {k: (_yaml_run[k] if v is None and k in _yaml_run else v)
                 for k, v in _ykw.items()}
+        _drop = _yaml_keys_not_honoured(
+            {k: _now[k] for k in _YAML_RUN_KW
+             if _ykw[k] is None and k in _yaml_run},
+            engine, dt, _yaml_src)
+        for k in _drop:
+            _now[k] = None
         _mark_resolved(_resolved, "yaml", _YAML_RUN_KW,
                        tuple(_ykw[k] for k in _YAML_RUN_KW),
                        tuple(_now[k] for k in _YAML_RUN_KW))

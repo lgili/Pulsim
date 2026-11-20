@@ -79,6 +79,20 @@
 
 namespace py = pybind11;
 
+namespace {
+// `resume=None` reads Optional in the signature (add-ai-usage-guide 1.4).
+// typing::Optional accepts any object, so the type is checked here: a
+// wrong one is a TypeError, as the plain `SolverSnapshot*` argument gave.
+// The pointer lives as long as the argument object (the call's duration).
+const pulsim::solver::SolverSnapshot* snapshot_or_null(
+    const py::typing::Optional<pulsim::solver::SolverSnapshot>& arg) {
+    if (arg.is_none()) return nullptr;
+    if (!py::isinstance<pulsim::solver::SolverSnapshot>(arg))
+        throw py::type_error("resume: expected a SolverSnapshot or None");
+    return &arg.cast<const pulsim::solver::SolverSnapshot&>();
+}
+}  // namespace
+
 namespace pulsim_dsed_bindings {
 
 using pulsim::Real;
@@ -1331,9 +1345,7 @@ void init_module(py::module_& m) {
            std::vector<std::uint64_t> tick_next_k,
            py::object loop_feed,
            Real t_offset, std::size_t output_budget) {
-            // `resume=None` reads Optional in the signature (add-ai-usage-guide 1.4)
-            const pulsim::solver::SolverSnapshot* resume =
-                resume_arg.is_none() ? nullptr : &resume_arg.cast<const pulsim::solver::SolverSnapshot&>();
+            const pulsim::solver::SolverSnapshot* resume = snapshot_or_null(resume_arg);
             PySwitchFnSSM sf(std::move(switch_fn_obj));
             // add-unified-event-queue group 3: control ticks on the
             // scheduler's queue; each gets the full MNA state.
@@ -1789,8 +1801,7 @@ void init_module(py::module_& m) {
            std::size_t store_every,
            bool event_log,
            py::typing::Optional<pulsim::solver::SolverSnapshot> resume_arg) {
-            const pulsim::solver::SolverSnapshot* resume =
-                resume_arg.is_none() ? nullptr : &resume_arg.cast<const pulsim::solver::SolverSnapshot&>();
+            const pulsim::solver::SolverSnapshot* resume = snapshot_or_null(resume_arg);
             // no loss tracking here: an adapter built with loss_port refuses by name
             pulsim::refuse_device_losses(adapter.pool(), "dsed");
             PySwitchFnSSM sf(std::move(switch_fn_obj));

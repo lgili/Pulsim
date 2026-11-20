@@ -147,7 +147,7 @@
       (Reconciled 2026-11: `docs/tutorials/gui-integration.md` never
       existed; the example is in `docs/helpers.md` §5.3:
       `b.build().to_yaml()` then `Circuit.from_yaml`, the alias still
-      resolving. Evidence: `test_doc_snippets.py`.)
+      resolving. Evidence: `test_builder_ergonomics.py::TestAliases::test_alias_yaml_round_trip`.)
 - [x] 5.3 Update each long-running entry-point's docstring with
       the `should_continue` kwarg, including a recipe for
       "wrap a `threading.Event` into the callback for GUI

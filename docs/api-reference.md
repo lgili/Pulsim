@@ -498,9 +498,11 @@ res = p.simulate(loaded)    # t_end / dt from the file; keywords override
 ```
 
 `simulate(loaded)` takes `t_end`, `dt` (when the file sets one),
-`t_start` and `store_every` from the `simulation:` block; any keyword
-you pass wins. The other `simulation:` fields (Newton tolerances,
-`integrator`, ...) stay on `loaded.options` for you to forward. A
+`t_start` and `store_every` from the `simulation:` block, and every
+other key the file sets (`loaded.simulation_keys`: Newton tolerances and
+caps, `integrator`, `rtol`, `atol`, `dt_init`) as the keyword of the same
+name; a keyword you pass, then `solver=`, wins. A key the engine the run
+lands on cannot honour is not used and raises one `RuntimeWarning`. A
 `LoadedCircuit` with no top-level `simulation:` block (or no `t_end` in
 it) is refused with a `ValueError` naming the file, unless you pass
 `t_end=`.

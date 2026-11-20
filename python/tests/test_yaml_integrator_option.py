@@ -9,6 +9,7 @@ The schema-side support keeps user YAMLs forward-compatible today.
 """
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
 pulsim = pytest.importorskip("pulsim")
@@ -164,10 +165,49 @@ def test_yaml_simulation_keys_are_listed_in_file_order():
 
 def test_simulate_loaded_circuit_forwards_the_integrator():
     """The YAML's `integrator: radau` reached no engine before: the run
-    went through on the kernel integrator. Now it is the keyword's own
-    refusal."""
-    with pytest.raises(NotImplementedError, match="v1.6"):
-        pulsim.simulate(pulsim.load_yaml_string(_RC_YAML))
+    went through on the kernel integrator. On the engine that takes an
+    integrator it is now the keyword's own refusal."""
+    with pytest.raises(ValueError, match="integrator='radau'"):
+        pulsim.simulate(pulsim.load_yaml_string(_RC_YAML), engine="exact")
+
+
+def test_keys_the_landing_engine_cannot_honour_warn_and_run():
+    """The same file on its dt (the fixed step): integrator, rtol, atol and
+    dt_init mean nothing there. It ran before 12.15 and still runs, now
+    with one RuntimeWarning naming the unused keys, byte-equal to the run
+    without them."""
+    loaded = pulsim.load_yaml_string(_RC_YAML)
+    with pytest.warns(RuntimeWarning, match="integrator='radau'.*dt_init"):
+        r = pulsim.simulate(loaded)
+    ref = pulsim.simulate(loaded.builder, 1e-3, dt=1e-5)
+    assert r.engine_used == "pwl"
+    np.testing.assert_array_equal(np.asarray(r.states), np.asarray(ref.states))
+
+
+_DOC_BLOCK_YAML = _RC_YAML.replace("""  integrator: radau
+  rtol: 1.5e-6
+  atol: 2.5e-9
+  dt_init: 1.0e-7
+""", """  enable_newton_line_search: false
+  max_event_iterations: 16
+  max_newton_iterations: 50
+  tol_newton_dx: 1.0e-9
+  integrator: kernel
+  dt_init: 0.0
+""")
+
+
+@pytest.mark.parametrize("engine", ["auto", "pwl", "trbdf2", "exact"])
+def test_the_documented_simulation_block_runs_on_every_engine(engine):
+    """docs/yaml-chain.md's block: the loader's placeholders (`integrator:
+    kernel`, `dt_init: 0`) and kernel-default Newton values ask nothing,
+    so no engine refuses or warns."""
+    import warnings
+    with warnings.catch_warnings():
+        warnings.filterwarnings("error", message=".*YAML simulation")
+        r = pulsim.simulate(pulsim.load_yaml_string(_DOC_BLOCK_YAML),
+                            engine=engine)
+    assert len(r.times) > 10
 
 
 def test_simulate_loaded_circuit_forwards_tolerances():
