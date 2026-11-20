@@ -36,7 +36,8 @@ ramp over T_R from 0 V, so v - V_m = (V_dc - V_m)/V_dc * V_dc(t) while the
 high side is on):  i_off = i_0 + (V_dc - V_m)(t_off - T_R/2) / L,  to
 R_on/L * int i dt ~ 3e-5 A (2e-5 relative), below every tolerance here.
 
-Engines and tolerances (each through explicit options, never the defaults):
+Engines and tolerances (each engine selected through explicit options; the
+variable-step ones at their default rtol / atol):
 * ``pwl`` (dt = 1 ns, discontinuity_restart False): first order at a gate
   edge (AI_GUIDE trap 9, a stale trapezoidal history): held to ONE STEP on a
   transition time (a half-step shift is that order's signature) and to the
@@ -176,13 +177,15 @@ def _run(engine, case, frac=None):
     fn = _gates(b, dead)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        try:
-            r = p.simulate(b, t_end=t_end, switch_fn=fn, **ENGINES[engine])
-        except p.SimulationAborted as e:
-            if engine == "esdirk43" and "t = 0.000000" in str(e):
-                pytest.xfail(f"finding F-S-1 (esdirk43 cannot start this circuit): {str(e)[:100]}")
-            raise
+        r = p.simulate(b, t_end=t_end, switch_fn=fn, **ENGINES[engine])
     return b, fn, r
+
+
+def _fs1(request, engine, case, frac=None):
+    """F-S-1: esdirk43 aborts at t = 0 on case B with i0 < 0 (partial ZVS)."""
+    if engine == "esdirk43" and case == "B" and frac is not None and frac < 1:
+        request.applymarker(pytest.mark.xfail(strict=True, raises=p.SimulationAborted,
+                                              reason="finding F-S-1: esdirk43 aborts at t = 0"))
 
 
 def _cross(t, v, level, t0, t1):
@@ -253,6 +256,7 @@ KNOWN_LOSS = {
 def test_hard_turn_on_energy_is_booked(engine, case, request):
     if engine in KNOWN_LOSS:
         request.applymarker(pytest.mark.xfail(strict=True, reason=KNOWN_LOSS[engine]))
+    _fs1(request, engine, case, 0.7)
     tp, tq = 2e-9, 20e-9
     if case == "A":
         b, fn, r = _run(engine, "A")
@@ -267,7 +271,8 @@ def test_hard_turn_on_energy_is_booked(engine, case, request):
     assert got == pytest.approx(truth, rel=0.05)
 
 
-def test_partial_zvs_trough_is_the_energy_closed_form(engine):
+def test_partial_zvs_trough_is_the_energy_closed_form(engine, request):
+    _fs1(request, engine, "B", 0.7)
     _, _, r = _run(engine, "B", 0.7)
     i0, i_off, t_off, sol = _case_B(0.7, DEAD_PART)
     v0 = mp.mpf(VDC) - mp.mpf(i_off) / GON
@@ -287,7 +292,8 @@ def test_partial_zvs_trough_is_the_energy_closed_form(engine):
 
 
 @pytest.mark.parametrize("frac", [0.7, 1.5])
-def test_resonant_trajectory_is_the_ode_truth(engine, frac):
+def test_resonant_trajectory_is_the_ode_truth(engine, frac, request):
+    _fs1(request, engine, "B", frac)
     _, _, r = _run(engine, "B", frac)
     dead = DEAD_PART if frac < 1 else DEAD_FULL
     _, _, t_off, sol = _case_B(frac, dead)
@@ -657,8 +663,9 @@ def psfb_engine(request):
 def test_psfb_dead_time_commutation_against_exact_truth(psfb_truth, psfb_engine, request):
     """i_Llk at each of the 12 gate-off edges within 5e-3 A (1e-3 of its
     ~5 A peak) and every engine sample inside each transition within 0.5 V
-    of the truth (1.25e-3 of the bus). Seen: pwl+restart 6.7e-4 A / 0.46 V
-    (second order on its own 10 ns grid), trbdf2 1.7e-5 A / 0.026 V,
+    of the truth (1.25e-3 of the bus, the LLC's bound). Seen: pwl+restart
+    6.7e-4 A / 0.46 V (second order on its fixed 10 ns grid: deterministic,
+    so the thin 8 % margin is not a platform risk), trbdf2 1.7e-5 A / 0.026 V,
     esdirk43 6.0e-6 A / 0.010 V, dsed 1.8e-7 A / 2e-5 V; pwl without
     restart 0.11 A / 245 V (trap 9)."""
     if psfb_engine == "pwl":

@@ -24,13 +24,14 @@ state; the fast ones are a fixed function of w (no floating point in any
 rank decision). A mode change keeps z = Cs^-1 [T^-1 M^-1 (E x)]_top, i.e.
 it depends only on the charges and fluxes E x: the distributional solution
 (charge / flux conservation), the impulsive energy is reported.
-(Derivation: integrate E x' = A x + B w over [t-, t+]: E (x+ - x-) = A s,
-s the impulse weights of x. In the Weierstrass coordinates x = T [z; u],
-M^-1 E = T diag(Cs, N) T^-1, so [T^-1 M^-1 E x]_top = Cs z for any x: z+
-read from E x- equals z-, the slow states pass unchanged, and only the
-nilpotent coordinates jump -- with N = 0 (index 1, no capacitor loop or
-inductor cut-set) E K = 0 and E x itself is conserved; at higher index the
-impulse moves charge / flux only along E K, the loop or cut-set.) The
+(Derivation: in the Weierstrass coordinates x = T [z; u] of the new mode,
+M^-1 E = T diag(Cs, N) T^-1, the DAE splits into z' = F z + G w (an ODE: a
+bounded w gives no impulse to z, so z is continuous) and N u' = ... (u
+algebraic, free to jump). [T^-1 M^-1 E x]_top = Cs z for any x, so z+ =
+Cs^-1 [T^-1 M^-1 E x-]_top = z- and only u jumps: E (x+ - x-) = E K du.
+With N = 0 (index 1: no capacitor loop, no inductor cut-set) E K = 0 and
+every charge and flux E x is conserved; at higher index the impulse moves
+charge / flux only along E K, i.e. around the loop or cut-set.) The
 augmented y = [z; w] is propagated exactly through the eigen-decomposition
 of H = [[F, G], [0, S]] (mpmath), so every observable is a sum of
 exponentials; window integrals (means, RMS, energies) are exact sums.

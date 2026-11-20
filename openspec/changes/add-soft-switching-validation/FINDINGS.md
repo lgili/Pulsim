@@ -11,11 +11,14 @@ dead-time state equations; none comes from a Pulsim run.
 `engine='trbdf2', integrator='esdirk43'` aborts at t = 0 (Newton fails, h at
 h_min) when a `add_nonlinear_capacitor` carries current at t = 0. Minimal: 0 V
 source, 1 mOhm, `add_nonlinear_capacitor(C0=1 nF, V0=25, m=0)` (a LINEAR law),
-10 A current source: `||dx|| 3.7e-6`, `||residual|| 7.0e-6` at the KCL row.
+10 A current source: the KCL row at node sw stays at `||residual||` 1e-6 to
+1e-5 (7.0e-6, 7.6e-6 and 9.3e-7 seen on different runs) against 1e-9.
 `add_capacitor` in its place runs; plain trbdf2 runs both. In the half-bridge
-of case B (inductor i0 = -0.97 A) it aborts the same way (`||residual||
-1.45e-6`); with i0 = +1.03 A it runs and agrees with the ODE truth.
-Strict xfail: `test_esdirk43_starts_a_current_driven_nonlinear_capacitor`.
+of case B, partial ZVS (inductor i0 = -0.97 A), it aborts the same way
+(`||residual|| 1.45e-6`); the full-ZVS case (i0 = +0.449 A) runs and agrees
+with the ODE truth. Strict xfails: `test_esdirk43_starts_a_current_driven_nonlinear_capacitor`
+and the three esdirk43 cells of case B at 0.7 x the critical current
+(`raises=SimulationAborted`).
 
 ### F-S-2 — `compute_switching_loss_per_event` was not an energy (FIXED here)
 `benchmarks/kpi.compute_switching_loss_per_event` summed `0.5*|v*i|` of the
