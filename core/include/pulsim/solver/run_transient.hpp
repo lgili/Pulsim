@@ -1974,10 +1974,6 @@ inline SimulationResult run_transient(
         auto step_take = [&]() PULSIM_STEP_PHASE {
             const Real t = t_step;
             const Real t_prev = t_prev_step;
-            if (L) {
-                L->clear();
-                L->ok = true;
-            }
             // Accumulate b_extra into the reused buffer (audit #6), in the
             // same left-to-right order as before so the result is
             // bit-identical: history, then the optional user fn, then only the
@@ -2467,6 +2463,11 @@ inline SimulationResult run_transient(
             auto restart_lined = [&](Real a, Real h) {
                 const bool inner = a != t_prev_step;
                 StepLines& lines = *L;   // restart steps exist under the rule only
+                if (lines.owner != t_step) {   // the step's first: no per-step reset
+                    lines.clear();
+                    lines.ok = true;
+                    lines.owner = t_step;
+                }
                 const Size j = lines.n;
                 if (inner) {
                     if (j < StepLines::kMax) {
@@ -2728,6 +2729,7 @@ inline SimulationResult run_transient(
                     if (L) {
                         L->clear();
                         L->ok = false;
+                        L->owner = t_step;
                     }
                     split_events.clear();
                     rs_first_valid = false;
@@ -3096,7 +3098,8 @@ inline SimulationResult run_transient(
             }
             // add-in-kernel-event-losses: the step is accepted; read its
             // commutations and conduction energy (reading rule).
-            if (lt) lt->accept(t_prev, t, x, stamped_mask, L && L->ok ? L : nullptr);
+            if (lt) lt->accept(t_prev, t, x, stamped_mask,
+                               L && L->owner == t && L->ok ? L : nullptr);
         };  // step_commit
 
         // Release group B: a step's lines into the result's event limits
@@ -3238,7 +3241,7 @@ inline SimulationResult run_transient(
                 result.record_switch_state(stamped_mask);
                 // the step's lines (release group B), when its start is the
                 // sample before this one
-                if (L && L->ok && !L->empty() && opts.store_every == 1 &&
+                if (L && L->owner == t && L->ok && !L->empty() && opts.store_every == 1 &&
                     result.times.size() >= 2) [[unlikely]] {
                     record_lines(result.times.size() - 2);
                 }

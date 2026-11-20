@@ -63,6 +63,7 @@
 #include <algorithm>
 #include <array>
 #include <format>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -96,6 +97,9 @@ struct StepLines {
     topology::SwitchStateMask m1;
     bool be_kept = false;
     bool ok = true;
+    // the step (its end time) the lines belong to: run_transient resets
+    // them at a step's first restart, not every step
+    Real owner = -std::numeric_limits<Real>::infinity();
     void clear() noexcept {
         start = false;
         n = 0;
