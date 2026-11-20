@@ -639,3 +639,14 @@ ESDIRK / Newton refusals beyond the tests.
   reproducers → audit cells `*_at_t_end` (expected: refusal on trbdf2),
   audit + sensitivity tests, full pytest, ruff, openspec validate; (b) build
   and run pulsim_core_step_tests; (c) 6.3 at rtol 1e-9 unchanged.
+- GATE on the rebuilt extension at 93292618 (LTO off, `.scratch/bl/cost.sh
+  6 norec`, instructions per accepted step, min of 6 alternating processes
+  × 3 runs, sensitivities off, vs 41860812): buck_pwl 3053.4 vs 3102.5
+  (−1.58 %), vsi_pwl 4721.9 vs 4771.1 (−1.03 %), buck_trbdf2 11060.9 vs
+  11058.8 (+0.02 %), bridge_trbdf2 12836.0 vs 12829.8 (+0.05 %). All ≤ +0.1 %.
+  The pwl gain is the split_step move (both cases run without the split).
+  Cumulative vs b9e46778 NOT measured (no LTO-off build of it).
+- NOT RUN on this tip: byte compares (g6cmp), audit / sensitivity tests,
+  full pytest, ruff, openspec validate, pulsim_core_step_tests. The move
+  and the lazy gate event change code paths on the default pwl loop: the
+  byte compares are the first thing the next agent runs.
