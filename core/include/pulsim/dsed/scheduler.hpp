@@ -2282,14 +2282,16 @@ private:
                     changed = true;
                     project_(t, x);
                 }
-                if (track && changed && reinit_log_size_() > mark) {
-                    // a trial mode's projection left records behind: that jump is
-                    // not physics, so the settled mode starts again from the
-                    // pre-event state (its own records alone). Keeping the iterated
-                    // state carried a cut-set trial's i_L = 0 into the freewheel
-                    // mode it settled in, with no record (the decision on the
-                    // projection's 1e-18 A residue is rounding: MSVC, R = 10·(1−u))
-                    truncate_reinit_log_(mark);
+                if (changed) {
+                    // a trial mode's projection is not physics: the settled mode
+                    // starts again from the pre-event state (its own records and
+                    // its own projection alone). Keeping the iterated state carried
+                    // a cut-set trial's i_L = 0 into the freewheel mode it settled
+                    // in, with no record (MSVC, R = 10·(1−u)), and a trial's
+                    // PARTIAL slow-manifold projection (no record at all) into the
+                    // forward converter's freewheel mode: I(L_o) +0.585 A in 0.2 ps
+                    // under the output rule's cut (F-X-6)
+                    if (track) truncate_reinit_log_(mark);
                     x = settle_x0_;
                     project_(t, x);
                 }
