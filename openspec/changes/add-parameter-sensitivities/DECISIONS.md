@@ -453,12 +453,12 @@ refusal by name:
    the interpolation (S_land = S_a + θ(S_b − S_a) with S_b a trap stage on
    the trial's factor, captured when the trial is solved) — or land with a
    solve when sensitivities are on.
-2. `test_moving_event_with_a_newton_device_is_refused` (strict xfail): a
-   pwl+split run with a Shockley diode and a PWL diode turn-on returned a
-   number; no refusal fired. NOT TRACED — possibly a silent wrong answer
-   (the Newton split path may never reach `sens_diode_events`, e.g. the
-   flip handled inside a Newton restart stage under a pending event). Trace
-   first: it is the priority.
+2. ~~`test_moving_event_with_a_newton_device_is_refused` returned a
+   number~~ — CLOSED, not a hole (see "Audit" below): its Shockley diode
+   (I_S 1e-14, n = 0.05, n·V_T = 1.3 mV) clamped v_c at 36 mV, the PWL
+   diode never reached 0.7 V, no event happened, and the number was right
+   (3.4e-9 vs central differences of the same scheme). With n = 10 the
+   event happens and the refusal fires, naming D.
 3. trbdf2 crossing within the conditioning floor (probe flip at t),
    ESDIRK landings, Newton-circuit moving events: refused by name.
 4. 4.4 saturable inductor: its flux λ(i) is a nonlinear q with its own
@@ -468,3 +468,44 @@ refusal by name:
    `seed_params`; not started.
 Not run: cost gate, byte compares, full pytest, C++ targets, stubs (no
 binding signature changed), openspec validate, the fresh-context reviewer.
+
+### Audit (2026-11-20, second session): no third outcome
+
+The rule: a step with sensitivities commits only through the recurrence (+
+the jump) or a refusal. Why it holds, by construction, in
+`StageSensitivity::stage`: a stage whose mode differs from the last one
+the object saw is accepted only if an event was REGISTERED before it
+(`time_event` / `state_event`), else it is refused ("not located"); a
+registered event with dτ/dp ≠ 0 in a circuit holding any Newton kind is
+refused (`has_newton_` is the DEVICE SET — Shockley, smooth diode,
+MOSFET L1, excess loss — not the device that fired); a stateful kind is
+refused at construction; a step not started from the committed bits is
+refused (contiguity). So a hole can only be (a) a mode change that does not
+show in the stamped mask, or (b) a registered event with a wrong dτ/dp. (a):
+the admitted kinds without a mask bit are linear or the four static laws
+(smooth: no event); time-varying sources have no parameters (dτ/dp = 0).
+(b) is what the truth cells check.
+
+`python/tests/test_sensitivity_event_audit.py` enumerates 5 event kinds
+(none, PWL diode turn-on, fixed gate edge, duty edge, sine-fed turn-on AND
+turn-off) × 3 device classes (linear, + a static Newton law, + a stateful
+kind) × 5 engine configurations (pwl, pwl+restart, pwl+split, trbdf2,
+trbdf2+esdirk43) = 75 cells; each is a number within 1e-5 of central
+differences of scipy Radau (rtol 1e-12, event functions) or an
+`UnsupportedError` naming the reason, pinned per cell. Plain pwl's numbers
+are checked against central differences of the same scheme (1e-6): its
+state has its own O(dt) first-order-start error (1.3e-4 here, the same as
+its sensitivity's gap to the truth; with restart both are ≤ 1e-8).
+
+| kind | linear | Newton | stateful |
+|---|---|---|---|
+| none | number on all 5 | number on all 5 | refused (history) |
+| diode turn-on | pwl, pwl+restart: refused (not located); split, trbdf2: number; esdirk43: refused (landing) | refused (Newton device) on split / trbdf2; else as linear | refused |
+| fixed gate edge | number on all 5 | number on all 5 | refused |
+| duty edge | pwl, pwl+restart: refused (staircase); split, trbdf2, esdirk43: number | refused (Newton device) where located | refused |
+| sine on/off | split: number; trbdf2: refused (turn-off within the conditioning floor); esdirk43: refused (landing); pwl, +restart: refused | refused | refused |
+
+Worst truth gaps of the number cells: diode turn-on 1.9e-7 (split) /
+6.0e-8 (trbdf2); duty 5e-10 / 5e-9 / 4e-12 (esdirk43) — d v/d D is entirely
+the jump term, so the sign and the factor T of dτ/dD are checked there;
+sine on/off on split 8.2e-8 (two turn-ons, two turn-offs, the ḃ term).

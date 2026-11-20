@@ -216,11 +216,13 @@ def test_fixed_gate_edges_without_splitting_are_carried():
     assert s == pytest.approx(fd, rel=1e-6)
 
 
-@pytest.mark.xfail(strict=True, reason="OPEN (DECISIONS 16): not refused; "
-                   "cause not traced (no refusal fired, a number came back)")
 def test_moving_event_with_a_newton_device_is_refused():
+    """n·V_T = 0.26 V: the junction leaves v_c free to reach the PWL diode's
+    threshold (an earlier version used n = 0.05, which clamped v_c at 36 mV:
+    no event happened and the number it returned was right)."""
     b = _diode_on()
-    b.add_shockley_diode("Dx", "c", "gnd", 1e-14, 0.05)
+    b.add_shockley_diode("Dx", "c", "gnd", 1e-8, 10.0)
     with pytest.raises(p.UnsupportedError) as ei:
         _run(b, T_END_ON, "pwl", sensitivities=["R.R"], **PWL_SPLIT)
     assert "Newton device" in str(ei.value)
+    assert "(D)" in str(ei.value)
