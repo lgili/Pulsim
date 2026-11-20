@@ -174,10 +174,181 @@ is a real right-row value.
 5. F-W-1: does not fall out (both xfails stand: the pulse step's END state,
    not the right limit).
 
+## Session 2 (7739d64a, 62b86ff1): located crossings, the ε-limit check, D4/D6/D7
+
+### 1. A located crossing (the new regression, diode_half_wave_rl_load split)
+
+Rule: at a LOCATED crossing the state is continuous (the predicate passes
+through zero) and the crossing variable is at its crossing value. For a diode
+with V_f = 0 the ON and OFF laws meet there (i = 0, v_D = 0), so the row is
+solved with the crossing diodes ON and no re-decision: the locator's residual
+(i_L = −2.6e-5 A, the location is 83 ns late) is read through R_on (0.13 µV),
+not through 1/g_off (25.6 V). Sites: split_step's three branches (crossing
+within snap of a, at b — the next step's start, only when b = t —, inside);
+`rl_loc_t` / `rl_loc_on` name the time and the crossing diodes.
+shortcut (in the code): a V_f > 0 turn-off keeps the OFF reading — its laws do
+not meet at i = 0 (v_D jumps by V_f); the ON reading would need the drop
+removed from the stamp.
+
+| D1 turn-off, pwl+split, V(out) | left | right | truth (at 10.0999172 ms) |
+|---|---|---|---|
+| before (c43be8b4) | −0.314107461 | +25.5709346 | −0.313847579 / −0.313847579 |
+| now | −0.314107461 | −0.314107461 | same |
+
+The engine's row is at 10.1 ms (the crossing lands on the grid point b); the
+truth continued to 10.1 ms is v_in(10.1 ms) = −0.31410759: left and right agree
+with it to 1.3e-7 V (6e-9 of the 20 V span). Cell 5.55e-2 → 9.637e-4 (b9e
+9.639e-4). Test: `test_a_located_turn_off_is_continuous_at_its_right_limit`
+(dt 20 µs: on b; 30 µs: inside the step).
+
+### 3. The ε-limit validity check
+
+Richardson is valid where x(ε) is smooth on (0, 16ε]: each mode of the ε mode
+either ε ≪ τ (polynomial motion) or ε ≫ τ (relaxed: a c·τ/ε tail). Not valid:
+τ inside [ε, 16ε], rounding through L/ε and C/ε. Five solves ε…16ε; per
+unknown P = (64x1 − 56x2 + 14x4 − x8)/21 is accepted when it agrees with the
+same combination on 2ε…16ε within 1e-6 of the unknown's size; else
+Q = (−8x1 + 22x2 − 13x4 + 2x8)/3 (it also annihilates a 1/ε term: a relaxed
+mode; an ideal constraint the moved states meet only to the probe's
+tolerance — D4; systematic rounding) against its shifted twin. An unknown
+passing neither takes the next rung: 1e3·ε0 = γh/2 (the stage's own
+conditioning), then 1e-3·ε0 (last: where rounding saturates a lost unknown is
+constant in ε and passes either test — ll10 at 1e-3 showed it, 51 V). After the
+ladder: the fallback, counted in `res.n_right_limit_fallbacks` — the impulse
+rule's x0+ after a probed jump, else ε0's P (the states are x0 or x0 + J in
+every solve: only algebraic unknowns fail; the left value is no fallback for
+them — ll10's leg jumps 36 kV at the dead time).
+
+Fallback on the 81 solved scoreboard circuits (rows with a fallback / right
+rows incl. inner): pwl+restart 65 / 32648, pwl+split 120 / 29102, in
+active_clamp_forward (6 / 45), half_bridge_transformer_dc (59 / 57),
+diode_bridge_rectifier split (7), three_phase_diode_rectifier split (1),
+voltage_doubler split (10 of 10). Their values are ε0's P, i.e. the session-1
+values; every cell of these circuits in the re-grade is at or under b9e.
+
+D4 (tested): C1 (10 V) — ideal S — C2 (0 V), R 1 kΩ / 500 Ω: the right-limit
+switch current was 68.1 A (C·δv/ε of the probe's J tolerance, then the
+fallback's impulse line); now 2.49376e-3 A = C2·dv/dt + v+/R2 at v+ to 1e-6, and
+dsed's 2.49438e-3 A at its own v+ (`test_a_constraint_current_after_a_charge_sharing_jump_is_the_regular_one`).
+
+D6: a split cluster's right limit reads the sources at ev_s + ε (the gates'
+side). Without the split loc = 0: a source edge inside a non-split step is not
+landed; the row at t_prev holds the t_prev+ values, which are the truth's
+there (reading at t_prev + loc would put the post-edge source at t_prev).
+D7: `rs_trig_ev` counts a resume seam (t_prev = t_start with `resume_from`):
+`test_a_gate_edge_on_a_resume_seam_records_its_right_limit` (resumed row =
+uninterrupted row to 1e-9).
+
+### 2. The other cells (exact measure; b9e46778 / head = stored scoreboard / now at 62b86ff1)
+
+| circuit | cell | b9e46778 | head | now | |
+|---|---|---|---|---|---|
+| back_to_back_diodes_sine | restart / split | 1.93e-16 / 1.94e-16 | 1.43e-9 / 1.64e-9 | 1.93e-16 / 1.95e-16 | ok (+0.9 % at 1e-16) |
+| diode_bridge_rectifier | restart / split | 2.21e-5 / 2.38e-5 | 4.43e-5 / 4.38e-5 | = b9e | ok |
+| half_wave_rectifier_sine | restart / split | 1.01e-4 / 2.56e-6 | 1.08e-4 / 1.58e-5 | = b9e | ok |
+| voltage_doubler | restart / split | 1.67e-6 / 2.19e-7 | 3.02e-6 / 2.19e-6 | = b9e | ok |
+| transformer_step_up | both | 4.03e-16 | 8.19e-10 | 4.03e-16 | ok |
+| chopper_with_rc_snubber | restart | 2.50e-8 | 2.88e-7 | 2.57e-8 | NOT MET (+2.8 %) |
+| chopper_with_rc_snubber | split | 3.11e-8 | 2.79e-7 | 3.11e-8 | ok |
+| pwm_voltage_rc | both | 1.38e-8 | 4.86e-8 | 1.38e-8 | ok |
+| cascaded_boost_buck | restart | 3.28e-6 | 3.32e-6 | 3.28e-6 | ok |
+| cascaded_boost_buck | split | 2.37e-7 | 6.02e-7 | 3.16e-7 | metric, listed |
+| flyback_converter | both | 2.55e-6 | 6.47e-6 | 2.56e-6 | ok (+0.6 %) |
+| three_phase_diode_rectifier | restart / split | 9.98e-4 / 9.96e-4 | 1.27e-2 | = b9e | ok |
+| vcswitch_resistor | restart | 5.92e-2 | 4.47e-2 | 3.87e-2 | ok |
+| vcswitch_resistor | split | 0 | 3.16e-2 | 3.16e-2 | not this branch (below) |
+| ll09_half_bridge_inverter_leg | both | 9.81e-3 | 4.14e-2 | 1.85e-7 | ok |
+| ll10_full_bridge_inverter_lc | both | 1.64e-7 | 1.71e-7 | 1.64e-7 | ok (was 2.46e-6) |
+| full_bridge_dc | restart / split | 3.76e-9 / 3.91e-9 | 8.02e-9 / 4.87e-9 | 3.72e-9 / 3.88e-9 | ok |
+| t_type_3level_halfbridge | both | 2.10e-7 | 3.26e-7 | 2.10e-7 | ok |
+| diode_half_wave_rl_load | restart / split | 9.49e-4 / 9.64e-4 | 6.71e-4 / 6.82e-4 | 9.49e-4 / 9.64e-4 | ok (split was 5.55e-2) |
+| ll07_boost_vcswitch | restart / split | 1.83e-2 / 2.96e-5 | 1.30e-2 / 2.96e-5 | 1.30e-2 / 2.96e-5 | ok |
+
+cascaded_h_bridge_5level, flying_capacitor_3level, mmc_4cell_chain (both
+columns) are within +0.3 % of b9e (mantissas 6.0034/6.0031, 1.5294/1.5333,
+1.1789/1.1758; same exponent).
+
+- ll10: the right row of every dead-time edge now agrees with the truth to
+  8.7e-6 of the span at worst (it was 1.8e-4: v_a −32248.82 vs −32242.25). The
+  leg potentials are ALGEBRAIC (no capacitance on leg_a / leg_b): at the gate
+  edge they jump from ~V_dc to ∓36 kV, the common mode (+2.16 V) set by the
+  1 MΩ bleeds against the switches' g_off. So the row must NOT hold the left
+  value: a leakage-only potential without charge storage is not a state. The
+  stored LEFT samples inside the dead time have a common-mode error of
+  ~4e-4 V (1e-8 of the value: conditioning 2L/dt against 1e-6 S); the ε rows
+  at ε0 had 6.6 V (L/ε 1e3× larger). The ladder's γh/2 rung brings the row to
+  the samples' conditioning.
+- cascaded_boost_buck split: every right row equals its left to 1.4e-15 of the
+  span (V(out) is a capacitor voltage, continuous); the largest row errors
+  (1.5e-6 of span) are the stored samples' own (eR = eL). The cell rises
+  because the two-sided reading counts each event row's sample twice. Listed.
+- vcswitch_resistor split: the rows are the session-1 rows (identical to
+  8d7b2a44's extension to 1e-22). The cell is set by an inner event at 1.5 ns
+  whose LEFT (the engine's start, out = 9.9999 V with the switch ON from the
+  pulse's previous period; the truth starts OFF) is a stored-sample matter,
+  identical at the head (3.16e-2). Session 1's 6.7e-25 for this cell does not
+  reproduce with its own extension.
+- chopper_with_rc_snubber restart: NOT MET. The right row of each switch
+  turn-off reads V(sw) 1e-5 V low (5e-7 of the 20 V span) with the states
+  exact: rounding of the ε0 solve (L/ε against the 1e-6 S off-conductances),
+  which passes the 1e-6 agreement test. A 1e-7 test would send it up the
+  ladder, where the γh/2 rung's truncation on the 1 µs snubber is 3e-6 — not
+  tried. Next: an ε chosen from the conditioning estimate, not a fixed ladder.
+
+### 4. Gates (62b86ff1)
+
+- Default path byte-identical vs the base extension (6027f4fd = cedac36b's C++,
+  built with this tree's flags, LTO ON): goldens, stateful, engines, steps,
+  trbdf2_identity rc 0; pwl_identity: the 218 differing entries are all
+  pwl+restart / pwl+split; the default entries are identical.
+- Rule-on: stored times and states identical to the base (`rlcmp.py`: 0
+  entries with a non-allowed difference); differences are the right-limit /
+  inner-event rows, `n_right_limit_fallbacks`, the voltage-scan peak and the
+  work counters of the ε solves on 16 Newton entries.
+- C++: pulsim_core_step_tests (32 cases) and pulsim_core_record_tests (18) pass
+  on Eigen 5. Full ctest not run.
+- Cost, instructions per accepted step (`/usr/bin/time -l`, min of six of the
+  K-run total minus min of six 0-run totals, base = 6027f4fd built with this
+  tree's flags; this tip includes session 1's changes): buck_pwl −0.06 %,
+  vsi_pwl +0.63 % (second run +0.60 %: GATE NOT MET), buck_trbdf2 +0.35 %,
+  vsi_trbdf2 −0.27 %. Rule on: buck_pwl_restart +10.5 %, vsi_pwl_restart
+  +11.4 % (five ε solves per rung, up to three rungs, at each event).
+  Not separated between session 1 and 2. Candidates (default path does no new
+  work): new by-reference captures in per-step closures — `split` in
+  run_restart, `rl_loc_t` / `rl_loc_on` in split_step, session 1's `rl_want`,
+  `L` uses — each a load + store per step if those closures are built per step
+  (STATE: the closure-construction work is another agent's).
+- test_simulate_overhead.py 2 passed; stubs --check rc 0; ruff clean; full
+  pytest 6420 passed / 114 skipped / 17 xfailed / 0 failed (at 62b86ff1).
+
+### Fresh review (opus, on 62b86ff1) — open, NOT fixed
+
+| id | finding | severity |
+|---|---|---|
+| R1 | `located` turns off re-decision for EVERY diode and forces the crossing diodes ON even when a gate edge coincides (crossing in the last snap = 1 % of the step, recorded at b, next step's mask trigger): e.g. a boundary-mode buck, D forced ON beside S ON, a short of Vin accepted by P. Also a second diode that stage 1 turned ON keeps ON with reverse current. Fix: force only `rl_loc_on`, keep re-deciding the others; do not mark located when the b-path's next step also has a gate trigger | high |
+| R2 | a V_f > 0 turn-off is still `located` (vector size matches) with nothing forced: the residual through 1/g_off is constant in ε, P accepts it, the counter stays 0. At least count it | medium-high |
+| R3 | ladder order 1, 1e3, 1e-3: a fast mode with τ ≲ ε0 that the probe misses is recorded relaxed (Q accepts at ε/τ ≥ 1e3) where the truth's x(t_e+) keeps its amplitude | medium |
+| R4 | rung 1e-3 still ACCEPTS saturated rounding (constant in ε) when rung 1e3 fails (ll10 with a coarser dt) | medium |
+| R5 | per-unknown rung mixing: a diode that commutes inside rung 1e3's range (16ε = 8γh) gives some unknowns from another mode; a capacitor between two large potentials resolved on different rungs is not exactly x0 | medium |
+| R6 | stale `rl_loc_t` on a retried step; fallbacks of discarded attempts are counted | low |
+| R7 | two modes of opposite sign can cancel in Q's test | remark |
+
 ## State and next step
 
-Open: D4 (no test), D6, D7; diode_half_wave_rl_load split (located turn-off
-read through g_off), ll10 (2.46e-6, conditioning), cascaded_boost_buck split,
-chopper restart (+2.8 %). Next step for the turn-off: at a located diode
-crossing, take the ε solves in the mode where the commutating diode is ON
-(i = 0 there; the OFF mode amplifies the location residual by 1/g_off).
+Tip 62b86ff1 (+ this notes commit). Not mergeable as is: vsi_pwl default-path
+cost +0.6 % over the 0.5 % gate (cause not separated), the reviewer's R1/R2
+(unflagged wrong right limits at a located crossing that coincides with a gate
+edge or a second diode; V_f > 0), R3–R5 (validity check accepts relaxed /
+saturated values), and chopper_with_rc_snubber restart still +2.8 %.
+Next, in order: (1) R1 — in event_right_limit force only `rl_loc_on` diodes
+ON and keep `events::redecide` for the others (a redecide that skips the
+forced indices), and clear `rl_loc_t` when the b-path's next step has a gate
+trigger at b; (2) R2 — `located` only if some `rl_loc_on` bit is set, and
+count a V_f > 0 located turn-off as a fallback; (3) R3/R4 — rung order
+1, 1e-3 (only accept P there, never Q: Q's job is the relaxed regime), 1e3,
+and refuse a rung whose x1..x16 are all equal to the last bit while rung 0
+moved (saturation); (4) cost — build c43be8b4 with these flags and measure it
+against this tip to separate session 1 from 2, then move `split` /
+`rl_loc_*` out of the per-step closures (read `split` inside event_right_limit,
+which is built once per run). Then re-run sb2.py, fb_count.py, ident2.sh
+compare, rlcmp.py, the restart tests, instr.sh.
