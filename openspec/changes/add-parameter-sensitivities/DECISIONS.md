@@ -376,3 +376,56 @@ confirmed. Found and fixed (each with a test in
   −0.35 %, shockrect51_pwl +0.09 %, shockrect51_trbdf2 0.00 %,
   mosl1_pwl +0.04 %, mosl1_trbdf2 +0.03 %. The hooks are `[[unlikely]]`
   calls into out-of-line members.
+
+## 16. Events on the time-stepping engines (group 6, 2026-11-20)
+
+Derivation (checked here, not copied). Each mode is the index-1 DAE
+`d/dt q(x) + f(x, t) = 0` in the engines' conductance form (`f = G·x − b(t)`,
+`q = C/2·x` for the linear stamps the recurrence admits; the engine matrix is
+`M = G + a·C/2`). At an event instant τ(p) the charges and fluxes q are
+continuous (no reset: identity for a PWL diode or a switch with R_on > 0).
+For t > τ, `q(t, p) = Φ⁺(t; τ, q(τ⁻, p))`, so
+
+    dq/dp(τ⁺) = dq/dp(τ⁻) + (q̇⁻ − q̇⁺)·dτ/dp,        (Φ⁺_τ = −q̇⁺ at t → τ⁺)
+
+and from the event's condition `g(x(τ), τ, p) = 0`
+
+    dτ/dp = −(g_x·S⁻ + g_p)/(g_x·ẋ⁻ + g_t).
+
+What the recurrence carries is (dq/dp, dq̇/dp) of the step start, so the jump
+is applied to dq/dp; dq̇/dp after the event is not formed (every engine's
+first post-event stage is backward-Euler-like, ψ = q_n with no q̇_n term — a
+stage that would read it is refused); the algebraic components of S follow
+from the first post-event stage solve, as the design says.
+
+- q̇⁻ = −f⁻(x⁻, τ) exactly: the stage relation `q̇_stage = a(q(X) − ψ)` IS the
+  residual of the stage equation, so the object mirrors the engine's own
+  charge slots (a value recurrence next to the sensitivity one, no solve).
+- q̇⁺ = −f⁺(x⁺, τ) at the CONSISTENT post-event point x⁺ = x⁻ + δ, with
+  `C/2·δ = 0` and `f⁺(x⁺) ∈ range(C/2)`. With `δ = M⁺⁻¹(−f⁺(x⁻) + C/2·w)`
+  the second condition holds for every w, and the first is the small bordered
+  system `(C/2·M⁺⁻¹·C/2)·w = C/2·M⁺⁻¹·f⁺(x⁻)` on the rows C touches (dense,
+  column-pivoted QR). `f⁺(x⁻) = f⁻(x⁻) + (G⁺ − G⁻)·x⁻ − (b_c⁺ − b_c⁻)`: the
+  common time-varying sources cancel, `f⁻(x⁻) = −q̇⁻`. M⁺ is the first
+  post-event stage's own factor (any a works: the formula is exact for every
+  a). The same bordered solve gives ẋ⁻ (all components, algebraic ones
+  included): `C/2·y = q̇⁻`, `G⁻·y − ḃ ∈ range(C/2)`, on a pre-event factor;
+  ḃ(τ) by a central difference of the source rows (ε = 1e-7·τ).
+- Cost at an event with dτ/dp ≠ 0: (rows of C) + 1 back-substitutions per
+  bordered solve and one dense QR of that size; NO factorization of the
+  circuit matrix (the gate). An event with dτ/dp = 0 costs nothing.
+- Kinds: a gate edge of a fixed schedule has dτ/dp = 0 (no jump; carried
+  even without event splitting: the mask sequence does not move with p, so
+  the discrete map is smooth). `<switch>.duty` of a fixed-period
+  trailing-edge PWM (checked in Python by `_duty_period`, passed to C++ as
+  `<switch>.duty#T=<period>`): dτ/dD = T at its OFF edge, 0 at its ON edge
+  (g_x = 0). A PWL diode crossing: g = v_a − v_k − V_on (OFF) or v − V_f /
+  i_s (ON), slope 1 in the read voltage; g_p = 0 (V_th, V_f are not
+  parameters).
+- Location accuracy. pwl with event splitting locates the crossing by its
+  linear interpolation (O(h²) in τ) and steps to it; the jump is formed at
+  that τ. Without splitting an event sits on the grid: x(p) is a staircase,
+  the jump would carry an O(h) error of τ that no correction with a measured
+  sub-step fraction removes consistently (the state itself was computed as if
+  the event were at the grid point), so a mode change that was not located is
+  REFUSED naming the device. TR-BDF2 lands its steps on the located event.

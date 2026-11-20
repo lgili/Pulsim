@@ -2,8 +2,9 @@
 
 Exact derivatives of a simulated waveform, and of KPIs computed from it,
 with respect to circuit parameters. They are available on the `dsed`
-exact stepper only. Every other route refuses with a typed
-`pulsim.UnsupportedError`. No gradient is ever a finite difference
+exact stepper and on the time-stepping engines `pwl` and `trbdf2` (see
+"On the time-stepping engines" below). Every other route refuses with a
+typed `pulsim.UnsupportedError`. No gradient is ever a finite difference
 presented as exact.
 
 ```python
@@ -145,6 +146,48 @@ on the `pss` route. The following are refused with feature
 A KPI whose extremum is not unique (the flat inductor-current valley of
 a DCM converter) gets no gradient. Its name is listed in
 `record.counters["grads_refused"]`.
+
+## On the time-stepping engines
+
+`simulate(engine="pwl" | "trbdf2", sensitivities=[...])` carries the
+stage recurrence of the step the run took (TR-BDF2, SDIRK, ESDIRK43 and
+the fixed engine's trapezoid / restart stages). Across an event the
+charges and fluxes are continuous and their sensitivity jumps:
+
+    dq/dp+ = dq/dp- + (dq/dt- - dq/dt+) * dtau/dp
+
+with `dq/dt-` the last pre-event stage's own field and `dq/dt+` the field
+at the consistent post-event point (one bordered solve on the first
+post-event stage's factor; no extra factorization). `dtau/dp` is
+
+- `-(grad g . S-) / (grad g . dx/dt-)` at a PWL diode crossing,
+- `T` at the OFF edge of `<switch>.duty` (a fixed-period trailing-edge PWM
+  from `make_pwm_switch_fn`, driving that switch alone), `0` at its ON edge,
+- `0` at a gate edge of a fixed schedule (no jump; carried even without
+  event splitting).
+
+Carried: diode crossings on `pwl` with `enable_substep_state_correction=True`
+(the crossing is located and the step split there) and on `trbdf2` (the
+step lands on the located crossing); duty and fixed gate edges on both.
+
+Refused by name (`UnsupportedError`, feature `sensitivities` unless noted):
+
+- a mode change that was not located in time: `pwl` without event
+  splitting (the error names the diode: the solution is a staircase in the
+  parameter), a duty edge taken at a grid point, a commutation inside an
+  SDIRK stage, an event-iteration breach, a retried step;
+- two events on one instant that move differently with the parameters (a
+  tie), and a grazing crossing (feature `grazing_event`);
+- an event whose instant moves in a circuit with a Newton device (the
+  consistent post-event field needs a nonlinear re-initialisation);
+- an event after which the charges cannot stay continuous (an impulsive
+  commutation: the state jumps);
+- on `trbdf2`: an interpolated or ESDIRK diode landing, a crossing within
+  the conditioning floor of a step start (flipped by probes, not landed),
+  a slot-only derivative refresh near `t_end` or a tick;
+- stateful devices (saturable inductor, nonlinear capacitor, Lauritzen
+  diode, machines, IGBT tail, external devices), `resume_from`,
+  `start_from_dc_op`, in-kernel losses, callbacks and closed loops.
 
 ## Cost
 

@@ -1884,6 +1884,9 @@ inline SimulationResult run_transient_trbdf2(
     Real slots_only_t = std::numeric_limits<Real>::quiet_NaN();
     auto restart_after_gate_event = [&](bool settled, Real t_gates,
                                         Real hp, bool commit) {
+        if (sens.on()) [[unlikely]] {   // group 6: the edge, at a landed instant
+            sens.time_event(t, x_mask, settled ? gates_decided : mask_at(t_gates), true);
+        }
         if (!opts.refresh_after_event) {
             return;
         }
@@ -1941,6 +1944,11 @@ inline SimulationResult run_transient_trbdf2(
             // conduction state, not its gate.
             gate.learn_toggles(diodes.num_gated() > 0 ? switch_fn(t_gates)
                                                       : m_probe, t);
+        }
+        if (sens.on()) [[unlikely]] {   // the probe is a trapezoidal step
+            sens.begin_step(t, x);
+            sens_stage(0, step::psi_trapezoidal(dtp), m_probe, dtp, x_trial, t + dtp);
+            sens.commit(t + dtp);
         }
         x = x_trial;
         x_sig = x;
@@ -3422,6 +3430,11 @@ inline SimulationResult run_transient_trbdf2(
                     const Real dt_floor =
                         std::max(h_min, h * Real{1e-4});
                     if (t_star - t < dt_floor) {
+                        if (sens.on()) [[unlikely]] {
+                            sens.refuse_step(t, "met by a diode crossing within the "
+                                             "conditioning floor of its start (flipped "
+                                             "by probes at t, not landed)");
+                        }
                         // Chatter-safe path: the crossing is
                         // within tolerance of the point we are
                         // already AT — flip the bits HERE with a
@@ -3798,6 +3811,16 @@ inline SimulationResult run_transient_trbdf2(
                     } else {
                     history.update_from_state(x_trial, dt_land);
                     }
+                    if (sens.on()) [[unlikely]] {   // group 6: the landing's stage
+                        if (interp_land || (kE && ed_land)) {
+                            sens.refuse_step(t + dt_land, "an interpolated or ESDIRK "
+                                             "diode landing (no trapezoidal stage)");
+                        }
+                        sens.begin_step(t, x);
+                        sens_stage(0, step::psi_trapezoidal(dt_land), mask_step, dt_land,
+                                   x_trial, t + dt_land);
+                        sens.commit(t + dt_land);
+                    }
                     // The stateful devices land here too. Only the
                     // linear companion history was committed at an
                     // event landing, so the Coss, Lauritzen, IGBT
@@ -3865,6 +3888,22 @@ inline SimulationResult run_transient_trbdf2(
                     // chatter guard.
                     const bool net_flip =
                         diodes.snapshot_on_bits() != bits_land;
+                    if (sens.on() && net_flip) [[unlikely]] {
+                        const auto& de = diodes.entries()[cross_idx];
+                        if (nl_effective) {
+                            sens.refuse_newton_event(t, graph.branch_name(de.branch_id));
+                            sens.refuse_step(t, "a diode event of a Newton solve");
+                        }
+                        sens.state_event(t, graph.branch_name(de.branch_id), de.from, de.to,
+                                         (bits_land[cross_idx] && de.var >= 0) ? de.var
+                                                                              : Index{-1},
+                                         mask_step,
+                                         cache.resident_factor(mask_step, dt_land),
+                                         Real{2} / dt_land,
+                                         [&](Real ts, Vector& out) {
+                                             accumulate_sources(ts, out);
+                                         });
+                    }
                     if (!net_flip) {
                         x_sig = x;
                     } else {

@@ -294,15 +294,14 @@ def _diode_rect():
     return b
 
 
-@pytest.mark.parametrize("engine,kw", [("pwl", dict(dt=1e-5)),
-                                       ("trbdf2", dict())])
-def test_a_state_event_is_refused_by_name(engine, kw):
-    """Events are group 6: a run with sensitivities that meets a diode
-    commutation is refused, naming the feature, not answered."""
+def test_an_unlocated_state_event_is_refused_by_name():
+    """Group 6: a diode commutation the fixed engine did not locate in time
+    (no event splitting) is refused, naming the diode; located events are
+    carried (test_sensitivity_events.py)."""
     with pytest.raises(p.UnsupportedError) as ei:
-        _run(_diode_rect(), 20e-3, engine, sensitivities=["C.C"], **kw)
-    assert (ei.value.engine, ei.value.feature) == (engine, "sensitivities")
-    assert "group 6" in str(ei.value)
+        _run(_diode_rect(), 20e-3, "pwl", sensitivities=["C.C"], dt=1e-5)
+    assert (ei.value.engine, ei.value.feature) == ("pwl", "sensitivities")
+    assert "group 6" in str(ei.value) and "'D' turns ON" in str(ei.value)
 
 
 def test_resume_and_other_refusals():
