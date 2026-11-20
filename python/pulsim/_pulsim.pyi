@@ -2107,9 +2107,12 @@ class SimulationResult:
     def avg(self, probe: str, t0 = None, t1 = None) -> float:
         """
         Time average of ``probe`` over [t0, t1] (default: the whole run):
-        the integral of the engines' dense output (linear between samples,
-        from the right limit where one is stored) divided by ``t1 - t0``,
-        windows clipped exactly. Correct on any grid, unlike ``.mean()``.
+        the trapezoid of the STORED samples (linear between them, from the
+        right limit where one is stored) divided by ``t1 - t0``, windows
+        clipped exactly. Time-weighted on any grid, unlike ``.mean()``; exact
+        for the fixed engine's rule, O(h^2) otherwise (``engine='exact'``
+        without ``dt`` stores one sample per 10 us). For the exact average of
+        the trajectory use an in-loop ``Recorder(windows=...)``.
         """
     def device_output(self, name: str, key: str):
         """
@@ -2137,8 +2140,8 @@ class SimulationResult:
         ...
     def rms(self, probe: str, t0 = None, t1 = None) -> float:
         """
-        RMS of ``probe`` over [t0, t1]: exact for the linear dense output
-        (``h(a^2 + ab + b^2)/3`` per step).
+        RMS of ``probe`` over [t0, t1]: exact for the line between stored
+        samples (``h(a^2 + ab + b^2)/3`` per step; see :meth:`avg`).
         """
     @property
     def _device_losses(self) -> list[DeviceLossRecord]:
