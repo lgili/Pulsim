@@ -1433,7 +1433,7 @@ private:
                 if (cert == nullptr) return false;
                 const auto n = x0.size();
                 if (cert->scan_q.size() < preds.size()) cert->scan_q.resize(preds.size());
-                Eigen::VectorXcd& q = cert->scan_q[ip];   // n row entries, then g(0)
+                Eigen::VectorXcd& q = cert->scan_q[ip];   // n row entries (and g(0) at the probe's t)
                 if (q.size() != n + 1) {   // once per mode and predicate
                     q.resize(n + 1);
                     scan_probe_.setZero(n);
@@ -1462,7 +1462,9 @@ private:
                 if (affine_ < 0) {
                     const Eigen::VectorXcd& q = cert->scan_q[ip];
                     const auto n = q.size() - 1;
-                    Real lin = q[n].real(), mag = std::abs(lin);
+                    scan_probe_.setZero(n);   // g(0) carries the sources: read at t0
+                    Real lin = p.value(t0, scan_probe_), mag = std::abs(lin);
+                    ++result.n_predicate_evals;
                     for (Eigen::Index k = 0; k < n; ++k) {
                         const std::complex<Real> qz = q[k] * scan_z_[k];
                         lin += qz.real();
