@@ -140,6 +140,19 @@ public:
     }
     void on_step(StepFn f) { step_.push_back(std::move(f)); }
     void on_device_state(DeviceStateFn f) { device_state_.push_back(std::move(f)); }
+    // release D3: a STORED sample that is not an accepted step. TR-BDF2
+    // stores a gate edge's right limit x(t_e+) at t_e + h_p (the edge's
+    // probe) and starts the next step from t_e, so that step ends after the
+    // sample but begins before it. Called when the row is stored, with the
+    // histories already the probe's; `x == nullptr` withdraws the sample at
+    // `t` (a later commit did not lie after it: the row was dropped).
+    using SampleFn = std::function<void(Real t, const Vector* x,
+                                        const topology::SwitchStateMask* mask)>;
+    void on_sample(SampleFn f) { sample_.push_back(std::move(f)); }
+    [[nodiscard]] bool has_sample() const noexcept { return !sample_.empty(); }
+    void sample(Real t, const Vector* x, const topology::SwitchStateMask* mask) const {
+        for (const auto& f : sample_) f(t, x, mask);
+    }
     /// probes 0b.10: ONE listener may take the accepted steps through a
     /// plain function pointer (no std::function hop) that is told when the
     /// step starts exactly where the previous call to it ended: `x_start` /
@@ -298,6 +311,7 @@ private:
     std::vector<CommutationFn> commut_;
     std::vector<StepFn> step_;
     std::vector<DeviceStateFn> device_state_;
+    std::vector<SampleFn> sample_;
     std::vector<EventFn> event_;
     std::vector<StartFn> start_;
     StepSinkFn sink_ = nullptr;

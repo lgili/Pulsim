@@ -1795,9 +1795,11 @@ inline SimulationResult run_transient_trbdf2(
     // is not a committed state: a sample the next commit would not lie
     // after is dropped, so the record stays increasing.
     Real event_sample_t = -std::numeric_limits<Real>::infinity();
+    Real gate_sample_t = -std::numeric_limits<Real>::infinity();   // a post-edge one the hooks saw
     auto drop_superseded_event_sample = [&](Real t_new) {
         if (event_sample_t >= t_new && !result.times.empty()
             && result.times.back() == event_sample_t) {
+            if (gate_sample_t == event_sample_t) hooks->sample(event_sample_t, nullptr, nullptr);
             result.times.pop_back();
             result.states.pop_back();
             result.event_iteration_count.pop_back();
@@ -1813,6 +1815,7 @@ inline SimulationResult run_transient_trbdf2(
             }
         }
         event_sample_t = -std::numeric_limits<Real>::infinity();
+        gate_sample_t = event_sample_t;
     };
     // Every recorded time: a sample below the previous one is the engine
     // breaking its own invariant, raised rather than returned as a result.
@@ -1941,7 +1944,24 @@ inline SimulationResult run_transient_trbdf2(
         // 4.6e-12 s), not the right limit; a TR-BDF2 step from x reading
         // them was rejected down to h_min. That probe is a step of its own
         // and stays committed, as before D3.
-        if (lin && dtp > hp * Real{1.0001} && commit
+        // Likewise a probe whose states MOVED over dtp: it resolved a mode
+        // faster than dtp (a flyback's leakage into a 1 uS open switch, tau
+        // ~5 ps against a 1-3 ps probe), so x(t + dtp) is not x(t_e+), and
+        // the step from x with its slots was rejected down to h_min (744
+        // forced accepts, 33 chatter breaks, against 3 / 0 at cad6ab6b).
+        auto probe_moved = [&]() {
+            for (const auto& e : entries) {
+                const bool cap = e.kind == pwl::DevicePool::StoredKind::Capacitor;
+                const Real ya = cap ? entry_v(e, x) : x[e.inductor_branch_var_id];
+                const Real yb = cap ? entry_v(e, x_trial) : x_trial[e.inductor_branch_var_id];
+                if (!(std::abs(yb - ya)
+                      <= opts.atol + opts.rtol * std::max(std::abs(ya), std::abs(yb)))) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        if (lin && (dtp > hp * Real{1.0001} || probe_moved()) && commit
             && t_plus < opts.t_end - h_min
             && t_plus < queue.next_of(events::Kind::ControlTick) - h_min) {
             history.update_from_state(x_trial, dtp);
@@ -1972,6 +1992,9 @@ inline SimulationResult run_transient_trbdf2(
         // but a diode landing inside that step solves a trapezoidal step from
         // them and commits it (review of D3: the pre-edge slots under the new
         // mask, the defect the probe commit had).
+        const bool sampled = commit && t_plus < opts.t_end - h_min
+            && t_plus < queue.next_of(events::Kind::ControlTick) - h_min;
+        if (sampled) device_state_once(t, x);   // the left side's row, before the slots move
         history.refresh_derivatives(x_trial, dtp);
         if (lt) lt->slots_rewritten();
         hs.refresh_derivatives(x_trial, dtp);
@@ -1986,8 +2009,7 @@ inline SimulationResult run_transient_trbdf2(
         x_edge_t = t;
         // No sample across t_end or a controller tick (the step to it
         // starts from x anyway): the slots only, for a snapshot.
-        if (!commit || t_plus >= opts.t_end - h_min
-            || t_plus >= queue.next_of(events::Kind::ControlTick) - h_min) {
+        if (!sampled) {
             slots_only_t = t_plus;   // where the unused probe reached
             return;
         }
@@ -2009,6 +2031,17 @@ inline SimulationResult run_transient_trbdf2(
         result.event_iteration_count.push_back(0);
         result.record_switch_state(m_probe);
         event_sample_t = t_plus;
+        // ONE rule for the post-edge sample (no right-limit field on this
+        // engine yet; the integration line moves it there): every consumer
+        // of the stored rows gets it as a stored state that is not a step.
+        // The external devices' readings with the probe's slots (ds_t stays
+        // t_e: the next commit's row is still due), the recorder feed's
+        // sample, withdrawn with the row (drop_superseded_event_sample).
+        if (hook_ds) hooks->device_state(t_plus, x_trial, hs);
+        if (hooks != nullptr && hooks->has_sample()) {
+            hooks->sample(t_plus, &x_trial, &m_probe);
+            gate_sample_t = t_plus;
+        }
     };
 
     // ---- L-stable SDIRK(2,2) restart (Alexander, gamma_s = 1 - 1/sqrt2) ----
