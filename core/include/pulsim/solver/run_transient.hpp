@@ -2488,7 +2488,7 @@ inline SimulationResult run_transient(
                     } catch (const pwl::NewtonRoundoffBudgetExceeded&) {
                         throw;
                     } catch (const std::runtime_error&) {
-                        return false;   // a failed trial: keep the bracket
+                        return false;   // a failed trial ends the search: the bracket's chord
                     }
                     if (!x.allFinite()) return false;
                     sm = signal(x);
@@ -2636,8 +2636,10 @@ inline SimulationResult run_transient(
                             break;
                         }
                         Real hi = t;
-                        while (hi - lo > snap) {
+                        // capped: below an ulp of t the midpoint stops moving
+                        for (int it = 0; it < 64 && hi - lo > snap; ++it) {
                             const Real mid = Real{0.5} * (lo + hi);
+                            if (mid <= lo || mid >= hi) break;
                             ++result.switch_fn_calls;
                             if (switch_fn(mid) == g_lo) {
                                 lo = mid;

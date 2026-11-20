@@ -182,3 +182,25 @@ directions) keep the chord without a counter; a stateful switch_fn (one that ass
 moves forward) is now called at bisection midpoints that go backwards.
 
 Also open: the diode crossing inside an SDIRK interval (above), the right-limit record (F-SB-1).
+
+## Cost (instructions per accepted step, min over 6 interleaved rounds x 3 in-process, same flags)
+
+Default path: buck_pwl 3133.0 -> 3131.3 (-0.05 %), vsi_pwl 4789.8 -> 4811.7 (+0.46 %, inside the
+0.5 % gate, close to it). Split on (one round x 2): buck_pwl+split 3962.4 -> 4020.8 (+1.5 %),
+vsi_pwl+split 5650.6 -> 5683.2 (+0.6 %).
+
+## Hand-off state (context budget reached)
+
+- Committed and pushed up to 124a43c8. The bisection cap (review finding B) is committed on top
+  WITHOUT its verification: at hand-off `.scratch/final.sh` was rebuilding the extension, then
+  running the area tests (`.scratch/logs/area.log`) and ONE full pytest (`.scratch/logs/full.log`).
+  The previous build (b0523a49) passed the area set: 14 files, 213 passed, 1 xfailed.
+- Scoreboard three-part grading, pwl+restart and pwl+split on the 81 circuits: base in
+  `.scratch/sbr/base.json` (vcswitch_resistor pwl+split instants 0.00316, max_dt_h -0.005;
+  pwl+restart instants 0.0629, +0.995; diode_rectifier pwl+split limits 0.0161, max_dt_h 0.227),
+  tip running into `.scratch/sbr/tip.json` (frozen package `.scratch/tippkg` = b0523a49); compare
+  with `python3 .scratch/sbr/cmp.py .scratch/sbr/base.json .scratch/sbr/tip.json`.
+- Next steps, in order: (1) read full.log / area.log; (2) cmp.py and list every moved cell;
+  (3) the multi-diode refinement (review finding A, above); (4) C++ targets
+  `.scratch/ctest_sel.sh` (layer5_v3, step, perf, layer5) - not run; (5) stubs --check (the
+  `split_snap` docstring changed in bindings.cpp) - not run.
