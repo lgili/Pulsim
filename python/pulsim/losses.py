@@ -1351,6 +1351,7 @@ def _switch_switching_loss(closed_trace: np.ndarray,
                             window: "Optional[_views.TimeWindow]" = None,
                             law: "tuple" = (True, math.inf, 0.0),
                             impulse_t=(),
+                            projected_limits: bool = True,
                             name: str = "",
                             ) -> Dict[str, float]:
     """Post-hoc turn-on / turn-off switching loss for an ideal-switch
@@ -1390,7 +1391,9 @@ def _switch_switching_loss(closed_trace: np.ndarray,
     no resolved sign: that edge is hard. An edge whose step carried an
     impulse of this device (``impulse_t``: the records' step starts) is
     never soft and reads its post-jump side one sample later, at the
-    first regular state. A non-finite reading at an edge is refused.
+    first regular state; a stored right limit is that state only where
+    the engine projects it (``projected_limits``: the exact engine; a
+    pwl / trbdf2 right limit at the jump is not, as in the kernel). A non-finite reading at an edge is refused.
 
     ``closed_start`` / ``v_start`` / ``i_start`` are the state at the
     start of the step after each sample
@@ -1509,7 +1512,7 @@ def _switch_switching_loss(closed_trace: np.ndarray,
         imp = np.isin(times[pre_k], np.asarray(impulse_t, dtype=float))
         # the jump's own step is not a regular state: read past it, unless
         # the post-edge side is an event's right limit (dsed, projected)
-        late = imp & (cl_s[pre_k] != cl[idxs])
+        late = imp & ((cl_s[pre_k] != cl[idxs]) | (not projected_limits))
         if late.any():
             # no sample after the jump's step: both sides before the edge
             # (LossTracker::settle_deferred_)
@@ -2215,7 +2218,8 @@ def device_loss_summary(
                     closed, times, _branch_v(states, nodes), states[:, col], spec,
                     closed_start=closed_s, v_start=_branch_v(states_s, nodes),
                     i_start=states_s[:, col], window=win, law=_edge_law(kind, desc.get("params", {})),
-                    impulse_t=imp_t, name=entry["name"]))
+                    impulse_t=imp_t, name=entry["name"],
+                    projected_limits=getattr(result, "engine_used", None) == "dsed"))
         else:
             warnings.warn(
                 f"device_loss_summary: ideal {kind} {entry['name']!r} has no recorded "

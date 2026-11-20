@@ -297,8 +297,8 @@ def test_a_dcm_turn_on_books_the_table_intercept(engine):
     edge books E_on(V_in - V_out, ~0) -- the table's intercept -- every
     period. Truth: 50 turn-ons x [c (V_in - V_out)/V_T + the current part
     at the reading the engine makes: 0 at the edge's right limit (trbdf2,
-    dsed), (V_in - V_out) dt / L one step later (pwl, the table path on
-    its result)]. V_out from the closed-form DCM ratio (1e-3 here: the
+    dsed, and the table path on a pwl+restart result, which stores that
+    right limit), (V_in - V_out) dt / L one step later (the pwl kernel)]. V_out from the closed-form DCM ratio (1e-3 here: the
     1 mOhm drops and the output ripple). A regression guard: a5af1ade
     booked these too (the leakage reads forward), the rule-level tests
     above are the ones that fail on it."""
@@ -333,7 +333,9 @@ def test_a_dcm_turn_on_books_the_table_intercept(engine):
         ev = ev[(ev["t"] >= t0) & (ev["kind"] == "on")]
         n, e_on = len(ev), math.fsum(ev["E"])
     v = VIN - vo
-    i = v * dt / LB if engine in ("pwl", "table") else 0.0
+    # the table path reads a pwl+restart result's stored right limit (the
+    # edge's own, i = 0); the pwl kernel reads the step's end
+    i = v * dt / LB if engine == "pwl" else 0.0
     assert n == 50
     assert e_on == pytest.approx(
         n * (C_ON * v / VT + E_ONB * (v / VT) * (i / 50.0)), rel=2e-3)
