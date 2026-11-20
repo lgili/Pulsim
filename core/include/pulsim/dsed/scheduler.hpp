@@ -1572,10 +1572,13 @@ private:
         // a decision that rejected a candidate as an ideal loop and then found no
         // admissible mode is refused by the loop's name: that loop is the cause
         rejected_loop_.reset();
+        last_select_ray_ = false;
         try {
             decide_modes_impl_(t, x, mask, gates_prev, prev_bits, rec, result);
         } catch (const UnsupportedError& e) {
-            if (e.feature() == "consistent_mode" && !rejected_loop_)
+            // only a selection that ended on a secondary ray (pwl's rule), not a
+            // consistent_mode thrown after a successful one (stale q_he_)
+            if (e.feature() == "consistent_mode" && !rejected_loop_ && last_select_ray_)
                 classify_refusal_(gates_prev, prev_bits, rec);
             if (e.feature() == "consistent_mode" && rejected_loop_) {
                 const UnsupportedError loop = *rejected_loop_;
@@ -1591,6 +1594,7 @@ private:
         rejected_loop_.reset();
     }
     std::optional<UnsupportedError> rejected_loop_;
+    bool last_select_ray_ = false;   // the last run_selector_ ended on a secondary ray
     /// F-4-1: a failed selection is classified on the selector's closure candidate
     /// (every ideal diode the posed network does not reverse-bias closed), the rule
     /// pwl uses: a loop of sources there names the refusal, not `consistent_mode`.
@@ -1740,7 +1744,8 @@ private:
                     // F-5-3: the horizons skip the parasitic transient, where an
                     // OFF pin dumps its inductor current into g_off (a 1 ps gate
                     // pulse lost): a pin OFF and forward-biased at t+ is not consistent
-                    c = off_forward_at_(gates_prev, m, t, x_held, sc)
+                    // (the LCP's decisions only: the default guard's repair keeps its judge)
+                    c = lcp_decides_ && off_forward_at_(gates_prev, m, t, x_held, sc)
                             ? 0 : judge_(gates_prev, m, t, x_held, sc, worst);
                 } catch (const UnsupportedError& e) {
                     if (!candidate_refusal_(e)) throw;
@@ -1772,6 +1777,7 @@ private:
         rep.released += static_cast<std::size_t>(sel.released);
         rep.enumerations += static_cast<std::size_t>(sel.enumerations);
         rep.nonunique_modes += static_cast<std::size_t>(sel.nonunique_modes);
+        last_select_ray_ = sel.status == events::LcpStatus::SecondaryRay;
         last_scale_ = sc;
         return sel;
     }
@@ -1860,7 +1866,8 @@ private:
     /// (its gap clear of tol_w) is not reopened by a signal that sits in the
     /// band at t (F-4-3: the ideal PSFB's D1 decided OFF with a 3.4e-4 V gap,
     /// its C_j state at 1.3e-13 V, the ladder read that residue as forward and
-    /// D1 went ON into a reverse current).
+    /// D1 went ON into a reverse current). Empty `tied`: every OFF diode (the
+    /// default guard's repair, unchanged).
     void release_band_ties_(Real t, const Vector& x, MaskT& mask, const std::vector<char>& tied)
         requires HasNodePairVoltage<System> {
         // The band on the circuit's scale (sources included): from rest every node
@@ -1871,7 +1878,7 @@ private:
             bool flipped = false;
             for (std::size_t jd = 0; jd < diodes_.size(); ++jd) {
                 const auto& d = diodes_[jd];
-                if (diode_bits_.get(d.switch_idx) || !(jd < tied.size() && tied[jd])) continue;
+                if (diode_bits_.get(d.switch_idx) || (!tied.empty() && !tied[jd])) continue;
                 const Real sig = models::SwitchedDiode::crossing_signal(
                     false, system_.node_pair_voltage(d.from, d.to, t, x), d.params());
                 const MaskT before = mask;
@@ -1996,7 +2003,8 @@ private:
         mask = gates_prev.overlay(diode_bits_, diode_owned_);
         system_.set_mask(mask);
         pose_or_open_loops_(t, shadow_x_, gates_prev, mask);
-        release_band_ties_(t, shadow_x_, mask, sel.tied);
+        // the default guard (no LCP decisions) keeps releasing every band tie
+        release_band_ties_(t, shadow_x_, mask, lcp_decides_ ? sel.tied : std::vector<char>{});
         pose_or_open_loops_(t, shadow_x_, gates_prev, mask);
         x = shadow_x_;
         undo_reinit_records_();

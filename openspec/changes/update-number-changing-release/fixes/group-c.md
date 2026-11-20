@@ -68,7 +68,8 @@ with every ideal port whose first-pass posed gap q_j < tol_w closed. pwl's secon
 block now calls it (it built the same set from u − V_f inline); the exact engine's `decide_modes_`
 classifies a `consistent_mode` refusal on that candidate (`classify_refusal_`: the extraction of the
 candidate mode; a candidate refusal — `ideal_voltage_loop` / `source_capacitor_loop` — becomes the
-refusal's name, as `rejected_loop_` already did for the settle). pwl's LCP solves now go through the
+refusal's name, as `rejected_loop_` already did for the settle). Only when the last selection ended on a
+secondary ray (pwl's condition), not on a `consistent_mode` thrown after a successful selection. pwl's LCP solves now go through the
 settle's structural pass first, so `floating_node` is named there too (it was a singular factor and
 an abort after 64 sub-steps).
 
@@ -116,7 +117,8 @@ the switch's leak) at the next — the pulse's current is gone, v_sw ≈ 0.
 Fix: the pin judge (the selector's `judge` on the exact engine, `run_selector_`) first checks the
 candidate at t itself (`off_forward_at_`: an OFF diode of the candidate breaking its law on the held
 state, the right limit before any parasitic transient); a candidate that does is inconsistent and
-the pins go ON. Only the pin arbitration changes (the guard's judge and the horizon are untouched).
+the pins go ON. Only the pin arbitration under the LCP's decisions (`lcp_decides_`) changes; the
+default guard's repair, which also runs the selector, keeps the old pin judge (review finding).
 
 ## Side observation — F-3-3 flyback on the exact engine with the LEGACY selector [M]
 
@@ -154,7 +156,8 @@ So: the LCP was right; its result was overridden by a post-step that is meant fo
 remaining TIES (ports no pass decided) and reopened a port the first pass had decided OFF.
 
 Fix: `ModeSelection::tied` (per port: left OFF as a remaining tie); `release_band_ties_` considers only
-those ports (both callers: `lcp_apply_` and the guard's repair).
+those ports under the LCP's decisions (`lcp_apply_`, and the guard's repair when `lcp_decides_`); the
+default guard's repair keeps releasing every OFF diode (empty `tied`), so the default path is unchanged.
 After: 'auto' runs to 30 µs, v_out(27–30 µs) 1.0358472569 V against the settle's 1.0358473 V and the
 twins' limit ≈ 1.035846 V. The gated bridge from rest (`test_a_gated_bridge_from_rest_turns_its_tie_on_under_the_lcp`,
 the case `release_band_ties_` was written for) still passes: its D1 is a remaining tie.
@@ -173,3 +176,40 @@ the case `release_band_ties_` was written for) still passes: its D1 is a remaini
 - Cost, instructions per accepted step (interleaved head/branch, min of 3): buck pwl 3102.8 → 3088.0
   (−0.48 %), vsi pwl 4770.8 → 4767.4 (−0.07 %), buck trbdf2 11033.4 → 11032.2 (−0.01 %), bridge trbdf2
   12785.3 → 12807.6 (+0.17 %). All within 0.5 %.
+
+## Review (fresh-context reviewer on 27c00520..a0fb2e3b) and what is left
+
+Fixed after the review:
+- `classify_refusal_` ran on any `consistent_mode`, including those thrown after a successful
+  selection (the guard-off refusal, the re-settle's pass 4), on a stale `q_he_`. Now only after a
+  selection that ended on a secondary ray.
+- The guard's repair on the DEFAULT exact engine runs the selector, so the F-5-3 pin check and the
+  F-4-3 tie restriction reached the default path. Both are now limited to `lcp_decides_`.
+
+Left open:
+- F-3-2 on the default guard's refusal path: its `.device` is still the internal label (`who` /
+  `flipped` = `d.label`, scheduler.hpp ~l.1953/1970/2073). A default-path message change; not done here.
+- The recoordination retry (F-4-2) is in the selector, so the default guard's repair reaches it too.
+  It runs only when the first pass failed, a run the guard would have refused, so no number that
+  ran before can move.
+- After a recoordinated retry, `released` / `shorted_held` / `shorted_released` count both
+  attempts, and `pivots` counts the retry only (diagnostics only).
+- The flyback on the default exact engine (side observation above) is still a default-path defect.
+
+Found by the review fix: before it, the default exact engine moved on a circuit that no identity
+suite covers. `test_lcp_bridge_on_a_floating_source_is_not_decided_by_rounding` passed only because
+default and 'lcp' had moved together. With the default restored, the default run is again identical to
+27c00520: 40047 samples, end 31.876241227722506 V.
+'lcp' (opt-in) moved:
+- D4 turns off at 5.981 ms. The LCP decides D1 OFF: no tie, v_D1 ≤ −3.6e-6 V. The tie release no
+  longer reopens D1.
+- The default keeps D1 ON for a few samples at −7.8e-11 A.
+- Truth, both laws: the end value moves by 1.7e-13 V, against the reference's 31.876241232.
+- The test's bit-identity check (lcp == default at H_E_REL 1e-7) is now an end-value check at
+  rel 1e-12, with this reason in a comment.
+
+Default exact engine, circuits WITH guard repairs, compared bit for bit with 27c00520 (states): the
+forward converter (2 repairs), the floating bridge, sine and transformer (2 repairs each), and the gated
+bridge (0 repairs). All identical. The post-review byte compares are unchanged: golden identical,
+trbdf2 371/371, bit-identity 36/36 + 36/36, pwl 389/390 (rect_lcp's signed zero). The C++ mode and dsed
+targets pass.
