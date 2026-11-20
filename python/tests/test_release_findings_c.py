@@ -126,7 +126,12 @@ def test_a_floating_node_is_named_under_the_lcp_too():
         for mode in ("legacy", "auto"):
             with pytest.raises(p.UnsupportedError) as ei:
                 _quiet(lambda: p.simulate(b, 1e-5, engine=engine, mode_selection=mode, **kw))
-            assert (ei.value.feature, ei.value.device) == ("floating_node", "D"), (engine, mode)
+            # `a` (behind D) and `b` (between D and D2) both float; which of the two
+            # the factorization meets first is its pivot order (MSVC's differs), so
+            # the refusal names D alone or D with D2. D is on both nodes.
+            named = {d.strip() for d in ei.value.device.split(",")}
+            assert ei.value.feature == "floating_node", (engine, mode)
+            assert "D" in named and named <= {"D", "D2"}, (engine, mode, ei.value.device)
 
 
 # ---------------------------------------------------------------------------
