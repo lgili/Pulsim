@@ -659,3 +659,39 @@ Selectors: (a) legacy, lcp, auto, both forms; (b) legacy, lcp, auto, conductance
   interleaved, same flags, `.scratch/f5/cost10.sh`), rule off: buck_ccm 0.998, bridge3 1.000,
   active_clamp_forward 0.992, forward_converter 0.974 (base spread), boost_pfc_open_loop 0.998.
 * Loss port: no separate number compared; the full pytest (below) carries its tests.
+
+### (c) The mode guard read the mode's next event as a violation — FIXED on legacy (orchestrator's third)
+
+Circuit: three-phase bridge, 325 V 50 Hz, 0.5 mH lines, D1..D6 (1e3 / 1e-9), 220 µF ∥ 40 Ω, 1 MΩ tie
+(`_bridge_3ph`). Truth (`exact_truth.py`, 40 digits, 0..6 ms): D1 OFF 0.37193567186 ms, D5 OFF
+1.49025821867 ms, D2 ON 5.00000025091293 ms with D6 still ON, D6 OFF 5.00135094309083 ms;
+V(dp,dn)(6 ms) 624.647465499693 V.
+
+Cause (coordinator's trace, confirmed): the settle at D2's turn-on keeps D6 ON; `guard_check_` →
+`judge_` advances the mode 1e2 and 1e4 h_e (capped only by the next TIME event) and reads D6's own
+turn-off 1.35 µs later as a violation (0.12 V); the LCP repair turns D6 OFF at once: 3 events.
+
+Rule (`leaves_later_`, in `judge_`): a law broken at the horizon by a diode that is consistent once
+the mode's parasitic transient is over (t + `exact_settle_length`, what the guard exists to see past)
+and first moves INTO its admissible side from there (`ladder_sign_`, the decision's own lexicographic
+test) is the mode's next event, which the scan locates; not a violation. Used by the guard, the
+selector's pin arbitration and `pose_or_open_loops_` (all through `judge_`).
+
+Numbers, legacy: 4 events; D2 ON 5.000000250912887 ms (truth …935, 4.8e-17 s), D6 OFF
+5.001350943055478 ms (3.5e-14 s), D5 OFF 1.4902582186960 ms (2.7e-14 s); before: D6 merged into D2.
+OPEN on the same circuit, base and tip alike: D1's turn-off 0.37193547048 ms is 2.0e-10 s early,
+so V(dp,dn)(6 ms) is 4.8e-8 V off (624.6474655478).
+lcp / auto: still merged (strict xfail): the LCP solve itself returns D6 OFF at D2's instant, no
+ties (trace: `lcp_apply_` bits before `resettle_projected_`). With every upper diode OFF, D6
+carries leakage-level current only; the selection does not resolve it. Needs: the LCP's
+classification of a leakage-level port current (the tie band) read against the root's error, not
+this guard.
+
+Moved on the DEFAULT path by (c) (bit-identity set, dsed, default options): `bridge1_vf07` t/x
+(34/36 arrays identical, default and shadow). Events 12 → 16; truth (`exact_truth_vf.py`, V_f
+0.7) has 16: each conduction start is TWO turn-ons 2.2e-17..2.3e-12 s apart (e.g. 13.704043490641626
+and …679 ms). Base merged them into one at 13.704043488297 ms (the guard's repair); tip has
+13.704043488297 and 13.704043490643 ms (the second within 1.3e-15 s of the truth's). End states
+identical to print precision. Goldens identical; the 243 scoreboard default cells identical (the
+exact-engine row stays 81 / 77 / 70); rtol invariance 111 / 0 / 15 kept.
+C++ `pulsim_core_dsed_tests` (Eigen 5) on the final header: 41265 assertions / 142 cases pass.
