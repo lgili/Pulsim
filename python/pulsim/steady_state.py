@@ -370,6 +370,7 @@ def steady_state(builder, *, period: float, dt: float | None = None,
         # F-6-1: 1.9e-8 at the default probe on the restart engine, whose
         # floor is 2e-11); the step removes that error whatever the probe,
         # and is kept only if a run measures it smaller.
+        residual_linear = residual   # the drift check keeps its scale
         if residual > 0.0:
             h_c = h_star + np.linalg.solve(np.eye(n) - Phi, h_back - h_star)
             snap_c = _snapshot_like(base_in, h_c)
@@ -426,7 +427,9 @@ def steady_state(builder, *, period: float, dt: float | None = None,
             # period of drift on a buck whose schedule used
             # `(t / T) % 1.0`, versus 1.7e-10 over a HUNDRED
             # periods once the edge was pinned to a step index.
-            tol = max(1e-9, 100.0 * residual * verify_periods)
+            # (the linear solve's residual: the chord's round-off-floor one
+            # would shrink the bound below what 8 periods accumulate)
+            tol = max(1e-9, 100.0 * residual_linear * verify_periods)
             if drift > tol:
                 raise ValueError(
                     "steady_state: the answer is a fixed point of "

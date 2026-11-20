@@ -32,8 +32,12 @@ tau = R_on·C_oss(48 V) = 1e-3·5.85e-10 = 0.6 ps; the step is 1600 tau.
 
 Cause: the TR-BDF2 error estimate had no row for the nonlinear capacitor's
 charge (a stateful kind), so nothing made the controller resolve the
-discharge; the state comes out right (L-stable BDF2 stage), the energy
-integral does not. NOT the tracker's dissipating-current definition (i is the
+discharge; the state is wrong by the end of that step too (v_S = −0.165 V
+where the truth is 0.0045 V) and recovers on the next one, while the energy
+quadrature has already booked the ringing stage values. Evidence that the
+missing row is the cause: the same circuit with a linear C_oss (its voltage IS
+an error-norm entry) was right before the merge, and the merge of the q rows
+alone moves 6.97 J to 3.943e-3 J; no experiment isolated it further. NOT the tracker's dissipating-current definition (i is the
 channel's own branch current, the capacitor's current is not in it), NOT the
 event reading (E_on / E_off exact), NOT an impulse double count (E_impulse 0).
 
@@ -50,7 +54,11 @@ trbdf2 4.30e-5 (defaults), 4.21e-5 (rtol 1e-8), esdirk43 4.29e-5; pwl 2.92e-5.
 One edge (19.9 .. 21 us): truth 7.981e-7 J; trbdf2 8.149e-7 (rtol 1e-6),
 8.099e-7 (1e-9), esdirk43 1e-9 8.116e-7.
 
-Remaining 1.5 % per edge (recorded, not fixed): the first step after the gate
+Whole run against the truth: +4.4 % (defaults), +2.1 % (rtol 1e-8), esdirk43
++4.1 % on E_cond. The first-step effect below explains 0.8 % (19 × 1.7e-8 J);
+THE REST IS NOT TRACED (the per-edge check agrees to 2 %, so it sits outside
+the turn-on: a candidate is the decomposition itself — DCM periods, the
+start-up edges). Remaining 1.5 % per edge (recorded, not fixed): the first step after the gate
 event (h1 = 1.5e-14 s) starts the capacitors from their PRE-event current (the
 first step's decay is half the exact one, 47.41 V where the ODE gives 46.79 V;
 the same with a linear C_oss), while the tracker reads the right limit's power
@@ -111,7 +119,13 @@ costs n more runs and two probe sizes cannot separate round-off (∝ 1/s) from
 curvature (∝ s). After: residual at the default probe 3.6e-14 (legacy) and
 2.8e-12 (restart); every probe 1e-6 .. 0.3 at 1e-11 or below. Moves on the
 default path: `steady_state(dt=...)`'s history by ≤ its old residual
-(≤ 1e-9), its residual / drift (to the floor), n_period_runs + 1.
+(≤ 1e-9 on the tests' circuits), its residual (to the floor), n_period_runs
++ 1; and a call whose linear solve missed the 1e-6·scale backstop but whose
+chord step meets it now returns an answer instead of "no periodic orbit
+found": `steady_state(engine='trbdf2')` on test_trbdf2_end_sliver's buck
+(1.6e-5 → 3.0e-10; its non-strict xfail removed). The drift check keeps the
+linear solve's residual in its bound (the chord's floor value would have
+tightened it to the absolute 1e-9 and could refuse large-state circuits).
 
 ## F-3-4 — trbdf2 aborts at h_min with branch-form switch and diode
 
@@ -152,5 +166,8 @@ stateful exclusion, which also turns today's `dependent_states` refusal
 a default-path change of every trbdf2 circuit with a stateful kind and a
 diode, to be measured against esdirk43 at tight tolerance. Not a refusal by
 name: three of four pairs (the default conductance pair included) run today,
-by the margin above. What an ideal-device circuit needs on this engine today:
+by the margin above. Status of the claim: the linear-in-h estimate on T1.lp
+after every landing and `sdirk_possible`'s stateful exclusion are measured /
+read; that the SDIRK restart is the cure is inferred (esdirk43 differs from
+TR-BDF2 in more than its restart), not shown by enabling it on TR-BDF2. What an ideal-device circuit needs on this engine today:
 no stateful kind, or integrator='esdirk43'.

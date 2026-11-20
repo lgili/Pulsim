@@ -88,12 +88,13 @@ def test_coss_turn_on_energy_is_e_oss_on_the_variable_step_engine(kw):
     assert d.E_on == pytest.approx(20 * 1e-4, rel=1e-12)
     assert d.E_off == pytest.approx(20 * 1e-4, rel=1e-12)
     truth = _conduction_truth(r)
-    # E_oss is 29 % of it; the 5 % band is the first step after each
-    # turn-on (it starts from the capacitors' pre-event current: +1 % of
-    # E_oss per edge at rtol 1e-6, group-de.md)
+    # E_oss is 29 % of it. Measured +2.1 % (rtol 1e-8) .. +4.4 % (defaults),
+    # esdirk43 +4.1 %: the first step after each turn-on explains 0.8 %
+    # (group-de.md), the rest is NOT traced. The finding was +1.7e5.
     assert d.E_cond_electrical == pytest.approx(truth, rel=5e-2)
+    # every joule booked reaches the junction (or is pending at t_end)
     assert r.heat_injected + r.heat_pending == pytest.approx(
-        4e-3 + truth, rel=5e-4)
+        d.E_on + d.E_off + d.E_cond_electrical, rel=1e-9)
     assert float(np.asarray(r.v("tj")).max()) < 30.0
 
 
@@ -299,6 +300,6 @@ def test_branch_form_flyback_runs_on_trbdf2(forms, integrator):
     (ecb07507) that pair runs and branch switch / conductance diode aborts
     instead (t = 0.47 ms). Truth: the fixed engine at dt = 1e-8, 15.3095 V
     (test_saturable_transformer); esdirk43 15.31034 V on all four pairs."""
-    dc = _flyback_dc(*forms, engine="trbdf2", integrator=integrator,
-                     rtol=1e-6, atol=1e-9)
+    kw = {"integrator": "esdirk43"} if integrator == "esdirk43" else {}
+    dc = _flyback_dc(*forms, engine="trbdf2", rtol=1e-6, atol=1e-9, **kw)
     assert dc == pytest.approx(15.3095, rel=2e-4)
