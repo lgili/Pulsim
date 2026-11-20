@@ -207,3 +207,38 @@ esdirk43 62.9259 (default, unchanged from session 1) → 62.8368 uJ, cf 62.8335
 (esdirk43 rtol 1e-8 63.0082 is the same under the old rule). Random 200
 lengths: trbdf2 1 abort (5.2324 us, the period-10 cycle), esdirk43 0.
 Running: build with k = 16, then the three sweeps again (expect 0 aborts).
+
+Results with k = 16 (final code, TEMP switches removed after these sweeps):
+- run-length sweep 1.1–4.0 us: trbdf2 0/30, esdirk43 0/30 (b9e46778 0/30).
+- tolerance sweep 2.2 us, rtol 1e-4…1e-10: no abort on either. Crossings
+  (300/200/100 V) vs the charge closed form, ps: trbdf2 1e-4 −14.82/−0.07/
+  +14.00, 1e-5 −12.34/−0.51/+1.28, 1e-8 −0.12/−0.01/+0.10, 1e-10 −0.01/0/+0.01;
+  esdirk43 1e-4 −15.58/−0.51/+8.47, 1e-5 −7.62/+0.54/+15.39, 1e-10
+  −0.02/0/+0.02 (all within 50 ps). E_hard vs 62.8335 uJ: trbdf2 62.8937 (1e-4),
+  62.8490 (1e-5), 62.8367 (1e-9, 1e-10); esdirk43 63.1770 (1e-4), 62.9259
+  (1e-5; b9e46778 62.9246, the +1.3 nJ is session 1's, the window rule leaves it
+  unchanged), 63.0082 (1e-8, identical under the old rule), 62.8368 (1e-10).
+  Tight-tolerance limit of both integrators: 62.8367–62.8368 (+3.2 nJ = 5e-5
+  over the closed form, both agree). Roundoff accepts at 2.2 us: trbdf2 61
+  (default) … 2679 (1e-10, of 10752 steps), esdirk43 2 … 1819; the run budget
+  (130 consecutive) never fires.
+- random 200 lengths in [0.2, 6] us, seed 20261120: 0 aborts on both (k = 8
+  had 1, the period-10 cycle). 40 of them are a test
+  (`test_case_a_runs_at_every_run_length`).
+- strict xfail trbdf2 rtol 1e-8 removed: passes.
+- Saturable cut-set (L1 atan 1 mH/5 A/0.1 mH + L2 1 mH, S opens at 200 us):
+  esdirk43 now RUNS at the default and rtol 1e-8 (was the floor cycle).
+  Flux-conserving closed form (mpmath) i+ = 0.908907 A from i1- = 1.882674,
+  i2- = 1.9e-4; i(R) at 200.1 us = 0.909368 on esdirk43 (both rtol) and trbdf2
+  (default, 1e-10): within 4.6e-4 (drift ≤ 4e-4 in 100 ns). The pwl+restart
+  reference refuses by name (the restart re-initialises linear L only).
+  trbdf2 rtol 1e-8 still aborts and is NOT the floor cycle: last ||dx||
+  3.648e-9, 3.643e-9, 3.639e-9 at node b, omega 0.12 eps, declined "growing"
+  (the newer window's max over 2x the older's): strict xfail with these
+  numbers. Seen in passing: trbdf2's first post-edge row (200.0000276 us)
+  reads 0.9412/0.9405 A against 0.9089 — recorded, not chased.
+
+Integration note (step 5): `hs_edge_restart` (cause (a)'s workaround) is
+untouched. When the branch that commits the probe's right-limit current to
+the slot meets this one: remove the flag, then re-run `.scratch/f5w/sweep.py
+len|tol|rand 200` and this file's tests; the window rule is independent of it.

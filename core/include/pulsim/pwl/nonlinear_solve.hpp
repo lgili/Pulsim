@@ -36,8 +36,6 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <cstdio>   // TEMP
-#include <cstdlib>  // TEMP
 #include <format>
 #include <memory>
 #include <optional>
@@ -212,8 +210,6 @@ struct NewtonRoundoffAcceptance {
     Size total = 0;
 };
 
-inline std::string& ro_trace_buf() { thread_local std::string s; return s; }  // TEMP
-
 /// Thrown when the run's roundoff-acceptance budget is exhausted. A
 /// named error, not a Newton failure: no caller may retry it at a smaller
 /// step (a retry is how the fixed engine's ladder would swallow it).
@@ -264,7 +260,6 @@ inline void solve_with_newton_in_place(
     constexpr int kRoWindow = 16;
     Real ro_dx[2 * kRoWindow];
     int ro_n = 0;
-    ro_trace_buf().clear();   // TEMP F-S-5 trace
     std::fill(std::begin(ro_dx), std::end(ro_dx),
               std::numeric_limits<Real>::infinity());
     if (static_cast<Size>(x.size()) != n) {
@@ -659,21 +654,6 @@ inline void solve_with_newton_in_place(
             for (int k = 2 * kRoWindow - 1; k > 0; --k) ro_dx[k] = ro_dx[k - 1];
             ro_dx[0] = last_dx_norm;
             ++ro_n;
-            if (std::getenv("PULSIM_RO_TRACE")) {   // TEMP F-S-5 trace
-                Real om = 0;
-                for (Index i = 0; i < static_cast<Index>(n); ++i) {
-                    const Real s = w.ro_scale[i];
-                    const Real be = s > 0 ? std::abs(f_combined[i]) / s
-                        : (f_combined[i] == 0 ? Real{0}
-                           : std::numeric_limits<Real>::infinity());
-                    om = std::max(om, be);
-                }
-                char b[160];
-                std::snprintf(b, sizeof b, "RO it %d dx %.4e res %.4e at %d omega %.3g eps\n",
-                    ro_n, last_dx_norm, last_res_norm, int(res_at),
-                    om / std::numeric_limits<Real>::epsilon());
-                ro_trace_buf() += b;
-            }
         }
         if (last_dx_norm < tol_dx && last_res_norm < tol_res) {
             if (roundoff != nullptr) roundoff->consecutive = 0;
@@ -762,23 +742,12 @@ inline void solve_with_newton_in_place(
             b_old = std::min(b_old, ro_dx[kw + k]);
             m_old = std::max(m_old, ro_dx[kw + k]);
         }
-        bool no_contraction = kw >= 2 && b_new >= Real{0.25} * b_old;
+        const bool no_contraction = kw >= 2 && b_new >= Real{0.25} * b_old;
         // ...and no growth: the largest of the newer window is at most
         // twice the largest of the older (a limit cycle repeats its
         // maxima; a diverging iterate does not).
-        bool growing = !(m_new <= Real{2} * m_old);
-        if (std::getenv("PULSIM_RO_OLD")) {   // TEMP: the two-step rule
-            no_contraction = ro_dx[0] >= Real{0.25} * ro_dx[2];
-            growing = !(std::max({ro_dx[0], ro_dx[1], ro_dx[2]})
-                        <= Real{2} * std::max({ro_dx[3], ro_dx[4], ro_dx[5]}));
-        }
+        const bool growing = !(m_new <= Real{2} * m_old);
         const bool stagnated = no_contraction && !growing;
-        if (std::getenv("PULSIM_RO_TRACE")) {   // TEMP
-            std::fprintf(stderr, "%sRO budget: kw %d best %.4e/%.4e max %.4e/%.4e "
-                "two-step %s\n", ro_trace_buf().c_str(), kw, b_new, b_old, m_new,
-                m_old, ro_dx[0] >= Real{0.25} * ro_dx[2] ? "no-contraction"
-                                                       : "still-contracting");
-        }
         const Real dx_cap = roundoff->dx_rel_max
             * std::max(Real{1}, w.ro_x0_inf);
         const Vector& scale = w.ro_scale;

@@ -146,13 +146,7 @@ def test_hard_turn_on_energy_is_booked(engine):
 # ------------------------------------------------- the same run, other knobs --
 @pytest.mark.parametrize("extra", [dict(rtol=1e-4), dict(rtol=1e-8), dict(dt=1e-10)],
                          ids=["rtol1e-4", "rtol1e-8", "dt1e-10"])
-def test_case_a_transition_under_other_controls(engine, extra, request):
-    if engine == "trbdf2" and extra == dict(rtol=1e-8):
-        # Open (notes, "Remaining"): the 1 ps ZVS edge at 1.5 us is resolved
-        # down to h ~ 1e-17 s, below Ch's companion floor eps·Q/(γh) ~ 1e-6 A;
-        # roundoff acceptance (omega 0.23 eps) declines a limit cycle whose
-        # last two ||dx|| happen to contract.
-        request.applymarker(pytest.mark.xfail(raises=p.SimulationAborted, strict=True))
+def test_case_a_transition_under_other_controls(engine, extra):
     _, _, r = _run(engine, **extra)
     t, v = np.asarray(r.times), np.asarray(r.v("sw"))
     t_off = 0.5 / FSW - DEAD_A
@@ -189,3 +183,60 @@ def test_a_charge_law_capacitor_charged_from_0_v_by_a_ramp_runs(engine, m):
         assert np.max(np.abs(v - s * (t - tau * (1 - np.exp(-t / tau))))) < 1e-6 * VDC
     else:   # the node follows the bus within the RC's lag, R·C(v)·S <= 4 mV
         assert np.max(np.abs(v - VDC * t / TR)) < 5e-3
+
+
+# ------------------------------------- run length as a property (F-S-5 session 2) --
+def test_case_a_runs_at_every_run_length(engine):
+    """The default h_min is span·1e-11, so the companion floor eps·Q/(γh)
+    at a ps edge depends on t_end: Newton cycled there (period 6, 7, 10) and
+    the two-step stagnation test declined it on 9 of 30 lengths. 40 lengths
+    from a fixed seed in [0.2, 6] us; the full 200 are in the notes."""
+    lengths = np.random.default_rng(20261120).uniform(0.2e-6, 6e-6, 40)
+    bad = []
+    for te in lengths:
+        try:
+            _run.__wrapped__(engine, t_end=float(te))
+        except p.SimulationAborted:
+            bad.append(te)
+    assert bad == []
+
+
+# ------------- saturable cut-set opened by a switch (reviewer's case, session 2) --
+def _cut_set():
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "v", "gnd", 10.0)
+    b.add_resistor("R", "v", "a", 1.0)
+    b.add_saturable_inductor("L1", "a", "b", 1e-3, 5.0, 1e-4)
+    b.add_inductor("L2", "b", "gnd", 1e-3)
+    b.add_switch("S", "b", "gnd", 1e3, 1e-9)
+    n, k = b.graph.num_switches, b.switch_index_of("S")
+
+    def fn(t):
+        m = p.SwitchStateMask(n)
+        m.set(k, t < 2e-4)
+        return m
+    return b, fn
+
+
+@pytest.mark.parametrize("cfg", [
+    ("esdirk43", {}), ("esdirk43", dict(rtol=1e-8)), ("trbdf2", {}),
+    pytest.param(("trbdf2", dict(rtol=1e-8)), marks=pytest.mark.xfail(
+        raises=p.SimulationAborted, strict=True,
+        reason="release finding F-S-5 (session 2): NOT the floor cycle — at "
+               "200 us Newton ends with ||dx|| 3.64e-9 at node b, omega 0.12 eps, "
+               "but its newer window's largest ||dx|| is over 2x the older one's "
+               "(declined 'growing'); open")),
+], ids=["esdirk43", "esdirk43-rtol1e-8", "trbdf2", "trbdf2-rtol1e-8"])
+def test_saturable_cut_set_opened_by_a_switch(cfg):
+    """L1 (atan law) + L2 forced into series at 200 us. Flux conservation:
+    lam1(i1-) + L2 i2- = lam1(i+) + L2 i+ with i1- = 1.882674, i2- = 1.9e-4
+    gives i+ = 0.908907 A (mpmath); 100 ns later the current has moved by
+    < 4e-4 A (di/dt <= 10 V / 2.7 mH). esdirk43 aborted here since cedac36b."""
+    eng, kw = cfg
+    b, fn = _cut_set()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(b, t_end=4e-4, switch_fn=fn, **ENGINES[eng], **kw)
+    t = np.asarray(r.times)
+    i = np.asarray(r.v("v")) - np.asarray(r.v("a"))
+    assert abs(np.interp(2.001e-4, t, i) - 0.908907) < 1e-3
