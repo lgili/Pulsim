@@ -128,3 +128,44 @@ Not covered by a restart-rule fix; recorded as a default-path finding of group A
 2. Fix at `run_restart`: decide stage 2's mode change (any bit, incl. a fresh turn-on) by the BE re-take
    from x1; for smooth devices find an equivalent test or report the stage-1 impulse to the guard.
 3. Build F-5-10 record, check records on the dsed byte-compare set, then F-3-7 / F-3-1 traces.
+
+## Fixes landed (130fcb70) [M]
+
+- **F-3-3** — `run_restart`: any stage-2 diode-mode change goes through the existing backward-Euler
+  re-take from x1 (kept iff it keeps stage 1's bits; else the SDIRK stage 2 is restored bit for bit).
+  The removed exclusion (fresh turn-on in stage 2) was the F-3-3 case. Side effect (reviewer): the old
+  loop's `break` also cleared a real on->off flip seen earlier in the same loop; now it counts.
+  Truth: exact engine (`mode_selection='auto'`) peak i_p 16.381990162 A, min +1.6e-7 A.
+  Restart pwl peak: 16.3819859 / 16.3819892 / 16.3819901 at dt 10 / 5 / 2.5 ns (errors 4.2e-6,
+  9.5e-7, 1.0e-7; order 2.2 then 3.2); min i_p +1.57e-7 A (was -20.92 A); v_out 16.3651 (was 17.146).
+- **F-5-10** — `_auto_check_voltage_sanity` also scans the right-limit samples (`right_limit_index` /
+  `right_limit_states`, only the exact engine has them). Truth: v_sw(0+) = i_L(0-)/g_off (closed
+  form; matches to 1e-9). The warning now fires on `engine='dsed'`.
+- Parked with traced causes (strict xfail in `test_release_findings_a.py`): F-5-1 (smooth Newton
+  device: no bit for the stage-2 check — needs a region test for Newton devices or the BE re-take on
+  a stage-1 impulse, plus the stage-1 voltage for the guard), F-3-7 (stage-1 Newton diode chatter at
+  a gate edge — needs the in-Newton diode re-decision fixed for the BE stage), F-3-1 (the split
+  locates a series diode pair's commutation at one diode's crossing — needs the split to locate the
+  decided post-event mode's commutation).
+
+## Byte compares vs the PR head (same machine) [M]
+DEFAULT options: identical everywhere — goldens (all non-restart cases), stateful (all but the two
+`*_restart` cases), engines, steps (all but restart/split), pwl_identity default config,
+trbdf2_identity 371/371. Moved, all with the restart rule ON (the option, not the default):
+golden `buck_pwl_restart` (stage2_retries 21 -> 29, stage2_be_kept 0 -> 6), stateful
+`compose_all_restart`, `everything_pwl_restart`, engines `buck_pwl_restart`, steps
+`buck_pwl_restart`, `vsi_pwl_split`, pwl_identity 18 of 379 restart/split entries (mostly the
+stage2_retries counter; boost_pfc, active_clamp_forward, interleaved_buck_3ph commutation counts).
+Checked against truth (the reviewer's risk: turn-ons at a zero start / buck CCM from rest): the
+golden buck (24 V, 100 kHz, from rest, 2 ms) on pwl+restart vs the exact engine at output_rtol 1e-9,
+p99 |dv_out| / p99 |di_L| over all samples:
+dt 100 ns: 1.96e-5 / 7.2e-6 -> 9.9e-6 / 3.5e-6; 50 ns: 3.8e-6 / 9.0e-7 -> 2.4e-6 / 1.2e-6;
+25 ns: 1.42e-6 / 5.6e-7 -> 1.34e-6 / 3.9e-7 (before -> after). Equal or better except di at 50 ns
+(1.35x). Cost: the change runs only inside `run_restart` (option ON); it removes one bit snapshot
+per restart and adds a BE re-take on the newly included case (counted in stage2_retries). The
+restart-less loop is untouched, so the four-case instruction count was not re-measured.
+
+## Default-path finding of group A (not fixed)
+F-3-3 restart-less: -15.48 A against ~0 (trapezoid R(∞) = -1 reflects the cut current, the body
+diode carries the reflection; v_out 16.80 vs 16.365). It warns (voltage sanity). Not covered by the
+restart-rule fix; the release's default (restart ON) now gets it right.
