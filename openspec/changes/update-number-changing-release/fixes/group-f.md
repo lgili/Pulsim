@@ -575,8 +575,11 @@ Rule: at a time event that keeps the mask, `undecided_at_time_event_` runs the s
 first-round test per diode (in band → `zero_band_on_`, the sign of the first non-vanishing
 derivative after t on the OFF-mode trajectory; past the threshold beyond the band → the value law
 confirmed by `zero_band_on_`); if a diode would flip, the event runs the full decision
-(`decide_modes_`, all three selectors). In-band diodes are re-decided only at a SOURCE CORNER
-(`corner_event_`, set by the four callers that know `at_corner`): a first version re-decided them
+(`decide_modes_`, all three selectors). Which instants: the four callers that fire a time event
+say what changed (`corner_event_`: 2 a source corner, 1 a tick, 0 neither). A corner checks every
+diode; a tick (a new level) only diodes past their threshold beyond the band; a poll landing nothing
+(it changes no input, and the scan located every crossing up to it; bridge3 lands one per step,
+100k in 0.1 s, and the check there cost +1.8 % instructions). A first version re-decided in-band diodes
 at every same-mask time event, and a poll landing in `bridge1_vf07` (bit-identity set) turned OFF
 a leakage-level ON diode (D1 carrying D4's g_off current, 7e-10 A) 1 µs after its located partner's
 turn-off; the mpmath truth (`exact_truth.py` patched for V_f in `.scratch/f5/exact_truth_vf.py`) keeps
@@ -607,7 +610,12 @@ Rule: `root_time_error_` — the root is known to t_tol + B/|ġ|, B = `signal_bo
 signal at the root, ġ its slope along the pre-event mode (the secant to the ladder's first
 significant rung); `ladder_sign_(…, dt0)` treats the post-mode signal's own movement over that
 window (sources included) as noise, max with the state term. No tuned constant: B, t_tol and the
-ladder are the existing ones. Trace on the pulse: t_tol 1e-18 s, B/|ġ| 2.5e-15 s, the OFF signal
+ladder are the existing ones. It is read only where a decision in `zero_band_on_` would put the
+FIRED diode back in its pre-event state (the crossing is the decision unless the contrary signal
+is significant beyond the root's error), once per event, from the root state and pre-event mask
+kept at the event (`loc_root_x_`, `loc_root_mask_`). Computed at every located event it cost
++1.9 % (bridge3) and +6.7 % (active_clamp_forward) instructions; an agreeing decision needs no
+more noise. Trace on the pulse: t_tol 1e-18 s, B/|ġ| 2.5e-15 s, the OFF signal
 then decides −1 at the 1e-15 s rung.
 
 Numbers: v0 = −1, conductance form, all selectors: turn-on 5.090909086439 µs (truth
@@ -630,3 +638,24 @@ Selectors: (a) legacy, lcp, auto, both forms; (b) legacy, lcp, auto, conductance
   5.3663208617 ms). Pre-existing; unchanged here.
 * Cost of (a) in the worst case: a diode resting at an exact zero at every corner runs the full ladder
   (~14 propagations) per corner (reviewer: 6 idle diodes × 800 corners, +35 % on that synthetic run).
+
+### Must-not-move (final C++, `.scratch/f5/tip_py` vs `.scratch/f5/base_py` built at 6cb51c00)
+
+* Goldens (golden_baseline compare): ALL IDENTICAL. dsed bit-identity 36/36 default and 36/36 shadow
+  (the first, eager version moved `bridge1_vf07` dsed t/x: the poll re-decision above; reverted by
+  scoping).
+* Exact scoreboard cells (`.scratch/f5/dsedall.py`: 81 circuits × dsed / dsed+next / no-dt rule
+  off, hashes of times, states, events, reinit records): 243 same, 0 moved — the exact-engine row
+  stays 81 / 77 / 70.
+* Event times and the states at events bit-equal across output_rtol 1e-4 / 1e-5 / 1e-6
+  (`.scratch/f5/rtolinv.py`, no dt): 111 circuits invariant, 0 differ, 15 not loadable by v1_reader
+  (base: the same 111 / 0 / 15).
+* Moved vs base, rule ON only: boost_pfc_open_loop (all three output_rtol, invariant among
+  themselves). Base fired a DiodeOff twice at 10.282917789558 ms; the re-decision changed the
+  trajectory at rounding level onward. Truth (`grade.py`, scoreboard `exact`, rule 1e-5, no dt):
+  7.36e-10 → 2.95e-12 (better). Its dsed / dsed+next / no-dt rule-off cells are identical
+  (2.565e-7 / 2.195e-7 / 2.565e-7).
+* Cost (instructions per run minus an import-only run, 10 runs per process, min of 6
+  interleaved, same flags, `.scratch/f5/cost10.sh`), rule off: buck_ccm 0.998, bridge3 1.000,
+  active_clamp_forward 0.992, forward_converter 0.974 (base spread), boost_pfc_open_loop 0.998.
+* Loss port: no separate number compared; the full pytest (below) carries its tests.
