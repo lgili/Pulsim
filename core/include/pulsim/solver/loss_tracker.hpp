@@ -89,6 +89,13 @@ struct StepLines {
     std::array<Vector, kMax> left, right;
     std::array<topology::SwitchStateMask, kMax> m_left, m_right;
     std::array<bool, kMax> right_ok{};
+    // the run's bookkeeping (run_transient): stage 1 of the last restart
+    // (sub)step, whether its stage 2 was the backward-Euler re-take, and
+    // whether the step is representable (false: the dt-retry ladder)
+    Vector x1;
+    topology::SwitchStateMask m1;
+    bool be_kept = false;
+    bool ok = true;
     void clear() noexcept {
         start = false;
         n = 0;

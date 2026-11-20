@@ -306,7 +306,7 @@ def with_inner_events(result):
     gs = getattr(result, "gate_states", None)
     if gs is not None:
         gs = np.asarray(gs, dtype=bool)
-        out.gate_states = np.insert(gs, pos, gs[np.minimum(pos, n - 1)], axis=0)
+        out.gate_states = np.insert(gs, pos, gs[after], axis=0)   # the gate before the edge
     # right limits: the samples' (renumbered) and the inner events'
     rl_i = getattr(result, "right_limit_index", None)
     rl_s = getattr(result, "right_limit_states", None)

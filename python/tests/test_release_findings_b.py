@@ -251,15 +251,24 @@ def test_f65_source_current_is_read_on_the_row_side_the_engine_solved():
     """The restart rule solves the row AT a source jump with the source's
     left limit (the row is the left limit); res.i(source) read the
     waveform's right value there: Rsq 1.0 A, Ip 0.0 A at t = 3e-4."""
-    b = p.CircuitBuilder()
-    b.add_pulse_current_source("Ip", "q", "gnd", 0.0, 1.0, 1e-4, 2e-4,
-                               period=5e-4)
-    b.add_resistor("Rsq", "q", "q2", 1e-3)
-    b.add_resistor("Rq", "q2", "gnd", 5.0)
-    for kw in ({}, dict(discontinuity_restart=True)):
-        res = p.simulate(b, t_end=1e-3, dt=1e-6, engine="pwl", **kw)
-        a, c = np.asarray(res.i("Ip")), np.asarray(res.i("Rsq"))
-        assert np.max(np.abs(a - c)) <= 1e-9, (kw, np.asarray(res.times)[np.abs(a - c) > 1e-9])
+    for kind in ("pulse", "pwl"):
+        b = p.CircuitBuilder()
+        if kind == "pulse":
+            b.add_pulse_current_source("Ip", "q", "gnd", 0.0, 1.0, 1e-4, 2e-4,
+                                       period=5e-4)
+        else:   # a ramp into a flat segment: a corner, not a jump
+            b.add_pwl_current_source("Ip", "q", "gnd", [0.0, 3e-4, 1e-3],
+                                     [0.0, 1.0, 1.0])
+        b.add_resistor("Rsq", "q", "q2", 1e-3)
+        b.add_resistor("Rq", "q2", "gnd", 5.0)
+        b.add_capacitor("C", "q2", "gnd", 1e-6)
+        # the exact engine: its event row sits one ulp after the grid sample
+        for kw in (dict(engine="pwl", dt=1e-6),
+                   dict(engine="pwl", dt=1e-6, discontinuity_restart=True),
+                   dict(engine="exact"), dict(engine="exact", output_rtol=1e-4)):
+            res = _quiet(p.simulate, b, t_end=1e-3, **kw)
+            a, c = np.asarray(res.i("Ip")), np.asarray(res.i("Rsq"))
+            assert np.max(np.abs(a - c)) <= 1e-9, (kind, kw, np.asarray(res.times)[np.abs(a - c) > 1e-9])
 
 
 # ---------------------------------------------------------------------------
@@ -322,3 +331,13 @@ def test_f44_recorder_window_charge_on_restart_steps():
     for k in range(len(wins)):
         dq = 10e-6 * (ends[2 * k + 1] - ends[2 * k])
         assert abs(q[k] - dq) <= 2e-4 * abs(dq) + 1e-12, (k, q[k], dq)
+
+
+def test_decimated_rule_run_keeps_no_event_limits():
+    """store_every > 1 stores some steps only: the result keeps no event
+    limits (None) rather than a partial record that reads as "no jumps"."""
+    b, pwm, T = _boost(0.7, 20.0)
+    r = _quiet(p.simulate, b, 2e-4, switch_fn=pwm, dt=T / 1000, store_every=4, **PWL_REL)
+    assert r.right_limit_index is None and r.inner_events is None
+    r1 = _quiet(p.simulate, b, 2e-4, switch_fn=pwm, dt=T / 1000, **PWL_REL)
+    assert r1.right_limit_index is not None and len(r1.right_limit_index) > 0

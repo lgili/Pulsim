@@ -534,7 +534,8 @@ def _with_right_limits(res, y_of_states, edges=None):
     DCM buck at T/200, O(h), DECISIONS 29). Each side is integrated
     separately: the right limit at the edge is extrapolated from the two
     samples after it (exact for a quantity linear there; O(h^2))."""
-    from ._result_views import states_as_array
+    from ._result_views import states_as_array, with_inner_events
+    res = with_inner_events(res)   # events inside fixed steps as rows
     t = np.asarray(res.times, dtype=float)
     y = np.asarray(y_of_states(states_as_array(res)), dtype=float)
     idx = getattr(res, "right_limit_index", None)
@@ -2165,8 +2166,13 @@ def _settle_error(b, run, T, n):
         # interpolation at kT from a landing a few ulps EARLY mixed in the
         # next sample across the edge's jump (an OFF branch's 2.4e-8 A
         # read 1.4e-10 A off, a settled run 1.3e-4 "not settled")
-        js = [int(np.argmin(np.abs(t - k * T))) for k in ks]
-        xs = X[js, :]
+        # (results with event limits; the others interpolate as before)
+        if getattr(run, "right_limit_index", None) is not None:
+            js = [int(np.argmin(np.abs(t - k * T))) for k in ks]
+            xs = X[js, :]
+        else:
+            xs = np.array([[np.interp(k * T, t, X[:, j])
+                            for j in range(X.shape[1])] for k in ks])
     else:
         # an edge between two samples: interpolating across its kink
         # reads 1e-4 of the state (trbdf2, PWM source); the mean over

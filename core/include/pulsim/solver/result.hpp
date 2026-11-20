@@ -599,7 +599,8 @@ struct SimulationResult {
     /// engine under the restart rule records, at the start sample of each
     /// SDIRK restart step, the start of the line whose trapezoid is the
     /// step's own quadrature (StepLines in loss_tracker.hpp): the right
-    /// limit to second order, exact for the step's integral of any quantity
+    /// limit to second order (first order after a kept backward-Euler stage
+    /// 2), exact for the step's integral of any quantity
     /// linear in the state. `inner_event_*`: an event INSIDE a fixed step
     /// (the event split): after sample `inner_event_after[j]`, at
     /// `inner_event_times[j]`, the left limit (the sub-step that ended

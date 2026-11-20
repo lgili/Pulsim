@@ -3613,6 +3613,10 @@ void init_module(py::module_& m) {
                 if (!r.has_event_limits) return py::none();
                 const auto m = static_cast<py::ssize_t>(r.right_limit_index.size());
                 const auto w = static_cast<py::ssize_t>(r.event_limit_width);
+                if (r.right_limit_states.size() != static_cast<std::size_t>(m * w))
+                    throw std::invalid_argument(
+                        "SimulationResult: right_limit_states does not hold "
+                        "len(right_limit_index) rows of the state width");
                 py::array_t<double> out(std::vector<py::ssize_t>{m, w});
                 if (m * w > 0)
                     std::copy_n(r.right_limit_states.data(), m * w, out.mutable_data());
@@ -3630,8 +3634,9 @@ void init_module(py::module_& m) {
             "of those samples (where the next step starts). On the fixed "
             "engine under the restart rule it is the start of the line "
             "whose trapezoid is the restart step's own SDIRK quadrature "
-            "(the right limit to second order; exact for the step's "
-            "integral of a quantity linear in the state).")
+            "(exact for the step's integral of a quantity linear in the "
+            "state; as a value the right limit to second order, to first "
+            "order after a kept backward-Euler stage 2).")
         .def_property("right_limit_switch_states",
             [](const SimulationResult& r) -> py::object {
                 if (!r.has_event_limits) return py::none();
@@ -3667,11 +3672,15 @@ void init_module(py::module_& m) {
                     times.mutable_data()[j] = r.inner_event_times[j];
                 }
                 auto rows = [&](const std::vector<Real>& v) {
+                    if (v.size() != static_cast<std::size_t>(m * w))
+                        throw std::logic_error("SimulationResult.inner_events: row size");
                     py::array_t<double> out(std::vector<py::ssize_t>{m, w});
                     if (m * w > 0) std::copy_n(v.data(), m * w, out.mutable_data());
                     return out;
                 };
                 auto bits = [&](const std::vector<std::uint8_t>& v) {
+                    if (v.size() != static_cast<std::size_t>(m * nb))
+                        throw std::logic_error("SimulationResult.inner_events: mask size");
                     py::array_t<bool> out(std::vector<py::ssize_t>{m, nb});
                     for (py::ssize_t k = 0; k < m * nb; ++k) out.mutable_data()[k] = v[k] != 0;
                     return out;

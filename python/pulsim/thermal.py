@@ -801,6 +801,8 @@ def device_thermal_summary(
     # split; _result_views.with_inner_events); T_j_trace drops them again.
     result = _views.with_inner_events(result)
     inner_keep = getattr(result, "_inner_keep", None)
+    has_limits = (inner_keep is not None
+                  or getattr(result, "right_limit_index", None) is not None)
     t_all = np.asarray(result.times, dtype=float)
     n_full = int(t_all.shape[0])
     result = _views.solved_part(result)
@@ -1079,6 +1081,7 @@ def device_thermal_summary(
         t_aug, p_aug = _with_step_starts(times, P_cond_t + P_constant,
                                          P_start_t + P_constant)
         on_grid = t_aug.size == times.size and not is_dsed
+        pl = not on_grid and (is_dsed or has_limits)
         # pwl / trbdf2 without event limits: compute_temperature's own
         # grid (a variable-step trace resampled to a uniform one). An
         # event result (engine='dsed', or step-start powers inserted): the
@@ -1088,12 +1091,21 @@ def device_thermal_summary(
         # grid (T_j_avg - 25)/R_th/P_cond_avg read 0.978 / 1.011 on a
         # boost, 0.994 / 0.994 with the grid on the edges (F-2-4).
         T_j_int = compute_temperature(t_aug, p_aug, stages, T_amb_dev,
-                                      piecewise_linear=not on_grid)
+                                      piecewise_linear=pl)
         if on_grid:
             T_j_trace = T_j_int
             T_j_avg = float(np.mean(T_j_trace))
             T_j_peak = float(np.max(T_j_trace))
             on_times = _views.grid_is_uniform(times)
+        elif not pl:
+            # step starts inserted on a result without event limits (pwl /
+            # trbdf2 reinit records): the uniform resample, as before
+            t_int = (t_aug if _views.grid_is_uniform(t_aug)
+                     else _views.resample_uniform(t_aug, p_aug)[0])
+            T_j_trace = np.interp(times, t_int, T_j_int)
+            T_j_avg = float(np.mean(T_j_int))
+            T_j_peak = float(np.max(T_j_int))
+            on_times = True
         else:
             # one value per result.times sample (t_aug holds every one of
             # them), averaged over TIME (a plain mean of the trace at the
@@ -1105,7 +1117,7 @@ def device_thermal_summary(
             on_times = True
         if not win.whole:
             # Over the window, on the grid the network ran on.
-            t_net = (t_aug if not on_grid or _views.grid_is_uniform(t_aug)
+            t_net = (t_aug if pl or _views.grid_is_uniform(t_aug)
                      else _views.resample_uniform(t_aug, p_aug)[0])
             w_net = _views.TimeWindow(t_net, win.a, win.b,
                                       what="device_thermal_summary")

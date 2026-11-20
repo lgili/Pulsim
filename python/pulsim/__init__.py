@@ -1420,16 +1420,21 @@ def _result_i(self, name: str, t=None, *, port=None):
             # side there too (release finding F-6-5). Rows 1..: row 0 is
             # the run's start.
             # the engine's left read, value_at(t - dt*1e-3); a jump is where
-            # the left difference dwarfs the right one (a smooth waveform's
-            # two are alike)
-            lb = 1e-3 * _np.diff(tt_all)
+            # the step to it dwarfs the next step further left (a slope or
+            # a corner moves both alike; a jump only the first)
+            # (the step before the row: an exact-engine event row one ulp
+            # after a grid sample reads the spacing before that sample)
+            g = _np.diff(tt_all)
+            real = g > 1e-12 * max(float(_np.max(_np.abs(tt_all))), 1e-300)
+            lb = 1e-3 * g[_np.maximum.accumulate(
+                _np.where(real, _np.arange(g.size), 0))]
             left = _np.array([val(b_id, float(tt - d))
                               for tt, d in zip(tt_all[1:], lb)], dtype=float)
-            right = _np.array([val(b_id, float(tt + d))
+            left2 = _np.array([val(b_id, float(tt - 2 * d))
                                for tt, d in zip(tt_all[1:], lb)], dtype=float)
             dl = _np.abs(left - out[1:])
-            dr = _np.abs(right - out[1:])
-            jump = dl > 1e3 * dr + 1e-12 * (_np.abs(left) + _np.abs(out[1:]))
+            jump = (dl > 1e3 * _np.abs(left2 - left)
+                    + 1e-12 * (_np.abs(left) + _np.abs(out[1:])))
             out[1:] = _np.where(jump, left, out[1:])
         return _finalize(out)
     if kind == "vccs":

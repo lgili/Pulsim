@@ -25,7 +25,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   switching event agree with KCL and the summaries (diode average 0.160684
   -> 0.161027, a pwl bridge charge error 4.9e-3 -> 1e-9, a DCM duty 0.2180
   -> within 2e-3 of the exact 0.2210, conduction loss second order in `dt`).
-  Default runs are byte-identical.
+  `design` traces of a rule run use its stored right limits and inner
+  events instead of extrapolating them from the gate schedule. Recorders
+  fed from the stored arrays see the right limits but not yet the inner
+  events. pwl without the rule and trbdf2 are byte-identical; exact-engine
+  results change in these summaries (its junction temperature is the exact
+  Foster response to the piecewise-linear power, no resample).
 
 ### Thermal networks on the variable-step engine; the exact engine's output grid
 

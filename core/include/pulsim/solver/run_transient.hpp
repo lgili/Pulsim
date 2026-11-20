@@ -80,6 +80,7 @@
 #include <cstdlib>
 #include <cmath>
 #include <limits>
+#include <memory>
 #include <format>
 #include <functional>
 #include <optional>
@@ -1514,7 +1515,8 @@ inline SimulationResult run_transient(
     const bool restart_rule = opts.discontinuity_restart;
     // Release group B: a rule run keeps event limits (a stored sample at a
     // jump is its left limit; the dynamic path adds its restart lines)
-    if (restart_rule) {
+    // (every step stored: a decimated run keeps none rather than some)
+    if (restart_rule && opts.store_every == 1) {
         result.has_event_limits = true;
         result.event_limit_width = static_cast<Size>(x.size());
         result.event_limit_switches = graph.num_switches();
@@ -1749,11 +1751,10 @@ inline SimulationResult run_transient(
         // (StepLines): stage 1 of the last restart (sub)step and how its
         // stage 2 was taken; `q_ok` false: the step is not representable
         // (the dt-retry ladder, more events than lines).
-        StepLines lines;
-        Vector q_x1;
-        topology::SwitchStateMask q_m1;
-        bool q_be_kept = false;
-        bool q_ok = true;
+        // Allocated under the rule only: the default loop sees one null
+        // pointer (instructions per step, DECISIONS 14/16/18).
+        const auto lines_box = restart_rule ? std::make_unique<StepLines>() : nullptr;
+        StepLines* const L = lines_box.get();
         // The step hooks, called in the shared phases (slice 3c,
         // DECISIONS 17): probes R1 (`StepHooks::step`, the step's start
         // state and mask), R2 (`on_event`, the stamps on each side of a
@@ -1973,9 +1974,9 @@ inline SimulationResult run_transient(
         auto step_take = [&]() PULSIM_STEP_PHASE {
             const Real t = t_step;
             const Real t_prev = t_prev_step;
-            if (restart_rule) {
-                lines.clear();
-                q_ok = true;
+            if (L) {
+                L->clear();
+                L->ok = true;
             }
             // Accumulate b_extra into the reused buffer (audit #6), in the
             // same left-to-right order as before so the result is
@@ -2343,9 +2344,11 @@ inline SimulationResult run_transient(
                 if (breach_1 && has_diodes && !last_solved_bits.empty()) {
                     diodes.restore_on_bits(last_solved_bits);
                 }
-                q_x1 = x;              // stage 1, for the step's lines
-                q_m1 = stamped_mask;
-                q_be_kept = false;
+                if (L) {                // stage 1, for the step's lines
+                    L->x1 = x;
+                    L->m1 = stamped_mask;
+                    L->be_kept = false;
+                }
                 if (has_diodes) {
                     rs_x1 = x;
                     diodes.snapshot_on_bits_into(rs_bits);
@@ -2428,7 +2431,7 @@ inline SimulationResult run_transient(
                     }
                     if (keep_be) {
                         ++result.stage2_be_kept;
-                        q_be_kept = true;
+                        if (L) L->be_kept = true;
                         be_commit_h = h_b;
                     } else {
                         // Back to the SDIRK stage 2, bit for bit: the
@@ -2463,6 +2466,7 @@ inline SimulationResult run_transient(
             // in another mode than stage 1 has no line (the step's ends).
             auto restart_lined = [&](Real a, Real h) {
                 const bool inner = a != t_prev_step;
+                StepLines& lines = *L;   // restart steps exist under the rule only
                 const Size j = lines.n;
                 if (inner) {
                     if (j < StepLines::kMax) {
@@ -2472,14 +2476,18 @@ inline SimulationResult run_transient(
                         lines.right_ok[j] = false;
                         lines.n = j + 1;
                     } else {
-                        q_ok = false;
+                        lines.ok = false;
                     }
                 }
                 run_restart(a, h);
-                if (!(q_m1 == stamped_mask) || (inner && j >= StepLines::kMax)) return;
-                const Real w1 = q_be_kept ? kGamma : Real{1} - kGamma;
+                if (!(lines.m1 == stamped_mask) || (inner && j >= StepLines::kMax)) return;
+                // shortcut: after a kept backward-Euler stage 2 (w1 = γ) the
+                // start lies between the stages, the quadrature's value but
+                // only a first-order right limit; record the extrapolation
+                // separately if a reader needs the value there
+                const Real w1 = lines.be_kept ? kGamma : Real{1} - kGamma;
                 Vector& dst = inner ? lines.right[j] : lines.x_start;
-                dst = (Real{2} * w1) * q_x1 + (Real{1} - Real{2} * w1) * x;
+                dst = (Real{2} * w1) * lines.x1 + (Real{1} - Real{2} * w1) * x;
                 if (inner) {
                     lines.m_right[j] = stamped_mask;
                     lines.right_ok[j] = true;
@@ -2717,8 +2725,10 @@ inline SimulationResult run_transient(
                     capture_first = false;
                     // shortcut: a retried step keeps no lines (its ends
                     // only); retries are rare
-                    lines.clear();
-                    q_ok = false;
+                    if (L) {
+                        L->clear();
+                        L->ok = false;
+                    }
                     split_events.clear();
                     rs_first_valid = false;
 
@@ -3086,12 +3096,13 @@ inline SimulationResult run_transient(
             }
             // add-in-kernel-event-losses: the step is accepted; read its
             // commutations and conduction energy (reading rule).
-            if (lt) lt->accept(t_prev, t, x, stamped_mask, q_ok ? &lines : nullptr);
+            if (lt) lt->accept(t_prev, t, x, stamped_mask, L && L->ok ? L : nullptr);
         };  // step_commit
 
         // Release group B: a step's lines into the result's event limits
         // (`before`: the stored sample the step starts at).
         auto record_lines = [&](Size before) {
+            const StepLines& lines = *L;
             const Size nb = result.event_limit_switches;
             auto put_mask = [&](const topology::SwitchStateMask& m,
                                 std::vector<std::uint8_t>& out) {
@@ -3227,7 +3238,7 @@ inline SimulationResult run_transient(
                 result.record_switch_state(stamped_mask);
                 // the step's lines (release group B), when its start is the
                 // sample before this one
-                if (restart_rule && q_ok && !lines.empty() && opts.store_every == 1 &&
+                if (L && L->ok && !L->empty() && opts.store_every == 1 &&
                     result.times.size() >= 2) [[unlikely]] {
                     record_lines(result.times.size() - 2);
                 }
