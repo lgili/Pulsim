@@ -471,13 +471,6 @@ public:
     [[nodiscard]] bool has_user_source_fn() const noexcept {
         return static_cast<bool>(b_extra_fn_);
     }
-    /// Whether a piecewise-linear source exists whose step can be a ramp.
-    [[nodiscard]] bool exo_may_ramp() const noexcept {
-        for (const auto& ps : pwl_sources_) {
-            if (ps.kind != PwlSource::PwmV) return true;
-        }
-        return false;
-    }
     /// The exosystem's size under `ramp`.
     [[nodiscard]] Index exo_size(bool ramp) const {
         Index ramps = 0;

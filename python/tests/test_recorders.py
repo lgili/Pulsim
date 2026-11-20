@@ -114,7 +114,14 @@ def test_rectified_sine_with_commutations_inside_the_window(eng):
     assert abs(got - truth) <= 5e-3, (got, truth)
     t = np.asarray(res.times)
     vb = np.asarray(res.v("dp")) - np.asarray(res.v("dn"))
-    assert got == pytest.approx(p.time_average(t, vb, a, b), rel=1e-9)   # two summation paths
+    if eng == "exact":
+        # the in-loop window is the trajectory's closed form, not the line
+        # between the 10 us samples (time_average: 8.7e-9 below the analytic
+        # value; the closed form 5.1e-10 below it, the g_off leakage's share)
+        assert got == pytest.approx(truth, rel=1e-9)
+        assert got == pytest.approx(p.time_average(t, vb, a, b), rel=2e-8)
+    else:
+        assert got == pytest.approx(p.time_average(t, vb, a, b), rel=1e-9)   # two summation paths
     # three complete half-periods [5+10k, 15+10k] ms of 2/pi * peak
     per = r.periods["v(dp,dn)"]
     assert per["avg"].size == 3

@@ -342,6 +342,16 @@ responses are each ~30× the state, and the degree-2 square's modal sum was
 Each modal sum now also checks u·Σ|terms| ≤ 1e-10 · (the probe's own scale
 over the piece, from the states at its ends: |l̃|·|x̃|, or |x̃|ᵀ|Q̃||x̃|, times
 L, squared for ∫y²) and takes the matrix form otherwise: 2.6e-10 → 1.1e-13.
+The gate applies to exosystem modes only: on DC modes the ends' scale is ~0
+at every diode's zero current and it re-routed pieces whose two forms agree
+to the circuit's rounding (DCM buck i(D1) period rms 8e-10 of 3e-4 A); DC
+recorder values stay byte-identical (48/48 arrays, ccm + dcm buck).
+
+**End check on (x, u).** The closed form's end is judged on the circuit's
+states and the constant only (`SegmentMode` `nx`): a source level in volts
+and a slope in V/s (5e5 on a 20 µs edge) next to √m-scaled states would let
+any gap pass (reviewer finding D1). u's own end is not judged either way
+(sin ωt1 recomputed vs rotated differ by u·ωt).
 
 ## Numbers against the truths (default grid unless named)
 

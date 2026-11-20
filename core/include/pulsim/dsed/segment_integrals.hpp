@@ -289,7 +289,10 @@ template <class AdapterT, class MaskT>
 /// the last two segment lengths are kept (the step's, and a clipped piece's).
 class SegmentMode {
 public:
-    SegmentMode(detail::PeriodMode e, const std::vector<SegForm>& forms) : e_{std::move(e)} {
+    /// `nx` ≥ 0: only the first nx states (and the constant) are the circuit's,
+    /// the rest an exosystem's (make_exo_mode), which end_gap does not judge.
+    SegmentMode(detail::PeriodMode e, const std::vector<SegForm>& forms, Index nx = -1)
+        : e_{std::move(e)}, nx_{nx} {
         const Index n1 = e_.n + 1;
         const Vector di = e_.d.cwiseInverse();
         deg_.resize(forms.size());
@@ -335,7 +338,13 @@ public:
         } else {
             xe = gram_of_(L).Phi * xt0_;
         }
-        return (xe - xt1).norm() / (xt0_.norm() + xt1.norm());
+        if (nx_ < 0) return (xe - xt1).norm() / (xt0_.norm() + xt1.norm());
+        // the circuit's part only: a source's level (V) or slope (V/s, 5e5 on
+        // a 20 us edge) next to √m-scaled states would make any gap pass
+        const auto circ = [&](const Vector& v) {
+            return std::sqrt(v.head(nx_).squaredNorm() + v[e_.n] * v[e_.n]);
+        };
+        return circ(xe - xt1) / (circ(xt0_) + circ(xt1));
     }
 
     /// Form g over [s0, s0 + L] from the start: out = {∫y, ∫y², y(s0),
@@ -372,11 +381,12 @@ public:
     /// out[1] when the square has no closed form here (the recorder takes
     /// its line for ∫y² only), and the reason integrate() then gives.
     static constexpr const char* kNoFourth =
-        "the square of a degree-2 probe on a mode with more than 7 states whose eigenbasis is "
-        "too ill-conditioned for it (u*kappa^4 > 1e-10)";
+        "the square of a degree-2 probe on a mode with more than 7 states whose modal sum is "
+        "too ill-conditioned for it (u*kappa^4 or its terms' cancellation > 1e-10)";
 
 private:
     detail::PeriodMode e_;
+    Index nx_ = -1;
     std::vector<int> deg_;
     std::vector<Eigen::VectorXcd> r_;
     std::vector<Eigen::MatrixXcd> B_;
@@ -483,8 +493,13 @@ private:
     // see it: near a resonance the source's forced response and the free
     // response are each 30x the state (a series LC 1e-3 off its frequency:
     // the degree-2 square's modal sum was 6.6e-10 off with κ = 10).
-    [[nodiscard]] static bool sums_ok_(Real terms, Real natural) noexcept {
-        return kExactRoundoff * terms <= kExactTierBound * natural;
+    // Only with an exosystem (nx_ >= 0): there the forced and free responses
+    // cancel; on a DC mode the ends' scale is ~0 at every diode's zero
+    // current and the gate only re-routed pieces whose two forms agree to
+    // the rounding of the circuit's scale (DCM buck: i(D1)'s period rms
+    // moved 8e-10 of its 3e-4 A = 2.6e-13 A), so DC modes keep κ alone.
+    [[nodiscard]] bool sums_ok_(Real terms, Real natural) const noexcept {
+        return nx_ < 0 || kExactRoundoff * terms <= kExactTierBound * natural;
     }
 
     // the matrix form (no modal basis): degree 1, and degree 2's ∫y
@@ -782,7 +797,8 @@ private:
                 for (const Size j : pp.atoms) at.push_back(j < rf.size() ? rf[j] : SegForm{});
                 forms.push_back(seg::compose(pp.prog, at, n1));
             }
-            it = modes_.emplace(key, std::make_unique<SegmentMode>(std::move(e), forms)).first;
+            const Index nx = dyn_ ? e.n - ad_.exo_size(ramp_) : Index{-1};
+            it = modes_.emplace(key, std::make_unique<SegmentMode>(std::move(e), forms, nx)).first;
         }
         sm_ = it->second.get();
         if (x0_.size() != sm_->n()) throw std::runtime_error("state size");
