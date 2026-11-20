@@ -532,3 +532,16 @@ def test_a_pulse_driven_rl_step_is_graded_against_its_ramp_closed_form():
         # 2e-8: the gate's own measure, the engine's samples (1e-7 s apart, tau = 1e-4 s)
         # interpolated linearly onto the union grid; at its samples dsed is 2e-12 V off
         assert rec["outcome"] == "agree" and rec["err_rms"] < 1e-7
+
+
+def test_a_right_limit_at_t0_belongs_to_the_initial_instant():
+    """A restart-rule run keeps the right limit of its start, one ulp after
+    t = 0 (with_right_limits). exclude_t0 drops it with the stored t = 0 row,
+    so the gate reads the cell from its first step as before: the 0+ row
+    against the reference's kept t = 0 row (0 V) read an exact DC trace
+    2.24e-3 off on the restart / split columns."""
+    t_ref = np.array([0.0, 5e-10, 1e-7, 2e-7])
+    ref = (t_ref, {"y": np.array([0.0, 1.0, 1.0, 1.0])}, None)
+    t = np.array([0.0, np.nextafter(0.0, 1.0), 1e-7, 2e-7])
+    eng = (t, {"y": np.array([0.0, 1.0, 1.0, 1.0])}, None)
+    assert dr.compare(eng, ref, ["y"], 1e-3)[0] == 0.0
