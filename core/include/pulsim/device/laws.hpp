@@ -245,7 +245,7 @@ struct NonlinearCapacitor {
     template <class T, class P>
     [[nodiscard]] static T charge(const Aux& a, const Params<P>& p, const T& v) {
         using std::abs; using std::atan; using std::exp; using std::log1p;
-        using std::pow; using std::tanh;
+        using std::pow; using std::tanh; using std::expm1;
         if (a.law == models::ChargeLawKind::Table) {
             const Real vv = value_of(v);
             return ad::chain(v, a.table->charge(vv), a.table->capacitance(vv));
@@ -278,24 +278,26 @@ struct NonlinearCapacitor {
                                        : T(p.cgd_max - s + s * atan(x));
             return v * cap - s * log1p(x * x) / (Real{2} * p.a);
         }
-        // Junction: Q = C0·V0/(1−m)·((1+u)·(1+u)^(−m) − 1), u = v/V0 clamped
-        // at the floor; dQ/dv = C0·(1+u)^(−m) — ONE pow for value and
-        // tangent (the model's charge + capacitance take two: the 3 % speed
-        // gate, task 15.7). Below the floor Q is flat and the tangent stays
-        // C(floor), as the hand stamp's (DECISIONS #26: a zero row would be
-        // a singular Newton matrix). AD parameters take the same operations
-        // in AD arithmetic (same value to the bit; x is Real there).
+        // Junction: Q = C0·V0/(1−m)·expm1((1−m)·log1p(u)), u = v/V0 clamped
+        // at the floor; dQ/dv = C0·exp(−m·log1p(u)) — one log1p for value
+        // and tangent. expm1, not (1+u)^(1−m) − 1: that cancels near 0 V to
+        // C0·V0·eps absolute, a Newton residual floor over a femtosecond
+        // step (F-S-5; the model's charge() takes the same form). Below the
+        // floor Q is flat and the tangent stays C(floor), as the hand
+        // stamp's (DECISIONS #26: a zero row would be a singular Newton
+        // matrix). AD parameters take the same operations in AD arithmetic
+        // (same value to the bit; x is Real there).
         if constexpr (std::is_same_v<P, Real>) {
             Real u = value_of(v) / p.V0;
             if (u < a.v_floor) u = a.v_floor;
-            const Real w = std::pow(Real{1} + u, -p.m);
-            const Real q = p.C0 * p.V0 / (Real{1} - p.m) * ((Real{1} + u) * w - Real{1});
-            return ad::chain(v, q, p.C0 * w);
+            const Real l = std::log1p(u);
+            const Real q = p.C0 * p.V0 / (Real{1} - p.m) * std::expm1((Real{1} - p.m) * l);
+            return ad::chain(v, q, p.C0 * std::exp(-p.m * l));
         } else {
             T u = v / p.V0;
             if (u < a.v_floor) u = T(a.v_floor);
-            const T w = pow(Real{1} + u, -p.m);
-            return p.C0 * p.V0 / (Real{1} - p.m) * ((Real{1} + u) * w - Real{1});
+            const T l = log1p(u);
+            return p.C0 * p.V0 / (Real{1} - p.m) * expm1((Real{1} - p.m) * l);
         }
     }
 

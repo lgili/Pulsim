@@ -272,7 +272,12 @@ struct NonlinearCapacitor {
 
     /// Stored charge Q(v) = ∫₀ᵛ C dv' [C], in closed form:
     ///   Q = C0·V0/(1−m)·[(1+v/V0)^(1−m) − 1]
-    /// The m → 0 case reduces to C0·v, exactly.
+    /// evaluated as expm1((1−m)·log1p(u)): relative to Q to a few ulp at
+    /// every bias. pow(1+u, 1−m) − 1 cancels near 0 V and held Q only to
+    /// C0·V0·eps absolute (5.5e-24 C at 1 nF, 25 V), which a companion
+    /// over a femtosecond step turns into a Newton residual floor of
+    /// 1e-8 A: a capacitor charged from 0 V aborted at h_min (F-S-5).
+    /// The m → 0 case reduces to C0·v (to an ulp).
     [[nodiscard]] static Real charge(const Params& p, Real v)
         noexcept {
         if (p.law == ChargeLawKind::Table) return p.table->charge(v);
@@ -282,8 +287,7 @@ struct NonlinearCapacitor {
         }
         const Real u = u_of(p, v);
         const Real e = Real{1} - p.m;
-        return p.C0 * p.V0 / e
-               * (std::pow(Real{1} + u, e) - Real{1});
+        return p.C0 * p.V0 / e * std::expm1(e * std::log1p(u));
     }
 
     /// The CHARGE-EQUIVALENT capacitance over [0, V]: Q(V)/V. This

@@ -1922,6 +1922,13 @@ inline SimulationResult run_transient_trbdf2(
     // commit reached (snapshot: x is then the pre-edge solve, the slots
     // post-edge; a sliver step to t_end may still follow).
     Real slots_only_t = std::numeric_limits<Real>::quiet_NaN();
+    // A gate edge with a stateful kind: the next step is the SDIRK restart
+    // (consumed where the step picks its stages). The probe is a
+    // trapezoidal step, so the slot it leaves a kind is 2·i+ − i−, not the
+    // post-edge current i+: off by the jump. On a hard turn-on (400 V into
+    // 1 mOhm across a nonlinear C_oss) TR-BDF2 read it as an O(h) q-row
+    // error at every h, down to h_min, where Newton stalls (F-S-5).
+    bool hs_edge_restart = false;
     auto restart_after_gate_event = [&](bool settled, Real t_gates,
                                         Real hp, bool commit) {
         if (!opts.refresh_after_event) {
@@ -1958,6 +1965,7 @@ inline SimulationResult run_transient_trbdf2(
         const Real dtp = last_probe_dt;
         ++st.n_derivative_refreshes;
         post_event_pending = true;
+        if (hs.any() && !(m_probe == x_mask)) hs_edge_restart = true;
         // No commit across t_end or a controller tick (it would fire
         // dtp late): replace the slots only.
         if (!commit || t + dtp >= opts.t_end - h_min
@@ -2814,6 +2822,14 @@ inline SimulationResult run_transient_trbdf2(
             // ---- stage 1: TR over γh (or SDIRK stage 1, BE over γ_s h) ----
             const step::StageSpec stage0 = step::TrBdf2::stage(h, 0);
             hg = stage0.factor_dt;   // gamma * h
+            // TR-BDF2 only: ESDIRK4(3) restarts from the committed probe
+            // through its own explicit stage, and a forced SDIRK step there
+            // read the 700 A ZVS edge spike (0.7 V on C_oss through 1 mOhm)
+            // as an O(jump) error, down to the h where Newton stalls (F-S-5).
+            if (hs_edge_restart) {
+                if constexpr (!kE) sdirk_left = std::max(sdirk_left, Size{1});
+                hs_edge_restart = false;
+            }
             sdirk = (sdirk_left > 0 && restart_ok()) || reinit_step
                                || reinit_left > 0;
             // Where x_g sits in time (the crossing detector reads it).
