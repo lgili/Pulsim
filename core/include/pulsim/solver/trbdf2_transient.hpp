@@ -1968,10 +1968,14 @@ inline SimulationResult run_transient_trbdf2(
             gates_decided = m_probe;
             return;
         }
+        // The slots from the probe on both paths: the SDIRK stages read none,
+        // but a diode landing inside that step solves a trapezoidal step from
+        // them and commits it (review of D3: the pre-edge slots under the new
+        // mask, the defect the probe commit had).
+        history.refresh_derivatives(x_trial, dtp);
+        if (lt) lt->slots_rewritten();
+        hs.refresh_derivatives(x_trial, dtp);
         if (lin) {
-            history.refresh_derivatives(x_trial, dtp);
-            if (lt) lt->slots_rewritten();
-            hs.refresh_derivatives(x_trial, dtp);
             edge_slots_t = t;
             edge_slots_m = m_probe;
         } else {
@@ -1984,11 +1988,6 @@ inline SimulationResult run_transient_trbdf2(
         // starts from x anyway): the slots only, for a snapshot.
         if (!commit || t_plus >= opts.t_end - h_min
             || t_plus >= queue.next_of(events::Kind::ControlTick) - h_min) {
-            if (!lin) {
-                history.refresh_derivatives(x_trial, dtp);
-                if (lt) lt->slots_rewritten();
-                hs.refresh_derivatives(x_trial, dtp);
-            }
             slots_only_t = t_plus;   // where the unused probe reached
             return;
         }
@@ -2769,8 +2768,15 @@ inline SimulationResult run_transient_trbdf2(
             // the step read the snapped source's RIGHT limit (ll12, ll10);
             // an edge at t_end was never counted (release D3).
             t_land = std::numeric_limits<Real>::quiet_NaN();
+            // The h_min/2 slack only on the first landing and never past
+            // t_end: a later one only shortens the step (a tick is not fired
+            // late, the last step does not overshoot t_end).
+            bool landed_any = false;
             auto lands = [&](Real at) {
-                if (!(at > t && at <= t + h + Real{0.5} * h_min)) return false;
+                const Real lim = landed_any
+                    ? t + h : std::min(t + h + Real{0.5} * h_min, t_stop);
+                if (!(at > t && at <= lim)) return false;
+                landed_any = true;
                 h = std::max(at - t, h_min);
                 t_land = at - t < h_min ? std::numeric_limits<Real>::quiet_NaN() : at;
                 return true;

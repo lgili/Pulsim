@@ -1,15 +1,8 @@
 # Release findings, group D3: TR-BDF2's restart at a gate edge and at the run start
 
-> **STATUS: WORK IN PROGRESS.**
->
-> **The tip's header is a newer variant than the one measured below.** The
-> tip restarts by SDIRK only on edges that change the mask. The scoreboard,
-> reference rows, byte compares, cost and jump metrics below were measured
-> at dd75634d, where SDIRK followed every edge of a stateful circuit.
-> Section "Open at this tip" says what is known about the newer variant.
->
-> At dd75634d, 12 tests in the trbdf2 / esdirk43 files failed. They pass on
-> cad6ab6b. The mode-change variant fixes 7 of them; 5 remain.
+> **STATUS: the five failing tests are fixed; step 2 re-measured on the
+> final variant (section "Successor session" at the end). The sections in
+> between are the predecessor's record (measured at dd75634d / 2d062bc5).**
 
 Branch `fix/core-release-d3-trbdf2-gate-edge-restart`, base cad6ab6b
 (`fix/core-release-d2-trbdf2-stateful-restart`). Tests:
