@@ -26,9 +26,13 @@ Two separate assertions per case:
    - ``pwl`` (trapezoidal, fixed dt) WITHOUT restart is first order after
      each switching event (stale history, AI guide trap 9) and locates a
      diode commutation only on the dt grid: O(dt / T) relative.
-   - ``pwl`` WITH ``discontinuity_restart`` is second order at gate edges;
-     a diode commutation still lands on the grid: O(dt / T) at DCM / diode
-     events, O((dt / T)^2) otherwise.
+   - ``pwl`` WITH ``discontinuity_restart`` is second order at gate edges
+     on the grid and at a diode turn-off at zero current (DCM, resonant
+     charging: the current is ~0 there, measured ~1e-9): O((dt / T)^2).
+     It stays first order where an event falls off the grid and steps a
+     current within one step: sine-triangle gate edges (no edge split
+     asked) and the bridge's phase-current commutation (a 0.6 us ramp
+     inside one 1 us step): O(dt / T) there.
    - ``trbdf2`` and ``trbdf2 + esdirk43`` are error-controlled at the
      explicit ``rtol`` / ``atol`` passed (events located by the engine).
    - ``dsed`` (exact engine) solves each mode in closed form: limited only
@@ -187,6 +191,8 @@ def dcdc_orbit(topo, gon, goff, f, D):
     # conducting mid-way through its interval, reverse-biased while off.
     mid = phi(A2, td / 2) * x1
     assert (iD(goff, gon) * mid[:3, 0])[0] > 0
+    on = phi(A1, DT / 2) * xs           # diode blocks while S conducts
+    assert (iD(gon, goff) * on[:3, 0])[0] <= 0
     if mode == "DCM":
         idle = phi(A3, (T - DT - td) / 2) * x2
         assert (iD(goff, goff) * idle[:3, 0])[0] <= 0
@@ -285,7 +291,9 @@ def spwm_edges(m, f1, mf):
         def g(t, a=a, sgn=sgn):
             tri = -1 + 4 * (t - a) / Tc if sgn > 0 else 1 - 4 * (t - a) / Tc
             return m * mp.sin(w * t) - tri
-        edges.append(mp.findroot(g, (a, b), solver="anderson"))
+        e = mp.findroot(g, (a, b), solver="anderson")
+        assert a < e < b
+        edges.append(e)
     return edges
 
 
@@ -422,9 +430,9 @@ def engine_tol(cfg, r, grid_events=True):
     docstring): first order 10 r, second order 10 r^2, error-controlled
     50 rtol (local control, accumulated over the run's steps), exact engine
     10 output_rtol (interpolated window means). ``grid_events=False``: the
-    circuit has events off the dt grid (diode commutations at current,
-    sine-triangle edges), which the fixed engine places on the grid with
-    or without restart: first order for both."""
+    circuit has events off the dt grid that step a current (sine-triangle
+    edges, the bridge's commutations), first order with or without
+    restart."""
     restart = 10 * r * r if grid_events else 10 * r
     return {"pwl": 10 * r, "pwl_restart": restart, "trbdf2": 50e-6,
             "esdirk43": 50e-6, "dsed": 1e-5}[cfg]
@@ -617,7 +625,8 @@ def resonant_truth(Vin, L, C, gon):
     """Underdamped series R'LC from rest (R' = 1 / g_on, the diode):
     i = Vin / (wd L) e^(-a t) sin(wd t), off at t_off = pi / wd, where
     v_C = Vin (1 + e^(-a pi / wd)); a = R' / (2 L), wd = sqrt(1/(LC) - a^2).
-    After t_off the diode blocks Vin (leak g_off Vin = 1e-7 A: 1e-7 V)."""
+    After t_off the diode blocks Vin (leak g_off Vin = 1e-7 A over
+    1.5 t_off into 1 uF: 1.5e-6 V, 8e-9 relative)."""
     Vin, L, C = mp.mpf(Vin), mp.mpf(L), mp.mpf(C)
     a = 1 / mp.mpf(gon) / (2 * L)
     wd = mp.sqrt(1 / (L * C) - a**2)
@@ -655,7 +664,7 @@ def test_resonant_charging_engine_matches_truth(cfg):
         "vC(end)": abs(at(res, 2.5 * t_off, res.v("c")) / float(tr["vC"]) - 1),
         "i(end)": abs(at(res, 2.5 * t_off, res.i("L"))) / i_pk,
     }
-    tol = engine_tol(cfg, RES_DT / t_off, grid_events=False)
+    tol = engine_tol(cfg, RES_DT / t_off)   # zero-current turn-off: 2nd order
     assert max(err.values()) <= tol, f"resonant on {cfg}: {err} > {tol:.1e}"
 
 
