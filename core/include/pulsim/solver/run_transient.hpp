@@ -2319,8 +2319,9 @@ inline SimulationResult run_transient(
                     if (!first || n_mode < 2 || mixed) continue;
                     // OFF -> ON stays off while s < 0; ON -> OFF
                     // stays on while s > 0.
-                    const bool far = dir > 0 ? s0 >= Real{0} : s0 <= Real{0};
-                    const Real t_g = far ? a : interp_commutation_time(a, b, s0, s1);
+                    // (`far` and `near` are macros in the Windows headers)
+                    const bool no_cross = dir > 0 ? s0 >= Real{0} : s0 <= Real{0};
+                    const Real t_g = no_cross ? a : interp_commutation_time(a, b, s0, s1);
                     for (Size k = 0; k < ents.size(); ++k) {
                         if (flips(k) && island_of(k) == r) cross_scratch[k] = t_g;
                     }
