@@ -436,7 +436,7 @@ reproduced every friction item.
       7.20 mW. The 0.14 % is the trapezoid mean over ~4 samples per
       period: the DSED waveform matches `pwl` pointwise (0.02 mV,
       1.7 mA), and `dt = 1e-7` reads 11.4899 V.
-- [ ] 12.8 With no dead time, `switch_specs` charges soft edges of a
+- [x] 12.8 With no dead time, `switch_specs` charges soft edges of a
       bidirectional PWL switch at the full bus (22.6 W against 11.3 W on
       the 3.7 VSI). Physically the complementary turn-on is the hard
       one; the soft turn-off should cost about 0. (Documented, not
@@ -445,6 +445,14 @@ reproduced every friction item.
       reverse-current edges cost 0.17 + 0.14 mJ with 1 us dead time and
       120.6 + 99.9 mJ without, `P_sw_avg` 11.26 W against 22.63 W.)
       (Still open on `feat/core-bindings-closeout`. The rule is `thermal::commutation_point`, shared by the in-kernel loss port, the period KPIs, the design kernel and the table path; `device_loss_summary` has its own copy. Zeroing soft reverse-current edges has to change all of them together and moves kernel numbers, which needs its own change with a closed-form truth per edge. The 11.3 W / 22.6 W split stays documented in the docstring and guide 3.7.)
+      (Fixed on `fix/core-commutation-edge-rule`, notes `fixes-12-8.md`.
+      `thermal::commutation_point(..., gated)`: a switch's edge whose
+      open-side v and closed-side i have opposite signs is soft (v = 0,
+      0 J); diodes never. One rule for the tracker, the period path, the
+      design batch and the table path. One leg against the closed form:
+      LS 45.14 W -> 0 (truth 0); VSI 3.7 `INV__HSa` 22.64 -> 11.61 W, leg
+      22.60 W against 22.65 W (half-cycle closed form). Dead-time numbers
+      unchanged. `test_commutation_edge_rule.py`.)
 - [x] 12.9 The missed-commutation warning of `res.i` repeats once per
       call site (Python's default filter keys on the caller's line), so
       a script that reads `res.i` of each diode in several places prints

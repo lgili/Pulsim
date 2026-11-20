@@ -268,7 +268,6 @@ event where the signal jumps.
 | Limitation | Measured | Workaround |
 |---|---|---|
 | **`make_pwm_switch_fn` edges jitter by one `dt` step.** It compares a floating-point phase. Guide trap 10. | 100 kHz, D = 0.5, `dt = 1e-7`: 49, 50 or 51 on-steps per period, where 50 were asked. `make_dead_time_pwm_pair_fn` with 200 ns dead time gives the high side 48 or 49 on-steps, where 48 are expected. | Make `D/f_sw` a whole number of steps and compute the PWM in steps (`grid_pwm`, guide 3.2), or split the steps at the edges: `discontinuity_restart=True, enable_substep_state_correction=True` (the helpers carry `next_edge_after`). |
-| **`switch_specs` charges the soft edges of a bidirectional PWL switch at the full bus when there is no dead time.** | Guide 3.7 VSI (600 V; 4 mJ / 3.5 mJ at 600 V, 50 A). `INV__HSa` switching loss is 22.64 W with no dead time and 11.29 W with 1 µs. | Model the dead time. |
 
 ## Sources
 

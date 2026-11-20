@@ -4420,9 +4420,9 @@ def _branch_form_capabilities() -> dict[typing.Any, typing.Any]:
     """
     The branch form's engine column (add-branch-form-ideal-switch): {'Switch'|'Diode': {engine: bool}}; False refuses with UnsupportedError(feature='branch_form').
     """
-def _commutation_points(seq: collections.abc.Sequence[tuple[bool, float, float]]) -> tuple[list[tuple[float, float]], list[tuple[float, float]]]:
+def _commutation_points(seq: collections.abc.Sequence[tuple[bool, float, float]], gated: bool) -> tuple[list[tuple[float, float, bool]], list[tuple[float, float, bool]]]:
     """
-    (on, off): the (|v|, |i|) of every turn-on and turn-off of an edge sequence [(closed, v, i), ...] by the kernel's reading rule (turn-on: v before, i after; turn-off: the reverse).
+    (on, off): the (|v|, |i|, soft) of every turn-on and turn-off of an edge sequence [(closed, v, i), ...] by the kernel's reading rule (turn-on: v before, i after; turn-off: the reverse). With `gated` (a switch, not a diode) an edge whose open-side v and closed-side i have opposite signs is soft: v = 0, no energy.
     """
 def _cpp_ipd_switching_function(m_ref: float, t: float, n_sm: int, f_carrier: float, sm_type: str = 'half_bridge') -> int:
     """

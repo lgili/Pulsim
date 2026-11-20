@@ -8,6 +8,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Bindings close-out (add-ai-usage-guide, add-python-builder-ergonomics)
 
+* **Fixed** a leg with no dead time charged its switching loss twice
+  (add-ai-usage-guide 12.8): the complementary switch's soft edge was read
+  at the full bus. `thermal::commutation_point`, the one rule of the
+  in-kernel loss port (`pwl`, `trbdf2`, `dsed`), the period path, the
+  design batch and `device_loss_summary`'s `switch_specs`, now records a
+  switch's edge whose open-side `v` and closed-side `i` have opposite
+  signs as soft: `v = 0`, 0 J (`res.loss_events` keeps it; the event
+  counts are unchanged). Diodes are never soft. **Behaviour change:** loss
+  outputs of circuits with a zero-dead-time leg move: the guide 3.7 VSI's
+  `INV__HSa` 22.64 → 11.61 W (closed form for the leg 22.65 W, measured
+  22.60 W); the buck_pareto example's synchronous switch loses its soft
+  `E_on`. Dead-time results and every electrical result are unchanged.
+
 * **Fixed** `simulate(LoadedCircuit)` forwarded only `t_start`, `t_end`,
   `dt` and `store_every`: the YAML's `integrator`, `rtol` / `atol`,
   `dt_init`, Newton tolerances and iteration caps were dropped silently.

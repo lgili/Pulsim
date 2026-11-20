@@ -377,8 +377,9 @@ The dead time costs `4/pi * V_dc * t_d * f_sw * sqrt(3/2)` = 9.4 V of
 dead time the freewheel diode carries the current (drop `V_f + i / g_on`);
 once `HSa` is on, the switch takes it all and the diode never shares
 (printed above). `switch_specs` on `HSa` (4 / 3.5 mJ at 600 V, 50 A)
-give 11.3 W with the dead time (soft edges cost about 0 J) and 22.6 W
-without (every edge hard). Model the dead time.
+give 11.3 W with the dead time and 11.6 W without: an edge whose `v` and
+`i` readings have opposite signs is soft (0 J), the complementary edge
+is hard.
 
 ## 4. Exact signatures of the most used calls
 

@@ -1900,11 +1900,15 @@ def device_loss_summary(
         ``V_blk`` is the measured voltage across the OPEN switch
         (the sample before a turn-on, after a turn-off) and
         ``I_load`` the current through the CLOSED switch (the sample
-        after a turn-on, before a turn-off), both as magnitudes:
-        every edge is charged by what it measured, whichever way the
-        current flows. Reports ``E_sw_on_total``, ``E_sw_off_total``,
-        ``E_sw_total``, ``P_sw_avg``, plus ``n_turn_on_events`` /
-        ``n_turn_off_events`` / ``f_sw_estimate``.
+        after a turn-on, before a turn-off), both as magnitudes. An
+        edge whose two readings have OPPOSITE signs (passive
+        convention) is soft and costs 0 J: the switch would deliver
+        energy passing from one to the other, so the complementary
+        device commutated the current (``thermal::commutation_point``,
+        the rule of the in-kernel loss port). Reports ``E_sw_on_total``,
+        ``E_sw_off_total``, ``E_sw_total``, ``P_sw_avg``, plus
+        ``n_turn_on_events`` / ``n_turn_off_events`` (soft edges
+        included) / ``f_sw_estimate``.
 
         Soft and hard edges, measured on ``INV__HSa`` of a 600 V,
         10 kHz SPWM ``add_three_phase_vsi`` (10 Ohm + 5 mH star
@@ -1912,19 +1916,19 @@ def device_loss_summary(
         50 A; ``t_from=20e-3`` over a 40 ms run, 200 edges each way):
 
         * with 1 us dead time, an edge where the switch carries
-          FORWARD current (``i > 0``, n_pos to n_neg: 98 turn-ons,
-          103 turn-offs) blocks the bus, 600.8 V, and costs
-          116.5 + 108.3 mJ; an edge where the current is REVERSE (the
-          antiparallel diode conducts across it: 102 + 97 edges) sees
-          the diode's 0.80 V and costs 0.17 + 0.14 mJ. ``P_sw_avg``
-          11.26 W;
-        * with NO dead time the complementary switch takes the
-          current at the same instant, so the reverse-current edges
-          block 599.98 V as well and cost 120.6 + 99.9 mJ, as much as
-          the hard ones: ``P_sw_avg`` 22.63 W. Physically those are
-          the complementary switch's hard edges, which its own entry
-          (``INV__LSa``, 22.64 W) charges too, so a leg's switching
-          loss is counted twice. Model the dead time.
+          FORWARD current (``i > 0``, n_pos to n_neg) blocks the bus
+          plus the diode drop and is hard; an edge where the current
+          is REVERSE sees the antiparallel diode's -0.8 V (signs
+          agree) and costs that drop's share, 0.17 + 0.14 mJ.
+          ``P_sw_avg`` 11.28 W;
+        * with NO dead time the reverse-current edges see +600 V
+          against a negative current: soft, 0 J (they cost
+          120.6 + 99.9 mJ, 22.64 W, before add-ai-usage-guide 12.8).
+          ``P_sw_avg`` 11.61 W, ``INV__LSa`` 10.99 W: the leg's
+          22.60 W against the half-cycle closed form
+          ``2 f (E_on + E_off) I / (50 A pi)`` = 22.65 W. It is 0.3 W over
+          the dead-time value because the dead time lowers the load
+          current (16.24 against 16.77 A rms), not a second edge.
     conduction_specs : mapping, optional
         Per-diode / per-switch offset+slope conduction model. Keys are
         device names or branch ids. Values give the PWL device
