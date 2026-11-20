@@ -199,9 +199,9 @@ pieces end at the left limit and restart from the right limit). The loss
 port books it as the switch's `E_impulse`. So the ledger over [0, T] is
 ΔE_C + Σ ∫p (recorders) + Σ E_impulse (loss port) = 0. Measured (default
 grid): buck 1.3e-13 of ∫p(V); DCM boost (57 events, diode turn-offs)
-2.7e-14; capacitor pair + R through an ideal switch closes within 1e-11 of
-∫p(R), with the switch's own g_off leak ∫p(S) = 6.4e-14 J before it closes
-needed to get there.
+2.7e-14; capacitor pair + R through an ideal switch at 1 us: 6.9e-16 of
+∫p(R) (E_impulse 2.42e-5 J), with the switch's own g_off leak ∫p(S) =
+6.4e-14 J before it closes needed to get there (tests hold 1e-11).
 
 ## Decision 2: stored-record integrals stay the trapezoid (docs)
 
@@ -271,6 +271,26 @@ runs on the default grid (was dt = 1e-7). `test_exact_output_grid.py` /
 `test_exact_output_rule_combinations.py` — recorders no longer drop
 output_rtol.
 
+## Cost (instructions retired, `/usr/bin/time -l`, F-B2-1 buck 1 ms, per run)
+
+| | base 19e4f1c5 | this branch (merged tip) |
+|---|---|---|
+| exact run, no recorder (1000 runs) | 4.2066 M | 4.2140 M (+0.18 %, run-to-run spread 0.2 %) |
+| one recorder, 9 probes x 2 windows (500 runs) | 13.20 M | 17.18 M (+30 %) |
+
+With no recorder the source is never built (the feed adapter is not
+attached); the +0.18 % is within the measurement's spread and includes the
+merged F-branch commits.
+
 ## Run / not run
 
-See the report of this branch's final tip.
+Run on the final tip: extension build (Eigen 5, clang, ccache);
+`pulsim_core_dsed_tests` (148 cases, incl. the 6 new segment-integral cases)
+and `pulsim_core_record_tests` (18); the exact-engine, recorder, F-finding,
+period-KPI and AI-guide pytest files (578 passed); one full pytest on
+d5310f5d (6123 passed, 110 skipped, 8 xfailed); dsed bit-identity 36/36 and golden baseline identical vs
+the base build of 19e4f1c5; loss port energies + period map integrals
+74/74 byte-identical; ruff on python/. Not run: Eigen 3.4.0, g++, full
+ctest, the full exact scoreboard (it grades stored samples only, which are
+bit-identical on the compared set); stubs (no binding signature changed:
+the native result gains a `recorder_closed_form` dict key).
