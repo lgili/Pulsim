@@ -440,3 +440,24 @@ without a diode.
 `test_exact_recorder_loop.py` — pulse_corners, rectifier and bridge are now
 closed (compared with a finer grid, dt = max(1e-7, t_end / 2e4): at 1e-7 the
 bridge's 3.5e7 pieces add 1.4e-10 of rounding).
+
+## Byte compares (base 20affaf9)
+
+Goldens with counters: all identical; dsed bit-identity 36/36 arrays; loss
+port energies + period map integrals 74/74 arrays; DC recorder statistics
+(F-B2-1 ccm buck, DCM buck: windows + periods, integral / rms / min / max)
+48/48 arrays. No binding signature changed (stubs not regenerated).
+
+## Reviewer (fresh context, opus, medium) — what it found, what was done
+
+- D1 end check diluted by the source's level / slope (fixed: x and the
+  constant only).
+- R1 sin ωt1 recomputed vs rotated (moot after D1: u's end is not judged).
+- R2 the cancellation gate over-rejects at a DC diode's zero current and
+  moved DC values ≤ 8e-10 of a small rms (fixed: exosystem modes only).
+- R3 every ramp step is defective: a Gramian (and, for a degree-2 probe,
+  the Kronecker 64×64) doubling per new step length — left; cost below.
+- R4 untested: a waveform current source's own reading (exo_current_row),
+  a PWM source's level, a sine with f ≤ 0, mixed PWM + ramping pulse —
+  left untested (no truth built for them here).
+- nits: kNoFourth message updated; unused exo_may_ramp removed.
