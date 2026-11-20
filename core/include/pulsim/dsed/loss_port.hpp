@@ -244,7 +244,7 @@ private:
             refuse_(names_.front(), "has no exact conduction integral on a mode at t = "
                     + detail::fmt(t0) + " s (" + e.reason + ")");
         }
-        const Index n = e.n, n1 = n + 1;
+        const Index n = e.n;
         z_ = e.Vi * e.d.cwiseProduct(detail::augment(x0)).template cast<detail::Cplx>();
         const Eigen::VectorXcd& z = z_;
         // the closed form must reproduce the engine's step end (the start was right)
@@ -267,12 +267,7 @@ private:
                         + std::to_string(i) + " by " + detail::fmt(std::abs(xe[i] - x1[i])));
             }
         }
-        P2_.resize(n1, n1);
-        for (Index i = 0; i < n1; ++i) {
-            for (Index j = i; j < n1; ++j) {
-                P2_(i, j) = P2_(j, i) = h * phi1((e.mu[i] + e.mu[j]) * h);
-            }
-        }
+        detail::phi1_pair_kernel(e.mu, h, P2_);
         for (std::size_t k = 0; k < e_.size(); ++k) {
             const auto r = static_cast<Index>(2 * k);
             const Eigen::VectorXcd av = e.Rm.row(r).transpose().cwiseProduct(z);

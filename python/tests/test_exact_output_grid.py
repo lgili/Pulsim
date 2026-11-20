@@ -122,8 +122,9 @@ def test_the_rule_bounds_linear_interpolation():
 
 
 def test_default_and_explicit_dt_keep_todays_samples():
-    """output_rtol=None is today's run; a dt, store_every or recorders keep
-    today's samples whatever output_rtol says."""
+    """output_rtol=None is today's run; a dt keeps today's samples whatever
+    output_rtol says. Recorders no longer drop it (F-B2-1: their statistics
+    are each segment's closed form, so the grid moves only the samples)."""
     def build():
         b = pulsim.CircuitBuilder()
         b.add_voltage_source("V", "a", "gnd", 1.0)
@@ -132,12 +133,13 @@ def test_default_and_explicit_dt_keep_todays_samples():
         return b
     base = pulsim.simulate(build(), 1e-4, engine="exact")
     assert "output_grid" not in base.diagnostics
-    explicit = ({"dt": 1e-6}, {"recorders": [pulsim.Recorder("vb", probes=["v(b)"])]})
-    for kw in explicit:
-        a = pulsim.simulate(build(), 1e-4, engine="exact", **kw)
-        c = pulsim.simulate(build(), 1e-4, engine="exact", output_rtol=1e-4, **kw)
-        np.testing.assert_array_equal(np.asarray(a.times), np.asarray(c.times))
-        np.testing.assert_array_equal(np.asarray(a.states), np.asarray(c.states))
+    a = pulsim.simulate(build(), 1e-4, engine="exact", dt=1e-6)
+    c = pulsim.simulate(build(), 1e-4, engine="exact", output_rtol=1e-4, dt=1e-6)
+    np.testing.assert_array_equal(np.asarray(a.times), np.asarray(c.times))
+    np.testing.assert_array_equal(np.asarray(a.states), np.asarray(c.states))
+    rec = {"recorders": [pulsim.Recorder("vb", probes=["v(b)"])]}
+    c = pulsim.simulate(build(), 1e-4, engine="exact", output_rtol=1e-4, **rec)
+    assert "output_grid" in c.diagnostics
     on = pulsim.simulate(build(), 1e-4, engine="exact", output_rtol=1e-4)
     assert len(on.times) > len(base.times)
     for bad in (0.0, -1.0, float("inf"), True):

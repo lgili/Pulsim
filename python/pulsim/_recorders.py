@@ -28,7 +28,15 @@ FEEDING MODES (``Recording.feeding``, ``result.recorder_feed``):
 The arithmetic is the kernel recorder's (``record/recorder.hpp``): windows
 clipped exactly, each step the straight line from its start (the right
 limit where the engine has one) to its end, exact integrals of the line
-and of its square. Event rows carry both limits and a resolution:
+and of its square — EXCEPT in the exact engine's loop, where each step's
+integral and integral of the square are the closed form of its mode
+(``dsed/segment_integrals.hpp``: exact for the trajectory, independent of
+the output grid; ``result.recorder_feed['closed_form']`` counts the pieces
+that had none, which are the line and warn). On the stored-arrays pass the
+line is between STORED samples: exact for the fixed engine's rule, O(h²)
+for the others (the exact engine's default samples are 10 us apart).
+min / max are the values at the samples and window edges. Event rows carry
+both limits and a resolution:
 ``'exact'`` (exact engine), ``'settled'`` (trbdf2's settled post-event
 state at the instant), ``'within_dt'`` (a bracket: left at ``event_t``,
 right at ``event_t_right``, the end of the first step under the new mode).
@@ -68,7 +76,9 @@ class Recorder:
         step that holds it, the right limit at an event instant;
         ``Recording.interpolated`` flags the rows that are not samples).
     windows
-        ``[(t0, t1), ...]``: statistics over each window, clipped exactly.
+        ``[(t0, t1), ...]``: statistics over each window, clipped exactly
+        (each step's line, or the exact engine's closed form in its loop;
+        see the module notes).
     period, offset
         Statistics per period ``[offset + kT, offset + (k+1)T]``; only
         complete periods are reported.
@@ -456,6 +466,7 @@ class _LoopPlan:
                        "Simulation object"
         self.resume = kw.get("resume_from")
         self.sim = None       # the Simulation the feed is attached to
+        self.closed_form = None   # the exact engine's closed-form counts
         self.n_steps0 = 0     # the feed's steps before this run (a resume)
         self.resumed = None   # what a resume did with the recorder state
 
@@ -606,6 +617,16 @@ def exact_feed_refused(why: str) -> None:
         plan.why_not = f"engine 'dsed' did not feed the recorders in its loop: {why}"
 
 
+def exact_closed_form(report: dict) -> None:
+    """The exact engine's count of recorder pieces integrated in closed
+    form and as the line (dsed/segment_integrals.hpp), for this run."""
+    plan = _LOOP_PLAN.get()
+    if plan is not None and isinstance(plan.sim, ExactFeedSlot):
+        plan.closed_form = {"n_closed": int(report["n_closed"]),
+                            "n_line": int(report["n_line"]),
+                            "why": str(report["why"])}
+
+
 def attach_loop_feed(sim, engine: str) -> None:
     """Called by simulate()'s Simulation routes (pwl, trbdf2) and the exact
     engine's event-driven integrator (``engine='dsed'``) before the run: when
@@ -724,6 +745,20 @@ def simulate_with_recorders(simulate: Callable[..., Any], kw: dict,
             "n_dropped": int(feed.n_dropped)}
         if plan.resumed is not None:
             res.recorder_feed["resume"] = plan.resumed
+        cf = plan.closed_form if exact else None
+        if cf is not None:
+            res.recorder_feed["closed_form"] = cf
+            if cf["n_line"]:
+                import warnings
+                stats = ", ".join(repr(r.name) for r in recs
+                                  if r.windows or r.period)
+                warnings.warn(
+                    f"simulate(engine='exact', recorders=[{stats}]): "
+                    f"{cf['n_line']} of {cf['n_line'] + cf['n_closed']} window "
+                    "pieces had no closed form and are the straight line between "
+                    f"the step's samples, O(h^2) ({cf['why']}; "
+                    "res.recorder_feed['closed_form']). Pass dt for a finer line.",
+                    RuntimeWarning, stacklevel=3)
         res.recorded = {r.name: _checked(r, _exact_rows(feed.result(k), exact),
                                          t[0], t[-1], "in-loop")
                         for k, r in enumerate(recs)}
@@ -782,15 +817,18 @@ def _stat(res, probe: str, field: str, t0, t1) -> float:
 
 def result_avg(self, probe: str, t0=None, t1=None) -> float:
     """Time average of ``probe`` over [t0, t1] (default: the whole run):
-    the integral of the engines' dense output (linear between samples,
-    from the right limit where one is stored) divided by ``t1 - t0``,
-    windows clipped exactly. Correct on any grid, unlike ``.mean()``."""
+    the trapezoid of the STORED samples (linear between them, from the
+    right limit where one is stored) divided by ``t1 - t0``, windows
+    clipped exactly. Time-weighted on any grid, unlike ``.mean()``; exact
+    for the fixed engine's rule, O(h^2) otherwise (``engine='exact'``
+    without ``dt`` stores one sample per 10 us). For the exact average of
+    the trajectory use an in-loop ``Recorder(windows=...)``."""
     return _stat(self, probe, "avg", t0, t1)
 
 
 def result_rms(self, probe: str, t0=None, t1=None) -> float:
-    """RMS of ``probe`` over [t0, t1]: exact for the linear dense output
-    (``h(a^2 + ab + b^2)/3`` per step)."""
+    """RMS of ``probe`` over [t0, t1]: exact for the line between stored
+    samples (``h(a^2 + ab + b^2)/3`` per step; see :meth:`avg`)."""
     return _stat(self, probe, "rms", t0, t1)
 
 

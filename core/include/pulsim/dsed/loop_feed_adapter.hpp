@@ -45,6 +45,7 @@
 // A pure observer of the scheduler's states; no allocation is made when no
 // feed is attached (the scheduler's hooks are then the loss port's or none).
 
+#include "pulsim/dsed/segment_integrals.hpp"
 #include "pulsim/dsed/time_eps.hpp"
 #include "pulsim/events/step_hooks.hpp"
 #include "pulsim/numeric/dense.hpp"
@@ -63,8 +64,13 @@ public:
     ExactFeedAdapter(AdapterT& ad, events::StepHooks& out, Real t_start)
         : ad_{ad}, out_{out}, t_last_{t_start} {}
 
+    /// F-B2-1: the recorders' closed forms (the source must be the one the
+    /// feed's recorders were given): told each step's ends and mode.
+    void set_segment(ExactSegmentSource<AdapterT>* s) noexcept { seg_ = s; }
+
     void attach(events::StepHooks& h) {
         h.on_start([this](const Vector& x0, const MaskT& m0) {
+            xr_ = x0;
             xs_ = full_(t_last_, x0, m0, Real{0});
             ms_ = m0;
             out_.start(xs_, m0);
@@ -79,6 +85,7 @@ public:
             const Real t = !stepped_ && near_time(t_ev, t_last_) ? t_last_ : t_ev;
             if (held_ && t == ht_) {   // a second report of the same instant
                 hr_ = full_(t, xr, mr, Real{0});
+                hxr_ = xr;
                 hmr_ = mr;
             } else {
                 if (held_) forward_(false);   // not a step's end: the feed decides
@@ -87,6 +94,7 @@ public:
                 hml_ = ml;
                 hl_valid_ = false;
                 hr_ = full_(t, xr, mr, Real{0});
+                hxr_ = xr;
                 hmr_ = mr;
                 held_ = true;
             }
@@ -102,7 +110,10 @@ public:
             stepped_ = true;
             lb_ = Real{0.5} * (t - t0);
             Vector xe = full_(t, x, m, lb_);
+            if (seg_ != nullptr) seg_->begin(t0, t, xr_, x, m);
             out_.step(t0, xs_, ms_, t, xe, m);
+            if (seg_ != nullptr) seg_->end();
+            xr_ = x;
             xs_.swap(xe);
             ms_ = m;
             t_last_ = t;
@@ -118,6 +129,7 @@ public:
                     hml_ = m;
                     hl_valid_ = true;
                     hr_.swap(r);
+                    hxr_ = x;
                     hmr_ = m;
                     held_ = true;   // forwarded when the next step starts from t
                 }
@@ -129,6 +141,8 @@ private:
     AdapterT& ad_;
     events::StepHooks& out_;
     Vector xs_, hl_, hr_, hxl_;
+    Vector xr_, hxr_;   // reduced: the next step's start, the held right limit
+    ExactSegmentSource<AdapterT>* seg_ = nullptr;
     MaskT ms_, hml_, hmr_;
     Real t_last_ = 0, ht_ = 0, lb_ = 0;
     Index n_full_ = -1;
@@ -141,6 +155,7 @@ private:
         out_.event(ht_, hl_, hml_, hr_, hmr_);
         if (starts_next) {   // the next step starts from the right limit
             xs_ = hr_;
+            xr_ = hxr_;
             ms_ = hmr_;
         }
         held_ = false;

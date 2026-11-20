@@ -122,11 +122,26 @@ def _same(a, b, rel=1e-12):
 def test_in_loop_recorders_match_the_stored_pass_on_the_same_run(name):
     """Kept rows and event rows against the stored-array pass over the same
     run's stored samples (store_every=1: every accepted step is stored), at
-    1e-12; window and period statistics too (both integrate the same line)."""
+    1e-12. Window and period statistics are the stored pass's line only where
+    the loop had no closed form (time-varying sources: pulse_corners,
+    rectifier, bridge). Where every piece is closed (F-B2-1) the integrals
+    (avg, rms) are the trajectory's, checked against a run on a finer grid
+    (dt = 1e-7) instead; min / max are still the samples', but a window or period
+    edge inside a step takes the closed form's value there, not the chord's
+    (measured <= 4.4e-11 of the scale here, so 1e-9)."""
     make, t_end, rec = CASES[name]
     recs = rec(t_end)
     res = _run(make, t_end, recs)
     assert res.recorder_feed["mode"] == "in-loop", res.recorder_feed
+    cf = res.recorder_feed["closed_form"]
+    assert cf["n_closed"] == 0 or cf["n_line"] == 0, cf
+    closed = cf["n_closed"] > 0
+    other = (_run(make, t_end, rec(t_end), dt=1e-7).recorded["r"] if closed
+             else record_result(res, recs)["r"])
+    mm = 1e-9 if closed else 1e-11
+    # the closed forms' rounding adds up over the fine grid's pieces: worst
+    # v(vout)*i(L)'s rms on buck_dcm, 1.7e-11 at dt = 1e-7 (3021 steps)
+    ia = 1e-10 if closed else 1e-11
     loop = res.recorded["r"]
     stored = record_result(res, recs)["r"]
     _same(loop.times, stored.times)
@@ -141,9 +156,12 @@ def test_in_loop_recorders_match_the_stored_pass_on_the_same_run(name):
     for pr in loop.probes:
         _same(loop.event_left[pr], stored.event_left[pr])
         _same(loop.event_right[pr], stored.event_right[pr])
-        for f in ("integral", "avg", "rms", "min", "max"):
-            _same(loop.windows[pr][f], stored.windows[pr][f], 1e-11)
-            _same(loop.periods[pr][f], stored.periods[pr][f], 1e-11)
+        for f in ("min", "max"):
+            _same(loop.windows[pr][f], stored.windows[pr][f], mm)
+            _same(loop.periods[pr][f], stored.periods[pr][f], mm)
+        for f in ("integral", "avg", "rms"):
+            _same(loop.windows[pr][f], other.windows[pr][f], ia)
+            _same(loop.periods[pr][f], other.periods[pr][f], ia)
 
 
 @pytest.mark.parametrize("name,t_split", [("buck_ccm", 100e-6), ("buck_dcm", 150e-6),
@@ -172,13 +190,14 @@ def test_a_resumed_run_continues_the_record(name, t_split):
 
 def test_window_statistics_agree_with_trbdf2_at_tight_tolerance():
     """Time-weighted window average and RMS of the buck's v(vout), i(L) on the
-    exact engine (in the loop) and on trbdf2 at rtol 1e-10. The statistics
-    integrate the line between accepted states (sampled): on the default grid
-    (one exact step per half period) the line puts v(vout)'s average 2.7e-3 V
-    off (1e-4 at dt = 1 us); with dt = 0.1 us it resolves the ripple."""
+    exact engine (in the loop) and on trbdf2 at rtol 1e-10. The exact
+    engine's statistics are each segment's closed form (F-B2-1), so the
+    default grid (one exact step per half period) suffices; the line between
+    its states had put v(vout)'s average 2.7e-3 V off."""
     t_end = 200e-6
     recs = [p.Recorder("w", ["v(vout)", "i(L)"], keep="none", windows=[(100e-6, 200e-6)])]
-    ex = _run(_ccm, t_end, recs, dt=1e-7)
+    ex = _run(_ccm, t_end, recs)
+    assert ex.recorder_feed["closed_form"]["n_line"] == 0
     assert ex.recorder_feed["mode"] == "in-loop"
     b, fn = _ccm()
     with warnings.catch_warnings():
@@ -191,7 +210,7 @@ def test_window_statistics_agree_with_trbdf2_at_tight_tolerance():
             assert abs(e - t) < WINDOW_BOUND * scale, (pr, f, e, t)
 
 
-WINDOW_BOUND = 5e-6   # measured at dt = 0.1 us: <= 6e-7 A on i(L), 1.5e-7 V on v(vout)
+WINDOW_BOUND = 5e-6   # trbdf2's own error at rtol 1e-10 (was measured at dt = 0.1 us)
 
 
 def test_the_junction_loop_keeps_the_stored_pass_and_says_why():
