@@ -31,21 +31,10 @@ PWL_REL = dict(engine="pwl", discontinuity_restart=True,
                enable_substep_state_correction=True)
 EXACT_REL = dict(engine="dsed", output_rtol=1e-5)
 
-# Open until the fixed engine stores its restart steps' quadrature.
-F_PWL_SAMPLES = pytest.mark.xfail(strict=True, reason=(
-    "release findings F-5-4 / F-5-5 / F-2-2 / F-5-7: the fixed engine stores no right "
-    "limit at a restart step's start and no row at a commutation inside a split step"))
-F_64 = pytest.mark.xfail(strict=True, reason=(
-    "release finding F-6-4: the loss port integrates a restart step as the trapezoid "
-    "of its end powers"))
 F_44 = pytest.mark.xfail(strict=True, reason=(
     "release finding F-4-4: the in-loop recorder (LoopFeed) is fed the restart step's "
     "ends only; a capacitor reading is the companion's END current at every point, so "
     "the step's lines need the stage currents (C·(X1 − x0)/(γh)) fed with them"))
-F_65 = pytest.mark.xfail(strict=True, reason=(
-    "release finding F-6-5: res.i(source) reads the waveform's right value at a row "
-    "the restart rule solved with the left limit"))
-
 
 def _quiet(fn, *a, **kw):
     with warnings.catch_warnings():
@@ -116,7 +105,6 @@ def test_f56_exact_summary_peak_is_a_value_of_the_two_limit_trace():
         float(np.abs(np.asarray(v.i("Vac"))).max()), rel=1e-9)
 
 
-@F_PWL_SAMPLES
 @pytest.mark.parametrize("V_th", (0.7, 0.0))
 def test_f54_f55_pwl_restart_steps_close_the_bridge_charge(V_th):
     """F-5-4 / F-5-5 (fixed engine, restart rule + split): integrated by
@@ -237,7 +225,6 @@ def _chopper():
     return m
 
 
-@F_64
 @pytest.mark.parametrize("dt", (1e-7,))
 def test_f64_loss_port_conduction_converges_on_restart_steps(dt):
     """RL chopper, closed-form ∫v·i per device. Restart rule: 1.86e-3 /
@@ -260,7 +247,6 @@ def test_f64_loss_port_conduction_converges_on_restart_steps(dt):
 # F-6-5: a pulse current source's edge row
 # ---------------------------------------------------------------------------
 
-@F_65
 def test_f65_source_current_is_read_on_the_row_side_the_engine_solved():
     """The restart rule solves the row AT a source jump with the source's
     left limit (the row is the left limit); res.i(source) read the
@@ -280,7 +266,6 @@ def test_f65_source_current_is_read_on_the_row_side_the_engine_solved():
 # F-2-2 / F-5-7: the boost's diode charge and duty from the result
 # ---------------------------------------------------------------------------
 
-@F_PWL_SAMPLES
 @pytest.mark.parametrize("R_load", (500.0, 20.0))
 def test_f22_pwl_summary_charge_is_the_load_charge(R_load):
     """D1's i_avg x T against the load's KCL charge C·Δv + ∫v/R (same
@@ -301,7 +286,6 @@ def test_f22_pwl_summary_charge_is_the_load_charge(R_load):
     assert s["D1"]["i_avg"] * (tw[-1] - tw[0]) == pytest.approx(q_load, rel=1e-6)
 
 
-@F_PWL_SAMPLES
 @pytest.mark.parametrize("V_th", (0.7, 0.0))
 def test_f57_pwl_duty_credits_the_part_of_a_step_before_a_commutation(V_th):
     """DCM boost, pwl T/100 with restart + split: D1 duty 0.21713 (V_th = 0)

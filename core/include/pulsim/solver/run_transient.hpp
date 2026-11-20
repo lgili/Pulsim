@@ -1512,6 +1512,13 @@ inline SimulationResult run_transient(
     // from the next step, which restarts): value_at(t - left_by), far
     // above the pwm_phase snap and far below a plateau. 0 = off.
     const bool restart_rule = opts.discontinuity_restart;
+    // Release group B: a rule run keeps event limits (a stored sample at a
+    // jump is its left limit; the dynamic path adds its restart lines)
+    if (restart_rule) {
+        result.has_event_limits = true;
+        result.event_limit_width = static_cast<Size>(x.size());
+        result.event_limit_switches = graph.num_switches();
+    }
     const Real left_by = restart_rule ? opts.dt * Real{1e-3} : Real{0};
     // b_extra_fn's declared jumps (restart rule only), memoised: the
     // answer for `bj_from` stays valid until t passes `bj_next`.
@@ -1747,11 +1754,6 @@ inline SimulationResult run_transient(
         topology::SwitchStateMask q_m1;
         bool q_be_kept = false;
         bool q_ok = true;
-        if (restart_rule) {
-            result.has_event_limits = true;
-            result.event_limit_width = static_cast<Size>(x.size());
-            result.event_limit_switches = graph.num_switches();
-        }
         // The step hooks, called in the shared phases (slice 3c,
         // DECISIONS 17): probes R1 (`StepHooks::step`, the step's start
         // state and mask), R2 (`on_event`, the stamps on each side of a

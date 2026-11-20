@@ -1419,9 +1419,17 @@ def _result_i(self, name: str, t=None, *, port=None):
             # a source jump with the pre-jump value): read a jump's left
             # side there too (release finding F-6-5). Rows 1..: row 0 is
             # the run's start.
-            left = _np.array([val(b_id, float(_np.nextafter(tt, -_np.inf)))
-                              for tt in tt_all[1:]], dtype=float)
-            jump = _np.abs(left - out[1:]) > 1e-9 * (_np.abs(left) + _np.abs(out[1:])) + 1e-300
+            # the engine's left read, value_at(t - dt*1e-3); a jump is where
+            # the left difference dwarfs the right one (a smooth waveform's
+            # two are alike)
+            lb = 1e-3 * _np.diff(tt_all)
+            left = _np.array([val(b_id, float(tt - d))
+                              for tt, d in zip(tt_all[1:], lb)], dtype=float)
+            right = _np.array([val(b_id, float(tt + d))
+                               for tt, d in zip(tt_all[1:], lb)], dtype=float)
+            dl = _np.abs(left - out[1:])
+            dr = _np.abs(right - out[1:])
+            jump = dl > 1e3 * dr + 1e-12 * (_np.abs(left) + _np.abs(out[1:]))
             out[1:] = _np.where(jump, left, out[1:])
         return _finalize(out)
     if kind == "vccs":
