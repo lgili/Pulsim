@@ -2177,6 +2177,23 @@ inline SimulationResult run_transient_trbdf2(
         } catch (const std::runtime_error&) {
             return false;
         }
+        // The linear entries too: a source switched onto a zero start (24 V
+        // into a gated buck) leaves their slots inconsistent, and a TR-BDF2
+        // first step was rejected down to 4e-13 s.
+        history.snapshot_into(hist_rec0);
+        history.refresh_derivatives(x_trial, last_probe_dt);
+        history.snapshot_into(hist_rec);
+        history.restore(hist_rec0);
+        for (Size i = 0; i < hist_rec.size(); ++i) {
+            const auto& a = hist_rec0[i];
+            const auto& b = hist_rec[i];
+            const bool cap = a.kind == pwl::DevicePool::StoredKind::Capacitor;
+            const Real d = cap ? (b.i_prev - a.i_prev) : (b.v_prev - a.v_prev);
+            const Real y = cap ? a.v_prev : a.i_prev;
+            if (!(std::abs(d) * h / a.C_or_L <= opts.atol + opts.rtol * std::abs(y))) {
+                return false;
+            }
+        }
         pwl::StatefulHistories::Snapshot snap;
         hs.snapshot_into(snap);
         hs.refresh_derivatives(x_trial, last_probe_dt);
