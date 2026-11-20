@@ -44,14 +44,13 @@ RUNS = {
 # first step lags by V*dt/(2*tau), and that offset decays with tau, so the
 # window average is off by ~1.3e-3 V at dt = 1e-6 (bound V*dt/tau = 1e-2).
 # pwl / trbdf2 run through the kernel Simulation object, whose step hooks
-# feed the recorders while the engine runs; the exact engine runs this
-# diode-free RC on integrator 'auto', which has no step hooks: stored arrays.
-FEEDING = {"pwl": "in-loop", "trbdf2": "in-loop", "exact": "stored-arrays"}
-# a circuit with diodes routes the exact engine to its event-driven
-# integrator, which feeds the recorders in the loop too (session 26); the
-# diode-free RC above runs on 'auto' (no step hooks: the stored arrays)
+# feed the recorders while the engine runs; the exact engine feeds them from
+# its exact steps on every route that has them (the diode-free RC runs on
+# integrator 'auto': in the loop too, its windows in closed form).
+FEEDING = {"pwl": "in-loop", "trbdf2": "in-loop", "exact": "in-loop"}
 FEEDING_DIODES = dict(FEEDING, exact="in-loop")
-RC_BOUND = {"pwl": V * 1e-6 / TAU, "trbdf2": 2e-5 * V, "exact": 2e-5 * V}
+# exact: the closed form's rounding (was 2e-5 V on the stored arrays' trapezoid)
+RC_BOUND = {"pwl": V * 1e-6 / TAU, "trbdf2": 2e-5 * V, "exact": 1e-12 * V}
 
 
 @pytest.mark.parametrize("eng", sorted(RUNS))
@@ -70,12 +69,15 @@ def test_rc_charge_window_clipped_mid_step(eng):
     assert abs(wi["avg"][0] - (V - avg) / R) <= bound / R
     print(f"RC {eng}: avg err {w['avg'][0] - avg:+.3e} V, "
           f"rms err {w['rms'][0] - rms:+.3e} V")
-    # pulsim.time_average / time_rms on the same samples: round-off
     t, v = np.asarray(res.times), np.asarray(res.v("out"))
-    assert w["avg"][0] == pytest.approx(p.time_average(t, v, A, B), rel=1e-9)  # kernel vs numpy: two summation paths
-    assert w["rms"][0] == pytest.approx(p.time_rms(t, v, A, B), rel=1e-9)  # kernel vs numpy: two summation paths
     # monotone charge: min at the clipped start, max at the clipped end
     assert w["t_min"][0] == A and w["t_max"][0] == B
+    if eng == "exact":   # the flow's own value there (closed form), not the chord
+        assert w["min"][0] == pytest.approx(V * (1 - math.exp(-A / TAU)), rel=1e-12)
+        return
+    # pulsim.time_average / time_rms on the same samples: round-off
+    assert w["avg"][0] == pytest.approx(p.time_average(t, v, A, B), rel=1e-9)  # kernel vs numpy: two summation paths
+    assert w["rms"][0] == pytest.approx(p.time_rms(t, v, A, B), rel=1e-9)  # kernel vs numpy: two summation paths
     assert w["min"][0] == pytest.approx(np.interp(A, t, v), rel=1e-9)  # kernel vs numpy: two summation paths
 
 

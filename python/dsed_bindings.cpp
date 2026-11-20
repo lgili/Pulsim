@@ -1807,7 +1807,8 @@ void init_module(py::module_& m) {
            Real stiffness_threshold,
            std::size_t store_every,
            bool event_log,
-           const pulsim::solver::SolverSnapshot* resume) {
+           const pulsim::solver::SolverSnapshot* resume,
+           py::object loop_feed) {
             // no loss tracking here: an adapter built with loss_port refuses by name
             pulsim::refuse_device_losses(adapter.pool(), "dsed");
             PySwitchFnSSM sf(std::move(switch_fn_obj));
@@ -1853,10 +1854,37 @@ void init_module(py::module_& m) {
                 for (pulsim::Size i = 0; i < n_sw; ++i) m.set(i, resume->stamped_mask[i]);
                 rs->mask = m;
             }
+            // the recorders in the loop, closed form per exact step (as on
+            // run_ped_native_builder; the hooks only observe)
+            pulsim::events::StepHooks hooks;
+            std::optional<pulsim::dsed::ExactFeedAdapter<NativeAdapter>> feed_ad;
+            std::optional<pulsim::dsed::ExactSegmentSource<NativeAdapter>> seg_src;
+            struct SegGuard {
+                pulsim::record::LoopFeed* f = nullptr;
+                ~SegGuard() { if (f != nullptr) f->set_segment_source(nullptr); }
+            } seg_guard;
+            if (!loop_feed.is_none()) {
+                auto& f = loop_feed.cast<pulsim::record::LoopFeed&>();
+                f.set_circuit(adapter.graph(), adapter.pool());
+                feed_ad.emplace(adapter, f.hooks(), rs ? rs->t : Real{0});
+                feed_ad->attach(hooks);
+                sim.set_hooks(&hooks);
+                seg_src.emplace(adapter, f);
+                f.set_segment_source(&*seg_src);
+                seg_guard.f = &f;
+                feed_ad->set_segment(&*seg_src);
+            }
             py::gil_scoped_release release;
             auto res = sim.simulate(x0, t_end, rs ? &*rs : nullptr);
             py::gil_scoped_acquire acquire;
             auto d = ped_result_auto_to_dict(res, event_log);
+            if (seg_src) {
+                py::dict cf;
+                cf["n_closed"] = seg_src->n_closed();
+                cf["n_line"] = seg_src->n_line();
+                cf["why"] = seg_src->why();
+                d["recorder_closed_form"] = cf;
+            }
             {   // the end instant as a snapshot (field 14 kind Exact, AutoResumeState)
                 const auto& f = sim.final_state();
                 pulsim::solver::SolverSnapshot snap;
@@ -1891,6 +1919,7 @@ void init_module(py::module_& m) {
         py::arg("store_every")          = std::size_t{1},
         py::arg("event_log") = true,
         py::arg("resume") = static_cast<const pulsim::solver::SolverSnapshot*>(nullptr),
+        py::arg("loop_feed") = py::none(),
         "Bridge.11 — native PEDSimulatorAuto over a "
         "NativeCircuitBuilderAdapter (per-mode RK45↔BDF2 dispatch).");
 

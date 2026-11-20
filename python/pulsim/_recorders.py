@@ -791,6 +791,17 @@ def simulate_with_recorders(simulate: Callable[..., Any], kw: dict,
         raise unsupported(e.engine, e.feature, f"{e}; this run was not fed in "
                           f"the loop: {why}", device=e.device, kind=e.kind) from None
     res.recorder_feed = {"mode": "stored-arrays", "why": why}
+    stats = [r.name for r in recs if r.windows or r.period]
+    if getattr(res, "engine_used", None) == "dsed" and stats:
+        # the exact engine's statistics are closed forms in the loop; here they
+        # are the trapezoid of its stored samples: never silently
+        import warnings
+        warnings.warn(
+            f"simulate(engine='exact', recorders={stats!r}): the recorders were not "
+            f"fed in the loop ({why}), so their window and period statistics are "
+            "the trapezoid of the stored samples, O(h^2) "
+            "(res.recorder_feed['mode'] == 'stored-arrays'). Pass dt for a finer line.",
+            RuntimeWarning, stacklevel=3)
     if plan.resume is not None:
         res.recorder_feed["resume"] = (
             f"started at the resume instant t = {float(plan.resume.t)!r}: the "

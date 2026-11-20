@@ -1154,7 +1154,10 @@ def run_dsed_from_builder(
                     native_adapter, sf, x0, t_window,
                     h_fixed=opts.h_bdf2,
                     store_every=opts.store_every, event_log=False)
-            else:  # 'auto'
+            else:  # 'auto': the same in-loop feed (its hooks only observe)
+                from . import _recorders as _rec
+                feed_slot = _rec.ExactFeedSlot(builder)
+                _rec.attach_loop_feed(feed_slot, "dsed")
                 native_res = run_auto_b11(
                     native_adapter, sf, x0,
                     float(t_end) if resume_from is not None else t_window,
@@ -1163,7 +1166,10 @@ def run_dsed_from_builder(
                     h_bdf2=opts.h_bdf2,
                     stiffness_threshold=opts.stiffness_threshold,
                     store_every=opts.store_every, event_log=False,
+                    loop_feed=feed_slot.feed,
                     **({"resume": resume_from} if resume_from is not None else {}))
+                if "recorder_closed_form" in native_res:
+                    _rec.exact_closed_form(native_res["recorder_closed_form"])
             res = _result_from_native(
                 native_res, 0.0 if resume_from is not None else opts.t_start)
             if "final_snapshot" in native_res and (
