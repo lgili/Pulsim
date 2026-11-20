@@ -1921,6 +1921,11 @@ inline SimulationResult run_transient(
             };
             const Size ne = ents.size();
             const Real h = h_s / kGamma;
+            // shortcut: the rate before the event (r0) also masks a real cut
+            // smaller than h·|ẋ(0−)| (1 µH at 100 V, dt 0.1 µs: an 8 A cut
+            // passes and returns as −8.38 A); dropping r0 at grid events
+            // flags the DCM buck's output C (36 µV, 3e-14 J). Needs a
+            // jump/kink test that does not read the old rate's magnitude.
             ip_d.resize(2 * ne);
             Real v_max = 0;   // node voltages after the event
             for (Index n = 0; n < graph.num_nodes(); ++n) {
@@ -1996,7 +2001,8 @@ inline SimulationResult run_transient(
                            stamping::read_node_voltage(y, e.to);
                 };
                 const Real c0 = models::NonlinearCapacitor::capacitance(e.params, e.v_prev);
-                refuse_jump(e.branch_id, e.v_prev, c0 > Real{0} ? e.i_prev / c0 : Real{0},
+                refuse_jump(e.branch_id, e.v_prev,
+                            c0 > Real{0} ? e.i_prev / c0 : Real{0},
                             v(ip_x1), v(x), v(ip_x2),
                             "nonlinear_capacitor", "V");
             }
@@ -2133,6 +2139,16 @@ inline SimulationResult run_transient(
                     return cross_scratch[j] <= b &&
                            decided_bits[j] != diodes_snap[j];
                 };
+                // A flipped diode between two floating islands joins them
+                // (an isolated bridge: D1 on the transformer side, D4 on the
+                // output side conduct together).
+                for (Size j = 0; j < ents.size(); ++j) {
+                    if (!flips(j)) continue;
+                    const Index g = find(-1);
+                    const Index rf = find(ents[j].from);
+                    const Index rt = find(ents[j].to);
+                    if (rf != g && rt != g) island[rf] = rt;
+                }
                 bool grouped = false;
                 for (Size j = 0; j < ents.size(); ++j) {
                     const Index r = flips(j) ? island_of(j) : kInvalidIndex;

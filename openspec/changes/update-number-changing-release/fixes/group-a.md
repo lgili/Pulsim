@@ -64,10 +64,64 @@
 >   bridge_trbdf2 0.9983 / 1.0008 (within 0.5 %, at the edge for buck_pwl; an earlier build of the same
 >   default path measured 1.0006: layout noise); rule on: buck 1.0553 / 1.0544, vsi 1.0207 / 1.0210.
 >   One full pytest on aa5d99f0: 6100 passed, 110 skipped, 9 xfailed; ruff clean; stubs up to date.
->   NOT yet on this tip: reference_status (last run before the two readings: no case worse, flyback 0.110 -> 2.3e-6
->   and forward 0.092 -> 2.6e-6 disagree -> agree), the reviewer.
-> - **F-3-7** still open: with this rule the saturable PSFB aborts at t = 44.95 us (Newton ||dx|| 803 V at
->   rect_neg, residual 9e-7); restart-less 6.911 V, linear primary 6.890 V.
+>   On the next tip (B1 + A1 xfail + F-3-7 parked; extension built with the env-gated trace, removed
+>   before commit — the committed header is that build minus inert prints): 41 restart/split test files
+>   1129 passed, 3 skipped, 7 xfailed; byte compares exactly as above (pwl_identity the same 32 entries,
+>   trbdf2 371/371); reference_status identical cell for cell to aa5d99f0's run (666 cells; pwl+restart
+>   115/20/1, pwl+split 118/17/1, the same as the run before the two readings; flyback 0.110 -> 2.3e-6
+>   and forward 0.092 -> 2.6e-6 still agree, no cell worse).
+>   NOT run: full ctest; the full pytest on the final tip (it ran on aa5d99f0).
+> - **Group B field for the event's peak voltage (step 5; their branch NOT merged).** On
+>   `fix/core-release-b-event-samples` (36836230) the result carries `right_limit_index` /
+>   `right_limit_states` (filled in `record_lines` from `lines.x_start` when `lines.start`) and
+>   `inner_event_times` / `inner_event_right` (split-interior events). The impulse's spike lives in the
+>   algebraic rows of x0+ = `event_rl_x` (F-5-1: v_sw −6.8e8 V; the cut current's L·di/dt), and nowhere
+>   else in the samples. Carry it as: an impulse at a grid step start (`event_rl_t == t_prev_step`):
+>   `lines.x_start = event_rl_x`, i.e. the `right_limit_states` row whose `right_limit_index` is that
+>   step's start sample; an impulse inside a split (`event_rl_t` == `inner_event_times[j]`):
+>   `inner_event_right[j]`. Then `_check_right_limit_voltage` (already scanning those rows on the exact
+>   engine) must also run on the fixed engine's finalize path to report it. Nothing is read by group A
+>   from those fields; `event_rl_t` / `event_rl_x` stay as the hand-off locals.
+> - **Reviewer (opus, fresh context, read-only) on a324a2db.** Reproduced by its scripts (scratchpad p1..p5):
+>   - **A1 (high) OPEN, strict xfail `test_a_cut_smaller_than_h_times_the_old_rate_is_an_impulse`.** The
+>     bound's old-mode rate h·|v_L(0−)/L| = 10 A masks an 8 A cut (1 µH at 100 V, dt 0.1 µs, S opens with
+>     its body diode reverse biased): no record, i_L 8 -> −8.38 A (truth 0, pwl dt 1e-10). Tried: drop the
+>     old rate when the event is AT the step start (gate mask / unknown start / snapped source jump,
+>     t_from == t_prev). A1 then passes (one record ½·L·8² J, i_L -> <1e-3 A), but the DCM buck's 47 uF
+>     output C is flagged at its gate edges (36 µV, 3e-14 J, cause ''), and reference_status moves on 31
+>     cells, status unchanged, errors up to +48 % (buck_dcm 3.4e-6 -> 5.0e-6, cascaded_boost_buck,
+>     two_phase_interleaved_boost, sync_buck_500khz, long_run_drift_buck, stiff_rc_high_freq_switching).
+>     Reverted. Needs a jump-vs-kink test that does not read the old rate's magnitude (the stage-1
+>     increment is not it: at an extremum |x1 − x0| = |d| too).
+>   - **A2 (high per reviewer) OPEN, by design.** A snubber Rs 1 Ω + Cs 1 nF (τ = 1 ns) at dt 100 ns:
+>     τ < γ²h, so Cs is an impulse by the rule (record 4.37 µJ, cause '', kind 'capacitor_loop' though Rs
+>     is in series). The waveform is right; `on_impulse='error'` would refuse it. The rule is dt-scaled by
+>     construction; `cause`/`kind` naming for a series-R loop is not done.
+>   - **A3 (medium) OPEN.** A source edge in (t1, t2] leaves only the frozen reading; a rectifier from rest
+>     plus an unrelated 1 V pulse with its edge at 0.4·dt gives a 0.96 mJ record at t = 0 (waveform matches
+>     the fine run to 1e-4 V). Needs the moved reading at the edge's left limit.
+>   - **B1 (medium) FIXED.** A flipped diode bridging two floating islands now joins them (the isolated
+>     bridge's D1 on the transformer side and D4 on the output side). Not reproduced numerically (1-ulp
+>     sensitivity 1.1e-10..1.8e-10 V before); F-3-1 and the split tests pass.
+>   - **B2 (low) OPEN.** Current sources / VCCS outputs / OFF conductance switches count as galvanic
+>     paths in the island union (an island grounded only through them is not "floating").
+>   - Also from the reviewer: every dt-retry sub-step under the rule runs the probe (1–2 extra solves);
+>     `event_rl_t`/`event_rl_x` are written but read by nothing (hand-off for group B, above).
+> - **F-3-7 traced, PARKED for group C (mode selection; branch fix/core-release-c-mode-selection).**
+>   Truth: restart-less 6.911 V, linear primary under the rule 6.890 V. Per-iteration trace (temporary
+>   env-gated prints in `run_event_iteration` and the Newton loop, removed): the abort is restart STAGE 1
+>   (BE of γh) at the HS_A turn-off t = 44.90 µs, solved under the step-start diode mask
+>   `0010|0010|1001` (switches HS_A..LS_B | D_HS_A..D_LS_B | D1..D4): D_LS_A still OFF, so the saturable
+>   L_leak's current is cut into g_off. Newton iteration 0 drives mid_a to −1.26e4 V; the primary then
+>   converges (residual 1e-9), but the rect_neg/vout iterate bounces 0.2–3.3 V at residual 8e-10..2.9e-9
+>   for all 50 iterations (round-off at |x| = 1.26e4, roundoff acceptance declined). The event
+>   iteration never reaches its first re-decision (`it=0` on every attempt), so D_LS_A is never asked to
+>   turn on. Each dt halving doubles |x| (2.5e4 ... 8.1e5 V at dt/64) and the bounce (803 V at the end).
+>   The linear primary passes because its stage is a direct LU solve, after which the event iteration
+>   flips D_LS_A. Cause: the mode a gate edge is first solved in (the step-start diode bits, an
+>   inconsistent mode that cuts an inductor) — mode selection, not the impulse rule. What it needs: the
+>   edge's mode decided before the Newton solve (D_LS_A ON at the HS_A turn-off), e.g. the LCP/settle
+>   decision at the gate edge applied to the Newton path too. The strict xfail stays.
 
 > **Second session — results (2026-11-19) [M]** (measured on 43c76065 + review fixes, energy ratio 0.25; the byte-compare, pwl_identity and reference_status numbers below are from that build, NOT from the tip):
 > - **F-5-1 FIXED.** Restart: i_L 100 -> -141.42135 A before; after 100 -> -3.8e-5 A (max |i_L[1:]| 3.3e-4 A),

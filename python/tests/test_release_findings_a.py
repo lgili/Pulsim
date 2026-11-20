@@ -179,13 +179,12 @@ def _psfb_vout(primary, **kw):
 
 
 @pytest.mark.xfail(strict=True, reason=(
-    "release finding F-3-7: traced - NOT the stage-2 pseudo-state: the restart step at "
-    "t = 21.5 us (a gate edge, rectifier bits 00001001) failed in STAGE 1's Newton solve at "
-    "every halving down to dt/64 (||dx|| 1.1e4 V at vout). The consistent start (x0+ before "
-    "the stages) moves the failure to t = 31.55 us (||dx|| 60 V at rect_neg, residual 6e-6; hypothesis, untraced: "
-    "Newton cycles with the rectifier's diode bits re-decided per iteration); restart-less "
-    "6.911 V, linear primary 6.890 V. Needs the in-Newton diode re-decision traced per "
-    "iteration (which bit flips, the residual) and fixed for the backward-Euler stage"))
+    "release finding F-3-7: traced, parked for group C (mode selection). Restart stage 1 at "
+    "the HS_A turn-off (44.90 us) is solved in the step-start diode mask (D_LS_A OFF): the "
+    "saturable L_leak is cut into g_off, Newton it 0 puts mid_a at -1.26e4 V, then rect_neg/vout "
+    "bounce 0.2-3.3 V at residual ~1e-9 for 50 iterations (round-off at that scale); the event "
+    "iteration never re-decides (it=0), each halving doubles |x| (803 V bounce at dt/64). "
+    "Restart-less 6.911 V, linear primary 6.890 V"))
 def test_f37_saturable_psfb_runs_under_the_restart_rule():
     """Below its knee the saturable primary is the linear one: the restart rule must run it
     and land with the linear primary (restart-less: 6.913 V vs 6.857 V linear)."""
@@ -305,6 +304,41 @@ def test_a_nonlinear_capacitor_shorted_by_its_switch_is_refused_by_name():
         _switched_junction(1.2e-5, **RESTART)
     assert ei.value.device == "Cj" and ei.value.feature == "impulse"
     _switched_junction(1.2e-5, engine="pwl")
+
+
+def _cut_smaller_than_the_old_rate(i0):
+    """1 uH charged at 100 V from i0 until S opens at 0.1 us; the body diode Db (a -> vin) is
+    reverse biased by the cut, so no path is left: the truth is i_L -> 0."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "vin", "gnd", 100.0)
+    b.add_switch("S", "vin", "a", 1e3, 1e-9)
+    b.add_diode("Db", "a", "vin", 1e3, 1e-9)
+    b.add_inductor("L", "a", "gnd", 1e-6, i0=i0)
+    n, k = b.graph.num_switches, b.switch_index_of("S")
+
+    def fn(t):
+        m = p.SwitchStateMask(n)
+        m.set(k, t < 1e-7 - 1e-15)
+        return m
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return p.simulate(b, t_end=1e-6, dt=1e-7, switch_fn=fn, **RESTART)
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "reviewer A1 (third session): the impulse bound h*max(|xdot(0-)|, ...) reads the OLD mode's "
+    "rate, h*V/L = 10 A here, so the 8 A cut passes as a kink: no record, i_L 8 -> -8.38 A "
+    "through Db (truth 0). Dropping the old rate at grid events fixes it but flags the DCM "
+    "buck's 47 uF output C (36 uV, 3e-14 J records; buck_dcm error 3.4e-6 -> 5.0e-6). Needs a "
+    "jump/kink test that does not read the old rate's magnitude"))
+def test_a_cut_smaller_than_h_times_the_old_rate_is_an_impulse():
+    """At an event AT the step start the old mode's rate h*V/L = 10 A must not mask the cut:
+    the 8 A cut came back as -8.38 A through Db with no record (reviewer, third session)."""
+    r = _cut_smaller_than_the_old_rate(-2.0)
+    i = np.asarray(r.i("L"))
+    assert len(r.reinit_records) == 1 and list(r.reinit_records[0].states) == ["L"]
+    assert abs(r.reinit_records[0].dW - 0.5 * 1e-6 * 8.0**2) < 1e-3 * 0.5 * 1e-6 * 64
+    assert np.max(np.abs(i[2:])) < 1e-3
 
 
 def _two_rectifiers(which, dt=1e-4):
