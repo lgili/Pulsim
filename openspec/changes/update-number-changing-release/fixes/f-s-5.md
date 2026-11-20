@@ -141,3 +141,28 @@ limit cycle whose last ||dx|| (5.4e-6, 5.2e-7, 3.1e-7) contract by chance. Next
 step: a stagnation test over the cycle (e.g. a longer window) in
 `pwl/nonlinear_solve.hpp`, a change to add-newton-roundoff-acceptance DECISIONS 8/10b
 (maintainer criterion), so not made here.
+
+## Fresh-context review (ef0ff76d) and state
+
+Reviewer (scripts in `.scratch/review/`), sweeping t_end 1.1–4.0 us by 0.1 at the
+defaults: trbdf2 aborts at 9 of 30 lengths (1.3, 2.7, 2.8, 3.2–3.5, 3.8, 4.0 us),
+esdirk43 at 1 (3.3 us); be5454f3 13/30 and 0/30; b9e46778 0/30. At 2.2 us also
+trbdf2 rtol 1e-7 / 1e-10 and esdirk43 rtol 1e-9 / 1e-10 abort. Every abort is the
+same signature as "Remaining": Newton at h_min, row backward error 0.23–2.2 eps
+(under 8 eps), roundoff acceptance declined "still contracting" or "growing". So
+the companion floor eps·|Q|/(γh) vs absolute 1e-9 A, with the acceptance's
+two-step stagnation window, is the main open cause at the defaults, not a 1e-8
+corner. Also: a saturable inductor (1 mH, I_sat 5 A) + 1 mH cut-set opened by a
+conductance switch at 200 us aborts on esdirk43 at every rtol (from cedac36b, not
+this diff) and trbdf2 at rtol 1e-8 / 1e-10 (unattributed between cedac36b and the
+flag); a ramp source across a capacitor reports the wrong-sign current sample at
+the 100 ns corner on every build (slot 2·i+ − i−; esdirk43 source energy −2e-3).
+Law (b): exact to 4.5e-16 vs mpmath on every branch, AD path included.
+
+NEXT STEP: make the roundoff acceptance recognise a roundoff limit cycle (a window
+covering the cycle, or the best iterate of the tail at omega <= 8 eps and dx within
+the cap), which changes add-newton-roundoff-acceptance DECISIONS 8/10b, keep the
+DC cascade excluded (absolute dx), then rerun the reviewer's t_end sweep
+(`.scratch/review/q3_caseA3.py`) and remove the strict xfail. Second: commit the
+probe's right-limit current to the slot instead of 2·i+ − i− (cause of (a) and of
+the corner sample), which would make the TR-BDF2-only flag unnecessary.
