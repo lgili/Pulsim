@@ -2289,7 +2289,7 @@ def _resolve_mode_auto(builder, engine, max_event_iterations,
     the exact engine takes 'lcp' when the circuit has a PWL diode (its
     capability table refuses Newton devices before the run) and the settle
     with sensitivities= (the sensitivity run differentiates the settle)."""
-    from . import _pulsim as _k  # type: ignore[import-not-found]
+    _k = _pulsim_module  # (not an import: simulate() pays on every call)
     if engine == "dsed":
         if sensitivities is not None:
             return _mode_auto_record(None, "sensitivities")
@@ -2304,7 +2304,8 @@ def _resolve_mode_auto(builder, engine, max_event_iterations,
             None, f"{reason} ({device})" if device else reason)
     if max_event_iterations is not None and int(max_event_iterations) == 0:
         return _mode_auto_record(None, "max_event_iterations=0", warn=True)
-    return _mode_auto_record("lcp", None)
+    # _mode_auto_record("lcp", None), inline (pwl's common case, every call)
+    return "lcp", {"requested": "auto", "chosen": "lcp", "reason": None}
 
 
 def simulate(
@@ -3037,6 +3038,28 @@ def _compose_for(engine, _plan, *, t_start, t_end, dt, sensitivities,
             _b_extra_fn_user, _closed_loops_user)
 
 
+def _dsed_refused(builder, _opt_values, device_path, enable_nonlinear_refresh,
+                  max_newton_iterations, max_event_iterations, tol_newton_dx,
+                  tol_newton_res, enable_newton_line_search, enable_newton_lm,
+                  newton_roundoff_budget, should_continue):
+    """The keywords (and C blocks) the exact engine cannot honour, by the
+    option x engine table: `_route` asks it for engine 'dsed' and for the
+    'auto' rule without dt (a function, not a closure in `_route`: the
+    closure's cells cost every route, the exact one or not)."""
+    return _ro.refused("dsed", {
+        **_opt_values, "c_blocks": bool(_c_blocks_of(builder)),
+        "device_path": device_path,
+        "enable_nonlinear_refresh": enable_nonlinear_refresh,
+        "max_newton_iterations": max_newton_iterations,
+        "max_event_iterations": max_event_iterations,
+        "tol_newton_dx": tol_newton_dx,
+        "tol_newton_res": tol_newton_res,
+        "enable_newton_line_search": enable_newton_line_search,
+        "enable_newton_lm": enable_newton_lm,
+        "newton_roundoff_budget": newton_roundoff_budget,
+        "should_continue": should_continue})
+
+
 def _route(
     engine, builder, _dsed, _plan, _opt_values, dt, t_start, resume_from,
     step_observer, closed_loops, controller_period, live_stream, progress,
@@ -3059,20 +3082,6 @@ def _route(
     fixed step), the mode-selection 'auto' rule, and the refusals of the
     engine landed on. Returns ``(engine, route_reasons, mode_selection,
     mode_auto)``."""
-    def _dsed_refused():
-        return _ro.refused("dsed", {
-            **_opt_values, "c_blocks": bool(_c_blocks_of(builder)),
-            "device_path": device_path,
-            "enable_nonlinear_refresh": enable_nonlinear_refresh,
-            "max_newton_iterations": max_newton_iterations,
-            "max_event_iterations": max_event_iterations,
-            "tol_newton_dx": tol_newton_dx,
-            "tol_newton_res": tol_newton_res,
-            "enable_newton_line_search": enable_newton_line_search,
-            "enable_newton_lm": enable_newton_lm,
-            "newton_roundoff_budget": newton_roundoff_budget,
-            "should_continue": should_continue})
-
     _auto_exact = []
     if engine == "auto" and (dt is None or dt <= 0) and not _AUTO_EXACT_OFF.get():
         # update-number-changing-release (add-exact-propagator-strategy D11,
@@ -3086,7 +3095,11 @@ def _route(
             _pulsim_module._require_supported(builder.graph, builder.pool, "exact")
             # a user b_extra_fn: the exact engine refuses it by name at the
             # run, and simulate() falls back to trbdf2
-            _exact_ok = not _dsed_refused()
+            _exact_ok = not _dsed_refused(
+                builder, _opt_values, device_path, enable_nonlinear_refresh,
+                max_newton_iterations, max_event_iterations, tol_newton_dx,
+                tol_newton_res, enable_newton_line_search, enable_newton_lm,
+                newton_roundoff_budget, should_continue)
         except UnsupportedError:
             _exact_ok = False
         if _exact_ok:
@@ -3105,7 +3118,12 @@ def _route(
         # circuit through b_extra, which this engine does not consume).
         # Controllers (closed_loops, controller_period, a periodic
         # step_observer, control_tick) tick on its event queue: rows.
-        _offending = _dsed_refused()
+        # ('auto' landed here only with none: not asked twice)
+        _offending = [] if _auto_exact else _dsed_refused(
+            builder, _opt_values, device_path, enable_nonlinear_refresh,
+            max_newton_iterations, max_event_iterations, tol_newton_dx,
+            tol_newton_res, enable_newton_line_search, enable_newton_lm,
+            newton_roundoff_budget, should_continue)
         if _offending:
             raise _unsupported(
                 "dsed", _offending[0],
@@ -3722,7 +3740,11 @@ def _plan_run(
     if device_path is None:
         device_path = "legacy" if engine == "dsed" else _planning.DEFAULT_DEVICE_PATH
     _device_path = getattr(DevicePath, device_path.capitalize())
-    if _planning.UNIFORM_ENGINE_RULES:   # the release's uniform rules (DECISIONS 26)
+    # the release's uniform rules (DECISIONS 26); they read only these four
+    # (a call that sets none of them pays no call: simulate()'s overhead)
+    _uniform = _planning.UNIFORM_ENGINE_RULES
+    if _uniform and (store_every is not None or max_event_iterations is not None
+                     or max_dt_halvings is not None or on_impulse != "record"):
         _uniform_checks(engine, store_every, max_event_iterations,
                         max_dt_halvings, on_impulse, integrator)
     if engine == "pwl":
@@ -3891,15 +3913,18 @@ def _plan_run(
             max_dt_halvings = 0
         # Construct options: the kernel resolves them from one RunOptions
         # (sim::to_simulation_options; every default in sim::Defaults).
-        if store_every is not None and int(store_every) < 1:
+        # (under the uniform rules `_uniform_checks` made these, above)
+        if _uniform:
+            pass
+        elif store_every is not None and int(store_every) < 1:
             raise _options_error("store_every",
                 f"simulate(store_every={store_every}): must be >= 1 "
                 "(1 records every step)")
-        if max_event_iterations is not None and int(max_event_iterations) < 0:
+        elif max_event_iterations is not None and int(max_event_iterations) < 0:
             raise _options_error("max_event_iterations",
                 f"simulate(max_event_iterations={max_event_iterations}"
                 "): must be >= 0 (0 disables event iteration)")
-        if max_dt_halvings is not None and int(max_dt_halvings) < 0:
+        elif max_dt_halvings is not None and int(max_dt_halvings) < 0:
             raise _options_error("max_dt_halvings",
                 f"simulate(max_dt_halvings={max_dt_halvings}): must "
                 "be >= 0 (0 disables the retry)")
