@@ -121,3 +121,27 @@ covers the linear entries only), so the first ps is unresolved (max error
 1.19e-3 V on both integrators, overshoot to −0.01069 V at 3 ps).
 F-S-1's strict xfail on `feat/core-soft-switching-validation` turns XPASS
 when that branch meets this one: remove the mark at the merge.
+
+## Moved cases — first pass (tip 8508df9b), and why a third commit followed
+
+`trbdf2_identity` (goldens + reference × modes '', lcp, shadow + extra) on
+85637327 vs 8508df9b: 367/371 identical; `pwl_identity` 390/390 identical.
+Moved: `stateful rectifier atan`, `stateful rectifier gapped`,
+`example boost_saturable_inductor.yaml`, `example hysteretic_inductor_demo.yaml`.
+Error at each engine's OWN samples against a dense truth interpolated there
+(relative to the component's max; `.scratch/d2_pts.py`):
+
+| case, component | truth | old rms | 8508df9b rms |
+|---|---|---|---|
+| boost_saturable_inductor v_out | esdirk43 rtol 1e-10 | 1.220e-4 | 1.798e-4 (AWAY) |
+| boost_saturable_inductor i_L | same | 1.554e-5 | 5.335e-5 (AWAY) |
+| rect_atan v_o / i_L | trbdf2 rtol 1e-10 | 4.671e-6 / 5.234e-6 | 4.695e-6 / 5.262e-6 |
+| rect_gapped v_o / i_L | same | 1.069e-4 / 2.929e-4 | 1.066e-4 / 2.926e-4 |
+| hysteretic demo (all states) | pwl dt 1e-9 | 1.293e-4 | 1.292e-4 |
+
+The boost moved away: an SDIRK restart step had no q-row estimate (the rows
+were skipped on `sdirk`), so the step after each landing was uncontrolled
+on the saturable inductor's flux — its only state. Third commit: the q rows
+take the entries' embedded first-order estimate on an SDIRK step,
+(1−gs)/gs·(d_g/gs − d_1) with d = q(X) − q_n (`trbdf2_increments`), also at
+the run's first step (it reads no slot). Re-measured below.

@@ -3042,15 +3042,18 @@ inline SimulationResult run_transient_trbdf2(
             // integrator's own estimate of q, scale atol·s + rtol·max(|q_n|,
             // |q_1|) with s the device's capacitance / inductance / time
             // constant (`q_scales`), so a row that stays 0 keeps a finite
-            // scale. Not on an SDIRK restart step (its stages are not the
-            // method the estimate is for; the entries use their own there).
-            if (q_rows && q_live && !sdirk) {
+            // scale. On an SDIRK restart step the rows take the entries'
+            // embedded first-order estimate h(1-gs)(k1 - k2) on q (without
+            // it a restart left a saturable inductor's flux uncontrolled: the
+            // boost example's i_L error 3.4x). That step reads no derivative
+            // slot, so its estimate also holds at the run's first step.
+            if (q_rows && (q_live || sdirk)) {
                 const Size nq = hs.stage_rows();
                 if (q_atol.size() != nq) {
                     q_atol.resize(nq);
                     hs.q_scales(q_atol.data());
                 }
-                if (!kE) {
+                if (!kE || sdirk) {
                     q_n.resize(nq);
                     q_fn.resize(nq);
                     q_dg.resize(nq);
@@ -3061,7 +3064,12 @@ inline SimulationResult run_transient_trbdf2(
                 for (Size r = 0; r < nq; ++r) {
                     if (q_atol[r] < Real{0}) continue;   // an external row with no q entry
                     Real ee, q0, q1;
-                    if constexpr (kE) {
+                    if (sdirk) {
+                        // k1 = d_g/(gs h), k2 = (d_1 - r d_g)/(gs h), r = (1-gs)/gs
+                        ee = (Real{1} - gs) / gs * (q_dg[r] / gs - q_d1[r]);
+                        q0 = q_n[r];
+                        q1 = q0 + q_d1[r];
+                    } else if constexpr (kE) {
                         using E = step::Esdirk43;
                         ee = E::err_explicit_weight() * ed_shd0[r];
                         for (int j = 0; j < E::n_stages; ++j) {
