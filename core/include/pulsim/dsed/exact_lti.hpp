@@ -95,6 +95,9 @@ struct ExactLTI {
     mutable std::vector<Eigen::Index> chord_order;
     mutable Vector chord_s;
     mutable Real chord_rho = Real{0};   // max |λ_k|
+    // The rows the rule bounds, in modal form: P = O·V for an output map O
+    // (the adapter: [I; R] — the state and its recovered vector); empty: P = V.
+    mutable DenseMatrix chord_P_re, chord_P_im;
     // The event scan's certificate (PEDSimulator::locate_event_exact_): per armed
     // predicate (index), its modal row q_k = c·V_k, built on first use (empty: not yet).
     mutable std::vector<Eigen::VectorXcd> scan_q;
@@ -106,6 +109,7 @@ struct ExactLTI {
 struct ChordWork {
     Vector xa, ta, c0, c1, v, s;            // the adapter's augmented state / sources
     Vector cr, ci, a;                       // V⁻¹c (re, im); |z̈_k| (decaying / zero modes)
+    Vector ty;                              // tolerance of each recovered row (empty: none)
     Vector gB, gC, gD;                      // the growing modes' terms at one probe
     Vector eb;                              // the bound at one probe
     std::vector<Eigen::Index> grow;         // modes with Re λ > 0
@@ -835,9 +839,14 @@ inline constexpr Real kSettleTau = Real{40};
     bounded = e.valid && e.tier == 1;
     if (!bounded || !(h > Real{0})) return h;
     const auto n = x.size();
+    // the bounded rows: the state, or the caller's output map (chord_P, rows = tol's)
+    const bool rows_p = e.chord_P_re.rows() > 0;
+    const DenseMatrix& Pre = rows_p ? e.chord_P_re : e.V_re;
+    const DenseMatrix& Pim = rows_p ? e.chord_P_im : e.V_im;
+    const auto r = Pre.rows();
     constexpr Real kInf = std::numeric_limits<Real>::infinity();
-    if (e.chord_vabs.rows() != n) {   // per mode, once
-        e.chord_vabs = e.V_re.binaryExpr(e.V_im, [](Real a, Real b) { return std::hypot(a, b); });
+    if (e.chord_vabs.rows() != r || e.chord_s.size() != n) {   // per mode (and row map), once
+        e.chord_vabs = Pre.binaryExpr(Pim, [](Real a, Real b) { return std::hypot(a, b); });
         Vector s(n);
         for (Eigen::Index k = 0; k < n; ++k) {
             const Real r = std::abs(e.lambda[k]);
@@ -878,12 +887,12 @@ inline constexpr Real kSettleTau = Real{40};
         w.a[k] = grows ? Real{0} : std::abs(w.zdd[k]);
     }
     // column i = the split F = chord_order[0, i): S / B / C / A0 as in the bound above
-    w.S.resize(n, n + 1);
-    w.B.resize(n, n + 1);
-    w.C.resize(n, n + 1);
-    w.A0.resize(n, n + 1);
-    w.D.resize(n, n + 1);
-    w.A1.resize(n, n + 1);
+    w.S.resize(r, n + 1);
+    w.B.resize(r, n + 1);
+    w.C.resize(r, n + 1);
+    w.A0.resize(r, n + 1);
+    w.D.resize(r, n + 1);
+    w.A1.resize(r, n + 1);
     w.S.col(0).setZero();
     w.B.col(n).setZero();
     w.C.col(n).setZero();
@@ -896,8 +905,8 @@ inline constexpr Real kSettleTau = Real{40};
         w.B.col(q) = w.B.col(q + 1) + e.chord_vabs.col(k) * w.a[k];
         w.C.col(q) = w.C.col(q + 1) + e.chord_vabs.col(k) * (w.a[k] * std::abs(e.lambda[k]));
         w.D.col(q) = w.D.col(q + 1) + e.chord_vabs.col(k) * (w.a[k] * std::norm(e.lambda[k]));
-        w.A0.col(q) = w.A0.col(q + 1) + e.V_re.col(k) * w.zdd[k].real() - e.V_im.col(k) * w.zdd[k].imag();
-        w.A1.col(q) = w.A1.col(q + 1) + e.V_re.col(k) * zl.real() - e.V_im.col(k) * zl.imag();
+        w.A0.col(q) = w.A0.col(q + 1) + Pre.col(k) * w.zdd[k].real() - Pim.col(k) * w.zdd[k].imag();
+        w.A1.col(q) = w.A1.col(q + 1) + Pre.col(k) * zl.real() - Pim.col(k) * zl.imag();
     }
     Eigen::Index n_sat = 0;   // modes with a finite s_k (only they can join F)
     while (n_sat < n && e.chord_s[n_sat] < kInf) ++n_sat;
@@ -920,9 +929,9 @@ inline constexpr Real kSettleTau = Real{40};
                        .matrix();
             return true;
         }
-        w.gB.setZero(n);
-        w.gC.setZero(n);
-        w.gD.setZero(n);
+        w.gB.setZero(r);
+        w.gC.setZero(r);
+        w.gD.setZero(r);
         for (const Eigen::Index k : w.grow) {   // always in S (s_k = ∞)
             const Real m = std::abs(w.zdd[k]) * std::exp(e.lambda[k].real() * d);
             if (!std::isfinite(m)) return false;

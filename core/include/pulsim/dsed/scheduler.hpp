@@ -524,6 +524,7 @@ public:
         // the output rule's state is per run: a resumed run rebuilds it (its
         // state range restarts at the snapshot instant), nothing is carried
         output_lo_.resize(0);
+        output_ylo_.resize(0);
         output_count_ = output_events_ = n_output_capped_ = n_output_unbounded_ = 0;
         output_pend_ = false;
         output_total_ = 0;
@@ -662,7 +663,9 @@ public:
                     if (out_steps) h_ex = output_step_(t, x, h_ex, result.n_events, t_target);
                     // no sliver step short of the edge (scheduler_auto.hpp)
                     if (h_ex < t_target - t && near_time(t + h_ex, t_target)) {
-                        h_ex = t_target - t;
+                        // a rule-cut step is not stretched past its bound: halve the rest
+                        h_ex = out_steps && output_certified_ ? Real{0.5} * (t_target - t)
+                                                              : t_target - t;
                     }
                     const MaskT mask_before = system_.current_mask();
                     advance_(t, x, h_ex, x_new_);
@@ -692,6 +695,14 @@ public:
                                     advance_(ts, result.states.back(), t1 - ts, output_end_);
                                     out_defer = ((x_new_ - output_end_).cwiseAbs().array()
                                                  <= Real{1e-3} * output_tol_.array()).all();
+                                    // and on the recovered rows (a high-impedance node reads
+                                    // the gap times its impedance)
+                                    if constexpr (requires { system_.recover_from_state(); })
+                                        if (out_defer && output_work_.ty.size()
+                                                             == system_.recover_from_state().rows())
+                                            out_defer = ((system_.recover_from_state() * (x_new_ - output_end_))
+                                                             .cwiseAbs().array()
+                                                         <= Real{1e-3} * output_work_.ty.array()).all();
                                 }
                             }
                             if (!out_defer) output_flush_(t, x, result);
@@ -3363,6 +3374,7 @@ private:
     std::size_t output_budget_ = 0, output_total_ = 0;   // cut steps allowed / taken in the run
     Real output_budget_t_ = std::numeric_limits<Real>::quiet_NaN();
     Vector output_lo_, output_hi_, output_tol_, output_end_;   // range of each state so far
+    Vector output_y_, output_ylo_, output_yhi_;   // the stored (recovered) vector: its range so far
     ChordWork output_work_;
 
     /// The exact step from (t, x) cut by the output rule (exact_chord_step).
@@ -3388,6 +3400,29 @@ private:
             }
             output_lo_ = output_lo_.cwiseMin(x);
             output_hi_ = output_hi_.cwiseMax(x);
+            // the stored samples are the RECOVERED vector (node voltages, branch currents:
+            // y = R·x + R_b·b(t)), so the promise is on each of its rows too; a node behind a
+            // high impedance reads a state's error times that impedance (F4: V(sw) of a buck
+            // whose switch and diode are both off, 1/(2e-4 S) × I(L)'s error = 596 × its tolerance)
+            constexpr bool kRows = requires(Vector& y) {
+                system_.recover_full_into(t, x, y);
+                system_.recover_from_state();
+            };
+            auto widen_y = [&](Real ty, const Vector& xy) {
+                if constexpr (kRows) {
+                    output_y_.resize(system_.recover_from_state().rows());
+                    system_.recover_full_into(ty, xy, output_y_);
+                    if (output_ylo_.size() != output_y_.size()) {
+                        output_ylo_ = output_y_;
+                        output_yhi_ = output_y_;
+                    }
+                    output_ylo_ = output_ylo_.cwiseMin(output_y_);
+                    output_yhi_ = output_yhi_.cwiseMax(output_y_);
+                } else {
+                    (void)ty; (void)xy;
+                }
+            };
+            widen_y(t, x);
             // relative to each state's range so far (a ripple on a large DC level
             // is what a plot reads; at least 1e-3 of its peak), with the run's atol
             // as an ABSOLUTE floor (F-X-3): a state sitting at ~0 V is held to atol,
@@ -3398,6 +3433,11 @@ private:
                                    .cwiseMax(Real{1e-3} * output_hi_.cwiseAbs().cwiseMax(output_lo_.cwiseAbs()))
                                * output_rtol_)
                                   .cwiseMax(Vector::Constant(x.size(), output_atol_));
+                if constexpr (kRows)
+                    output_work_.ty = ((output_yhi_ - output_ylo_)
+                                           .cwiseMax(Real{1e-3} * output_yhi_.cwiseAbs().cwiseMax(output_ylo_.cwiseAbs()))
+                                       * output_rtol_)
+                                          .cwiseMax(Vector::Constant(output_ylo_.size(), output_atol_));
             };
             set_tol();
             bool bounded = true;
@@ -3408,6 +3448,7 @@ private:
                 advance_(t, x, h, output_end_);
                 output_lo_ = output_lo_.cwiseMin(output_end_);
                 output_hi_ = output_hi_.cwiseMax(output_end_);
+                widen_y(t + h, output_end_);
                 set_tol();
                 d = system_.exact_output_step(t, x, output_tol_, output_rtol_, h, bounded, output_work_);
             }
@@ -3453,8 +3494,11 @@ private:
             const Real h = t1 - tau;
             const Real d = output_step_(tau, output_x_, h, n_events, t_target);
             // no sample a sliver short of the step's end (the end is a sample)
-            if (!(d < h) || near_time(tau + d, t1)) return output_certified_ && !(d < h);
-            tau += d;
+            if (!(d < h)) return output_certified_;
+            // ... nor a chord stretched past the bound to reach it (near_time's 1e-12 s
+            // floor is 0.7 % of a 1.5e-10 s chord: ll06's ring read 1.007 × the
+            // tolerance): halve the rest instead, each half within d
+            tau += near_time(tau + d, t1) ? Real{0.5} * h : d;
             advance_(t0, x0, tau - t0, output_x_);
             ped_push_sample(result, tau, output_x_, mask, mask, nullptr);
             ++result.n_output_samples;

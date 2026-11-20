@@ -219,6 +219,35 @@ def run_cell(case, name):
         return "error", None, time.perf_counter() - t0, f"{type(ex).__name__}: {ex}"[:300], info
 
 
+FLOW_FACTORS = tuple(float(f) for f in os.environ.get("PULSIM_FLOW_FACTORS", "5e-2,2e-1").split(","))   # the dense run's output_rtol / the cell's (read quadratically)
+
+
+def _dense_flow(case, name, res, rt):
+    """(the same cell at output_rtol·f, None) -- the exact flow the rule's promise is
+    about -- for the first f of FLOW_FACTORS whose run is not cut by the sample cap,
+    or (None, why) when none can stand for it (other events, capped)."""
+    orig = nd.profile_kwargs
+    why = None
+    for f in FLOW_FACTORS:
+        def dense(e, only=None, f=f):
+            kw = orig(e, only)
+            return {**kw, "output_rtol": kw["output_rtol"] * f} if "output_rtol" in kw else kw
+        nd.profile_kwargs = dense
+        try:
+            kind, rd, _, msg, _ = run_cell(case, name)
+        finally:
+            nd.profile_kwargs = orig
+        if kind != "ran":
+            return None, f"dense flow {kind}: {msg}"[:200]
+        if not np.array_equal(np.asarray(res.event_times), np.asarray(rd.event_times)):
+            return None, "dense flow: other event times"
+        og = (getattr(rd, "diagnostics", None) or {}).get("output_grid") or {}
+        if not og.get("n_output_capped") and og.get("output_budget_t") is None:
+            return rd, None
+        why = f"dense flow capped at {f}: {og}"[:200]
+    return None, why
+
+
 def circuit_worker(unit, names, emit):
     import exact_scoreboard as sb
     import v1_reader
@@ -255,7 +284,13 @@ def circuit_worker(unit, names, emit):
             dr.classify(rec, res, case, cols, ref, tol, case.dt if eng == "pwl" else None)
             rt = _rule_rtol(res)
             if rt:
-                rec["rule_ratio"] = dr.rule_check(res, ref, cols, rt)
+                rec["rule_ratio_ref"] = dr.rule_check(res, ref, cols, rt)
+                flow, why = _dense_flow(case, name, res, rt)
+                if flow is None:
+                    rec["rule_ratio"] = float("nan")
+                    rec["rule_note"] = why
+                else:
+                    rec["rule_ratio"] = dr.rule_check(res, ref, cols, rt, flow=flow)
         dr.mark_suspect(rec, entry)
         if kind == "ran" and sol is not None and g:
             try:
