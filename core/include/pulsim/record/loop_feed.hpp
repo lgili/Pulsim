@@ -198,6 +198,7 @@ public:
         }
         graph_ = &graph;
         pool_ = &pool;
+        if (view_of_ != nullptr) set_lines_(*view_of_);   // attached before the circuit
     }
 
     /// Pre-size kept rows for `n_samples` and the period windows up to t_last.
@@ -234,6 +235,7 @@ public:
         bool batch = general_.empty() && !settled_;
         for (const auto& r : recs_) batch = batch && !r.streams();
         hooks.set_step_sink(&LoopFeed::sink_step, this, batch ? &LoopFeed::sink_batch : nullptr);
+        set_lines_(hooks);
         hooks.on_event([this](Real t, const Vector& xl, const topology::SwitchStateMask& ml,
                               const Vector& xr, const topology::SwitchStateMask& mr) {
             on_event(t, xl, ml, xr, mr);
@@ -335,6 +337,13 @@ public:
     [[nodiscard]] bool restored() const noexcept { return restored_; }
 
 private:
+    // A stateful reading reads the committed histories: no value at a point
+    // inside a step, so such a feed takes restart steps whole.
+    void set_lines_(events::StepHooks& hooks) const noexcept {
+        bool lines = true;
+        for (const auto& r : readings_) lines = lines && r.dev.law != DeviceCurrent::Law::Stateful;
+        hooks.set_sink_takes_lines(lines);
+    }
     std::vector<std::string> names_;
     std::vector<StateReading> readings_;
     std::vector<Recorder> recs_;
@@ -724,7 +733,12 @@ private:
         const bool had_event = event_at_last_;
         event_at_last_ = false;
         eval(t, xe, me, row_, false, view.cap_end);
-        if (has_pending_ && !settled_) {
+        if (has_pending_ && !settled_ && view.line) {
+            // a step fed as lines: its jump rows place the commutation (a
+            // bracket would end on the first line, a left limit)
+            has_pending_ = false;
+            ++n_events_;
+        } else if (has_pending_ && !settled_) {
             // the bracket's right side is this step's end (xr was xe), read
             // at t: a source's value belongs to the end, not to the report
             for (auto& r : recs_) r.event_bracket(t, row_);

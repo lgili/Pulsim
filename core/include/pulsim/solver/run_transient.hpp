@@ -2498,6 +2498,7 @@ inline SimulationResult run_transient(
                     lines.v0.resize(es.size());
                     for (Size k = 0; k < es.size(); ++k) lines.v0[k] = es[k].v_prev;
                 }
+                lines.m_a = stamped_mask;   // the mode the (sub)step starts in
                 run_restart(a, h);
                 if (inner && j >= StepLines::kMax) return;
                 // shortcut: after a kept backward-Euler stage 2 (w1 = γ) the
@@ -2507,8 +2508,17 @@ inline SimulationResult run_transient(
                 const Real w1 = lines.be_kept ? kGamma : Real{1} - kGamma;
                 const bool mixed = !(lines.m1 == stamped_mask);
                 const Real t_m = a + w1 * h;
-                if (mixed && (lines.n >= StepLines::kMax || !(t_m > a && t_m < a + h))) {
-                    return;   // no slot (or no time) for the held pieces: the ends
+                // held pieces only when no device's stage-1 state is neither
+                // side's (off -> on -> off would read as an on/off pair the
+                // loss tracker never books)
+                bool one_way = mixed;
+                for (Size bit = 0; one_way && bit < lines.m1.size(); ++bit) {
+                    const bool s1 = lines.m1.get(bit);
+                    one_way = s1 == lines.m_a.get(bit) || s1 == stamped_mask.get(bit);
+                }
+                if (mixed && (!one_way || lines.n >= StepLines::kMax ||
+                              !(t_m > a && t_m < a + h))) {
+                    return;   // the step's ends
                 }
                 Vector& dst = inner ? lines.right[j] : lines.x_start;
                 if (mixed) {
@@ -3357,7 +3367,7 @@ inline SimulationResult run_transient(
                     hooks->event(t_prev, x_prev, mask_start, x, stamped_mask);
                 }
                 if (hook_step) {
-                    if (L && L->owner == t && L->ok && !L->empty()) [[unlikely]] {
+                    if (L && L->owner == t && L->ok && !L->empty() && hooks->takes_lines()) [[unlikely]] {
                         feed_lines(t_prev, t);
                     } else {
                         hooks->step(t_prev, x_prev, mask_start, t, x, stamped_mask, hook_contig);

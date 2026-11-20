@@ -242,6 +242,10 @@ public:
                   Real t, const Vector& x_end, const topology::SwitchStateMask& mask_end) const {
         for (const auto& f : step_) f(t_prev, x_start, mask_start, t, x_end, mask_end);
     }
+    /// The sink takes lines (default); false: `takes_lines()` tells the
+    /// engine to hand it whole steps.
+    void set_sink_takes_lines(bool v) noexcept { sink_lines_ = v; }
+    [[nodiscard]] bool takes_lines() const noexcept { return sink_ != nullptr && sink_lines_; }
     void line(Real t0, const Vector& xs, const topology::SwitchStateMask& ms, Real t,
               const Vector& xe, const topology::SwitchStateMask& me, const Real* cap_start,
               const Real* cap_end) {
@@ -332,6 +336,7 @@ private:
     StepSinkFn sink_ = nullptr;
     void* sink_ctx_ = nullptr;
     StepBatchFn batch_fn_ = nullptr;
+    bool sink_lines_ = true;
     static constexpr Size kBatchRows = 128;
     std::vector<Real> batch_;
     Size batch_cap_ = 0, batch_n_ = 0, batch_stride_ = 0;   // rows

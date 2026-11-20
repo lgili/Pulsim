@@ -137,3 +137,30 @@ Extension build; pulsim_core_record_tests, _dsed_tests, _perf_tests
 (losses, loss port, recorders, probes, switch-state record, identity tool)
 342 pass; full pytest 6114 passed / 110 skipped / 9 xfailed; ruff clean;
 stubs --check up to date. NOT run: full ctest, Eigen 3.4.0, g++.
+
+## Reviewer (opus, medium, read-only) and what was done
+
+1. Stateful readings (nonlinear capacitor, Lauritzen, IGBT tail, Coss) at
+   the new line points read the END-of-step histories -> a feed with a
+   stateful reading takes restart steps whole (`StepHooks::takes_lines`,
+   set by LoopFeed::attach); test_stateful_reading_takes_restart_steps_whole.
+2. The fixed engine's bracket row landed on the first line's end with a
+   left-limit value, beside the jump rows -> a step fed as lines counts the
+   commutation (`n_events`) and writes no bracket row; the agreement test
+   now asserts no `within_dt` row on that run.
+3. Held-pieces rows where stage 1's mode is neither side's (off -> on ->
+   off, SDIRK kept after the BE re-take flipped too) read as a spurious
+   on/off pair in losses.py while the LossTracker books none -> held
+   pieces only when no device's stage-1 state differs from both the
+   (sub)step start's and stage 2's (each device changes once); otherwise
+   the step's ends, as before.
+4. (left) a mixed step with no slot / no time falls back to its ends with
+   `ok` still true (group B's existing fallback for the no-line case).
+5. (left) `line0` keys on "first line's start differs from the seeded
+   start", not on "starts from a right limit"; x_prev at step 1 is the
+   seeded x0.
+
+After the reviewer fixes: test_release_findings_b2 7/7, _b 15 + 1 xfail;
+the 12-case recorder set (rule off) still bit-identical, 1296 arrays, the
+same step sequences; pwl_identity 354/379 (the 25 differing are all
+`pwl+restart` / `pwl+split`, fewer held-pieces rows than before).

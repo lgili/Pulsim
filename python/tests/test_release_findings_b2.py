@@ -154,6 +154,7 @@ def test_in_loop_and_stored_array_feeds_agree():
     # the loop's jump rows are the stored pass's right-limit rows (the loop
     # also brackets each commutation, a row the stored pass never had)
     jumps = loop.event_resolution != "within_dt"
+    assert np.all(jumps), "a lined step's commutation is its jump rows, no bracket"
     np.testing.assert_array_equal(loop.event_t[jumps], arr.event_t)
     for q in probes:
         np.testing.assert_allclose(loop.event_right[q][jumps], arr.event_right[q],
@@ -196,3 +197,20 @@ def test_window_integrals_converge_second_order():
     print("window errors (relative)", errs, file=sys.stderr)
     assert np.all(errs[0] < 1e-3), errs
     assert np.all(errs[0] / np.maximum(errs[1], 1e-300) > 3.0), errs
+
+
+def test_stateful_reading_takes_restart_steps_whole():
+    """A stateful device's reading reads the committed histories (no value
+    inside a step): its feed takes restart steps whole (no line jumps), and
+    KCL against the series resistor holds at every sample (the reviewer's
+    finding: line points read end-of-step histories)."""
+    b = m._NEWTON["nonlinear_capacitor"]()
+    res = _quiet(p.simulate, b, 2e-3, dt=2e-6, **RULE,
+                 recorders=[p.Recorder("r", ["i(Rs)", "i(X)"])])
+    assert res.recorder_feed["mode"] == "in-loop", res.recorder_feed
+    assert res.recorder_feed["n_jumps"] == 0, res.recorder_feed
+    assert res.n_restart_steps > 0
+    a = res.recorded["r"]
+    scale = np.max(np.abs(a["i(Rs)"]))
+    floor = 8 * 1e-6 * m.EPS * 5.0 / np.diff(a.times)
+    assert np.all(np.abs(a["i(Rs)"] - a["i(X)"])[1:] <= 1e-6 * scale + floor)
