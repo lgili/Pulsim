@@ -4,7 +4,7 @@ python/tests/test_run_plan.py:: | bucket 0: auto fallback decided in the helper;
 python/tests/test_simulation_object.py::test_simulate_snapshots_every_refusable_option | bucket 0: no b_extra_fn in the option snapshot (8fdcf9a2)
 python/tests/test_stubs.py:: | bucket 0: stubs regenerated, exact result members in the overlay (aa636e4c, 8fdcf9a2)
 python/tests/test_benchmark_harness.py::test_flip_evidence_resumes_per_circuit | bucket 0: ideal_switch_flip_evidence keeps its own five configurations
-python/tests/test_benchmark_harness.py::test_golden[stiff_rlc] | R1 owns, NOT DONE: regenerate (orchestrator decision 1, accepted rounding-level move); old golden still on file, test fails until then
-python/tests/test_benchmark_harness.py::test_golden[back_to_back_diodes_sine] | R1 owns, NOT DONE: regenerate (orchestrator decision 1, accepted rounding-level move); old golden still on file, test fails until then
+python/tests/test_benchmark_harness.py::test_golden[stiff_rlc] | DONE 2026-11-20 (second integrator): regenerated (orchestrator decision 1, accepted rounding-level move); listed under "Farther from truth, accepted" in RELEASE_GOLDEN_DIFF.md
+python/tests/test_benchmark_harness.py::test_golden[back_to_back_diodes_sine] | DONE 2026-11-20 (second integrator): regenerated (orchestrator decision 1, accepted rounding-level move); listed under "Farther from truth, accepted" in RELEASE_GOLDEN_DIFF.md
 python/tests/test_benchmark_harness.py::test_golden[ | C: goldens regenerated (RELEASE_GOLDEN_DIFF.md)
 python/tests/test_benchmark_harness.py:: | R1 owns: shared manifests (analytic.yaml ceilings, perf_counters.yaml) re-frozen in C

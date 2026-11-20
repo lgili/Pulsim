@@ -6,8 +6,8 @@
 counters:
   rc_charge:
     pwl:
-      event_builds: 0
-      event_hits: 0
+      event_builds: 1
+      event_hits: 5
       event_refactors: 0
       rank1_hits: 0
       multi_bit_rank1_hits: 0
@@ -29,15 +29,15 @@ counters:
       n_chatter_breaks: 0
       n_forced_accepts: 0
     dsed:
-      n_accept: 5000
+      n_accept: 5008
       n_reject: 0
       n_events: 0
       n_rk45_steps: 0
       n_bdf2_steps: 0
   ladder500_rc:
     pwl:
-      event_builds: 0
-      event_hits: 0
+      event_builds: 1
+      event_hits: 5
       event_refactors: 0
       rank1_hits: 0
       multi_bit_rank1_hits: 0
@@ -59,22 +59,23 @@ counters:
       n_chatter_breaks: 0
       n_forced_accepts: 0
     dsed:
-      skipped: 'release finding F-X-3: the exact output rule does not finish ladder500_rc (> 29 min in the chord bound); count again when F-X-3 is fixed'
+      skipped: 'release finding F-X-3: the exact output rule does not finish ladder500_rc
+        (> 29 min in the chord bound); count again when F-X-3 is fixed'
   buck_ccm:
     pwl:
-      event_builds: 0
-      event_hits: 0
+      event_builds: 4
+      event_hits: 557
       event_refactors: 0
       rank1_hits: 0
       multi_bit_rank1_hits: 0
       full_refactor_hits: 0
       fallbacks: 0
       segment_evictions: 0
-      num_built_segments: 4
+      num_built_segments: 2
       n_steps: 8001
       n_dt_retries: 0
-      n_event_iterations: 80
-      n_commutations: 80
+      n_event_iterations: 79
+      n_commutations: 79
     trbdf2:
       n_accept: 1055
       n_reject: 9
@@ -85,45 +86,45 @@ counters:
       n_chatter_breaks: 0
       n_forced_accepts: 0
     dsed:
-      n_accept: 80
+      n_accept: 1117
       n_reject: 0
       n_events: 79
       n_rk45_steps: 0
       n_bdf2_steps: 0
   buck_dcm:
     pwl:
-      event_builds: 0
-      event_hits: 0
-      event_refactors: 0
+      event_builds: 4
+      event_hits: 597
+      event_refactors: 75
       rank1_hits: 0
       multi_bit_rank1_hits: 0
       full_refactor_hits: 0
       fallbacks: 0
       segment_evictions: 0
-      num_built_segments: 4
+      num_built_segments: 3
       n_steps: 8001
       n_dt_retries: 0
-      n_event_iterations: 80
+      n_event_iterations: 61
       n_commutations: 80
     trbdf2:
-      n_accept: 1263
-      n_reject: 180
-      n_solves: 3203
+      n_accept: 1093
+      n_reject: 104
+      n_solves: 2712
       n_newton_retries: 0
       n_gate_events: 80
       n_diode_events: 19
       n_chatter_breaks: 0
       n_forced_accepts: 0
     dsed:
-      n_accept: 99
+      n_accept: 858
       n_reject: 0
       n_events: 98
       n_rk45_steps: 0
       n_bdf2_steps: 0
   hard_switched_rc:
     pwl:
-      event_builds: 0
-      event_hits: 0
+      event_builds: 2
+      event_hits: 58
       event_refactors: 0
       rank1_hits: 0
       multi_bit_rank1_hits: 0
@@ -145,7 +146,7 @@ counters:
       n_chatter_breaks: 0
       n_forced_accepts: 1
     dsed:
-      n_accept: 74   # was 10: 64 exact samples resolve the RC's fast mode after its 9 edges (add-exact-propagator-strategy DECISIONS, fast-mode samples)
+      n_accept: 1189
       n_reject: 0
       n_events: 9
       n_rk45_steps: 0
@@ -175,7 +176,7 @@ counters:
       n_chatter_breaks: 0
       n_forced_accepts: 0
     dsed:
-      refused: ValueError
+      refused: UnsupportedError
   saturable_rl:
     pwl:
       event_builds: 0
@@ -201,11 +202,11 @@ counters:
       n_chatter_breaks: 0
       n_forced_accepts: 0
     dsed:
-      refused: ValueError
+      refused: UnsupportedError
   half_bridge_inverter:
     pwl:
-      event_builds: 0
-      event_hits: 0
+      event_builds: 2
+      event_hits: 1198
       event_refactors: 0
       rank1_hits: 0
       multi_bit_rank1_hits: 0
@@ -227,37 +228,37 @@ counters:
       n_chatter_breaks: 0
       n_forced_accepts: 0
     dsed:
-      n_accept: 206
+      n_accept: 1321
       n_reject: 0
       n_events: 199
       n_rk45_steps: 0
       n_bdf2_steps: 0
   three_phase_diode_rectifier:
     pwl:
-      event_builds: 0
-      event_hits: 0
-      event_refactors: 0
+      event_builds: 12
+      event_hits: 428
+      event_refactors: 249
       rank1_hits: 0
       multi_bit_rank1_hits: 0
       full_refactor_hits: 0
       fallbacks: 0
       segment_evictions: 0
-      num_built_segments: 12
+      num_built_segments: 10
       n_steps: 1601
       n_dt_retries: 0
-      n_event_iterations: 56
-      n_commutations: 54
+      n_event_iterations: 15
+      n_commutations: 98
     trbdf2:
-      n_accept: 1250
+      n_accept: 1251
       n_reject: 79
-      n_solves: 3549
+      n_solves: 3520
       n_newton_retries: 0
       n_gate_events: 0
       n_diode_events: 96
       n_chatter_breaks: 0
       n_forced_accepts: 1
     dsed:
-      n_accept: 80042
+      n_accept: 80284
       n_reject: 0
       n_events: 96
       n_rk45_steps: 0
@@ -275,8 +276,8 @@ counters:
       num_built_segments: 2
       n_steps: 2501
       n_dt_retries: 0
-      n_event_iterations: 80
-      n_commutations: 80
+      n_event_iterations: 79
+      n_commutations: 79
     trbdf2:
       n_accept: 1077
       n_reject: 12
@@ -287,42 +288,42 @@ counters:
       n_chatter_breaks: 0
       n_forced_accepts: 0
     dsed:
-      refused: ValueError
+      refused: UnsupportedError
   flyback_converter:
     pwl:
-      event_builds: 0
-      event_hits: 0
-      event_refactors: 0
+      event_builds: 4
+      event_hits: 1399
+      event_refactors: 200
       rank1_hits: 0
       multi_bit_rank1_hits: 0
       full_refactor_hits: 0
       fallbacks: 0
       segment_evictions: 0
-      num_built_segments: 4
+      num_built_segments: 2
       n_steps: 20001
       n_dt_retries: 0
-      n_event_iterations: 3809
-      n_commutations: 3808
+      n_event_iterations: 300
+      n_commutations: 200
     trbdf2:
-      n_accept: 28642
-      n_reject: 642
-      n_solves: 59746
+      n_accept: 28626
+      n_reject: 600
+      n_solves: 59548
       n_newton_retries: 0
       n_gate_events: 200
       n_diode_events: 199
       n_chatter_breaks: 0
-      n_forced_accepts: 3
-    dsed:   # was refused (coupled inductors; add-exact-propagator-strategy DECISIONS)
-      n_accept: 1500
+      n_forced_accepts: 0
+    dsed:
+      n_accept: 8885
       n_reject: 0
-      n_events: 199
+      n_events: 296
       n_rk45_steps: 0
       n_bdf2_steps: 0
   diode_bridge_rectifier:
     pwl:
-      event_builds: 0
-      event_hits: 0
-      event_refactors: 0
+      event_builds: 3
+      event_hits: 96
+      event_refactors: 56
       rank1_hits: 0
       multi_bit_rank1_hits: 0
       full_refactor_hits: 0
@@ -331,8 +332,8 @@ counters:
       num_built_segments: 3
       n_steps: 1001
       n_dt_retries: 0
-      n_event_iterations: 20
-      n_commutations: 38
+      n_event_iterations: 1
+      n_commutations: 40
     trbdf2:
       n_accept: 1144
       n_reject: 20
@@ -343,7 +344,7 @@ counters:
       n_chatter_breaks: 0
       n_forced_accepts: 0
     dsed:
-      n_accept: 50010
+      n_accept: 50347
       n_reject: 0
       n_events: 19
       n_rk45_steps: 0

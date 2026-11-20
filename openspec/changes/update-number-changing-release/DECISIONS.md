@@ -519,4 +519,50 @@ Paralleled bridges, 20 ms, conductance-form diodes (the test as written):
 **Suite on the merged tree (1b3f7ecc, extension `/Users/lgili/pulsim_wt/so_release_1b3f7ecc/`):** ctest 1071/1071 (at fad54e51, same C++); full pytest 11 failed / 6123 passed / 110 skipped / 67 xfailed, no XPASS (`test_counter_gate[ladder500_rc]` deselected: F-X-3). The 11 = the two accepted goldens + nine counter gates (re-freeze pending). One new failure fixed: `test_ai_guide` size (the PR's passives line; four trap-table phrasings shortened).
 **FINDINGS.md:** 36 open + 2 closed (F-4-6, F-X-2 by group H); `probes/findings_index.py` has a `FIXED` table.
 **Counters:** `counters.py` `SKIP` names `ladder500_rc` / dsed (F-X-3), written `skipped:` into the freeze file; its gate case is a strict xfail citing F-X-3.
-**Running / next (in this order, chain script `.scratch/r2m2_chain.sh`, logs `.scratch/r2m2_*.log`):** B(ii) reference_status + rehearsal_match; B(iii) exact scoreboard; B(i) byte compares vs b9e46778 (`.scratch/base_b9e46778`); goldens regeneration + golden diff; counters re-freeze; `test_benchmark_harness.py`; flip evidence; accuracy summary.
+**Step 3 (run 2026-11-20 05:00-05:17, chain `.scratch/r2m2_chain.sh`, tree eac80cbf + the extension above):**
+- **Proof B(ii)** `reference_status.py --json` + `probes/rehearsal_match.py`: the DEFAULT strict counts equal the rehearsal's full profile: pwl 91/17/1/0/0, trbdf2 106/2/1/0/0, dsed 100/0/0/9/0, auto 106/2/1/0/0 (@legacy: pwl 81/27/1, pwl+restart 89/19/1, pwl+split 91/17/1, trbdf2 106/2/1, dsed 100/0/0/9). 1197 cells compared: 0 differ in kind, 12 differ in the printed number: `ll07_boost_vcswitch` trbdf2 1.17e-4 -> 2.95e-4 and trbdf2@legacy 1.17e-4 -> 2.94e-4 (agree both; the PR line's trbdf2 changes since the rehearsal, the same move in both columns = not a default); `ll07_boost_vcswitch` pwl+restart@legacy 0.0997 -> 0.111 and `ll12_pfc_boost_continuous` pwl+restart@legacy 0.0806 -> 0.114 (disagree both, legacy-only columns); `ll09_half_bridge_inverter_leg` dsed and dsed@legacy 1.67e-4 -> 2.31e-4 (agree; same in both columns: the PR line's exact engine, not the flip); auto `cuk_converter` 4.32e-6 -> 4.34e-6, `active_clamp_forward` 3.66e-6 -> 4.82e-6, `flyback_converter` 6.69e-6 -> 7.0e-6, `forward_converter` 6.13e-6 -> 6.62e-6, `synchronous_flyback` 6.2e-6 -> 6.27e-6 (agree; the exact route's output grid after the cost fix 1e2b90ff); `analytic:hard_switched_rc` dsed 2.53e-10 -> 7.76e-14 (closer to the closed form: the cost fix's per-mode chord bound). The triage freezes in `manifests/v2_triage.yaml` were NOT migrated (reference_status prints 72 `UNEXPECTED` lines against the old per-config keys) — leftover.
+- **Proof B(iii)** exact scoreboard at the defaults: pwl 76/41/10, dsed 81/77/70 of 81 below 1e-3/1e-6/1e-9 = the targets; trbdf2 80/30/9, auto 81/79/73, trbdf2+esdirk43 81/65/13.
+- **Proof B(i)** byte compares under `next_defaults.legacy()` against b9e46778 (`git archive` + `so_b9e46778`): goldens 22/22, stateful 41/41, engines 36/36, steps 29/29, `pwl_identity` 390/390, `trbdf2_identity` 370/371 — the one is `examples/refrigerator_compressor_cc.yaml`, a v1-netlist refusal whose text names the tree's own path (checked: same message, path differs; R1 saw the same artefact).
+- **Goldens:** `goldens.py --update-goldens` changed exactly the two accepted files (`stiff_rlc`, `back_to_back_diodes_sine`); `golden_diff.py` rc 0 (38 of 52 changed, 0 worse outside the accepted list; both listed under "Farther from truth, accepted").
+- **Counters** (`counters.py --freeze`, `ladder500_rc` / dsed skipped by name, F-X-3): every counter that rose, a cost of the new defaults (pwl: the restart rule's event factorisations; dsed: the output rule's samples; dsed refusals now `UnsupportedError`):
+
+  - rc_charge / pwl / event_builds: 0 -> 1
+  - rc_charge / pwl / event_hits: 0 -> 5
+  - rc_charge / dsed / n_accept: 5000 -> 5008
+  - ladder500_rc / pwl / event_builds: 0 -> 1
+  - ladder500_rc / pwl / event_hits: 0 -> 5
+  - buck_ccm / pwl / event_builds: 0 -> 4
+  - buck_ccm / pwl / event_hits: 0 -> 557
+  - buck_ccm / dsed / n_accept: 80 -> 1117
+  - buck_dcm / pwl / event_builds: 0 -> 4
+  - buck_dcm / pwl / event_hits: 0 -> 597
+  - buck_dcm / pwl / event_refactors: 0 -> 75
+  - buck_dcm / dsed / n_accept: 99 -> 858
+  - hard_switched_rc / pwl / event_builds: 0 -> 2
+  - hard_switched_rc / pwl / event_hits: 0 -> 58
+  - hard_switched_rc / dsed / n_accept: 74 -> 1189
+  - shockley_op / dsed: {'refused': 'ValueError'} -> {'refused': 'UnsupportedError'}
+  - saturable_rl / dsed: {'refused': 'ValueError'} -> {'refused': 'UnsupportedError'}
+  - half_bridge_inverter / pwl / event_builds: 0 -> 2
+  - half_bridge_inverter / pwl / event_hits: 0 -> 1198
+  - half_bridge_inverter / dsed / n_accept: 206 -> 1321
+  - three_phase_diode_rectifier / pwl / event_builds: 0 -> 12
+  - three_phase_diode_rectifier / pwl / event_hits: 0 -> 428
+  - three_phase_diode_rectifier / pwl / event_refactors: 0 -> 249
+  - three_phase_diode_rectifier / pwl / n_commutations: 54 -> 98
+  - three_phase_diode_rectifier / trbdf2 / n_accept: 1250 -> 1251
+  - three_phase_diode_rectifier / dsed / n_accept: 80042 -> 80284
+  - buck_mosfet_nonlinear / dsed: {'refused': 'ValueError'} -> {'refused': 'UnsupportedError'}
+  - flyback_converter / pwl / event_builds: 0 -> 4
+  - flyback_converter / pwl / event_hits: 0 -> 1399
+  - flyback_converter / pwl / event_refactors: 0 -> 200
+  - flyback_converter / dsed / n_accept: 1500 -> 8885
+  - flyback_converter / dsed / n_events: 199 -> 296
+  - diode_bridge_rectifier / pwl / event_builds: 0 -> 3
+  - diode_bridge_rectifier / pwl / event_hits: 0 -> 96
+  - diode_bridge_rectifier / pwl / event_refactors: 0 -> 56
+  - diode_bridge_rectifier / pwl / n_commutations: 38 -> 40
+  - diode_bridge_rectifier / dsed / n_accept: 50010 -> 50347
+
+- `test_benchmark_harness.py` whole: 379 passed, 1 xfailed (`test_counter_gate[ladder500_rc]`, F-X-3).
+- **Step 5 evidence:** `REFERENCE_STATUS.md`, `EXACT_SCOREBOARD.md` + json, `IDEAL_SWITCH_FLIP_EVIDENCE.md`, `ACCURACY_SUMMARY.md` (`--check` rc 0) regenerated at the defaults, `@legacy` columns kept.
