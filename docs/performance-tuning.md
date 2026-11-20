@@ -213,3 +213,19 @@ auditing a kernel-header change for compile-time regressions.
 There's no in-tree wall-clock harness for transient simulation yet
 — individual test binaries time themselves with
 ``BENCHMARK("…") { … }`` macros from Catch2.
+
+## Long-simulation stress suite
+
+`python/tests/test_long_simulation_stress.py` runs multi-second workloads
+(1 s of a 100 kHz buck on every engine, 1.5 s of a closed-loop buck with
+junction-temperature coupling, resume chains through pickle, a bounded
+memory check). The long cases sit behind the `examples` marker:
+
+```bash
+PULSIM_RUN_EXAMPLES=1 pytest python/tests/test_long_simulation_stress.py -m examples
+```
+
+Expected wall time on an Apple M-series laptop (2026-11): about 13 s for the
+16 long cases (the 1e7-step pwl runs take ~2.5 s each); the default run of
+the same file takes about 3 s. These are indications, not checks: the suite
+asserts no timing.
