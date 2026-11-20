@@ -99,3 +99,32 @@ def test_inconsistent_start_keeps_the_restart_step():
     t = np.asarray(r.times)
     assert r._trbdf2_stats["n_sdirk_steps"] >= 1
     assert t[1] - t[0] > 1e-10
+
+
+def _syncbuck_dead_time():
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", 24.0)
+    b.add_switch("Q1", "vin", "sw", 1e3, 1e-9)
+    b.add_switch("Q2", "sw", "gnd", 1e3, 1e-9)
+    b.add_diode("D2", "gnd", "sw", 1e3, 1e-9)
+    b.add_inductor("L", "sw", "vout", 100e-6)
+    b.add_capacitor("C", "vout", "gnd", 47e-6)
+    b.add_resistor("RL", "vout", "gnd", 10.0)
+    fn = p.make_dead_time_pwm_pair_fn(100e3, 0.5, b.switch_index_of("Q1"),
+                                      b.switch_index_of("Q2"), b.graph.num_switches, 2e-7)
+    return b, fn
+
+
+def test_post_edge_samples_reach_the_recorder_and_the_rows():
+    """A post-edge sample (x(t_e+) stored h_p after the edge, not a step) is
+    a stored row for every consumer: the in-loop recorder has each one, also
+    when the step after an edge lands on the next edge (dead time)."""
+    b0, fn0 = _syncbuck_dead_time()
+    r0 = _sim(b0, fn0, t_end=2e-4)
+    b1, fn1 = _syncbuck_dead_time()
+    r1 = _sim(b1, fn1, t_end=2e-4, recorders=[p.Recorder("r", ["v(sw)"], keep="every")])
+    assert r1.recorder_feed["mode"] == "in-loop", r1.recorder_feed
+    t = np.asarray(r1.times)
+    np.testing.assert_array_equal(t, np.asarray(r0.times))
+    np.testing.assert_array_equal(r1.recorded["r"].times, t)
+    np.testing.assert_array_equal(r1.recorded["r"]["v(sw)"], np.asarray(r1.v("sw")))

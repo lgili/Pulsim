@@ -150,7 +150,8 @@ public:
                                         const topology::SwitchStateMask* mask)>;
     void on_sample(SampleFn f) { sample_.push_back(std::move(f)); }
     [[nodiscard]] bool has_sample() const noexcept { return !sample_.empty(); }
-    void sample(Real t, const Vector* x, const topology::SwitchStateMask* mask) const {
+    void sample(Real t, const Vector* x, const topology::SwitchStateMask* mask) {
+        flush_steps();   // the sink sees its steps before a sample after them
         for (const auto& f : sample_) f(t, x, mask);
     }
     /// probes 0b.10: ONE listener may take the accepted steps through a

@@ -408,3 +408,106 @@ Next step for the successor:
 2. Fix the device-output / recorder feed at the post-edge sample: one rule for both.
 3. Trace the flyback's forced accepts.
 4. Rerun the full pytest and the step-2 rows.
+
+## Session 3 (tips 6dffe5f4 and the WIP commit after it)
+
+### Attribution of the six full-pytest failures
+Each test was run on three trees: the base cad6ab6b (`.scratch/d3base`), 2d062bc5 (built in `.scratch/pkg2d06`), and bb07661f. The tests ran from a copy of `python/tests` without `conftest.py` (`.scratch/tcopy`).
+
+| test | cad6ab6b | 2d062bc5 | bb07661f |
+|---|---|---|---|
+| device_output gate edges + diode [kw1], [kw2] | pass | FAIL (39 rows) | FAIL |
+| recorder rows across batches [trbdf2], [esdirk43] | pass | FAIL | FAIL |
+| counter_gate[hard_switched_rc] | pass | FAIL (23 > 17 rejects) | FAIL |
+| counter_gate[flyback_converter] | pass | FAIL (744 forced accepts / 33 chatter breaks) | FAIL |
+
+All six come from the first predecessor's range cad6ab6b..2d062bc5. The commits in between were not built. By reading the code: e1a969ae records the probe as a sample instead of committing it, which causes the four row failures. dd1587e5 gives linear circuits the probe's slots and TR-BDF2 from x, which causes the two counter failures.
+
+### The post-edge sample rule (no right-limit field on this branch)
+`git log origin/feat/core-integration` has the right-limit fields; this branch's base does not. The sample therefore stays a stored row, and every consumer is taught that row:
+- `StepHooks::sample(t, x, mask)` fires when the row is stored, after the slots were refreshed to the probe's. `x == nullptr` withdraws it; `drop_superseded_event_sample` does this when it pops the row. `sample()` flushes the batched steps first.
+- `LoopFeed` evaluates the row at once and holds it. The held row is sampled when a step ends after it, or when the next sample arrives (two edges one step apart). The line then runs from the held row with `event_at_last_`, so the next step from t_e is not counted as a jump. A row that cannot be placed is counted in `n_dropped`.
+- `OutputTrace` gets `device_state(t_plus, x_trial, hs)` with the probe's slots, and `ds_t` stays at t_e. A trailing trace row at or after a new row's time is dropped as superseded.
+- The diode post-event sample (`record_post_event`) is NOT wired. Its histories are not the sample's own. This gap is pre-existing at the base and not covered by any test.
+- Move the sample to the right-limit field at the integration merge.
+
+Result: the four row tests pass with their original assertions.
+
+### Flyback trace (tip bb07661f, through a debug build)
+- The turn-off edges, for example 1.268e-3 s. The vcswitch is driven by a PWM source, so each edge is a landed source corner with `lin = 1`. No restart is taken: the slots come from the probe and the TR-BDF2 step starts from the pre-edge x.
+- The probe (h_p ≈ 2–7e-13 s) moves the primary leakage current: τ = L_leak·g_off ≈ 5e-12 s, so x(t+h_p) is not x(t_e+).
+- The following steps shrink from 4.3e-13 to 1.8e-13 s with err about 0.8–1.5 per step. Then a chatter break on the secondary diode, then the forced accepts at h = 1e-10 with err 8e4, 2.3e4, 5.5e3, 1.4e3 and so on, about 24 per turn-off edge.
+- At the base, the probe was committed, so x and the slots agreed and there were 0 forced accepts.
+
+**Fix.** On a linear circuit, a probe whose stored states (inductor currents, capacitor voltages) moved over h_p by more than atol + rtol·max is committed as a step, as at the base.
+
+| counter | flyback trbdf2 (cad6ab6b / bb07661f / now) | hard_switched_rc trbdf2 (cad6ab6b / bb07661f / now) |
+|---|---|---|
+| accepted | 28626 / 23651 / 28626 | 2407 / 2421 / 2407 |
+| rejected | 600 / 541 / 600 | 17 / 23 / 17 |
+| forced accepts | 0 / 744 / 0 | 1 / 1 / 1 |
+| chatter breaks | 0 / 33 / 0 | 0 / 0 / 0 |
+
+The hard_switched_rc extra rejects had the same cause: the edge probe moved the capacitor of a fast RC mode. The predecessor's −15 % flyback cost is gone: it was paid for by steps forced at h_min.
+
+**Reviewer (opus, medium) on 6dffe5f4.**
+- (high) The held sample was lost when two edges fall one step apart. Fixed: it is flushed on the next sample.
+- (medium) The moved rule also fires on edges that only ramp, for example a DCM turn-on from i = 0. Those edges keep the base's committed probe:
+  - trbdf2_identity vs cad6ab6b: 233/371 identical (bb07661f: 221).
+  - Buck, sync buck, VSI and bridge steps all equal the base.
+- A curvature test was tried: a second probe over 2 h_p, using y2 − 2y1 + y0, where the pre-edge slot cancels. It tells ramps apart, but it left 22 forced accepts and 1 chatter break on the flyback. Its turn-on edges, where i_p = 2.4e-5 A, took the sample path. The cause was not traced, so the test was reverted. If wanted, this is the next refinement.
+- (low) A sample before the first step (`started_` false) is dropped, the same as `on_event`. Not fixed.
+- (low) `StepHooks::sample` lacked `flush_steps()`. Fixed.
+
+### Step 4: bit-identical resume exactly on an edge
+Not done. It needs a new snapshot block. The uninterrupted run stores the post-edge row at t_e + h_p. A split at t_end = t_e skips it, because t_plus ≥ t_end − h_min, and keeps only `post_edge_derivatives`. To resume bit-identically, the block must carry:
+- `x_edge`, the probe state, which is both the Newton warm start and the row to emit;
+- h_p (`x_edge_t` is the snapshot's t);
+- the probe mask `edge_slots_m`;
+- whether the edge took the slots path (`edge_slots_t == t`) or SDIRK (`sdirk_left`, `sdirk_gate`).
+
+On resume, the engine emits the post-edge row at t + h_p before the first step. Coordinate the pickle index with the integration line, where 19 is taken.
+
+### Step-5 numbers (moved-only rule, measured on 6dffe5f4)
+C_oss conduction energy, booked against the closed form. These are identical to bb07661f, because the C_oss circuit has a stateful kind, so `lin` is false and the rule does not apply:
+- defaults: +0.0574 %
+- rtol 1e-6: +0.0134 %
+- rtol 1e-8: +0.0066 %
+- dt 4e-9: +0.0210 %
+- esdirk43: +0.1401 %
+- esdirk43, rtol 1e-6: −0.0139 %
+- esdirk43, dt 4e-9: +0.0228 %
+
+Steps, base / now. Instructions per accepted step are the minimum of 2 interleaved runs:
+
+| case | base steps | base instr/acc | now steps | now instr/acc |
+|---|---|---|---|---|
+| buck | 2471/201 | 14837 | 2471/201 | 14819 |
+| sync buck | 2987/209 | 15337 | 2987/209 | 15067 |
+| VSI | 2347/94 | 46284 | 2347/94 | 45875 |
+| flyback | 28626/600 | 12094 | 28626/600 | 12135 |
+| C_oss buck | 7420/187 | 73162 | 7516/192 | 80275 (+9.7 %) |
+| bridge | 1199/58 | 12918 | 1199/58 | 12926 |
+
+Byte compares vs cad6ab6b:
+- pwl_identity 390/390 identical.
+- Engines oracle: 4 trbdf2 lines differ; the others are identical.
+- Stateful oracle: 9 trbdf2 cases differ, as before.
+- trbdf2_identity: 233/371 identical.
+
+Not run on this tip: the exact scoreboard and reference_status. Run `.scratch/d3_bench.py` with the worktree package; the base is in `.scratch/d3_bench_base`.
+
+### Verified / not
+- Verified on 6dffe5f4:
+  - the extension build;
+  - the 5 C++ binaries on Eigen 5 (dsed 142, step 32, sim 8, thermal 9, layer5_v2 37), all passed;
+  - the six tests plus test_release_findings_d3 / de / esdirk43 passed (139 passed, 1 xfailed).
+- The WIP commit after it adds the reviewer fixes (the held sample flushed on the next sample; `flush_steps` in `sample`) and a dead-time recorder test. The build in flight checks exactly these: the six tests, the new test and the two counters.
+- NOT run: the 44 touched files on the final tip, the full pytest, ruff, the scoreboard and reference_status, and a re-review.
+
+### Next steps (successor)
+1. Build the extension on the pushed tip, then run the six tests, `test_release_findings_d3.py` and the counters.
+2. Run ruff, the 44 touched files, and one full pytest (zero failures required).
+3. Run `.scratch/d3_bench.py` (scoreboard trbdf2 80/30/9, trbdf2+esdirk43 vs 81/65/16; reference 106/2/1). The moved rule reverts some linear edges to the base's behaviour, so the esdirk43 row may fall back toward 81/65/13. The class bar is against cad6ab6b.
+4. Optional: trace why the curvature variant left 22 forced accepts (a turn-on that took the sample path).
+5. Step 4's snapshot block, coordinated with the integration line.

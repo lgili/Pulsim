@@ -568,6 +568,7 @@ private:
             if (has_held_ && t_held_ == t) has_held_ = false;
             return;
         }
+        if (has_held_) flush_held(t);   // an earlier edge's, a step before this one
         if (!started_ || has_held_) ++n_dropped_;
         if (!started_) return;
         eval(t, *x, *m, held_);

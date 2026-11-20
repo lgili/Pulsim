@@ -1944,11 +1944,15 @@ inline SimulationResult run_transient_trbdf2(
         // 4.6e-12 s), not the right limit; a TR-BDF2 step from x reading
         // them was rejected down to h_min. That probe is a step of its own
         // and stays committed, as before D3.
-        // Likewise a probe whose states MOVED over dtp: it resolved a mode
-        // faster than dtp (a flyback's leakage into a 1 uS open switch, tau
-        // ~5 ps against a 1-3 ps probe), so x(t + dtp) is not x(t_e+), and
-        // the step from x with its slots was rejected down to h_min (744
-        // forced accepts, 33 chatter breaks, against 3 / 0 at cad6ab6b).
+        // Likewise a probe whose stored states MOVED over dtp by more than
+        // their tolerance: on the flyback (leakage into a 1 uS open switch,
+        // tau ~5 ps against a 1-3 ps probe) the step from x with its slots
+        // was rejected down to h_min (744 forced accepts, 33 chatter breaks;
+        // cad6ab6b: 0 / 0). The rule also takes edges that only ramp (a DCM
+        // turn-on from i = 0): those keep cad6ab6b's committed probe. A
+        // curvature test (a second probe over 2 dtp, y2 - 2 y1 + y0) told
+        // ramps apart but left 22 forced accepts on the flyback (its turn-on
+        // edges then took the sample path): not adopted (release D3 notes).
         auto probe_moved = [&]() {
             for (const auto& e : entries) {
                 const bool cap = e.kind == pwl::DevicePool::StoredKind::Capacitor;
