@@ -261,3 +261,30 @@ states are same-or-closer everywhere, the algebraic variables at events are not.
 | Coss buck (new path) | 74443 | 73187 | −1.7 % |
 
 Gate 0.5 % on the cases off the new path: met (+0.14 .. +0.30 %).
+
+## Verified at the tip (5ebaa41d code; notes after it)
+
+- Extension build (Release, Eigen 5, macOS arm64), copied into
+  `python/pulsim/` (`build/python/pulsim` is a symlink to it: pytest ran this build).
+- C++ targets on Eigen 5, all pass: pulsim_core_dsed_tests (142 cases),
+  pulsim_core_step_tests (32), pulsim_core_sim_tests (8),
+  pulsim_core_thermal_tests (9), pulsim_core_layer5_v2_tests (37).
+- Full pytest: 6220 passed, 110 skipped, 10 xfailed, 0 failed.
+- Byte compares vs 85637327: `pwl_identity` 390/390 identical;
+  `trbdf2_identity` 367/371 (the four moved cases above); engines oracle:
+  everything identical except `satind_trbdf2` (listed); stateful oracle: the
+  11 trbdf2 cases listed above move, every pwl / restart / resume case identical.
+- ruff on the touched test files: clean. No binding signature changed (no stubs check needed).
+
+NOT run: Eigen 3.4.0, g++, full ctest, openspec strict, mkdocs, scoreboards,
+the goldens.py checkpoint tool (pwl only; covered by the pwl identity).
+
+Strict xfails for the release merge:
+- REMOVE: none of this slice's (the F-3-4 pair's strict xfail in
+  test_release_findings_de.py is already removed here).
+- On `feat/core-soft-switching-validation` (45076ddb):
+  `test_esdirk43_starts_a_current_driven_nonlinear_capacitor` (F-S-1) turns
+  XPASS against this branch: remove its mark at the merge.
+- ADDED (strict, stays until the gate-edge probe is fixed):
+  `test_coss_conduction_energy_to_1pc_at_defaults[kw0, kw1]` (F-4-5 remainder).
+- KEPT: `test_coss_turn_on_energy_on_the_fixed_engine` (pwl E_oss booking).
