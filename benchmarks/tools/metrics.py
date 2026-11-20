@@ -137,7 +137,12 @@ def exact_dev(y, cand) -> np.ndarray:
 
 
 def err_exact(t, y, cand, *, span: float, gap=None, exclude_t0: bool = True) -> float:
-    """The ``exact`` measure: ``sqrt((Σ w_i e_i² + Σ c_i) / Σ w_i) / span``
+    """The OLD ``exact`` measure, kept only to print the previous definition
+    beside :func:`exact_parts` for one release (``exact_old``). It misprices a
+    displaced event (charged its row's weight, not jump² × δ, once δ exceeds
+    the snap window) and grades the right limit at t = 0⁺; do not use it.
+
+    ``sqrt((Σ w_i e_i² + Σ c_i) / Σ w_i) / span``
     over the trace's OWN samples, e_i = :func:`exact_dev`, w_i the trapezoid
     time weight of sample i (half of each adjacent interval). No
     interpolation of the trace, so a perfect trace scores the truth's
@@ -179,3 +184,174 @@ def err_exact(t, y, cand, *, span: float, gap=None, exclude_t0: bool = True) -> 
     w[:-1] += h / 2
     w[1:] += h / 2
     return float(np.sqrt((np.sum(w * e * e) + np.sum(c)) / w.sum()) / span)
+
+
+# ---------------------------------------------------------------- exact --
+# The `exact` measure (three parts). One implementation for every tool that
+# grades an engine against the exact truth (exact_scoreboard.grade and what
+# calls it: the accuracy summary, the rehearsal, the tests).
+
+EVENT_WINDOW = 2.0          # matching window, in units of h
+
+
+def match_events(truth, engine, window: float):
+    """Match engine events to truth events by key and order.
+
+    ``truth``, ``engine``: sequences of ``(t, key)``; a key names one device
+    and the state it enters (``"D1+"``). Per key, in time order, each truth
+    event takes the engine event of the same key nearest to it within
+    ``window`` among those after the key's previous match (order is kept: a
+    chattering engine cannot match one truth event twice, and the extra
+    flips are spurious); a truth event with none is missing. A cluster of
+    truth events closer than h is matched one by one the same way.
+    Returns ``(pairs, missing, spurious)``: ``[(i_truth, j_engine)]`` and two
+    index lists."""
+    pairs, missing, spurious = [], [], []
+    for key in {k for _, k in truth} | {k for _, k in engine}:
+        T = sorted((i for i, (_, k) in enumerate(truth) if k == key), key=lambda i: truth[i][0])
+        E = sorted((j for j, (_, k) in enumerate(engine) if k == key), key=lambda j: engine[j][0])
+        q0 = 0
+        for i in T:
+            ti = truth[i][0]
+            while q0 < len(E) and engine[E[q0]][0] < ti - window:   # too early for this or any later one
+                spurious.append(E[q0])
+                q0 += 1
+            best = None
+            for q in range(q0, len(E)):
+                d = engine[E[q]][0] - ti
+                if d > window:
+                    break
+                if best is None or abs(d) < abs(engine[E[best]][0] - ti):
+                    best = q
+            if best is None:
+                missing.append(i)
+                continue
+            spurious += E[q0:best]
+            pairs.append((i, E[best]))
+            q0 = best + 1
+        spurious += E[q0:]
+    return sorted(pairs), sorted(missing), sorted(spurious)
+
+
+def exact_parts(t, y, cand, *, span: float, h: float, truth_events=(), engine_events=(),
+                right_rows=(), events_available: bool = True, window: float = EVENT_WINDOW) -> dict:
+    """The ``exact`` measure of one column, in three parts (fractions of ``span``).
+
+    ``t``, ``y``: the engine's STORED rows (left limits); ``cand``: the truth
+    at those times, one column per one-sided value (``at_float(..., 0.0)``;
+    two only where t_i is a truth event instant, where either is right).
+    ``truth_events``: ``(t_e, key, left, right)``, the truth's one-sided
+    values of this column at its device events. ``engine_events``:
+    ``(t_e, key, left, right, truth_left, truth_right)``, the engine's own
+    instant and one-sided values (``right`` None when the engine records no
+    right limit) and the truth's at that same instant (used when unmatched).
+    ``right_rows``: ``(t, value, truth_right)``, every other right limit the
+    engine records. ``h``: the unit of the reported instant error.
+
+    smooth: ``sqrt(Σ w_i e_i² / Σ w_i)``, e_i = :func:`exact_dev`, over the
+      stored rows except the initial instant and every row whose step on
+      either side holds a device event (truth or engine): w_i the trapezoid
+      weights of the grid; no snap window, no timing charge. None if no row
+      is left.
+    instants: ``sqrt(Σ_e jump_e² |δ_e| / T)``, δ_e = engine − truth instant
+      of each matched truth instant (the largest over its devices), jump_e the
+      truth's right − left: the L2 cost of the displacement. Also max |δ|/h.
+      None (not available) when the engine exposes no event record.
+    limits: ``max |engine − truth|`` over every one-sided value the engine
+      records at an instant after the initial one: at a matched event its left
+      (and right) value against the truth's limits at the TRUTH's instant; at
+      an unmatched engine event and at every other right-limit row, against
+      the truth's limits at the engine's instant.
+
+    Unmatched events are listed (``missing`` / ``spurious``), never priced:
+    what they do to the trajectory is in ``smooth``. Engine events at the
+    initial instant without a match are the engine's initial mode selection
+    (``n_initial``), not spurious. ``summary`` = the largest part, ``part``
+    its name; a non-finite value anywhere scores inf (part ``non-finite``)."""
+    t = np.asarray(t, dtype=float)
+    y = np.asarray(y, dtype=float)
+    cand = np.asarray(cand, dtype=float).reshape(t.size, -1)
+    if np.any(np.diff(t) < 0):
+        raise ValueError("times must be non-decreasing")
+    if t.size < 2 or span <= 0.0 or h <= 0.0:
+        raise ValueError("need >= 2 stored rows, span > 0 and h > 0")
+    t0 = t[0]
+    t0p = np.nextafter(t0, np.inf)
+    T = float(t[-1] - t0)
+    pairs, missing, spurious = match_events([(e[0], e[1]) for e in truth_events],
+                                            [(e[0], e[1]) for e in engine_events], window * h)
+    initial = [j for j in spurious if engine_events[j][0] <= t0p]
+    spurious = [j for j in spurious if engine_events[j][0] > t0p]
+    out = dict(missing=[(float(truth_events[i][0]), truth_events[i][1]) for i in missing],
+               spurious=[(float(engine_events[j][0]), engine_events[j][1]) for j in spurious],
+               n_initial=len(initial), n_matched=len(pairs), instants_available=bool(events_available))
+    recorded = [y] + [np.array([v for e in engine_events for v in e[2:4] if v is not None], dtype=float),
+                      np.array([r[1] for r in right_rows], dtype=float)]
+    if not all(np.all(np.isfinite(a)) for a in recorded):
+        out.update(summary=float("inf"), part="non-finite", smooth=float("inf"), instants=None,
+                   limits=float("inf"), smooth_rows=0, kept=np.zeros(t.size, dtype=bool))
+        return out
+
+    # (a) smooth: rows whose two adjacent steps hold no device event
+    ev = np.sort(np.r_[[e[0] for e in truth_events], [e[0] for e in engine_events]]).astype(float)
+    prev = np.r_[t[0], t[:-1]]
+    nxt = np.r_[t[1:], t[-1]]
+    near = np.searchsorted(ev, prev, side="left") < np.searchsorted(ev, nxt, side="right")
+    graded = t > t0
+    w = np.zeros(t.size)
+    g = t[graded]
+    w_g = np.zeros(g.size)
+    w_g[:-1] += np.diff(g) / 2
+    w_g[1:] += np.diff(g) / 2
+    w[graded] = w_g
+    kept = graded & ~near
+    e = exact_dev(y, cand)
+    out["smooth_rows"] = int(kept.sum())
+    out["kept"] = kept
+    out["smooth"] = (float(np.sqrt(np.sum(w[kept] * e[kept] ** 2) / w[kept].sum()) / span)
+                     if kept.any() and w[kept].sum() > 0 else None)
+
+    # (b) instants: per matched truth instant, its largest displacement
+    worst = {}
+    for i, j in pairs:
+        d = float(engine_events[j][0] - truth_events[i][0])
+        te = float(truth_events[i][0])
+        if te not in worst or abs(d) > abs(worst[te][0]):
+            worst[te] = (d, truth_events[i][3] - truth_events[i][2])
+    if events_available:
+        cost = sum(jmp * jmp * abs(d) for d, jmp in worst.values())
+        out["instants"] = float(np.sqrt(cost / T) / span) if T > 0 else 0.0
+        dmax = max(worst.values(), key=lambda x: abs(x[0]))[0] if worst else 0.0
+        out["max_dt_s"] = dmax
+        out["max_dt_h"] = dmax / h
+    else:
+        out["instants"] = None
+
+    # (c) one-sided limits, after the initial instant
+    errs = []
+    for i, j in pairs:
+        te, _, left, right = engine_events[j][:4]
+        if te > t0p:
+            errs.append((te, abs(left - truth_events[i][2])))
+            if right is not None:
+                errs.append((te, abs(right - truth_events[i][3])))
+    for j in spurious:
+        te, _, left, right, tl, tr = engine_events[j]
+        errs.append((te, abs(left - tl)))
+        if right is not None:
+            errs.append((te, abs(right - tr)))
+    errs += [(tr, abs(v - tv)) for tr, v, tv in right_rows if tr > t0p]
+    if errs:
+        a = np.array([x for _, x in errs])
+        k = int(np.argmax(a))
+        out.update(limits=float(a[k] / span), limits_rms=float(np.sqrt(np.mean(a * a)) / span),
+                   n_limits=len(errs), limits_worst_t=float(errs[k][0]))
+    else:
+        out.update(limits=None, n_limits=0)
+
+    parts = {p: out[p] for p in ("smooth", "instants", "limits") if out[p] is not None}
+    if not parts:
+        raise ValueError("nothing graded: no smooth row, no event, no recorded limit")
+    out["part"] = max(parts, key=parts.get)
+    out["summary"] = parts[out["part"]]
+    return out
