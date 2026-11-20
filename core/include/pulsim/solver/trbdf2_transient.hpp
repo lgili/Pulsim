@@ -1868,6 +1868,8 @@ inline SimulationResult run_transient_trbdf2(
     // Where and under which mode a gate edge re-solved the slots (x itself
     // is the pre-edge solve): esdirk43's explicit stage may read them.
     Real edge_slots_t = std::numeric_limits<Real>::quiet_NaN();
+    Vector x_edge;   // the edge's probe: the next step's Newton warm start
+    Real x_edge_t = std::numeric_limits<Real>::quiet_NaN();
     SwitchStateMask edge_slots_m;
     auto restart_after_gate_event = [&](bool settled, Real t_gates,
                                         Real hp, bool commit) {
@@ -1913,16 +1915,52 @@ inline SimulationResult run_transient_trbdf2(
         // C_oss loop of tau = 0.6 ps it stopped at 38.94 V where the ODE is
         // at 30.67 V, and the loss port booked it from the right limit's
         // 2.3 MW (+4.4 % conduction energy, release group D3).
-        //  - A circuit whose diode events restart by the SDIRK(2,2) step (a
-        //    Newton law or a stateful kind): the same restart from x; its
-        //    backward-Euler stages read no slot, its commit stores the new
-        //    mode's.
-        //  - A linear circuit: the slots from the probe, which KCL balances
-        //    under the new mode at t + h_p (the probe's companion current, not
-        //    the stale slot), and the next step is TR-BDF2 from x. (The SDIRK
-        //    step there cost +40 .. +90 % accepted steps on PWM circuits for no
-        //    measured gain: its embedded estimate is first order.)
-        const bool lin = !sdirk_ok;
+        //  - A circuit with a stateful kind: the SDIRK(2,2) restart from x,
+        //    as after a diode event; its backward-Euler stages read no slot,
+        //    its commit stores the new mode's. (The probe is no right limit
+        //    there: 0.47 tau of the C_oss loop, its slot half a decay late.)
+        //  - Otherwise: the slots from the probe, which KCL balances under the
+        //    new mode at t + h_p (the probe's companion current, not the stale
+        //    slot), and the next step is TR-BDF2 from x. The SDIRK step there
+        //    cost +40 .. +90 % accepted steps on linear PWM circuits (its
+        //    estimate is first order), moved two esdirk43 scoreboard cells out
+        //    of their class, and on a vcswitch forward converter (a Newton law,
+        //    no stateful kind) its stage-2 base, extrapolated across the
+        //    source jump, failed Newton down to h_min (ll13).
+        const bool lin = !hs.any() && !opts.sdirk_on_linear_circuits;
+        const Real t_plus = t + dtp;
+        // A probe whose Newton stalled at hp was retaken 100x longer: its
+        // slots are then those of t + dtp, many time constants of the new
+        // mode past the edge (ll13's off-state drain, tau ~ 2e-13 s, probe
+        // 4.6e-12 s), not the right limit; a TR-BDF2 step from x reading
+        // them was rejected down to h_min. That probe is a step of its own
+        // and stays committed, as before D3.
+        if (lin && dtp > hp * Real{1.0001} && commit
+            && t_plus < opts.t_end - h_min
+            && t_plus < queue.next_of(events::Kind::ControlTick) - h_min) {
+            history.update_from_state(x_trial, dtp);
+            if (learn_gates) {
+                gate.learn_toggles(diodes.num_gated() > 0 ? switch_fn(t_gates)
+                                                          : m_probe, t);
+            }
+            x = x_trial;
+            x_sig = x;
+            const Real t_hook0 = t;
+            t = t_plus;
+            drop_superseded_event_sample(t);
+            push_time(t, "gate-edge");
+            result.states.push_back(x);
+            result.event_iteration_count.push_back(0);
+            result.record_switch_state(m_probe);
+            device_state_once(t, x);
+            if (hooks) hooks->accepted(t_hook0, t, x, m_probe);
+            if (lt) lt->accept_step(t_hook0, t, x, m_probe, nullptr, 0.5, 0, 0.5);
+            if (structure.active()) reinit.note(m_probe);
+            x_mask = m_probe;
+            x_mask_known = true;
+            gates_decided = m_probe;
+            return;
+        }
         if (lin) {
             history.refresh_derivatives(x_trial, dtp);
             if (lt) lt->slots_rewritten();
@@ -1932,7 +1970,8 @@ inline SimulationResult run_transient_trbdf2(
             sdirk_left = std::max(sdirk_left, Size{1});
             sdirk_gate = true;
         }
-        const Real t_plus = t + dtp;
+        x_edge = x_trial;
+        x_edge_t = t;
         // No sample across t_end or a controller tick (the step to it
         // starts from x anyway): the slots only, for a snapshot.
         if (!commit || t_plus >= opts.t_end - h_min
@@ -2857,7 +2896,10 @@ inline SimulationResult run_transient_trbdf2(
             history.compute_b_extra(hg, b_stage);
             accumulate_sources(t + h_pt, b_src);
             b_stage += b_src;
-            x_g = x;                 // Newton warm start
+            // Newton warm start; the first step after a gate edge starts from
+            // the edge's probe (x is the pre-edge solve: from it a vcswitch
+            // forward converter's Newton failed down to h_min, ll13)
+            x_g = x_edge_t == t ? x_edge : x;
             step_ctx = stage0.ctx();
             step_ctx.t = t + h_pt;
             if (sdirk && ed_sf) {   // the q rows: BE of gs·h, the linear entries' rule
