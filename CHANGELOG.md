@@ -23,6 +23,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   instead of jump²·δ (`vcswitch_resistor` pwl+split, 0.005 dt early:
   0.0316, now 0.0032). It is kept as `exact_old` (json and table) for this
   release.
+* **Added (evidence)** rule (1), a projected transient: where an engine
+  reports a projection at an event (`reinit_records`) and the truth itself
+  settles to the engine's recorded right value within the engine's declared
+  parasitic window (dt/100 for the exact engine, h for pwl), that value is
+  priced as a transient collapsed in time (instants, jump²·tau_eff), not as
+  a wrong limit; the cell counts it (`n_projected`). No engine writes such a
+  record at the events it was made for yet (the exact engine's slow-manifold
+  projection writes none: finding F-SB-3), so no cell moved.
 
 ### Thermal summary: one conduction reading; refusals where there was silence
 
