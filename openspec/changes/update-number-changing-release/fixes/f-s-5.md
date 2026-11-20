@@ -242,3 +242,52 @@ Integration note (step 5): `hs_edge_restart` (cause (a)'s workaround) is
 untouched. When the branch that commits the probe's right-limit current to
 the slot meets this one: remove the flag, then re-run `.scratch/f5w/sweep.py
 len|tol|rand 200` and this file's tests; the window rule is independent of it.
+
+## Session 2 verification (tip after 6e5241a6) and the OPEN REGRESSION
+
+- C++ on Eigen 5 (fresh `.scratch/build-ctest`, targets only): layer5_v4 24
+  cases (incl. the period-7 cycle and the protected slow-convergence case:
+  declined "still contracting" at budgets 20/25/30), layer5_v3 35 cases (incl.
+  session 1's law test in `test_device_laws.cpp`), step 32, sim 8, dsed 142:
+  all pass.
+- `test_release_findings_fs5.py` 27 passed + 1 strict xfail (cut-set trbdf2
+  rtol 1e-8); `test_newton_stall_and_mask_chatter.py` (the 10.67 V spurious-root
+  DC test) passes.
+- Byte compares vs the 14b0c81a build: goldens ALL IDENTICAL, stateful ALL
+  IDENTICAL, engines ALL IDENTICAL, pwl_identity 379/379, dsed bit-identity
+  280/280, trbdf2_identity 369/371:
+  - ll08_buck_mosfet (trbdf2): moved — 2020 → 1998 accepted steps, roundoff
+    accepts 138 → 135 (solves that were declined and shrank h are now
+    accepted). Not yet checked against a truth.
+  - **ll13_active_clamp_forward (trbdf2): REGRESSION — ran at 14b0c81a (345
+    roundoff accepts, 1538 steps), now aborts at t = 41 us**: Newton at h_min,
+    ||dx|| 1.56e-4 at node sw_out, row backward error 3.4e5 eps (NOT a
+    roundoff case; declined correctly). The new path reaches a state where
+    Newton genuinely fails. Cause not traced.
+- Fresh-context reviewer (opus): could not make the acceptance return a wrong
+  answer (the 8 eps residual gate bounds any accepted state; the window is
+  stricter than rule 8 on monotone convergence); its sweeps 60 lengths / 14
+  rtols / 102 law variants: 0 aborts, crossings ≤ 2.9 ps. It found: trbdf2
+  cut-set also aborts at rtol 1e-9 ("growing", not in the test); the decline
+  message still prints the last three ||dx||, not the window minima/maxima
+  (and prints inf / "still contracting" when kw < 2); test comments fixed.
+  Note: trbdf2 rtol 1e-9 case A has 2000 accepts of 19557 solves (100k of 169k
+  Newton iterations are spent in budget-exhausted solves).
+
+NEXT STEPS (in order):
+1. ll13 regression: rebuild with a trace of every ACCEPT (t, h, omega, row,
+   ||dx_k||, kw, window min/max) and run ll13 on both builds (the old rule:
+   restore the two-step lines locally); find the first accept the old rule
+   declined, and whether the state it kept is wrong (compare v(sw_out),
+   i(Lout) against pwl at small dt / trbdf2 rtol 1e-9). Candidates: an accept
+   with ||dx_k|| near the cap 1e-6·|x_0| (|x_0| large in a forward converter
+   ⇒ a cap of volts), or a cycle whose x_k is the worst phase. A fix would be
+   to keep the best-residual iterate of the window, or to cap ||dx_k|| by
+   tol_dx·k.
+2. Then re-run: `.scratch/f5w/sweep.py len|tol|rand 200`, the byte compares
+   (`.scratch/b14/rec.sh new compare`), ll08 against a truth, full pytest
+   (one started on 6e5241a6+, with -x: `.scratch/logs/full_pytest.log`).
+3. Decline message: print the window minima/maxima (the h_min abort text).
+4. Cost (instructions per accepted step, stateless trbdf2/pwl, min of six):
+   NOT run. The rule adds a 32-entry shift per Newton iteration only when the
+   acceptance is on (transient Newton solves), nothing on linear circuits.

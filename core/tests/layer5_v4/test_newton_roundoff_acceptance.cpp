@@ -218,7 +218,7 @@ TEST_CASE("Roundoff acceptance: a period-7 cycle is accepted at every phase",
     // ||dx|| = 48, 20, 10, 4, 2, 12, 4 u. Ending after 48, 20, 10 (or 20,
     // 10, 4) the last two steps contract by more than 4, so the two-step
     // rule of DECISIONS 8 declined it ("still contracting"); the window
-    // minimum (2 u) is the same in both windows of 8.
+    // minimum (2 u) is the same in both windows (15-16 steps here).
     Graph g;
     g.add_node("n0");
     g.add_branch(0, g.ground(), BranchKind::Source);
@@ -249,7 +249,7 @@ TEST_CASE("Roundoff acceptance: slow convergence near the floor is declined",
     // but ||dx|| still falls geometrically at rate 0.7, so the iterate is
     // still moving toward its root. The two-step rule accepted it (0.49 of
     // ||dx_{k-2}|| is "no net contraction by 4"); the window minimum falls
-    // by 0.7^8 = 0.06 and it is declined while it contracts.
+    // by 0.7^k (k = 10..15 here) and it is declined while it contracts.
     Graph g;
     g.add_node("n0");
     g.add_branch(0, g.ground(), BranchKind::Source);
