@@ -17,6 +17,7 @@ import pulsim as p
 from pulsim._result_views import with_right_limits
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(ROOT / "benchmarks" / "tools"))
 import metrics  # noqa: E402
 import v1_reader  # noqa: E402
@@ -116,3 +117,33 @@ def test_f8_the_referee_fails_a_line_it_cannot_read():
         F.lines_ratio(t, np.array([0.0, np.nan, 1.0]), np.array([0.5, 1.5]), np.array([0.5, 1.0]), 1e-3)
     r, at = F.lines_ratio(t, y, np.array([0.5, 1.5]), np.array([0.5, 1.0 + 2e-3]), 1e-3)
     assert r == pytest.approx(2.0) and at == 1.5
+
+
+def test_f8_ten_bridges_rows_at_rounding_do_not_cut_the_samples():
+    """D-2 (session 7): ten paralleled bridges capped EVERY interval (409 600 samples in
+    0.1 ms): a 1.5e11 /s mode carrying the state's own rounding (1e-13 in modal units) on a
+    node behind 1/g_off read 7.6e-5 V against a 4e-9 tolerance, above the old floor
+    Σ|P||z| (3.4e-13, P after its cancellation). The floor is now ε·Σ|terms| of the recovery
+    (|O||V||z|); the rows it certifies are counted, never silent."""
+    from test_exact_route import _paralleled_bridges
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(_paralleled_bridges(10), t_end=1e-4, engine="exact", output_rtol=1e-5)
+    og = r.diagnostics["output_grid"]
+    assert og["n_output_capped"] == 0 and og["output_budget_t"] is None
+    assert len(r.times) < 3000          # 926 at session 7
+    assert og["n_output_floored"] > 0
+    assert og["output_floor_max"] > 0.0
+    fc = np.asarray(og["output_floor_by_column"])
+    assert fc.shape == (np.asarray(r.states).shape[1],)
+    assert fc.max() == og["output_floor_max"]
+
+
+def test_f8_a_balanced_neutral_does_not_spend_the_budget():
+    """D-3 (session 7): three_phase_balanced_rl_load spent the whole 2e6-sample budget by
+    4.53 ms (8 038 samples before 075feac9's per-row floor; 5 153 rule-free)."""
+    case = v1_reader.load(ROOT / "benchmarks" / "circuits/three_phase/three_phase_balanced_rl_load.yaml")
+    r = _no_dt(case, output_rtol=1e-5)
+    og = r.diagnostics["output_grid"]
+    assert og["output_budget_t"] is None and og["n_output_capped"] == 0
+    assert len(r.times) < 12_000        # 5 290 at session 7

@@ -122,21 +122,29 @@ def _column_floor(res, col, fl):
     raise RefereeError(f"no floor mapping for {col} (floored columns reported)")
 
 
-def check(unit: str) -> dict:
+def check(unit: str, config: str = "auto+next") -> dict:
     warnings.simplefilter("ignore")
     case = v1_reader.load(R.ROOT / unit)
     cols = dr.observables_of(case)
-    kind, res, _, msg, info = R.run_cell(case, "auto+next")
+    kind, res, _, msg, info = R.run_cell(case, config)
     rt = R._rule_rtol(res) if kind == "ran" else None
     if not rt:
         return dict(unit=unit, comparable=False, why=f"no rule cell ({kind}: {msg})")
+    return dict(unit=unit, **referee(case, res, info, cols, rt, config))
+
+
+def referee(case, res, info, cols, rt, config: str = "auto+next") -> dict:
+    """The promise on one rule run ``res`` of ``case`` (``info``: run_cell's, for the
+    route): ``comparable`` with ``ratio`` (worst over ``cols``), or not with ``why``."""
+    spec = R.CONFIGS[config]
     og = res.diagnostics["output_grid"]
     if og.get("n_output_capped") or og.get("n_output_unbounded") or og.get("output_budget_t") is not None:
-        return dict(unit=unit, comparable=False, why=f"rule suspended (cap/unbounded/budget): "
+        return dict(comparable=False, why=f"rule suspended (cap/unbounded/budget): "
                     f"{ {k: og.get(k) for k in ('n_output_capped', 'n_output_unbounded', 'output_budget_t')} }")
     t, ys, _ = dr.traces(res, cols)
     ev = np.asarray(res.event_times if res.event_times is not None else [], dtype=float)
-    eng = info.get("route") or "dsed"
+    eng = info.get("route") or info.get("engine_used") or "dsed"
+    eng = "dsed" if eng == "exact" else eng
     t0 = time.perf_counter()
     # the reference: the same route, rule off, chained windows (one build: a closed loop's
     # controller lives in its Python objects and continues across windows)
@@ -154,9 +162,11 @@ def check(unit: str) -> dict:
     import pulsim
     tg_all, yg_all, eg_all = [], {c: [] for c in cols}, []
     snap = None
-    with warnings.catch_warnings(), nd.builder_form(True), nd.plan_defaults(True):
+    with warnings.catch_warnings(), nd.builder_form(spec["form"]), nd.plan_defaults(spec.get("plan", False)):
         warnings.simplefilter("ignore")
-        kw = {k: v for k, v in nd.profile_kwargs(eng).items() if k != "output_rtol"}
+        kw = ({k: v for k, v in nd.profile_kwargs(eng).items() if k != "output_rtol"}
+              if spec.get("profile") else dict(spec.get("kw") or {}))
+        kw.pop("output_rtol", None)
         for t_w, dt in _windows(t, float(t[-1])):
             a = dict(args, **kw, dt=float(dt))
             if snap is not None:
@@ -176,7 +186,7 @@ def check(unit: str) -> dict:
     eg = np.unique(np.concatenate(eg_all)) if eg_all else np.zeros(0)
     if eg.size != ev.size or (ev.size and float(np.abs(eg - ev).max()) > EVENT_TOL):
         n = min(eg.size, ev.size)
-        return dict(unit=unit, comparable=False, why=f"reference events differ: {ev.size} vs {eg.size}, "
+        return dict(comparable=False, why=f"reference events differ: {ev.size} vs {eg.size}, "
                     f"max |dt_e| {float(np.abs(eg[:n] - ev[:n]).max()) if n else float('nan'):.3g}")
     fl = og.get("output_floor_by_column")
     worst, where, per = 0.0, None, {}
@@ -190,7 +200,7 @@ def check(unit: str) -> dict:
         per[c] = dict(ratio=r, floor=floor, tol=tol)
         if r > worst:
             worst, where = r, (c, at)
-    return dict(unit=unit, comparable=True, ratio=worst, at=where, n_lines=int(np.sum(np.diff(t) > 0)),
+    return dict(comparable=True, ratio=worst, at=where, n_lines=int(np.sum(np.diff(t) > 0)),
                 n_ref=int(tg.size), n_windows=len(tg_all), rtol=rt, per=per,
                 n_output_floored=og.get("n_output_floored"), output_floor_max=og.get("output_floor_max"),
                 wall_ref_s=round(time.perf_counter() - t0, 2))

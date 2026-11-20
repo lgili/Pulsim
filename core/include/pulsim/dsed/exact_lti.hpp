@@ -98,6 +98,9 @@ struct ExactLTI {
     // The rows the rule bounds, in modal form: P = O·V for an output map O
     // (the adapter: [I; R] — the state and its recovered vector); empty: P = V.
     mutable DenseMatrix chord_P_re, chord_P_im;
+    // |O|·|V| (complex moduli): each row's evaluation magnitude per mode, its rounding
+    // floor's weights (empty: |P| = chord_vabs, exact when P = V)
+    mutable DenseMatrix chord_M;
     // The event scan's certificate (PEDSimulator::locate_event_exact_): per armed
     // predicate (index), its modal row q_k = c·V_k, built on first use (empty: not yet).
     mutable std::vector<Eigen::VectorXcd> scan_q;
@@ -110,6 +113,7 @@ struct ChordWork {
     Vector xa, ta, c0, c1, v, s;            // the adapter's augmented state / sources
     Vector cr, ci, a;                       // V⁻¹c (re, im); |z̈_k| (decaying / zero modes)
     Vector ty, tyf, te;                     // tolerance of each recovered row (empty: none); its rounding floor; the effective tol
+    Vector fu;                              // per bounded row: the floor the last step's certification needed (0: none)
     Vector gB, gC, gD;                      // the growing modes' terms at one probe
     Vector eb;                              // the bound at one probe
     std::vector<Eigen::Index> grow;         // modes with Re λ > 0
@@ -947,34 +951,45 @@ inline constexpr Real kSettleTau = Real{40};
                    .matrix();
         return true;
     };
-    // a recovered row (P's rows past the state's) cannot be held below its own evaluation
-    // error, 16·u·Σ_k |P_jk||z_k| (the sums its samples are made of): a balanced three-phase
-    // neutral, exactly 0 with 3.4e-7 V of rounding, held to atol spent the run's whole budget
-    const Real* te = tol.data();
-    if (rows_p && r > n) {
-        w.cr = (e.z_re.array().square() + e.z_im.array().square()).sqrt().matrix();
-        w.tyf.noalias() = e.chord_vabs.bottomRows(r - n) * w.cr;
-        w.tyf *= Real{16} * kExactRoundoff;
-        w.te = tol;
-        w.te.tail(r - n) = w.te.tail(r - n).cwiseMax(w.tyf);
-        te = w.te.data();
-    } else {
-        w.tyf.resize(0);
-    }
-    const Eigen::Map<const Vector> tol_e(te, r);
+    // No row is promised below its own rounding floor: its evaluation from the modal
+    // state, 16·u·Σ_i |O_ji| Σ_k |V_ik||z_k| (chord_M = |O|·|V|; |V| itself when P = V),
+    // i.e. ε·Σ|terms| of the recovery y = O·(V·z). Tolerance = max(tol, floor). A row
+    // whose bound only fits through its floor is certified constant up to rounding at
+    // that floor (w.fu, counted by the caller). The old floor Σ_k |P_jk||z_k| took P after
+    // its cancellation: ten paralleled bridges carry a 1.5e11 /s mode at 1e-13 (the state's
+    // own rounding) on a node behind 1/g_off = 3.9e8 Ω, 7.6e-5 V against a 4e-9 tolerance,
+    // and every interval hit the sample cap (group F session 7, D-2).
+    const DenseMatrix& M = e.chord_M.rows() == r ? e.chord_M : e.chord_vabs;
+    w.cr = (e.z_re.array().square() + e.z_im.array().square()).sqrt().matrix();
+    w.fu.noalias() = M * w.cr;
+    w.fu *= Real{16} * kExactRoundoff;
+    w.te = tol.cwiseMax(w.fu);
+    if (rows_p && r > n) w.tyf = w.fu.tail(r - n);
+    else w.tyf.resize(0);
+    const Eigen::Map<const Vector> tol_e(w.te.data(), r);
     // whether step d satisfies the bound for every component
     auto fits = [&](Real d) { return bound(d) && (w.eb.array() <= tol_e.array()).all(); };
-    if (fits(h)) return h;
+    // w.fu: each row's floor where the bound at the step taken needed it, else 0
+    auto floored = [&] {
+        w.fu = (w.eb.array() > tol.array()).select(w.fu, Real{0});
+    };
+    if (fits(h)) {
+        floored();
+        return h;
+    }
     // bisect in log d; lo always fits, so the result is a bound whatever the split does
     Real lo = h * Real{1e-12}, hi = h;
     if (!fits(lo)) {   // not even 1e-12·h fits: no bound (counted as unbounded)
         bounded = false;
+        w.fu.setZero();
         return h;
     }
     for (int it = 0; it < 60 && hi > lo * Real{1.01}; ++it) {
         const Real mid = std::sqrt(lo * hi);
         (fits(mid) ? lo : hi) = mid;
     }
+    bound(lo);
+    floored();
     return lo;
 }
 

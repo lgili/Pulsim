@@ -525,7 +525,8 @@ public:
         // state range restarts at the snapshot instant), nothing is carried
         output_lo_.resize(0);
         output_ylo_.resize(0);
-        output_count_ = output_events_ = n_output_capped_ = n_output_unbounded_ = 0;
+        output_count_ = output_events_ = n_output_capped_ = n_output_unbounded_ = n_output_floored_ = 0;
+        output_floor_row_.resize(0);
         output_pend_ = false;
         output_total_ = 0;
         output_budget_t_ = std::numeric_limits<Real>::quiet_NaN();
@@ -1082,6 +1083,11 @@ public:
     [[nodiscard]] Real output_budget_t() const noexcept { return output_budget_t_; }
     [[nodiscard]] std::size_t n_output_capped() const noexcept { return n_output_capped_; }
     [[nodiscard]] std::size_t n_output_unbounded() const noexcept { return n_output_unbounded_; }
+    /// The rule calls whose chord was certified only through a row's rounding floor
+    /// (that row is constant up to rounding at the floor), and per bounded row (the
+    /// augmented state, then the recovered vector) the largest floor so used (0: none).
+    [[nodiscard]] std::size_t n_output_floored() const noexcept { return n_output_floored_; }
+    [[nodiscard]] const Vector& output_floor_row() const noexcept { return output_floor_row_; }
 
     // Test hooks: the step cap (default 10M) and the settle's round cap
     // (default 64). A small cap reaches the give-up deterministically on
@@ -3372,7 +3378,8 @@ private:
     Real output_atol_ = Real{0};
     std::size_t output_cap_ = 0, output_count_ = 0, output_events_ = 0;
     Real output_target_ = Real{0};   // the interval's next time event
-    std::size_t n_output_capped_ = 0, n_output_unbounded_ = 0;
+    std::size_t n_output_capped_ = 0, n_output_unbounded_ = 0, n_output_floored_ = 0;
+    Vector output_floor_row_;   // per bounded row (state, then recovered): the largest floor used
     std::size_t output_budget_ = 0, output_total_ = 0;   // cut steps allowed / taken in the run
     Real output_budget_t_ = std::numeric_limits<Real>::quiet_NaN();
     Vector output_lo_, output_hi_, output_tol_, output_end_;   // range of each state so far
@@ -3459,6 +3466,12 @@ private:
                 return h;
             }
             output_certified_ = true;
+            // rows certified only through their rounding floor (never silent: counted)
+            if (const Vector& fu = output_work_.fu; (fu.array() > Real{0}).any()) {
+                if (output_floor_row_.size() != fu.size()) output_floor_row_.setZero(fu.size());
+                output_floor_row_ = output_floor_row_.cwiseMax(fu);
+                ++n_output_floored_;
+            }
             if (!(d < h)) return h;
             if (!count) return d;
             ++output_total_;

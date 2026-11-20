@@ -285,12 +285,15 @@ def circuit_worker(unit, names, emit):
             rt = _rule_rtol(res)
             if rt:
                 rec["rule_ratio_ref"] = dr.rule_check(res, ref, cols, rt)
-                flow, why = _dense_flow(case, name, res, rt)
-                if flow is None:
-                    rec["rule_ratio"] = float("nan")
-                    rec["rule_note"] = why
-                else:
-                    rec["rule_ratio"] = dr.rule_check(res, ref, cols, rt, flow=flow)
+                # the referee reads every stored line against the rule-off flow (session 7)
+                import output_rule_referee as F
+                try:
+                    fr = F.referee(case, res, info, cols, rt, name)
+                except Exception as ex:  # noqa: BLE001 - a harness failure, recorded as one
+                    fr = dict(comparable=False, why=f"{type(ex).__name__}: {ex}"[:200])
+                rec["rule_ratio"] = fr["ratio"] if fr["comparable"] else float("nan")
+                if not fr["comparable"]:
+                    rec["rule_note"] = fr["why"]
         dr.mark_suspect(rec, entry)
         if kind == "ran" and sol is not None and g:
             try:
@@ -481,14 +484,9 @@ def judge(a, b):
         # no class change (above) and within what the rule promises -- never "2x the
         # base": the base's extra samples (the 1 us poll) are not a promise
         r = b["rule_ratio"]
-        if r == r:
-            return ("worse", "rule") if r > 1 else (None, None)
-        # NaN: no interval between switching steps to read the chord on; the truth
-        # (`exact`, below) still judges, the 2x reference bar does not
-        ea, eb = a.get("exact"), b.get("exact")
-        if ea is not None and eb is not None and max(ea, eb) > 1e-12 and eb > 2 * ea:
-            return "worse", "truth"
-        return None, None
+        # NaN: the referee could not read every line (rule_note says why) -- a failure,
+        # never a pass (session 7: a NaN passed as not-worse)
+        return ("worse", "rule") if not r <= 1 else (None, None)
     sa, sb = a.get("err_rms"), b.get("err_rms")
     big = sa is not None and sb is not None and max(sa, sb) > (b.get("tol") or 1e-3) / 100
     up, down = big and sb > 2 * sa, big and sa > 2 * sb

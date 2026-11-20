@@ -563,6 +563,9 @@ public:
                 if (k > 0 && e.recover_osc.rows() == m) O.bottomRightCorner(m, 2 * k) = e.recover_osc;
                 e.exact.chord_P_re = O * e.exact.V_re;
                 e.exact.chord_P_im = O * e.exact.V_im;
+                e.exact.chord_M = O.cwiseAbs()
+                                  * e.exact.V_re.binaryExpr(e.exact.V_im,
+                                                            [](Real a, Real b) { return std::hypot(a, b); });
             }
             w.ta.conservativeResize(n + 2 * k + w.ty.size());
             w.ta.tail(w.ty.size()) = w.ty;   // floored in exact_chord_step (w.tyf)

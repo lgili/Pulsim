@@ -1667,6 +1667,9 @@ void init_module(py::module_& m) {
                 d["n_output_capped"] = sim.n_output_capped();
                 d["n_output_unbounded"] = sim.n_output_unbounded();
                 d["output_budget_t"] = sim.output_budget_t();
+                d["n_output_floored"] = sim.n_output_floored();
+                const auto& fr = sim.output_floor_row();
+                d["output_floor_row"] = std::vector<double>(fr.data(), fr.data() + fr.size());
             }
             d["exact"] = exact_report_dict(adapter, res.n_predicate_evals);
             if (mode_shadow_h_e > Real{0}) {

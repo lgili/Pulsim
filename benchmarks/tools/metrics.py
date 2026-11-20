@@ -139,7 +139,9 @@ def rule_ratio(t, y, ref: Reference, *, rtol: float, atol: float, exclude=()) ->
     its peak; a sum, not a max, of the two tolerances, so the reference's own error
     near atol is absorbed). Intervals of zero length or overlapping an ``exclude``
     interval (a recorded switch-state change: the rule promises nothing across an
-    event) are skipped. <= 1 is within the promise; nan when no interval is left."""
+    event) are skipped. <= 1 is within the promise; nan when no interval is left.
+    A callable ``ref`` (a closed form) is read at eleven interior instants of every line,
+    against ``max(rtol * range, atol)`` exactly (the promise, no slack)."""
     t = np.asarray(t, dtype=float)
     y = np.asarray(y, dtype=float)
     keep = np.diff(t) > 0
@@ -151,8 +153,16 @@ def rule_ratio(t, y, ref: Reference, *, rtol: float, atol: float, exclude=()) ->
         bad = np.zeros(m.shape, bool)
         for a, b in iv:
             bad |= (lo < b) & (hi > a)
-        m, ym = m[~bad], ym[~bad]
-    if callable(ref):
+        if not callable(ref):
+            m, ym = m[~bad], ym[~bad]
+    if callable(ref):   # a closed form: every line at several interior instants (session 7)
+        lo_, hi_ = t[:-1][keep], t[1:][keep]
+        y0, y1 = y[:-1][keep], y[1:][keep]
+        if len(exclude):
+            lo_, hi_, y0, y1 = lo_[~bad], hi_[~bad], y0[~bad], y1[~bad]
+        f = np.array([1e-3, 1e-2, 0.05, 0.15, 0.3, 0.5, 0.7, 0.85, 0.95, 0.99, 0.999])
+        m = (lo_[:, None] + (hi_ - lo_)[:, None] * f[None, :]).ravel()
+        ym = (y0[:, None] + (y1 - y0)[:, None] * f[None, :]).ravel()
         rm = np.asarray(ref(m), dtype=float)
         rr = np.asarray(ref(t), dtype=float)
     else:
@@ -163,6 +173,8 @@ def rule_ratio(t, y, ref: Reference, *, rtol: float, atol: float, exclude=()) ->
     if not m.size:
         return float("nan")
     rng = max(float(np.ptp(rr)), 1e-3 * float(np.abs(rr).max()))
+    if callable(ref):   # the promise itself: max(rtol·range, atol), no added slack
+        return float(np.abs(ym - rm).max() / max(rtol * rng, atol))
     return float(np.abs(ym - rm).max() / (rtol * rng + atol))
 
 

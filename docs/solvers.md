@@ -216,3 +216,25 @@ step after a refreshed edge).
   you need adaptive stepping today without waiting for v1.6.0.
 - `openspec/changes/add-adaptive-runge-kutta-solvers/` — proposal +
   design + delta spec.
+
+## The exact engine's output rule (`output_rtol`)
+
+With `engine='exact'`, no `dt`, `store_every` or recorders, `output_rtol`
+chooses the stored samples: every event instant (both limits of a jump),
+and between events only the samples a tolerance needs. The promise: the
+straight line between two consecutive stored samples is within
+`max(output_rtol * range, atol, floor)` of the exact solution at every
+instant of the line, for every stored column (states, node voltages,
+branch currents). `range` is the column's range over the run so far
+(through the end of the exact step holding the line, at least 1e-3 of
+its peak); `atol` is the run's absolute tolerance (default 1e-9). No
+column is promised below its own rounding floor (`floor`, 16·eps times
+the sum of the magnitudes of the terms it is evaluated from): a column
+whose bound only fits through its floor is certified constant up to
+rounding at that floor and counted in `res.diagnostics['output_grid']`
+(`n_output_floored`, `output_floor_max`, `output_floor_by_column`). A
+source corner (a pulse or PWM edge) is always a stored sample. Where the
+4096-sample cap per interval, a mode without a diagonalising basis, or
+the run's 2e6-sample budget suspends the promise, the diagnostics say
+so and the run warns. `benchmarks/tools/output_rule_referee.py` checks
+the promise on the benchmark set.

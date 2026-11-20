@@ -788,3 +788,59 @@ TEST_CASE("Exact: the output rule bounds the rows of an output map (a high-imped
         x = xd;
     }
 }
+
+TEST_CASE("Exact: a row is promised down to its rounding floor, never hiding a variation above it",
+          "[v2][dsed][exact_lti][output_rule]") {
+    // group F session 7 (D-2 / D-3): no row is promised below its own rounding floor,
+    // 16·u·Σ|O||V||z|. y = x2 − x1 with x1 = 1e6 held and x2 relaxing to it at 1e9 /s: the
+    // floor is ~7e-9 (the 1e6 terms), the row's real variation is the fast mode's a.
+    DenseMatrix A(2, 2);
+    A << 0.0, 0.0, 1e9, -1e9;
+    const Vector b = Vector::Zero(2);
+    const auto e = make_exact_lti(A, b);
+    REQUIRE(e.tier == 1);
+    DenseMatrix O(3, 2);
+    O.topRows(2).setIdentity();
+    O.row(2) << -1.0, 1.0;
+    e.chord_P_re = O * e.V_re;
+    e.chord_P_im = O * e.V_im;
+    e.chord_M = O.cwiseAbs() * e.V_re.binaryExpr(e.V_im, [](Real p, Real q) { return std::hypot(p, q); });
+    Vector tol(3);
+    tol << 1.0, 1.0, 1e-12;   // the states never bind; the row is held to 1e-12
+    ChordWork w;
+    auto step = [&](Real a, bool& bounded) {
+        Vector x(2);
+        x << 1e6, 1e6 + a;
+        return exact_chord_step(e, x, nullptr, nullptr, tol, 1e-6, bounded, w);
+    };
+    bool bounded = false;
+    (void)step(0.0, bounded);
+    const Real floor = w.te[2];
+    INFO("floor " << floor);
+    REQUIRE(floor > 1e-9);
+    REQUIRE(floor < 1e-7);
+    // a real variation just above the floor is refined: the 1 ns mode is resolved
+    const Real d_hi = step(1.2 * floor, bounded);
+    REQUIRE(bounded);
+    REQUIRE(d_hi < 1e-8);   // h = 1e-6: cut to the 1 ns mode's scale
+    {
+        Vector x0(2);
+        x0 << 1e6, 1e6 + 1.2 * floor;
+        const Vector x1 = exact_advance(e, x0, b, d_hi);
+        Real worst = 0.0;
+        for (int i = 1; i < 200; ++i) {
+            const Real f = i / 200.0;
+            const Vector xt = exact_advance(e, x0, b, f * d_hi);
+            const Real line = (1 - f) * (x0[1] - x0[0]) + f * (x1[1] - x1[0]);
+            worst = std::max(worst, std::abs((xt[1] - xt[0]) - line));
+        }
+        REQUIRE(worst <= floor);   // the line it stores is within the promise
+    }
+    // below it (the bound's 2|γ| = half the floor) the row is constant up to rounding: the
+    // step is not cut, and the certification is reported (w.fu: the floor it needed)
+    const Real d_lo = step(0.25 * floor, bounded);
+    REQUIRE(bounded);
+    REQUIRE(d_lo == 1e-6);
+    REQUIRE(std::abs(w.fu[2] - floor) <= 1e-6 * floor);
+    REQUIRE(w.fu[0] == 0.0);
+}
