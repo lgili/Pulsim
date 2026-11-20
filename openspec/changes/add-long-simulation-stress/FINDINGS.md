@@ -53,3 +53,24 @@ Tests: `test_buck_energy_ledger_closes_over_the_record[dsed]` and
   can bound it (`test_store_every_bounds_the_record_not_the_statistics`).
 - pwl without the restart rule reads each gate at the step's end: the
   sample at an edge instant is one step past the edge (trap 9).
+
+## F-L-1 / F-L-2 on the other circuits (task 5.2)
+
+Energy ledger over a record from rest, residual / input energy:
+
+| circuit | pwl | pwl restart (F-L-1) | trbdf2 | esdirk43 | dsed (F-L-2) |
+|---|---|---|---|---|---|
+| 1 MHz GaN buck, 50 us | closes | 5.2e-3 (bound 1e-4) | closes | closes | 0.206 |
+| stiff 1 GOhm leak + 5 MHz loop, 20 us | closes | 0.0499 | 1.5e-4 | 0.0125 (F-L-3) | 0.0564 |
+| 8-cell MMC, 5 ms | closes | 1.75e-6 (bound 1e-8) | closes | closes | 0.0304 |
+
+## F-L-3 — esdirk43 records too coarse to integrate power through a fast transient
+
+On the stiff loop (5 MHz half bridge into a 10 ohm / 1 nF RC, tau = 10 ns),
+`engine='trbdf2', integrator='esdirk43'` (rtol 1e-6) steps 1.64 ns =
+0.16 tau after each edge and records only its steps (5711 rows over 20 us;
+TR-BDF2: 44809). The states are right (the period-start value matches the
+closed form to 5e-5), but the trapezoid through the record of
+`((v_sw - v_fo) / R)^2` misses 1.25 % of the input energy, above the spec's
+1 %. Integrals over a high-order engine's record need its interpolant, or a
+denser record. Test: `test_conservation_kpi_closes_on_the_other_long_run_circuits[stiff-esdirk43]`.

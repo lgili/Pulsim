@@ -444,6 +444,87 @@ def test_mmc_8cell_chain_mean_current_and_determinism(eng):
 
 
 # ---------------------------------------------------------------------------
+# The conservation KPI on the GaN buck, the stiff loop and the MMC (task 5.2)
+# ---------------------------------------------------------------------------
+
+def _branch_power(r, name, a, b):
+    va = 0.0 if a == "gnd" else np.asarray(r.v(a))
+    vb = 0.0 if b == "gnd" else np.asarray(r.v(b))
+    return (va - vb) * np.asarray(r.i(name))
+
+
+def _ledger(r, sources, dissipators, stores):
+    """sources / dissipators: (name, n+, n-); stores: (value, kind, name-or-node,
+    n-) with kind 'C' (1/2 C v^2 across n+, n-) or 'L' (1/2 L i^2)."""
+    p_in = -sum(_branch_power(r, *s) for s in sources)
+    p_out = sum(_branch_power(r, *d) for d in dissipators)
+    e = 0.0
+    for val, kind, x, y in stores:
+        if kind == "L":
+            e = e + 0.5 * val * np.asarray(r.i(x)) ** 2
+        else:
+            v = np.asarray(r.v(x)) - (0.0 if y == "gnd" else np.asarray(r.v(y)))
+            e = e + 0.5 * val * v ** 2
+    return compute_conservation_drift(list(p_in), list(p_out), e[0], e[-1],
+                                      list(np.asarray(r.times)))
+
+
+def _gan_case():
+    b, fn = GAN.build()
+    led = ([("Vin", "vin", "gnd")],
+           [("RL", "out", "gnd"), ("S1", "vin", "sw"), ("D1", "gnd", "sw")],
+           [(GAN.C, "C", "out", "gnd"), (GAN.L, "L", "L", None)])
+    return b, fn, 50e-6, 10e-9, GAN.w0, led
+
+
+def _stiff_case():
+    b, fn = _stiff()
+    led = ([("Vin", "vin", "gnd")],
+           [("SH", "vin", "sw"), ("SL", "sw", "gnd"), ("Rf", "sw", "fo"),
+            ("Rleak", "fo", "slow")],
+           [(1e-9, "C", "fo", "gnd"), (C_SLOW, "C", "slow", "gnd")])
+    return b, fn, 20e-6, 1e-9, 1 / ((10.0 + 1e-2) * 1e-9), led
+
+
+def _mmc_case():
+    b, fn = _mmc()
+    src = [(f"V{k}", f"P{k}", f"N{k}") for k in range(N_CELLS)]
+    sw = []
+    for k in range(N_CELLS):
+        a = "gnd" if k == 0 else f"m{k}"
+        for leg, node in (("a", a), ("b", f"m{k + 1}")):
+            sw += [(f"S{k}{leg}h", f"P{k}", node), (f"S{k}{leg}l", node, f"N{k}")]
+    led = (src, sw + [("Rload", f"m{N_CELLS}", "x")], [(L_MMC, "L", "Lload", None)])
+    return b, fn, 5e-3, 1e-7, R_MMC / L_MMC, led
+
+
+_CASES = {"gan": _gan_case, "stiff": _stiff_case, "mmc": _mmc_case}
+F_L_3 = ("finding F-L-3: trbdf2 + esdirk43 crosses the stiff loop's 10 ns RC transient "
+         "in 0.16-tau steps and records only those points: the energy ledger over its "
+         "record misses 1.25 % of the input energy (above the spec's 1 %); TR-BDF2 on the "
+         "same circuit: 1.5e-4")
+_XF_LEDGER = {"pwl-restart": F_L_1, "dsed": F_L_2}
+
+
+def _ledger_param(case, eng):
+    reason = F_L_3 if (case, eng) == ("stiff", "esdirk43") else _XF_LEDGER.get(eng)
+    if reason:
+        return pytest.param(case, eng, marks=pytest.mark.xfail(strict=True, reason=reason))
+    return (case, eng)
+
+
+@pytest.mark.parametrize("case,eng", [_ledger_param(c, e) for c in sorted(_CASES) for e in ENGINES])
+def test_conservation_kpi_closes_on_the_other_long_run_circuits(case, eng):
+    """Source work = dissipation + stored energy, every branch on its own,
+    over a record from rest: the spec's 1 % and the grid's own bound."""
+    b, fn, t_end, dt, w, (src, diss, stores) = _CASES[case]()
+    r = _sim(b, t_end, switch_fn=fn, **_engines(dt)[eng])
+    resid = _ledger(r, src, diss, stores)
+    assert abs(resid) < 1e-2
+    assert abs(resid) <= min(1e-2, _acc_bound(eng, r.times, w))
+
+
+# ---------------------------------------------------------------------------
 # Closed loop + junction temperature (pwl: in-kernel losses are pwl only)
 # ---------------------------------------------------------------------------
 
