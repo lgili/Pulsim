@@ -744,3 +744,44 @@ TEST_CASE("Exact: the output rule's step is a chord bound for every mode structu
                                       1e-4, bounded, w);
     REQUIRE(d1a < 1e-10);
 }
+
+TEST_CASE("Exact: the output rule bounds the rows of an output map (a high-impedance node)",
+          "[v2][dsed][exact_lti][output_rule]") {
+    // group F session 4: the samples are the recovered vector y = O·x. A node read as
+    // 5000 Ω × (x1 − x2) holds x's errors times 5000; bounding x alone let its chord
+    // error reach 596 × its tolerance (ll06_buck_vcswitch's V(sw)).
+    DenseMatrix A(2, 2);
+    A << 0.0, 1.0, -4e12, -2e5;   // a fast ring: ω = 2e6 rad/s, lightly damped
+    const Vector b = Vector::Zero(2);
+    Vector x(2);
+    x << 1.0, 0.0;
+    DenseMatrix O(1, 2);
+    O << 5000.0, -5000.0 * 1e-7;   // y = 5000·x1 − 5e-4·x2 (a node behind 5 kΩ)
+    const auto e = make_exact_lti(A, b);
+    REQUIRE(e.tier == 1);
+    DenseMatrix P(3, 2);
+    P.topRows(2).setIdentity();
+    P.bottomRows(1) = O;
+    e.chord_P_re = P * e.V_re;
+    e.chord_P_im = P * e.V_im;
+    Vector tol(3);
+    tol << 1e-5 * 2.0, 1e-5 * 4e6, 1e-5 * 2.0;   // the node's range is that of x1's, not 5000×
+    ChordWork w;
+    for (int s = 0; s < 20; ++s) {
+        bool bounded = false;
+        const Real d = exact_chord_step(e, x, nullptr, nullptr, tol, 1e-5, bounded, w);
+        REQUIRE(bounded);
+        const Vector xd = exact_advance(e, x, b, d);
+        Real worst = 0.0;
+        for (int i = 1; i < 400; ++i) {
+            const Real f = i / 400.0;
+            const Vector xt = exact_advance(e, x, b, f * d);
+            const Real yt = (O * xt)(0), y0 = (O * x)(0), y1 = (O * xd)(0);
+            worst = std::max(worst, std::abs(yt - ((1 - f) * y0 + f * y1)) / tol[2]);
+        }
+        INFO("step " << s << " d = " << d);
+        REQUIRE(worst <= 1.0);
+        REQUIRE(worst > 0.5);   // and the bound is not idle: the node sets the step
+        x = xd;
+    }
+}

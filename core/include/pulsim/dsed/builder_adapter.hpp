@@ -565,6 +565,16 @@ public:
                 e.exact.chord_P_im = O * e.exact.V_im;
             }
             w.ta.conservativeResize(n + 2 * k + w.ty.size());
+            // floored at the row's own evaluation error (u·κ of the modal basis times the
+            // terms it sums): a balanced three-phase neutral (exactly 0, 3.4e-7 V of
+            // rounding) held to atol = 1e-9 spent the run's whole sample budget
+            const Real ux = Real{16} * kExactRoundoff * std::max(Real{1}, e.exact.kappa);
+            // (written back: the caller's deferred-end check reads the same tolerance)
+            w.tyf = ux * (e.recover_from_state.cwiseAbs() * x.cwiseAbs()
+                          + (k > 0 && e.recover_osc.rows() == w.ty.size()
+                                 ? Vector(e.recover_osc.cwiseAbs().rowwise().sum())
+                                 : Vector::Zero(w.ty.size())));
+            w.ty = w.ty.cwiseMax(w.tyf);
             w.ta.tail(w.ty.size()) = w.ty;
         }
         if (pwl_sources_.empty()) {

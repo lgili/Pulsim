@@ -702,7 +702,8 @@ public:
                                                              == system_.recover_from_state().rows())
                                             out_defer = ((system_.recover_from_state() * (x_new_ - output_end_))
                                                              .cwiseAbs().array()
-                                                         <= Real{1e-3} * output_work_.ty.array()).all();
+                                                         <= (Real{1e-3} * output_work_.ty)
+                                                                .cwiseMax(output_work_.tyf).array()).all();
                                 }
                             }
                             if (!out_defer) output_flush_(t, x, result);

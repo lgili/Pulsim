@@ -109,7 +109,7 @@ struct ExactLTI {
 struct ChordWork {
     Vector xa, ta, c0, c1, v, s;            // the adapter's augmented state / sources
     Vector cr, ci, a;                       // V⁻¹c (re, im); |z̈_k| (decaying / zero modes)
-    Vector ty;                              // tolerance of each recovered row (empty: none)
+    Vector ty, tyf;                         // tolerance of each recovered row (empty: none); its rounding floor
     Vector gB, gC, gD;                      // the growing modes' terms at one probe
     Vector eb;                              // the bound at one probe
     std::vector<Eigen::Index> grow;         // modes with Re λ > 0
