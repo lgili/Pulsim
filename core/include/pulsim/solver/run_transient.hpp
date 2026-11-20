@@ -2138,9 +2138,16 @@ inline SimulationResult run_transient(
                 history.compute_b_extra_backward_euler(h_s, ip_h1);
                 b_extra = ip_b - ip_h0 + ip_h1;
                 x = ip_x1;
-                run_event_iteration(t_from + h_s, dt_eq, true, true);
+                bool ln_ok = true;
+                try {   // a lines-only solve never fails the run's step
+                    run_event_iteration(t_from + h_s, dt_eq, true, true);
+                } catch (const pwl::NewtonRoundoffBudgetExceeded&) {
+                    throw;
+                } catch (const std::runtime_error&) {
+                    ln_ok = false;
+                }
                 ln_x1 = x;
-                ln_pre = stamped_mask == stamped_s;   // same mode: else the run's own
+                ln_pre = ln_ok && stamped_mask == stamped_s;   // same mode: else the run's own
                 ip_hist = at_x0;
                 history.restore(ip_hist);
                 if (has_diodes) diodes.restore_on_bits(ln_bits);
@@ -3108,6 +3115,10 @@ inline SimulationResult run_transient(
                 }
                 if (mixed && (!one_way || lines.n >= StepLines::kMax ||
                               !(t_m > a && t_m < a + h))) {
+                    // shortcut: after an ideal element's jump (ln_pre) these
+                    // ends read the run's i_prev, which folds the jump in
+                    // (needs a mixed stage 2 too); upgrade with F-W-1's
+                    // lines-only stage 2
                     return;   // the step's ends
                 }
                 Vector& dst = inner ? lines.right[j] : lines.x_start;
