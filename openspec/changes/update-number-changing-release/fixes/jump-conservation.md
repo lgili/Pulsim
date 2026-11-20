@@ -98,3 +98,37 @@ Rm 1e-6: 3.33333332 / −3.33333332, L3 −4e-8, record 3.323348319e-5. Base at 
 Two snubbers (test_release_findings_a): record 1.000778e-5 J [½Cs(J1² + J2²) = 1.000778e-5]; Cs2 after the step
 0.0099990 V [v_on 0.0099990]; base 1.000782e-5 and Cs2 +0.010220 V.
 Clamp: no record at 1 µs (base 4.9e-10 / 4.924e-10 J), v = −0.71 V from the next sample on (1e-9).
+
+## Reviewer (opus, fresh context, read-only; scripts `.scratch/rev_jc/`) on d7100f19 [M]
+1. FIXED (09126877): a real jump hidden as a move — C1 1 nF/100 V –S– C2 10 nF clamped by Dl, R_on 0.3–0.85 Ω
+   (ρ ≈ 0.04–0.12): the start-mode allowance |y2 − y1| held the fast mode's tail; records lost C2 or vanished.
+   Now (window.py) every R_on 0.3–0.85: [C1, C2], 4.932695e-6 J [closed form 4.93270e-6].
+   OPEN (pre-existing in kind): R_on 0.90–1.10 (ρ 0.12–0.15): the base already missed C1 (free probe after a
+   stage-1 flip: not geometric) and recorded C2 alone, 1.38–1.69 µJ of 4.93; now 0.90 the same, 0.95–1.10 no
+   record; the waveform is the base's (vm 1.94 → 0.736 V at R_on 0.95, identical). Cause not traced.
+2. FIXED (09126877): ladders of 5–10 capacitors lost 8–11 % of their charge (unflagged island states kept d):
+   now ΔQ/Q over the event 5e-14 … 6e-13 for N = 3, 5, 7, 8, 10 (ladder.py); base −4 … −9 %.
+   island_hidden (C3 at a 1e7 V offset, hidden by the 1e-8 floor): Q to 1e-16 rel, v1+ 0.099801 [0.099800]
+   (base and d7100f19: Q off 2.7e-8 C, v1+ 0.0687).
+3. Minor, done: mutual term skipped for a moved winding; fallbacks named in the shortcut comment.
+Held (reviewer): default path bit-identical (md5); ringing modes (pH loop inductance) Q to 5e-13, dW in 0.8 %.
+
+## Gates at 09126877 [M]
+- Byte compares vs a FRESH base recording (6a950022 extension, `.scratch/jc/pkgbase`; the predecessor's c_base
+  was stale — trbdf2 entries differed there that this change cannot reach): goldens all identical except
+  pyduty_split (rule on: states max|d| 24 V, restart steps 718 → 719) and clmon_split (rule on: 8.9e-11);
+  pwl_identity 363/396 — all 33 differing entries are pwl+restart / pwl+split, every default entry identical;
+  trbdf2_identity 377/377; dsed bit-identity 36/36 + shadow 36/36; stateful identical except
+  everything_pwl_restart (rule on, max|d| 16.8); engines ALL IDENTICAL.
+  pyduty_split / clmon_split against the same circuit at dt/16 (rule off): vout p99 6.59e-3, sw 0.382, out
+  1.64e-3 — identical to 3 digits base and new (moved, not worse).
+- reference_status (base vs new, --json): NO outcome moved. err_rms moved in 31 cells; up: half_bridge_transformer_dc
+  2.663e-6 → 2.815e-6 (restart, +5.7 %) / 2.786e-6 → 2.967e-6 (split, +6.5 %), forward_converter +0.5 %, flyback
+  +0.12 %, cascaded_boost_buck split +0.005 %, others ≤ 1e-6 relative; down: synchronous_flyback 1.619e-6 →
+  1.288e-6 (−20 %, both), stiff_two_timescale_rc −0.02 %, ll15 restart −0.004 %. NOT traced: which event moves
+  half_bridge_transformer_dc (a transformer pair at its first commutation; t_estimated of event 0 moved).
+  Both runs exit 1 on the base's two lines (llc / psfb new outcome on pwl), as at the base.
+- Cost, instructions per accepted step, min of six interleaved, vs the 6a950022 extension: buck_pwl 0.9991,
+  vsi_pwl 1.0008, buck_trbdf2 0.9997, bridge_trbdf2 1.0000; rule on buck_pwl_restart 1.0068, vsi_pwl_restart 1.0025.
+- The 60 restart / split test files at d7100f19: 1685 passed, 23 skipped, 33 xfailed, 2 failed (the two
+  test_f24_exact_thermal_ratio… of the base).
