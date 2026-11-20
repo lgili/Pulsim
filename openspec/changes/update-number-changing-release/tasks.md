@@ -37,6 +37,7 @@ Rehearsal at fe75ee01 (the regenerated report's header names the runs its sectio
 - [ ] 4.1 Goldens, `pwl_identity` / `trbdf2_identity` baselines
 - [ ] 4.2 `benchmarks/REFERENCE_STATUS.md` and the triage freezes (`known:` / `known_err:`) per configuration
 - [ ] 4.3 `benchmarks/EXACT_SCOREBOARD.md` and `exact_scoreboard.json`
+  - Note (2026-11-20, `feat/core-scoreboard-measure`): the scoreboard's `exact` is now the three-part measure with rule (1) (DECISIONS 7); the evidence was regenerated under it on the pre-flip defaults. At the re-baseline it is regenerated again on the flipped defaults; the rehearsal's stored cells (`NEXT_DEFAULTS_REHEARSAL.md`) still hold the old definition until the rehearsal is re-run. Open findings it pins: F-SB-1..4 (`test_restart_scoreboard_findings.py`).
 - [ ] 4.4 Tests that pin old numbers (the rehearsal's pytest blast radius, by file), each re-pinned against a reference or truth, never loosened
 - [ ] 4.5 Docs and examples that print numbers; `python/pulsim/AI_GUIDE.md`
 
