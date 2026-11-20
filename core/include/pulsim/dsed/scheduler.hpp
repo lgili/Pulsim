@@ -613,6 +613,7 @@ public:
                 if (output_pend_) output_flush_(t, x, result);
                 if (t_gate < t_end) {
                     const MaskT before = system_.current_mask();
+                    corner_event_ = at_corner;
                     fire_event_(t_gate, "gate_edge", PredicateType::GateEdge,
                                   x, rk_state, result);
                     t = t_gate;
@@ -724,6 +725,7 @@ public:
                             x_pre_event = x;
                             step_fired = true;
                             const bool ticked = run_due_ticks_(t, x);   // a tick at the edge's instant first (D2)
+                            corner_event_ = on_edge && at_corner;
                             fire_event_(on_edge ? t_gate : t, on_edge ? "gate_edge" : "control_tick",
                                           PredicateType::GateEdge,
                                           x, rk_state, result);
@@ -929,6 +931,7 @@ public:
                     x_pre_event = x;
                     step_fired = true;
                     if (run_due_ticks_(t, x)) rk_state.invalidate();   // D2: tick first
+                    corner_event_ = on_edge && at_corner;
                     fire_event_(on_edge ? t_gate : t, on_edge ? "gate_edge" : "control_tick",
                                   PredicateType::GateEdge,
                                   x, rk_state, result);
@@ -1205,6 +1208,7 @@ private:
         const bool ticked = run_due_ticks_(t, x);
         bool fired = false;
         if (on_edge || ticked) {
+            corner_event_ = on_edge && at_corner;
             fire_event_(on_edge ? t_gate : t, on_edge ? "gate_edge" : "control_tick",
                         PredicateType::GateEdge, x, rk_state, result);
             fired = !(system_.current_mask() == before);
@@ -2526,6 +2530,8 @@ private:
         const MaskT old_mask = system_.current_mask();
         const MaskT prev_bits = diode_bits_;
         const Real prev_time_event_t = last_time_event_t_;
+        const bool corner = corner_event_;   // set by the caller for this call only
+        corner_event_ = false;
         if (ptype == PredicateType::GateEdge) last_time_event_t_ = t_event;   // next_time_event_
         // the event's left limit for a step hook listening to events (the loss port)
         const bool hook_event = hooks_ != nullptr && hooks_->has_event();
@@ -2579,7 +2585,7 @@ private:
         // Drop spurious same-mask gate edges silently — unless a diode is undecided
         // there (a source corner on its zero: F5 (a)).
         if (ptype == PredicateType::GateEdge && new_mask == old_mask
-            && !undecided_at_time_event_(t_event, x)) {
+            && !undecided_at_time_event_(t_event, x, corner)) {
             // F-X-1: a poll landing of a gate that names no edge, which changed
             // nothing, is not a time event: as one it made resolved_scale_ the time
             // left to t_end, so the parasitic cluster shrank as the run neared its
@@ -2712,16 +2718,17 @@ private:
         return slope > Real{0} ? loc_t_tol_ + b / slope : loc_t_tol_;
     }
 
-    /// A time event that keeps the mask (a source corner, a tick, a poll) still
-    /// changes every predicate's RATE (the source's new slope enters ġ), so a diode
-    /// whose signal sits in its zero band, or past its threshold, there is decided
-    /// as the settle cascade would (its first round: in band → by the sign of the
-    /// first non-vanishing derivative after t, zero_band_on_). The scan after the
-    /// event cannot: it leaves a zero start leaving on its event side to the mode
-    /// decision (locate_event_exact_), which a dropped event never ran — a pulse
-    /// rising from 0 V kept its diode OFF under 10 V (F5 (a)). True when a diode
-    /// would flip: the event then runs the full decision.
-    [[nodiscard]] bool undecided_at_time_event_(Real t, const Vector& x) {
+    /// A source corner that keeps the mask still changes every predicate's RATE (the
+    /// source's new slope enters ġ), so a diode whose signal sits in its zero band
+    /// there is decided as the settle cascade would (its first round: by the sign
+    /// of the first non-vanishing derivative after t, zero_band_on_); at any
+    /// same-mask time event (a tick's new level, a poll) so is a diode past its
+    /// threshold beyond the band. The scan after the event cannot: it leaves a
+    /// start on, or past, the event side to the mode decision (locate_event_exact_),
+    /// which a dropped event never ran — a pulse rising from 0 V kept its diode OFF
+    /// under 10 V (F5 (a)). True when a diode would flip: the event then runs the
+    /// full decision.
+    [[nodiscard]] bool undecided_at_time_event_(Real t, const Vector& x, bool corner) {
         if constexpr (HasNodePairVoltage<System>) {
             if (!has_diodes_) return false;
             const MaskT mask = system_.current_mask();
@@ -2734,12 +2741,17 @@ private:
                 const bool in_band =
                     std::abs(models::SwitchedDiode::crossing_signal(on, v_d, prm))
                     <= (d.reads_current() ? signal_bound_(d, t, x, Real{-1}, Real{0}) : tol);
+                // in its band: a decision only where the rates change (a corner);
+                // elsewhere nothing moved it and continuity keeps the mode (a poll
+                // re-deciding a leakage-level ON diode in a bridge cut 264 us off
+                // its conduction against the mpmath truth)
+                if (in_band && !corner) continue;
                 if ((in_band || by_value != on)
                     && zero_band_on_(t, x, d, mask, tol, in_band ? false : by_value) != on)
                     return true;
             }
         } else {
-            (void)t; (void)x;
+            (void)t; (void)x; (void)corner;
         }
         return false;
     }
@@ -3590,7 +3602,8 @@ private:
     // The located root's time tolerance (locator) and the state error it
     // carries, x(t + t_tol) − x(t) in the pre-event mode (fire_event_).
     Real loc_t_tol_ = Real{0};
-    Real loc_dt_ = Real{0};   // root_time_error_ of the located diode event being decided
+    Real loc_dt_ = Real{0};
+    bool corner_event_ = false;   // the next fire_event_ lands on a source corner   // root_time_error_ of the located diode event being decided
     Vector loc_dx_, x_lad2_, x_offp_;
     std::vector<Vector> scan_x_;
     Eigen::VectorXcd scan_zdd_;   // locate_event_exact_'s certificate: z̈ at the step start
