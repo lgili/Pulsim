@@ -23,7 +23,14 @@ T^-1 Eh T = diag(Cs, N): the slow coordinates z' = F z + G w carry the
 state; the fast ones are a fixed function of w (no floating point in any
 rank decision). A mode change keeps z = Cs^-1 [T^-1 M^-1 (E x)]_top, i.e.
 it depends only on the charges and fluxes E x: the distributional solution
-(charge / flux conservation), the impulsive energy is reported. The
+(charge / flux conservation), the impulsive energy is reported.
+(Derivation: integrate E x' = A x + B w over [t-, t+]: E (x+ - x-) = A s,
+s the impulse weights of x. In the Weierstrass coordinates x = T [z; u],
+M^-1 E = T diag(Cs, N) T^-1, so [T^-1 M^-1 E x]_top = Cs z for any x: z+
+read from E x- equals z-, the slow states pass unchanged, and only the
+nilpotent coordinates jump -- with N = 0 (index 1, no capacitor loop or
+inductor cut-set) E K = 0 and E x itself is conserved; at higher index the
+impulse moves charge / flux only along E K, the loop or cut-set.) The
 augmented y = [z; w] is propagated exactly through the eigen-decomposition
 of H = [[F, G], [0, S]] (mpmath), so every observable is a sum of
 exponentials; window integrals (means, RMS, energies) are exact sums.
@@ -671,12 +678,15 @@ class Struct:
             P = f_mul(P, Eh)
         self.index = k - 1
         Pk = P                      # Eh^(index+1) has the same range / kernel
-        _, piv = f_rref(Pk)
-        R = [[Pk[i][c] for c in piv] for i in range(n)]
-        for j in range(len(piv)):            # unit columns, exactly: z in physical scale
-            mx = max(abs(R[i][j]) for i in range(n))
-            for i in range(n):
-                R[i][j] /= mx
+        # basis of range(Pk): the reduced echelon rows of Pk^T (exact), not Pk's
+        # own columns -- those are a power iteration of Eh (index + 1 products),
+        # aligned to the slowest mode to (lam/|mu_fast|)^(index+1) (1e-27 in the
+        # LLC with a transformer): z then cancels ~1e18 to 1e2, the projection
+        # loses those digits and every sign / root test reads noise (F-S-3).
+        # Echelon rows hold an identity at their pivots: z_j is the pivot
+        # variable's own value on the core subspace (physical scale).
+        Rt, piv = f_rref([list(c) for c in zip(*Pk)])
+        R = [[Rt[j][i] for j in range(len(piv))] for i in range(n)]
         Kb = f_null(Pk)
         K = [[v[i] for v in Kb] for i in range(n)]
         r = len(piv)
