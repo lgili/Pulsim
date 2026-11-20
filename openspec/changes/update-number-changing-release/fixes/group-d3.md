@@ -511,3 +511,12 @@ Not run on this tip: the exact scoreboard and reference_status. Run `.scratch/d3
 3. Run `.scratch/d3_bench.py` (scoreboard trbdf2 80/30/9, trbdf2+esdirk43 vs 81/65/16; reference 106/2/1). The moved rule reverts some linear edges to the base's behaviour, so the esdirk43 row may fall back toward 81/65/13. The class bar is against cad6ab6b.
 4. Optional: trace why the curvature variant left 22 forced accepts (a turn-on that took the sample path).
 5. Step 4's snapshot block, coordinated with the integration line.
+
+### Results on 3141dec6
+The extension was built from this tree, and only what the build was for was run:
+- The six tests, all of `test_external_device.py`, `test_recorder_batch_combinations.py`, `counter_gate`, and `test_release_findings_d3.py` with the new dead-time recorder test: 87 passed, 0 failed.
+- flyback trbdf2: 28626 accepted / 600 rejected, 0 forced accepts, 0 chatter breaks. Same as the base.
+- hard_switched_rc: 2407 accepted / 17 rejected, 1 forced accept. Same as the base.
+- `ruff check` on the touched test file passes.
+
+Next steps 2–5 above remain.
