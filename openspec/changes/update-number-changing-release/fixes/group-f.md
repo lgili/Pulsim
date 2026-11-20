@@ -79,7 +79,7 @@ for another. The cause-level fix is a sliding-mode rule in the event decisions (
 settle), not in this group's scope. Test: `test_fx1_ten_branch_form_bridges_run_under_the_rule`
 (strict xfail, cause in the reason).
 
-## F-X-3 — ladder RC under the rule (PARTIAL)
+## F-X-3 — ladder RC under the rule (session 1: PARTIAL; session 2: FIXED, see below)
 
 **Trace.** n-section RC ladder (10 Ω, 1 nF), 2e-5 s, `output_rtol=1e-5`. The far nodes sit at
 ~0 V, so their tolerance is the floor rtol·atol = 1e-14, while `exact_chord_step`'s bound is a
@@ -128,3 +128,31 @@ OFF 0.7296 V forward at 1.99690 e-2 s. Their tie-release / pin-judge fix is not 
 
 Left: no independent truth for the excluded far-node chords (F-X-3); the F-5-8 pwl reference
 is one dt (10 ns), its convergence order not measured.
+
+## Session 2 — F-X-3 fixed: the absolute floor, and a second-order chord bound
+
+**Decision (orchestrator).** tol_j = max(output_rtol·range_j, atol), range_j = the state's range
+so far, at least 1e-3 of its peak; atol = the run's ONE absolute tolerance (`simulate(atol=)`,
+default 1e-9; the engine has no per-kind atol: event location uses a time tolerance only, so
+the scalar is used for volts and amperes alike). The "uncertified" escape is REMOVED
+(`ChordWork::floor / n_uncertified / tol_eff`, `n_output_uncertified` in the scheduler, the
+binding, the dispatch and the docstring): every state is held to its tolerance; what the bound
+cannot certify ends at the sample cap / budget, which warn.
+
+**Trace after the floor alone.** ladder100: 5 491 samples, ONE capped interval (warns);
+ladder500: 7 139 samples, one capped interval, 14.8 s vs 7.3 s rule off. Histogram per µs:
+4 097 samples in the FIRST rule-free step (1 204 in the first 10 ns), then 653, 251 ... The
+far nodes are no longer the cost; the first node near the start from rest is. Closed form
+(numpy eigendecomposition of the ladder, ∫ sqrt(max_j |ẍ_j|/(8 tol_j)) dt over the first µs):
+~600 samples needed, n = 100 and n = 500 alike. A numpy replica of `exact_chord_step` on the
+same states: 5 349 samples (the C++ rule hit the 4 096 cap there) — the bound's first-order term
+|ẍ_S(0)| + δ Σ m_k|λ_k| is the triangle inequality over every mode.
+
+**Fix 2 (`exact_chord_step`).** A second-order form joins the min: |Σ V z̈| + δ|Σ V z̈ λ| +
+δ²/2 Σ m|λ|² (the third derivative at τ = 0 exact, the remainder by the triangle inequality;
+growing modes with their g_k like the other sums). Rigorous by Taylor with the Lagrange
+remainder per component. Replica: 1 170 samples; C++: 1 170.
+
+**After.** ladder100 2 083 samples, 0.18 s, no cap, no warning; ladder500 3 072 samples,
+12.25 s vs 7.28 s rule off (1.7×), no cap, no warning. Test
+`test_fx3_ladder_far_nodes_are_held_to_the_absolute_floor`.

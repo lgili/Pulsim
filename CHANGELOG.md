@@ -18,8 +18,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   without one are unchanged.
 * **Added** `simulate(engine='exact', output_rtol=r)`: without `dt`,
   `store_every` or recorders, every event instant is a sample and the steps
-  between events are cut so that linear interpolation is within `r` of
-  every state's range (counters in `diagnostics['output_grid']`). Default
+  between events are cut so that, between events, linear interpolation of
+  the returned samples is within `max(r·range, atol)` of the exact solution
+  for every state (`range`: the state's range so far, at least 1e-3 of its
+  peak; `atol`: the run's one absolute tolerance, default 1e-9, an absolute
+  floor — a state near 0 is not chased to rounding). Where that cannot be
+  certified (sample cap, no diagonalising basis, budget) the run warns
+  (counters in `diagnostics['output_grid']`). Default
   `None` keeps today's samples; refused by name off the exact engine.
   A run resumed with it samples its own grid (the rule's state ranges
   restart at the snapshot instant); the events and states agree.

@@ -204,16 +204,19 @@ def _ladder(n):
     return b
 
 
-def test_fx3_ladder_far_nodes_do_not_cut_every_step_to_the_floor():
-    """F-X-3: a 100-section RC ladder, 2e-5 s. The far nodes sit at ~0 V (tolerance
-    rtol*atol = 1e-14) while the chord bound sums volts of modes that cancel there: every
-    step was cut to the floor, 197 755 samples. A state held to the floor (it has not moved
-    more than atol over the step) that the bound cannot certify even at the modes' own
-    resolution is not held to it (counted in diagnostics): 6 215 samples. The state carried
-    is the rule-free run's."""
+def test_fx3_ladder_far_nodes_are_held_to_the_absolute_floor():
+    """F-X-3: a 100-section RC ladder, 2e-5 s. The far nodes sit at ~0 V; their tolerance was
+    rtol*atol = 1e-14 while the chord bound sums volts of modes that cancel there: every step
+    was cut to that floor, 197 755 samples. With atol an absolute floor (max(rtol*range, atol))
+    they are within tolerance: no cap, no warning, nothing left out of the check. The state
+    carried is the rule-free run's."""
     off = _run(_ladder(100), 2e-5)
-    on = _run(_ladder(100), 2e-5, output_rtol=1e-5)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        on = p.simulate(_ladder(100), t_end=2e-5, engine="exact", output_rtol=1e-5)
+    assert not [w for w in caught if issubclass(w.category, RuntimeWarning)]
     og = on.diagnostics["output_grid"]
+    assert og["n_output_capped"] == 0 and og["n_output_unbounded"] == 0
+    assert "n_output_uncertified" not in og
     assert og["n_output_samples"] < 10000
-    assert og["n_output_uncertified"] >= 1
     assert np.array_equal(np.asarray(on.states)[-1], np.asarray(off.states)[-1])

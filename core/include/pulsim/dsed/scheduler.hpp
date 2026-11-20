@@ -523,7 +523,6 @@ public:
         // state range restarts at the snapshot instant), nothing is carried
         output_lo_.resize(0);
         output_count_ = output_events_ = n_output_capped_ = n_output_unbounded_ = 0;
-        n_output_uncertified_ = 0;
         output_total_ = 0;
         output_budget_t_ = std::numeric_limits<Real>::quiet_NaN();
         if (resume == nullptr) {
@@ -997,7 +996,9 @@ public:
 
     /// The output-grid rule (update-number-changing-release; off = rtol 0):
     /// each exact step is cut so that linear interpolation between samples
-    /// is within rtol·max(|x_j| seen so far, atol) of every state
+    /// is within max(rtol·range_j, atol) of every state (range_j: its range
+    /// so far, at least 1e-3 of its peak; atol: the run's one absolute
+    /// tolerance, an absolute floor, not scaled by rtol)
     /// (exact_chord_step), at most `cap` cut steps between two events
     /// (n_output_capped counts the intervals where the cap bit), at most
     /// `budget` cut steps in the run (past it the rule stops cutting:
@@ -1015,8 +1016,6 @@ public:
     [[nodiscard]] Real output_budget_t() const noexcept { return output_budget_t_; }
     [[nodiscard]] std::size_t n_output_capped() const noexcept { return n_output_capped_; }
     [[nodiscard]] std::size_t n_output_unbounded() const noexcept { return n_output_unbounded_; }
-    /// Rule evaluations (one per chord decided) that left a floor state uncertified (exact_chord_step).
-    [[nodiscard]] std::size_t n_output_uncertified() const noexcept { return n_output_uncertified_; }
 
     // Test hooks: the step cap (default 10M) and the settle's round cap
     // (default 64). A small cap reaches the give-up deterministically on
@@ -3165,7 +3164,7 @@ private:
     Real output_atol_ = Real{0};
     std::size_t output_cap_ = 0, output_count_ = 0, output_events_ = 0;
     Real output_target_ = Real{0};   // the interval's next time event
-    std::size_t n_output_capped_ = 0, n_output_unbounded_ = 0, n_output_uncertified_ = 0;
+    std::size_t n_output_capped_ = 0, n_output_unbounded_ = 0;
     std::size_t output_budget_ = 0, output_total_ = 0;   // cut steps allowed / taken in the run
     Real output_budget_t_ = std::numeric_limits<Real>::quiet_NaN();
     Vector output_lo_, output_hi_, output_tol_, output_end_;   // range of each state so far
@@ -3193,20 +3192,22 @@ private:
             output_lo_ = output_lo_.cwiseMin(x);
             output_hi_ = output_hi_.cwiseMax(x);
             // relative to each state's range so far (a ripple on a large DC level
-            // is what a plot reads), floored at 1e-3 of its peak and at atol
+            // is what a plot reads; at least 1e-3 of its peak), with the run's atol
+            // as an ABSOLUTE floor (F-X-3): a state sitting at ~0 V is held to atol,
+            // not to rtol·atol = rounding (a 500-section ladder's far nodes cut
+            // every chord to 1e-14 V against a bound that cannot see their cancellation)
             auto set_tol = [&] {
-                output_tol_ = (output_hi_ - output_lo_)
-                                  .cwiseMax(Real{1e-3} * output_hi_.cwiseAbs().cwiseMax(output_lo_.cwiseAbs()))
-                                  .cwiseMax(Vector::Constant(x.size(), output_atol_)) * output_rtol_;
+                output_tol_ = ((output_hi_ - output_lo_)
+                                   .cwiseMax(Real{1e-3} * output_hi_.cwiseAbs().cwiseMax(output_lo_.cwiseAbs()))
+                               * output_rtol_)
+                                  .cwiseMax(Vector::Constant(x.size(), output_atol_));
             };
             set_tol();
-            output_work_.floor = output_atol_ * output_rtol_;   // set_tol's floor, bit for bit
             bool bounded = true;
             Real d = system_.exact_output_step(t, x, output_tol_, output_rtol_, h, bounded, output_work_);
-            if (d < h || output_work_.n_uncertified > 0) {
+            if (d < h) {
                 // the scale of the interval ahead too (a state starting from rest
-                // would otherwise be cut to its atol floor, or left uncertified at
-                // it); only a step the bound cuts or a floor state needs it
+                // would otherwise be cut to its atol floor); only a step the bound cuts needs it
                 advance_(t, x, h, output_end_);
                 output_lo_ = output_lo_.cwiseMin(output_end_);
                 output_hi_ = output_hi_.cwiseMax(output_end_);
@@ -3214,7 +3215,6 @@ private:
                 d = system_.exact_output_step(t, x, output_tol_, output_rtol_, h, bounded, output_work_);
             }
             if (!bounded) ++n_output_unbounded_;
-            if (output_work_.n_uncertified > 0) ++n_output_uncertified_;
             if (!(d < h)) return h;
             ++output_total_;
             if (++output_count_ == output_cap_) ++n_output_capped_;
