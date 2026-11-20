@@ -99,3 +99,22 @@ Implementation choices not covered by the design:
     fails; `frequency_response` running one extra period per frequency →
     `assert 43 == 433` fails; tutorial 06 at `dt=5e-9` (was 2e-8) →
     `3975414 <= 2900000` fails. The unmodified copies pass.
+
+13. **Tasks 4.1–4.3 reconciled with the tree at 77ce4a28.** Probe: buck_ccm,
+    shockley_op, saturable_rl on three engines, printing `res.stats` and
+    `res.counters`. `result.counters` exists but is not the design's
+    `RunCounters`: it is the pwl fixed-loop dict (`switch_fn_calls`,
+    `segment_searches`, `rollback_snapshots`, stage-2 / gate / mode keys;
+    zeros on other engines). The engine-independent counters are
+    `result.stats` (`record::RunStats`, `core/include/pulsim/record/grid.hpp`):
+    `n_steps, n_accept, n_reject, n_solves, n_factorizations,
+    n_newton_iterations`, event and integrator counts. Gaps against design 6:
+    no `n_symbolic_analyses` / `n_segment_builds` / `n_event_refactors` on the
+    result (only `CacheMetrics` through `on_cache`); pwl leaves `stats.n_steps`
+    and its linear factorisation total at 0 (buck_ccm: all zero; shockley_op:
+    `n_solves 100, n_factorizations 124`); trbdf2 reports `n_factorizations 0`
+    on linear buck_ccm with `n_solves 2289`. The counter gate
+    (`benchmarks/tools/counters.py`) reads `CacheMetrics` + `len(res.times)` +
+    event lists on pwl, `_trbdf2_stats` on trbdf2, the dsed fields — not
+    `res.stats`. 4.1 / 4.2 stay open (kernel work); 4.3 is met but for the
+    scratch-build proof of the extra factorisation.
