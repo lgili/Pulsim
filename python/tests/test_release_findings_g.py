@@ -192,14 +192,7 @@ def test_thermal_specs_on_an_unsupported_kind_is_refused_by_name():
 # F-3-2: a refusal's .device is the user's name
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("mode", [
-    "legacy",
-    pytest.param("lcp", marks=pytest.mark.xfail(strict=True, reason=(
-        "release finding F-3-2: run_transient.hpp builds mode_diode_names with "
-        "pwl::branch_label ('D (branch #1)') and passes it as the UnsupportedError's "
-        "device; the fix is C++ (pass graph.branch_name, keep the label in the "
-        "message) — out of this Python-only slice"))),
-])
+@pytest.mark.parametrize("mode", ["legacy", "lcp"])
 def test_ideal_voltage_loop_refusal_names_the_device(mode):
     b = p.CircuitBuilder()
     b.add_voltage_source("V", "a", "gnd", 10.0)
