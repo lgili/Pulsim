@@ -2759,7 +2759,11 @@ inline SimulationResult run_transient_trbdf2(
             h_pre_bp = h;
             if (!corners.empty() || has_iwave) {
                 bp_t = next_breakpoint_after(t);
-                if (bp_t <= t + h) {
+                // A step ending within h_min/2 short of the jump lands on
+                // it: the next step's search skips it (next_breakpoint_after),
+                // and the step read the snapped source's RIGHT limit there
+                // (ll12 and ll10 on a step grid of the PWM period, release D3).
+                if (bp_t <= t + h + Real{0.5} * h_min) {
                     h = std::max(bp_t - t, h_min);
                     landed_on_bp = true;
                 }
