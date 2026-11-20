@@ -907,3 +907,6 @@ deferred; the flow referee cannot see it), (2) three_phase_balanced_rl_load spen
 2e6-sample budget (the promise is suspended after 4.53 ms), (3) ten paralleled bridges cap every
 interval and three tests time out — (2) and (3) arrived with session 4's recovered-row bound /
 075feac9's rounding floor. e88a06dc reverted (rule-off cost +1.8..+7.6 %).
+* Hand-off correction: the re-run chain was terminated (SIGTERM, exit 143) during the full pytest
+  at 80 % (after the two timeouts in test_release_findings_f.py; `[python]` unfinished). The
+  full pytest did NOT complete and `-m reference` did NOT run on this tip.
