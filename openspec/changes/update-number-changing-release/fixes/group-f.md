@@ -879,3 +879,31 @@ Tip at start dde945bd (extension = e88a06dc's C++, `build/python/pulsim` is a sy
   drops the three rule configurations so `next_defaults_rehearsal.py run` re-measures them
   (render with `R.OUT` pointed into `.scratch`: `render()` writes the tracked
   NEXT_DEFAULTS_REHEARSAL.md).
+* **Full pytest on the reverted tip (`R_pytest_full.log`, `--timeout=900`, still running at the
+  hand-off, chain PID 43140; the `-m reference` run follows it in the same chain)**: 0 failures up
+  to 80 %, then in test_release_findings_f.py TWO TIMEOUT FAILURES so far —
+  `test_f67_event_states_do_not_depend_on_the_output_grid` and
+  `test_fx1_ten_branch_form_bridges_run_under_the_rule[constant]` ([python] was running) — the
+  ten-bridges cap above. The full pytest is NOT green.
+* Also: ruff `python/` + the four harness tools clean (`ruff.log`); `openspec validate
+  update-number-changing-release --strict` valid (`openspec_validate.log`); stubs not needed (no
+  binding source changed since 6cb51c00).
+* **Reviewer (fresh context, opus, read only)**: no under-reading of `exact_chord_step` /
+  `chord_row_bound` found (numpy port, 20 000 random systems, worst 1.0001 = float cancellation
+  in the test); sine share of the certificate correct for today's predicates. One plausible
+  uncounted chord: `at_corner = t_gate < t_sw` false when a source corner ties with a gate
+  edge / poll → `out_transparent` → the corner deferred (the diode-clamp violation above is
+  this, with the no-edge poll). Harness blind spots: a NaN rule ratio passes as not-worse in the
+  rehearsal; the flow referee is the engine against itself (a chord with no dense sample inside
+  reads 0 — the diode clamp is exactly this); only declared observables are read; the first chord
+  after a jump-free event is excluded; midpoint-only reading; the denominator rtol·rng + atol.
+  Stated gaps: the 1e-3·peak range floor and y(t+h) in the range are not in the docstring; the
+  docstring still says "every STATE".
+
+### Session 6 verdict
+NOT MERGEABLE. The promise holds against the exact flow on 99/99 comparable circuits and against
+the rule-off grid on 94/95, but (1) diode_clamp_overvoltage violates it 9.64 × (a source corner
+deferred; the flow referee cannot see it), (2) three_phase_balanced_rl_load spends the whole
+2e6-sample budget (the promise is suspended after 4.53 ms), (3) ten paralleled bridges cap every
+interval and three tests time out — (2) and (3) arrived with session 4's recovered-row bound /
+075feac9's rounding floor. e88a06dc reverted (rule-off cost +1.8..+7.6 %).
