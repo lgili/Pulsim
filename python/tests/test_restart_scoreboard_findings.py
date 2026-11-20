@@ -3,8 +3,10 @@
 
 The storage convention (release group B): a stored sample at an event is the
 LEFT limit and ``result.right_limit_states`` holds the RIGHT limit, the
-state where the next step starts; ``pulsim.with_event_limits`` inserts it one
-ulp after the event as a value of the trajectory.
+state value one instant after the event; ``pulsim.with_event_limits``
+inserts it one ulp after the event as a value of the trajectory. F-SB-1 (the
+quadrature line's start stored as the right limit) is fixed:
+test_restart_right_limit.py.
 """
 
 from __future__ import annotations
@@ -12,16 +14,8 @@ from __future__ import annotations
 import warnings
 
 import numpy as np
-import pytest
 
 import pulsim as p
-
-F_SB_1 = pytest.mark.xfail(strict=True, reason=(
-    "finding F-SB-1: under the restart rule the fixed engine records as the right limit "
-    "the start of the restart step's quadrature line, 2·w1·X1 + (1 − 2·w1)·X2, at every "
-    "restart step (the event's and the window's next two): a capacitor voltage, continuous, "
-    "reads 0 V left / 0.163 V right at the closing and jumps at two instants with no event"))
-
 
 def _rc_closing():
     # 10 V -> ideal switch -> 1 ohm -> 1 uF from 0 V; the gate closes at 2.25 us, dt = tau/2
@@ -42,7 +36,6 @@ def _rc_closing():
                           discontinuity_restart=True)
 
 
-@F_SB_1
 def test_a_continuous_state_has_equal_left_and_right_limits():
     r = _rc_closing()
     assert r.right_limit_index is not None and len(r.right_limit_index) > 0

@@ -3736,12 +3736,12 @@ void init_module(py::module_& m) {
                 r.right_limit_states.assign(a.data(), a.data() + a.size());
             },
             "(len(right_limit_index), n_states): the right limit of each "
-            "of those samples (where the next step starts). On the fixed "
-            "engine under the restart rule it is the start of the line "
-            "whose trapezoid is the restart step's own SDIRK quadrature "
-            "(exact for the step's integral of a quantity linear in the "
-            "state; as a value the right limit to second order, to first "
-            "order after a kept backward-Euler stage 2).")
+            "of those samples: the state value one instant after the "
+            "event (each capacitor / inductor state continuous, or moved "
+            "by an ideal element's jump; the other unknowns solved in the "
+            "event's mode). Recorded only at events; on the fixed engine "
+            "under the restart rule never at a restart window's later "
+            "steps nor at t = 0 unless the start is a probed jump.")
         .def_property("right_limit_switch_states",
             [](const SimulationResult& r) -> py::object {
                 if (!r.has_event_limits) return py::none();

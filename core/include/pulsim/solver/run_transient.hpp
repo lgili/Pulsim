@@ -875,6 +875,15 @@ inline SimulationResult run_transient(
     pwl::StatefulHistories::Snapshot ip_hs;
     std::vector<solver::ReinitRecord> impulse_pending;
     Vector event_rl_x;
+    // F-SB-1 (event_right_limit): the probe's verdict for the right limit
+    // (a jump; an ideal element's), the moved histories (ip_hist stays at
+    // x0), the restart's caller says it starts at an event (rl_want), and
+    // the right-limit solve's scratch.
+    bool ip_jump = false, ip_struct = false, rl_want = false;
+    std::vector<Real> ip_hist_p, rl_hist, rl_hcur;
+    Vector rl_x1, rl_b0, rl_b, rl_h, rl_xa;
+    std::vector<bool> rl_bits, rl_last;
+    pwl::StatefulHistories::Snapshot rl_hs;
     // The OFF state's leakage conductance in total (conductance-form
     // switches and diodes): the restart rule's current resolution
     // (`consistent_start`).
@@ -1798,6 +1807,8 @@ inline SimulationResult run_transient(
         // probe (consistent_start) at a TIME event.
         Real rs_trig_t = std::numeric_limits<Real>::quiet_NaN();
         Real rs_trig_loc = 0;
+        // the trigger is an event (F-SB-1): not an unknown start's stamp
+        bool rs_trig_ev = false;
         Real be_commit_h = kGamma * opts.dt;
         // Release group B: the lines of the step under the restart rule
         // (StepLines): stage 1 of the last restart (sub)step and how its
@@ -1893,6 +1904,7 @@ inline SimulationResult run_transient(
                                     Real dt_eq, Real loc, Size& iters_1,
                                     bool& breach_1) PULSIM_STEP_DRIVER -> bool {
             const auto& ents = history.entries();
+            ip_jump = false;
             if (ents.empty() &&
                 hs.get<pwl::SaturableInductorHistory>().entries().empty() &&
                 hs.get<pwl::NonlinearCapacitorHistory>().entries().empty()) {
@@ -2125,6 +2137,8 @@ inline SimulationResult run_transient(
             const bool structural = structure.active() &&
                                     !structure.check(stamped_mask, true).dependent.empty();
             const bool impulsive = solved && jumped && !structural;
+            ip_jump = solved && jumped;
+            ip_struct = structural;
             if (!impulsive && solved && jumped && L) [[unlikely]] {
                 // the lines' stage 1 from x0+ (a window integral is the
                 // regular part; the jump is the tracker's record); the run's
@@ -2232,8 +2246,10 @@ inline SimulationResult run_transient(
             // extrapolated impulse (F-5-1: -6.8e8 V).
             // (event_rl_x keeps the stages' line 2·x1 − x2; the states take
             // x0 + J from the snapshot at x0)
-            for (Size k = 0; k < ne; ++k) ip_hist[2 * k + (is_cap(ents[k]) ? 0 : 1)] += ip_d[2 * k];
-            history.restore(ip_hist);
+            // (ip_hist stays at x0: the right limit's states, event_right_limit)
+            ip_hist_p = ip_hist;
+            for (Size k = 0; k < ne; ++k) ip_hist_p[2 * k + (is_cap(ents[k]) ? 0 : 1)] += ip_d[2 * k];
+            history.restore(ip_hist_p);
             history.compute_b_extra_backward_euler(h_s, ip_h1);
             b_extra = ip_b - ip_h0 + ip_h1;
             x = ip_x1;   // the solve's start (Newton): the relaxed stage
@@ -2249,6 +2265,126 @@ inline SimulationResult run_transient(
             }
             breach_1 = breach_1 || flipped;
             return true;
+        };
+        // F-SB-1: an event's RIGHT LIMIT as a state value, x(t_e+), for the
+        // result (right_limit_*, inner_events), NOT the lines' quadrature
+        // start. Every C / L state at its value at t_e+ — x0, continuous;
+        // x0 + J where an ideal element's constraint moves it (the probe's
+        // J, the structural record's jump) — and every other unknown the
+        // event's mode solved there: the ε → 0 limit of a backward-Euler
+        // solve of ε from those states, its mode decided there by the event
+        // iteration (a diode still carrying a located turn-off's residual
+        // current stays ON: no spike through its g_off); two solves, ε and
+        // 2ε, Richardson: the O(ε) motion cancels, O(ε²) is left, ε =
+        // 1e-9·γh (one mode for both, else the ε solve alone). A
+        // conductance-form element's unresolved mode that the impulse rule
+        // records is not relaxed here: its right limit is the model's own
+        // (i_L continuous, v = i_L/g_off: the exact engine's, F-5-10), the
+        // record carries the collapse. Called with stage 1 solved (x, its
+        // b_extra, its bits); everything it touches is put back. Out of line,
+        // once per run, as consistent_start.
+        auto event_right_limit = [&](auto& rei, Real t_from, Real h_s, Vector& out,
+                                     topology::SwitchStateMask& m_out)
+                                     PULSIM_STEP_DRIVER -> bool {
+            rl_x1 = x;
+            rl_b0 = b_extra;
+            const Size iters_s = iters;
+            const bool flipped_s = flipped;
+            const bool cycle_s = mask_cycle;
+            const auto stamped_s = stamped_mask;
+            if (has_diodes) diodes.snapshot_on_bits_into(rl_bits);
+            rl_last = last_solved_bits;
+            history.snapshot_into(rl_hcur);
+            hs.snapshot_into(rl_hs);
+            // the run's Newton round-off budget and its counters are not the
+            // right limit's (a tiny-ε Newton solve stagnates at round-off)
+            const auto nr_s = newton_roundoff_run;
+            const auto nr_n = result.newton_roundoff_accepts;
+            const auto nr_w = result.newton_roundoff_omega_max;
+            const auto nr_r = result.newton_roundoff_row;
+            // stage 1's b_extra less its history and source parts (a
+            // b_extra_fn keeps its t1 value, as in consistent_start)
+            const Real t1 = t_from + h_s;
+            const Real src1 = t1 == src_end_at ? src_end_read : t1;
+            history.compute_b_extra_backward_euler(h_s, rl_h);
+            rl_b = rl_b0 - rl_h;
+            rl_h.setZero(rl_b.size());
+            add_source_rows(rl_h, src1, t1, left_by);
+            rl_b -= rl_h;
+            if (has_iwave) {
+                sources::compute_current_waveform_b_extra(pool, graph, src1, be_iwave,
+                                                          left_by);
+                rl_b -= be_iwave;
+            }
+            if (ip_jump) {   // the probe ran: its x0, plus the constrained jumps
+                rl_hist = ip_hist;
+                const auto& ents = history.entries();
+                for (Size k = 0; ip_struct && k < ents.size(); ++k) {
+                    if (ip_d[2 * k + 1] != Real{0}) {
+                        rl_hist[2 * k + (ents[k].kind == pwl::DevicePool::StoredKind::Capacitor
+                                             ? 0 : 1)] += ip_d[2 * k];
+                    }
+                }
+                history.restore(rl_hist);
+            }   // else the histories are at x0
+            const Real eps = Real{1e-9} * h_s;
+            bool ok = true;
+            const Size rf_s = restart_factorizations;
+            struct AuxEvents {   // the run's event factors stay put, on any exit
+                const decltype(cache)& c;
+                explicit AuxEvents(const decltype(cache)& cc) : c(cc) { c.swap_aux_events(); }
+                ~AuxEvents() { c.swap_aux_events(); }
+            };
+            std::optional<AuxEvents> aux_events(std::in_place, cache);
+            for (int i = 0; i < 2 && ok; ++i) {
+                const Real e = eps * static_cast<Real>(i + 1);
+                const Real te = t_from + e;
+                history.compute_b_extra_backward_euler(e, rl_h);
+                b_extra = rl_b + rl_h;
+                add_source_rows(b_extra, te, te, left_by);
+                if (has_iwave) {
+                    sources::compute_current_waveform_b_extra(pool, graph, te, be_iwave,
+                                                              left_by);
+                    b_extra += be_iwave;
+                }
+                x = rl_x1;
+                try {
+                    rei(te, Real{2} * e, true);   // the mode decided at t_e+
+                } catch (const std::runtime_error&) {
+                    ok = false;   // no right limit recorded; the run goes on
+                }
+                if (i == 0) {
+                    rl_xa = x;
+                    m_out = stamped_mask;
+                }
+            }
+            aux_events.reset();
+            restart_factorizations = rf_s;
+            if (ok) {
+                // the two solves in one mode: Richardson; else the ε solve
+                // (O(ε·ẋ), 1e-9 of a step's motion)
+                if (stamped_mask == m_out) {
+                    out = Real{2} * rl_xa - x;
+                } else {
+                    out = rl_xa;
+                }
+                ok = out.allFinite();
+            }
+            history.restore(rl_hcur);
+            hs.restore(rl_hs);
+            x = rl_x1;
+            b_extra = rl_b0;
+            iters = iters_s;
+            flipped = flipped_s;
+            mask_cycle = cycle_s;
+            stamped_mask = stamped_s;
+            if (has_diodes) diodes.restore_on_bits(rl_bits);
+            last_solved_bits = rl_last;
+            newton_roundoff_run = nr_s;
+            result.newton_roundoff_accepts = nr_n;
+            result.newton_roundoff_omega_max = nr_w;
+            result.newton_roundoff_row = nr_r;
+            return ok;
         };
         // F-3-1's location of the decided mode's commutation (split_step);
         // built once per run, out of line (see consistent_start).
@@ -2862,6 +2998,7 @@ inline SimulationResult run_transient(
                          : b_jump_after(t_prev - left_by) < t - left_by)))) {
                 restart_left = kRestartSteps;
                 rs_trig_t = t_prev;
+                rs_trig_ev = stamped_known && t_prev != opts.t_start;   // t = 0: a probed jump only
                 // without the split a built-in source / b_extra jump inside
                 // the step is solved from t_prev: δt_loc is its offset
                 // (a stage reads it only up to t_prev + γh)
@@ -2938,6 +3075,11 @@ inline SimulationResult run_transient(
                     L->x1 = ln_pre ? ln_x1 : x;
                     L->m1 = stamped_mask;
                     L->be_kept = false;
+                    // F-SB-1: the right limit, only where something happens
+                    // (the caller's event, a probed jump)
+                    L->rl_ok = (rl_want || ip_jump) &&
+                               event_right_limit(run_event_iteration, t_from, h_s, L->rl_x,
+                                                 L->rl_m);
                 }
                 if (has_diodes) {
                     rs_x1 = x;
@@ -3056,7 +3198,10 @@ inline SimulationResult run_transient(
             // in another mode than stage 1 (F-4-4) is the same quadrature as
             // two held pieces, each a solved state in its own mode: X1 over
             // w1·h, then X2 (an extra row at a + w1·h, not an event).
-            auto restart_lined = [&](Real a, Real h, Real loc) {
+            // ev: the (sub)step starts at an event (a trigger at the step
+            // start, a scheduled or located split event): its right limit is
+            // recorded (F-SB-1); a window step's only after a probed jump.
+            auto restart_lined = [&](Real a, Real h, Real loc, bool ev) {
                 const bool inner = a != t_prev_step;
                 StepLines& lines = *L;   // restart steps exist under the rule only
                 if (lines.owner != t_step) {   // the step's first: no per-step reset
@@ -3096,12 +3241,27 @@ inline SimulationResult run_transient(
                 }
                 lines.m_a = stamped_mask;   // the mode the (sub)step starts in
                 lines.end_own = false;
+                rl_want = ev;
                 run_restart(a, h, loc);
+                rl_want = false;
                 if (inner && j >= StepLines::kMax) return;
+                if (inner) {   // the event's right limit (state value)
+                    lines.held[j] = false;
+                    lines.rl_right_ok[j] = lines.rl_ok;
+                    if (lines.rl_ok) {
+                        std::swap(lines.rl_right[j], lines.rl_x);
+                        lines.rl_m_right[j] = lines.rl_m;
+                    }
+                } else {
+                    lines.rl_start_ok = lines.rl_ok;
+                    if (lines.rl_ok) {
+                        std::swap(lines.rl_start, lines.rl_x);
+                        lines.rl_m_start = lines.rl_m;
+                    }
+                }
                 // shortcut: after a kept backward-Euler stage 2 (w1 = γ) the
-                // start lies between the stages, the quadrature's value but
-                // only a first-order right limit; record the extrapolation
-                // separately if a reader needs the value there
+                // start lies between the stages: the quadrature's value, not
+                // a state value (the result's right limit is rl_*, F-SB-1)
                 const Real w1 = lines.be_kept ? kGamma : Real{1} - kGamma;
                 const bool mixed = !(lines.m1 == stamped_mask);
                 const Real t_m = a + w1 * h;
@@ -3143,6 +3303,7 @@ inline SimulationResult run_transient(
                     lines.right[q] = x;
                     lines.m_right[q] = stamped_mask;
                     lines.right_ok[q] = true;
+                    lines.held[q] = true;   // quadrature only: no inner event
                     lines.n = q + 1;
                 }
                 if (caps) {
@@ -3221,7 +3382,8 @@ inline SimulationResult run_transient(
                         restart_lined(a, h,
                                     i > 0 ? ev_s[i - 1] - ev_t[i - 1]
                                     : rs_trig_t == t_prev ? rs_trig_loc
-                                                          : kGamma * h);
+                                                          : kGamma * h,
+                                    i > 0 || (rs_trig_t == t_prev && rs_trig_ev));
                     } else {
                         if (i > 0 || h != opts.dt) {
                             accumulate_b_extra(b, h);
@@ -3301,7 +3463,7 @@ inline SimulationResult run_transient(
                                 be = true;
                                 restart_left = std::max(restart_left,
                                                         kRestartSteps - 1);
-                                restart_lined(a, h, snap);   // crossing within snap of a
+                                restart_lined(a, h, snap, true);   // crossing within snap of a
                             } else if (b - t_d < snap) {
                                 x = x_first;
                                 stamped_mask = mask_first;
@@ -3322,7 +3484,7 @@ inline SimulationResult run_transient(
                                 commit_trap(h1);
                                 diodes.restore_on_bits(post_event_bits);
                                 h = b - t_d;
-                                restart_lined(t_d, h, snap);   // located to snap
+                                restart_lined(t_d, h, snap, true);   // located to snap
                                 be = true;
                                 any_split = true;
                             }
@@ -3377,7 +3539,8 @@ inline SimulationResult run_transient(
                 }
                 if (restart) {
                     restart_lined(t_prev, opts.dt,
-                                rs_trig_t == t_prev ? rs_trig_loc : kGamma * opts.dt);
+                                rs_trig_t == t_prev ? rs_trig_loc : kGamma * opts.dt,
+                                rs_trig_t == t_prev && rs_trig_ev);
                     committed_be = true;
                 }
                 }   // !split
@@ -3826,19 +3989,22 @@ inline SimulationResult run_transient(
             auto put_x = [](const Vector& v, std::vector<Real>& out) {
                 out.insert(out.end(), v.data(), v.data() + v.size());
             };
-            if (lines.start) {
+            // F-SB-1: state values at events only (rl_*); the lines' starts
+            // (x_start, right[]) and the held-pieces rows are quadrature
+            if (lines.rl_start_ok) {
                 result.right_limit_index.push_back(before);
-                put_x(lines.x_start, result.right_limit_states);
-                put_mask(lines.m_start, result.right_limit_switch_bits);
+                put_x(lines.rl_start, result.right_limit_states);
+                put_mask(lines.rl_m_start, result.right_limit_switch_bits);
             }
             for (Size j = 0; j < lines.n; ++j) {
+                if (lines.held[j]) continue;
                 result.inner_event_after.push_back(before);
                 result.inner_event_times.push_back(lines.t[j]);
                 put_x(lines.left[j], result.inner_event_left);
                 put_mask(lines.m_left[j], result.inner_event_left_bits);
-                if (lines.right_ok[j]) {
-                    put_x(lines.right[j], result.inner_event_right);
-                    put_mask(lines.m_right[j], result.inner_event_right_bits);
+                if (lines.rl_right_ok[j]) {
+                    put_x(lines.rl_right[j], result.inner_event_right);
+                    put_mask(lines.rl_m_right[j], result.inner_event_right_bits);
                 } else {
                     result.inner_event_right.insert(
                         result.inner_event_right.end(), lines.left[j].size(),
@@ -3976,7 +4142,8 @@ inline SimulationResult run_transient(
                 result.record_switch_state(stamped_mask);
                 // the step's lines (release group B), when its start is the
                 // sample before this one
-                if (L && L->owner == t && L->ok && !L->empty() && opts.store_every == 1 &&
+                if (L && L->owner == t && L->ok && (!L->empty() || L->rl_start_ok) &&
+                    opts.store_every == 1 &&
                     result.times.size() >= 2) [[unlikely]] {
                     record_lines(result.times.size() - 2);
                 }
