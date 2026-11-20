@@ -26,6 +26,9 @@
 >
 > Status: F-5-1 FIXED, F-3-3 FIXED, F-3-1 FIXED (numbers below, measured on 43c76065; the refinements only
 > restrict detection, F-5-1/F-3-3 are far above every floor), F-3-7 OPEN.
+> **Verification of this tip finished after the commit [M]:** of the 9 files only
+> `test_dt_retry_of_a_step_that_holds_an_edge` still fails (ideal_loop_release x2 and the induction
+> machine now pass); F-5-1 / F-3-3 / F-3-1 drivers give the same numbers as below.
 > NEXT: rebuild this tip, re-run the 9 files (branch_form_reinit, fixed_step_event_splitting,
 > ideal_loop_release, induction_machine_mna, restart_stiff_overshoot, run_plan, release_findings_a,
 > fixed_step_discontinuity_order, restart_review_fixes) and `.scratch/a2.py`, `.scratch/f31.py`; trace
