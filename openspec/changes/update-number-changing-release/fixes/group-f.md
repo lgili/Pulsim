@@ -366,3 +366,110 @@ against the rule's tolerance, or F-X-4 is reverted to "every step end stored".
   import-only run, 0.04 s runs): buck pwl 0.968, buck trbdf2 0.956, buck dsed 1.010,
   bridge3 dsed 1.003. pwl/trbdf2 are not touched by this branch: their −3…−4 % is the method's
   noise, so the 0.5 % bar cannot be read from these numbers.
+
+## Session 3 — branch `fix/core-release-f3-exact-leftovers` (from d59a18fe + merge of F-S-4 8366a3e5)
+
+Base for every "before" below: the extension built at the merge commit b08f4e4e (`.scratch/base_py`).
+Truth: mpmath `exact_truth.py` from `origin/feat/core-soft-switching-validation` fa4b5c71
+(in `.scratch/f3/`, not committed) and the stored `benchmarks/truth/*.json`.
+
+### F-X-6 — FIXED: a trial mode's projection never survives the settle
+
+**Why the rule changes a trajectory at all.** The one piece of output-rule state the settle reads is
+the projection threshold in `project_`: rule off `100 / dt_max`, rule on `1 / (1e-6 · t_res)` (only
+the parasitic cluster is projected — by design, so the rule resolves modes rule-off projects). It does
+not depend on the `output_rtol` VALUE (1e-4 / 1e-5 / 1e-6 stay bit-identical) but on whether the
+rule is on. Trace at the 48 µs switch-off (temporary fprintf in `settle_and_project_`, states
+[v_C, i_Lm, i_sec, I(L_o)]): rule off — one settle pass, mask 010, `changed = 0`, both fast modes
+projected (I(L_o) 5.62 → 0.776), the guard then repairs the mode from the held state (final 5.6208,
+right). Rule on — trial mode 010 projected PARTIALLY (1.12e11 /s out, 1.21e10 kept), D_fw turns on
+(mask 011, `changed = 1`), no reinit record was written (a slow-manifold projection writes none),
+so the restart (`track && changed && log grew`) did not run: I(L_o) 6.2063 A kept.
+
+**Fix.** On any mask change in the settle the settled mode starts again from the pre-event state and
+projects alone (`if (changed)`; the log is truncated when tracked). Before → after, forward converter,
+I(L_o) at 48.0000553 µs (truth 5.620787) and full-run mean of V(out) − truth 6.6073535537897:
+rule 1e-4 / 1e-5 / 1e-6: 6.2063 A, +0.131 V → 5.62078 A, −1.2e-4 / −1.1e-5 / −1.2e-6 V (the samples'
+chord interpolation, ∝ rtol); scoreboard `exact` at 1e-5: 0.0457 → 1.0e-9. Rule off unchanged.
+Test `test_fx6_forward_converter_keeps_the_inductor_current_at_the_switch_off`.
+
+**Moved on the default path** (`.scratch/f3/dsedall.py`: every scoreboard circuit × dsed (with dt,
+as the scoreboard), dsed+next, no dt rule off; hashes of times / states / events): 4 circuits, both
+dsed and no-dt cells; truth `exact` before → after (dsed cell): half_bridge_transformer_dc 3.0e-6 →
+1.49e-6, boost_pfc_open_loop 2.21e-7 → 2.57e-7 (1.16×, worse, same decade), active_clamp_forward
+2.54e-8 → 5.16e-9, flyback_converter 2.12e-6 → 1.18e-6. No cell crosses a scoreboard threshold
+(1e-3 / 1e-6 / 1e-9): the exact-engine row stays 81 / 77 / 70 cell by cell. Rule-on cells: flyback
+3.9e-7 → 7.3e-7 (1.9×, worse), forward 0.0457 → 1.0e-9, others identical. Goldens identical; dsed
+bit-identity 36/36 default + 36/36 shadow. Not traced: why boost_pfc / rule-on flyback get slightly
+worse (both stay within 2× and far below 1e-3).
+
+### F-X-5 — FIXED: a no-crossing certificate per scan interval
+
+Between events a diode predicate is affine in the state, g = Re Σ q_k z_k(τ) + d(τ) (q_k = c·V_k,
+probed once per mode and predicate from `p.value`, cached in `ExactLTI::scan_q`; d affine over the
+step), and z̈_k(τ) = z̈_k(0) e^{λ_k τ}. On [a, a + δ]: |g − chord| ≤ E = Σ_k |q_k z̈_k(a)|
+min(δ²/8 · e^{max(0, Re λ)δ}, 2/|λ|²) — the output rule's per-mode bound. Ends of one sign, both
+outside the significance band, with min(|g_a|, |g_b|) > E hold no root; otherwise the interval is
+halved (depth ≤ 40, ≤ 256 halvings per interval) until each piece is certified or holds a
+significant sign change (then `locate_root_bracket`). Tier-1 modes without sine sources only
+(otherwise the D3 scan alone, as before). The eigenvalue-count alternative (n − 1 real zeros) was
+not needed: the bound decides directly.
+
+active_clamp_forward, D_fw OFF/ON (truth 1.66354841887779847e-5 / 1.67126164738377463e-5 s):
+rule off no dt — missed (nearest event 2.8 µs away), `exact` 2.74e-6 → found within 7e-17 s,
+5.18e-9; rule 1e-5 — `DiodeModeInconsistentError` → runs, 5.16e-9; dt = 1e-7 unchanged (found
+before). Test `test_fx5_a_double_crossing_inside_one_scan_interval_is_found` (None, 1e-4..1e-6).
+Default path: only active_clamp_forward's no-dt cell moves (670 → 674 events); every other
+scoreboard dsed / dsed+next / no-dt cell, the goldens and the bit-identity set are identical.
+**Cost** (instructions per run minus an import-only run, min of 6 interleaved, same build flags,
+base b08f4e4e): buck_ccm dsed 0.979, bridge3 dsed 0.998, forward_converter 1.001,
+boost_pfc_open_loop 0.992, active_clamp_forward 1.111 (4 more events, 10 more samples, the halvings
+around the double crossing). The per-step price is one O(n²) z̈ per exact step with an armed diode
+predicate and O(n) per predicate per scan interval; nothing measurable on the circuits above.
+
+### F-X-4 harness and the new bar — DONE (decision taken)
+
+`metrics.first_kept`: dropping the initial sample is skipped when it would leave < 2 samples (the
+reference is then read from its own first kept sample); a trace that cannot be compared raises with
+the reason and `classify` records `undersampled: <why>`. The nine DC / resistive cells now agree
+(current_divider_3way 0, ll01 1.3e-7, voltage_divider_3stage 0, bridge_resistive_pure 1.3e-13,
+bode_rlc_low_pass 0, stiff_rlc 2.9e-9, ...). New bar for cells under the rule (DECISIONS 6):
+`rule_ratio` = worst |interp(midpoint) − reference| / (output_rtol·range + atol) between events,
+≤ 1, and no outcome change. Rehearsal counts: see "Rehearsal under the new bar" below.
+
+### Docs — the opaque-gate poll (decision: stays at dt_max/10)
+
+`simulate()` docstring (`dt`, `output_rtol`), `_dsed_dispatch` heuristics, KNOWN_LIMITATIONS, the
+release spec scenario and the rehearsal text now say: 10 µs ceiling, 1 µs when the gate names no
+edge. AI_GUIDE and the dsed overview already said `dt_max / 10`. No number moves.
+
+### F-S-4 leftover — FIXED: a start projection of a given state is reported
+
+`record_start_projection` (adapter), called once after the t = 0 decision: a given state that the
+start's settle / projection moved by more than 1e-6 of max(|x0_i|, the circuit's scale of its kind)
+gets a record at t0, kind `start_projection`, states = the moved ones, `projection_gap` = the largest
+move, dW = ½ΔᵀWΔ (W the mode's energy weight, else diag(C, L) — mutual terms of coupled windings
+left out there, a named shortcut). In the ideal limit ½ΔᵀWΔ is the jump's loss including the
+sources' impulsive work (10 V onto 1 nF at 8 V: V·CΔv − ΔE = 2 nJ = ½C(2 V)²), as for the
+dependent-state records. Not written when the start already wrote dependent-state records. The
+threshold is 1e-6, not reinit's 1e-9: from rest a reverse-biased diode's g_off leakage (10 V · 1 nS =
+1e-8 A in a 1 A circuit) is a projection too, and no report. `on_impulse='error'` refuses it by name;
+`impulse_losses` / `device_loss_summary` book it to no device. Not refused by default (the precharged
+capacitor's inrush through an ON diode runs and is reported). 1 A in L behind a reverse-biased diode:
+0 A (+1e-8 leakage) with a record dW = 0.5 mJ = ½Li². Records on the default suites: none of the 81
+scoreboard circuits (dsed, dsed+next, no dt) and none of the 18 examples the exact engine runs get a
+start record; the exact test files (dsed*, exact*, release_findings*, mode_selection*,
+branch_form_reinit, release_uniform_rules: 425 pass) are unchanged.
+
+### Small ones
+
+* `events::require_after` refuses NaN by name (`test_require_after_refuses_nan_by_name`, three
+  integrators). Was: a NaN pending event compared false everywhere and the queue never asked again.
+* t_end dependence — LEFT OPEN (strict xfail `test_parasitic_cut_does_not_depend_on_t_end`). The
+  parasitic cut is 1/(1e-6 · t_res), t_res = next time event − last time event; with no gate edge the
+  next time event is the run's end. Case: 10 V → ON diode → 0.1 Ω → 1 nF ∥ 1 kΩ under the rule:
+  v_C(0) = 0 V in a 10 µs run (mode resolved), 9.999 V in a 1 ms run (projected, with a start
+  record). It should depend on the mode's own spectrum (a gap in its decay rates), not on t_end; that
+  moves every oracle-less run's settle (`settled_` reads `resolved_scale_` on the default path): not
+  local. On the 51 oracle-less benchmark circuits event times are identical for t_end and 1.5·t_end
+  (rule off and on), so the benchmark set does not show it.
