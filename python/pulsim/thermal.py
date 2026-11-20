@@ -239,7 +239,9 @@ def compute_temperature(t: np.ndarray,
     frequent). Returning ``False`` raises :class:`pulsim.Cancelled`
     with ``where='compute_temperature'`` so a GUI's cancel button
     can preempt a long convolution within ~1 ms on a 100 kHz / 10 s
-    trace.
+    trace. A callback that raises propagates. GUI Cancel button:
+    ``should_continue=lambda: not cancel.is_set()`` with
+    ``cancel = threading.Event()``.
     """
     t = np.asarray(t, dtype=float)
     p = np.asarray(p_loss, dtype=float)
@@ -962,7 +964,7 @@ def device_thermal_summary(
                           if d_trace.V_f else (None, None))
             # Cut at the window where the whole-run integral is linear
             # (current; power on a step that flips the stamp).
-            _, i_w, i_s_w, E_br = _losses._window_conductance(
+            _, i_w, i_s_w, E_br, _ = _losses._window_conductance(
                 win, v_D, g_arr, d_trace.v_start, g_arr_s, o_D, o_D_s)
             i_D, i_D_s = d_trace.current, d_trace.current_start
             c_spec = cond_by_bid.get(bid)
@@ -1013,7 +1015,7 @@ def device_thermal_summary(
                       - _views.node_voltage_trace(states_s, int(to_id)))
             g_arr = np.where(closed, g_on, g_off)
             g_arr_s = np.where(closed_s, g_on, g_off)
-            _, i_w, i_s_w, E_br = _losses._window_conductance(
+            _, i_w, i_s_w, E_br, _ = _losses._window_conductance(
                 win, v_SW, g_arr, v_SW_s, g_arr_s)
             c_spec = cond_by_bid.get(bid)
             if c_spec is not None:

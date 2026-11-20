@@ -291,9 +291,10 @@ def _conduction_stats(v: np.ndarray,
     where ``engine='dsed'`` fired an event, whose stored sample is the
     left limit (``_result_views.step_start_states``).
 
-    ``branch``, the ``(times, i, i_start, E)`` of
+    ``branch``, the ``(times, i, i_start, E, I2)`` of
     :func:`_window_conductance`, replaces the arrays above: the
-    statistics then cover that window.
+    statistics then cover that window, and ``i_rms`` is ``sqrt(I2 / T)``
+    (a flip step counted as the energy counts it).
 
     ``v_off`` / ``v_off_start`` are a per-sample series offset (a
     SwitchedDiode's forward drop ``V_f`` while ON): ``i = g·(v − v_off)``,
@@ -307,8 +308,9 @@ def _conduction_stats(v: np.ndarray,
     g_arr = _arr(g, v)
     vs = v if v_start is None else np.asarray(v_start, dtype=float)
     gs = g_arr if g_start is None else _arr(g_start, v)
+    I2 = None
     if branch is not None:
-        times, i, i_s, E = branch
+        times, i, i_s, E, I2 = branch
     elif v_off is None:
         i = v * g_arr
         i_s = vs * gs
@@ -336,7 +338,9 @@ def _conduction_stats(v: np.ndarray,
         # peaks), and an unweighted mean read +4.6% high on a buck
         # diode at rtol=1e-6 — a bias that GREW as the tolerance
         # tightened.
-        "i_rms": _time_weighted_rms(i, times, i_s),
+        "i_rms": (_time_weighted_rms(i, times, i_s) if I2 is None
+                  or times.size < 2 or not times[-1] > times[0]
+                  else float(np.sqrt(max(I2, 0.0) / (times[-1] - times[0])))),
         "i_peak": i_peak,
         "P_avg": float(P_avg),
         "E_total": float(E_total),
@@ -394,15 +398,32 @@ def _offset_step_power(a, c, ga, gc, oa, oc) -> np.ndarray:
     return np.where(same, lin, trap)
 
 
+def _branch_i2(t, i_w, i_s_w, i2_w, i2_s_w, same_w) -> float:
+    """``∫ i² dt`` of a branch by the energy's own rule: a same-stamp step
+    is the exact integral of the linear current, a step whose ends carry
+    different stamps (the pwl / trbdf2 step that flips a switch or diode)
+    the trapezoid of its end ``i²`` (``i2_*``, cut at a window bound as
+    ``i²``). The line through the flip step's two stamps read a switch's
+    RMS current low by ``I²·h/3`` per pulse, first order in ``dt``
+    (add-ai-usage-guide 12.5); the trapezoid is ``I²·h`` per on/off pair,
+    as the conduction energy."""
+    if t.size < 2:
+        return 0.0
+    a, c = i_s_w[:-1], i_w[1:]
+    lin = (a * a + a * c + c * c) / 3.0
+    trap = 0.5 * (i2_s_w[:-1] + i2_w[1:])
+    return float(np.dot(np.diff(t), np.where(same_w, lin, trap)))
+
+
 def _window_conductance(win: "_views.TimeWindow", v: np.ndarray,
                         g: np.ndarray, v_start: np.ndarray,
                         g_start: np.ndarray,
                         v_off: "Optional[np.ndarray]" = None,
                         v_off_start: "Optional[np.ndarray]" = None):
-    """``(times, i, i_start, E)`` of a conductance branch (``i = g·v``,
+    """``(times, i, i_start, E, I2)`` of a conductance branch (``i = g·v``,
     whole-run per-sample arrays) restricted to ``win``: the window's
     times, the branch current at each windowed sample and step start,
-    and ``∫ v·i dt`` over the window.
+    ``∫ v·i dt`` and ``∫ i² dt`` (:func:`_branch_i2`) over the window.
 
     Every quantity is cut where the whole-run integral is linear, so
     the parts of adjacent windows add up to the whole
@@ -440,24 +461,26 @@ def _window_conductance(win: "_views.TimeWindow", v: np.ndarray,
                                      v_off if v_off_start is None
                                      else v_off_start)
     i, i_s = v * g, vs * gs
+    same = np.ones(v.size, dtype=bool)
+    same[1:] = gs[:-1] == g[1:]
     if win.whole:
         return (win.times, i, i_s,
-                _branch_energy(win.times, v, g, vs, gs))
+                _branch_energy(win.times, v, g, vs, gs),
+                _branch_i2(win.times, i, i_s, i * i, i_s * i_s, same[1:]))
     t = win.times
     i_w, i_s_w = win.cont(i, i_s)
     if t.size < 2:
-        return t, i_w, i_s_w, 0.0
+        return t, i_w, i_s_w, 0.0, 0.0
     v_w, v_s_w = win.cont(v, vs)
     p_w, p_s_w = win.cont(g * v * v, gs * vs * vs)
-    same = np.ones(v.size, dtype=bool)
-    same[1:] = gs[:-1] == g[1:]
     same_w = win.step(same)[1:]
     g_w = win.step(g)[1:]
     a, c = v_s_w[:-1], v_w[1:]
     lin = g_w * (a * a + a * c + c * c) / 3.0
     trap = 0.5 * (p_s_w[:-1] + p_w[1:])
     E = float(np.dot(np.diff(t), np.where(same_w, lin, trap)))
-    return t, i_w, i_s_w, E
+    i2_w, i2_s_w = win.cont(i * i, i_s * i_s)
+    return t, i_w, i_s_w, E, _branch_i2(t, i_w, i_s_w, i2_w, i2_s_w, same_w)
 
 
 def _window_offset_branch(win, v, g, vs, gs, off, off_s):
@@ -465,16 +488,17 @@ def _window_offset_branch(win, v, g, vs, gs, off, off_s):
     off = np.asarray(off, dtype=float)
     off_s = np.asarray(off_s, dtype=float)
     i, i_s = g * (v - off), gs * (vs - off_s)
+    same = np.ones(v.size, dtype=bool)
+    same[1:] = (gs[:-1] == g[1:]) & (off_s[:-1] == off[1:])
     if win.whole:
         return (win.times, i, i_s,
-                _branch_energy(win.times, v, g, vs, gs, off, off_s))
+                _branch_energy(win.times, v, g, vs, gs, off, off_s),
+                _branch_i2(win.times, i, i_s, i * i, i_s * i_s, same[1:]))
     t = win.times
     i_w, i_s_w = win.cont(i, i_s)
     if t.size < 2:
-        return t, i_w, i_s_w, 0.0
+        return t, i_w, i_s_w, 0.0, 0.0
     p_w, p_s_w = win.cont(v * i, vs * i_s)
-    same = np.ones(v.size, dtype=bool)
-    same[1:] = (gs[:-1] == g[1:]) & (off_s[:-1] == off[1:])
     same_w = win.step(same)[1:]
     g_w = win.step(g)[1:]
     o_w = win.step(off)[1:]
@@ -487,7 +511,8 @@ def _window_offset_branch(win, v, g, vs, gs, off, off_s):
     lin = np.where(o_w != 0.0, lin_i, g_w * (a * a + a * c + c * c) / 3.0)
     trap = 0.5 * (p_s_w[:-1] + p_w[1:])
     E = float(np.dot(np.diff(t), np.where(same_w, lin, trap)))
-    return t, i_w, i_s_w, E
+    i2_w, i2_s_w = win.cont(i * i, i_s * i_s)
+    return t, i_w, i_s_w, E, _branch_i2(t, i_w, i_s_w, i2_w, i2_s_w, same_w)
 
 
 def _conduction_model_coeffs(spec: Mapping[str, Any]) -> "tuple[float, float]":
@@ -2291,7 +2316,7 @@ def device_loss_summary(
                           else (None, None))
             br = _window_conductance(win, v_D, g_D, d_trace.v_start,
                                      g_D_s, o_D, o_D_s)
-            _, i_D, i_D_s, _ = br
+            _, i_D, i_D_s, _, _ = br
             stats = _conduction_stats(v_D, g_D, times, d_trace.v_start,
                                       g_D_s, branch=br)
             cond_d = np.asarray(d_trace.conducting, dtype=bool)
@@ -2407,7 +2432,7 @@ def device_loss_summary(
             g_SW = np.where(closed, g_on, g_off)
             g_SW_s = np.where(closed_s, g_on, g_off)
             br = _window_conductance(win, v_SW, g_SW, v_SW_s, g_SW_s)
-            _, i_w, i_s_w, _ = br
+            _, i_w, i_s_w, _, _ = br
             stats = _conduction_stats(v_SW, g_SW, times, v_SW_s, g_SW_s,
                                       branch=br)
             entry: Dict[str, Any] = {
