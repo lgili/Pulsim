@@ -66,12 +66,14 @@
       loop, after each `solve_step()`, invoke
       `if (should_continue && !should_continue()) throw
       Cancelled("compute_dc_op", iteration);`.
-- [ ] 3.3 Same for `run_ac_sweep`
-      (`core/include/pulsim/analysis/ac_analysis.hpp`) and
-      `run_mna_sweep` (`core/include/pulsim/analysis/mna_sweep.hpp`)
-      — call between frequency points / sweep iterations.
-      (Reconciled 2026-11: done for the kernel `run_mna_sweep` only;
-      `run_ac_sweep` has no cancellation check.)
+- [x] 3.3 Same for `run_ac_sweep` and `run_mna_sweep` — call
+      between frequency points / sweep iterations. (Reconciled
+      2026-11: `run_ac_sweep` has no C++ kernel; it is the Python
+      `ac_analysis.py` driver, which checks before each frequency and
+      passes the callback into each settle `simulate`, so a stop
+      inside a point raises at that point. The kernel `run_mna_sweep`
+      already checked. Evidence: `test_cancellation.py::
+      TestAcSweepCancellation`, `::TestMnaSweepCancellation`.)
 - [x] 3.4 Same for `compute_temperature` in
       `core/include/pulsim/thermal/foster_network.hpp` — call
       every 1000 convolution samples or every 1 % of the trace,
@@ -82,15 +84,19 @@
       `Cancelled` exception to this Python type with the
       `iteration` / `point_index` / `chunk_index` field exposed
       as an attribute.
-- [ ] 3.6 Bind `should_continue=` kwarg on `compute_dc_op`,
+- [x] 3.6 Bind `should_continue=` kwarg on `compute_dc_op`,
       `run_ac_sweep`, `run_mna_sweep`, `compute_temperature` in
       the existing Python wrappers (`__init__.py`,
       `ac_analysis.py`, `mna_sweep.py`, `thermal.py`).
-      (Reconciled 2026-11: `compute_dc_op` and `compute_temperature`
-      take it; `p.run_ac_sweep` and `p.run_mna_sweep` raise
-      `TypeError: unexpected keyword argument 'should_continue'`.
-      `_builder_ergonomics.wrap_with_cancellation` exists but is never
-      applied.)
+      (Reconciled 2026-11: all four take it. `p.run_mna_sweep` wraps
+      both paths: the kernel's `_CxxCancelled` becomes
+      `pulsim.Cancelled`, and the impulse path raises instead of
+      returning a short trace. The unused `wrap_with_cancellation`
+      was replaced by `_builder_ergonomics.CancelProbe`. The settle DC
+      strategy now raises when stopped mid-transient instead of judging
+      the partial trace as settled. Evidence: `test_cancellation.py::
+      TestRunMnaSweepCancellation`, `::test_settle_strategy_cancelled_
+      mid_transient_returns_no_point`.)
 
 ## 4. Tests
 
@@ -110,9 +116,11 @@
       - Alias name colliding with an existing canonical name
         raises `ValueError`.
       - `builder.aliases()` returns the registered map.
-- [ ] 4.3 `python/tests/test_cancellation.py`: (Reconciled 2026-11:
-      the file tests `compute_temperature`, `compute_dc_op` and the
-      kernel `run_mna_sweep_kernel`; nothing tests `run_ac_sweep`.)
+- [x] 4.3 `python/tests/test_cancellation.py`: (Reconciled 2026-11:
+      all four entry points are covered; `run_ac_sweep` by
+      `TestAcSweepCancellation`, which checks `point_index` and that a
+      True callback changes nothing. The timing envelope is not
+      measured; the default path is byte-identical instead.)
       - `compute_dc_op(..., should_continue=)` that returns False
         after N calls raises `pulsim.Cancelled` with the right
         iteration count.
@@ -134,17 +142,20 @@
       `c0=12.0`, `i0=0.5` and `set_initial`. Kept ticked because the
       content shipped; 5.2 is unticked because its YAML round-trip
       did not.)
-- [ ] 5.2 Add or extend `docs/tutorials/gui-integration.md`
-      explaining how `set_alias` round-trips GUI human labels
+- [x] 5.2 Explain how `set_alias` round-trips GUI human labels
       through pulsim — concrete example with a YAML round-trip.
-      (Reconciled 2026-11: `docs/helpers.md` §5.3 shows `set_alias`,
-      with no YAML round-trip; `gui-integration.md` never existed.)
-- [ ] 5.3 Update each long-running entry-point's docstring with
+      (Reconciled 2026-11: `docs/tutorials/gui-integration.md` never
+      existed; the example is in `docs/helpers.md` §5.3:
+      `b.build().to_yaml()` then `Circuit.from_yaml`, the alias still
+      resolving. Evidence: `test_doc_snippets.py`.)
+- [x] 5.3 Update each long-running entry-point's docstring with
       the `should_continue` kwarg, including a recipe for
       "wrap a `threading.Event` into the callback for GUI
-      Cancel buttons". (Reconciled 2026-11: the recipe is in
-      `docs/helpers.md` §5.3; the `compute_dc_op` docstring does not
-      mention `should_continue`.)
+      Cancel buttons". (Reconciled 2026-11: `compute_dc_op`,
+      `run_ac_sweep`, `run_mna_sweep`, `compute_temperature` and
+      `simulate` document it with the `threading.Event` recipe; the
+      long form is in `docs/helpers.md` §5.3. `simulate` returns the
+      partial trace rather than raising.)
 
 ## 6. Validation
 
