@@ -4416,6 +4416,7 @@ def _finalize(out, plan):
             pass
         _auto_check_voltage_sanity(res, builder,
                                     voltage_sanity_factor)
+        _check_right_limit_voltage(res, builder, voltage_sanity_factor)
         # on_impulse on the exact engine (its dependent-state projections,
         # recorded after the run): 'error' refuses the run as pwl's kernel
         # does at the event, 'warn' warns.
@@ -5095,16 +5096,34 @@ def _auto_check_voltage_sanity(res, builder, factor):
                 builder.graph, builder.pool,
                 list(_np.asarray(res.times, dtype=float)),
                 _np.asarray(res.states, dtype=float), f)
-        # The right limits at the events (the exact engine stores them apart):
-        # an inductor current cut into g_off is a spike there and nowhere else
-        # (release finding F-5-10: 2.4e9 V at the right limit, 48 V sampled).
-        rl = getattr(res, "right_limit_index", None)
-        if (volt is None or volt.node < 0) and rl is not None and len(rl):
-            import numpy as _np
-            volt = _k.find_implausible_voltage(
-                builder.graph, builder.pool,
-                list(_np.asarray(res.times, dtype=float)[_np.asarray(rl, dtype=int)]),
-                _np.asarray(res.right_limit_states, dtype=float), f)
+    except Exception:  # pragma: no cover — never break a good run
+        return
+    if volt is not None and volt.node >= 0:
+        import warnings
+        res._implausible_voltage = volt
+        warnings.warn(
+            "simulate(): " + _k.describe_implausible_voltage(
+                builder.graph, builder.pool, volt),
+            stacklevel=4)
+
+
+def _check_right_limit_voltage(res, builder, factor):
+    """The exact engine's right limits at its events, stored apart from the
+    samples: an inductor current cut into g_off is a spike there and nowhere
+    else (release finding F-5-10: v_sw = i_L / g_off = 2.4e9 V at the right
+    limit, 48 V sampled). Same detector and warning as the samples' check."""
+    rl = getattr(res, "right_limit_index", None)
+    if getattr(res, "_implausible_voltage", None) is not None or rl is None or not len(rl):
+        return
+    try:
+        import numpy as _np
+        _k = _pulsim_module
+        f = (_ro.DEFAULTS["voltage_sanity_factor"] if factor is None
+             else float(factor))
+        volt = _k.find_implausible_voltage(
+            builder.graph, builder.pool,
+            list(_np.asarray(res.times, dtype=float)[_np.asarray(rl, dtype=int)]),
+            _np.asarray(res.right_limit_states, dtype=float), f)
     except Exception:  # pragma: no cover — never break a good run
         return
     if volt is not None and volt.node >= 0:

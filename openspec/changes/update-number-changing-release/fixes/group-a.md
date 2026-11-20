@@ -169,3 +169,27 @@ restart-less loop is untouched, so the four-case instruction count was not re-me
 F-3-3 restart-less: -15.48 A against ~0 (trapezoid R(∞) = -1 reflects the cut current, the body
 diode carries the reflection; v_out 16.80 vs 16.365). It warns (voltage sanity). Not covered by the
 restart-rule fix; the release's default (restart ON) now gets it right.
+
+## REVERTED: the F-3-3 stage-2 change (after the full pytest) [M]
+Full pytest on 130fcb70: 6089 passed / 4 failed. Three failures are the stage-2 change itself:
+`test_buck_ccm_stays_second_order_to_t_over_1600` (stage2_be_kept 1, not 0: at the CCM buck's zero
+start the BE re-take keeps stage 1's mode for a REAL stage-2 turn-on — the dt-independent 7e-10 A the
+exclusion was written to prevent; the reviewer flagged exactly this risk), `test_one_factor_per_mask_
+and_no_refactor` (6 restart factorizations, not 4), `test_a_failed_stage2_retry_...` (retries 38 vs
+19). So the exclusion is load-bearing; `run_transient.hpp` is back to the PR head byte for byte and
+F-3-3 is a strict xfail again. What the fix needs: a test that separates the pseudo-state's turn-on
+(F-3-3: stage 1 itself commutated, iters_1 = 2, the cut current relaxed to ~0) from a real one (zero
+start), e.g. include a fresh stage-2 turn-on only when stage 1 commutated — unmeasured; then the
+three tests above plus the F-3-3 truth (peak 16.381990, min i_p ~ +1.6e-7) and the restart byte set.
+The fourth failure was `test_simulate_overhead[pwl]` (2894 > 2890 bytecodes) from the guard edit
+in the shared `_auto_check_voltage_sanity`; the right-limit scan moved to its own helper
+`_check_right_limit_voltage`, called only on the exact engine's finalize path.
+
+State of the branch now: C++ identical to the PR head (no extension change; the head's extension
+`so_27c00520` is the one to use); Python: `_check_right_limit_voltage` (F-5-10). Test file: F-5-10
+passes; F-5-1, F-3-3, F-3-7, F-3-1 strict xfails with traced causes. Re-run after the revert:
+test_release_findings_a, test_fixed_step_discontinuity_order, test_restart_review_fixes,
+test_simulate_overhead, test_engine_auto: 68 passed, 4 xfailed; ruff clean; stubs up to date.
+The byte compares of the earlier section no longer apply: with the C++ reverted every case is the
+PR head's own extension (identical by construction); the Python change only adds a warning on
+`engine='dsed'` results whose right limits breach the voltage bound.
