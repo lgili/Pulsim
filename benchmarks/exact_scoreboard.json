@@ -1,6 +1,6 @@
 {
  "delta_steps": 0.001,
- "commit": "60a0fcbc",
+ "commit": "2b7b4b7c",
  "configs": {
   "pwl": {
    "engine": "pwl",
@@ -72,7 +72,7 @@
  "circuits": [
   {
    "circuit": "circuits/switching/isolated/active_clamp_forward.yaml",
-   "truth_s": 21.7,
+   "truth_s": 21.3,
    "n_events": 825,
    "dt": 1e-07,
    "graded": [
@@ -129,40 +129,40 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.028,
+     "wall_s": 0.007,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
      },
      "form": null,
      "measure": "interp",
-     "err_rms": 0.0037505497825424125,
+     "err_rms": 0.003750508438130029,
      "err_max": 0.00988562142806428,
      "outcome": "agree",
-     "excluded_frac": 0.01951070601031593,
-     "edge_rms": 0.003748698607018415,
+     "excluded_frac": 0.019510706010315643,
+     "edge_rms": 0.0037486986070184116,
      "edge_timing_s": 5.824310551770974e-06,
      "edge_timing_steps": 58.24310551770974,
      "edge": "ok",
      "known": null,
      "known_err": null,
-     "exact": 0.003751508133823762,
+     "exact": 0.003751467097649138,
      "exact_col": "V(out)",
      "exact_per_col": {
-      "V(out)": 0.003751508133823762
+      "V(out)": 0.003751467097649138
      },
      "exact_max_pt": 0.00988868314214847,
-     "n_samples": 16520,
+     "n_samples": 16589,
      "departure": null,
-     "self": 1.3401474752412767e-16,
-     "self_n": 5669,
+     "self": 1.3351225293890398e-16,
+     "self_n": 5741,
      "class": ""
     },
     "pwl+split": {
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.023,
+     "wall_s": 0.014,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -170,33 +170,33 @@
      },
      "form": null,
      "measure": "interp",
-     "err_rms": 0.0037438952306746887,
-     "err_max": 0.009894538574241364,
+     "err_rms": 0.003743048425560516,
+     "err_max": 0.009892881857182116,
      "outcome": "agree",
-     "excluded_frac": 0.03365123813956909,
-     "edge_rms": 0.0037549367881640266,
-     "edge_timing_s": 5.724310551770976e-06,
-     "edge_timing_steps": 57.243105517709765,
+     "excluded_frac": 0.03391719035690408,
+     "edge_rms": 0.003754642206192386,
+     "edge_timing_s": 3.608960233550439e-07,
+     "edge_timing_steps": 3.608960233550439,
      "edge": "ok",
      "known": null,
      "known_err": null,
-     "exact": 0.0037448549225583593,
+     "exact": 0.0037440084790916987,
      "exact_col": "V(out)",
      "exact_per_col": {
-      "V(out)": 0.0037448549225583593
+      "V(out)": 0.0037440084790916987
      },
-     "exact_max_pt": 0.009897602081444913,
-     "n_samples": 16304,
+     "exact_max_pt": 0.009895946981427511,
+     "n_samples": 16375,
      "departure": null,
-     "self": 1.3559028504938977e-16,
-     "self_n": 5595,
+     "self": 1.3529069062538302e-16,
+     "self_n": 5667,
      "class": ""
     },
     "trbdf2": {
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.085,
+     "wall_s": 0.053,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -227,7 +227,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.186,
+     "wall_s": 0.063,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -258,7 +258,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.04,
+     "wall_s": 0.023,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -302,33 +302,33 @@
      },
      "form": "branch",
      "measure": "interp",
-     "err_rms": 0.0037437996983777262,
-     "err_max": 0.009894267768038978,
+     "err_rms": 0.003709972377241908,
+     "err_max": 0.009818313424571824,
      "outcome": "agree",
-     "excluded_frac": 0.034383164492350925,
-     "edge_rms": 0.003755678907700521,
-     "edge_timing_s": 5.724310551770976e-06,
-     "edge_timing_steps": 57.243105517709765,
+     "excluded_frac": 0.03464911670968591,
+     "edge_rms": 0.003722325402437638,
+     "edge_timing_s": 3.608960233550439e-07,
+     "edge_timing_steps": 3.608960233550439,
      "edge": "ok",
      "known": null,
      "known_err": null,
-     "exact": 0.0037447593941636517,
+     "exact": 0.0037109338433368895,
      "exact_col": "V(out)",
      "exact_per_col": {
-      "V(out)": 0.0037447593941636517
+      "V(out)": 0.0037109338433368895
      },
-     "exact_max_pt": 0.009897331257599746,
-     "n_samples": 16293,
+     "exact_max_pt": 0.009821378793447681,
+     "n_samples": 16364,
      "departure": null,
-     "self": 1.3806062230598982e-16,
-     "self_n": 5595,
+     "self": 1.3538327935078317e-16,
+     "self_n": 5661,
      "class": ""
     },
     "trbdf2+next": {
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.095,
+     "wall_s": 0.063,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -363,7 +363,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.118,
+     "wall_s": 0.059,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -398,7 +398,7 @@
   },
   {
    "circuit": "circuits/diodes/back_to_back_diodes_sine.yaml",
-   "truth_s": 0.7,
+   "truth_s": 0.6,
    "n_events": 5,
    "dt": 2e-05,
    "graded": [
@@ -455,7 +455,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -488,7 +488,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -553,7 +553,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.053,
+     "wall_s": 0.059,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -617,7 +617,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -654,7 +654,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -689,7 +689,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.092,
+     "wall_s": 0.07,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -750,7 +750,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -781,7 +781,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -879,7 +879,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.005,
+     "wall_s": 0.002,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -943,7 +943,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -980,7 +980,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -1015,7 +1015,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.004,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -1076,7 +1076,7 @@
      "config": "pwl",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.0,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -1107,7 +1107,7 @@
      "config": "pwl+restart",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.0,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -1174,7 +1174,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.0,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -1205,7 +1205,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.006,
+     "wall_s": 0.007,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -1306,7 +1306,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.0,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -1341,7 +1341,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.007,
+     "wall_s": 0.004,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -1376,7 +1376,7 @@
   },
   {
    "circuit": "circuits/switching/boost/boost_classic.yaml",
-   "truth_s": 1.5,
+   "truth_s": 1.2,
    "n_events": 191,
    "dt": 2e-07,
    "graded": [
@@ -1500,7 +1500,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.004,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -1531,7 +1531,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.011,
+     "wall_s": 0.012,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -1562,7 +1562,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.005,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -1595,7 +1595,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.003,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -1632,7 +1632,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.003,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -1667,7 +1667,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.011,
+     "wall_s": 0.008,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -1702,7 +1702,7 @@
   },
   {
    "circuit": "circuits/switching/boost/boost_pfc_open_loop.yaml",
-   "truth_s": 90.5,
+   "truth_s": 69.0,
    "n_events": 4185,
    "dt": 2e-06,
    "graded": [
@@ -1728,7 +1728,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.01,
+     "wall_s": 0.008,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -1774,30 +1774,30 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.014,
+     "wall_s": 0.019,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
      },
      "form": null,
      "measure": "interp",
-     "err_rms": 0.03041291767768703,
+     "err_rms": 0.0304128578319522,
      "err_max": 0.06133568447698149,
      "outcome": "disagree",
-     "excluded_frac": 0.020366981308484786,
-     "edge_rms": 0.028761746498903284,
+     "excluded_frac": 0.019766981058475755,
+     "edge_rms": 0.02876515319894827,
      "edge_timing_s": 0.0012499999983017797,
      "edge_timing_steps": 624.9999991508898,
      "edge": "ok",
      "known": "disagree",
      "known_err": 0.0304,
-     "exact": 0.030412340778108483,
+     "exact": 0.03041228093524239,
      "exact_col": "V(out)",
      "exact_per_col": {
-      "V(out)": 0.030412340778108483
+      "V(out)": 0.03041228093524239
      },
      "exact_max_pt": 0.0613360874104588,
-     "n_samples": 39359,
+     "n_samples": 39553,
      "departure": {
       "t": 0.004946,
       "col": "V(out)",
@@ -1814,15 +1814,15 @@
        "flips": "SW_boost- D_boost+"
       }
      },
-     "self": 6.979575496972136e-17,
-     "self_n": 7686,
+     "self": 7.013109132705554e-17,
+     "self_n": 7712,
      "class": "engine error"
     },
     "pwl+split": {
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.018,
+     "wall_s": 0.02,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -1830,33 +1830,33 @@
      },
      "form": null,
      "measure": "interp",
-     "err_rms": 1.061284119323907e-05,
+     "err_rms": 1.0635189190061604e-05,
      "err_max": 0.0003297534536758391,
      "outcome": "agree",
-     "excluded_frac": 0.060833534477974634,
-     "edge_rms": 1.483814007608559e-06,
+     "excluded_frac": 0.0608335344779626,
+     "edge_rms": 1.4835114333071472e-06,
      "edge_timing_s": 0.00035119999968054663,
      "edge_timing_steps": 175.5999998402733,
      "edge": "ok",
      "known": null,
      "known_err": null,
-     "exact": 1.626120022251124e-06,
+     "exact": 1.821329700094285e-06,
      "exact_col": "V(out)",
      "exact_per_col": {
-      "V(out)": 1.626120022251124e-06
+      "V(out)": 1.821329700094285e-06
      },
-     "exact_max_pt": 4.145039576886804e-06,
-     "n_samples": 37020,
+     "exact_max_pt": 2.2152675512728424e-05,
+     "n_samples": 37198,
      "departure": null,
-     "self": 6.922009804458462e-17,
-     "self_n": 7349,
+     "self": 6.787464107330117e-17,
+     "self_n": 7371,
      "class": ""
     },
     "trbdf2": {
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.055,
+     "wall_s": 0.052,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -1887,7 +1887,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.202,
+     "wall_s": 0.167,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -1918,7 +1918,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.082,
+     "wall_s": 0.068,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -1951,7 +1951,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.033,
+     "wall_s": 0.035,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -1962,33 +1962,33 @@
      },
      "form": "branch",
      "measure": "interp",
-     "err_rms": 1.0612847048742378e-05,
+     "err_rms": 1.0635197351049723e-05,
      "err_max": 0.0003297534536743004,
      "outcome": "agree",
-     "excluded_frac": 0.06096686677704193,
-     "edge_rms": 1.4838294092471877e-06,
+     "excluded_frac": 0.06096686677702991,
+     "edge_rms": 1.4835431825602236e-06,
      "edge_timing_s": 0.00035119999968054663,
      "edge_timing_steps": 175.5999998402733,
      "edge": "ok",
      "known": null,
      "known_err": null,
-     "exact": 1.626160985488626e-06,
+     "exact": 1.821380093522716e-06,
      "exact_col": "V(out)",
      "exact_per_col": {
-      "V(out)": 1.626160985488626e-06
+      "V(out)": 1.821380093522716e-06
      },
-     "exact_max_pt": 4.145136008315096e-06,
-     "n_samples": 37016,
+     "exact_max_pt": 2.2152675509650977e-05,
+     "n_samples": 37194,
      "departure": null,
-     "self": 6.996807871631832e-17,
-     "self_n": 7342,
+     "self": 6.99421313421675e-17,
+     "self_n": 7370,
      "class": ""
     },
     "trbdf2+next": {
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.069,
+     "wall_s": 0.059,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -2023,7 +2023,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.288,
+     "wall_s": 0.237,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -2058,7 +2058,7 @@
   },
   {
    "circuit": "circuits/switching/boost/boost_switching_complex.yaml",
-   "truth_s": 0.6,
+   "truth_s": 0.4,
    "n_events": 139,
    "dt": 2e-07,
    "graded": [
@@ -2155,7 +2155,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -2189,7 +2189,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -2220,7 +2220,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.003,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -2321,7 +2321,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.001,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -2356,7 +2356,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.005,
+     "wall_s": 0.004,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -2515,7 +2515,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.0,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -2577,7 +2577,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.0,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -2610,7 +2610,7 @@
      "config": "pwl+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.0,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -2682,7 +2682,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.0,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -2717,7 +2717,7 @@
   },
   {
    "circuit": "circuits/switching/buck_boost/buck_boost.yaml",
-   "truth_s": 1.1,
+   "truth_s": 0.8,
    "n_events": 193,
    "dt": 2e-07,
    "graded": [
@@ -2743,7 +2743,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -2815,20 +2815,20 @@
      },
      "form": null,
      "measure": "interp",
-     "err_rms": 6.365926631717745e-07,
+     "err_rms": 6.368406407962479e-07,
      "err_max": 3.824900431239318e-06,
      "outcome": "agree",
      "excluded_frac": 0.005733385296986169,
-     "edge_rms": 6.367965056299903e-07,
+     "edge_rms": 6.370419509446387e-07,
      "edge_timing_s": 1.9045556773908748e-07,
      "edge_timing_steps": 0.9522778386954375,
      "edge": "ok",
      "known": null,
      "known_err": null,
-     "exact": 6.228183132175082e-07,
+     "exact": 6.220302598961921e-07,
      "exact_col": "V(out)",
      "exact_per_col": {
-      "V(out)": 6.228183132175082e-07
+      "V(out)": 6.220302598961921e-07
      },
      "exact_max_pt": 1.6952668643007051e-06,
      "n_samples": 8034,
@@ -2872,7 +2872,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.007,
+     "wall_s": 0.006,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -2973,7 +2973,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.003,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -3008,7 +3008,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.01,
+     "wall_s": 0.007,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -3043,7 +3043,7 @@
   },
   {
    "circuit": "circuits/switching/buck/buck_dcm.yaml",
-   "truth_s": 0.8,
+   "truth_s": 0.7,
    "n_events": 113,
    "dt": 2e-07,
    "graded": [
@@ -3069,7 +3069,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -3107,33 +3107,33 @@
      },
      "form": null,
      "measure": "interp",
-     "err_rms": 3.409048894292705e-06,
+     "err_rms": 3.40965360467093e-06,
      "err_max": 7.938911463694233e-06,
      "outcome": "agree",
-     "excluded_frac": 0.006750032021619417,
+     "excluded_frac": 0.006750032021616977,
      "edge_rms": 3.4140517495332613e-06,
      "edge_timing_s": 1.4121523693057096e-07,
      "edge_timing_steps": 0.7060761846528548,
      "edge": "ok",
      "known": null,
      "known_err": null,
-     "exact": 3.268185250073649e-06,
+     "exact": 3.2690517132785326e-06,
      "exact_col": "V(out)",
      "exact_per_col": {
-      "V(out)": 3.268185250073649e-06
+      "V(out)": 3.2690517132785326e-06
      },
      "exact_max_pt": 7.739750873168252e-06,
-     "n_samples": 4274,
+     "n_samples": 4300,
      "departure": null,
-     "self": 9.068868647557329e-17,
-     "self_n": 4274,
+     "self": 9.078401136557576e-17,
+     "self_n": 4300,
      "class": ""
     },
     "pwl+split": {
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -3141,33 +3141,33 @@
      },
      "form": null,
      "measure": "interp",
-     "err_rms": 3.0947957690745484e-06,
+     "err_rms": 3.0977692797588325e-06,
      "err_max": 7.609628397218179e-06,
      "outcome": "agree",
-     "excluded_frac": 0.0070000309741434395,
-     "edge_rms": 3.098366924034282e-06,
+     "excluded_frac": 0.007000030974141,
+     "edge_rms": 3.0983669240342825e-06,
      "edge_timing_s": 1.9081622132691937e-07,
      "edge_timing_steps": 0.9540811066345969,
      "edge": "ok",
      "known": null,
      "known_err": null,
-     "exact": 2.965905891219564e-06,
+     "exact": 2.9692677489471908e-06,
      "exact_col": "V(out)",
      "exact_per_col": {
-      "V(out)": 2.965905891219564e-06
+      "V(out)": 2.9692677489471908e-06
      },
      "exact_max_pt": 7.4031517934564115e-06,
-     "n_samples": 4273,
+     "n_samples": 4299,
      "departure": null,
-     "self": 9.068868647557329e-17,
-     "self_n": 4273,
+     "self": 9.078401136557575e-17,
+     "self_n": 4299,
      "class": ""
     },
     "trbdf2": {
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.002,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -3198,7 +3198,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.005,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -3229,7 +3229,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.005,
+     "wall_s": 0.002,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -3262,7 +3262,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.003,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -3273,33 +3273,33 @@
      },
      "form": "branch",
      "measure": "interp",
-     "err_rms": 3.0948456961132963e-06,
+     "err_rms": 3.097819159158077e-06,
      "err_max": 7.609628284983562e-06,
      "outcome": "agree",
-     "excluded_frac": 0.007250029927317306,
-     "edge_rms": 3.0973477700104285e-06,
+     "excluded_frac": 0.007250029927314866,
+     "edge_rms": 3.0973477700104293e-06,
      "edge_timing_s": 1.9812267005019785e-07,
      "edge_timing_steps": 0.9906133502509893,
      "edge": "ok",
      "known": null,
      "known_err": null,
-     "exact": 2.9659569240923394e-06,
+     "exact": 2.969318724336796e-06,
      "exact_col": "V(out)",
      "exact_per_col": {
-      "V(out)": 2.9659569240923394e-06
+      "V(out)": 2.969318724336796e-06
      },
      "exact_max_pt": 7.403151683197223e-06,
-     "n_samples": 4272,
+     "n_samples": 4298,
      "departure": null,
-     "self": 9.068868647557329e-17,
-     "self_n": 4272,
+     "self": 9.078401136557575e-17,
+     "self_n": 4298,
      "class": ""
     },
     "trbdf2+next": {
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.004,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -3334,7 +3334,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.01,
+     "wall_s": 0.004,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -3524,7 +3524,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.006,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -3555,7 +3555,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.002,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -3695,7 +3695,7 @@
   },
   {
    "circuit": "circuits/switching/buck/buck_switching.yaml",
-   "truth_s": 0.4,
+   "truth_s": 0.3,
    "n_events": 42,
    "dt": 2e-07,
    "graded": [
@@ -3721,7 +3721,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -3752,7 +3752,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -3819,7 +3819,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -3881,7 +3881,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -3914,7 +3914,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -4078,7 +4078,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -4277,7 +4277,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -4373,7 +4373,7 @@
      "config": "pwl",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.0,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -4509,7 +4509,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.002,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -4645,7 +4645,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.005,
+     "wall_s": 0.002,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -4680,7 +4680,7 @@
   },
   {
    "circuit": "circuits/switching/boost/cascaded_boost_buck.yaml",
-   "truth_s": 6.1,
+   "truth_s": 5.4,
    "n_events": 478,
    "dt": 2e-07,
    "graded": [
@@ -4737,7 +4737,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.007,
+     "wall_s": 0.009,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -4770,7 +4770,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.006,
+     "wall_s": 0.009,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -4778,22 +4778,22 @@
      },
      "form": null,
      "measure": "interp",
-     "err_rms": 2.197071810563814e-06,
-     "err_max": 6.515453325825193e-06,
+     "err_rms": 2.2067420692249635e-06,
+     "err_max": 6.916510904248423e-06,
      "outcome": "agree",
      "excluded_frac": 0.00824001322717316,
-     "edge_rms": 2.1999921464348076e-06,
+     "edge_rms": 2.209563988067939e-06,
      "edge_timing_s": 1.9776418315508096e-07,
      "edge_timing_steps": 0.9888209157754049,
      "edge": "ok",
      "known": null,
      "known_err": null,
-     "exact": 6.019626785521419e-07,
+     "exact": 6.372255785496297e-07,
      "exact_col": "V(out)",
      "exact_per_col": {
-      "V(out)": 6.019626785521419e-07
+      "V(out)": 6.372255785496297e-07
      },
-     "exact_max_pt": 4.6337426430594295e-06,
+     "exact_max_pt": 4.679413428414641e-06,
      "n_samples": 13835,
      "departure": null,
      "self": 1.692133235495328e-16,
@@ -4804,7 +4804,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.014,
+     "wall_s": 0.012,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -4835,7 +4835,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.036,
+     "wall_s": 0.03,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -4866,7 +4866,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.013,
+     "wall_s": 0.011,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -4899,7 +4899,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.013,
+     "wall_s": 0.015,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -4971,7 +4971,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.038,
+     "wall_s": 0.034,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -5063,7 +5063,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.005,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -5096,7 +5096,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.005,
+     "wall_s": 0.004,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -5130,7 +5130,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -5161,7 +5161,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.008,
+     "wall_s": 0.005,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -5225,7 +5225,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.003,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -5262,7 +5262,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.002,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -5297,7 +5297,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.008,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -5502,7 +5502,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.009,
+     "wall_s": 0.004,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -5603,7 +5603,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.003,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -5638,7 +5638,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.005,
+     "wall_s": 0.004,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -5699,7 +5699,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.007,
+     "wall_s": 0.003,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -5778,7 +5778,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.005,
+     "wall_s": 0.004,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -5843,7 +5843,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.022,
+     "wall_s": 0.011,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -5907,7 +5907,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.005,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -5979,7 +5979,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.012,
+     "wall_s": 0.016,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -6071,7 +6071,7 @@
      "config": "pwl+restart",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.0,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -6104,7 +6104,7 @@
      "config": "pwl+split",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.0,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -6305,7 +6305,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.011,
+     "wall_s": 0.006,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -6340,7 +6340,7 @@
   },
   {
    "circuit": "circuits/switching/buck_boost/cuk_converter.yaml",
-   "truth_s": 3.9,
+   "truth_s": 4.0,
    "n_events": 286,
    "dt": 2e-07,
    "graded": [
@@ -6366,7 +6366,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.003,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -6397,7 +6397,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.006,
+     "wall_s": 0.003,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -6430,7 +6430,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.007,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -6495,7 +6495,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.025,
+     "wall_s": 0.016,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -6526,7 +6526,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.005,
+     "wall_s": 0.004,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -6559,7 +6559,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.006,
+     "wall_s": 0.005,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -6596,7 +6596,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.006,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -6631,7 +6631,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.014,
+     "wall_s": 0.022,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -7082,7 +7082,7 @@
      "config": "pwl+split",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -7147,7 +7147,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.031,
+     "wall_s": 0.028,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -7248,7 +7248,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.0,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -7283,7 +7283,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.028,
+     "wall_s": 0.031,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -7449,7 +7449,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.0,
+     "wall_s": 0.001,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -7677,7 +7677,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.0,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -7708,7 +7708,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.0,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -7775,7 +7775,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -7806,7 +7806,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.033,
+     "wall_s": 0.032,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -7837,7 +7837,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.003,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -7942,7 +7942,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.035,
+     "wall_s": 0.04,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -8105,20 +8105,20 @@
      },
      "form": null,
      "measure": "interp",
-     "err_rms": 6.408224995897687e-05,
+     "err_rms": 6.158832561900704e-05,
      "err_max": 0.03046907684274763,
      "outcome": "agree",
      "excluded_frac": 9.849000699254004e-08,
-     "edge_rms": 6.408060339932829e-05,
+     "edge_rms": 6.158674227856156e-05,
      "edge_timing_s": 8.333712692895119e-08,
      "edge_timing_steps": 0.004166856346447559,
      "edge": "ok",
      "known": null,
      "known_err": null,
-     "exact": 0.0006817034100256143,
+     "exact": 0.0006813090211713425,
      "exact_col": "V(out)",
      "exact_per_col": {
-      "V(out)": 0.0006817034100256143
+      "V(out)": 0.0006813090211713425
      },
      "exact_max_pt": 0.03046906569994283,
      "n_samples": 3019,
@@ -8146,7 +8146,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -8192,7 +8192,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.043,
+     "wall_s": 0.045,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -8359,7 +8359,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.037,
+     "wall_s": 0.034,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -8409,7 +8409,7 @@
   },
   {
    "circuit": "circuits/diodes/diode_rectifier.yaml",
-   "truth_s": 1.1,
+   "truth_s": 1.4,
    "n_events": 199,
    "dt": 1e-06,
    "graded": [
@@ -8513,7 +8513,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -8547,7 +8547,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.005,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -8578,7 +8578,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.023,
+     "wall_s": 0.03,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -8609,7 +8609,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.005,
+     "wall_s": 0.003,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -8679,7 +8679,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.004,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -8714,7 +8714,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.027,
+     "wall_s": 0.035,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -8775,7 +8775,7 @@
      "config": "pwl",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -8813,7 +8813,7 @@
      "config": "pwl+restart",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.004,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -8894,7 +8894,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.012,
+     "wall_s": 0.009,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -8925,7 +8925,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.08,
+     "wall_s": 0.094,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -8956,7 +8956,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -8990,7 +8990,7 @@
      "config": "pwl+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.004,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -9034,7 +9034,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.012,
+     "wall_s": 0.009,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -9069,7 +9069,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.076,
+     "wall_s": 0.08,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -9104,7 +9104,7 @@
   },
   {
    "circuit": "circuits/switching/isolated/dual_active_bridge.yaml",
-   "truth_s": 0.2,
+   "truth_s": 0.3,
    "n_events": 239,
    "dt": 2e-07,
    "graded": [
@@ -9130,7 +9130,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.003,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -9161,7 +9161,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.006,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -9194,7 +9194,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.003,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -9323,7 +9323,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.007,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -9360,7 +9360,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.002,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -9395,7 +9395,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.007,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -9487,7 +9487,7 @@
      "config": "pwl+restart",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.0,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -9520,7 +9520,7 @@
      "config": "pwl+split",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.0,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -9554,7 +9554,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.0,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -9616,7 +9616,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.0,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -9721,7 +9721,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -9756,7 +9756,7 @@
   },
   {
    "circuit": "circuits/switching/isolated/flyback_converter.yaml",
-   "truth_s": 4.5,
+   "truth_s": 4.0,
    "n_events": 398,
    "dt": 1e-07,
    "graded": [
@@ -9824,29 +9824,29 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.005,
+     "wall_s": 0.008,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
      },
      "form": null,
      "measure": "interp",
-     "err_rms": 5.613204990490127e-06,
-     "err_max": 0.0001268230338143446,
+     "err_rms": 5.619125642435218e-06,
+     "err_max": 0.0001268431756035705,
      "outcome": "agree",
      "excluded_frac": 4.919809527026385e-06,
-     "edge_rms": 5.607547678743971e-06,
+     "edge_rms": 5.61347370091237e-06,
      "edge_timing_s": 1.5844399345163105e-10,
      "edge_timing_steps": 0.0015844399345163105,
      "edge": "ok",
      "known": null,
      "known_err": null,
-     "exact": 6.474265767516498e-06,
+     "exact": 6.480518122980961e-06,
      "exact_col": "V(out)",
      "exact_per_col": {
-      "V(out)": 6.474265767516498e-06
+      "V(out)": 6.480518122980961e-06
      },
-     "exact_max_pt": 0.00012706512648855603,
+     "exact_max_pt": 0.0001270852680422408,
      "n_samples": 20601,
      "departure": null,
      "self": 1.1996259730293669e-16,
@@ -9857,7 +9857,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.005,
+     "wall_s": 0.011,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -9865,22 +9865,22 @@
      },
      "form": null,
      "measure": "interp",
-     "err_rms": 5.613204990490127e-06,
-     "err_max": 0.0001268230338143446,
+     "err_rms": 5.619125642435218e-06,
+     "err_max": 0.0001268431756035705,
      "outcome": "agree",
      "excluded_frac": 4.919809527026385e-06,
-     "edge_rms": 5.607547678743971e-06,
+     "edge_rms": 5.61347370091237e-06,
      "edge_timing_s": 1.5844399345163105e-10,
      "edge_timing_steps": 0.0015844399345163105,
      "edge": "ok",
      "known": null,
      "known_err": null,
-     "exact": 6.474265767516498e-06,
+     "exact": 6.480518122980961e-06,
      "exact_col": "V(out)",
      "exact_per_col": {
-      "V(out)": 6.474265767516498e-06
+      "V(out)": 6.480518122980961e-06
      },
-     "exact_max_pt": 0.00012706512648855603,
+     "exact_max_pt": 0.0001270852680422408,
      "n_samples": 20601,
      "departure": null,
      "self": 1.1996259730293669e-16,
@@ -9891,7 +9891,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.022,
+     "wall_s": 0.019,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -9922,7 +9922,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.03,
+     "wall_s": 0.021,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -9953,7 +9953,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.015,
+     "wall_s": 0.016,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -9986,7 +9986,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.006,
+     "wall_s": 0.007,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -9997,22 +9997,22 @@
      },
      "form": "branch",
      "measure": "interp",
-     "err_rms": 5.613205065386308e-06,
-     "err_max": 0.00012682303402741674,
+     "err_rms": 5.619125716018644e-06,
+     "err_max": 0.0001268431758039788,
      "outcome": "agree",
      "excluded_frac": 4.919809527026385e-06,
-     "edge_rms": 5.607547753699991e-06,
+     "edge_rms": 5.613473774554573e-06,
      "edge_timing_s": 1.5844399345163105e-10,
      "edge_timing_steps": 0.0015844399345163105,
      "edge": "ok",
      "known": null,
      "known_err": null,
-     "exact": 6.474265844176772e-06,
+     "exact": 6.480518198256249e-06,
      "exact_col": "V(out)",
      "exact_per_col": {
-      "V(out)": 6.474265844176772e-06
+      "V(out)": 6.480518198256249e-06
      },
-     "exact_max_pt": 0.0001270651267016244,
+     "exact_max_pt": 0.00012708526824264558,
      "n_samples": 20601,
      "departure": null,
      "self": 1.1996259730293669e-16,
@@ -10023,7 +10023,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.029,
+     "wall_s": 0.026,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -10058,7 +10058,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.023,
+     "wall_s": 0.029,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -10119,7 +10119,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -10161,7 +10161,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.003,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -10259,7 +10259,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.008,
+     "wall_s": 0.003,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -10395,7 +10395,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.005,
+     "wall_s": 0.003,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -10430,7 +10430,7 @@
   },
   {
    "circuit": "circuits/switching/isolated/forward_converter.yaml",
-   "truth_s": 13.0,
+   "truth_s": 11.9,
    "n_events": 598,
    "dt": 1e-07,
    "graded": [
@@ -10456,7 +10456,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.009,
+     "wall_s": 0.01,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -10502,40 +10502,40 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.005,
+     "wall_s": 0.013,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
      },
      "form": null,
      "measure": "interp",
-     "err_rms": 7.685055285964036e-06,
-     "err_max": 0.0004440868169768206,
+     "err_rms": 6.023625615469257e-06,
+     "err_max": 0.0004426554616866935,
      "outcome": "agree",
-     "excluded_frac": 0.0089587967239815,
-     "edge_rms": 7.695300107343592e-06,
-     "edge_timing_s": 1.938915370454993e-07,
-     "edge_timing_steps": 1.938915370454993,
+     "excluded_frac": 0.003958796723964077,
+     "edge_rms": 5.9938790024956085e-06,
+     "edge_timing_s": 9.389153704551041e-08,
+     "edge_timing_steps": 0.9389153704551042,
      "edge": "ok",
      "known": null,
      "known_err": null,
-     "exact": 8.24653032221411e-06,
+     "exact": 6.797452238348595e-06,
      "exact_col": "V(out)",
      "exact_per_col": {
-      "V(out)": 8.24653032221411e-06
+      "V(out)": 6.797452238348595e-06
      },
-     "exact_max_pt": 0.00044387548931882823,
-     "n_samples": 20805,
+     "exact_max_pt": 0.0004424441375624376,
+     "n_samples": 20913,
      "departure": null,
-     "self": 1.8706553640686183e-16,
-     "self_n": 5504,
+     "self": 1.854035104188671e-16,
+     "self_n": 5521,
      "class": ""
     },
     "pwl+split": {
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.009,
+     "wall_s": 0.007,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -10543,33 +10543,33 @@
      },
      "form": null,
      "measure": "interp",
-     "err_rms": 7.637167119439e-06,
-     "err_max": 0.00044410276294433313,
+     "err_rms": 6.04492757310863e-06,
+     "err_max": 0.00044267145987685215,
      "outcome": "agree",
-     "excluded_frac": 0.00985875977890952,
-     "edge_rms": 7.649824065706143e-06,
-     "edge_timing_s": 1.938915370454993e-07,
-     "edge_timing_steps": 1.938915370454993,
+     "excluded_frac": 0.004858759778892097,
+     "edge_rms": 6.017379122170763e-06,
+     "edge_timing_s": 9.878394074697844e-08,
+     "edge_timing_steps": 0.9878394074697844,
      "edge": "ok",
      "known": null,
      "known_err": null,
-     "exact": 8.201615720266753e-06,
+     "exact": 6.815958430601346e-06,
      "exact_col": "V(out)",
      "exact_per_col": {
-      "V(out)": 8.201615720266753e-06
+      "V(out)": 6.815958430601346e-06
      },
-     "exact_max_pt": 0.00044389143524697325,
-     "n_samples": 20787,
+     "exact_max_pt": 0.0004424601357130998,
+     "n_samples": 20895,
      "departure": null,
-     "self": 1.843401337905023e-16,
-     "self_n": 5512,
+     "self": 1.83847522930693e-16,
+     "self_n": 5527,
      "class": ""
     },
     "trbdf2": {
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.021,
+     "wall_s": 0.032,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -10600,7 +10600,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.04,
+     "wall_s": 0.036,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -10631,7 +10631,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.013,
+     "wall_s": 0.019,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -10664,7 +10664,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.013,
+     "wall_s": 0.021,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -10675,33 +10675,33 @@
      },
      "form": "branch",
      "measure": "interp",
-     "err_rms": 7.637167374816089e-06,
-     "err_max": 0.00044410276291086945,
+     "err_rms": 6.044927018531454e-06,
+     "err_max": 0.0004426714598404995,
      "outcome": "agree",
-     "excluded_frac": 0.009908758254478284,
-     "edge_rms": 7.649925576994828e-06,
-     "edge_timing_s": 1.938915370454993e-07,
-     "edge_timing_steps": 1.938915370454993,
+     "excluded_frac": 0.004908758254460861,
+     "edge_rms": 6.017507067901308e-06,
+     "edge_timing_s": 9.878394074697844e-08,
+     "edge_timing_steps": 0.9878394074697844,
      "edge": "ok",
      "known": null,
      "known_err": null,
-     "exact": 8.201615977056608e-06,
+     "exact": 6.815957962333252e-06,
      "exact_col": "V(out)",
      "exact_per_col": {
-      "V(out)": 8.201615977056608e-06
+      "V(out)": 6.815957962333252e-06
      },
-     "exact_max_pt": 0.0004438914352135096,
-     "n_samples": 20786,
+     "exact_max_pt": 0.0004424601356767473,
+     "n_samples": 20894,
      "departure": null,
-     "self": 1.858045585559419e-16,
-     "self_n": 5572,
+     "self": 1.8242859883338037e-16,
+     "self_n": 5527,
      "class": ""
     },
     "trbdf2+next": {
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.027,
+     "wall_s": 0.031,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -10736,7 +10736,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.051,
+     "wall_s": 0.055,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -10771,7 +10771,7 @@
   },
   {
    "circuit": "circuits/switching/isolated/full_bridge_dc.yaml",
-   "truth_s": 0.6,
+   "truth_s": 0.7,
    "n_events": 98,
    "dt": 2e-07,
    "graded": [
@@ -10876,7 +10876,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -11077,7 +11077,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.015,
+     "wall_s": 0.01,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -11298,7 +11298,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.003,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -11331,7 +11331,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.003,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -11368,7 +11368,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.003,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -11464,7 +11464,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.009,
+     "wall_s": 0.014,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -11495,7 +11495,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.011,
+     "wall_s": 0.016,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -11562,7 +11562,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.006,
+     "wall_s": 0.011,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -11593,7 +11593,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.027,
+     "wall_s": 0.035,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -11658,7 +11658,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.014,
+     "wall_s": 0.018,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -11730,7 +11730,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.026,
+     "wall_s": 0.028,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -11855,7 +11855,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -11920,7 +11920,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.004,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -11984,7 +11984,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.003,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -12091,7 +12091,7 @@
   },
   {
    "circuit": "circuits/magnetics/half_bridge_transformer_dc.yaml",
-   "truth_s": 10.3,
+   "truth_s": 13.3,
    "n_events": 447,
    "dt": 1e-07,
    "graded": [
@@ -12117,7 +12117,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.006,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -12163,40 +12163,40 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.007,
+     "wall_s": 0.006,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
      },
      "form": null,
      "measure": "interp",
-     "err_rms": 0.00012808943441412304,
-     "err_max": 0.00023400948458491313,
+     "err_rms": 2.663271810300443e-06,
+     "err_max": 1.8368287078745173e-05,
      "outcome": "agree",
-     "excluded_frac": 0.0016009923763933148,
-     "edge_rms": 0.00012799680709952655,
-     "edge_timing_s": 9.099999990000001e-06,
-     "edge_timing_steps": 90.99999990000002,
+     "excluded_frac": 0.0015343922828992113,
+     "edge_rms": 2.6648404172267315e-06,
+     "edge_timing_s": 6.941909753548645e-08,
+     "edge_timing_steps": 0.6941909753548645,
      "edge": "ok",
      "known": null,
      "known_err": null,
-     "exact": 0.00012772605508570302,
+     "exact": 2.8592097388788924e-06,
      "exact_col": "V(out)",
      "exact_per_col": {
-      "V(out)": 0.00012772605508570302
+      "V(out)": 2.8592097388788924e-06
      },
-     "exact_max_pt": 0.00023176827325920295,
-     "n_samples": 15748,
+     "exact_max_pt": 1.8452655454270648e-05,
+     "n_samples": 15751,
      "departure": null,
-     "self": 1.1963732079366837e-16,
-     "self_n": 5549,
+     "self": 1.1955627324053553e-16,
+     "self_n": 5554,
      "class": ""
     },
     "pwl+split": {
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.009,
+     "wall_s": 0.007,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -12204,33 +12204,33 @@
      },
      "form": null,
      "measure": "interp",
-     "err_rms": 0.00012733852794829688,
-     "err_max": 0.0002330994693367508,
+     "err_rms": 2.7855686623544076e-06,
+     "err_max": 1.8156239875998554e-05,
      "outcome": "agree",
-     "excluded_frac": 0.00213432452268265,
-     "edge_rms": 0.00012721665318491968,
-     "edge_timing_s": 9.099999990000001e-06,
-     "edge_timing_steps": 90.99999990000002,
+     "excluded_frac": 0.002201057457690007,
+     "edge_rms": 2.7873908637849156e-06,
+     "edge_timing_s": 9.799028449189624e-08,
+     "edge_timing_steps": 0.9799028449189625,
      "edge": "ok",
      "known": null,
      "known_err": null,
-     "exact": 0.00012697538267940806,
+     "exact": 3.0684557903102333e-06,
      "exact_col": "V(out)",
      "exact_per_col": {
-      "V(out)": 0.00012697538267940806
+      "V(out)": 3.0684557903102333e-06
      },
-     "exact_max_pt": 0.0002308600333196131,
-     "n_samples": 15740,
+     "exact_max_pt": 1.82406092162525e-05,
+     "n_samples": 15741,
      "departure": null,
-     "self": 1.1999027921330072e-16,
-     "self_n": 5544,
+     "self": 1.1851782091834744e-16,
+     "self_n": 5542,
      "class": ""
     },
     "trbdf2": {
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.022,
+     "wall_s": 0.02,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -12261,7 +12261,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.066,
+     "wall_s": 0.043,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -12292,7 +12292,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.02,
+     "wall_s": 0.013,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -12325,7 +12325,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.008,
+     "wall_s": 0.012,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -12336,33 +12336,33 @@
      },
      "form": "branch",
      "measure": "interp",
-     "err_rms": 0.0001273385639550893,
-     "err_max": 0.00023309946910876067,
+     "err_rms": 2.785570188592103e-06,
+     "err_max": 1.8156242800804175e-05,
      "outcome": "agree",
-     "excluded_frac": 0.0022009910431775173,
-     "edge_rms": 0.00012721144229234753,
-     "edge_timing_s": 9.099999990000001e-06,
-     "edge_timing_steps": 90.99999990000002,
+     "excluded_frac": 0.002201057457690007,
+     "edge_rms": 2.7873923917698926e-06,
+     "edge_timing_s": 9.799028449189624e-08,
+     "edge_timing_steps": 0.9799028449189625,
      "edge": "ok",
      "known": null,
      "known_err": null,
-     "exact": 0.00012697541865056488,
+     "exact": 3.0684573301266945e-06,
      "exact_col": "V(out)",
      "exact_per_col": {
-      "V(out)": 0.00012697541865056488
+      "V(out)": 3.0684573301266945e-06
      },
-     "exact_max_pt": 0.00023086003309042742,
-     "n_samples": 15739,
+     "exact_max_pt": 1.8240612141044798e-05,
+     "n_samples": 15741,
      "departure": null,
-     "self": 1.1894392549528516e-16,
-     "self_n": 5547,
+     "self": 1.1851782091834744e-16,
+     "self_n": 5542,
      "class": ""
     },
     "trbdf2+next": {
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.032,
+     "wall_s": 0.036,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -12397,7 +12397,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.051,
+     "wall_s": 0.06,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -12489,7 +12489,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.0,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -12522,7 +12522,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.0,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -12587,7 +12587,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.012,
+     "wall_s": 0.017,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -12618,7 +12618,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -12723,7 +12723,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.017,
+     "wall_s": 0.014,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -12758,7 +12758,7 @@
   },
   {
    "circuit": "circuits/switching/buck/high_freq_gan_buck.yaml",
-   "truth_s": 0.1,
+   "truth_s": 0.2,
    "n_events": 400,
    "dt": 1e-08,
    "graded": [
@@ -12815,7 +12815,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.007,
+     "wall_s": 0.01,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -12848,7 +12848,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.006,
+     "wall_s": 0.012,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -12882,7 +12882,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.008,
+     "wall_s": 0.005,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -12913,7 +12913,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.013,
+     "wall_s": 0.009,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -12977,7 +12977,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.006,
+     "wall_s": 0.01,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -13049,7 +13049,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.01,
+     "wall_s": 0.012,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -13110,7 +13110,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.003,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -13204,7 +13204,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.005,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -13299,7 +13299,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.064,
+     "wall_s": 0.054,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -13330,7 +13330,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -13416,7 +13416,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.007,
+     "wall_s": 0.004,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -13467,7 +13467,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.061,
+     "wall_s": 0.039,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -13502,7 +13502,7 @@
   },
   {
    "circuit": "circuits/three_phase/interleaved_buck_3ph.yaml",
-   "truth_s": 5.1,
+   "truth_s": 4.1,
    "n_events": 269,
    "dt": 2e-07,
    "graded": [
@@ -13559,7 +13559,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.003,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -13569,30 +13569,30 @@
      "err_rms": 0.0024861559177438673,
      "err_max": 0.00492613632380115,
      "outcome": "agree",
-     "excluded_frac": 5.832144303409625e-08,
+     "excluded_frac": 0.000444502729971335,
      "edge_rms": 0.0024739686428493376,
      "edge_timing_s": 9.933333496333125e-06,
      "edge_timing_steps": 49.66666748166563,
      "edge": "ok",
      "known": null,
      "known_err": null,
-     "exact": 0.0024860308415480268,
+     "exact": 0.0024854783288529646,
      "exact_col": "V(out)",
      "exact_per_col": {
-      "V(out)": 0.0024860308415480268
+      "V(out)": 0.0024854783288529646
      },
      "exact_max_pt": 0.004925870646235609,
-     "n_samples": 3195,
+     "n_samples": 3196,
      "departure": null,
-     "self": 6.05111095416647e-17,
-     "self_n": 3195,
+     "self": 6.064013223191555e-17,
+     "self_n": 3196,
      "class": ""
     },
     "pwl+split": {
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.003,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -13603,30 +13603,30 @@
      "err_rms": 1.7526928676686908e-06,
      "err_max": 2.7847453245025848e-06,
      "outcome": "agree",
-     "excluded_frac": 0.1000444802179389,
+     "excluded_frac": 0.10044446043995764,
      "edge_rms": null,
      "edge_timing_s": 9.933333496333125e-06,
      "edge_timing_steps": 49.66666748166563,
      "edge": "undersampled",
      "known": null,
      "known_err": null,
-     "exact": 1.6637933258694673e-06,
+     "exact": 1.663423824494991e-06,
      "exact_col": "V(out)",
      "exact_per_col": {
-      "V(out)": 1.6637933258694673e-06
+      "V(out)": 1.663423824494991e-06
      },
      "exact_max_pt": 2.1652860461484356e-06,
-     "n_samples": 2835,
+     "n_samples": 2836,
      "departure": null,
-     "self": 6.006346148499036e-17,
-     "self_n": 2835,
+     "self": 6.019364296648281e-17,
+     "self_n": 2836,
      "class": ""
     },
     "trbdf2": {
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.006,
+     "wall_s": 0.002,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -13657,7 +13657,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.02,
+     "wall_s": 0.011,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -13688,7 +13688,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.006,
+     "wall_s": 0.005,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -13721,7 +13721,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.007,
+     "wall_s": 0.005,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -13735,30 +13735,30 @@
      "err_rms": 1.7526928708912493e-06,
      "err_max": 2.7847453434887093e-06,
      "outcome": "agree",
-     "excluded_frac": 0.1000444802179389,
+     "excluded_frac": 0.10044446043995764,
      "edge_rms": null,
      "edge_timing_s": 9.933333496333125e-06,
      "edge_timing_steps": 49.66666748166563,
      "edge": "undersampled",
      "known": null,
      "known_err": null,
-     "exact": 1.6637933287918663e-06,
+     "exact": 1.6634238274167402e-06,
      "exact_col": "V(out)",
      "exact_per_col": {
-      "V(out)": 1.6637933287918663e-06
+      "V(out)": 1.6634238274167402e-06
      },
      "exact_max_pt": 2.1652860524771396e-06,
-     "n_samples": 2835,
+     "n_samples": 2836,
      "departure": null,
-     "self": 6.006346148499036e-17,
-     "self_n": 2835,
+     "self": 6.019364296648281e-17,
+     "self_n": 2836,
      "class": ""
     },
     "trbdf2+next": {
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.005,
+     "wall_s": 0.003,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -13793,7 +13793,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.025,
+     "wall_s": 0.015,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -13885,7 +13885,7 @@
      "config": "pwl+restart",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -13918,7 +13918,7 @@
      "config": "pwl+split",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -13983,7 +13983,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.049,
+     "wall_s": 0.025,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -14014,7 +14014,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.001,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -14119,7 +14119,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.038,
+     "wall_s": 0.026,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -14211,7 +14211,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.003,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -14278,7 +14278,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.009,
+     "wall_s": 0.004,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -14411,7 +14411,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.005,
+     "wall_s": 0.006,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -14446,7 +14446,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.005,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -14642,7 +14642,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.01,
+     "wall_s": 0.013,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -14818,7 +14818,7 @@
   },
   {
    "circuit": "circuits/switching/buck/ll06_buck_vcswitch.yaml",
-   "truth_s": 1.8,
+   "truth_s": 2.1,
    "n_events": 286,
    "dt": 2e-07,
    "graded": [
@@ -14904,34 +14904,34 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.007,
+     "wall_s": 0.005,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
      },
      "form": null,
      "measure": "interp",
-     "err_rms": 0.09071450341519616,
+     "err_rms": 0.09071449994980278,
      "err_max": 1.157098115348566,
      "outcome": "disagree",
-     "excluded_frac": 0.005903307451981045,
+     "excluded_frac": 0.005903307451980611,
      "edge_rms": 0.040373046979416315,
      "edge_timing_s": 1.9880000194377527e-05,
      "edge_timing_steps": 99.40000097188764,
      "edge": "ok",
      "known": "disagree",
      "known_err": 0.118,
-     "exact": 0.09060603754869512,
+     "exact": 0.0906060362752098,
      "exact_col": "V(sw)",
      "exact_per_col": {
       "V(vin)": 2.44533744615951e-13,
-      "V(sw)": 0.09060603754869512,
-      "V(n_l)": 0.09027384170448097,
-      "V(out)": 0.0035060669786319875,
-      "I(L1)": 0.014727205401892214
+      "V(sw)": 0.0906060362752098,
+      "V(n_l)": 0.09027383662797889,
+      "V(out)": 0.003506066785849603,
+      "I(L1)": 0.014726859842758636
      },
      "exact_max_pt": 1.1570982637528386,
-     "n_samples": 10884,
+     "n_samples": 10886,
      "departure": {
       "t": 8.4e-06,
       "col": "V(sw)",
@@ -14948,15 +14948,15 @@
        "flips": "S1- D1+"
       }
      },
-     "self": 9.391866812602151e-17,
-     "self_n": 5542,
+     "self": 9.418110291805541e-17,
+     "self_n": 5543,
      "class": "engine error"
     },
     "pwl+split": {
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.007,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -14964,7 +14964,7 @@
      },
      "form": null,
      "measure": "interp",
-     "err_rms": 0.04262198531420382,
+     "err_rms": 0.0426219893428333,
      "err_max": 0.9987812583336084,
      "outcome": "disagree",
      "excluded_frac": 0.018500149824095563,
@@ -14974,17 +14974,17 @@
      "edge": "ok",
      "known": "disagree",
      "known_err": 0.0704,
-     "exact": 0.011418529756018,
+     "exact": 0.011418529756328727,
      "exact_col": "V(sw)",
      "exact_per_col": {
       "V(vin)": 2.474687979695853e-13,
-      "V(sw)": 0.011418529756018,
-      "V(n_l)": 0.01137698654142048,
-      "V(out)": 3.4081244909521833e-06,
-      "I(L1)": 2.7479181551503095e-05
+      "V(sw)": 0.011418529756328727,
+      "V(n_l)": 0.011376986546374685,
+      "V(out)": 3.4930024712851613e-06,
+      "I(L1)": 7.438017307442383e-05
      },
      "exact_max_pt": 0.6387618392527137,
-     "n_samples": 10663,
+     "n_samples": 10666,
      "departure": {
       "t": 1.84e-05,
       "col": "V(sw)",
@@ -15001,15 +15001,15 @@
        "flips": "D1-"
       }
      },
-     "self": 9.432368509309935e-17,
-     "self_n": 5432,
+     "self": 9.487467033287379e-17,
+     "self_n": 5433,
      "class": "measure"
     },
     "trbdf2": {
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.005,
+     "wall_s": 0.006,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -15059,7 +15059,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.01,
+     "wall_s": 0.023,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -15131,7 +15131,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.009,
+     "wall_s": 0.005,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -15142,7 +15142,7 @@
      },
      "form": "branch",
      "measure": "interp",
-     "err_rms": 0.042623473116947586,
+     "err_rms": 0.04262347714543645,
      "err_max": 0.99878125833361,
      "outcome": "disagree",
      "excluded_frac": 0.018600113347048305,
@@ -15153,17 +15153,17 @@
      "known": null,
      "known_err": null,
      "unexpected": "new outcome",
-     "exact": 0.011422721503847417,
+     "exact": 0.011422721504158028,
      "exact_col": "V(sw)",
      "exact_per_col": {
       "V(vin)": 0.0,
-      "V(sw)": 0.011422721503847417,
-      "V(n_l)": 0.011381163049480862,
-      "V(out)": 3.4081244781171884e-06,
-      "I(L1)": 2.748330055387832e-05
+      "V(sw)": 0.011422721504158028,
+      "V(n_l)": 0.011381163054433251,
+      "V(out)": 3.4930024587800437e-06,
+      "I(L1)": 7.438169490707063e-05
      },
      "exact_max_pt": 0.6387618392480686,
-     "n_samples": 10662,
+     "n_samples": 10665,
      "departure": {
       "t": 1.84e-05,
       "col": "V(sw)",
@@ -15180,15 +15180,15 @@
        "flips": "D1-"
       }
      },
-     "self": 9.430386782298443e-17,
-     "self_n": 5431,
+     "self": 9.492681512127219e-17,
+     "self_n": 5433,
      "class": "measure"
     },
     "trbdf2+next": {
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.013,
+     "wall_s": 0.008,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -15281,7 +15281,7 @@
   },
   {
    "circuit": "circuits/switching/boost/ll07_boost_vcswitch.yaml",
-   "truth_s": 1.7,
+   "truth_s": 1.8,
    "n_events": 399,
    "dt": 2e-07,
    "graded": [
@@ -15317,7 +15317,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.006,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -15367,7 +15367,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.004,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -15419,7 +15419,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.005,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -15493,7 +15493,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.011,
+     "wall_s": 0.026,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -15565,7 +15565,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.005,
+     "wall_s": 0.012,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -15646,7 +15646,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.019,
+     "wall_s": 0.021,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -15722,7 +15722,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.003,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -15772,38 +15772,38 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.008,
+     "wall_s": 0.009,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
      },
      "form": null,
      "measure": "interp",
-     "err_rms": 0.00808851216300577,
-     "err_max": 0.5101789775077812,
+     "err_rms": 0.010206480018019852,
+     "err_max": 0.523792301368614,
      "outcome": "agree",
      "excluded_frac": 8.711272104745965e-08,
-     "edge_rms": 0.00678318462161207,
+     "edge_rms": 0.010205383117746483,
      "edge_timing_s": 2.2796778570768894e-12,
      "edge_timing_steps": 9.118711428307558e-06,
      "edge": "ok",
      "known": "disagree",
      "known_err": 0.0587,
-     "exact": 0.0414295035125575,
-     "exact_col": "V(mid)",
+     "exact": 0.04994225801620564,
+     "exact_col": "I(Lload)",
      "exact_per_col": {
       "V(vcc)": 0.0,
-      "V(mid)": 0.0414295035125575,
-      "V(out)": 0.0027997581986972725,
-      "V(load_mid)": 0.002799314954836206,
-      "I(Lload)": 0.04142950351255748
+      "V(mid)": 0.04994225801620562,
+      "V(out)": 0.0018055957762435407,
+      "V(load_mid)": 0.0018051404942585447,
+      "I(Lload)": 0.04994225801620564
      },
-     "exact_max_pt": 0.5101789774372851,
+     "exact_max_pt": 0.5237923012962472,
      "n_samples": 12721,
      "departure": {
       "t": 2.4000000000000004e-05,
       "col": "V(mid)",
-      "dev": 0.5101789774352696,
+      "dev": 0.5237923012942154,
       "onset_t": 2.4000000000000004e-05,
       "event": {
        "t": 2.4e-05,
@@ -15824,7 +15824,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.007,
+     "wall_s": 0.005,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -15832,31 +15832,31 @@
      },
      "form": null,
      "measure": "interp",
-     "err_rms": 0.00808851216300577,
-     "err_max": 0.5101789775077812,
+     "err_rms": 0.010206480018019852,
+     "err_max": 0.523792301368614,
      "outcome": "agree",
      "excluded_frac": 8.711272104745965e-08,
-     "edge_rms": 0.00678318462161207,
+     "edge_rms": 0.010205383117746483,
      "edge_timing_s": 2.2796778570768894e-12,
      "edge_timing_steps": 9.118711428307558e-06,
      "edge": "ok",
      "known": "disagree",
      "known_err": 0.0587,
-     "exact": 0.0414295035125575,
-     "exact_col": "V(mid)",
+     "exact": 0.04994225801620564,
+     "exact_col": "I(Lload)",
      "exact_per_col": {
       "V(vcc)": 0.0,
-      "V(mid)": 0.0414295035125575,
-      "V(out)": 0.0027997581986972725,
-      "V(load_mid)": 0.002799314954836206,
-      "I(Lload)": 0.04142950351255748
+      "V(mid)": 0.04994225801620562,
+      "V(out)": 0.0018055957762435407,
+      "V(load_mid)": 0.0018051404942585447,
+      "I(Lload)": 0.04994225801620564
      },
-     "exact_max_pt": 0.5101789774372851,
+     "exact_max_pt": 0.5237923012962472,
      "n_samples": 12721,
      "departure": {
       "t": 2.4000000000000004e-05,
       "col": "V(mid)",
-      "dev": 0.5101789774352696,
+      "dev": 0.5237923012942154,
       "onset_t": 2.4000000000000004e-05,
       "event": {
        "t": 2.4e-05,
@@ -15877,7 +15877,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.014,
+     "wall_s": 0.012,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -15912,7 +15912,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.015,
+     "wall_s": 0.007,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -15947,7 +15947,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.01,
+     "wall_s": 0.005,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -15984,7 +15984,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.008,
+     "wall_s": 0.01,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -15995,31 +15995,31 @@
      },
      "form": "branch",
      "measure": "interp",
-     "err_rms": 0.008088512163005556,
-     "err_max": 0.5101789775077064,
+     "err_rms": 0.01020648001801982,
+     "err_max": 0.5237923013686081,
      "outcome": "agree",
      "excluded_frac": 8.711272104745965e-08,
-     "edge_rms": 0.00678318462161189,
+     "edge_rms": 0.01020538311774636,
      "edge_timing_s": 2.2796778570768894e-12,
      "edge_timing_steps": 9.118711428307558e-06,
      "edge": "ok",
      "known": null,
      "known_err": null,
-     "exact": 0.041429503512562645,
+     "exact": 0.049942258016205165,
      "exact_col": "V(mid)",
      "exact_per_col": {
       "V(vcc)": 0.0,
-      "V(mid)": 0.041429503512562645,
-      "V(out)": 0.0027997581986978237,
-      "V(load_mid)": 0.002799314954836756,
-      "I(Lload)": 0.041429503512562645
+      "V(mid)": 0.049942258016205165,
+      "V(out)": 0.001805595776243508,
+      "V(load_mid)": 0.0018051404942585122,
+      "I(Lload)": 0.04994225801620515
      },
-     "exact_max_pt": 0.5101789774372043,
+     "exact_max_pt": 0.5237923012962461,
      "n_samples": 12721,
      "departure": {
       "t": 2.4000000000000004e-05,
       "col": "V(mid)",
-      "dev": 0.5101789774351888,
+      "dev": 0.5237923012940254,
       "onset_t": 2.4000000000000004e-05,
       "event": {
        "t": 2.4e-05,
@@ -16040,7 +16040,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.017,
+     "wall_s": 0.012,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -16079,7 +16079,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.016,
+     "wall_s": 0.013,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -16118,7 +16118,7 @@
   },
   {
    "circuit": "circuits/switching/inverter/ll10_full_bridge_inverter_lc.yaml",
-   "truth_s": 0.0,
+   "truth_s": 0.1,
    "n_events": 119,
    "dt": 2.5e-07,
    "graded": [
@@ -16170,7 +16170,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.005,
+     "wall_s": 0.007,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -16219,7 +16219,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.014,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -16292,7 +16292,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.006,
+     "wall_s": 0.002,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -16375,7 +16375,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.006,
+     "wall_s": 0.004,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -16426,7 +16426,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.01,
+     "wall_s": 0.005,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -16466,7 +16466,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.006,
+     "wall_s": 0.002,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -16504,7 +16504,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.016,
+     "wall_s": 0.013,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -16542,7 +16542,7 @@
   },
   {
    "circuit": "circuits/thermal/long_run_drift_buck.yaml",
-   "truth_s": 7.3,
+   "truth_s": 7.5,
    "n_events": 19999,
    "dt": 1e-06,
    "graded": [
@@ -16568,7 +16568,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.03,
+     "wall_s": 0.024,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -16599,7 +16599,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.053,
+     "wall_s": 0.072,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -16632,7 +16632,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.062,
+     "wall_s": 0.082,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -16666,7 +16666,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.131,
+     "wall_s": 0.161,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -16697,7 +16697,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.089,
+     "wall_s": 0.103,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -16728,7 +16728,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.264,
+     "wall_s": 0.216,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -16761,7 +16761,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.083,
+     "wall_s": 0.066,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -16798,7 +16798,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.119,
+     "wall_s": 0.141,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -16833,7 +16833,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.071,
+     "wall_s": 0.077,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -16894,7 +16894,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.003,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -16940,7 +16940,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.003,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -16973,7 +16973,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.003,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -17038,7 +17038,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.005,
+     "wall_s": 0.003,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -17102,7 +17102,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.006,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -17174,7 +17174,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.005,
+     "wall_s": 0.003,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -17235,7 +17235,7 @@
      "config": "pwl",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.004,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -17371,7 +17371,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.017,
+     "wall_s": 0.019,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -17507,7 +17507,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.017,
+     "wall_s": 0.028,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -17599,7 +17599,7 @@
      "config": "pwl+restart",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -17632,7 +17632,7 @@
      "config": "pwl+split",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -17697,7 +17697,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.044,
+     "wall_s": 0.043,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -17728,7 +17728,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.003,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -17761,7 +17761,7 @@
      "config": "pwl+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -17798,7 +17798,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -17833,7 +17833,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.04,
+     "wall_s": 0.043,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -17932,7 +17932,7 @@
      "config": "pwl+restart",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.004,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -17965,7 +17965,7 @@
      "config": "pwl+split",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -18030,7 +18030,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.036,
+     "wall_s": 0.04,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -18061,7 +18061,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -18094,7 +18094,7 @@
      "config": "pwl+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.004,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -18166,7 +18166,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.031,
+     "wall_s": 0.047,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -18201,7 +18201,7 @@
   },
   {
    "circuit": "circuits/switching/multilevel/npc_three_level_halfbridge.yaml",
-   "truth_s": 1.3,
+   "truth_s": 1.6,
    "n_events": 59,
    "dt": 2e-07,
    "graded": [
@@ -18227,7 +18227,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -18356,7 +18356,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.011,
+     "wall_s": 0.007,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -18387,7 +18387,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.004,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -18420,7 +18420,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.004,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -18457,7 +18457,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -18492,7 +18492,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.009,
+     "wall_s": 0.011,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -18553,7 +18553,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.0,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -18628,7 +18628,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.0,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -18794,7 +18794,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.0,
+     "wall_s": 0.001,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -18921,7 +18921,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.003,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -18954,7 +18954,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -18988,7 +18988,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.002,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -19019,7 +19019,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.032,
+     "wall_s": 0.04,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -19050,7 +19050,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.003,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -19083,7 +19083,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -19155,7 +19155,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.03,
+     "wall_s": 0.037,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -19216,7 +19216,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -19247,7 +19247,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -19345,7 +19345,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.017,
+     "wall_s": 0.036,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -19481,7 +19481,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.021,
+     "wall_s": 0.037,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -19542,7 +19542,7 @@
      "config": "pwl",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -19573,7 +19573,7 @@
      "config": "pwl+restart",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -19671,7 +19671,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.014,
+     "wall_s": 0.013,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -19772,7 +19772,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.0,
+     "wall_s": 0.001,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -19807,7 +19807,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.012,
+     "wall_s": 0.014,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -19868,7 +19868,7 @@
      "config": "pwl",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.0,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -19899,7 +19899,7 @@
      "config": "pwl+restart",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.0,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -20133,7 +20133,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.003,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -20330,7 +20330,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -20527,7 +20527,7 @@
      "config": "pwl",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -20558,7 +20558,7 @@
      "config": "pwl+restart",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -20656,7 +20656,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.047,
+     "wall_s": 0.046,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -20827,7 +20827,7 @@
   },
   {
    "circuit": "circuits/switching/buck_boost/sepic.yaml",
-   "truth_s": 3.8,
+   "truth_s": 4.3,
    "n_events": 290,
    "dt": 2e-07,
    "graded": [
@@ -20853,7 +20853,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.003,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -20917,7 +20917,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.007,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -20982,7 +20982,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.013,
+     "wall_s": 0.012,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -21083,7 +21083,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.006,
+     "wall_s": 0.008,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -21210,7 +21210,7 @@
      "config": "pwl+restart",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.0,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -21243,7 +21243,7 @@
      "config": "pwl+split",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.0,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -21308,7 +21308,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.012,
+     "wall_s": 0.015,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -21372,7 +21372,7 @@
      "config": "pwl+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.0,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -21444,7 +21444,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.017,
+     "wall_s": 0.014,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -21569,7 +21569,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -21634,7 +21634,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.005,
+     "wall_s": 0.003,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -21665,7 +21665,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.007,
+     "wall_s": 0.005,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -21698,7 +21698,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.005,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -21735,7 +21735,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.006,
+     "wall_s": 0.003,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -21770,7 +21770,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.008,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -21831,7 +21831,7 @@
      "config": "pwl",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.0,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -21862,7 +21862,7 @@
      "config": "pwl+restart",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.0,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -21960,7 +21960,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.006,
+     "wall_s": 0.003,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -22024,7 +22024,7 @@
      "config": "pwl+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.0,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -22096,7 +22096,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.01,
+     "wall_s": 0.003,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -22188,7 +22188,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -22387,7 +22387,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.002,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -22422,7 +22422,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.003,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -22514,7 +22514,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.005,
+     "wall_s": 0.012,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -22547,7 +22547,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.008,
+     "wall_s": 0.009,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -22612,7 +22612,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.012,
+     "wall_s": 0.014,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -22748,7 +22748,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.025,
+     "wall_s": 0.015,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -22840,7 +22840,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -23039,7 +23039,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -23074,7 +23074,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.004,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -23135,7 +23135,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.008,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -23181,29 +23181,29 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.005,
+     "wall_s": 0.011,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
      },
      "form": null,
      "measure": "interp",
-     "err_rms": 1.0052943339859868e-06,
-     "err_max": 3.8903764194046354e-06,
+     "err_rms": 1.618999565600353e-06,
+     "err_max": 5.9885929356345e-06,
      "outcome": "agree",
      "excluded_frac": 3.068020425400849e-08,
-     "edge_rms": 1.005294347295641e-06,
+     "edge_rms": 1.6189968747151683e-06,
      "edge_timing_s": 9.856664096030698e-13,
      "edge_timing_steps": 9.856664096030698e-06,
      "edge": "ok",
      "known": null,
      "known_err": null,
-     "exact": 1.3249503663520522e-07,
+     "exact": 1.2241587591585342e-06,
      "exact_col": "V(out)",
      "exact_per_col": {
-      "V(out)": 1.3249503663520522e-07
+      "V(out)": 1.2241587591585342e-06
      },
-     "exact_max_pt": 3.952832982095988e-07,
+     "exact_max_pt": 2.988955490163689e-06,
      "n_samples": 20601,
      "departure": null,
      "self": 6.975843745884761e-17,
@@ -23214,7 +23214,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.008,
+     "wall_s": 0.012,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -23222,22 +23222,22 @@
      },
      "form": null,
      "measure": "interp",
-     "err_rms": 1.0052943339859868e-06,
-     "err_max": 3.8903764194046354e-06,
+     "err_rms": 1.618999565600353e-06,
+     "err_max": 5.9885929356345e-06,
      "outcome": "agree",
      "excluded_frac": 3.068020425400849e-08,
-     "edge_rms": 1.005294347295641e-06,
+     "edge_rms": 1.6189968747151683e-06,
      "edge_timing_s": 9.856664096030698e-13,
      "edge_timing_steps": 9.856664096030698e-06,
      "edge": "ok",
      "known": null,
      "known_err": null,
-     "exact": 1.3249503663520522e-07,
+     "exact": 1.2241587591585342e-06,
      "exact_col": "V(out)",
      "exact_per_col": {
-      "V(out)": 1.3249503663520522e-07
+      "V(out)": 1.2241587591585342e-06
      },
-     "exact_max_pt": 3.952832982095988e-07,
+     "exact_max_pt": 2.988955490163689e-06,
      "n_samples": 20601,
      "departure": null,
      "self": 6.975843745884761e-17,
@@ -23279,7 +23279,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.017,
+     "wall_s": 0.022,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -23310,7 +23310,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.012,
+     "wall_s": 0.014,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -23343,7 +23343,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.006,
+     "wall_s": 0.007,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -23354,22 +23354,22 @@
      },
      "form": "branch",
      "measure": "interp",
-     "err_rms": 1.0052943240432515e-06,
-     "err_max": 3.890376296817453e-06,
+     "err_rms": 1.6189994810541167e-06,
+     "err_max": 5.988592777080418e-06,
      "outcome": "agree",
      "excluded_frac": 3.068020425400849e-08,
-     "edge_rms": 1.0052943373529045e-06,
+     "edge_rms": 1.618996790169437e-06,
      "edge_timing_s": 9.856664096030698e-13,
      "edge_timing_steps": 9.856664096030698e-06,
      "edge": "ok",
      "known": null,
      "known_err": null,
-     "exact": 1.3249493035072017e-07,
+     "exact": 1.2241586427206963e-06,
      "exact_col": "V(out)",
      "exact_per_col": {
-      "V(out)": 1.3249493035072017e-07
+      "V(out)": 1.2241586427206963e-06
      },
-     "exact_max_pt": 3.95283115677404e-07,
+     "exact_max_pt": 2.9889552743620793e-06,
      "n_samples": 20601,
      "departure": null,
      "self": 6.975843745884761e-17,
@@ -23380,7 +23380,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.027,
+     "wall_s": 0.036,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -23415,7 +23415,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.024,
+     "wall_s": 0.018,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -23522,7 +23522,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.003,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -23555,7 +23555,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -23620,7 +23620,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.003,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -23684,7 +23684,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.003,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -23721,7 +23721,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.003,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -23756,7 +23756,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.002,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -23791,7 +23791,7 @@
   },
   {
    "circuit": "circuits/switching/boost/textbook_erickson_boost_ccm.yaml",
-   "truth_s": 0.9,
+   "truth_s": 1.0,
    "n_events": 191,
    "dt": 2e-07,
    "graded": [
@@ -23817,7 +23817,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -23915,7 +23915,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.002,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -23946,7 +23946,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.012,
+     "wall_s": 0.007,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -24082,7 +24082,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.009,
+     "wall_s": 0.007,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -24117,7 +24117,7 @@
   },
   {
    "circuit": "circuits/switching/buck/textbook_erickson_buck_ccm.yaml",
-   "truth_s": 4.1,
+   "truth_s": 4.7,
    "n_events": 739,
    "dt": 2e-07,
    "graded": [
@@ -24143,7 +24143,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.009,
+     "wall_s": 0.006,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -24207,7 +24207,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.006,
+     "wall_s": 0.01,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -24215,20 +24215,20 @@
      },
      "form": null,
      "measure": "interp",
-     "err_rms": 4.2056511264985587e-07,
+     "err_rms": 4.2058679496559437e-07,
      "err_max": 4.087831100339223e-06,
      "outcome": "agree",
      "excluded_frac": 0.00956001595623077,
-     "edge_rms": 4.2074768796689375e-07,
+     "edge_rms": 4.207688842537382e-07,
      "edge_timing_s": 1.9754104622253868e-07,
      "edge_timing_steps": 0.9877052311126935,
      "edge": "ok",
      "known": null,
      "known_err": null,
-     "exact": 1.5563760707173738e-07,
+     "exact": 1.557293959572535e-07,
      "exact_col": "V(out)",
      "exact_per_col": {
-      "V(out)": 1.5563760707173738e-07
+      "V(out)": 1.557293959572535e-07
      },
      "exact_max_pt": 9.133499243217651e-07,
      "n_samples": 26982,
@@ -24272,7 +24272,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.037,
+     "wall_s": 0.024,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -24303,7 +24303,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.013,
+     "wall_s": 0.01,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -24336,7 +24336,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.012,
+     "wall_s": 0.01,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -24373,7 +24373,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.01,
+     "wall_s": 0.008,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -24408,7 +24408,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.027,
+     "wall_s": 0.029,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -24469,7 +24469,7 @@
      "config": "pwl",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -24598,7 +24598,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.057,
+     "wall_s": 0.048,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -24629,7 +24629,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -24734,7 +24734,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.069,
+     "wall_s": 0.049,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -24769,7 +24769,7 @@
   },
   {
    "circuit": "circuits/three_phase/three_phase_diode_rectifier.yaml",
-   "truth_s": 2.6,
+   "truth_s": 2.0,
    "n_events": 97,
    "dt": 5e-05,
    "graded": [
@@ -24848,7 +24848,7 @@
      },
      "form": null,
      "measure": "interp",
-     "err_rms": 0.006318255202075455,
+     "err_rms": 0.005719172490666758,
      "err_max": 0.21059899451883055,
      "outcome": "agree",
      "excluded_frac": 0.0850484411681758,
@@ -24858,13 +24858,13 @@
      "edge": "ok",
      "known": null,
      "known_err": null,
-     "exact": 0.012736050628070001,
+     "exact": 0.012727172183760673,
      "exact_col": "V(out)",
      "exact_per_col": {
-      "V(out)": 0.012736050628070001
+      "V(out)": 0.012727172183760673
      },
      "exact_max_pt": 0.7175421056239919,
-     "n_samples": 1830,
+     "n_samples": 1832,
      "departure": {
       "t": 5e-324,
       "col": "V(out)",
@@ -24874,14 +24874,14 @@
       "onset_event": null
      },
      "self": 9.015968859682248e-17,
-     "self_n": 1830,
+     "self_n": 1832,
      "class": ""
     },
     "pwl+split": {
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -24889,7 +24889,7 @@
      },
      "form": null,
      "measure": "interp",
-     "err_rms": 0.006308540062150382,
+     "err_rms": 0.005708016559773695,
      "err_max": 0.21059899451883055,
      "outcome": "agree",
      "excluded_frac": 0.08888372301903612,
@@ -24899,13 +24899,13 @@
      "edge": "ok",
      "known": null,
      "known_err": null,
-     "exact": 0.012735895076360158,
+     "exact": 0.01272700711160015,
      "exact_col": "V(out)",
      "exact_per_col": {
-      "V(out)": 0.012735895076360158
+      "V(out)": 0.01272700711160015
      },
      "exact_max_pt": 0.7175421056239919,
-     "n_samples": 1807,
+     "n_samples": 1809,
      "departure": {
       "t": 5e-324,
       "col": "V(out)",
@@ -24915,7 +24915,7 @@
       "onset_event": null
      },
      "self": 8.996959838198428e-17,
-     "self_n": 1807,
+     "self_n": 1809,
      "class": ""
     },
     "trbdf2": {
@@ -24953,7 +24953,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.147,
+     "wall_s": 0.117,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -25028,7 +25028,7 @@
      },
      "form": "branch",
      "measure": "interp",
-     "err_rms": 0.006308540062152231,
+     "err_rms": 0.005708016559775736,
      "err_max": 0.21059899451883055,
      "outcome": "agree",
      "excluded_frac": 0.08888372301903612,
@@ -25038,13 +25038,13 @@
      "edge": "ok",
      "known": null,
      "known_err": null,
-     "exact": 0.012735895076360174,
+     "exact": 0.012727007111600165,
      "exact_col": "V(out)",
      "exact_per_col": {
-      "V(out)": 0.012735895076360174
+      "V(out)": 0.012727007111600165
      },
      "exact_max_pt": 0.7175421056239919,
-     "n_samples": 1807,
+     "n_samples": 1809,
      "departure": {
       "t": 5e-324,
       "col": "V(out)",
@@ -25054,7 +25054,7 @@
       "onset_event": null
      },
      "self": 8.996959838198428e-17,
-     "self_n": 1807,
+     "self_n": 1809,
      "class": ""
     },
     "trbdf2+next": {
@@ -25096,7 +25096,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.164,
+     "wall_s": 0.129,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -25195,7 +25195,7 @@
      "config": "pwl+restart",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.0,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -25235,7 +25235,7 @@
      "config": "pwl+split",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.0,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -25307,7 +25307,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.005,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -25371,7 +25371,7 @@
      "config": "pwl+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.0,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -25416,7 +25416,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.008,
+     "wall_s": 0.002,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -25512,7 +25512,7 @@
      "config": "pwl",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.0,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -25610,7 +25610,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.0,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -25641,7 +25641,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.017,
+     "wall_s": 0.014,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -25672,7 +25672,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -25742,7 +25742,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.0,
+     "wall_s": 0.001,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -25777,7 +25777,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.017,
+     "wall_s": 0.013,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -25869,7 +25869,7 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.004,
+     "wall_s": 0.003,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -25902,7 +25902,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.004,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -25936,7 +25936,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -25998,7 +25998,7 @@
      "config": "trbdf2+esdirk43",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.004,
      "engine": "trbdf2",
      "kwargs": {
       "integrator": "esdirk43"
@@ -26031,7 +26031,7 @@
      "config": "pwl+next",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.006,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -26138,7 +26138,7 @@
   },
   {
    "circuit": "circuits/switching/boost/two_phase_interleaved_boost.yaml",
-   "truth_s": 6.8,
+   "truth_s": 5.7,
    "n_events": 491,
    "dt": 2e-07,
    "graded": [
@@ -26164,7 +26164,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.005,
+     "wall_s": 0.003,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -26195,40 +26195,40 @@
      "config": "pwl+restart",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.009,
+     "wall_s": 0.004,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
      },
      "form": null,
      "measure": "interp",
-     "err_rms": 1.036246331940862e-06,
-     "err_max": 3.073033800712919e-06,
+     "err_rms": 1.0375637553699443e-06,
+     "err_max": 8.439622979590981e-06,
      "outcome": "agree",
      "excluded_frac": 0.00630004880825577,
-     "edge_rms": 1.0358318872125918e-06,
-     "edge_timing_s": 1.9999995754709302e-07,
-     "edge_timing_steps": 0.9999997877354652,
+     "edge_rms": 1.0358318872125924e-06,
+     "edge_timing_s": 1.392840136922504e-07,
+     "edge_timing_steps": 0.696420068461252,
      "edge": "ok",
      "known": null,
      "known_err": null,
-     "exact": 1.352359074923387e-06,
+     "exact": 1.3531994588507503e-06,
      "exact_col": "V(out)",
      "exact_per_col": {
-      "V(out)": 1.352359074923387e-06
+      "V(out)": 1.3531994588507503e-06
      },
-     "exact_max_pt": 2.402145908430471e-06,
-     "n_samples": 11390,
+     "exact_max_pt": 7.639574431927283e-06,
+     "n_samples": 11395,
      "departure": null,
-     "self": 5.793916089646264e-17,
-     "self_n": 6093,
+     "self": 5.548729827265807e-17,
+     "self_n": 6098,
      "class": ""
     },
     "pwl+split": {
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.006,
+     "wall_s": 0.007,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -26236,26 +26236,26 @@
      },
      "form": null,
      "measure": "interp",
-     "err_rms": 4.3211152443919023e-07,
-     "err_max": 3.063387817442135e-06,
+     "err_rms": 4.366291980855408e-07,
+     "err_max": 8.452534960102363e-06,
      "outcome": "agree",
-     "excluded_frac": 0.009100033746764626,
-     "edge_rms": 4.335978141260522e-07,
-     "edge_timing_s": 1.9999995754709302e-07,
-     "edge_timing_steps": 0.9999997877354652,
+     "excluded_frac": 0.009100033746764193,
+     "edge_rms": 4.335978141260543e-07,
+     "edge_timing_s": 1.9654565342191056e-07,
+     "edge_timing_steps": 0.9827282671095529,
      "edge": "ok",
      "known": null,
      "known_err": null,
-     "exact": 5.227532897699884e-07,
+     "exact": 5.26058343430817e-07,
      "exact_col": "V(out)",
      "exact_per_col": {
-      "V(out)": 5.227532897699884e-07
+      "V(out)": 5.26058343430817e-07
      },
-     "exact_max_pt": 1.4361475735236269e-06,
-     "n_samples": 11362,
+     "exact_max_pt": 7.65248639164973e-06,
+     "n_samples": 11367,
      "departure": null,
-     "self": 5.660033604720685e-17,
-     "self_n": 6079,
+     "self": 5.686040252175495e-17,
+     "self_n": 6084,
      "class": ""
     },
     "trbdf2": {
@@ -26293,7 +26293,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.027,
+     "wall_s": 0.035,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -26368,33 +26368,33 @@
      },
      "form": "branch",
      "measure": "interp",
-     "err_rms": 4.321115207267166e-07,
-     "err_max": 3.063387804698026e-06,
+     "err_rms": 4.3662919441933944e-07,
+     "err_max": 8.452534958750715e-06,
      "outcome": "agree",
-     "excluded_frac": 0.009100033746764626,
-     "edge_rms": 4.335978104750339e-07,
-     "edge_timing_s": 1.9999995754709302e-07,
-     "edge_timing_steps": 0.9999997877354652,
+     "excluded_frac": 0.009100033746764193,
+     "edge_rms": 4.33597810475036e-07,
+     "edge_timing_s": 1.9654565342191056e-07,
+     "edge_timing_steps": 0.9827282671095529,
      "edge": "ok",
      "known": null,
      "known_err": null,
-     "exact": 5.22753313407163e-07,
+     "exact": 5.260583669260944e-07,
      "exact_col": "V(out)",
      "exact_per_col": {
-      "V(out)": 5.22753313407163e-07
+      "V(out)": 5.260583669260944e-07
      },
-     "exact_max_pt": 1.4361475686963207e-06,
-     "n_samples": 11362,
+     "exact_max_pt": 7.652486390298084e-06,
+     "n_samples": 11367,
      "departure": null,
-     "self": 5.660033604720685e-17,
-     "self_n": 6079,
+     "self": 5.686040252175495e-17,
+     "self_n": 6084,
      "class": ""
     },
     "trbdf2+next": {
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.01,
+     "wall_s": 0.008,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -26429,7 +26429,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.037,
+     "wall_s": 0.033,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -26569,7 +26569,7 @@
      "config": "pwl+split",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.0,
+     "wall_s": 0.001,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -26751,7 +26751,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -26878,7 +26878,7 @@
      "config": "pwl+restart",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.0,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true
@@ -26911,7 +26911,7 @@
      "config": "pwl+split",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.0,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -26945,7 +26945,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.0,
+     "wall_s": 0.001,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -26976,7 +26976,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.001,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -27040,7 +27040,7 @@
      "config": "pwl+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.0,
      "engine": "pwl",
      "kwargs": {
       "discontinuity_restart": true,
@@ -27147,7 +27147,7 @@
   },
   {
    "circuit": "circuits/diodes/voltage_doubler.yaml",
-   "truth_s": 0.6,
+   "truth_s": 0.4,
    "n_events": 19,
    "dt": 5e-05,
    "graded": [
@@ -27173,7 +27173,7 @@
      "config": "pwl",
      "tol": 0.02,
      "message": null,
-     "wall_s": 0.002,
+     "wall_s": 0.0,
      "engine": "pwl",
      "kwargs": {},
      "form": null,
@@ -27271,7 +27271,7 @@
      "config": "trbdf2",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.003,
+     "wall_s": 0.001,
      "engine": "trbdf2",
      "kwargs": {},
      "form": null,
@@ -27302,7 +27302,7 @@
      "config": "dsed",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.031,
+     "wall_s": 0.02,
      "engine": "dsed",
      "kwargs": {},
      "form": null,
@@ -27403,7 +27403,7 @@
      "config": "trbdf2+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.001,
+     "wall_s": 0.002,
      "engine": "trbdf2",
      "kwargs": {
       "mode_selection": "auto",
@@ -27438,7 +27438,7 @@
      "config": "dsed+next",
      "tol": 0.001,
      "message": null,
-     "wall_s": 0.039,
+     "wall_s": 0.037,
      "engine": "dsed",
      "kwargs": {
       "mode_selection": "auto",
@@ -27559,23 +27559,23 @@
    },
    {
     "run": "pwl+restart dt/1",
-    "exact": 6.4384715949450714e-06,
+    "exact": 6.444511685749874e-06,
     "exact_col": "V(out)",
     "n": 20601,
     "departure": null
    },
    {
     "run": "pwl+restart dt/4",
-    "exact": 1.0960137264390304e-05,
+    "exact": 1.4250864654000668e-06,
     "exact_col": "V(out)",
-    "n": 80607,
+    "n": 80601,
     "departure": null
    },
    {
     "run": "pwl+restart dt/16",
-    "exact": 0.00020747126247597407,
+    "exact": 9.788294727088345e-07,
     "exact_col": "V(out)",
-    "n": 320816,
+    "n": 320802,
     "departure": null
    }
   ]
