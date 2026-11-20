@@ -249,16 +249,21 @@ def exact_parts(t, y, cand, *, span: float, h: float, truth_events=(), engine_ev
     engine records. ``h``: the unit of the reported instant error.
 
     smooth: ``sqrt(Σ w_i e_i² / Σ w_i)``, e_i = :func:`exact_dev`, over the
-      stored rows except the initial instant and every row with a device
-      event (truth or engine) at it or strictly inside a step on either
-      side of it: w_i the trapezoid
-      weights of the grid; no snap window, no timing charge. None if no row
-      is left.
-    instants: ``sqrt(Σ_e jump_e² |δ_e| / T)``, δ_e = engine − truth instant
-      of each matched truth instant (the largest over its devices; 0 within
-      4 ulp of the instant, a float time's own resolution), jump_e the
-      truth's right − left: the L2 cost of the displacement. Also max |δ|/h.
-      None (not available) when the engine exposes no event record.
+      stored rows except the initial instant and the rows inside a matched
+      event's displacement, ``[min(t_engine, t_truth), max(...)]`` (where the
+      engine is on the other branch: priced by ``instants``; the row at the
+      engine's instant is its left limit, graded by ``limits``); w_i the
+      trapezoid weights of the grid; no snap window, no timing charge. Every
+      other row is graded, the first one solved after an event included.
+      None if no row is left.
+    instants: ``sqrt((Σ_e jump_e² |δ_e| + Σ_m jump_m² d_m) / T)``: δ_e =
+      engine − truth instant of each matched truth instant (the largest over
+      its devices; 0 within 4 ulp, a float time's own resolution), jump the
+      truth's right − left: the L2 cost of the displacement; a MISSING truth
+      event is charged as displaced by d_m = the time to that device's next
+      truth event, at most the window (beyond it the rows carry the error).
+      Also max |δ|/h over the matched. None (not available) when the engine
+      exposes no event record: then the rows carry every timing error.
     limits: ``max |engine − truth|`` over every one-sided value the engine
       records at an instant after the initial one: at a matched event its left
       (and right) value against the truth's limits at the TRUTH's instant; at
@@ -266,11 +271,15 @@ def exact_parts(t, y, cand, *, span: float, h: float, truth_events=(), engine_ev
       the truth's limits at the engine's instant.
 
     Events at or after the last stored row are not graded (the record ends
-    there). Unmatched events are listed (``missing`` / ``spurious``), never priced:
-    what they do to the trajectory is in ``smooth``. Engine events at the
+    there). Unmatched events are listed (``missing`` / ``spurious``); a
+    spurious one is not charged a duration (no rows are left out around it:
+    its effect is in ``smooth`` and its one-sided values in ``limits``). An
+    event displaced by more than the window is a missing + spurious pair.
+    Engine events at the
     initial instant without a match are the engine's initial mode selection
     (``n_initial``), not spurious. ``summary`` = the largest part, ``part``
-    its name; a non-finite value anywhere scores inf (part ``non-finite``)."""
+    its name; a non-finite value anywhere, the engine's or the truth's,
+    scores inf (part ``non-finite``)."""
     t = np.asarray(t, dtype=float)
     y = np.asarray(y, dtype=float)
     cand = np.asarray(cand, dtype=float).reshape(t.size, -1)
@@ -291,21 +300,21 @@ def exact_parts(t, y, cand, *, span: float, h: float, truth_events=(), engine_ev
     out = dict(missing=[(float(truth_events[i][0]), truth_events[i][1]) for i in missing],
                spurious=[(float(engine_events[j][0]), engine_events[j][1]) for j in spurious],
                n_initial=len(initial), n_matched=len(pairs), instants_available=bool(events_available))
-    recorded = [y] + [np.array([v for e in engine_events for v in e[2:4] if v is not None], dtype=float),
-                      np.array([r[1] for r in right_rows], dtype=float)]
+    recorded = [y, np.nanmin(np.where(np.isnan(cand), np.inf, cand), axis=1)]
+    recorded += [np.array([v for e in engine_events for v in e[2:4] if v is not None], dtype=float),
+                 np.array([v for e in engine_events for v in e[4:6]], dtype=float),
+                 np.array([v for e in truth_events for v in e[2:4]], dtype=float),
+                 np.array([v for r in right_rows for v in r[1:3]], dtype=float)]
     if not all(np.all(np.isfinite(a)) for a in recorded):
         out.update(summary=float("inf"), part="non-finite", smooth=float("inf"), instants=None,
                    limits=float("inf"), smooth_rows=0, kept=np.zeros(t.size, dtype=bool))
         return out
 
-    # (a) smooth: rows with no device event strictly inside their two adjacent steps
-    # (an event AT the row counts; one at the far end of a step does not: the row one
-    # full step after an engine event is a solved value of the new mode and is graded)
-    ev = np.sort(np.r_[[e[0] for e in truth_events], [e[0] for e in engine_events]]).astype(float)
-    prev = np.r_[t[0], t[:-1]]
-    nxt = np.r_[t[1:], t[-1]]
-    near = np.searchsorted(ev, prev, side="right") < np.searchsorted(ev, nxt, side="left")
-    near |= np.isin(t, ev)
+    # (a) smooth: every row but those inside a matched event's displacement
+    near = np.zeros(t.size, dtype=bool)
+    for i, j in pairs:
+        lo, hi = sorted((truth_events[i][0], engine_events[j][0]))
+        near[np.searchsorted(t, lo, side="left"):np.searchsorted(t, hi, side="right")] = True
     graded = t > t0
     w = np.zeros(t.size)
     g = t[graded]
@@ -331,6 +340,15 @@ def exact_parts(t, y, cand, *, span: float, h: float, truth_events=(), engine_ev
             worst[te] = (d, truth_events[i][3] - truth_events[i][2])
     if events_available:
         cost = sum(jmp * jmp * abs(d) for d, jmp in worst.values())
+        miss = {}
+        for i in missing:
+            te, key = truth_events[i][:2]
+            dev = key[:-1]
+            nxt = [e[0] for e in truth_events if e[1][:-1] == dev and e[0] > te]
+            d = min(min(nxt, default=t[-1]) - te, window * h)
+            jmp = truth_events[i][3] - truth_events[i][2]
+            miss[te] = max(miss.get(te, 0.0), jmp * jmp * d)
+        cost += sum(miss.values())
         out["instants"] = float(np.sqrt(cost / T) / span) if T > 0 else 0.0
         dmax = max(worst.values(), key=lambda x: abs(x[0]))[0] if worst else 0.0
         out["max_dt_s"] = dmax

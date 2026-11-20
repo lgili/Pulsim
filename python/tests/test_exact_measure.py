@@ -97,16 +97,51 @@ def test_a_right_limit_row_without_an_event_is_graded_against_the_truth_value():
     assert r["n_limits"] == 1 and r["smooth"] == 0.0
 
 
-def test_a_missing_event_is_named_and_its_effect_is_in_smooth():
+def test_a_missing_event_is_named_priced_and_its_effect_is_in_smooth():
     tau = 0.45
     cand, tev = step_truth(tau)
     y = np.zeros(GRID.size)                                    # the engine never switches
     r = metrics.exact_parts(GRID, y, cand(GRID), span=1.0, h=H, truth_events=tev)
     assert r["missing"] == [(tau, "S+")] and r["n_matched"] == 0
-    # rows 0.4 and 0.5 hold the event in an adjacent step; 0.6 .. 1.0 read 1 (weight 4 x 0.1 + 0.05)
-    # of the kept 0.1 (0.05), 0.2, 0.3, 0.6 .. 0.9 (0.1 each), 1.0 (0.05)
-    assert r["smooth"] == pytest.approx(np.sqrt(0.45 / 0.7), rel=1e-12)
+    # no row is left out: 0.5 .. 0.9 (0.1 each) and 1.0 (0.05) read 1, of 0.9 s graded
+    assert r["smooth"] == pytest.approx(np.sqrt(0.55 / 0.9), rel=1e-12)
+    # and the missing event is charged as displaced by the window (no later event of S)
+    assert r["instants"] == pytest.approx(np.sqrt(2 * H / 1.0), rel=1e-12)
     assert r["part"] == "smooth"
+
+
+def test_a_short_pulse_the_engine_misses_between_two_rows_is_charged():
+    """Reviewer case: the truth conducts over (50.2, 50.9) h and the engine
+    never switches: no row sees it; the two missing events are charged."""
+    t = np.arange(0.0, 101.0)
+    a, b = 50.2, 50.9
+    cand = np.zeros((t.size, 1))
+    tev = [(a, "S+", 0.0, 1.0), (b, "S-", 1.0, 0.0)]
+    r = metrics.exact_parts(t, np.zeros(t.size), cand, span=1.0, h=1.0, truth_events=tev)
+    assert r["smooth"] == 0.0 and len(r["missing"]) == 2
+    # S+ until the next S event (0.7), S- for the window (2 h)
+    assert r["instants"] == pytest.approx(np.sqrt((0.7 + 2.0) / 100.0), rel=1e-12)
+
+
+def test_the_row_closing_an_off_grid_event_step_is_graded():
+    """Reviewer case: an exact inner event at 50.3 (pwl+split) and a wrong
+    stored row at 51: it is not inside any displacement, so it is graded."""
+    t = np.arange(0.0, 101.0)
+    cand = np.where(t > 50.3, 1.0, 0.0)[:, None]
+    y = cand[:, 0].copy()
+    y[51] = 100.0
+    r = metrics.exact_parts(t, y, cand, span=1.0, h=1.0, truth_events=[(50.3, "S+", 0.0, 1.0)],
+                            engine_events=[(50.3, "S+", 0.0, 1.0, 0.0, 1.0)])
+    assert r["smooth"] == pytest.approx(99.0 * np.sqrt(1.0 / 99.0), rel=1e-12)
+    assert r["part"] == "smooth"
+
+
+def test_a_truth_that_cannot_be_evaluated_scores_inf():
+    """Reviewer case: a NaN truth limit was dropped by max() and read as 0."""
+    f = np.zeros(GRID.size)
+    r = metrics.exact_parts(GRID, f, f[:, None], span=1.0, h=H,
+                            engine_events=[(0.5, "S+", 5.0, None, np.nan, np.nan)])
+    assert r["summary"] == np.inf and r["part"] == "non-finite"
 
 
 def test_spurious_events_are_named_and_initial_selection_is_not_spurious():
@@ -115,7 +150,7 @@ def test_spurious_events_are_named_and_initial_selection_is_not_spurious():
            (0.31, "S+", 0.0, 0.0, 0.0, 0.0), (0.33, "S-", 0.0, 0.0, 0.0, 0.0)]
     r = metrics.exact_parts(GRID, f, f[:, None], span=1.0, h=H, engine_events=eng)
     assert r["spurious"] == [(0.31, "S+"), (0.33, "S-")] and r["n_initial"] == 1
-    assert r["smooth_rows"] == GRID.size - 1 - 2               # rows 0.3 and 0.4 (0.1: the event at 0 ends its step)
+    assert r["smooth_rows"] == GRID.size - 1                   # no row is left out around a spurious event
 
 
 def test_an_event_at_t0_and_the_0plus_row_are_not_graded():

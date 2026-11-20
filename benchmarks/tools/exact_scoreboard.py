@@ -15,11 +15,13 @@ peak; raised to the truth's range at the engine's samples):
 
 - smooth: time-weighted RMS over the engine's STORED rows of the distance to
   the truth at those times (``exact_truth.Solver.at_float``, no snap window),
-  leaving out the initial instant, the 0+ row and every row with a device
-  event (truth's or engine's) at it or strictly inside a step on either side;
+  leaving out the initial instant, the 0+ row and the rows inside a matched
+  event's displacement [min(t_engine, t_truth), max(...)];
 - instants: each engine device event matched to the truth's (same device and
   direction, in order, within EVENT_WINDOW netlist steps); the displacement's
-  L2 cost sqrt(sum jump^2 |delta| / T), and max |delta| / dt;
+  L2 cost sqrt(sum jump^2 |delta| / T) (a missing truth event charged as
+  displaced to that device's next event, at most the window), and max
+  |delta| / dt;
 - limits: max distance of every one-sided value the engine records (left at
   its event instants, every right limit) from the truth's limits at the
   truth's instant (the engine's own when unmatched).
@@ -75,19 +77,22 @@ MEASURE_TEXT = [
     "fraction of `span` (the truth's peak-to-peak, floored at 1e-3 of its peak):", "",
     "- **smooth**: sqrt(sum w_i e_i^2 / sum w_i) over the engine's STORED rows, e_i the distance to the "
     "truth at t_i (two one-sided candidates only when t_i is a truth event instant; either is right), w_i "
-    "trapezoid time weights; left out: the initial instant, the right limit at t = 0+, and every row with a "
-    "device event (the truth's or the engine's) at it or strictly inside a step on either side of it (the row "
-    "one full step after an engine event is a solved value of the new mode and is graded). No snap window, "
-    "no timing charge.",
+    "trapezoid time weights; left out: the initial instant, the right limit at t = 0+ (stored rows only), "
+    "and the rows inside a matched event's displacement [min(t_engine, t_truth), max(...)] (the engine is on "
+    "the other branch there: `instants` prices it; the row at the engine's instant is its left limit: "
+    "`limits` grades it). Every other row is graded, the first one solved after an event included. No snap "
+    "window, no timing charge.",
     "- **instants**: engine device events (changes of the switch record of `pulsim.with_event_limits(res)`: "
     "stored rows, the split's inner events, right limits; the instant is the row before the change) "
     "matched to the truth's by device and direction, in order, the nearest within "
     "2 netlist steps; cost sqrt(sum_e jump_e^2 |delta_e| / T), the true L2 of each displacement (jump from "
-    "the truth's two limits; |delta| within 4 ulp counts 0). `max δ/h`: the largest |delta| in units of the "
+    "the truth's two limits; |delta| within 4 ulp counts 0); a missing truth event is charged as displaced to "
+    "that device's next truth event, at most the window (beyond it, the rows carry the error). `max δ/h`: the largest |delta| in units of the "
     "netlist dt, the same unit for every engine (the fixed engine's step; the output grid of the "
     "variable-step and exact engines, which place events by root finding). Missing and spurious events are "
-    "counted and named in the json, not priced: what they do to the trajectory is in `smooth`. `n/a`: "
-    "the run exposes no switch record.",
+    "counted and named in the json; a spurious one is not charged a duration (no row is left out around it: "
+    "its effect is in `smooth`, its values in `limits`); an event displaced by more than the window is a "
+    "missing + spurious pair. `n/a`: the run exposes no switch record (every row is then graded).",
     "- **limits**: the largest distance of a one-sided value the engine records after t = 0 (its left "
     "value at each of its event instants, every right-limit row, matched or not) from the truth's limit "
     "on that side at the truth's instant (at the engine's own instant when there is no match). An "
@@ -95,7 +100,7 @@ MEASURE_TEXT = [
     "Cell = the largest part of the worst column (`by` names it); a non-finite value anywhere scores inf. "
     "Classes (< 1e-3 / 1e-6 / 1e-9) are read from it. Events at the run's first or last instant are not "
     "graded. Source breaks without a device flip are not events here: the engine is given their instant, "
-    "and the rows around them stay in `smooth`. Input columns (only a source in them) are not graded.", "",
+    "and the rows around them are graded in `smooth`; a non-finite truth value scores inf. Input columns (only a source in them) are not graded.", "",
     "**What changed and why (this release).** The previous `exact` (kept as `exact_old`, column `old`) was "
     "one time-weighted RMS over every row of the two-sided trace with a snap window of 1e-3 dt. Two flaws: "
     "(1) it dropped only rows at t == t[0], so the right limit at t = 0+ (5e-324) was graded against the "
