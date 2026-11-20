@@ -1356,6 +1356,9 @@ class Evaluator:
         rows, losses = self._loss_rows(b, run, a, z)
         specs = self.loss_options.get("switch_specs") or {}
         semis = {n: bit for n, _, bit in run.spec.semis}
+        from .losses import _edge_law
+        laws = {c["name"]: _edge_law(c["kind"], c["params"])
+                for c in b.components()}
         tj, evals, resid, heat = {}, 0, 0.0, {}
         for d, r_th in th.r_th.items():
             sp = specs.get(d) or {}
@@ -1372,7 +1375,13 @@ class Evaluator:
                             f"switch_specs[{d!r}] mixes a loss table with "
                             f"{ref} / {curve}; the kernel fixed point reads "
                             "tables only (mode='fixed_point')")
-                on, off = _pk.commutations(run.edges(d, semis[d]))
+                on, off = (
+                    [(v, i) for v, i, soft in pts if not soft]
+                    for pts in _pk.commutations(run.edges(d, semis[d]),
+                                                laws[d]))
+                if not all(math.isfinite(x) for pt in on + off for x in pt):
+                    raise RuntimeError(f"switch_specs[{d!r}]: a non-finite "
+                                       "commutation point")
                 cat.pop("switching", None)
                 cat.pop("recovery", None)
             cond, q1, q2, i_max = None, 0.0, 0.0, 0.0

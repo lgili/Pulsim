@@ -160,11 +160,10 @@ on-steps per period: [50]
 For a half bridge, `p.make_dead_time_pwm_pair_fn` drives the high- and
 low-side bits with a dead time; for a three-phase bridge see 3.7.
 Helpers name their edges (`pwm.next_edge_after(t)`); variable-step
-engines land on them. A plain callable has no edges: `trbdf2` can step
-over a short pulse or dead time silently (D = 0.03: 0.17 V vs 1.20 V);
-`dsed` bisects only changes seen at its `dt_max / 10` polls (and
-warns). Use a helper or pass `dt`. Both call it out of time order:
-keep it a pure function of `t`.
+engines land on them. A plain callable has none: `trbdf2` samples it
+(trap 13); `dsed` bisects only changes seen at its `dt_max / 10` polls
+(and warns). Use a helper or pass `dt`. Both call it out of time
+order: keep it a pure function of `t`.
 
 ### 3.3 Bridge rectifier from `pulsim.topology`
 
@@ -378,8 +377,9 @@ The dead time costs `4/pi * V_dc * t_d * f_sw * sqrt(3/2)` = 9.4 V of
 dead time the freewheel diode carries the current (drop `V_f + i / g_on`);
 once `HSa` is on, the switch takes it all and the diode never shares
 (printed above). `switch_specs` on `HSa` (4 / 3.5 mJ at 600 V, 50 A)
-give 11.3 W with the dead time (soft edges cost about 0 J) and 22.6 W
-without (every edge hard). Model the dead time.
+give 11.3 W with the dead time and 11.6 W without: an edge whose `v` and
+`i` readings have opposite signs is soft (0 J), the complementary edge
+is hard.
 
 ## 4. Exact signatures of the most used calls
 
@@ -471,7 +471,7 @@ Each row was measured on this version. The fix column is what to write.
 | 11 | Omitting `switch_fn` leaves switches open | With `dt`, undriven controlled switches are ALL CLOSED, `simulate` only warns: the buck of 3.2 runs at D = 1, settles at 24.0 V, not 12 V; without `dt`, `auto` refuses | Always pass `switch_fn` with controlled switches |
 | 12 | `except Exception:` around `simulate` keeps a script robust | A broad except turns a refusal into a silent wrong answer | Let it raise, or catch `p.PulsimError` (`.engine`, `.feature`) |
 | 13 | A warning from a run without `dt` is noise | It names what TR-BDF2 could not guarantee (a diode on its conduction boundary, a pulse narrower than its sampling). Silence is no proof: a one-shot pulse under a quarter of the step ceiling (`dt`, else `t_end/1000`) can be skipped | Rerun with `dt`, compare (6.2); `dt` <= 4x the narrowest pulse |
-| 14 | `p.time_rms` (and `.rms`) of a switched current is exact on a fixed grid | Each edge is a one-step ramp: low by ~`h / (3 t_on)` in `i^2`. Buck MOSFET (D = 0.25): 1.4942 / 1.4993 / 1.5019 A at `dt` = 1e-7 / 5e-8 / 2.5e-8, exact 1.5044 A. Same for `device_loss_summary`'s `i_rms`, not `P_avg` | `np.sqrt(p.time_average(t, i**2, t_from=...))`: 1.5044 A at all three |
+| 14 | `p.time_rms` (and `.rms`) of a switched current is exact on a fixed grid | Each edge is a one-step ramp: low by about `h / (3 t_on)` in `i^2`. Buck MOSFET (D = 0.25): 1.4942 / 1.4993 / 1.5019 A at `dt` = 1e-7 / 5e-8 / 2.5e-8, exact 1.5044 A. A switch or PWL diode's `i_rms` in `device_loss_summary` is exact | `np.sqrt(p.time_average(t, i**2, t_from=...))`: 1.5044 A at all three |
 | 15 | Controllers run each step, chains in insertion order | Ticks at `t_start + k*T`, `ceil(span/T)` times. A chain runs in graph order; a loop with no `DelayBlock`, an unported block, a stateful block with no `p.Rate(T)` raise `ControlGraphBuildError` | `controller_period=` or `p.Rate`; custom code: `p.PythonBlock(fn)` |
 | 16 | No `ResolutionWarning` means resolved | Opt-in (`resolution_diagnostics=True`); estimates, not bounds | Halve `dt` (6.3) |
 

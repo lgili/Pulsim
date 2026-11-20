@@ -2245,6 +2245,85 @@ def _resolve_loaded_circuit(lc, t_end, dt, t_start, store_every):
     return lc.builder, t_end, dt, t_start, store_every
 
 
+# The `simulation:` keys of a LoadedCircuit that are not its run window:
+# simulate() keywords of the same name (add-ai-usage-guide 12.15).
+_YAML_RUN_KW = ("enable_newton_line_search", "enable_newton_lm",
+                "enable_substep_state_correction", "max_event_iterations",
+                "max_newton_iterations", "tol_newton_dx", "tol_newton_res",
+                "integrator", "rtol", "atol", "dt_init")
+_YAML_WINDOW_KW = ("t_start", "t_end", "dt", "store_every")
+
+
+def _loaded_run_options(lc) -> dict:
+    """The run options a :class:`LoadedCircuit` carries besides its window:
+    every key its YAML sets, and every field of ``lc.options`` changed
+    from the default since. A changed field simulate() has no keyword for
+    is refused by name, never dropped."""
+    opts, base = lc.options, SimulationOptions()
+    keys = set(getattr(lc, "simulation_keys", ()))
+    out = {}
+    for name in dir(base):
+        if name.startswith("_") or name in _YAML_WINDOW_KW:
+            continue
+        val = getattr(opts, name)
+        if callable(val):
+            continue
+        if name not in keys and val == getattr(base, name):
+            continue
+        if name not in _YAML_RUN_KW:
+            raise _options_error(name,
+                f"simulate(): {lc.source!r}'s loaded.options.{name} = {val!r} "
+                "is not its default, and simulate() reads only the YAML "
+                f"simulation: keys from a LoadedCircuit; pass it as a keyword "
+                "(see help(pulsim.simulate)) or leave loaded.options.{name} "
+                "at its default.")
+        out[name] = val
+    return out
+
+
+_YAML_PLACEHOLDER = {"integrator": ("kernel", "default"), "dt_init": (0.0,)}
+
+
+def _yaml_keys_not_honoured(filled, engine, dt, source) -> "list[str]":
+    """The YAML run keys of `filled` (name -> value, each filling a keyword
+    left unset) to drop: those an engine the run can land on cannot
+    honour. Before 12.15 simulate() never read them, so a file that ran
+    keeps running: they are dropped with one RuntimeWarning, never raised
+    on and never dropped silently. A value that asks nothing is dropped
+    without a word: the loader's placeholders (`integrator: kernel` /
+    `default`, `dt_init: 0`) and a value equal to the kernel default."""
+    eng = {"exact": "dsed"}.get(engine, engine)
+    # 'auto': an explicit dt requests the fixed step; without one the
+    # run may land on either MNA engine (a blocker routes it to pwl).
+    landing = (eng,) if eng in ("pwl", "trbdf2", "dsed") else (
+        ("pwl",) if dt is not None else ("pwl", "trbdf2"))
+    drop, loud = [], []
+    for k, v in filled.items():
+        if (v in _YAML_PLACEHOLDER.get(k, ())
+                or (_ro.DEFAULTS.get(k) is not None and v == _ro.DEFAULTS[k])):
+            drop.append(k)
+            continue
+        if k == "integrator":
+            ok = all(e == "dsed" or (e == "trbdf2" and v == "esdirk43")
+                     for e in landing)
+        else:
+            ok = all(_ro.honoured(k, e) or not _ro.is_requested(k, v, e)
+                     for e in landing)
+        if not ok:
+            drop.append(k)
+            loud.append(f"{k}={v!r}")
+    if loud:
+        import warnings
+        warnings.warn(
+            f"simulate({source!r}): the YAML simulation: key(s) "
+            f"{', '.join(loud)} are not used: this run can land on "
+            f"engine={'/'.join(landing)!r}, which cannot honour them "
+            "(pulsim.option_capabilities()). Pass engine= to choose the "
+            "engine that does, or remove the key(s).",
+            RuntimeWarning, stacklevel=3)
+    return drop
+
+
 # Stage A's plan.resolved_from: where each simulate() keyword's value came
 # from. 'explicit' = not the signature's default (an explicit default reads
 # 'default'); 'yaml' / 'solver' = filled from a LoadedCircuit / SolverOptions.
@@ -2513,8 +2592,11 @@ def simulate(
         ``LoadedCircuit`` the run takes ``t_end``, ``dt`` (when the YAML
         sets one), ``t_start`` (when ``t_start`` is left at 0.0) and
         ``store_every`` (when not passed) from its ``simulation:``
-        block; a keyword you pass wins. The other ``simulation:``
-        fields stay on ``loaded.options`` — forward them yourself. A
+        block, and every other key that block sets (Newton tolerances,
+        ``integrator``, ``rtol`` / ``atol``, ...: ``loaded.simulation_keys``)
+        as the keyword of the same name; a keyword you pass, then
+        ``solver=``, wins. A ``loaded.options`` field changed in Python
+        that is not a ``simulation:`` key is refused by name. A
         ``LoadedCircuit`` whose ``t_end`` is not after ``t_start`` (no
         top-level ``simulation:`` block, or no ``t_end`` in it) is
         refused with a ``ValueError`` naming the YAML file.
@@ -2572,6 +2654,15 @@ def simulate(
     start_from_dc_op
         PWL-only: If ``True``, seed the initial state from
         :func:`compute_dc_op` instead of zero.
+    should_continue
+        ``() -> bool`` polled once per step. ``False`` stops the run and
+        returns the trace up to there: ``result.times[-1] < t_end``, no
+        exception (a live scope keeps what it drew). A callback that
+        raises propagates. The analyses raise :class:`Cancelled` instead
+        (``compute_dc_op``, ``run_ac_sweep``, ``run_mna_sweep``,
+        ``compute_temperature``). GUI Cancel button:
+        ``should_continue=lambda: not cancel.is_set()`` with
+        ``cancel = threading.Event()``.
     enable_nonlinear_refresh
         ``None`` (default): the kernel stamps the Newton devices when
         the circuit has any. ``True`` forces the static chain.
@@ -3311,7 +3402,10 @@ def _plan_run(
     # `simulation:` block) used to reach the engines as t_end = dt = 0
     # and died on an engine-specific message about the step ceiling;
     # refuse it here and name the file.
+    _yaml_run = None
     if isinstance(builder, LoadedCircuit):
+        _yaml_run = _loaded_run_options(builder)
+        _yaml_src = builder.source
         _was = (t_end, dt, t_start, store_every)
         builder, t_end, dt, t_start, store_every = _resolve_loaded_circuit(
             builder, t_end, dt, t_start, store_every)
@@ -3420,6 +3514,39 @@ def _plan_run(
             discontinuity_restart, resolution_diagnostics,
             inductor_freeze_di_max, inductor_abs_clamp, integrator, rtol,
             atol, dt_init))
+
+    # The YAML's own run keys fill what neither a keyword nor solver= set.
+    if _yaml_run:
+        _ykw = {"enable_newton_line_search": enable_newton_line_search,
+                "enable_newton_lm": enable_newton_lm,
+                "enable_substep_state_correction":
+                    enable_substep_state_correction,
+                "max_event_iterations": max_event_iterations,
+                "max_newton_iterations": max_newton_iterations,
+                "tol_newton_dx": tol_newton_dx, "tol_newton_res": tol_newton_res,
+                "integrator": integrator, "rtol": rtol, "atol": atol,
+                "dt_init": dt_init}
+        _now = {k: (_yaml_run[k] if v is None and k in _yaml_run else v)
+                for k, v in _ykw.items()}
+        _drop = _yaml_keys_not_honoured(
+            {k: _now[k] for k in _YAML_RUN_KW
+             if _ykw[k] is None and k in _yaml_run},
+            engine, dt, _yaml_src)
+        for k in _drop:
+            _now[k] = None
+        _mark_resolved(_resolved, "yaml", _YAML_RUN_KW,
+                       tuple(_ykw[k] for k in _YAML_RUN_KW),
+                       tuple(_now[k] for k in _YAML_RUN_KW))
+        enable_newton_line_search = _now["enable_newton_line_search"]
+        enable_newton_lm = _now["enable_newton_lm"]
+        enable_substep_state_correction = _now[
+            "enable_substep_state_correction"]
+        max_event_iterations = _now["max_event_iterations"]
+        max_newton_iterations = _now["max_newton_iterations"]
+        tol_newton_dx, tol_newton_res = (_now["tol_newton_dx"],
+                                         _now["tol_newton_res"])
+        integrator, rtol, atol, dt_init = (_now["integrator"], _now["rtol"],
+                                           _now["atol"], _now["dt_init"])
 
     if enable_nonlinear_refresh is not None:
         import warnings

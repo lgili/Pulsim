@@ -285,27 +285,16 @@ def _resolve_dsed_options(
 # =============================================================================
 
 
-# The bridge fallback message is now ONLY surfaced when the underlying
-# C++ extractor throws (e.g. a circuit with floating caps that the
-# current LTI bridge doesn't support). In that case we want a clear
-# explanation + the escape hatch.
+# Surfaced only when the C++ extractor throws: the underlying reason, the
+# engines that take the circuit, and the options this call resolved. (It
+# used to list long-fixed causes -- floating capacitors, nonlinear devices --
+# and point to a design note that ships with no wheel.)
 _BRIDGE_FALLBACK_MESSAGE = (
     "pulsim.simulate(engine='dsed', builder=...): the C++ extractor "
     "rejected this topology: {underlying}\n"
-    "Older causes of this refusal: the circuit has "
-    "**floating capacitors** (caps between two non-ground nodes; the "
-    "current LTI bridge supports caps-to-ground only — Phase 5.1b "
-    "TODO in notes/DSED_BRIDGE_DESIGN.md), or because the circuit "
-    "has **nonlinear devices** (diodes / MOSFETs / IGBTs / saturable "
-    "inductors), which the PED engine doesn't model.\n"
-    "\n"
-    "For PED today on circuits the bridge can't handle, use "
-    "`pulsim.dsed.run_user_lti(system, switch_fn, x0, t_end, ...)` "
-    "with a hand-rolled LTI system (see "
-    "`pulsim.dsed.run_user_lti.__doc__` for the 5-method system "
-    "protocol). Captured "
-    "benchmarks across 13 scenarios: ~1× on non-stiff PWM converters "
-    "(no penalty), 4-90× on stiff multi-state systems.\n"
+    "Run it with engine='pwl' (with dt) or engine='trbdf2'; "
+    "pulsim.exact_route(...) reports which segments of a run the exact "
+    "engine can take.\n"
     "\n"
     "Resolved DSED options for this call:\n"
     "  rtol = {rtol}, atol = {atol}\n"

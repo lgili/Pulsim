@@ -49,6 +49,49 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `transmission_line` (user and IR); the snapshot carries the line's past
   (`line_state`, pickle field 19, written only when a line exists).
   Docs: `docs/transmission-line.md`.
+### Bindings close-out (add-ai-usage-guide, add-python-builder-ergonomics)
+
+* **Fixed** a leg with no dead time charged its switching loss twice
+  (add-ai-usage-guide 12.8): the complementary switch's soft edge was read
+  at the full bus. `thermal::commutation_point`, the one rule of the
+  in-kernel loss port (`pwl`, `trbdf2`, `dsed`), the period path, the
+  design batch and `device_loss_summary`'s `switch_specs`, now records a
+  switch's edge whose open-side `v` and closed-side `i` have opposite
+  signs as soft: `v = 0`, 0 J (`res.loss_events` keeps it; the event
+  counts are unchanged). Diodes are never soft. **Behaviour change:** loss
+  outputs of circuits with a zero-dead-time leg move: the guide 3.7 VSI's
+  `INV__HSa` 22.64 → 11.61 W (closed form for the leg 22.65 W, measured
+  22.60 W); the buck_pareto example's synchronous switch loses its soft
+  `E_on`. Dead-time results and every electrical result are unchanged.
+  The reverse current must be a conducted one: within `(g_off + eps
+  g_on)|v|` (the open switch's own leakage, the closed law's rounding) its
+  sign is not resolved and the edge is hard, so a DCM turn-on keeps a
+  table's `E(v, 0)` intercept. An edge with an impulse of that switch at
+  its instant (a capacitor loop closed) is never soft: the pre-jump `v`,
+  the regular current after the jump (it was soft on `trbdf2`, read at the
+  jump's -8397 A). A non-finite reading is refused by name.
+
+* **Fixed** `simulate(LoadedCircuit)` forwarded only `t_start`, `t_end`,
+  `dt` and `store_every`: the YAML's `integrator`, `rtol` / `atol`,
+  `dt_init`, Newton tolerances and iteration caps were dropped silently.
+  Every `simulation:` key the file sets (`loaded.simulation_keys`) is now
+  the keyword of the same name; a keyword you pass, then `solver=`, wins.
+  A `loaded.options` field changed in Python that is no `simulation:` key
+  is refused by name (`OptionsError`). **Behaviour change:** a YAML run
+  on an engine that honours these keys (`trbdf2`, `exact`) now uses them,
+  so its trace can move. A key the landing engine cannot honour (e.g.
+  `rtol` on the fixed step) is not used and raises one `RuntimeWarning`
+  naming it, so a file that ran still runs; the loader's placeholders
+  (`integrator: kernel`, `dt_init: 0`) and kernel-default values ask
+  nothing and pass without a word.
+* **Changed (BREAKING)** the channel arguments after the defaulted gains of
+  `CxxBlockChain.add_sum`, `add_inverse_clarke`, `add_flux_mras_observer`
+  and `add_sliding_mode_observer` are keyword-only (`py::kw_only()`), as
+  the stub already declared; no caller in the repository was positional.
+* **Changed** binding signatures name Python types (`builder.graph -> Graph`,
+  `final_snapshot -> SolverSnapshot`, ...) and every `= None` default reads
+  `... | None`; defaults print as `PreflightOptions()` /
+  `CxxInputRef.const_value(0.0)`.
 
 ### Excess core loss in the permeance network
 

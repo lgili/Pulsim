@@ -164,6 +164,7 @@ def run_ac_sweep(
     settle_rtol: float = 0.01,
     max_extra_windows: int = 20,
     verbose: bool = True,
+    should_continue: Callable[[], bool] | None = None,
 ) -> AcSweepResult:
     """Sweep frequency and build an AC frequency response.
 
@@ -229,6 +230,14 @@ def run_ac_sweep(
         Windows to add before giving up; a frequency that has not
         settled by then warns (``RuntimeWarning``) and keeps the last
         window.
+    should_continue
+        ``() -> bool``, polled before each frequency and inside every
+        transient of it. ``False`` raises :class:`pulsim.Cancelled`
+        (``.where == "run_ac_sweep"``, ``.point_index`` = the frequency
+        that was not finished); no partial :class:`AcSweepResult` is
+        returned. A callback that raises propagates. For a GUI Cancel
+        button: ``cancel = threading.Event()``,
+        ``should_continue=lambda: not cancel.is_set()``.
 
     Returns
     -------
@@ -239,11 +248,16 @@ def run_ac_sweep(
     # booting; ``simulate`` isn't defined until the bottom of that
     # init).
     import pulsim as p
+    from ._builder_ergonomics import CancelProbe
 
     freqs = np.asarray(freqs, dtype=float)
     H = np.zeros(len(freqs), dtype=complex)
+    cont = (None if should_continue is None
+            else CancelProbe(should_continue, "run_ac_sweep"))
 
     for i, f in enumerate(freqs):
+        if cont is not None:
+            cont.check(i)
         T_cycle = 1.0 / f
         t_end = (settling_cycles + cycles_per_point) * T_cycle
 
@@ -280,7 +294,10 @@ def run_ac_sweep(
             b_extra_fn=b_extra_fn,
             start_from_dc_op=start_from_dc_op,
             enable_nonlinear_refresh=enable_nonlinear_refresh,
+            should_continue=cont,
         )
+        if cont is not None:
+            cont.raise_if_fired(i)
 
         def window_phasor(r, k0):
             t_w = np.asarray(r.times)[k0:]
@@ -301,8 +318,10 @@ def run_ac_sweep(
                 t_start=t0, t_end=t0 + cycles_per_point * T_cycle,
                 dt=dt_local, switch_fn=sw_fn, b_extra_fn=b_extra_fn,
                 enable_nonlinear_refresh=enable_nonlinear_refresh,
-                resume_from=snap,
+                resume_from=snap, should_continue=cont,
             )
+            if cont is not None:
+                cont.raise_if_fired(i)
             Y_next = window_phasor(res, 0)
             done = abs(Y_next - Y) <= settle_rtol * abs(Y_next)
             Y = Y_next
