@@ -194,16 +194,12 @@ def test_f37_saturable_psfb_runs_under_the_restart_rule():
 
 # ---- F-3-1: restart + split not rounding-stable at a diode turn-on ----------------------------
 
-@pytest.mark.xfail(strict=True, reason=(
-    "release finding F-3-1: traced - the floating bridge's diode PAIR (D2, D3) turns on "
-    "together, but the split locates the event at the FIRST single diode's interpolated "
-    "crossing; which diode crosses first, and whether the second lands within snap of it, "
-    "is a tie decided by leakage and rounding (k=0: t_d = 33.70395 ms, one diode, the other "
-    "flips in stage 1; k=2: t_d = 33.70405 ms, both) -> 14.299 vs 14.192 A, 2.15e-4 V. Not "
-    "an impulse. Needs the split to locate the commutation of the decided post-event mode"))
 def test_f31_split_turn_on_is_rounding_stable():
     """The floating single-phase bridge (V_f = 0.7) with C and R moved by 1..5 ulp: the
-    waveform must move by rounding only (restart-less: 2.3e-11 V)."""
+    waveform must move by rounding only (restart-less: 2.3e-11 V). The series diode pair
+    (D2, D3) conducts together; the split located the event at ONE diode's crossing, a tie
+    of leakage and rounding (3.1e-4 V). It now locates the decided mode's commutation on
+    the pair's summed signal: 33.7040 ms, the exact engine's 33.704043-33.704054 ms."""
     from tests.oracles import lcp_pulsim_bridge as B
     f = B.FAMILIES["bridge1_vf07"]
 
