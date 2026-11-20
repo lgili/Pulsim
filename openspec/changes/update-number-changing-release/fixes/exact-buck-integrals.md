@@ -294,3 +294,139 @@ the base build of 19e4f1c5; loss port energies + period map integrals
 ctest, the full exact scoreboard (it grades stored samples only, which are
 bit-identical on the compared set); stubs (no binding signature changed:
 the native result gains a `recorder_closed_form` dict key).
+
+---
+
+# Time-varying sources (branch `fix/core-exact-integrals-sources`)
+
+**Result: with a sine, pulse, PWM or table source the in-loop recorder
+windows and periods are closed forms too — the line (1e-4 off on the default
+grid, warned) is gone for every source kind the engine propagates exactly.**
+
+## How the engine propagates each source kind (builder_adapter.hpp)
+
+| kind | propagation | exact? |
+|---|---|---|
+| sine V / I (`f > 0`) | one oscillator pair (sin ωt, cos ωt) per distinct ω augmented to the mode (`build_augmented_exact_`): amplitude and phase folded into its two coupling columns, v_dc into b | yes (tier 1 modal / tier 2 Padé; tier 3 numeric, refused unless `allow_implicit_segments`) |
+| PWM V | level per step (`pwl_cols`), a corner is a time event | yes |
+| pulse V / I, PWL table I | level + ramp per step (`exact_advance_affine_into`), never across a corner | yes, degree 1 |
+| user `b_extra_fn` | numeric | no |
+
+## Design: the inputs as an exosystem (make_exo_mode)
+
+Every exactly-propagated source is a state of an autonomous u' = S·u
+appended to x: per ω the engine's (s, c) pair (modes ±jω), per PWL source
+its level v (mode 0) and, on a step where some slope is not 0, its slope σ
+(v' = σ, σ' = 0: a Jordan block at 0, degree 1 = what the engine steps
+with). With x̄ = (x, u, 1):
+
+  As = d·[[A, Bx, b_dc], [0, S, 0], [0, 0, 0]]·d⁻¹,  x_full = [Rx, Ru]·(x, u) + rc,
+
+Bx = b_projection·G, Ru = recover_from_b·G, G the sources' b_extra stamps per
+unit of u (`NativeCircuitBuilderAdapter::exo_inputs`; `exo_state` /
+`exo_advance` give u at a step's start and end: the oscillators at t, the
+levels v + σL, a corner's left limit). The source's forced response is then
+part of the modal sums; nothing of SegmentMode changed except the gate below:
+the same kernels (`phi1_kernel`, `phi1_pair_kernel`, `modal_basis`), the same
+u·κ^p rule, the same Gramian / Kronecker fallback, the same end check (the
+closed form's end against the engine's end state, now with u). A waveform
+current source's own reading (i(I), p(I)) is a row of u. Modes are cached
+per (mask, ramp). The DC path is untouched (`make_period_mode`, byte-
+identical: only its observable rows moved into `observable_rows`).
+
+**A second conditioning gate (`sums_ok_`).** κ₂(V) does not see the
+cancellation of a near-resonant drive: a series LC driven 1e-3 off its
+frequency has κ = 10 (u·κ⁴ = 2e-12, modal accepted) but the forced and free
+responses are each ~30× the state, and the degree-2 square's modal sum was
+6.6e-10 off (numpy vs mpmath on one 1 µs step; 2.6e-10 on the window rms).
+Each modal sum now also checks u·Σ|terms| ≤ 1e-10 · (the probe's own scale
+over the piece, from the states at its ends: |l̃|·|x̃|, or |x̃|ᵀ|Q̃||x̃|, times
+L, squared for ∫y²) and takes the matrix form otherwise: 2.6e-10 → 1.1e-13.
+
+## Numbers against the truths (default grid unless named)
+
+By hand (python/tests/test_exact_integrals_sources.py, mpmath quadrature of
+the closed forms, 40 digits): RL on two sines (50 Hz + DC offset, 150 Hz,
+phases), a three-phase set into star RLs, a series LC driven at, 1e-8 from,
+1e-3 from and 1.7× its frequency — all integrals and rms ≤ 1e-11 (∫y relative
+to ∫|y|: near resonance ∫v(c) is 2600× below ∫|v(c)|). RL probe:
+6.3e-13 (∫i), 2.2e-13 (rms i); the resonant LC passes at 1e-11 (defective
+augmented mode: Gramian / Kronecker form).
+
+Kernel (core/tests/dsed/test_segment_integrals.cpp, 50-digit mpmath of
+expm, `fixes/exact_sources_truth/seg_truth_exo.py`): resonant, 1e-8, 1e-3,
+far, damped resonant over a piece, a ramp and a ramp's piece: ∫y, ∫y², a
+degree-2 ∫y and ∫y², all ≤ 1e-12.
+
+mpmath engine (`benchmarks/tools/exact_truth.py` at fa4b5c71,
+`fixes/exact_sources_truth/diode_truths.py`): window mean / rms, and every
+element's window energy (relative to the window's source energy):
+
+| circuit | events | worst column | worst energy |
+|---|---|---|---|
+| half-wave RLC, 1 kHz | 12 | 2.2e-14 | 4.7e-12 of p(D1) itself |
+| 1-ph bridge, Ls 1 mH, floating bus | 7 | 7.2e-12 (mean i(Ls), of itself) | p(D4) 5.9e-11 of itself = 1e-15 of the source; p(Rtie) 4.5e-8 of its 5e-4 J (the floating common mode) |
+| 3-ph bridge, Ls 0.5 mH | 10 | 2.5e-9 | 9.5e-8 of a 2e-3 J diode energy (6e-12 of the source) |
+| RLC on a pulse with 20/30 µs edges | 12 corners | 4.2e-14 | 1.4e-14 |
+
+The 3-phase bridge is limited by the TRAJECTORY, not the integrals: the
+engine's end states are off the truth by up to 1.8e-9 (i(La) at 8 ms; bus
+7.7e-11 at 4.9 ms), and the truth's D2 turn-on at 5.0000003 ms and D5 turn-off
+1.35 µs later are one event in the engine (8 events vs 10; the same at
+11.6667 ms). The test holds it at 1e-8. FINDING for the exact-engine
+owner (scheduler, not touched here).
+
+Floating-bus bridge of the recorder-loop tests (40 ms): the 30–40 ms bus
+average is 6.6e-14 off its 50-digit truth (311.343881428885841697 V) on the
+default grid (the old line: −1.4e-12 on this window); at dt = 1e-7 it is
+1.9e-12 (3.5e7 pieces of rounding).
+
+Ledger (1-ph bridge, [0, 30 ms], default grid): Σ∫p(Rs, RL, Rtie, D1–4,
+Ls, Vac) + ½C·v_C(T)² = 1.0e-12 of the source's 54.38 J; the source energy
+is the truth's (54.384383077361804 J) to 1e-11. Half-wave RLC: 1.3e-14.
+
+Grid independence (half-wave RLC): default / dt = 1e-7 / output_rtol = 1e-8
+agree to 2.4e-12 (test 1e-10). dt = 1e-7 adds up rounding: 2e-12 (half-wave),
+3e-11 (RL, 6.7e6 pieces).
+
+## What still takes the line (counted, warned)
+
+- a user `b_extra_fn` (the engine steps it numerically);
+- a mode the engine stepped numerically (tier 3, `allow_implicit_segments`):
+  the end check refuses it;
+- a capacitor's own in-loop i(C) / p(C) (its companion law) and Newton
+  laws, as before (use ½C·v² for the ledger);
+- a degree-2 probe's ∫y² on a mode with no acceptable modal sum when
+  n + 1 > 8, where n now counts the exosystem's states too (two per
+  frequency, one per PWL source, one more per ramping source; the 3-phase
+  bridge is 4 + 2 + 1 = 7) — its ∫y stays closed.
+
+NOT routed: the default `integrator='auto'` of a diode-free circuit runs
+PEDSimulatorAuto, which has no step hooks: its recorders take the stored-
+array pass (trapezoid of the stored samples) for DC and AC alike. Pass
+`integrator='rk45'` (the tests do). Routing recorders to the event-driven
+integrator would move that run's stored samples: left to the owner.
+
+FINDING (pre-existing, base 20affaf9 too): an RC driven by a pulse with a
+finite rise into a diode (`v_D` = 0 exactly at the ramp's start, the
+diode's first derivative 0) is refused: `DiodeModeInconsistentError ...
+OFF while forward-biased by 2.4e-2 V at t = 6e-6 s`. The scheduler's
+crossing scan misses a second-order turn-on; the pulse test uses an RLC
+without a diode.
+
+## Moved recorder values (base 20affaf9 → this branch, `.scratch/src/moved.py`)
+
+| circuit | statistic | old | new | truth |
+|---|---|---|---|---|
+| floating-bus bridge | ∫v(dp,dn) 30–40 ms | 3.113438814285 | 3.113438814289 | 3.11343881428886 |
+| floating-bus bridge | rms i(Ls) 30–40 ms | 7.30723062451 | 7.307231627426 | (old −1.4e-7) |
+| floating-bus bridge | rms v·i 20–40 ms | 2151.413405541 | 2151.41372192 | |
+| rectifier (R load) | ∫v(dp,dn) 7.3–33.1 ms | 1.520410095004 | 1.520410107508 | (chord h² 8.2e-9) |
+| pulse RC (zero edges) | ∫v(in)·v(a) 0.15–0.45 ms | 0.01198522798102 | 0.01198689086503 | (old −1.4e-4) |
+| pulse RC | rms v(a) 0.15–0.45 ms | 5.92279079959 | 5.923002449319 | |
+
+(every integral / rms of those three circuits moved by the chord's h²:
+1e-12 … 1.4e-4; min / max only at clip points.) Test values that moved:
+`test_exact_recorder_loop.py` — pulse_corners, rectifier and bridge are now
+closed (compared with a finer grid, dt = max(1e-7, t_end / 2e4): at 1e-7 the
+bridge's 3.5e7 pieces add 1.4e-10 of rounding).
