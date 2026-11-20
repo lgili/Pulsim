@@ -2528,7 +2528,7 @@ class SimulationOptions:
     @property
     def split_snap(self) -> float:
         """
-        Split events within split_snap*dt of a step boundary are taken at it (default 0.01).
+        Split events within split_snap*dt of a step boundary are taken at it (default 1e-6).
         """
     @split_snap.setter
     def split_snap(self, arg0: float) -> None:

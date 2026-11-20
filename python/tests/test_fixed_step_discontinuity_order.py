@@ -438,7 +438,9 @@ def test_a_resume_inside_a_restart_window_is_exact():
     h = TB / 100
 
     def fn_of(b):
-        return _mask_fn(b, "S", lambda t: int(round(t / h)) % 100 < 50)
+        # edges ON the grid (floor, not round: a round index changes at the
+        # half step, which the rule now reads as plain pwl does, F-SB-2)
+        return _mask_fn(b, "S", lambda t: int(math.floor(t / h + 1e-6)) % 100 < 50)
     b = build()
     full = p.simulate(b, t_end=10 * TB, dt=h, engine="pwl", switch_fn=fn_of(b), **ON)
     b = build()

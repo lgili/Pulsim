@@ -56,6 +56,7 @@
 #include "pulsim/solver/jump_series.hpp"
 #include "pulsim/solver/loss_tracker.hpp"
 #include "pulsim/events/event_queue.hpp"
+#include "pulsim/events/locate.hpp"
 #include "pulsim/events/mode_set.hpp"
 #include "pulsim/events/step_hooks.hpp"
 #include "pulsim/solver/options.hpp"
@@ -954,8 +955,6 @@ inline SimulationResult run_transient(
     std::vector<Real> cross_scratch;
     std::vector<Index> island;          // the split's floating islands
     std::vector<char> off_branch;
-    topology::SwitchStateMask prev_gate;   // unlocated-edge count (no oracle)
-    bool have_prev_gate = false;
     Real edge_from = std::numeric_limits<Real>::infinity();   // oracle memo:
     Real edge_next = -std::numeric_limits<Real>::infinity();  // first edge after edge_from
     // The mask of the LAST solve that produced x — recorded with
@@ -1635,6 +1634,8 @@ inline SimulationResult run_transient(
     const bool split = opts.enable_substep_state_correction;
     // Events this close to a step boundary are taken at it (design D4).
     const Real snap = opts.dt * opts.split_snap;
+    // the restart rule's gate sample without the split (F-SB-2)
+    const Real gate_left = opts.dt * Real{0.01};
     // A source jump snapped to the step end (t - snap <= tau < t): the
     // solve AT `src_end_at` reads the built-in sources at `src_end_read`
     // (= tau, so value_at(tau - left_by) is the pre-jump level). NaN
@@ -2982,8 +2983,8 @@ inline SimulationResult run_transient(
         };
         // F-3-1's location of the decided mode's commutation (split_step);
         // built once per run, out of line (see consistent_start).
-        auto locate_islands = [&](Real a, Real b, Real h, Real& t_d)
-                                  PULSIM_STEP_DRIVER {
+        auto locate_islands = [&](auto& run_event_iteration, Real a, Real b,
+                                  Real h, Real& t_d) PULSIM_STEP_DRIVER {
             const auto ents = diodes.entries();
             diodes.snapshot_on_bits_into(decided_bits);
             {
@@ -3068,6 +3069,80 @@ inline SimulationResult run_transient(
                     }
                 }
             }
+            // F-SB-4: the estimate above is one chord of the crossing signal
+            // between x_prev and the first solve. A signal curved over the
+            // step (a sine source near its peak) puts that chord's root a
+            // fraction of h off (diode_rectifier: +0.227 h). Refine the
+            // earliest crossing with the one locator (events::illinois, as
+            // TR-BDF2) on trapezoidal trial solves from the step start under
+            // the start bits, to snap. The crossers that share the estimate
+            // (one diode, or a floating island's group) share the signal.
+            const Real t_g = t_d;
+            if (!(t_g > a && t_g < b)) return;
+            int dir = 0;
+            for (Size j = 0; j < ents.size(); ++j) {
+                if (cross_scratch[j] != t_g) continue;
+                const int d = diodes_snap[j] ? -1 : 1;
+                if (dir != 0 && d != dir) return;   // mixed directions: keep the chord
+                dir = d;
+            }
+            auto signal = [&](const Vector& xv) {
+                Real s = 0;
+                for (Size j = 0; j < ents.size(); ++j) {
+                    if (cross_scratch[j] != t_g) continue;
+                    const bool on = diodes_snap[j];
+                    s += models::SwitchedDiode::crossing_signal(
+                        on, ents[j].law_voltage(xv, on), ents[j].params());
+                }
+                return s;
+            };
+            const Real s_a = signal(x_prev), s_b = signal(x_first);
+            if (!(dir > 0 ? (s_a < Real{0} && s_b > Real{0})
+                          : (s_a > Real{0} && s_b < Real{0}))) {
+                return;
+            }
+            events::Bracket br{a, s_a, b, s_b, s_a, s_b, 0};
+            // converged: the bracket, or two successive trial instants,
+            // within snap
+            auto narrow = [&](const events::Bracket& q) { return q.tb - q.ta <= snap; };
+            Real t_cur = a, t_was = b;
+            const int n_trials = events::illinois(br, 40,
+                [&](Real, const events::Bracket& q) { return narrow(q); },
+                [&](Real t_loc, Real& sm) {
+                    t_was = t_cur;
+                    t_cur = t_loc;
+                    x = x_prev;
+                    history.restore(history_snap);
+                    hs.restore(hs_snap);
+                    diodes.restore_on_bits(diodes_snap);
+                    try {
+                        accumulate_b_extra(t_loc, t_loc - a);
+                        run_event_iteration(t_loc, t_loc - a, false, true);
+                    } catch (const pwl::NewtonRoundoffBudgetExceeded&) {
+                        throw;
+                    } catch (const std::runtime_error&) {
+                        return false;   // a failed trial ends the search: the bracket's chord
+                    }
+                    if (!x.allFinite()) return false;
+                    sm = signal(x);
+                    return true;
+                },
+                [](events::BracketEnd) {},
+                [&](const events::Bracket& q) {
+                    return narrow(q) || std::abs(t_cur - t_was) <= snap ||
+                           q.sa_raw == Real{0} || q.sb_raw == Real{0};
+                });
+            result.split_locator_trials += static_cast<Size>(n_trials);
+            // the root of the final bracket's unweighted chord
+            const Real t_new = br.sa_raw == Real{0} ? br.ta
+                : br.sb_raw == Real{0} ? br.tb
+                : std::clamp(br.ta - br.sa_raw * (br.tb - br.ta) / (br.sb_raw - br.sa_raw),
+                             br.ta, br.tb);
+            t_d = b;
+            for (Size j = 0; j < ents.size(); ++j) {
+                if (cross_scratch[j] == t_g) cross_scratch[j] = t_new;
+                t_d = std::min(t_d, cross_scratch[j]);
+            }
         };
 
         // User-cancellation check (Phase: live scope). Lets a
@@ -3103,7 +3178,14 @@ inline SimulationResult run_transient(
             // gate is sampled at the step START (design D4); the
             // observer keeps its (t_k, x_{k-1}) label, whose move to
             // t_{k-1} belongs to fix-control-tick-semantics.
-            gate_t = restart_rule ? t_prev : t;
+            // Restart rule without the split: the gate just before the
+            // step end (t - dt/100), so an edge inside the step takes
+            // effect from t_prev, the side plain pwl takes, and an edge
+            // on a grid point t_prev is exact (F-SB-2). dt/100, not an
+            // ulp: a closure's own tolerance band (1e-9 of a period) must
+            // not read an edge at t as already there. The split samples
+            // t_prev and places the step's edges itself.
+            gate_t = !restart_rule ? t : split ? t_prev : t - gate_left;
             if (step_observer || step_observer_in) {
                 (has_ticks ? step_observer : step_observer_in)(t, x_prev);
                 // An observer (or a control tick) may mutate the
@@ -3172,6 +3254,42 @@ inline SimulationResult run_transient(
                     // an edge exactly on the grid point t: the next step's
                     // oracle query (strictly after t) skips it
                     if (edge_next == t) ++result.n_gate_events;
+                } else {
+                    // An opaque switch_fn (F-SB-2): each change between the
+                    // step's samples t_prev and t is bisected to snap and
+                    // split at like an oracle edge (post side). A pulse that
+                    // opens and closes between two samples is not seen.
+                    Real lo = t_prev;
+                    topology::SwitchStateMask g_lo = gate_at(t_prev);
+                    const topology::SwitchStateMask g_end = gate_at(t);
+                    for (Size q = 0; !(g_lo == g_end); ++q) {
+                        if (q == kMaxStepEvents) {
+                            ++result.unlocated_gate_steps;
+                            ev_overflow = true;
+                            break;
+                        }
+                        Real hi = t;
+                        // capped: below an ulp of t the midpoint stops moving
+                        for (int it = 0; it < 64 && hi - lo > snap; ++it) {
+                            const Real mid = Real{0.5} * (lo + hi);
+                            if (mid <= lo || mid >= hi) break;
+                            ++result.switch_fn_calls;
+                            if (switch_fn(mid) == g_lo) {
+                                lo = mid;
+                            } else {
+                                hi = mid;
+                            }
+                        }
+                        if (hi >= t - snap) break;   // taken at t
+                        ++result.n_gate_events_bisected;
+                        if (hi < t_prev + snap) {
+                            gate_t = hi;
+                        } else {
+                            push_ev(hi);
+                        }
+                        g_lo = gate_at(hi);
+                        lo = hi;
+                    }
                 }
                 if (has_jump_sources) {
                     Real e = sources::next_source_jump_after(pool, graph, t_prev);
@@ -3237,20 +3355,6 @@ inline SimulationResult run_transient(
             // diode flip during this step. Captured before
             // event iteration runs.
             mask_pre = gate_at(gate_t);
-            if (split && !next_edge_fn) {
-                // An opaque switch_fn: a gate change between two grid
-                // samples was not located (review M3).
-                // Counted only when the change happened INSIDE the
-                // previous step (the gate at t_prev - snap is already the
-                // new mask); an edge exactly on the grid point t_prev was
-                // taken where it is (review L4).
-                if (have_prev_gate && !(mask_pre == prev_gate) &&
-                    gate_at(t_prev - snap) == mask_pre) {
-                    ++result.unlocated_gate_steps;
-                }
-                prev_gate = mask_pre;
-                have_prev_gate = true;
-            }
             if (ev_overflow) {
                 ++result.split_event_overflows;
             }
@@ -4045,7 +4149,7 @@ inline SimulationResult run_transient(
                             // while the sum around the conducting path is the
                             // circuit's. Every other diode keeps its own
                             // crossing.
-                            locate_islands(a, b, h, t_d);
+                            locate_islands(run_event_iteration, a, b, h, t_d);
                             // Back to the step start, then: the crossing
                             // at a (an SDIRK step, as the rule alone), at
                             // b (keep the pre-event solve, flip there) or
@@ -4972,7 +5076,7 @@ inline SimulationResult run_transient(
             // path — sample k reads the gate at t_{k-1} and the jumping
             // sources at their left limit — so adding a capacitor does
             // not shift the recorded mask by one sample. (k = 0: t.)
-            st_gate_t = restart_rule && k > 0 ? t_prev : t;
+            st_gate_t = restart_rule && k > 0 ? t - gate_left : t;   // as the dynamic path
             const Real src_left = k > 0 ? left_by : Real{0};
             b_extra.setZero();
             if (b_extra_fn) {

@@ -62,11 +62,12 @@ def test_a_closing_records_one_right_limit_and_the_state_is_continuous(split):
     b.add_capacitor("C", "c", "gnd", 1e-6, 0.0)
     r = _quiet(p.simulate, b, t_end=6e-6, dt=DT, switch_fn=_gate(b, "S", False),
                enable_substep_state_correction=split, **RULE)
-    t = np.asarray(r.times)
-    # one row, at the (sampled) edge: none at t = 0, none at the window's
-    # later steps 3.0 / 3.5 us
-    assert t[np.asarray(r.right_limit_index)] == pytest.approx([2.5e-6], rel=1e-12)
+    # one row, at the edge: none at t = 0, none at the window's later steps.
+    # Without the split the restart rule reads the gate just before the step's
+    # end, so the edge inside (2.0, 2.5] us takes effect from 2.0 us; the split
+    # lands it at T_E (an inner event, not a sample)
     v, tv, k = _limits(r)
+    assert tv[k] == pytest.approx([T_E if split else 2.0e-6], rel=1e-12)
     vc, va = np.asarray(v.v("c")), np.asarray(v.v("a"))
     (j,) = k
     assert vc[j] == 0.0

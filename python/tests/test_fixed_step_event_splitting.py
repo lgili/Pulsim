@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import math
 
+import warnings
+
 import numpy as np
 import pytest
 from scipy.linalg import expm
@@ -64,8 +66,8 @@ def _rl(dt, frac, **kw):
 
 
 @pytest.mark.parametrize("frac, at_2us, rule_2us", [
-    (0.3, +1.012e-6, -8.497e-3),
-    (0.7, +1.014e-6, -3.635e-3),
+    (0.3, +1.012e-6, +3.639e-3),     # rule: 0.3 dt early (was -8.497e-3, 0.7 dt late)
+    (0.7, +1.014e-6, +8.477e-3),     # rule: 0.7 dt early (was -3.635e-3, 0.3 dt late)
 ])
 def test_gate_edge_off_the_grid_is_second_order(frac, at_2us, rule_2us):
     errs = [_rl(dt, frac, **SPLIT)[1] for dt in (8e-6, 4e-6, 2e-6, 1e-6)]
@@ -73,7 +75,8 @@ def test_gate_edge_off_the_grid_is_second_order(frac, at_2us, rule_2us):
     # The edge on the grid with the rule alone reads +1.01e-6 too.
     assert errs[2] == pytest.approx(at_2us, rel=2e-2)
     assert all(f >= 3.7 for f in _factors(errs)), errs
-    # The rule alone takes the edge at the next grid point: first order.
+    # The rule alone takes the edge at the grid point before it (plain
+    # pwl's side, F-SB-2): first order.
     rule = [_rl(dt, frac, **RULE)[1] for dt in (4e-6, 2e-6)]
     assert rule[1] == pytest.approx(rule_2us, rel=1e-3)
     assert _factors(rule)[0] == pytest.approx(2.0, abs=0.02)
@@ -89,9 +92,9 @@ def test_output_grid_is_unchanged_and_splits_are_counted():
     assert _rl(2e-6, 0.3, **RULE)[0].n_split_steps == 0
 
 
-def test_an_opaque_switch_fn_is_not_split():
-    """No `next_edge_after`: the edge stays at the next grid point (design
-    open question 4, the conservative option)."""
+def test_an_opaque_switch_fn_is_bisected_and_split():
+    """No `next_edge_after`: the change between two grid samples is bisected
+    (F-SB-2; design open question 4 had kept it at the next grid point)."""
     te = 500.3 * 2e-6
     b = p.CircuitBuilder()
     b.add_voltage_source("V", "in", "gnd", V)
@@ -105,7 +108,12 @@ def test_an_opaque_switch_fn_is_not_split():
         m.set(k, t >= te)
         return m
     res = p.simulate(b, t_end=te + 0.6e-3, dt=2e-6, engine="pwl", switch_fn=fn, **SPLIT)
-    assert res.n_split_steps == 0
+    # F-SB-2: bisected to split_snap*dt and split at, as an oracle edge
+    assert res.n_split_steps == 1 and res.counters["n_gate_events_bisected"] == 1
+    t, i = np.asarray(res.times), np.asarray(res.i("L"))
+    j = int(np.argmin(abs(t - (te + 0.5e-3))))
+    exact = V / (R + 1 / GON) * (1 - math.exp(-(t[j] - te) / TAU))
+    assert abs(i[j] - exact) <= 1e-5, i[j] - exact   # the oracle's run: +1.01e-6
 
 
 # --- buck CCM with a duty that is not a whole number of steps ----------------
@@ -178,10 +186,11 @@ def test_duty_off_the_grid_is_second_order():
     errs = [_buck_err(N, **SPLIT) for N in (50, 100, 200, 400)]
     assert abs(errs[0]) <= 2e-6, errs          # engine: +1.07e-6 (prototype 7.3e-6)
     assert all(f >= 3.5 for f in _factors(errs)), errs   # 4.2 4.2 4.3
-    # The rule alone snaps the duty edge to the grid: 8.08e-2 V at T/50,
-    # and it does not converge until the snapped duty changes.
-    assert _buck_err(50, **RULE) == pytest.approx(8.08e-2, rel=1e-2)
-    assert _buck_err(100, **RULE) == pytest.approx(8.08e-2, rel=1e-2)
+    # The rule alone takes the duty edge (0.835 of a T/50 step in) at the
+    # grid point before it (plain pwl's side, F-SB-2; it took the one after,
+    # +8.08e-2 V at T/50 and T/100): first order.
+    assert _buck_err(50, **RULE) == pytest.approx(-0.4090, rel=1e-2)
+    assert _buck_err(100, **RULE) == pytest.approx(-0.1641, rel=1e-2)
 
 
 # --- DCM buck: the diode turn-off is located -----------------------------------
@@ -191,8 +200,10 @@ def _grid_fn(N):
         dt = TB / N
 
         def fn(t):
+            # edges ON the grid: floor, not round (a round index changes at
+            # the half step, where the split now bisects it, F-SB-2)
             m = p.SwitchStateMask(n)
-            m.set(k, bool(int(round(t / dt)) % N < Don))
+            m.set(k, bool(int(math.floor(t / dt + 1e-9)) % N < Don))
             return m
         return fn
     return make
@@ -431,9 +442,17 @@ def test_stateful_devices_are_second_order_across_an_off_grid_event(fn, dts):
     on, n = _richardson(fn, dts, **SPLIT)
     assert n >= 1
     assert all(3.4 <= r <= 4.7 for r in on), on
-    # The rule alone snaps the event to the grid: not second order.
-    rule, _ = _richardson(fn, dts, **RULE)
-    assert not all(3.4 <= r <= 4.7 for r in rule), rule
+    # The rule alone takes the event at a grid point: off the split's
+    # limit by far more than the split's own error at the finest dt. (It
+    # takes it at the point BEFORE the edge, plain pwl's side, F-SB-2;
+    # with the edge less than every dt past one grid point that is the
+    # same instant for every dt, so its Richardson ratio alone reads 4.)
+    # Against the split's Richardson limit: the rule is >= 3x further off
+    # than the split at the finest dt (lauritzen 4.4x, the others more).
+    y_s = [fn(dt, **SPLIT)[0] for dt in dts[-2:]]
+    y_inf = y_s[1] + (y_s[1] - y_s[0]) / 3
+    y_r = fn(dts[-1], **RULE)[0]
+    assert abs(y_r - y_inf) > 3 * abs(y_s[1] - y_inf), (y_r, y_s)
 
 
 # --- interactions --------------------------------------------------------------
@@ -600,13 +619,21 @@ def test_a_dead_time_pair_inside_one_step_lands_both_edges():
     assert all(f >= 3.5 for f in _factors(e)), e
 
 
-def test_an_opaque_gate_with_the_split_is_counted_and_warned():
-    with pytest.warns(UserWarning, match="could not be located"):
+def test_an_opaque_gate_with_the_split_is_bisected_and_counted():
+    """F-SB-2: both edges of the pair, inside one step, are bisected to
+    split_snap*dt and split at, as the oracle's are."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
         r = _pair(1e-6, opaque=True, **SPLIT)
-    assert r.counters["unlocated_gate_steps"] == 1     # one change, both edges
-    r = _pair(1e-6, **SPLIT)
+    assert r.counters["n_gate_events_bisected"] == 2
     assert r.counters["unlocated_gate_steps"] == 0
-    assert r.counters["split_event_overflows"] == 0
+    o = _pair(1e-6, **SPLIT)
+    assert o.counters["n_gate_events_bisected"] == 0
+    assert o.counters["unlocated_gate_steps"] == 0
+    assert o.counters["split_event_overflows"] == 0
+    # located to 1e-6 dt: the same trajectory as the oracle's to that order
+    np.testing.assert_allclose(np.asarray(r.i("L")), np.asarray(o.i("L")),
+                               rtol=0, atol=1e-6 * np.abs(np.asarray(o.i("L"))).max())
 
 
 def test_a_declared_b_extra_jump_off_the_grid_is_split():
