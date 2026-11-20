@@ -30,6 +30,7 @@
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <pybind11/typing.h>
 
 #include <array>
 #include <memory>
@@ -1325,11 +1326,14 @@ void init_module(py::module_& m) {
            std::vector<py::object> tick_fns,
            std::vector<bool> tick_monitors,
            Real output_rtol, std::size_t output_cap,
-           const pulsim::solver::SolverSnapshot* resume,
+           py::typing::Optional<pulsim::solver::SolverSnapshot> resume_arg,
            std::vector<Real> tick_origins,
            std::vector<std::uint64_t> tick_next_k,
            py::object loop_feed,
            Real t_offset, std::size_t output_budget) {
+            // `resume=None` reads Optional in the signature (add-ai-usage-guide 1.4)
+            const pulsim::solver::SolverSnapshot* resume =
+                resume_arg.is_none() ? nullptr : &resume_arg.cast<const pulsim::solver::SolverSnapshot&>();
             PySwitchFnSSM sf(std::move(switch_fn_obj));
             // add-unified-event-queue group 3: control ticks on the
             // scheduler's queue; each gets the full MNA state.
@@ -1720,7 +1724,7 @@ void init_module(py::module_& m) {
         py::arg("tick_monitors") = std::vector<bool>{},
         py::arg("output_rtol") = Real{0},
         py::arg("output_cap") = std::size_t{4096},
-        py::arg("resume") = static_cast<const pulsim::solver::SolverSnapshot*>(nullptr),
+        py::arg("resume") = py::none(),
         py::arg("tick_origins") = std::vector<Real>{},
         py::arg("tick_next_k") = std::vector<std::uint64_t>{},
         py::arg("loop_feed") = py::none(),
@@ -1784,7 +1788,9 @@ void init_module(py::module_& m) {
            Real stiffness_threshold,
            std::size_t store_every,
            bool event_log,
-           const pulsim::solver::SolverSnapshot* resume) {
+           py::typing::Optional<pulsim::solver::SolverSnapshot> resume_arg) {
+            const pulsim::solver::SolverSnapshot* resume =
+                resume_arg.is_none() ? nullptr : &resume_arg.cast<const pulsim::solver::SolverSnapshot&>();
             // no loss tracking here: an adapter built with loss_port refuses by name
             pulsim::refuse_device_losses(adapter.pool(), "dsed");
             PySwitchFnSSM sf(std::move(switch_fn_obj));
@@ -1867,7 +1873,7 @@ void init_module(py::module_& m) {
         py::arg("stiffness_threshold") = Real{10.0},
         py::arg("store_every")          = std::size_t{1},
         py::arg("event_log") = true,
-        py::arg("resume") = static_cast<const pulsim::solver::SolverSnapshot*>(nullptr),
+        py::arg("resume") = py::none(),
         "Bridge.11 — native PEDSimulatorAuto over a "
         "NativeCircuitBuilderAdapter (per-mode RK45↔BDF2 dispatch).");
 

@@ -2219,6 +2219,42 @@ def _resolve_loaded_circuit(lc, t_end, dt, t_start, store_every):
     return lc.builder, t_end, dt, t_start, store_every
 
 
+# The `simulation:` keys of a LoadedCircuit that are not its run window:
+# simulate() keywords of the same name (add-ai-usage-guide 12.15).
+_YAML_RUN_KW = ("enable_newton_line_search", "enable_newton_lm",
+                "enable_substep_state_correction", "max_event_iterations",
+                "max_newton_iterations", "tol_newton_dx", "tol_newton_res",
+                "integrator", "rtol", "atol", "dt_init")
+_YAML_WINDOW_KW = ("t_start", "t_end", "dt", "store_every")
+
+
+def _loaded_run_options(lc) -> dict:
+    """The run options a :class:`LoadedCircuit` carries besides its window:
+    every key its YAML sets, and every field of ``lc.options`` changed
+    from the default since. A changed field simulate() has no keyword for
+    is refused by name, never dropped."""
+    opts, base = lc.options, SimulationOptions()
+    keys = set(getattr(lc, "simulation_keys", ()))
+    out = {}
+    for name in dir(base):
+        if name.startswith("_") or name in _YAML_WINDOW_KW:
+            continue
+        val = getattr(opts, name)
+        if callable(val):
+            continue
+        if name not in keys and val == getattr(base, name):
+            continue
+        if name not in _YAML_RUN_KW:
+            raise _options_error(name,
+                f"simulate(): {lc.source!r}'s loaded.options.{name} = {val!r} "
+                "is not its default, and simulate() reads only the YAML "
+                f"simulation: keys from a LoadedCircuit; pass it as a keyword "
+                "(see help(pulsim.simulate)) or leave loaded.options.{name} "
+                "at its default.")
+        out[name] = val
+    return out
+
+
 # Stage A's plan.resolved_from: where each simulate() keyword's value came
 # from. 'explicit' = not the signature's default (an explicit default reads
 # 'default'); 'yaml' / 'solver' = filled from a LoadedCircuit / SolverOptions.
@@ -2487,8 +2523,11 @@ def simulate(
         ``LoadedCircuit`` the run takes ``t_end``, ``dt`` (when the YAML
         sets one), ``t_start`` (when ``t_start`` is left at 0.0) and
         ``store_every`` (when not passed) from its ``simulation:``
-        block; a keyword you pass wins. The other ``simulation:``
-        fields stay on ``loaded.options`` — forward them yourself. A
+        block, and every other key that block sets (Newton tolerances,
+        ``integrator``, ``rtol`` / ``atol``, ...: ``loaded.simulation_keys``)
+        as the keyword of the same name; a keyword you pass, then
+        ``solver=``, wins. A ``loaded.options`` field changed in Python
+        that is not a ``simulation:`` key is refused by name. A
         ``LoadedCircuit`` whose ``t_end`` is not after ``t_start`` (no
         top-level ``simulation:`` block, or no ``t_end`` in it) is
         refused with a ``ValueError`` naming the YAML file.
@@ -3270,7 +3309,9 @@ def _plan_run(
     # `simulation:` block) used to reach the engines as t_end = dt = 0
     # and died on an engine-specific message about the step ceiling;
     # refuse it here and name the file.
+    _yaml_run = None
     if isinstance(builder, LoadedCircuit):
+        _yaml_run = _loaded_run_options(builder)
         _was = (t_end, dt, t_start, store_every)
         builder, t_end, dt, t_start, store_every = _resolve_loaded_circuit(
             builder, t_end, dt, t_start, store_every)
@@ -3379,6 +3420,33 @@ def _plan_run(
             discontinuity_restart, resolution_diagnostics,
             inductor_freeze_di_max, inductor_abs_clamp, integrator, rtol,
             atol, dt_init))
+
+    # The YAML's own run keys fill what neither a keyword nor solver= set.
+    if _yaml_run:
+        _ykw = {"enable_newton_line_search": enable_newton_line_search,
+                "enable_newton_lm": enable_newton_lm,
+                "enable_substep_state_correction":
+                    enable_substep_state_correction,
+                "max_event_iterations": max_event_iterations,
+                "max_newton_iterations": max_newton_iterations,
+                "tol_newton_dx": tol_newton_dx, "tol_newton_res": tol_newton_res,
+                "integrator": integrator, "rtol": rtol, "atol": atol,
+                "dt_init": dt_init}
+        _now = {k: (_yaml_run[k] if v is None and k in _yaml_run else v)
+                for k, v in _ykw.items()}
+        _mark_resolved(_resolved, "yaml", _YAML_RUN_KW,
+                       tuple(_ykw[k] for k in _YAML_RUN_KW),
+                       tuple(_now[k] for k in _YAML_RUN_KW))
+        enable_newton_line_search = _now["enable_newton_line_search"]
+        enable_newton_lm = _now["enable_newton_lm"]
+        enable_substep_state_correction = _now[
+            "enable_substep_state_correction"]
+        max_event_iterations = _now["max_event_iterations"]
+        max_newton_iterations = _now["max_newton_iterations"]
+        tol_newton_dx, tol_newton_res = (_now["tol_newton_dx"],
+                                         _now["tol_newton_res"])
+        integrator, rtol, atol, dt_init = (_now["integrator"], _now["rtol"],
+                                           _now["atol"], _now["dt_init"])
 
     if enable_nonlinear_refresh is not None:
         import warnings

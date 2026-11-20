@@ -6,6 +6,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Bindings close-out (add-ai-usage-guide, add-python-builder-ergonomics)
+
+* **Fixed** `simulate(LoadedCircuit)` forwarded only `t_start`, `t_end`,
+  `dt` and `store_every`: the YAML's `integrator`, `rtol` / `atol`,
+  `dt_init`, Newton tolerances and iteration caps were dropped silently.
+  Every `simulation:` key the file sets (`loaded.simulation_keys`) is now
+  the keyword of the same name; a keyword you pass, then `solver=`, wins.
+  A `loaded.options` field changed in Python that is no `simulation:` key
+  is refused by name (`OptionsError`).
+* **Changed (BREAKING)** the channel arguments after the defaulted gains of
+  `CxxBlockChain.add_sum`, `add_inverse_clarke`, `add_flux_mras_observer`
+  and `add_sliding_mode_observer` are keyword-only (`py::kw_only()`), as
+  the stub already declared; no caller in the repository was positional.
+* **Changed** binding signatures name Python types (`builder.graph -> Graph`,
+  `final_snapshot -> SolverSnapshot`, ...) and every `= None` default reads
+  `... | None`; defaults print as `PreflightOptions()` /
+  `CxxInputRef.const_value(0.0)`.
+
 ### Excess core loss in the permeance network
 
 * **Added** `CircuitBuilder.add_excess_loss(name, m_a, m_b, c, eps)`:
