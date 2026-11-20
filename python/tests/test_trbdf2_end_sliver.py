@@ -9,7 +9,6 @@ add-branch-form-ideal-switch).
 import warnings
 
 import numpy as np
-import pytest
 
 import pulsim as p
 
@@ -44,12 +43,12 @@ def test_no_final_sliver_step_before_t_end():
     assert t[-1] - t[-2] > 1e-12
 
 
-@pytest.mark.xfail(strict=False, reason=(
-    "the sliver is gone (one period from the answer: 4.9e-3 -> 1.6e-5), but "
-    "the monodromy probes take different step grids (a 2.9e-14 s step at "
-    "the mid-period edge), so the one-period map is not affine in the "
-    "probe; DECISIONS #50"))
 def test_steady_state_finds_the_orbit_on_trbdf2():
+    """The monodromy probes take different step grids (a 2.9e-14 s step at
+    the mid-period edge), so the one-period map is not affine in the probe
+    (DECISIONS #50: 1.6e-5 from the answer). steady_state's chord step on
+    the verify run (release finding F-6-1) corrects the columns' error:
+    measured 3.0e-10."""
     b, fn = _buck()
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")

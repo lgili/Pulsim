@@ -1946,10 +1946,10 @@ inline SimulationResult run_transient_trbdf2(
     // equals 2C/(gamma h), so both stages are the trapezoidal companion
     // at dt = gamma*h with the DERIVATIVE slots zeroed and the STATE slots
     // set to the stage's base: the same factor, no new history method.
+    // The stateful kinds' q rows take the same BE stages (ed_sdirk_base /
+    // ed_hs_commit, shared with esdirk43): every circuit can restart.
     const Real gs = Real{1} - Real{1} / std::sqrt(Real{2});
-    const bool sdirk_possible = !hs.any();
-    const bool sdirk_ok = sdirk_possible
-                          && (opts.sdirk_on_linear_circuits || nl_effective);
+    const bool sdirk_ok = opts.sdirk_on_linear_circuits || nl_effective;
     // ---- the SDIRK restart after a diode turn-off on a linear circuit ----
     // A diode with g_off > 0 that turns off leaves the inductor it carried
     // on a g_off path: an L*g_off mode (tau ~ 2e-13 s on the DCM buck) the
@@ -1962,7 +1962,7 @@ inline SimulationResult run_transient_trbdf2(
     // stage factor W (Hosea-Shampine). Measured on the DCM buck: 7,608 ->
     // 4,212 accepted steps, 4,306 -> 2,753 rejects, no step below 1e-11 s
     // away from the event records (add-branch-form-ideal-switch DECISIONS 24).
-    const bool sdirk_off_lin = opts.sdirk_after_turn_off && sdirk_possible
+    const bool sdirk_off_lin = opts.sdirk_after_turn_off
                                && !nl_effective && !sdirk_ok;
     bool sdirk_event = false;   // the pending restart came from such an event
     auto restart_ok = [&]() { return sdirk_ok || sdirk_event; };
@@ -2125,6 +2125,13 @@ inline SimulationResult run_transient_trbdf2(
         event_sample_t = tp;
     };
     Size sdirk_left = has_diodes ? opts.sdirk_after_settle : Size{0};
+    // A run start with a stateful kind is an SDIRK restart step: the kinds'
+    // derivative slots are init's zeros, not the current they carry (a
+    // current-driven nonlinear capacitor: esdirk43's explicit first stage
+    // read q' = 0, the q-row estimate was O(h) at any h and Newton stalled at
+    // h_min, F-S-1). Its backward-Euler stages read no slot; the commit
+    // stores the consistent one.
+    if (hs.any() && resume_from == nullptr) sdirk_left = std::max(sdirk_left, Size{1});
     std::vector<pwl::HistoryEntry> hist_snap, hist_s1, hist_s2, hist_f;
     std::vector<Real> est_v, est_sc;
     sparse::Matrix noise_J;
@@ -2264,8 +2271,9 @@ inline SimulationResult run_transient_trbdf2(
                                 name));
             }
         }
-        // the stateful kinds take the stages (their q rows below)
-        const bool ed_sf = esdirk && hs.any();
+        // the stateful kinds take the stages (their q rows below): every
+        // ESDIRK stage, and an SDIRK(2,2) restart step on both integrators
+        const bool ed_sf = hs.any();
         // The stages in entry space (capacitor v, inductor i): with a linear
         // q the stage combinations in x are those in q (design D2).
         std::vector<Real> ed_y0, ed_hd0, ed_psi;
@@ -2730,23 +2738,6 @@ inline SimulationResult run_transient_trbdf2(
                 reinit_new = reinit.entering(structure, mask_step, false);
             }
             reinit_step = !reinit_new.empty();
-            if (reinit_step && !sdirk_possible) {
-                const Index el = reinit_new.front()->elements.front();
-                throw UnsupportedError(
-                    "trbdf2", "dependent_states",
-                    std::string(graph.branch_name(el)),
-                    std::string(pwl::stored_kind_name(pool.kind_of(el))),
-                    std::format(
-                        "engine 'trbdf2': at t = {} the mode {} makes states "
-                        "dependent through the ideal element '{}'; their "
-                        "re-initialisation is the SDIRK x3 restart, which this "
-                        "engine does not take with a Coss, Lauritzen-diode, "
-                        "IGBT-tail, PMSM or saturable-inductor history. Use "
-                        "engine='pwl', or give '{}' R_on > 0 and g_off > 0.",
-                        t, mask_step.to_string(), graph.branch_name(el),
-                        graph.branch_name(el)));
-            }
-
             // ---- stage 1: TR over γh (or SDIRK stage 1, BE over γ_s h) ----
             const step::StageSpec stage0 = step::TrBdf2::stage(h, 0);
             hg = stage0.factor_dt;   // gamma * h
@@ -2784,11 +2775,9 @@ inline SimulationResult run_transient_trbdf2(
             x_g = x;                 // Newton warm start
             step_ctx = stage0.ctx();
             step_ctx.t = t + h_pt;
-            if constexpr (kE) {
-                if (sdirk && ed_sf) {   // the q rows: BE of gs·h, the linear entries' rule
-                    hs.snapshot_into(ed_hs_snap);
-                    step_ctx = {gs * h, pwl::TrBdf2Stage::BackwardEuler, t + h_pt};
-                }
+            if (sdirk && ed_sf) {   // the q rows: BE of gs·h, the linear entries' rule
+                hs.snapshot_into(ed_hs_snap);
+                step_ctx = {gs * h, pwl::TrBdf2Stage::BackwardEuler, t + h_pt};
             }
             // A step below the matrix's conditioning floor: 2C/h against
             // a node held only by g_off (a capacitor between two OFF
@@ -2868,21 +2857,25 @@ inline SimulationResult run_transient_trbdf2(
                 hs.capture_gamma(x_g);
                 step_ctx = step::TrBdf2::stage(h, 1).ctx();
                 step_ctx.t = t + h;
-                if constexpr (kE) {
-                    if (sdirk && ed_sf) {
-                        step_ctx.t = t + h_pt;   // q(x_g) at x_g's own time
-                        ed_sdirk_base(x_g, (Real{1} - gs) / gs);
-                        step_ctx = {gs * h, pwl::TrBdf2Stage::BackwardEuler, t + h};
-                    }
+                if (sdirk && ed_sf) {
+                    step_ctx.t = t + h_pt;   // q(x_g) at x_g's own time
+                    ed_sdirk_base(x_g, (Real{1} - gs) / gs);
+                    step_ctx = {gs * h, pwl::TrBdf2Stage::BackwardEuler, t + h};
                 }
                 x_1 = x_g;           // Newton warm start
                 stage_ok =
                     solve_dispatch(mask_step, hg, b_stage, x_1);
                 ++st.n_solves;
             }
-            if constexpr (kE) {   // no stage leaves a trace; the commit re-applies ψ
-                if (sdirk && ed_sf) { hs.restore(ed_hs_snap); hs.stage_clear(); }
+            // the q rows' stage-2 increment q(x_1) − ψ for the estimate, read
+            // under the stage's own last stamp; then no stage leaves a trace
+            // (the commit re-applies ψ, and the rollback also drops the γ
+            // capture, so trbdf2_increments cannot serve a restart step)
+            if (sdirk && ed_sf && stage_ok) {
+                q_d1.resize(hs.stage_rows());
+                hs.stage_increment(x_1, ed_spsi5.data(), q_d1.data());
             }
+            if (sdirk && ed_sf) { hs.restore(ed_hs_snap); hs.stage_clear(); }
             if (stage_singular) {
                 ++st.n_reject;
                 ++st.n_conditioning_rejects;
@@ -3059,15 +3052,19 @@ inline SimulationResult run_transient_trbdf2(
             // integrator's own estimate of q, scale atol·s + rtol·max(|q_n|,
             // |q_1|) with s the device's capacitance / inductance / time
             // constant (`q_scales`), so a row that stays 0 keeps a finite
-            // scale. Not on an SDIRK restart step (its stages are not the
-            // method the estimate is for; the entries use their own there).
-            if (q_rows && q_live && !sdirk) {
+            // scale. On an SDIRK restart step the rows take the entries'
+            // embedded first-order estimate h(1-gs)(k1 - k2) on q, k1 = (ψ5 −
+            // q_n)/(r gs h), k2 = (q(x_1) − ψ5)/(gs h), r = (1-gs)/gs (without
+            // it a restart left a saturable inductor's flux uncontrolled: the
+            // boost example's i_L error 3.4x). That step reads no derivative
+            // slot, so its estimate also holds at the run's first step.
+            if (q_rows && (q_live || sdirk)) {
                 const Size nq = hs.stage_rows();
                 if (q_atol.size() != nq) {
                     q_atol.resize(nq);
                     hs.q_scales(q_atol.data());
                 }
-                if (!kE) {
+                if (!kE && !sdirk) {
                     q_n.resize(nq);
                     q_fn.resize(nq);
                     q_dg.resize(nq);
@@ -3078,7 +3075,11 @@ inline SimulationResult run_transient_trbdf2(
                 for (Size r = 0; r < nq; ++r) {
                     if (q_atol[r] < Real{0}) continue;   // an external row with no q entry
                     Real ee, q0, q1;
-                    if constexpr (kE) {
+                    if (sdirk) {
+                        ee = ed_sdpsi5[r] - (Real{1} - gs) / gs * q_d1[r];
+                        q0 = ed_sq0[r];
+                        q1 = ed_spsi5[r] + q_d1[r];
+                    } else if constexpr (kE) {
                         using E = step::Esdirk43;
                         ee = E::err_explicit_weight() * ed_shd0[r];
                         for (int j = 0; j < E::n_stages; ++j) {
@@ -3994,7 +3995,7 @@ inline SimulationResult run_transient_trbdf2(
                 // next step is the one the method produced (the
                 // hysteretic law integrates from the same base the
                 // converged BDF2 residual used, (H_γ, M_γ)).
-                if (kE && ed_sf) {   // the q rows under the rule their stages used
+                if ((kE || sdirk) && ed_sf) {   // the q rows under the rule their stages used
                     ed_hs_commit(x_1, (sdirk ? gs : step::Esdirk43::gamma) * h, h);
                 } else {
                 hs.commit(x_1, h, pwl::TrBdf2Stage::Bdf2Stage2);

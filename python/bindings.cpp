@@ -5067,7 +5067,8 @@ void init_module(py::module_& m) {
            py::object tick_before_obj,
            Real tick_origin,
            std::vector<Real> tick_origins,
-           std::vector<std::uint64_t> tick_next_ks) {
+           std::vector<std::uint64_t> tick_next_ks,
+           std::vector<bool> tick_closed_ends) {
             // add-unified-event-queue group 5: Python tick sources, which
             // the kernel's queue schedules (source j calls tick_fns[j]).
             // a graph's queue tick (CxxChainTick) runs in C++, no GIL
@@ -5095,7 +5096,8 @@ void init_module(py::module_& m) {
                     tick_origins.empty() ? tick_origin : tick_origins[j],
                     tick_next_ks.size() == tick_periods.size() && !tick_origins.empty()
                         ? tick_next_ks[j]
-                        : std::numeric_limits<std::uint64_t>::max()});
+                        : std::numeric_limits<std::uint64_t>::max(),
+                    j < tick_closed_ends.size() && tick_closed_ends[j]});
             }
             tick_plan.fn = [&tick_fns](std::uint32_t j, const pulsim::events::TickInfo&,
                                        Real t, const Vector& xs) {
@@ -5223,6 +5225,7 @@ void init_module(py::module_& m) {
         py::arg("tick_origin") = std::numeric_limits<Real>::quiet_NaN(),
         py::arg("tick_origins") = std::vector<Real>{},
         py::arg("tick_next_ks") = std::vector<std::uint64_t>{},
+        py::arg("tick_closed_ends") = std::vector<bool>{},
         "Run a fixed-dt transient simulation. switch_fn(t) "
         "→ SwitchStateMask; b_extra_fn(t) → Vector adds "
         "to b_constant at each step. `step_observer(t, x)` "
