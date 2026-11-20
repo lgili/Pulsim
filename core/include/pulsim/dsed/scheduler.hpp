@@ -1145,6 +1145,7 @@ private:
                 // re-read at each landing; without it a plain Python gate
                 // ran with its t = 0 mask frozen.
                 t_sw = std::min(t_now + dt_max_ * Real{0.1}, t_end);
+                poll_t_ = t_sw;
             }
         }
         if constexpr (requires { system_.next_source_corner_after(t_now); }) {
@@ -2372,6 +2373,7 @@ private:
                        int aux_index = -1) {
         const MaskT old_mask = system_.current_mask();
         const MaskT prev_bits = diode_bits_;
+        const Real prev_time_event_t = last_time_event_t_;
         if (ptype == PredicateType::GateEdge) last_time_event_t_ = t_event;   // next_time_event_
         // the event's left limit for a step hook listening to events (the loss port)
         const bool hook_event = hooks_ != nullptr && hooks_->has_event();
@@ -2423,6 +2425,11 @@ private:
 
         // Drop spurious same-mask gate edges silently.
         if (ptype == PredicateType::GateEdge && new_mask == old_mask) {
+            // F-X-1: a poll landing of a gate that names no edge, which changed
+            // nothing, is not a time event: as one it made resolved_scale_ the time
+            // left to t_end, so the parasitic cluster shrank as the run neared its
+            // end (ten bridges: a 2e-10 s mode left the cluster 31 us before t_end)
+            if (t_event == poll_t_) last_time_event_t_ = prev_time_event_t;
             return;
         }
 
@@ -3300,6 +3307,7 @@ private:
     std::size_t reinit_mark_ = 0;   // reinit_log_size_() before the settle
     Vector settle_x0_;   // settle_and_project_: the pre-event state (its records)
     Real last_time_event_t_ = std::numeric_limits<Real>::quiet_NaN();   // last gate edge / corner fired
+    Real poll_t_ = std::numeric_limits<Real>::quiet_NaN();   // next_gate_edge_: the last poll boundary
     // add-unified-event-queue group 3: the run's time events (start_time_events_)
     events::EventQueue queue_;
     events::TickPlan ticks_;

@@ -51,6 +51,7 @@
 
 #include "pulsim/dsed/bdf2_integrator.hpp"
 #include "pulsim/dsed/time_eps.hpp"
+#include "pulsim/events/event_queue.hpp"
 #include "pulsim/dsed/event_predictor.hpp"
 #include "pulsim/dsed/scheduler.hpp"
 #include "pulsim/numeric/dense.hpp"
@@ -222,7 +223,8 @@ private:
             // applies here: ∞ from `next_edge_after` triggers a
             // `dt_max/10` poll boundary so PWM events from plain
             // Python switch_fns aren't silently missed.
-            const Real raw = switch_fn_.next_edge_after(t_now);
+            const Real raw = events::require_after(t_now, switch_fn_.next_edge_after(t_now),
+                                                   events::Kind::GateEdge);
             if (std::isfinite(raw)) {
                 return std::min(raw, t_end);
             }

@@ -182,18 +182,24 @@ def _branch_bridges(n):
         p.CircuitBuilder.add_diode = orig
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "release finding F-X-1: under output_rtol the event projection keeps every mode but the "
-    "parasitic cluster (1/(1e-6 * 1 us) = 1e12 /s); ten branch-form bridges keep their "
-    "~2e-10 s common mode (L / R_g), and after Dt0c turns OFF at 19.96896 ms the b-phase "
-    "bottom diodes chatter (Db0b located OFF 18 times in 43 ns, intervals shrinking ~0.85x: "
-    "a Zeno approach to a sliding mode) until the settle leaves one OFF 0.73 V forward. "
-    "The old projection (100/dt_max) removes that mode and the run passes; it is not the "
-    "fix (it projects ll06's real 100 ns transient, 1.1e-2 off the truth). Needs a "
-    "sliding-mode rule in the exact engine's event decisions (zero_band_on_ / settle)"))
 def test_fx1_ten_branch_form_bridges_run_under_the_rule():
-    r = _run(_branch_bridges(10), 0.02, output_rtol=1e-5)
-    assert r.times[-1] == pytest.approx(0.02)
+    """F-X-1: refused at 19.969 ms (Db8b OFF 0.73 V forward after Db0b chattered 18 times in
+    43 ns), and only for t_end = 0.02: t_end = 0.0205 / 0.025 / 0.03 ran. The parasitic cut is
+    1/(1e-6 t_res), t_res = next time event - last time event; with no gate oracle the next is
+    t_end and every dt_max/10 poll landing counted as the last, so t_res was the time LEFT in the
+    run (31 us there) and the common mode L/R_g = 2e-10 s left the cluster near the end. A poll
+    landing that changes nothing is not a time event: the rule's run takes the rule-free run's
+    events (111, one at 19.96895575516 ms, no chatter) to 1e-12 s and its end state to 1e-12 of
+    each state's peak (measured 1e-12 V on the bus)."""
+    on = _run(_branch_bridges(10), 0.02, output_rtol=1e-5)
+    off = _run(_branch_bridges(10), 0.02)
+    assert on.times[-1] == pytest.approx(0.02)
+    eon, _, fon = _event_rows(on)
+    eoff, _, foff = _event_rows(off)
+    assert len(eon) == len(eoff) == 111
+    assert np.abs(eon - eoff).max() <= 1e-12
+    scale = np.abs(np.asarray(off.states)).max(axis=0) + 1e-12
+    assert (np.abs(fon - foff) / scale).max() <= 1e-11
 
 
 def _ladder(n):
@@ -272,3 +278,35 @@ def test_fx4_thermal_kpi_is_exact_on_any_sample_grid():
     for t in (np.array([0.0, 2.0]), np.linspace(0.0, 2.0, 1004)):
         r = kpi.compute_junction_temperature(np.full(len(t), 25.0), t, 5.0, 0.1, 25.0)
         assert r["t_j_final_c"] == pytest.approx(truth, rel=1e-13)
+
+
+class _StuckGate:
+    """F-T-2: next_edge_after returns t itself (a float round-off in a user gate did it)."""
+
+    def __init__(self, n, i):
+        self.n, self.i = n, i
+
+    def __call__(self, t):
+        m = p.SwitchStateMask(self.n)
+        m.set(self.i, (t % 1e-5) < 5e-6)
+        return m
+
+    def next_edge_after(self, t):
+        return t
+
+
+@pytest.mark.parametrize("integrator", [None, "rk45", "bdf2"])
+def test_ft2_a_gate_oracle_that_does_not_advance_is_refused_by_name(integrator):
+    """F-T-2: the exact engine spun at 100 % CPU forever. One rule (events::require_after) where
+    an oracle is asked (the event queue: exact and trbdf2's native oracles; the auto and BDF2
+    schedulers): a refusal naming next_edge_after and the instant. trbdf2 never asks a Python
+    gate's oracle (it locates a Python gate's edges by bisection), so it runs this gate."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "a", "gnd", 10.0)
+    b.add_switch("S", "a", "o", 1e3, 1e-9)
+    b.add_resistor("R", "o", "gnd", 10.0)
+    b.add_capacitor("C", "o", "gnd", 1e-6)
+    gate = _StuckGate(b.graph.num_switches, b.switch_index_of("S"))
+    with pytest.raises(p.UnsupportedError, match=r"next_edge_after\(t\) returned .* not a later instant"):
+        p.simulate(b, t_end=1e-4, engine="dsed", switch_fn=gate,
+                   **({} if integrator is None else {"integrator": integrator}))

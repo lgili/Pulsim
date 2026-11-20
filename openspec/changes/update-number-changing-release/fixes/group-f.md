@@ -206,3 +206,48 @@ of V(vin) against the closed form (constant): 0.
 Not changed (owner decision, default path): the poll itself — every exact run whose gate names
 no edge steps at dt_max/10 = 1 µs, not the documented 10 µs; treating an infinite answer as
 "no edge" would move every such default run's step grid.
+
+## F-T-2 — a gate oracle that does not advance hung the exact engine
+
+**Trace.** `next_edge_after(t)` returning t: `EventQueue::next_after` re-asks a function source
+whose pending event is not after t; the answer t gives `h_use = 0`, the scheduler fires the
+"edge" at t (same mask, dropped), and asks again — forever (dsed). trbdf2 "returned" only
+because its step controller forced steps at its h floor (a floor warning; the edges were never
+located). periodic_steady_state refuses such a gate by name.
+
+**Rule (one, shared).** The refusal by name, `events::require_after` (event_queue.hpp), called
+wherever an oracle is asked: the event queue (`EventQueue::next_after`: the exact engine's RK45
+scheduler and trbdf2's native oracles) and the exact engine's auto and BDF2 schedulers, which
+ask the switch_fn directly (the hang reproduced on the auto scheduler, `integrator='auto'`): an
+answer not strictly after t raises `UnsupportedError(feature='switch_fn')` naming
+`next_edge_after(t)`, the answer and t — periodic_steady_state's rule. trbdf2 never asks a
+Python gate's oracle (it bisects a Python gate's edges: sim_bindings "the variable step lands
+native edges only"), so it runs this gate, correctly, with its usual floor warning. Test
+`test_ft2_a_gate_oracle_that_does_not_advance_is_refused_by_name` (integrator auto / rk45 /
+bdf2, milliseconds).
+
+## F-X-1 — cause found (session 2)
+
+**The decision depended on t_end.** Ten branch-form bridges under the rule: t_end = 0.02 refuses
+at 19.969 ms; t_end = 0.0205 / 0.025 / 0.03 run (113 / 138 / 163 events). Cause:
+`resolved_scale_(t) = next_time_event_(t) − last_time_event_t_`. The bridges have no gate
+oracle (the default constant mask), so (i) `next_time_event_` is the run's end, and (ii) every
+dt_max/10 poll landing fired a same-mask "gate_edge" that set `last_time_event_t_` before the
+"drop spurious same-mask gate edges" return. So t_res = the time LEFT in the run: 31 µs at
+19.969 ms of a 20 ms run, the parasitic cut 1/(1e-6·31 µs) = 3.2e10 /s, and the bridges' common
+mode L/R_g (5e9 /s) left the cluster: neither projected nor settled over (the previous trace's
+"1e12 /s" was this same quantity a µs before the end). Earlier in the run (t_res ≫) the same
+mode is in the cluster.
+
+**Fix.** A poll landing that changed nothing is not a time event: `fire_event_` restores
+`last_time_event_t_` at the same-mask return when the landing is the poll boundary
+(`poll_t_`, set in `next_gate_edge_`). t_res is then the span since the last real time event
+(the run's start here): constant, not shrinking toward t_end.
+
+**After.** Ten branch-form bridges, `output_rtol=1e-5`, t_end 0.02: runs, 111 events, the
+19.969 ms one alone (19.96895575516 ms, no chatter), event times equal to the rule-off run's to
+9.8e-13 s, end state to 1e-12 V (test `test_fx1_ten_branch_form_bridges_run_under_the_rule`).
+The answer to the brief's question: the 2e-10 s mode IS part of the cluster by the engine's own
+definition at every instant but the last 3 % of a run; the settle and the projection were right,
+t_res was wrong. Default path: the settle reads the same t_res (`settled_`), so oracle-less runs
+near their end may decide differently (measured in the byte compares below).
