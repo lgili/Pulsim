@@ -520,3 +520,80 @@ The extension was built from this tree, and only what the build was for was run:
 - `ruff check` on the touched test file passes.
 
 Next steps 2–5 above remain.
+
+## Session 4: verification of e0a1cad1 (code 3141dec6). NOT mergeable
+
+Logs are in `.scratch/d6/`. The extension was built from the tip: ninja was up to date, the `.so` is identical to `build-ext`'s, and pytest imports `python/pulsim`.
+
+### Blockers
+1. **ll13_active_clamp_forward on trbdf2 now aborts.** The reference_status cell goes from disagree to error, and it is reproducible (`ll13_base_vs_tip.log`).
+   - Tip: `Newton failed at t = 0.000021 with h already at h_min` (||dx|| 4.7e-9 at node sec, dx/|x| 1.2e-17).
+   - cad6ab6b runs it: 1538 accepted / 62 rejected / 7 Newton retries.
+   - Session 2's tip ran it (1624 / 11 retries), so the regression comes from 6dffe5f4 or 3141dec6. Not bisected.
+   - No pytest covers it.
+2. **Reviewer A (medium regression).** On the post-edge sample path, `slots_only_t` is not set (trbdf2_transient.hpp ~2015).
+   - If a run is stopped by `should_continue` / `Simulation` cancel right after an edge, the snapshot holds pre-edge x with post-edge slots, but `post_edge_derivatives` is false.
+   - On resume: the fixed engine's refusal does not fire, and trbdf2 resumes with TR-BDF2 from the probe slots without the SDIRK restart.
+   - Suggested one-line fix, not applied (outside the verification scope): set `slots_only_t = t_plus` on the sample path too.
+
+### Numbers
+- **C++ binaries on Eigen 5:** dsed 142, step 32, sim 8, thermal 9, layer5_v2 37, all passed (`cpp_*.log`).
+- **Lint and pytest:**
+  - `ruff check python/` passes (`ruff.log`).
+  - The 44 touched files: 479 passed, 1 xfailed (`pytest_touched44.log`).
+  - Full pytest: 6227 passed, 110 skipped, 8 xfailed, 0 failed, 0 XPASS (`pytest_full.log`).
+- **Exact scoreboard** (`scoreboard_classes.log`, script `d6/sbcmp.py`):
+  - trbdf2: 80/30/9 → 80/30/9.
+  - trbdf2+esdirk43: 81/65/13 → 81/65/13. The 16 measured at the earlier commit is gone: boost_classic, erickson boost and synchronous_flyback fall back to class 2.
+  - No circuit changes class in either direction.
+  - Per-cell ratios: 23 better, 14 worse, 115 within 1 %.
+- **reference_status trbdf2:** 106/2/1 → 106/1/2. The one changed cell is ll13 (disagree → error). Analytic 27/27.
+- **C_oss conduction energy vs the closed form** (`coss_energy.log`), all within 1 %:
+  - defaults +0.0574 %, rtol 1e-6 +0.0134 %, rtol 1e-8 +0.0066 %, dt 4e-9 +0.0210 %;
+  - esdirk43 +0.1401 %, esdirk43 rtol 1e-6 −0.0139 %, esdirk43 dt 4e-9 +0.0228 %.
+- **Byte compares vs cad6ab6b** (`bytecmp_*.log`):
+  - pwl_identity 390/390.
+  - Engines oracle: dsed, exact, pwl, pwl_restart, bdf1 and adaptive identical; 4 trbdf2 lines differ (buck, satind, mosl1, syncbuck).
+  - Stateful oracle: 9 trbdf2 cases differ.
+  - trbdf2_identity: 233/371.
+- **The ten largest trbdf2_identity movers** (relative rms, `trid_movers.log`, `trid_top10_vs_tight.log`, `trid_worse_percol.log`). The tight reference is trbdf2 at rtol 1e-10 / atol 1e-13.
+  - Worst-column rms against it: 6 the same within 1 % (cl_boost_pi, ll16, cl_buck_aggressive_pi, cl_buck_pi, ll14, shockbuck).
+  - 2 worse:
+    - buck_mosfet_nonlinear: 0.174 → 0.254;
+    - ll08_buck_mosfet: 0.042 → 0.140.
+    - In both, the worst columns are switch-node voltages, which are dominated by edge timing.
+    - One device-current column improved 20–40×: 0.146 → 0.0069 and 0.034 → 0.00087.
+    - The smooth states of ll08 are 3× worse at the 1e-8 level: final state 2.2e-8 → 7.1e-8.
+  - The 2 turnoff cases are not measured: the tight override did not reach them (error 0).
+  - ll13 aborts on the tip (see blocker 1).
+- **Counters** (`counters_flyback_rc.log`):
+  - flyback 28626 / 600 / 0 forced / 0 chatter, equal to the base;
+  - hard_switched_rc 2407 / 17 / 1 forced, equal to the base;
+  - `test_counter_gate` passes in the full pytest, and `perf_counters.yaml` is unchanged since cad6ab6b.
+- **Cost: instructions per accepted step**, min of 6 interleaved with the base (`cost_interleaved.log`). Steps are accepted/rejected.
+
+| case | base | tip | change |
+|---|---|---|---|
+| buck | 14825 | 14837 | +0.08 % |
+| sync buck | 15346 | 15067 | −1.82 % |
+| VSI | 46101 | 45783 | −0.69 % |
+| flyback | 12081 | 12126 | +0.37 % |
+| bridge | 12926 | 12929 | +0.02 % |
+| C_oss buck | 73092 | 80293 | +9.85 % |
+
+  - Steps are equal to the base in every case except the C_oss buck.
+  - C_oss buck steps: 7420/187 → 7516/192. SDIRK steps 55 → 94: the restart after each mask-changing edge, plus about 96 steps for h to grow back. The cost per run is +11.3 %.
+
+### Reviewer (opus, medium, fresh context, static reading)
+- **A** (medium, regression): the snapshot after a cancel stop. This is blocker 2.
+- **B** (low, regression, harmless today): OutputTrace keeps a t_e+h_p row that the result dropped, after a diode cascade at t_e or a cancel stop. `device_output` matches rows by time, so the extra row is ignored.
+- **C** (low–medium, pre-existing): a gate change at a step boundary gets no settle and no restart when the circuit has no diode entries (`if (has_diodes && gates_differ…)`, ~:2771).
+- **D** (low, pre-existing): `restart_after_gate_event` returns early when `!refresh_after_event`, when the probe throws, or when `!last_probe_ok`. The pre-edge slots stay and no SDIRK is owed.
+- `sdirk_gate` is effectively dead.
+- Checked and found sound: the loop feed, the loss tracker, and Python's row consumers.
+
+### Not run
+- Eigen 3.4.0, g++-15, the full ctest.
+- A bisect of ll13.
+- The tight reference for the two turnoff movers.
+- Step 4's snapshot block.
