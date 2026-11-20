@@ -71,6 +71,18 @@ period path (`_commutation_points`) and the design batch;
 `losses._switch_switching_loss` applies it in numpy (a test compares the
 two bit for bit).
 
+The reverse current must exceed `(g_off + eps g_on)|v|`: what the open
+switch itself leaks at that voltage plus the rounding of a current read
+through the closed law (a branch-form switch, `g_on = inf`: the leakage
+alone). Below it the sign is noise and the edge is hard (a DCM turn-on
+books the table's `E(v, 0)`). An edge at whose instant the engine books an
+impulse of the device is never soft and reads its post-jump side at the
+first regular state (dsed: the projected right limit; pwl / trbdf2 /
+the table path: the state after the jump's step); the jump's energy is
+`E_impulse`. A non-finite reading is never soft and is refused by name.
+The period path and the design batch refuse modes with dependent states,
+so they see no impulsive edge.
+
 ### Deposition
 
 The energy enters the junction node as heat, once per event:

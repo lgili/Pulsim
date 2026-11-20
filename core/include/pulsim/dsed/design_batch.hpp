@@ -93,7 +93,7 @@ struct SwitchingEntry {
     int obs_i = -1;
     std::shared_ptr<const thermal::LossTable3D> on, off;
     Real tj = 0;
-    bool gated = true;   // a switch, not a diode (commutation_point)
+    thermal::EdgeLaw edge{true, 0.0, 0.0};   // commutation_point's soft edges
 };
 
 /// Everything a design needs besides its row, period and schedule.
@@ -182,7 +182,7 @@ inline std::array<Real, 4> switching_energy(const PeriodMapResult<SSM>& p,
         const auto& a = seq[q];
         const auto& b = seq[q + 1];
         if (a.closed == b.closed) continue;
-        const auto pt = thermal::commutation_point(b.closed, a.v, a.i, b.v, b.i, s.gated);
+        const auto pt = thermal::commutation_point(b.closed, a.v, a.i, b.v, b.i, s.edge, false);
         const Real v = pt.v, i = pt.i;
         if (!std::isfinite(v) || !std::isfinite(i)) {
             throw Fallback{"a non-finite switching point"};

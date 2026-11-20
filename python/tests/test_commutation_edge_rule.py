@@ -25,6 +25,7 @@ R-L circuit (exponentials in closed form, no simulator).
 from __future__ import annotations
 
 import math
+import warnings
 
 import numpy as np
 import pytest
@@ -242,3 +243,243 @@ def test_three_phase_vsi_switch_loss_is_the_half_cycle_average():
             ls += (E_OFF if hs_on else E_ON) * -i / 50.0
     assert p_sw["INV__HSa"] == pytest.approx(hs / 20e-3, rel=1e-3)
     assert p_sw["INV__LSa"] == pytest.approx(ls / 20e-3, rel=1e-3)
+
+
+# ---- task 12.8 follow-up: edges at about zero current, impulsive edges,
+# non-finite readings (thermal::commutation_point, one rule, four callers)
+
+def _tab_c(c, e, v_ref=V):
+    """E(v, i) = c v / v_ref + e (v / v_ref)(i / 50): an E(v, 0) intercept
+    (a datasheet table's output-capacitance energy), bilinear."""
+    return p.LossTable(v_axis=[0.0, v_ref], i_axis=[0.0, 50.0], tj_axis=[25.0],
+                       energy=np.array([[[0.0], [0.0]], [[c], [c + e]]]))
+
+
+def test_a_reverse_current_within_the_leakage_has_no_sign():
+    """The rule on its own: a turn-on from 600 V whose closed-side current
+    is -1e-15 A (rounding) or -1e-7 A (below the 6e-7 A the open switch
+    itself leaks, g_off = 1 nS) is hard; -40 A (a conducted current) is
+    soft. Same answer from the period path's binding and the table
+    path's numpy mirror."""
+    from pulsim._pulsim import _commutation_points
+    from pulsim.losses import _switch_switching_loss
+    law = (True, 1e3, 1e-9)
+    tab = _tab_c(1e-3, 4e-3)
+    spec = {"E_on_table": tab, "Tj": 25.0}
+    for i_after, soft in ((-1e-15, False), (-1e-7, False), (-40.0, True)):
+        seq = [(False, 600.0, 6e-7), (True, 1e-3, i_after)]
+        (on,), _ = _commutation_points(seq, *law)
+        assert on[2] is soft
+        assert on[0] == (0.0 if soft else 600.0)
+        out = _switch_switching_loss(np.array([False, True]), np.zeros(2),
+                                     np.array([600.0, 1e-3]),
+                                     np.array([6e-7, i_after]), spec, law=law)
+        assert out["E_sw_on_total"] == (0.0 if soft else pytest.approx(
+            1e-3 + 4e-3 * abs(i_after) / 50.0, rel=1e-12))
+
+
+# DCM buck: 24 V, 10 uH, 100 uF, 20 Ohm, 100 kHz, D = 0.3 (K = 2L/(R T) =
+# 0.1 < 1 - D); switch and diode 1 mOhm / 1 nS, V_f = 0
+VIN, LB, CB, RB, FB, DB = 24.0, 10e-6, 100e-6, 20.0, 100e3, 0.3
+C_ON, E_ONB, VT = 1e-6, 2e-4, 50.0
+
+
+def _dcm_vout():
+    """M = 2 / (1 + sqrt(1 + 4K / D^2)) of the ideal DCM buck."""
+    k = 2.0 * LB * FB / RB
+    return VIN * 2.0 / (1.0 + math.sqrt(1.0 + 4.0 * k / DB ** 2))
+
+
+@pytest.mark.parametrize("engine", ["pwl", "table", "trbdf2", "dsed"])
+def test_a_dcm_turn_on_books_the_table_intercept(engine):
+    """Every turn-on of a DCM buck starts from zero inductor current: the
+    closed-side reading is the off devices' leakage (or nothing), and the
+    edge books E_on(V_in - V_out, ~0) -- the table's intercept -- every
+    period. Truth: 50 turn-ons x [c (V_in - V_out)/V_T + the current part
+    at the reading the engine makes: 0 at the edge's right limit (trbdf2,
+    dsed), (V_in - V_out) dt / L one step later (pwl, the table path on
+    its result)]. V_out from the closed-form DCM ratio (1e-3 here: the
+    1 mOhm drops and the output ripple)."""
+    vo = _dcm_vout()
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", VIN)
+    b.add_switch("S", "vin", "sw", 1e3, 1e-9)
+    b.add_diode("D", "gnd", "sw", 1e3, 1e-9)
+    b.add_inductor("L", "sw", "out", LB)
+    b.add_capacitor("C", "out", "gnd", CB, vo)
+    b.add_resistor("R", "out", "gnd", RB)
+    tab = _tab_c(C_ON, E_ONB, VT)
+    if engine != "table":
+        b.set_device_losses("S", Tj=25.0, E_on=tab)
+    fn = p.make_pwm_switch_fn(FB, DB, b.switch_index_of("S"),
+                              b.graph.num_switches, 0.0)
+    dt = 1e-8
+    # the default pwl rings on the switch node's leakage mode in the idle
+    # interval (trapezoidal at tau = L g_off << dt); the restart rule does not
+    kw = ({"dt": dt, "discontinuity_restart": True}
+          if engine in ("pwl", "table") else {})
+    t0, t1 = 1.5e-3 - 0.5 / FB, 2e-3 - 0.5 / FB
+    res = p.simulate(b, t_end=t1, switch_fn=fn,
+                     engine="pwl" if engine == "table" else engine, **kw)
+    if engine == "table":
+        row = next(r for r in p.device_loss_summary(
+            b, res, switch_specs={"S": {"E_on_table": tab, "Tj": 25.0}},
+            t_from=t0) if r["name"] == "S")
+        n, e_on = row["n_turn_on_events"], row["E_sw_on_total"]
+    else:
+        ev = res.loss_events("S")
+        ev = ev[(ev["t"] >= t0) & (ev["kind"] == "on")]
+        n, e_on = len(ev), math.fsum(ev["E"])
+    v = VIN - vo
+    i = v * dt / LB if engine in ("pwl", "table") else 0.0
+    assert n == 50
+    assert e_on == pytest.approx(
+        n * (C_ON * v / VT + E_ONB * (v / VT) * (i / 50.0)), rel=2e-3)
+
+
+def _bare_leg(goff):
+    """The leg with nothing on its output (a state off the leg, R-C on the
+    bus, keeps every engine's state vector non-empty): every commutation is
+    at zero current -- the off devices' leakage, or exactly 0."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vdc", "dcp", "gnd", V)
+    b.add_resistor("Rb", "dcp", "y", 1.0)
+    b.add_capacitor("Cb", "y", "gnd", 1e-6)
+    b.add_switch("HS", "dcp", "a", 1.0 / R_ON, goff)
+    b.add_switch("LS", "a", "gnd", 1.0 / R_ON, goff)
+    b.add_diode("Dh", "a", "dcp", 1.0 / R_D, goff, V_f=V_F)
+    b.add_diode("Dl", "gnd", "a", 1.0 / R_D, goff, V_f=V_F)
+    fn = p.make_dead_time_pwm_pair_fn(F, 0.5, b.switch_index_of("HS"),
+                                      b.switch_index_of("LS"),
+                                      b.graph.num_switches, 0.0)
+    return b, fn
+
+
+@pytest.mark.parametrize("goff", [1e-9, 0.0])
+@pytest.mark.parametrize("engine", ["pwl", "table", "trbdf2", "dsed"])
+def test_a_zero_current_commutation_books_the_intercept_once(engine, goff):
+    """No dead time, no load current: each of the 20 commutations in
+    [T/4, 1 ms + T/4) books E_on(600 V, ~0) = 1 mJ once (the incoming
+    switch; E_off has no intercept), on every engine and the table
+    path."""
+    b, fn = _bare_leg(goff)
+    tab_on, tab_off = _tab_c(1e-3, E_ON), _tab_c(0.0, E_OFF)
+    if engine != "table":
+        for d in ("HS", "LS"):
+            b.set_device_losses(d, Tj=25.0, E_on=tab_on, E_off=tab_off)
+    t0, t1 = 0.25 / F, 1e-3 + 0.25 / F
+    res = p.simulate(b, t_end=t1, switch_fn=fn,
+                     engine="pwl" if engine == "table" else engine,
+                     **({"dt": 1e-7} if engine in ("pwl", "table") else {}))
+    total = 0.0
+    if engine == "table":
+        spec = {"E_on_table": tab_on, "E_off_table": tab_off, "Tj": 25.0}
+        for r in p.device_loss_summary(b, res, t_from=t0,
+                                       switch_specs={"HS": spec, "LS": spec}):
+            if r["name"] in ("HS", "LS"):
+                total += r["E_sw_total"]
+    else:
+        for d in ("HS", "LS"):
+            ev = res.loss_events(d)
+            total += math.fsum(ev["E"][ev["t"] >= t0])
+    assert total == pytest.approx(20 * 1e-3, rel=1e-6)
+
+
+@pytest.mark.parametrize("engine", ["pwl", "table", "trbdf2", "dsed"])
+def test_soft_edges_of_amps_stay_free_with_an_intercept(engine):
+    """Vm = 0, no dead time: LS turns on and off against the load's ~45 A
+    in its reverse direction -- soft, 0 J even where the table has an
+    intercept; HS books its hard edges plus one intercept per period."""
+    c = 1e-3
+    b, fn = _leg(0.0, 0.0, False)
+    tab_on, tab_off = _tab_c(c, E_ON), _tab(E_OFF)
+    if engine != "table":
+        for d in ("HS", "LS"):
+            b.set_device_losses(d, Tj=25.0, E_on=tab_on, E_off=tab_off)
+    kw = {"dt": 1e-7} if engine in ("pwl", "table") else {}
+    res = p.simulate(b, t_end=T_END, switch_fn=fn,
+                     engine="pwl" if engine == "table" else engine, **kw)
+    if engine == "table":
+        spec = {"E_on_table": tab_on, "E_off_table": tab_off, "Tj": 25.0}
+        rows = {r["name"]: r for r in p.device_loss_summary(
+            b, res, switch_specs={"HS": spec, "LS": spec}, t_from=T_FROM)}
+        hs, ls = rows["HS"]["P_sw_avg"], rows["LS"]["E_sw_total"]
+    else:
+        e = {}
+        for d in ("HS", "LS"):
+            ev = res.loss_events(d)
+            e[d] = math.fsum(ev["E"][ev["t"] >= T_FROM])
+        hs, ls = e["HS"] / (T_END - T_FROM), e["LS"]
+    assert ls == 0.0
+    assert hs == pytest.approx(truth(0.0, 0.0)[0] + c * F,
+                               rel=_RTOL[engine], abs=_ATOL)
+
+
+def _cap_loop(engine):
+    """1 uF at 10 V closed onto 3 uF at 2 V through an ideal switch at
+    1 us, opened at 2 us; E(v, i) = 1e-9 (v / 10) + 1e-6 i."""
+    b = p.CircuitBuilder()
+    b.add_capacitor("C1", "x", "gnd", 1e-6, 10.0)
+    b.add_capacitor("C2", "y", "gnd", 3e-6, 2.0)
+    b.add_ideal_switch("S", "x", "y", 0.0, 1e-9)
+    k = b.switch_index_of("S")
+
+    def fn(t, k=k, n=b.graph.num_switches):
+        m = p.SwitchStateMask(n)
+        m.set(k, 1e-6 <= t < 2e-6)
+        return m
+    tab = p.LossTable(v_axis=[0.0, 10.0], i_axis=[0.0, 1.0], tj_axis=[25.0],
+                      energy=np.array([[[0.0], [1e-6]], [[1e-9], [1e-9 + 1e-6]]]))
+    if engine != "table":
+        b.set_device_losses("S", Tj=25.0, E_on=tab, E_off=tab)
+    kw = {"dt": 1e-8, "discontinuity_restart": True} if engine == "pwl" else {}
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(b, t_end=5e-6, switch_fn=fn, auto_regularize=False,
+                       engine="trbdf2" if engine == "table" else engine, **kw)
+    return b, r, tab
+
+
+@pytest.mark.parametrize("engine", ["pwl", "trbdf2", "dsed", "table"])
+def test_an_impulsive_turn_on_reads_the_pre_jump_voltage(engine):
+    """Closing the capacitor loop is an impulse (E_impulse = 1/2 C1 C2 /
+    (C1 + C2) dV^2 = 24 uJ), not a commutation of load current: the
+    closed side's -8397 A on trbdf2 is the jump's own step. The edge is
+    hard at the 8 V the switch blocked and the regular current after the
+    jump (0: the loop carries none once equal): E_on = 0.8 nJ, never soft
+    (it read 0 on trbdf2), never at the jump's current (1 uJ)."""
+    b, r, tab = _cap_loop(engine)
+    dw = 0.5 * 1e-6 * 3e-6 / 4e-6 * 8.0 ** 2
+    if engine == "table":
+        row = next(x for x in p.device_loss_summary(
+            b, r, switch_specs={"S": {"E_on_table": tab, "E_off_table": tab,
+                                      "Tj": 25.0}}) if x["name"] == "S")
+        assert row["n_turn_on_events"] == 1
+        assert row["E_sw_on_total"] == pytest.approx(0.8e-9, rel=1e-6)
+        from pulsim.losses import impulse_losses
+        assert impulse_losses(b, r)["S"]["E_impulse_total"] == pytest.approx(
+            dw, rel=1e-8)
+        return
+    e = r.device_energy("S")
+    assert (e["n_on"], e["n_off"]) == (1, 1)
+    assert e["E_impulse"] == pytest.approx(dw, rel=1e-8)
+    ev = r.loss_events("S")
+    on = ev[ev["kind"] == "on"][0]
+    assert on["v"] == pytest.approx(8.0, rel=1e-6)
+    assert on["E"] == pytest.approx(0.8e-9, rel=1e-6)
+
+
+def test_a_non_finite_reading_is_refused_on_the_table_and_period_paths():
+    """An infinite blocking voltage against a reverse current used to be
+    soft (v = 0); it is refused by name. The period path's binding keeps
+    it hard (the general path then refuses it)."""
+    from pulsim._pulsim import _commutation_points
+    from pulsim.losses import _switch_switching_loss
+    (on,), _ = _commutation_points([(False, math.inf, 0.0), (True, 0.0, -40.0)],
+                                   True, 1e3, 1e-9)
+    assert on[2] is False and math.isinf(on[0])
+    with pytest.raises(ValueError, match=r"'Q'.*non-finite"):
+        _switch_switching_loss(np.array([False, True]), np.zeros(2),
+                               np.array([math.inf, 0.0]), np.array([0.0, -40.0]),
+                               {"E_on_table": _tab(E_ON), "Tj": 25.0},
+                               law=(True, 1e3, 1e-9), name="Q")

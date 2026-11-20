@@ -401,6 +401,7 @@ private:
         for (; k < pend_.size() && pend_[k].t <= t; ++k) {
             auto& e = pend_[k];
             lt_.event(e.t, e.xl, e.ml, e.xr, e.mr);
+            for (auto& im : e.imp) im.t = e.t;   // the edge it belongs to
             imp_.insert(imp_.end(), e.imp.begin(), e.imp.end());
             lt_.impulses(imp_);
             x_last_ = e.xr_red;   // the next step starts from the event's right limit
@@ -411,6 +412,7 @@ private:
     struct Impulse {
         std::string cause;
         Real dW = 0;
+        Real t = 0;
     };
 
     /// The records the event appended, each booked to its commutating

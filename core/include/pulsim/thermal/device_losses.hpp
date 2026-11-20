@@ -74,12 +74,42 @@ struct CommutationPoint {
 /// zero voltage or off at zero current. It is charged at v = 0, nothing.
 /// A diode (`gated` false) blocks reverse voltage after forward current
 /// by nature: its turn-off is its recovery and is always charged.
+///
+/// The reverse current must be a conducted one (task 12.8 follow-up): at
+/// most g_off·|v| is what the OPEN device itself leaks at that voltage, and
+/// a current read through the closed law g_on·v carries a rounding of
+/// eps·g_on·|v| (a branch-form switch, g_on = inf, reads its current as an
+/// unknown: no such term). A smaller current (a discontinuous-conduction
+/// turn-on, a load current crossing zero) has no resolved sign: the edge
+/// is hard and costs the table's E(v, ~0) intercept.
+///
+/// An `impulsive` edge (the engine booked an impulse of this device at
+/// that instant: a capacitor loop closed, an inductor cut-set opened) is
+/// not a commutation of load current: never soft. The caller passes the
+/// post-jump side read at the first regular state; the jump's energy is
+/// E_impulse.
+///
+/// A non-finite reading is never soft: the callers refuse it by name.
+struct EdgeLaw {
+    bool gated = false;   // a switch, not a diode
+    double g_on = 0.0;    // the device's PWL conductances (S)
+    double g_off = 0.0;
+};
+
 [[nodiscard]] inline CommutationPoint commutation_point(
     bool turn_on, double v_before, double i_before, double v_after,
-    double i_after, bool gated) noexcept {
+    double i_after, const EdgeLaw& law, bool impulsive) noexcept {
     const double v = turn_on ? v_before : v_after;
     const double i = turn_on ? i_after : i_before;
-    if (gated && v * i < 0.0) return {0.0, std::abs(i), true};
+    if (!law.gated || impulsive || !std::isfinite(v) || !std::isfinite(i)) {
+        return {std::abs(v), std::abs(i), false};
+    }
+    // two statements: no fused multiply-add, the numpy mirror rounds alike
+    const double rounding = std::isfinite(law.g_on)
+        ? std::numeric_limits<double>::epsilon() * law.g_on : 0.0;
+    const double g_floor = law.g_off + rounding;
+    const double i_floor = g_floor * std::abs(v);
+    if (v * i < 0.0 && std::abs(i) > i_floor) return {0.0, std::abs(i), true};
     return {std::abs(v), std::abs(i), false};
 }
 

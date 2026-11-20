@@ -196,7 +196,7 @@ def loss_rows(b, kp, loss_options):
     """``{name: row}`` with the fields of :func:`device_loss_summary`
     the evaluator reads (``kind``, ``P_avg``, ``i_peak``, ``i_rms``,
     ``P_sw_avg`` and the switching bookkeeping)."""
-    from .losses import _switch_switching_loss
+    from .losses import _edge_law, _switch_switching_loss
     T = kp.T
     specs = loss_options.get("switch_specs") or {}
     comps = {c["name"]: c for c in b.components()}
@@ -217,7 +217,8 @@ def loss_rows(b, kp, loss_options):
             seq = kp.edges(name, bit)
             if not seq:
                 seq = [(bool(kp.first_mask.get(bit)), 0.0, 0.0)]
-            sw = _table_switching_loss(seq, spec, kind == "switch")
+            law = _edge_law(kind, comps[name]["params"])
+            sw = _table_switching_loss(seq, spec, law)
             if sw is None and kind == "diode":
                 raise RuntimeError(f"switch_specs[{name!r}]: a non-finite "
                                    "commutation point of a diode")
@@ -233,7 +234,7 @@ def loss_rows(b, kp, loss_options):
             i = np.array([s[2] for s in seq], dtype=float)
             # the same energy model, read at the exact edge limits
             sw = _switch_switching_loss(cl, np.zeros(cl.size), v, i, spec,
-                                        gated=kind == "switch")
+                                        law=law, name=name)
             sw["P_sw_avg"] = sw["E_sw_total"] / T
             sw["f_sw_estimate"] = (sw["n_turn_on_events"]
                                    + sw["n_turn_off_events"]) / (2.0 * T)
@@ -242,7 +243,7 @@ def loss_rows(b, kp, loss_options):
     return rows
 
 
-def _table_switching_loss(seq, spec, gated):
+def _table_switching_loss(seq, spec, law):
     """:func:`pulsim.losses._switch_switching_loss` on an edge sequence
     for a spec whose energies are all 3-D tables at a scalar ``Tj``,
     in scalars: the same edges, the same limits (turn-on: blocking ``v``
@@ -263,7 +264,7 @@ def _table_switching_loss(seq, spec, gated):
             return None        # a mixed spec: the general path
         if t is not None and not isinstance(t, LossTable):
             return None
-    on, off = commutations(seq, gated)
+    on, off = commutations(seq, law)
     tj = float(tj)
 
     def total(table, pts):
@@ -292,18 +293,21 @@ class _NonFinite(Exception):
     pass
 
 
-def commutations(seq, gated):
+def commutations(seq, law):
     """``(on, off)``: the ``(|v|, |i|, soft)`` of every turn-on and
     turn-off of an edge sequence (:meth:`Period.edges`), by the reading
     rule -- a turn-on reads the blocking ``v`` before and the load ``i``
-    after, a turn-off the reverse; a ``gated`` switch's edge whose two
-    readings have opposite signs is soft (no energy). The rule is the
+    after, a turn-off the reverse; with ``law = (gated, g_on, g_off)``
+    (``losses._edge_law``) a switch's edge whose two readings have
+    opposite signs, the current above ``(g_off + eps g_on)|v|``, is soft
+    (no energy). The rule is the
     kernel's (``thermal::commutation_point``), the one the transient
     engine reads with ``set_device_losses``: one implementation for both
     routes."""
     from ._pulsim import _commutation_points
     return _commutation_points([(bool(c), float(v), float(i))
-                                for c, v, i in seq], bool(gated))
+                                for c, v, i in seq], bool(law[0]),
+                               float(law[1]), float(law[2]))
 
 
 def _diode_recovery_only(spec):

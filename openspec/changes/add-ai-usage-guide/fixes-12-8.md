@@ -184,3 +184,38 @@ switch_states identical. Ruff clean; stubs regenerated, `--check` clean;
 `openspec validate add-ai-usage-guide --strict` and
 `add-in-kernel-event-losses --strict` valid. NOT run: full ctest, Eigen
 3.4.0, g++, trbdf2_identity, the dsed bit-identity set.
+
+## Follow-up: the three corners (branch tip after a5af1ade)
+
+The rule now reads (`thermal::commutation_point(turn_on, v0, i0, v1, i1,
+EdgeLaw{gated, g_on, g_off}, impulsive)`): a gated switch's edge is soft
+iff `v_open * i_closed < 0` AND `|i_closed| > (g_off + eps g_on)|v_open|`
+(the open switch's own leakage at that voltage plus the rounding of a
+current read through the closed law; a branch-form switch, `g_on = inf`,
+has the leakage term only), the edge is not impulsive, and both readings
+are finite. Every caller passes the device's own conductances:
+LossTracker (`PwlBranchLaw`), `_commutation_points(seq, gated, g_on,
+g_off)`, `SwitchingEntry.edge` (design batch, from `_edge_law`), and
+`losses._switch_switching_loss(law=, impulse_t=, name=)`.
+
+1. ABOUT-ZERO CURRENT. Evidence first: a turn-on's closed-side current at
+   about zero current is the leakage of the devices that now block, which
+   flows FORWARD through the incoming switch (DCM buck, dsed 1.92e-8 A =
+   g_off (V_in - V_out) + g_off V_in; the bare leg 1.2e-6 A = 2 g_off V);
+   with g_off = 0 it is exactly 0 or rounding (dsed boost 7e-16 A). No
+   engine read a reverse sign on these circuits at a5af1ade; a reverse
+   reading of that size (rounding, or a load current within the leakage)
+   is now hard by the rule, which the C++ and binding tests pin.
+2. IMPULSIVE EDGE. On this tip the capacitor-loop turn-on read soft on
+   TRBDF2 (v 0, i 8397 A: the closed side read at the end of the SDIRK
+   step that carried the jump); dsed read 8 V / 0 A already (its right
+   limit is the projected state). LossTracker::impulses() now re-books an
+   edge booked at the record's instant as impulsive: dsed at the event's
+   right limit, pwl / trbdf2 at the next accepted state; the table path
+   reads the sample after the jump's step. Period path / design batch
+   refuse modes with dependent states (`periodic_steady_state` refusal
+   `dependent_states`): no impulsive edge reaches them.
+3. NON-FINITE. Never soft; LossTracker throws naming the device;
+   `_switch_switching_loss` raises `switch_specs['<name>']: a non-finite
+   commutation point`; the period path's scalar route falls to it; the
+   design batch's Fallback leads there; the kernel fixed point raises.

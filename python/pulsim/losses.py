@@ -38,6 +38,7 @@ binding changes are required for v1.6 closure.
 
 from __future__ import annotations
 
+import math
 import warnings
 from typing import Any, Callable, Dict, List, Mapping, Optional, Union
 
@@ -1292,6 +1293,15 @@ def _diode_switching_loss(turn_offs: List[Dict[str, float]],
     }
 
 
+def _edge_law(kind: str, params: Mapping[str, Any]) -> tuple:
+    """``(gated, g_on, g_off)`` of ``thermal::commutation_point`` for a
+    component's kind and params (``builder.components()``): a switch is
+    gated; a branch-form one has ``g_on = inf`` (its current is an
+    unknown)."""
+    return (kind == "switch", float(params.get("g_on", math.inf)),
+            float(params.get("g_off", 0.0)))
+
+
 def _switch_switching_loss(closed_trace: np.ndarray,
                             times: np.ndarray,
                             v_SW: np.ndarray,
@@ -1302,7 +1312,9 @@ def _switch_switching_loss(closed_trace: np.ndarray,
                             v_start: "Optional[np.ndarray]" = None,
                             i_start: "Optional[np.ndarray]" = None,
                             window: "Optional[_views.TimeWindow]" = None,
-                            gated: bool = True,
+                            law: "tuple" = (True, math.inf, 0.0),
+                            impulse_t=(),
+                            name: str = "",
                             ) -> Dict[str, float]:
     """Post-hoc turn-on / turn-off switching loss for an ideal-switch
     branch (MOSFET / IGBT equivalent).
@@ -1334,8 +1346,14 @@ def _switch_switching_loss(closed_trace: np.ndarray,
     too: the two readings then have OPPOSITE signs (a switch would
     deliver energy crossing from one to the other), so the edge is
     soft and costs 0 J -- the kernel's rule,
-    ``thermal::commutation_point``, which ``gated`` (a switch; False
-    for a diode's recovery table) turns on.
+    ``thermal::commutation_point``; ``law`` is its ``(gated, g_on,
+    g_off)`` (:func:`_edge_law`; gated False for a diode's recovery
+    table). A reverse current within ``(g_off + eps g_on)|v|`` -- the
+    open device's own leakage plus the rounding of the closed law -- has
+    no resolved sign: that edge is hard. An edge whose step carried an
+    impulse of this device (``impulse_t``: the records' step starts) is
+    never soft and reads its post-jump side one sample later, at the
+    first regular state. A non-finite reading at an edge is refused.
 
     ``closed_start`` / ``v_start`` / ``i_start`` are the state at the
     start of the step after each sample
@@ -1452,9 +1470,23 @@ def _switch_switching_loss(closed_trace: np.ndarray,
                  if blocking_at_post_edge else v_SW[pre_k])
         I_load = (_post_edge(i_SW, i_s, idxs)
                   if load_at_post_edge else i_SW[pre_k])
+        imp = np.isin(times[pre_k], np.asarray(impulse_t, dtype=float))
+        if imp.any():
+            # the jump's own step is not a regular state: read past it
+            nxt = np.clip(idxs + 1, 0, v_SW.size - 1)
+            if blocking_at_post_edge:
+                V_blk = np.where(imp, v_SW[nxt], V_blk)
+            if load_at_post_edge:
+                I_load = np.where(imp, i_SW[nxt], I_load)
+        if not (np.all(np.isfinite(V_blk)) and np.all(np.isfinite(I_load))):
+            raise ValueError(f"switch_specs[{name!r}]: a non-finite "
+                             "commutation point")
+        gated, g_on, g_off = law
         if gated:
             # a soft edge costs nothing (thermal::commutation_point)
-            hard = ~(V_blk * I_load < 0.0)
+            rounding = np.finfo(float).eps * g_on if math.isfinite(g_on) else 0.0
+            i_floor = (g_off + rounding) * np.abs(V_blk)
+            hard = ~((V_blk * I_load < 0.0) & (np.abs(I_load) > i_floor)) | imp
             V_blk, I_load, load_k = V_blk[hard], I_load[hard], load_k[hard]
         V_blk, I_load = np.abs(V_blk), np.abs(I_load)
         if table is not None:
@@ -2118,10 +2150,13 @@ def device_loss_summary(
                 closed_s = closed
                 if masks_s is not None and masks_s is not kernel_masks:
                     closed_s = np.asarray(masks_s[:, bit], dtype=bool)
+                imp_t = [float(r.t) for r in getattr(result, "reinit_records", None) or []
+                         if float(r.dW) > 0 and _impulse_cause(builder, result, r) == entry["name"]]
                 entry.update(_switch_switching_loss(
                     closed, times, _branch_v(states, nodes), states[:, col], spec,
                     closed_start=closed_s, v_start=_branch_v(states_s, nodes),
-                    i_start=states_s[:, col], window=win))
+                    i_start=states_s[:, col], window=win, law=_edge_law(kind, desc.get("params", {})),
+                    impulse_t=imp_t, name=entry["name"]))
         else:
             warnings.warn(
                 f"device_loss_summary: ideal {kind} {entry['name']!r} has no recorded "
@@ -2480,7 +2515,9 @@ def device_loss_summary(
                                             closed_start=closed_s,
                                             v_start=v_SW_s,
                                             i_start=i_SW_s,
-                                            window=win))
+                                            window=win,
+                                            law=_edge_law(kind, params),
+                                            name=name))
             summary.append(entry)
             switch_seq_idx += 1
             continue

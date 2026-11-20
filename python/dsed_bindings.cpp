@@ -2222,7 +2222,7 @@ void init_module(py::module_& m) {
                 if (!t[3].is_none()) e.on = std::make_shared<const pulsim::thermal::LossTable3D>(t[3].cast<const pulsim::thermal::LossTable3D&>());
                 if (!t[4].is_none()) e.off = std::make_shared<const pulsim::thermal::LossTable3D>(t[4].cast<const pulsim::thermal::LossTable3D&>());
                 e.tj = t[5].cast<Real>();
-                e.gated = t[6].cast<bool>();
+                e.edge = {t[6].cast<bool>(), t[7].cast<Real>(), t[8].cast<Real>()};
                 plan.switching.push_back(std::move(e));
             }
             for (const auto& it : pd["code"].cast<py::list>()) {

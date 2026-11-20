@@ -94,7 +94,7 @@ public:
                     s.device, pwl::stored_kind_name(k)));
             }
             d.law = pwl::PwlBranchLaw::of(graph, pool, d.branch);
-            d.gated = k == K::Switch;
+            d.edge = {k == K::Switch, d.law.g_on, d.law.g_off};
             const auto& node_name = s.deposit_node();
             if (!node_name.empty()) {
                 d.node = find_node_(graph, node_name);
@@ -176,6 +176,7 @@ public:
             }
             if (d.spec.conduction == thermal::ConductionHeat::Electrical) heat = e_el;
             d.last = {h, e_el, d.spec.v_on ? d.e_tab_last_ : Real{0}, false};
+            if (d.dfr.valid) heat += book_deferred_(d, v1, i1);
             if (on1 != d.on) heat += book_(d, t0, on1, d.v, d.i, v1, i1, tj0);
             if (d.node >= 0) add_(queue_, d.node, heat);
             d.on = on1;
@@ -317,6 +318,7 @@ private:
             if (d.spec.conduction == thermal::ConductionHeat::Electrical) heat = e_el;
             d.last = {h, e_el, e_t, e_exact != nullptr};
             // a flip no event() reported: the reading rule on the step's ends
+            if (d.dfr.valid) heat += book_deferred_(d, v1, i1);
             if (!same) heat += book_(d, t0, on1, d.v, d.i, v1, i1, tj0);
             if (d.node >= 0) add_(queue_, d.node, heat);
             d.on = on1;
@@ -342,6 +344,7 @@ public:
             const Real v_l = v_of_(d, x_l), i_l = i_of_(d, x_l, on_l);
             const Real v_r = v_of_(d, x_r), i_r = i_of_(d, x_r, on_r);
             const Real e = book_(d, t, on_r, v_l, i_l, v_r, i_r, tj_of_(d));
+            d.bk.event = true;   // its right limit is the engine's projected state
             if (d.node >= 0) add_(queue_, d.node, e);
             d.ev_e = e;
             d.ev_pending = true;
@@ -362,7 +365,7 @@ public:
             for (auto& d : devs_) {
                 if (d.spec.device != r.cause) continue;
                 d.e_imp.add(r.dW);
-                Real heat = r.dW;
+                Real heat = r.dW + impulsive_edge_(d, r.t);
                 if (!d.last.replaced) {
                     // The step that carried the impulse conducts its end
                     // power only (device_loss_summary's pulse step): its
@@ -628,7 +631,7 @@ private:
         thermal::DeviceLossSpec spec;   // a copy: the pool may grow mid-run
         Index branch = -1, node = -1;
         pwl::PwlBranchLaw law;   // v and i under the stamped mode (one law)
-        bool gated = false;      // a switch (commutation_point's soft edges)
+        thermal::EdgeLaw edge;   // commutation_point's soft edges
         bool on = false;     // state at the last accepted step
         Real v = 0, i = 0;   // device voltage / current there
         Real x_tj = 0;       // junction temperature there (closed loop)
@@ -644,6 +647,12 @@ private:
         // an event() whose right limit the next accept_step() starts from
         bool ev_pending = false, ev_on = false;
         Real ev_t = 0, ev_v = 0, ev_i = 0, ev_e = 0;
+        // the last booking's readings (an impulse at its instant re-books it)
+        struct Booked {
+            bool valid = false, on = false, event = false, impulsive = false;
+            Real t = 0, v0 = 0, i0 = 0, tj = 0, e = 0;
+        } bk;
+        Booked dfr;   // an impulsive edge to re-book at the next accepted state
     };
 
     /// Undo the pending event's booking (its record, ledger and heat).
@@ -656,14 +665,49 @@ private:
 
     /// One commutation of `d` by the reading rule: record, ledger, energy.
     Real book_(Dev& d, Real t, bool on1, Real v0, Real i0, Real v1, Real i1,
-               Real tj) {
-        const auto pt = thermal::commutation_point(on1, v0, i0, v1, i1, d.gated);
+               Real tj, bool impulsive = false) {
+        const auto pt = thermal::commutation_point(on1, v0, i0, v1, i1, d.edge, impulsive);
+        if (!std::isfinite(pt.v) || !std::isfinite(pt.i)) {
+            throw std::runtime_error(std::format(
+                "device losses: '{}' has a non-finite commutation point at t = {} "
+                "(v = {}, i = {})", d.spec.device, t, pt.v, pt.i));
+        }
         const auto& tab = on1 ? d.spec.e_on : d.spec.e_off;
         const Real e = tab && !pt.soft ? (*tab)(pt.v, pt.i, tj) : Real{0};
         d.rec.events.push_back({t, on1, pt.v, pt.i, tj, e});
         (on1 ? d.e_on : d.e_off).add(e);
         ++(on1 ? d.rec.n_on : d.rec.n_off);
+        d.bk = {true, on1, false, impulsive, t, v0, i0, tj, e};
         return e;
+    }
+
+    /// An impulse of `d` at t: an edge booked at t is not a commutation of
+    /// load current (thermal::commutation_point). Taken back; an event's
+    /// projected right limit is regular and re-books it now, a step's end
+    /// (pwl / trbdf2: the step that carried the jump) is not: the next
+    /// accepted state does. Returns the change of the queued heat.
+    Real impulsive_edge_(Dev& d, Real t) {
+        if (!d.bk.valid || d.bk.impulsive || d.bk.t != t) return 0;
+        const auto b = d.bk;
+        d.rec.events.pop_back();
+        (b.on ? d.e_on : d.e_off).add(-b.e);
+        --(b.on ? d.rec.n_on : d.rec.n_off);
+        d.bk.valid = false;
+        if (!b.event) {
+            d.dfr = b;
+            return -b.e;
+        }
+        const Real e = book_(d, t, b.on, b.v0, b.i0, d.ev_v, d.ev_i, b.tj, true);
+        d.bk.event = true;
+        if (d.ev_pending && d.ev_t == t) d.ev_e = e;
+        return e - b.e;
+    }
+
+    /// The edge impulsive_edge_ deferred, read at this accepted state.
+    Real book_deferred_(Dev& d, Real v1, Real i1) {
+        const auto b = d.dfr;
+        d.dfr.valid = false;
+        return book_(d, b.t, b.on, b.v0, b.i0, v1, i1, b.tj, true);
     }
     struct Heat {
         Index node;

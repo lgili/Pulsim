@@ -20,6 +20,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `INV__HSa` 22.64 → 11.61 W (closed form for the leg 22.65 W, measured
   22.60 W); the buck_pareto example's synchronous switch loses its soft
   `E_on`. Dead-time results and every electrical result are unchanged.
+  The reverse current must be a conducted one: within `(g_off + eps
+  g_on)|v|` (the open switch's own leakage, the closed law's rounding) its
+  sign is not resolved and the edge is hard, so a DCM turn-on keeps a
+  table's `E(v, 0)` intercept. An edge with an impulse of that switch at
+  its instant (a capacitor loop closed) is never soft: the pre-jump `v`,
+  the regular current after the jump (it was soft on `trbdf2`, read at the
+  jump's -8397 A). A non-finite reading is refused by name.
 
 * **Fixed** `simulate(LoadedCircuit)` forwarded only `t_start`, `t_end`,
   `dt` and `store_every`: the YAML's `integrator`, `rtol` / `atol`,
