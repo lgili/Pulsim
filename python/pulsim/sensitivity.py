@@ -1831,7 +1831,9 @@ class StepSensitivityResult:
     accepted step: on pwl the step grid, on trbdf2 the engine's own steps);
     ``counters`` holds ``n_sens_solves`` (one back-substitution per
     parameter per stage) and ``n_sens_iterations`` (the refinements of a
-    Newton stage solved on its last iteration's factor)."""
+    Newton stage solved on its last iteration's factor), both of accepted
+    steps, and ``n_sens_discarded`` (the back-substitutions of rejected
+    attempts)."""
 
     params: list
     times: np.ndarray
@@ -1846,7 +1848,8 @@ class StepSensitivityResult:
         return cls(list(tr["params"]), np.asarray(tr["times"], dtype=float),
                    np.transpose(st, (0, 2, 1)).copy(),
                    {"n_sens_solves": int(tr["n_sens_solves"]),
-                    "n_sens_iterations": int(tr["n_sens_iterations"])},
+                    "n_sens_iterations": int(tr["n_sens_iterations"]),
+                    "n_sens_discarded": int(tr["n_sens_discarded"])},
                    engine, builder)
 
     def sens(self, signal, param):

@@ -415,6 +415,8 @@ struct SensitivityTrace {
     Size n_state = 0;
     std::uint64_t n_sens_solves = 0;       ///< first back-substitutions
     std::uint64_t n_sens_iterations = 0;   ///< refinement back-substitutions
+    /// back-substitutions (first + refinement) of attempts that were rejected
+    std::uint64_t n_sens_discarded = 0;
 };
 
 struct SimulationResult {

@@ -157,6 +157,8 @@ public:
     /// committed a state no stage here produced) is refused by name.
     void begin_step(Real t0, const Vector& x0) {
         n_stage_ = 0;
+        trace_.n_sens_discarded += pend_solves_ + pend_iters_;
+        pend_solves_ = pend_iters_ = 0;
         check_contiguous_(t0, x0);
     }
 
@@ -223,7 +225,7 @@ public:
             add_fp_(params_[static_cast<std::size_t>(j)], X, fp);
             rhs = psi.a * (dpsi - qp) - fp;
             fac.solve(rhs, S);
-            ++trace_.n_sens_solves;
+            ++pend_solves_;
             if (newton) {
                 // modified Newton: iterate on the stale factor (5.2)
                 for (int it = 0;; ++it) {
@@ -231,7 +233,7 @@ public:
                     r.noalias() += Jnl_ * S;
                     r = rhs - r;
                     fac.solve(r, d);
-                    ++trace_.n_sens_iterations;
+                    ++pend_iters_;
                     S += d;
                     const Real dn = d.cwiseAbs().maxCoeff();
                     const Real sn = S.cwiseAbs().maxCoeff();
@@ -268,6 +270,9 @@ public:
         x_last_ = X_last_;
         t_last_ = t;
         n_stage_ = 0;
+        trace_.n_sens_solves += pend_solves_;   // the accepted attempt's solves
+        trace_.n_sens_iterations += pend_iters_;
+        pend_solves_ = pend_iters_ = 0;
         record_(t);
     }
 
@@ -498,6 +503,7 @@ private:
     DenseMatrix S_, dq_n_, dqd_n_, Sst_;
     std::array<DenseMatrix, kMaxStages> dq_st_, dqd_st_;
     int n_stage_ = 0;
+    std::uint64_t pend_solves_ = 0, pend_iters_ = 0;
     Vector x_last_, X_last_;
     Real t_last_ = Real{0};
     bool have_qx_ = false;

@@ -86,7 +86,8 @@ def test_rc_on_esdirk43_matches_the_closed_form():
     ref_R = np.array([_rc_closed_form(tk)[0] for tk in s.times])
     assert np.max(np.abs(r.sens("out", "R.R") - ref_R)) < 1e-5 * abs(dR)
     # 5 implicit stages, one first solve per stage and parameter
-    assert s.counters["n_sens_solves"] == 2 * 5 * r.stats["n_accept"]
+    assert s.counters["n_sens_solves"] == 2 * 5 * r.stats.n_accept
+    assert s.counters["n_sens_iterations"] == 0
 
 
 def _pwl_rc_final(R=R0, C=C0, dt=1e-6, t_end=TAU):
@@ -120,18 +121,21 @@ def test_linear_counters_and_factorizations():
     c = r.sensitivity.counters
     n_steps = len(r.sensitivity.times) - 1
     assert n_steps == 200
-    assert c == {"n_sens_solves": 2 * 1 * n_steps, "n_sens_iterations": 0}
+    assert c == {"n_sens_solves": 2 * 1 * n_steps, "n_sens_iterations": 0,
+                 "n_sens_discarded": 0}
 
     b0, b1 = _rc(), _rc()
     r0 = _run(b0, 2e-3, "trbdf2", rtol=1e-6)
     r1 = _run(b1, 2e-3, "trbdf2", rtol=1e-6, sensitivities=["R.R", "C.C"])
-    n_acc = int(r1.stats["n_accept"])
+    n_acc = int(r1.stats.n_accept)
     assert n_acc == len(r1.sensitivity.times) - 1
-    assert r1.sensitivity.counters == {"n_sens_solves": 2 * 2 * n_acc,
-                                       "n_sens_iterations": 0}
-    for k in ("n_factor_builds", "n_factor_refactors", "n_factor_hits",
-              "n_accept", "n_reject"):
-        assert r0.stats[k] == r1.stats[k], k
+    c1 = r1.sensitivity.counters
+    assert (c1["n_sens_solves"], c1["n_sens_iterations"]) == (2 * 2 * n_acc, 0)
+    # a rejected attempt's stages were solved too: at most 2 per parameter
+    assert c1["n_sens_discarded"] <= 2 * 2 * int(r1.stats.n_reject)
+    for k in ("n_factorizations", "n_solves", "n_accept", "n_reject",
+              "n_newton_iterations"):
+        assert getattr(r0.stats, k) == getattr(r1.stats, k), k
     assert np.array_equal(np.asarray(r0.times), np.asarray(r1.times))
     assert np.array_equal(np.asarray(r0.states), np.asarray(r1.states))
 
@@ -233,7 +237,7 @@ def _radau_rect(t_end, **kw):
 
 
 @pytest.mark.parametrize("k,integrator", [
-    *[(k, "trbdf2") for k in ("R", "C", "Rl", "I_S", "n")],
+    *[(k, None) for k in ("R", "C", "Rl", "I_S", "n")],
     ("C", "esdirk43"), ("I_S", "esdirk43")])
 def test_shockley_rectifier_on_trbdf2_against_an_independent_integration(
         k, integrator):

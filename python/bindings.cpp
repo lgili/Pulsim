@@ -3633,13 +3633,16 @@ void init_module(py::module_& m) {
                 d["states"] = st;   // (sample, param, state)
                 d["n_sens_solves"] = tr.n_sens_solves;
                 d["n_sens_iterations"] = tr.n_sens_iterations;
+                d["n_sens_discarded"] = tr.n_sens_discarded;
                 return d;
             },
             "Forward parameter sensitivities of a pwl / trbdf2 run "
             "(add-parameter-sensitivities group 5): a dict with 'params', "
             "'times' (the start and every accepted step), 'states' "
             "(sample, param, state) and the counters 'n_sens_solves', "
-            "'n_sens_iterations'; None without sensitivities.")
+            "'n_sens_iterations' (of accepted steps), 'n_sens_discarded' "
+            "(back-substitutions of rejected attempts); None without "
+            "sensitivities.")
         // Per-sample record of the STAMPED switch / diode mask
         // (result.hpp, `switch_state_bits`). Unpacked here into a
         // (num_steps, num_switches) bool array; column j is bit j of
