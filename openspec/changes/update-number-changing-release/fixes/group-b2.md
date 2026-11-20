@@ -104,7 +104,8 @@ for the orchestrator).
   `n_jumps` > 0) beside the `within_dt` brackets: the release's
   `test_recorders.test_event_rows_against_the_bridge_truth` asserts
   `{"within_dt"}` for pwl and must read `{"within_dt", "settled"}` there
-  (checked: with the rule explicit it fails only on that set). KCL at
+  (after the reviewer fix the bridge run with the rule shows `{"settled"}`
+  only: a lined step writes no bracket; a step without lines still does). KCL at
   every sample and every event row's right side holds (test_kcl_holds…
   with the rule: rc, buck, rectifier pass).
 - keep='times' at an event instant returns the right limit (documented);
@@ -164,3 +165,5 @@ After the reviewer fixes: test_release_findings_b2 7/7, _b 15 + 1 xfail;
 the 12-case recorder set (rule off) still bit-identical, 1296 arrays, the
 same step sequences; pwl_identity 354/379 (the 25 differing are all
 `pwl+restart` / `pwl+split`, fewer held-pieces rows than before).
+Full pytest on 1364510c: 6115 passed / 110 skipped / 9 xfailed.
+C++ (Eigen 5) on 1364510c: pulsim_core_record_tests, _dsed_tests, _perf_tests pass.
