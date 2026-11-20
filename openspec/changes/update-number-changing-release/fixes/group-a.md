@@ -499,3 +499,58 @@ d) Rebuild, re-run group_nums.py, the 48 files, baseA.sh compare (check buck_pwl
    engine), cost (needs a 1cec4e8b extension: build it once), reference_status vs refstat_t7.json,
    one reviewer, one full pytest.
 A3's left-limit source reading (src_move) and the third stage are independent of (a)/(b) and stay.
+
+## Fifth session (2026-11-20): event-time allowance, every restart step probed, the whole jump [M]
+
+Branch `fix/core-release-a4-jump-test`, code 5fe40868 (from 0bd28e03).
+
+**The criterion (in `consistent_start`, ONE place).** Probe stages x1 (stage 1), x2, x3 (BE of γh, same
+factor, discarded), per state d = Δ1 − Δ2, d' = Δ2 − Δ3; impulsive iff, in both source readings,
+  |d| > max(|Δ2|/γ, (1 + 1/γ)|d'|) + 1e-8·(1 + |x0| + |x1|) [+ G_off·(1 + V_max) for currents] + δt_loc·|ẋ(0−)|.
+ẋ(0−): history slot i/C, v/L (L⁻¹v for a transformer pair), the law's V_L/L(i), i/C(v) for saturable L /
+nonlinear C. δt_loc, ONE number per restart from its caller (`run_restart(t_from, h, loc)`):
+- 0 at a TIME event: a trigger at the step start (`rs_trig_t == t_prev`: gate mask change, unknown
+  start, source / b_extra jump within snap), a scheduled split event (`ev_s − ev_t`, the merge offset);
+  without the split a source / b_extra jump inside the step gives its offset (≤ γh);
+- `snap` at a split-located diode crossing (its declared resolution: both the at-a and the inside branch);
+- γh when the event is not located: a window step (no trigger) and every dt-retry sub-step j > 0;
+- a stage-1 diode flip widens it to γh for EVERY state of that step (mixed trigger; shortcut, comment
+  in the code: a real jump below γh·|ẋ(0−)| at a gate edge whose stage 1 also flips a diode is
+  integrated, not recorded).
+Derivation: a kink at θ inside the probe moves the extrapolated start by |d| ≤ θ·|ẋ(0−)|; an
+unlocated event lies in the probe window, θ ≤ γh (a later kink shows in x2 only: |d| ≤ (2γh − θ)|ẋ|).
+The fresh-start domain of 0bd28e03 is gone (no per-step stores on the default path; the trigger block
+writes `rs_trig_t` / `rs_trig_loc` only when a trigger fires).
+
+**The whole jump.** Per mode d = −J(1 − a)², d' = a·d. Each JUMPING state's record entry and x0+ take
+J = d/(1 − a)², a = d'/d of that state (moved reading), clamped to [0, γ/(1+γ)] (factor ≤ 1.67); the
+other states keep d. With d alone the residual a(2 − a)·J came back reversed through stage 2's
+pseudo-state: the gate fall below kept 0.955 A in the FWD (a = 0.0034: the cut mode τ = L·g_off = 1 ps
+at dt 1 ns). `event_rl_x` keeps the line 2·x1 − x2; the histories are set to x0 + J from the snapshot at
+x0. Shortcut: a per state (exact for a state one mode moves). First version (5fe40868) used ONE a for
+the event (the dominant state's): the reviewer's two snubbers (Rs 1 Ω and 5 Ω across one switch)
+recorded 80 % of ½C(J1² + J2²) and left Cs2 at −3.4 V (truth 0.01 V) — fixed by the per-state a.
+
+**Reviewer (opus, fresh context) on 5fe40868** — scripts `.scratch/rev5/`:
+1. FALSE record / refusal (FIXED): the stage-1 widening read `breach_1` (= `flipped`, true only for an
+   UNSETTLED event iteration), so a settled diode stop inside stage 1 of a TIME-event step was a jump:
+   freewheel i0 = 2.5 A at t = 0 (3.1 µJ); the buck freewheel + an unrelated switch edge at 0.8 µs
+   (2.6e-7 J; saturable L refused by name). Now widened on `iters_1 > 1` (the event iteration changed
+   the bits). Test: the unrelated-edge variant (linear / saturable, split off / on). STILL OPEN (strict
+   xfail): the stop within γh of a START FROM INITIAL CONDITIONS (i0 = 2.5 A, t = 0) — the history slot
+   is 0 there (no trajectory before t = 0), so ẋ(0−) = 0; the pre-flip stage-1 solve is not the rate at
+   a time event (it holds the event's own cut, F-3-3). Needs the start's rate in its initial mode.
+2. MISSED jump (OPEN, cause established): the probe sees an event in (t_from, t1] only (t1 = t_from + γh).
+   (a) a source JUMP in (t1, t] of a restart step without the split (gate pulse with rise 0 at 5.6 / 5.95 ns,
+   restart at 5 ns): no record, i_L −100 → −0.34 → +0.478 A held by the FWD (truth 0, 5 J). The moved
+   reading reads it at its left limit (A3), the frozen reading never reaches it. With the split ON (the
+   release profile turns it on with the rule) it is a split event: 4.999996 J recorded (reviewer).
+   (b) a CONTINUOUS 1 ps gate fall in (t1, t] of a restart step (window steps 2–3, or the first step at
+   0.45 ns), split on or off: no record, i_L ends +0.478 A. Same class as the same ramp OUTSIDE the
+   window (6.02 ns: no restart at all, −100 → −0.20 / +0.28 A): a smooth Newton device's region change
+   is not an event of the fixed engine. The next window step does not see it either: its rate before the
+   event (history v_L/L) is the cut's own voltage, so δt_loc·|ẋ(0−)| covers it. Needs a state event for
+   Newton-device region changes (or a moved-reading-only jump located inside (t1, t3)); not in this slice.
+3. One a per event (FIXED, above).
+
+(verification of this section in progress; numbers below.)

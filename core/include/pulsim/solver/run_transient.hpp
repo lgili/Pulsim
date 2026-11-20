@@ -1863,7 +1863,9 @@ inline SimulationResult run_transient(
                 hs.get<pwl::NonlinearCapacitorHistory>().entries().empty()) {
                 return false;
             }
-            const Real dt_loc = breach_1 ? std::max(loc, h_s) : loc;
+            // a stage-1 diode flip (iters_1 > 1: the event iteration changed
+            // the bits; breach_1 alone is an unsettled iteration)
+            const Real dt_loc = (iters_1 > 1 || breach_1) ? std::max(loc, h_s) : loc;
             ip_x1 = x;
             ip_b = b_extra;
             history.snapshot_into(ip_hist);
@@ -2002,7 +2004,6 @@ inline SimulationResult run_transient(
             Real e_jump = 0;
             Size dom = 0;
             Real dom_e = -1;
-            Real dom_a = 0;   // the dominant jump's a = d'/d (moved reading)
             bool jumped = false;
             for (Size k = 0; k < ne; ++k) {
                 const auto& e = ents[k];
@@ -2014,15 +2015,27 @@ inline SimulationResult run_transient(
                 const Real dp = Real{2} * s1 - s2 - s0;
                 const bool jk = jumps(s0, s1, s2, state(e, x), tol) &&
                                 jumps(s0, s1, state(e, ip_x2), state(e, ip_x3f), tol);
-                ip_d[2 * k] = dp;
+                // A jumping state's whole jump J = d/(1 − a)², a = d'/d (moved
+                // reading; < γ/(1 + γ) by the rule): per mode d = −J(1 − a)²,
+                // d' = a·d. With d alone the a(2 − a)·J left in x0+ came back
+                // reversed through stage 2's pseudo-state (0.955 A of a 100 A
+                // IGBT cut held by its FWD, a = 0.0034: τ = L·g_off = 1 ps at
+                // dt 1 ns). Other states keep d (O(h²) on a smooth trajectory).
+                // shortcut: a per state, exact for a state that one mode moves.
+                Real jd = dp;
+                if (jk) {
+                    const Real a = std::clamp((Real{2} * s2 - s1 - state(e, x)) / dp, Real{0},
+                                              kGamma / (Real{1} + kGamma));
+                    jd = dp / ((Real{1} - a) * (Real{1} - a));
+                }
+                ip_d[2 * k] = jd;
                 ip_d[2 * k + 1] = jk ? Real{1} : Real{0};
                 jumped = jumped || jk;
-                const Real ek = Real{0.5} * e.C_or_L * dp * dp;
+                const Real ek = Real{0.5} * e.C_or_L * jd * jd;
                 e_jump += ek;
                 if (jk && ek > dom_e) {
                     dom_e = ek;
                     dom = k;
-                    dom_a = (Real{2} * s2 - s1 - state(e, x)) / dp;
                 }
             }
             for (const auto& tc : history.transformer_couplings()) {
@@ -2087,16 +2100,6 @@ inline SimulationResult run_transient(
                 stamped_mask = stamped_s;
                 return false;
             }
-            // The whole jump, not its unresolved part: per mode d = −J(1 − a)²
-            // and d' = a·d, so x0+ = x0 + κ·d, κ = 1/(1 − a)², a from the
-            // dominant jump (a < γ/(1 + γ) by the rule: κ ≤ 1.67). With κ = 1
-            // the a(2 − a)·J left in x0+ came back reversed through stage 2's
-            // pseudo-state: 0.68 A of a 100 A IGBT cut (a = 0.0034, τ = L·g_off
-            // = 1 ps at dt 1 ns) stayed in the free-wheeling diode (0.955 A,
-            // truth 0). The other states' d (O(h²) on a smooth trajectory)
-            // take the same κ (shortcut: one a per event, exact for one mode).
-            const Real a_j = std::clamp(dom_a, Real{0}, kGamma / (Real{1} + kGamma));
-            const Real kappa = Real{1} / ((Real{1} - a_j) * (Real{1} - a_j));
             // The record (every non-structural device kind). dW =
             // ½·JᵀM·J > 0 by the test above (M is positive semidefinite).
             {
@@ -2111,18 +2114,18 @@ inline SimulationResult run_transient(
                     }
                 }
                 // the flux (V·s) or charge (C) moved on the dominant state
-                rec.lambda = de.C_or_L * kappa * ip_d[2 * dom];
+                rec.lambda = de.C_or_L * ip_d[2 * dom];
                 for (const auto& tc : history.transformer_couplings()) {
                     const Real m =
                         models::TwoWindingTransformer::mutual_inductance(tc.params);
                     if (tc.p_entry_idx == dom) {
-                        rec.lambda += m * kappa * ip_d[2 * tc.s_entry_idx];
+                        rec.lambda += m * ip_d[2 * tc.s_entry_idx];
                     }
                     if (tc.s_entry_idx == dom) {
-                        rec.lambda += m * kappa * ip_d[2 * tc.p_entry_idx];
+                        rec.lambda += m * ip_d[2 * tc.p_entry_idx];
                     }
                 }
-                rec.dW = kappa * kappa * e_jump;
+                rec.dW = e_jump;
                 // The devices that opened: the switching / nonlinear
                 // elements at the dominant state's terminals.
                 Index dev0 = kInvalidIndex;
@@ -2166,8 +2169,10 @@ inline SimulationResult run_transient(
             // through the event (only the C / L states are probed), and
             // their laws read x0+'s algebraic entries, which carry the
             // extrapolated impulse (F-5-1: -6.8e8 V).
-            // (event_rl_x keeps the stages' line 2·x1 − x2; the states take κ)
-            history.extrapolate_previous(event_rl_x, kappa);
+            // (event_rl_x keeps the stages' line 2·x1 − x2; the states take
+            // x0 + J from the snapshot at x0)
+            for (Size k = 0; k < ne; ++k) ip_hist[2 * k + (is_cap(ents[k]) ? 0 : 1)] += ip_d[2 * k];
+            history.restore(ip_hist);
             history.compute_b_extra_backward_euler(h_s, ip_h1);
             b_extra = ip_b - ip_h0 + ip_h1;
             x = ip_x1;   // the solve's start (Newton): the relaxed stage
