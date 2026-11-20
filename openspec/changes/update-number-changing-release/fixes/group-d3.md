@@ -386,6 +386,25 @@ On the DCM buck of `test_trbdf2_post_event_restart`, every interval below 1e-11 
 - 44 touched files: 478 passed, 1 xfailed (fixed-engine F-4-5).
 - ruff passes.
 - No binding change, so stubs were not needed.
-- The full pytest result is in the commit after this one.
+- Full pytest (serial): 6220 passed, 110 skipped, 8 xfailed, **6 FAILED**.
+  None of the 6 is in the 44 touched files. None was checked against cad6ab6b or 2d062bc5 (the predecessor never ran the full pytest).
 
 **Not run:** Eigen 3.4.0, g++, the full ctest (integration batch).
+
+### OPEN: 6 full-pytest failures on bb07661f — the branch is NOT mergeable
+
+Suspected cause: the D3 design, not the landing or loss fixes. The edge's
+probe is now a recorded sample, not an accepted step.
+
+| test | failure | suspected cause |
+|---|---|---|
+| `test_external_device.py::test_device_output_covers_a_pwm_run_with_gate_edges_and_a_diode[kw1]`, `[kw2]` | `UnsupportedError`: "device_output('M', 'i(a)'): 39 stored sample(s) ... are not accepted steps of the run" | The 39 post-edge samples are not steps. The named-output recorder needs a value there: record the probe's device outputs at the post-edge sample, or record the sample as an event row. |
+| `test_recorder_batch_combinations.py::test_rows_across_batch_boundaries_with_events[trbdf2]`, `[esdirk43]` | the recorder's rows lack 39 of the `res.times` rows (1019 vs 1058, 3266 vs 3305) | The same samples. The in-loop recorder sees no step hook for them. |
+| `test_benchmark_harness.py::test_counter_gate[hard_switched_rc]` | n_reject 23 > frozen 17 | Re-freeze the counter only with the cause written down. |
+| `test_benchmark_harness.py::test_counter_gate[flyback_converter]` | n_forced_accepts 744 > frozen 3; n_chatter_breaks 33 > frozen 0 | A regression signal: 744 steps forced at h_min. Trace it first: where they sit (post-edge SDIRK from the pre-edge x?), and whether 2d062bc5 already has them. Do not re-freeze it blindly. |
+
+Next step for the successor:
+1. Run these 6 against `.scratch/d3base` (cad6ab6b) and against 2d062bc5 to attribute them.
+2. Fix the device-output / recorder feed at the post-edge sample: one rule for both.
+3. Trace the flyback's forced accepts.
+4. Rerun the full pytest and the step-2 rows.
