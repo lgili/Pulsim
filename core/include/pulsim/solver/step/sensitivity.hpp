@@ -112,7 +112,8 @@ using solver::SensitivityTrace;
 
 class StageSensitivity {
 public:
-    StageSensitivity(const topology::Graph& graph, const pwl::DevicePool& pool,
+    // Out of line: the engines' hot step loops keep their code when off.
+    [[gnu::noinline]] StageSensitivity(const topology::Graph& graph, const pwl::DevicePool& pool,
                      const std::vector<std::string>& names, const char* engine,
                      Real tol)
         : graph_{graph}, pool_{pool}, engine_{engine}, tol_{tol} {
@@ -140,7 +141,7 @@ public:
     /// earlier states), a caller's static-refresh override (another model
     /// than the pool's laws), or Levenberg–Marquardt from the start (its
     /// factor is J + λI, not the stage's). Each is refused by name.
-    void refuse_setup(bool losses, bool nl_override, bool lm) const {
+    [[gnu::noinline]] void refuse_setup(bool losses, bool nl_override, bool lm) const {
         const char* why = losses ? "in-kernel device losses (their heat currents "
                                    "read earlier states)"
                         : nl_override ? "a caller-supplied nl_refresh (not the "
@@ -156,7 +157,7 @@ public:
     /// The factor a Newton stage ended on: the workspace's plain solver.
     /// A solve that went through Levenberg–Marquardt (an auto-promotion)
     /// has none of the stage's matrix: refused by name.
-    [[nodiscard]] const sparse::DirectSolver& newton_factor(
+    [[nodiscard, gnu::noinline]] const sparse::DirectSolver& newton_factor(
             const pwl::NewtonWorkspace& w, Real t) const {
         if (!w.solver || w.lm_attempts != 0) {
             refuse_step(t, "solved by Levenberg-Marquardt (an auto-promotion "
@@ -170,7 +171,7 @@ public:
     /// starts from zero derivative slots). `x0` must not depend on the
     /// parameters (the engine refuses a DC-operating-point start; a start
     /// the engine moves before its first step is caught by `begin_step`).
-    void start(Real t0, const Vector& x0) {
+    [[gnu::noinline]] void start(Real t0, const Vector& x0) {
         n_ = static_cast<Index>(x0.size());
         const auto np = static_cast<Index>(params_.size());
         S_.setZero(n_, np);
@@ -187,7 +188,7 @@ public:
     /// discarded. The engine must start it from the state this object last
     /// committed; anything else (an event landing, a probe or a split that
     /// committed a state no stage here produced) is refused by name.
-    void begin_step(Real t0, const Vector& x0) {
+    [[gnu::noinline]] void begin_step(Real t0, const Vector& x0) {
         n_stage_ = 0;
         trace_.n_sens_discarded += pend_solves_ + pend_iters_;
         pend_solves_ = pend_iters_ = 0;
@@ -195,12 +196,12 @@ public:
     }
 
     /// The run ended at (t, x): the last committed state must be ours.
-    void finish(Real t, const Vector& x) const { check_contiguous_(t, x); }
+    [[gnu::noinline]] void finish(Real t, const Vector& x) const { check_contiguous_(t, x); }
 
     /// Stage `s` (0-based in the step) converged at X under `mask`. `fac`
     /// holds the factor the stage solved with; `J_lin` is the linear part of
     /// a Newton stage (nullptr: the factor is the stage's exact matrix).
-    void stage(int s, const StagePsi& psi, const topology::SwitchStateMask& mask,
+    [[gnu::noinline]] void stage(int s, const StagePsi& psi, const topology::SwitchStateMask& mask,
                const Vector& X, Real t, const sparse::DirectSolver& fac,
                const sparse::Matrix* J_lin) {
         if (!have_qx_) {
@@ -292,7 +293,7 @@ public:
     }
 
     /// The step was accepted at time `t`: its last stage is the new step start.
-    void commit(Real t) {
+    [[gnu::noinline]] void commit(Real t) {
         if (n_stage_ == 0) {
             throw std::logic_error("StageSensitivity: commit without a stage");
         }
@@ -311,7 +312,7 @@ public:
 
     /// An accepted step that is not a sequence of this object's stages (an
     /// event landing, a split, a retry, a restart): refused by name.
-    [[noreturn]] void refuse_step(Real t, std::string_view what) const {
+    [[noreturn, gnu::noinline, gnu::cold]] void refuse_step(Real t, std::string_view what) const {
         throw UnsupportedError(engine_, "sensitivities", "", "",
             std::format("sensitivities on engine '{}': at t = {} the step was "
                         "{}; the sensitivity of such a step (its event or "
@@ -329,7 +330,7 @@ public:
                                    "settle, a split or a retry moved it", t_last_));
     }
 
-    [[nodiscard]] SensitivityTrace take_trace() { return std::move(trace_); }
+    [[nodiscard, gnu::noinline]] SensitivityTrace take_trace() { return std::move(trace_); }
     [[nodiscard]] const DenseMatrix& S() const noexcept { return S_; }
 
 private:

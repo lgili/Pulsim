@@ -353,3 +353,26 @@ confirmed. Found and fixed (each with a test in
   central differences: within 1e-6.
 - 4.4 partial: the saturable inductor (L_0, I_sat) keeps a flux history
   and is refused by name; Shockley and MOSFET L1 are covered.
+- Review (fresh-context, opus, read-only, 2026-11-20). Fixed: in-kernel
+  losses (heat currents and capacitor-slot writes from earlier states),
+  `enable_newton_lm` and an LM auto-promotion (the factor is J + λI or
+  null: `newton_factor` refuses), a caller's `nl_refresh` override, the
+  trbdf2 slot-only derivative refresh near t_end / a tick, `mmc_arms` and
+  `on_cache` (Python), and the kernel `Simulation(engine='dsed')`
+  silently ignoring the names — each now refused by name and tested
+  (losses, LM, on_cache). Each of these changed the stage equations or
+  the slots without moving (t, x), which is why contiguity alone missed
+  them. The pwl Newton hook reads the J_lin of the solve it follows
+  (it no longer touches the cache's LRU clock). Open: an event probe of
+  `ed_stages` overwrites the stage buffers and the later refusal names
+  "taken from a state the recurrence did not produce" rather than the
+  event; `enable_substep_state_correction` refuses every step.
+- Off-path cost (instructions per accepted step, proc_pid_rusage, min
+  over 3 alternating processes × 8 runs, base b9e46778 and tip both
+  built LTO off — the project default turns LTO on, and an LTO base
+  read as a false 1–2 % regression): buck_pwl +0.18 % (min of 6
+  processes; 3 processes gave +0.54 %, the process-to-process spread is
+  ≈ 0.5 %), buck_trbdf2 +0.20 %, rlc152_pwl +0.33 %, rlc152_trbdf2
+  −0.35 %, shockrect51_pwl +0.09 %, shockrect51_trbdf2 0.00 %,
+  mosl1_pwl +0.04 %, mosl1_trbdf2 +0.03 %. The hooks are `[[unlikely]]`
+  calls into out-of-line members.

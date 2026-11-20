@@ -351,7 +351,8 @@ def test_what_the_recurrence_does_not_carry_is_refused(engine, kw):
     (a factor J + λI) and an on_cache hook are refused by name, never a
     silently wrong derivative."""
     with pytest.raises(p.UnsupportedError) as ei:
-        _run(_loss_rc(), 1e-4, engine, sensitivities=["R.R"], **kw)
+        _run(_loss_rc(), 1e-4, engine, sensitivities=["R.R"],
+             switch_fn=p.make_pwm_switch_fn(10e3, 0.5, 0, 1), **kw)
     assert ei.value.feature == "sensitivities" and "losses" in str(ei.value)
     with pytest.raises(p.UnsupportedError) as ei:
         _run(_rect(), 1e-4, engine, sensitivities=["C.C"],
@@ -360,4 +361,5 @@ def test_what_the_recurrence_does_not_carry_is_refused(engine, kw):
     with pytest.raises(p.UnsupportedError) as ei:
         _run(_rc(), 1e-4, engine, sensitivities=["R.R"],
              on_cache=lambda c: None, **kw)
-    assert ei.value.feature == "sensitivities"
+    # trbdf2 refuses on_cache on its own
+    assert ei.value.feature in ("sensitivities", "on_cache")

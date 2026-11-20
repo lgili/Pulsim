@@ -1922,7 +1922,7 @@ inline SimulationResult run_transient_trbdf2(
         // dtp late): replace the slots only.
         if (!commit || t + dtp >= opts.t_end - h_min
             || t + dtp >= queue.next_of(events::Kind::ControlTick) - h_min) {
-            if (sens.on()) {   // the slots move, x and t do not
+            if (sens.on()) [[unlikely]] {   // the slots move, x and t do not
                 sens.refuse_step(t, "followed by a slot-only derivative refresh "
                                     "(an event probe near t_end or a tick)");
             }
@@ -2403,7 +2403,7 @@ inline SimulationResult run_transient_trbdf2(
                     ok = solve_dispatch(m, fdt, b_stage, ys);
                     ++st.n_solves;
                     if (!ok) break;
-                    if (sens.on()) {
+                    if (sens.on()) [[unlikely]] {
                         if (s == 0) sens.begin_step(t, x);
                         sens_stage(s, step::psi_esdirk43(s, hh), m, fdt, ys,
                                    t + spec.t_off);
@@ -2840,7 +2840,7 @@ inline SimulationResult run_transient_trbdf2(
                 stage_singular = true;
             }
             ++st.n_solves;
-            if (sens.on() && stage_ok) {
+            if (sens.on() && stage_ok) [[unlikely]] {
                 sens.begin_step(t, x);
                 sens_stage(0, sdirk ? step::psi_backward_euler_on(hg)
                                     : step::psi_trapezoidal(hg), mask_step, hg, x_g,
@@ -2900,7 +2900,7 @@ inline SimulationResult run_transient_trbdf2(
                 stage_ok =
                     solve_dispatch(mask_step, hg, b_stage, x_1);
                 ++st.n_solves;
-                if (sens.on() && stage_ok) {
+                if (sens.on() && stage_ok) [[unlikely]] {
                     sens_stage(1, sdirk ? step::psi_sdirk_stage2(hg, (Real{1} - gs) / gs)
                                         : step::psi_bdf2_stage2(hg), mask_step, hg,
                                x_1, t + h);
@@ -3984,7 +3984,7 @@ inline SimulationResult run_transient_trbdf2(
                 x = x_1;
                 x_sig = x;
                 t += h;
-                if (sens.on()) sens.commit(t);
+                if (sens.on()) [[unlikely]] sens.commit(t);
                 newton_at_start = false;
                 // the slots are this step's own, not a refresh-only probe's;
                 // a sliver step after a landed edge keeps the flag (its

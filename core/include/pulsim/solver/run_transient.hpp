@@ -2805,7 +2805,7 @@ inline SimulationResult run_transient(
                             : ""));
                 }
             }
-            if (sens.on()) {
+            if (sens.on()) [[unlikely]] {
                 // one trapezoidal stage of opts.dt, or refused by name
                 if (split || restart || step_retried || n_ev > 0 || iters != 1) {
                     sens.refuse_step(t, split ? "split at its events (substep "
@@ -3077,7 +3077,7 @@ inline SimulationResult run_transient(
             // add-in-kernel-event-losses: the step is accepted; read its
             // commutations and conduction energy (reading rule).
             if (lt) lt->accept(t_prev, t, x, stamped_mask);
-            if (sens.on()) sens.commit(t);
+            if (sens.on()) [[unlikely]] sens.commit(t);
         };  // step_commit
 
         auto step_record = [&](Size k) PULSIM_STEP_PHASE {
