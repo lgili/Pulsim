@@ -253,8 +253,18 @@ def event_record(sol, res, cols, t_end, names):
                         paired.add(int(i + 1))
     rr = [int(r) for r in np.flatnonzero(is_right) if int(r) not in paired and tv[r - 1] <= t_end]
     yv = {c: np.asarray(v1_reader.observable(view, c), dtype=float) for c in cols}
-    tl = _one_sided(sol, cols, sorted({x[0] for x in tev}))
-    tl_at = {c: dict(zip(sorted({x[0] for x in tev}), zip(*tl[c]))) for c in cols}
+    # truth events within 4 ulp of each other (a complementary pair one ulp apart) are one
+    # instant for the limits: left of the first, right of the last (an engine flips them at once)
+    ut = sorted({x[0] for x in tev})
+    tl = _one_sided(sol, cols, ut)
+    first, last = list(range(len(ut))), list(range(len(ut)))
+    for k in range(1, len(ut)):
+        if ut[k] - ut[k - 1] <= 4 * np.spacing(abs(ut[k])):
+            first[k] = first[k - 1]
+    for k in range(len(ut) - 2, -1, -1):
+        if ut[k + 1] - ut[k] <= 4 * np.spacing(abs(ut[k + 1])):
+            last[k] = last[k + 1]
+    tl_at = {c: {u: (tl[c][0][first[k]], tl[c][1][last[k]]) for k, u in enumerate(ut)} for c in cols}
     inst = sorted({e[0] for e in eev} | {float(tv[r - 1]) for r in rr})
     el = _one_sided(sol, cols, inst)
     el_at = {c: dict(zip(inst, zip(*el[c]))) for c in cols}
