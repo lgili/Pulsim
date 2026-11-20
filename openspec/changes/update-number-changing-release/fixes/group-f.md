@@ -473,3 +473,28 @@ branch_form_reinit, release_uniform_rules: 425 pass) are unchanged.
   moves every oracle-less run's settle (`settled_` reads `resolved_scale_` on the default path): not
   local. On the 51 oracle-less benchmark circuits event times are identical for t_end and 1.5·t_end
   (rule off and on), so the benchmark set does not show it.
+
+### Session 3 reviewer (fresh context, opus, read only) — fixed / left
+
+* M1 FIXED — the F-X-5 halving located a sign change in a piece that started past the
+  threshold (a way back, no event in the scan); it now needs the admissible start `s·g_a > 0`.
+* M2 FIXED — the certificate's predicate row is probed at x = 0 and the unit eigenvectors, which
+  assumes g affine; an ideal branch diode's DiodeOn reads −1 inside its band. The row is used only if
+  it reproduces g at the step start (|g(x0) − g(0) − Re Σ q_k z_k| ≤ 1e-6 · scale), else no
+  certificate (the D3 scan alone). `exact_scan_modes` returns z with z̈.
+* M3 LEFT, by the truth — the reviewer asked that the restart be re-checked by the cascade (a trial
+  ON diode equalising two capacitors could be physics the settled mode needs). Tried: on the forward
+  converter the restarted state reads D_fw off again at every switch-off (mask 11 → 10 at each switch-off printed, every 20 µs),
+  so the check kept the iterated state and I(L_o) went back to 6.2063 A (truth 5.6208 A). A
+  capacitor equalisation is a dependent-state projection that writes records, and the restart then
+  re-records it in the settled mode; the no-record branch is the parasitic cut alone, which is not a
+  constraint of the settled mode. `resettle_projected_` keeps the old rule (not on this path).
+* M4 FIXED (part) — a NaN rule ratio (no interval between switching steps) fell to "not worse"; it
+  now falls to the truth check (`exact` beyond 2×). The judge does not apply the truth check to a
+  rule cell with a finite ratio: the decided bar is the rule's promise and the class (DECISIONS 6).
+* L1/L5 FIXED — band checks before the row probe; the probe has its own buffer (no `x_tmp_`
+  aliasing); `exact_scan_modes` reuses its pwl buffers (no heap per step).
+* L4 LEFT — `n_predicate_evals` now counts the certificate's probes (2n+1 per mode and predicate,
+  +1 per step that uses it); not a listed number. L7/L8 noted, no change.
+* After the fixes: 243 default cells (81 circuits × dsed / dsed+next / no-dt) identical to the
+  pre-review tip; goldens and bit-identity 36/36 + 36/36; the F3 tests 16 passed + 1 xfail.
