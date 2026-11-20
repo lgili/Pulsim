@@ -218,8 +218,14 @@ def bridge_truth(Vm, f, R, L, gon):
     through two diodes (R' = R + 2 / g_on):
         L i' + R' i = sqrt(3) Vm cos(w t),  i(-h) = i(h),  h = T / 12.
     The diodes' leakage (g_off = 1e-9 S: 6 * 563 V * 1e-9 = 3.4 uA against
-    ~50 A) and the two-diode overlap at a commutation (~1e-7 s while
-    v_a - v_b < i / g_on) are below 1e-7 relative and ignored."""
+    ~50 A) is below 1e-7 relative and ignored. The two-diode overlap at a
+    commutation is NOT negligible for the line current: while
+    |v_a - v_b| < i / g_on both top diodes conduct, i_a = i / 2 +
+    g_on (v_a - v_b) / 2 ramps over W = 2 i / (g_on sqrt(3) V_m w)
+    (0.6 us here) instead of stepping, which lowers i_a^2's integral by
+    i^2 W / 6 at each of phase a's four commutations a period (1.4e-5 of
+    I_a,rms: the exact engine found it). It is subtracted below; it moves
+    the DC side by O(i / g_on * W / T), ~1e-10, ignored."""
     Vm, f, R, L = (mp.mpf(x) for x in (Vm, f, R, L))
     w = 2 * mp.pi * f
     Rp = R + 2 / mp.mpf(gon)
@@ -239,8 +245,9 @@ def bridge_truth(Vm, f, R, L, gon):
     i_mean = mp.quad(i, [-h, h]) / (2 * h)
     i2_mean = mp.quad(lambda t: i(t)**2, [-h, h]) / (2 * h)
     assert min(i(-h), i(0), i(h)) > 0          # continuous conduction
-    return dict(i=i, h=h, Vd_mean=R * i_mean, i_mean=i_mean,
-                Ia_rms=mp.sqrt(mp.mpf(2) / 3 * i2_mean))
+    W = 2 * i(h) / (mp.mpf(gon) * mp.sqrt(3) * Vm * w)
+    ia2 = mp.mpf(2) / 3 * i2_mean - 4 * f * i(h)**2 * W / 6
+    return dict(i=i, h=h, Vd_mean=R * i_mean, i_mean=i_mean, Ia_rms=mp.sqrt(ia2))
 
 
 def bridge_builder(Vm, f, R, L, gon, goff, i0):
@@ -332,8 +339,12 @@ class BipolarGate:
 
     def next_edge_after(self, t):
         k, r = divmod(t, self.T1)
-        j = np.searchsorted(self.e, r, side="right")
-        return k * self.T1 + (self.e[j] if j < len(self.e) else self.T1 + self.e[0])
+        j = int(np.searchsorted(self.e, r, side="right"))
+        while True:              # strictly after t, whatever divmod rounded
+            e = k * self.T1 + self.e[j % len(self.e)] + (j // len(self.e)) * self.T1
+            if e > t:
+                return e
+            j += 1
 
 
 def spwm_builder(Vd, R, L, gon, goff, i0):
@@ -401,13 +412,30 @@ def dcdc_builder(name):
     return build
 
 
-def engine_tol(cfg, r):
+def engine_tol(cfg, r, grid_events=True):
     """Relative tolerance of an engine at step ratio r = dt / T (module
     docstring): first order 10 r, second order 10 r^2, error-controlled
     50 rtol (local control, accumulated over the run's steps), exact engine
-    10 output_rtol (interpolated window means)."""
-    return {"pwl": 10 * r, "pwl_restart": 10 * r * r, "trbdf2": 50e-6,
+    10 output_rtol (interpolated window means). ``grid_events=False``: the
+    circuit has events off the dt grid (diode commutations at current,
+    sine-triangle edges), which the fixed engine places on the grid with
+    or without restart: first order for both."""
+    restart = 10 * r * r if grid_events else 10 * r
+    return {"pwl": 10 * r, "pwl_restart": restart, "trbdf2": 50e-6,
             "esdirk43": 50e-6, "dsed": 1e-5}[cfg]
+
+
+def mean_sq(res, y, t0, t1):
+    """Exact mean of y^2 over [t0, t1] for y linear between samples (the
+    window clipped by interpolation): sum h (a^2 + a b + b^2) / 3. A
+    trapezoid of y^2 overstates it by sum h (dy)^2 / 6, which on a sparse
+    adaptive grid is the metric's error, not the engine's."""
+    t, y = np.asarray(res.times), np.asarray(y)
+    k = (t > t0) & (t < t1)
+    tt = np.concatenate(([t0], t[k], [t1]))
+    yy = np.concatenate(([np.interp(t0, t, y)], y[k], [np.interp(t1, t, y)]))
+    a, b, h = yy[:-1], yy[1:], np.diff(tt)
+    return float(np.sum(h * (a * a + a * b + b * b)) / 3 / (t1 - t0))
 
 
 def _ripple_vc(tr, name, n=400):
@@ -479,3 +507,94 @@ def test_dcdc_engine_matches_orbit(name, cfg):
     tol = engine_tol(cfg, DT_DCDC * f)
     err, ok = check_dcdc(tr, dcdc_builder(name), "S", f, D, cfg, DT_DCDC, N_PER, tol)
     assert ok, f"{name} on {cfg}: relative errors {err} > {tol:.1e}"
+
+
+# ------------------------------------------- three-phase bridge (KSV) ----
+
+BRIDGE = dict(Vm=325.0, f=50.0, R=10.0, L=5e-3, gon=1e3)
+BR_GOFF, BR_DT, BR_NPER = 1e-9, 1e-6, 2
+
+
+@functools.lru_cache(maxsize=None)
+def bridge():
+    return bridge_truth(**BRIDGE)
+
+
+def test_truth_bridge_matches_kassakian():
+    """V_d0 = (3 sqrt(3) / pi) V_m = 537.55 V less the two diode drops
+    (2 I_d / g_on = 0.107 V); I_a,rms = sqrt(2/3) I_d with a finite L."""
+    tr = bridge()
+    Vd0 = 3 * math.sqrt(3) / math.pi * BRIDGE["Vm"]
+    assert Vd0 == pytest.approx(537.5457, rel=1e-6)
+    assert float(tr["Vd_mean"]) == pytest.approx(Vd0, rel=0.02)
+    assert float(tr["Ia_rms"]) == pytest.approx(math.sqrt(2 / 3) * float(tr["i_mean"]), rel=0.02)
+
+
+@pytest.mark.parametrize("cfg", list(ENGINES))
+def test_bridge_engine_matches_truth(cfg):
+    tr = bridge()
+    T = 1 / BRIDGE["f"]
+    h = float(tr["h"])
+    build = bridge_builder(BRIDGE["Vm"], BRIDGE["f"], BRIDGE["R"], BRIDGE["L"],
+                           BRIDGE["gon"], BR_GOFF, float(tr["i"](0)))
+    res = run(build, cfg, BR_NPER * T, BR_DT)
+    tN, t0 = BR_NPER * T, (BR_NPER - 1) * T
+    iL = np.asarray(res.i("L"))
+    vd = np.asarray(res.v("dp")) - np.asarray(res.v("dn"))
+    ia = np.asarray(res.i("Va"))
+    sc = float(tr["i_mean"])
+    err = {
+        "i(NT)": abs(at(res, tN, iL) - float(tr["i"](0))) / sc,
+        "i(NT-h)": abs(at(res, tN - h, iL) - float(tr["i"](h))) / sc,
+        "Vd_mean": abs(avg(res, vd, t0, tN) / float(tr["Vd_mean"]) - 1),
+        "Ia_rms": abs(math.sqrt(mean_sq(res, ia, t0, tN)) / float(tr["Ia_rms"]) - 1),
+    }
+    tol = engine_tol(cfg, BR_DT / (2 * h), grid_events=False)
+    assert max(err.values()) <= tol, f"bridge on {cfg}: {err} > {tol:.1e}"
+
+
+# ------------------------------- bipolar full-bridge SPWM (Mohan ch. 8) ----
+
+SPWM = dict(Vd=300.0, m=0.8, f1=50.0, mf=21, R=10.0, L=20e-3, gon=1e3)
+SP_GOFF, SP_DT = 1e-9, 1e-6
+
+
+@functools.lru_cache(maxsize=None)
+def spwm():
+    return spwm_truth(**SPWM)
+
+
+def test_truth_spwm_matches_mohan():
+    """Bipolar sine-triangle, m_a = 0.8, m_f = 21: V_o1 = m_a V_d = 240 V
+    (the exact Fourier coefficient of the edges); the load's fundamental
+    current is V_o1 / |R' + j w L|."""
+    tr = spwm()
+    S = SPWM
+    assert float(tr["V1"]) == pytest.approx(S["m"] * S["Vd"], rel=1e-6)
+    I1 = S["m"] * S["Vd"] / abs(float(tr["Rp"]) + 1j * float(tr["w"]) * S["L"])
+    assert float(tr["I1"]) == pytest.approx(I1, rel=1e-4)
+
+
+@pytest.mark.parametrize("cfg", list(ENGINES))
+def test_spwm_engine_matches_truth(cfg):
+    tr = spwm()
+    S = SPWM
+    T1 = float(tr["T1"])
+    build = spwm_builder(S["Vd"], S["R"], S["L"], S["gon"], SP_GOFF, float(tr["i0"]))
+    b = build()
+    gate = BipolarGate(tr["edges"], T1, [b.switch_index_of("S1"), b.switch_index_of("S4")],
+                       [b.switch_index_of("S2"), b.switch_index_of("S3")], b.graph.num_switches)
+    res = run(build, cfg, 2 * T1, SP_DT, gate)
+    t = np.asarray(res.times)
+    iL = np.asarray(res.i("L"))
+    w = 2 * math.pi * S["f1"]
+    c1 = 2 * (avg(res, iL * np.cos(w * t), T1, 2 * T1)
+              - 1j * avg(res, iL * np.sin(w * t), T1, 2 * T1))
+    sc = float(tr["I1"])
+    err = {
+        "i(2T)": abs(at(res, 2 * T1, iL) - float(tr["i0"])) / sc,
+        "I1": abs(abs(c1) / sc - 1),
+        "I_rms": abs(math.sqrt(mean_sq(res, iL, T1, 2 * T1)) / float(tr["I_rms"]) - 1),
+    }
+    tol = engine_tol(cfg, SP_DT * S["mf"] * S["f1"], grid_events=False)
+    assert max(err.values()) <= tol, f"spwm on {cfg}: {err} > {tol:.1e}"
