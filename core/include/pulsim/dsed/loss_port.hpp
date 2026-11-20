@@ -400,7 +400,7 @@ private:
         std::size_t k = 0;
         for (; k < pend_.size() && pend_[k].t <= t; ++k) {
             auto& e = pend_[k];
-            lt_.event(e.t, e.xl, e.ml, e.xr, e.mr);
+            lt_.event(e.t, e.xl, e.ml, e.xr, e.mr, true);
             for (auto& im : e.imp) im.t = e.t;   // the edge it belongs to
             imp_.insert(imp_.end(), e.imp.begin(), e.imp.end());
             lt_.impulses(imp_);

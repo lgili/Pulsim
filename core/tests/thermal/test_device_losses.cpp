@@ -138,6 +138,7 @@ TEST_CASE("a non-finite reading at an edge is refused by the device's name",
     auto b = chopper();
     thermal::DeviceLossSpec s;
     s.device = "S1";
+    s.tj = 25.0;
     s.e_on = constant(1e-3);
     b.set_device_losses(s);
     solver::LossTracker lt(b.graph(), b.pool(), "dsed");

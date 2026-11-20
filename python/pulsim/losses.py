@@ -1461,8 +1461,7 @@ def _switch_switching_loss(closed_trace: np.ndarray,
                     *, blocking_at_post_edge: bool,
                     load_at_post_edge: bool,
                     table=None) -> float:
-        if idxs.size == 0 or (E_ref <= 0 and curve is None
-                               and table is None):
+        if idxs.size == 0:
             return 0.0
         pre_k = np.clip(idxs - 1, 0, v_SW.size - 1)
         load_k = idxs if load_at_post_edge else pre_k
@@ -1471,16 +1470,22 @@ def _switch_switching_loss(closed_trace: np.ndarray,
         I_load = (_post_edge(i_SW, i_s, idxs)
                   if load_at_post_edge else i_SW[pre_k])
         imp = np.isin(times[pre_k], np.asarray(impulse_t, dtype=float))
-        if imp.any():
-            # the jump's own step is not a regular state: read past it
-            nxt = np.clip(idxs + 1, 0, v_SW.size - 1)
+        # the jump's own step is not a regular state: read past it, unless
+        # the post-edge side is an event's right limit (dsed, projected)
+        late = imp & (cl_s[pre_k] != cl[idxs])
+        if late.any():
+            # no sample after the jump's step: both sides before the edge
+            # (LossTracker::settle_deferred_)
+            nxt = np.where(idxs + 1 < v_SW.size, idxs + 1, pre_k)
             if blocking_at_post_edge:
-                V_blk = np.where(imp, v_SW[nxt], V_blk)
+                V_blk = np.where(late, v_SW[nxt], V_blk)
             if load_at_post_edge:
-                I_load = np.where(imp, i_SW[nxt], I_load)
+                I_load = np.where(late, i_SW[nxt], I_load)
         if not (np.all(np.isfinite(V_blk)) and np.all(np.isfinite(I_load))):
             raise ValueError(f"switch_specs[{name!r}]: a non-finite "
                              "commutation point")
+        if E_ref <= 0 and curve is None and table is None:
+            return 0.0
         gated, g_on, g_off = law
         if gated:
             # a soft edge costs nothing (thermal::commutation_point)
@@ -2104,6 +2109,21 @@ def device_loss_summary(
         return (_node_voltage_trace(st, int(f))
                 - _node_voltage_trace(st, int(to)))
 
+    _imp_cache: Dict[str, List[float]] = {}
+
+    def _impulse_times() -> Dict[str, List[float]]:
+        """{switch: the start times of the steps that carried an impulse of
+        its structure} (its cause and the elements that flipped with it),
+        computed once."""
+        if not _imp_cache:
+            _imp_cache["\0"] = []
+            for r in getattr(result, "reinit_records", None) or []:
+                if not float(r.dW) > 0:
+                    continue
+                for n in {_impulse_cause(builder, result, r), *r.devices}:
+                    _imp_cache.setdefault(n, []).append(float(r.t))
+        return _imp_cache
+
     def _ideal_entry(bid: int, desc, kind: str) -> "Optional[Dict[str, Any]]":
         # An ideal branch-form element (R_on = 0) has no conductance law:
         # its current is its own solved unknown i_s (what result.i reads),
@@ -2150,8 +2170,7 @@ def device_loss_summary(
                 closed_s = closed
                 if masks_s is not None and masks_s is not kernel_masks:
                     closed_s = np.asarray(masks_s[:, bit], dtype=bool)
-                imp_t = [float(r.t) for r in getattr(result, "reinit_records", None) or []
-                         if float(r.dW) > 0 and _impulse_cause(builder, result, r) == entry["name"]]
+                imp_t = _impulse_times().get(entry["name"], [])
                 entry.update(_switch_switching_loss(
                     closed, times, _branch_v(states, nodes), states[:, col], spec,
                     closed_start=closed_s, v_start=_branch_v(states_s, nodes),

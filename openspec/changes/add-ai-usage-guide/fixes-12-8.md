@@ -147,7 +147,7 @@ edge. Found none in a well-resolved topology (AC switch pairs, matrix /
 CSI reverse-blocking, NPC / T-type both current signs, overlap, one-step
 dead time all classify correctly). Left open, with what each needs:
 
-1. NOISE-FLOOR EDGES (medium-low). A hard edge at ~0 A (a DCM turn-on, a
+1. CLOSED by the follow-up below. NOISE-FLOOR EDGES (medium-low). A hard edge at ~0 A (a DCM turn-on, a
    zero crossing) has a current whose sign is rounding noise (dsed /
    trbdf2 right limit) or already reversed (pwl, one step late); about
    half of them now read soft and lose the table's E(v, 0) intercept
@@ -158,10 +158,10 @@ dead time all classify correctly). Left open, with what each needs:
    — needs g_off plumbed into all four callers (tracker: the law;
    design batch: SwitchingEntry; `_commutation_points`: an argument;
    losses.py: the component's params).
-2. A switch that closes a capacitor loop reads a delta current after the
+2. CLOSED by the follow-up below. A switch that closes a capacitor loop reads a delta current after the
    edge (-8397 A on dsed, `test_exact_loss_port`): its table E_on is now
    0 (was the table at 8 V). E_impulse (1/2 C dV^2) is unchanged.
-3. An infinite reading against a finite current of opposite sign is now
+3. CLOSED by the follow-up below (refused by name now). An infinite reading against a finite current of opposite sign is now
    soft (v = 0) instead of refused / fallback, identically in all four
    callers.
 4. User-visible: with specs on only one switch of a leg (buck_pareto's

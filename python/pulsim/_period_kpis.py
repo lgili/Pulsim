@@ -268,10 +268,10 @@ def _table_switching_loss(seq, spec, law):
     tj = float(tj)
 
     def total(table, pts):
-        if table is None or not pts:
-            return 0.0
         if not all(math.isfinite(v) and math.isfinite(i) for v, i, _ in pts):
             raise _NonFinite
+        if table is None or not pts:
+            return 0.0
         f = table._kernel()
         e = [f(v, i, tj) for v, i, soft in pts if not soft]
         if len(e) < 8:         # numpy's pairwise sum is a plain loop here

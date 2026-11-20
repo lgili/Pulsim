@@ -332,8 +332,11 @@ public:
     /// A commutation at t between the engine's left limit (x_l under m_l)
     /// and right limit (x_r under m_r): every tracked device whose bit
     /// differs is booked by the reading rule on the two limits.
+    /// `projected`: x_r is a consistent state the engine projected (dsed),
+    /// not a probe across the edge (trbdf2): an impulse at t re-books from it.
     void event(Real t, const Vector& x_l, const topology::SwitchStateMask& m_l,
-               const Vector& x_r, const topology::SwitchStateMask& m_r) {
+               const Vector& x_r, const topology::SwitchStateMask& m_r,
+               bool projected = false) {
         for (auto& d : devs_) {
             const auto bit = static_cast<Size>(d.law.bit);
             const bool on_l = m_l.get(bit), on_r = m_r.get(bit);
@@ -344,7 +347,7 @@ public:
             const Real v_l = v_of_(d, x_l), i_l = i_of_(d, x_l, on_l);
             const Real v_r = v_of_(d, x_r), i_r = i_of_(d, x_r, on_r);
             const Real e = book_(d, t, on_r, v_l, i_l, v_r, i_r, tj_of_(d));
-            d.bk.event = true;   // its right limit is the engine's projected state
+            d.bk.event = projected;
             if (d.node >= 0) add_(queue_, d.node, e);
             d.ev_e = e;
             d.ev_pending = true;
@@ -362,6 +365,19 @@ public:
         for (; n_reinit_ < recs.size(); ++n_reinit_) {
             const auto& r = recs[n_reinit_];
             if (!(r.dW > 0)) continue;
+            if constexpr (requires { r.devices; }) {
+                // the structure's other switches that flipped with it: their
+                // edges are part of the jump too (its energy goes to cause)
+                for (auto& d : devs_) {
+                    if (d.spec.device == r.cause
+                        || std::find(r.devices.begin(), r.devices.end(), d.spec.device)
+                               == r.devices.end()) {
+                        continue;
+                    }
+                    const Real e = impulsive_edge_(d, r.t);
+                    if (d.node >= 0 && e != Real{0}) add_(queue_, d.node, e);
+                }
+            }
             for (auto& d : devs_) {
                 if (d.spec.device != r.cause) continue;
                 d.e_imp.add(r.dW);
@@ -657,6 +673,7 @@ private:
 
     /// Undo the pending event's booking (its record, ledger and heat).
     void unbook_(Dev& d) {
+        d.bk.valid = false;
         if (!d.rec.events.empty()) d.rec.events.pop_back();
         (d.ev_on ? d.e_on : d.e_off).add(-d.ev_e);
         --(d.ev_on ? d.rec.n_on : d.rec.n_off);
@@ -701,6 +718,19 @@ private:
         d.bk.event = true;
         if (d.ev_pending && d.ev_t == t) d.ev_e = e;
         return e - b.e;
+    }
+
+    /// A deferred impulsive edge whose next accepted state never came (the
+    /// run or the snapshot ends on the jump's step, whose end carries the
+    /// jump): no regular post-jump reading exists, both sides are read
+    /// before the edge (a turn-on: the blocked v and the device's own
+    /// off-state current).
+    void settle_deferred_() {
+        for (auto& d : devs_) {
+            if (!d.dfr.valid) continue;
+            const Real e = book_deferred_(d, d.dfr.v0, d.dfr.i0);
+            if (d.node >= 0) add_(queue_, d.node, e);
+        }
     }
 
     /// The edge impulsive_edge_ deferred, read at this accepted state.
@@ -791,7 +821,8 @@ public:
     /// pending heat, the ledgers, each device's last accepted reading and
     /// its events. A resume restores it in place of begin(), so the
     /// resumed run's records and junction heat continue the first run's.
-    [[nodiscard]] std::vector<Real> save() const {
+    [[nodiscard]] std::vector<Real> save() {
+        settle_deferred_();
         // version 2 adds left_ and pred_ (two more lists), written only when
         // they hold something (pwl never fills them: its state stays version 1)
         const bool v2 = !left_.empty() || !pred_.empty();
@@ -891,7 +922,8 @@ public:
 
     /// Move the records into a result.
     template <typename Result>
-    void write(Result& out) const {
+    void write(Result& out) {
+        settle_deferred_();
         out.device_losses.clear();
         // queued, or owed to a step that was not accepted (an abort)
         Real pending = 0;
