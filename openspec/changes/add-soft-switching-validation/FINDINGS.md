@@ -59,8 +59,18 @@ the PSFB solve at dps 30 (|y| 200 for the 400 V state); hand closed forms
 KCL/KVL, not the tool's MNA) agree within 6e-19 (LLC dead time + rectifier
 turn-on) and 2.8e-21 (PSFB lagging-leg transition + D4 turn-on). The
 closed-form validation table is unchanged (all checks <= 1.3e-37; buck DCM
-improves 1e-41 -> 1e-50); every stored truth record re-solved with the old
-and the new tool: TRUTH_COMPARE.
+improves 1e-41 -> 1e-50). Every stored truth record (87, benchmarks/truth/*.json,
+`truth()` at its own dps pair) re-solved with the tool before and after the
+fix: events, commutation counts, window means / RMS, energies, jumps and
+impulsive losses identical to their 25 stored digits in 86; in stiff_rlc
+only two energies that are physically zero differ (1e-67 J noise). Of the
+diagnostics, the eigenvector condition and the dps-doubling estimate move:
+transformer circuits gain (half_bridge_transformer_dc 1.9e-25 -> 1.2e-40,
+flyback 3.2e-16 -> 8.9e-28, cuk 1.8e-14 -> 8.4e-19), 19 records lose
+(worst cascaded_boost_buck 5.0e-24 -> 1.4e-20); the worst over all 87
+drops from 1.8e-14 to 8.4e-19. (The committed records predate the current
+tool's jump reporting -- 24edce80 -- and differ from both runs in their jump
+lists only; not regenerated here.)
 Tests: `test_exact_tool_settles_the_llc_with_a_transformer_rectifier`,
 `test_exact_tool_psfb_lagging_leg_transition_closed_form` (both also check
 the truth's diode law on every segment).
