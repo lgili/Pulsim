@@ -87,6 +87,7 @@ Rehearsal at fe75ee01 (the regenerated report's header names the runs its sectio
 - A (`fix/core-release-a-impulsive` a324a2db) and F (`fix/core-release-f-exact-output` a5b9a485, now with F-X-4): in progress.
 - H: merged here (1b3f7ecc), F-4-6 / F-X-2 closed.
 - R3 stays BLOCKED until every finding is closed or accepted by the owner.
+- Full pytest at 2ae30180 (extension `so_release_1b3f7ecc`, identical to the worktree's): 1 failed / 6133 passed / 110 skipped / 68 xfailed, no XPASS. The one failure, `test_flip_evidence_resumes_per_circuit`, was a race: its cache key is HEAD + the uncommitted diff, and two docs commits landed during the run. Alone on the stable tree it passes. Full ctest not run (no C++ change).
 
 ## R3. Delete the legacy paths (after one release) — BLOCKED on R2.5 (every finding closed or accepted by the owner)
 - [ ] R3.1 Remove the `legacy` values and the today-branches they keep: `form='conductance'` default paths, `mode_selection='legacy'`, `control_tick='label'`, `device_path='legacy'` (and the hand stamps, 3.4), `undriven=None` per-engine behaviour, `UNIFORM_ENGINE_RULES` switch
