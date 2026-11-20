@@ -204,3 +204,16 @@ vsi_pwl+split 5650.6 -> 5683.2 (+0.6 %).
   (3) the multi-diode refinement (review finding A, above); (4) C++ targets
   `.scratch/ctest_sel.sh` (layer5_v3, step, perf, layer5) - not run; (5) stubs --check (the
   `split_snap` docstring changed in bindings.cpp) - not run.
+
+## Three-part scoreboard, pwl+restart / pwl+split, base vs tip (b0523a49), 81 circuits
+
+`python3 .scratch/sbr/cmp.py .scratch/sbr/base.json .scratch/sbr/tip.json`: 131 cells unchanged,
+31 moved. Targets: vcswitch_resistor pwl+split instants 0.00316 -> 2e-9 (smooth, limits 0);
+pwl+restart 0.0629 -> 0.00632. diode_rectifier pwl+split limits 0.0161 -> 0.0132 (NOT at the
+smooth level: the right-limit record, F-SB-1, above), smooth 1.84e-4 -> 2.32e-4.
+WORSE (open, not investigated): diode_half_wave_rl_load pwl+split smooth 1.35e-9 -> 5.05e-5,
+limits 2.52e-5 -> 0.0281 (instants 4.8e-6 -> 5e-15) - suspect F-SB-3's collapsed 1 ns L*g_off
+transient at the now exactly-located turn-off; half_wave_rectifier_sine pwl+split smooth
+2.56e-6 -> 5.37e-6; interleaved_buck_3ph pwl+restart smooth 0.00249 -> 0.00966, limits
+0.00528 -> 0.0198 (side change). Better: boost_pfc_open_loop pwl+restart limits 0.0613 ->
+0.0387, voltage_doubler, chopper_with_rc_snubber, full_bridge_dc limits, ll06 restart instants.
