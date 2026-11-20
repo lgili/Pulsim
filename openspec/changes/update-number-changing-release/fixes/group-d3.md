@@ -303,3 +303,89 @@ C_oss energies) were NOT re-run on the mode-change variant.
      identical, C_oss conduction within 1 %.
 4. Run the fresh-context reviewer on the diff against cad6ab6b.
 5. Clean `.scratch`: d3A, d3B, `bt`, the bench dirs except base and final.
+
+## Successor session (tips c387433b, bb07661f)
+
+### The five failures: causes and fixes
+
+| test | cause | fix |
+|---|---|---|
+| `_loss_buck` (esdirk43) | The edge at t_end = 1e-3 was never landed. esdirk43's 1 µs steps ended at 0.00099999999999999815, 1.8e-18 s short of it. The clamp landed only `edge <= t + h`. With the probe no longer advancing t, steps stay on the PWM grid. Result: 39 gate events, S1 n_on 19 (base and trbdf2: 40 / 20). | ONE landing rule in `tb_clamp` for ticks, source corners and gate edges (`lands`). An instant at or before t + h + h_min/2 ends the step. The commit sets `t = t_land`, the queue's or the locator's own number, not `t + h`. The slack applies to the first landing only and never past t_end (review). The predecessor's corner-only slack is folded in. |
+| `_loss_vsi` (esdirk43) | Not a missed edge. `LossTracker::accept_step` starts a step from the event's right limit only for devices that FLIPPED. An off switch whose v jumps with its leg kept its left-limit reading at the step's start weight. The base's committed probe step had hidden that (h_p long). esdirk43 E_cond drifted by about −1e-9 J/ms against the exact engine (−5.1e-9 J on INV__LSa; limit 3.6e-9). trbdf2 drifted +1e-10, and the error did not converge with rtol. | `LossTracker::event` also restarts the unflipped devices' readings from the right limit. The gate-edge restart reports every probe, also under an unchanged mask (a source corner). Against `engine='exact'`: esdirk43 is within 1e-12 J at 0.25 to 2 ms; trbdf2 equals the base's. |
+| `test_an_edge_the_first_run_committed_is_not_landed_again` [8e-05-None], [8e-05-esdirk43] | Pass after the landing rule. Not traced separately. The split run ends on an edge at t_end, which the landing rule lands at exactly t_end. | the landing rule |
+| `test_stateful_kinds_through_diode_events_agree_with_a_fine_trbdf2` | The EXPECTATION. At the first turn-on (1e-5) D still carries i_L (v_D = +4 mV). It turns off when C_oss lifts v_sw through 0, 1.9e-16 s after the edge. The 2 ns reference's SDIRK step after the edge was rejected ×10 from 2e-9 down to 2e-17 s (the 1 ps C_oss transient). That is still before the zero, so the chatter guard re-decided D ON at the edge and landed the turn-off at +1.87e-16 s: 21 diode events for the same 20 record transitions. esdirk43 and default trbdf2 count 19, as the base does. Traced with prints. | The test compares D's record transitions (values exact, times within 1 ns) instead of `n_diode_events`. The reason is written in the test. |
+
+Tried and reverted, because neither was the cause:
+- skipping `near_side_clear` after an edge;
+- flooring the post-edge h at `h_ctrl`.
+
+### Review (fresh context, opus, medium; static reading only)
+
+1. **(high) Fixed in bb07661f.** On the SDIRK path the slots stayed pre-edge. A diode landing inside that first step commits a trapezoidal step from them. The probe's slots now replace them on both paths. The SDIRK stages and their estimate read none of them, so the C_oss numbers, steps and Newton count are unchanged.
+2. **(medium) Not fixed.** A run split exactly ON an edge does not resume bit-identically. The snapshot does not carry `sdirk_left` / `sdirk_gate`, `edge_slots_t/m` or `x_edge`. A resume skips the start restart. The uninterrupted record also has the post-edge sample that the split lacks. cad6ab6b was not bit-identical there either: it committed the probe in the uninterrupted run and did slots-only at the split. The resume tests bound the final state at 2e-5 and pass. A split between edges is unaffected. Closing it needs a snapshot block (pickle field 19 or later).
+3. **(medium-low) Fixed in bb07661f.** `lands` could lengthen h past an earlier landing, or past t_end.
+4. **(low) Open.** `LossTracker::event` writes unflipped devices' readings with no rollback when the cascade undoes the event. No energy is booked for them. The next step's start reading is the uncommitted right limit.
+
+The reviewer also named one pre-existing case, not D3's: `edge_at_resume`'s h_min step still commits a TR-BDF2 step from pre-edge slots under the post-edge mask.
+
+### Step 2 on bb07661f
+
+C_oss conduction energy (booked / closed form − 1). All of these are within 1 % and equal the predecessor's numbers:
+
+| call | value |
+|---|---|
+| defaults | +0.0574 % |
+| rtol 1e-6 | +0.0134 % |
+| rtol 1e-8 | +0.0066 % |
+| dt 4e-9 | +0.021 % |
+| esdirk43 | +0.140 % |
+| esdirk43, rtol 1e-6 | −0.014 % |
+| esdirk43, dt 4e-9 | +0.023 % |
+
+Exact scoreboard and reference rows:
+- **Exact scoreboard, trbdf2:** [80, 30, 9], unchanged.
+- **trbdf2 + esdirk43:** [81, 65, 13] → [81, 65, 16]. Three cells move up a class: boost_classic and textbook_erickson_boost_ccm (1.53e-8 → 6.78e-10), and synchronous_flyback (2.28e-8 → 7.27e-10).
+- No cell leaves its class. Per cell: 58 better, 34 worse, 60 the same.
+- The largest move without a class change: ll10 trbdf2 4.91e-5 → 6.87e-5 (×1.4, class 1e-3).
+- **reference_status, trbdf2:** 106 / 2 / 1, analytic 27 / 27.
+  - ll10 and ll12 agree. ll13 disagrees, as on the base.
+  - The 2 disagreements are high_q_rlc_ringdown and ll13. The error is ll11.
+
+Byte compares against cad6ab6b:
+- pwl_identity 390 / 390 identical.
+- Engines oracle: dsed, exact, pwl, pwl+restart and bdf1 are identical. Only the trbdf2 lines differ (buck, satind, mosl1, syncbuck).
+- trbdf2_identity: 221 / 371 identical.
+- Stateful oracle: 9 trbdf2 cases differ (saturable, gapped, lauritzen, igbt_tail, rect_atan, rect_gapped, gbuck_coss, gbuck_lauritzen, everything).
+
+Steps and cost. Accepted / rejected steps, then instructions per accepted step (min of 2, interleaved):
+
+| case | base | tip |
+|---|---|---|
+| buck | 2471 / 201, 14873 | 2471 / 201, 14774 |
+| sync buck, dead time | 2987 / 209, 15363 | 2987 / 209, 15034 |
+| three-phase VSI | 2347 / 94, 46333 | 2349 / 95, 45645 |
+| flyback | 28626 / 600, 12067 | 23651 / 541, 12406 (−15 % per run) |
+| C_oss buck | 7420 / 187, 73129 | 7516 / 192, 80246 |
+| bridge | 1199 / 58, 12942 | 1199 / 58, 12926 |
+
+The C_oss buck costs +11 % per run. The main cost is the SDIRK restarts after its 40 edges, which run from the pre-edge x into the 0.6 ps C_oss transient:
+- Newton iterations (= factorisations) 51337 → 55122 (+7.4 %).
+- 94 SDIRK steps (was 55).
+- 15 forced accepts at h_min (was 0).
+- The smallest post-event step is 4e-15 s (h_min; was 3.7e-14).
+
+Resolving the transient is the price of the accuracy (+3.9 % → +0.06 %). The 15 forced accepts are waste: they are steps whose estimate could not shrink before h_min.
+
+### Task 4.3 of `update-trbdf2-post-event-restart`: NOT ticked
+
+On the DCM buck of `test_trbdf2_post_event_restart`, every interval below 1e-11 s is one post-edge record sample per edge (800 of 800). On this tip those samples are no longer steps. The smallest first post-event accepted step is 2.3e-7 s. The step half of the criterion therefore now holds on that circuit. The `i_L` error half (≤ 1e-9 A) was not measured. The 3e-13 s that the predecessor reported is the golden buck's (`d3_steps`, `hpe_min`), after a diode turn-off: a real step in an L·g_off mode, not a probe.
+
+### Verified on bb07661f
+- Extension build (Release).
+- The 5 C++ binaries on Eigen 5, at c387433b: dsed 142, step 32, sim 8, thermal 9, layer5_v2 37, all passed. bb07661f changes only the gate-edge restart, and they were not re-run on it.
+- 44 touched files: 478 passed, 1 xfailed (fixed-engine F-4-5).
+- ruff passes.
+- No binding change, so stubs were not needed.
+- The full pytest result is in the commit after this one.
+
+**Not run:** Eigen 3.4.0, g++, the full ctest (integration batch).
