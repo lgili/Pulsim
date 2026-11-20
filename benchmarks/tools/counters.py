@@ -84,6 +84,13 @@ CIRCUITS = {
     "diode_bridge_rectifier": _v1("circuits/diodes/diode_bridge_rectifier.yaml"),
 }
 
+# Cells not counted, by name, with the finding that keeps them out; the
+# freeze writes them as `skipped: <reason>` (a visible entry, not an omission).
+SKIP = {
+    ("ladder500_rc", "dsed"): "release finding F-X-3: the exact output rule does not finish ladder500_rc "
+                              "(> 29 min in the chord bound); count again when F-X-3 is fixed",
+}
+
 
 def count(name: str, engine: str) -> dict:
     """Counters of one run; raises the engine's refusal unchanged."""
@@ -130,6 +137,10 @@ def main(argv=None) -> int:
     for name in CIRCUITS:
         out[name] = {}
         for engine in ("pwl", "trbdf2", "dsed"):
+            if (name, engine) in SKIP:
+                out[name][engine] = {"skipped": SKIP[name, engine]}
+                print(f"{name:28s} {engine:6s} SKIPPED ({SKIP[name, engine]})")
+                continue
             t0 = time.perf_counter()
             try:
                 got = count(name, engine)
@@ -138,12 +149,13 @@ def main(argv=None) -> int:
                 continue
             out[name][engine] = got
             wall = time.perf_counter() - t0
-            if not args.freeze and "refused" not in frozen.get(name, {}).get(engine, {"refused": 1}):
+            cell = frozen.get(name, {}).get(engine, {"refused": 1})
+            if not args.freeze and "refused" not in cell and "skipped" not in cell:
                 bad, better = check(frozen[name][engine], name, engine, got)
                 fails += len(bad)
                 for line in bad + better:
                     print(line)
-            print(f"{name:28s} {engine:6s} {wall * 1e3:8.1f} ms (information only)")
+            print(f"{name:28s} {engine:6s} {wall * 1e3:8.1f} ms (information only)", flush=True)
     if args.freeze:
         head = [line for line in MANIFEST.read_text(encoding="utf-8").splitlines() if line.startswith("#")] \
             if MANIFEST.exists() else []

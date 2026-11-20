@@ -145,6 +145,15 @@ F = [
      "`test_simulate_overhead` no-dt script", "ceiling 3760 bytecodes", "3683 (trbdf2 route)", "5456 (pulsim.exact_route alone 4745)"),
 ]
 
+# Closed by a fix merged into the release branch: id -> where and the measured result.
+# A closed finding leaves the open tables and is listed under "Closed".
+FIXED = {
+    "F-4-6": "group H, `release/h-call-overhead` 26d059b0 (merged 1b3f7ecc): fixed step 3057 -> 2800 bytecodes "
+             "(ceiling 2890); `test_simulate_overhead.py` no longer xfail",
+    "F-X-2": "group H, `release/h-call-overhead` 26d059b0 (merged 1b3f7ecc): no-dt call on the exact route "
+             "5609 -> 3634 bytecodes (ceiling 3760); gate case `[exact]` added",
+}
+
 PAT = re.compile(r"release finding (F-[0-9X]+-[0-9]+)")
 
 
@@ -162,8 +171,10 @@ def parked(paths):
 
 def main(argv):
     park = parked(argv[1:])
+    closed = [r for r in F if r[0] in FIXED]
+    open_ = [r for r in F if r[0] not in FIXED]
     by_g = defaultdict(list)
-    for row in F:
+    for row in open_:
         by_g[row[1]].append(row)
     sev = defaultdict(int)
     lines = ["# Release findings — update-number-changing-release", "",
@@ -179,7 +190,7 @@ def main(argv):
     lines += ["| group | " + " | ".join(SEV) + " | all |", "|---|" + "---:|" * (len(SEV) + 1)]
     for g in sorted(by_g):
         lines.append(f"| {g} {GROUPS[g]} | " + " | ".join(str(total[(g, s)]) for s in SEV) + f" | {len(by_g[g])} |")
-    lines.append("| all | " + " | ".join(str(sev[s]) for s in SEV) + f" | {len(F)} |")
+    lines.append("| all | " + " | ".join(str(sev[s]) for s in SEV) + f" | {len(open_)} |")
     lines += ["", "Bucket-0 items (fixed by the integrator, not findings): `oracles/lcp_pulsim_bridge.py` builds "
               "`form='conductance'` (keyword `form=`); `next_defaults.legacy()` reads `dt` from the third positional "
               "argument; the branch-form refusal names `V_f` for `add_diode`.", ""]
@@ -190,11 +201,17 @@ def main(argv):
             lines += [f"### {fid} [{s}] {title}", "",
                       f"- call: {call}", f"- truth: {truth}", f"- old: {old}", f"- new: {new}",
                       "- parked: " + "; ".join(tests), ""]
+    if closed:
+        lines += ["## Closed (fix merged into the release branch)", ""]
+        for fid, g, s_, title, *_ in closed:
+            tests = sorted(park.get(fid, ())) or ["none parked"]
+            lines.append(f"- {fid} [{g}/{s_}] {title}: {FIXED[fid]}; parked: " + "; ".join(tests))
+        lines.append("")
     unknown = sorted(set(park) - {r[0] for r in F})
     if unknown:
         lines += ["## Parked under an id not in the table", ""] + [f"- {u}: " + "; ".join(sorted(park[u])) for u in unknown]
     Path(__file__).resolve().parent.parent.joinpath("FINDINGS.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print(f"{len(F)} findings, {sum(len(v) for v in park.values())} parked tests, unknown ids {unknown}")
+    print(f"{len(open_)} open findings, {len(closed)} closed, {sum(len(v) for v in park.values())} parked tests, unknown ids {unknown}")
 
 
 if __name__ == "__main__":

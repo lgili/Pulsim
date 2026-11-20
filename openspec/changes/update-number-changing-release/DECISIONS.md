@@ -512,3 +512,11 @@ Paralleled bridges, 20 ms, conductance-form diodes (the test as written):
 7. Step 5 evidence regeneration (`REFERENCE_STATUS.md`, `EXACT_SCOREBOARD.md` + json, flip evidence, `ACCURACY_SUMMARY.md --check`) — after 3–4.
 8. Verification not run: `openspec validate --all --strict`, device reference `--check`, `mkdocs build --strict`, ctest. Run: ruff (clean at b1ed9c74), stubs `--check` (clean after 967c8bfe).
 9. Clean-up: delete `.scratch/bcbase`, `.scratch/base_a32b97ed`, `.scratch/base_27c00520` (and `.scratch/bcbase27` once used).
+
+## 8. R2 merge, second integrator (2026-11-20, running note — kept current after every step)
+
+**Merged:** `feat/core-integration` b9e46778 (fad54e51; conflicts: `dsed_bindings.cpp` takes the PR line's `output_budget` parameter order, `test_permeance_magnetic.py` keeps the release's restart-aware energy check plus the PR's 4.1 / 4.4 tests, stubs = the PR's, `--check` clean after the build); `release/h-call-overhead` 26d059b0 (1b3f7ecc, no conflict; overhead gate 3/3 pass, no ceiling raised).
+**Suite on the merged tree (1b3f7ecc, extension `/Users/lgili/pulsim_wt/so_release_1b3f7ecc/`):** ctest 1071/1071 (at fad54e51, same C++); full pytest 11 failed / 6123 passed / 110 skipped / 67 xfailed, no XPASS (`test_counter_gate[ladder500_rc]` deselected: F-X-3). The 11 = the two accepted goldens + nine counter gates (re-freeze pending). One new failure fixed: `test_ai_guide` size (the PR's passives line; four trap-table phrasings shortened).
+**FINDINGS.md:** 36 open + 2 closed (F-4-6, F-X-2 by group H); `probes/findings_index.py` has a `FIXED` table.
+**Counters:** `counters.py` `SKIP` names `ladder500_rc` / dsed (F-X-3), written `skipped:` into the freeze file; its gate case is a strict xfail citing F-X-3.
+**Running / next (in this order, chain script `.scratch/r2m2_chain.sh`, logs `.scratch/r2m2_*.log`):** B(ii) reference_status + rehearsal_match; B(iii) exact scoreboard; B(i) byte compares vs b9e46778 (`.scratch/base_b9e46778`); goldens regeneration + golden diff; counters re-freeze; `test_benchmark_harness.py`; flip evidence; accuracy summary.

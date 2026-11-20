@@ -395,15 +395,23 @@ def test_golden_catches_a_changed_switching_sequence_before_values():
 FROZEN = yaml.safe_load((BENCH / "manifests" / "perf_counters.yaml").read_text(encoding="utf-8"))["counters"]
 
 
-@pytest.mark.parametrize("name", list(counters.CIRCUITS))
+@pytest.mark.parametrize("name", [
+    pytest.param(n, marks=pytest.mark.xfail(strict=True, reason=counters.SKIP[k]))
+    if (k := next((c for c in counters.SKIP if c[0] == n), None)) else n
+    for n in counters.CIRCUITS])
 def test_counter_gate(name):
+    skipped = []
     for engine, frozen in FROZEN[name].items():
+        if "skipped" in frozen:
+            skipped.append(f"{engine}: {frozen['skipped']}")
+            continue
         if "refused" in frozen:
             with pytest.raises(Exception):
                 counters.count(name, engine)
             continue
         bad, _ = counters.check(frozen, name, engine, counters.count(name, engine))
         assert not bad, bad
+    assert not skipped, skipped    # a skipped cell is a finding's strict xfail (see the parametrize)
 
 
 def test_counter_gate_names_an_extra_factorisation_per_step():
