@@ -394,3 +394,17 @@ Results on the FINAL build (TEMP removed):
   (dx/|x| 2.8e-17): a row-scale question (10a), not the windows; not fixed
   here (open). No wrong accepted state: ll13 vs the pwl reference at 25
   instants 1.97e-5 (default) … 1.3e-6 (rtol 1e-8/1e-9), shrinking with rtol.
+- Ring buffer (fd697142): Newton buck pwl 30234 -> 27841 (-7.9 %), trbdf2
+  59461 -> 59329 (-0.22 %) against 14b0c81a, min of 6. Re-verified on it:
+  C++ layer5_v4 26 / layer5_v3 35 / step 32 / sim 8 / dsed 142 pass; byte
+  compares unchanged (goldens, stateful, engines identical; pwl_identity
+  379/379; dsed 280/280; trbdf2_identity 368/371, the same three entries);
+  fs5 + newton + roundoff-floor + saturable transformer 79 passed, 2 xfailed.
+- FULL PYTEST on fd697142: 6438 passed, 114 skipped, 17 xfailed, 0 failed.
+- Not run: Eigen 3.4.0, g++, the full ctest (integration batch); stubs (no
+  binding signature changed). Cost was measured on the Newton buck (pwl,
+  trbdf2) only: linear circuits never enter the changed code.
+OPEN: ll13 at esdirk43 rtol 1e-6 and trbdf2 rtol 1e-7 abort at h_min on a
+backward error of ~1e6 eps against the START-state row scale (rule 10a),
+which comes before the ~1e8 V dead-time spike. cedac36b fails the same way
+at other rtols. This is a row-scale question, separate from the windows.
