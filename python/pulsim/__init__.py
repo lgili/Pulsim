@@ -2585,6 +2585,15 @@ def simulate(
     start_from_dc_op
         PWL-only: If ``True``, seed the initial state from
         :func:`compute_dc_op` instead of zero.
+    should_continue
+        ``() -> bool`` polled once per step. ``False`` stops the run and
+        returns the trace up to there: ``result.times[-1] < t_end``, no
+        exception (a live scope keeps what it drew). A callback that
+        raises propagates. The analyses raise :class:`Cancelled` instead
+        (``compute_dc_op``, ``run_ac_sweep``, ``run_mna_sweep``,
+        ``compute_temperature``). GUI Cancel button:
+        ``should_continue=lambda: not cancel.is_set()`` with
+        ``cancel = threading.Event()``.
     enable_nonlinear_refresh
         ``None`` (default): the kernel stamps the Newton devices when
         the circuit has any. ``True`` forces the static chain.
