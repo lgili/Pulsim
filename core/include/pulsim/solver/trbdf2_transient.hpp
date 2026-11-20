@@ -1927,7 +1927,12 @@ inline SimulationResult run_transient_trbdf2(
         //    of their class, and on a vcswitch forward converter (a Newton law,
         //    no stateful kind) its stage-2 base, extrapolated across the
         //    source jump, failed Newton down to h_min (ll13).
-        const bool lin = !hs.any() && !opts.sdirk_on_linear_circuits;
+        // A stateful kind restarts by SDIRK only where the edge changes the
+        // mode (a source corner under the same mask keeps TR-BDF2: SDIRK
+        // there tripled the restart steps of a saturable boost's pulse
+        // source and gave an idle IGBT tail extra steps).
+        const bool lin = !opts.sdirk_on_linear_circuits
+            && !(hs.any() && !(m_probe == x_mask));
         const Real t_plus = t + dtp;
         // A probe whose Newton stalled at hp was retaken 100x longer: its
         // slots are then those of t + dtp, many time constants of the new
@@ -1939,6 +1944,7 @@ inline SimulationResult run_transient_trbdf2(
             && t_plus < opts.t_end - h_min
             && t_plus < queue.next_of(events::Kind::ControlTick) - h_min) {
             history.update_from_state(x_trial, dtp);
+            hs.commit(x_trial, dtp, pwl::TrBdf2Stage::Trapezoidal);
             if (learn_gates) {
                 gate.learn_toggles(diodes.num_gated() > 0 ? switch_fn(t_gates)
                                                           : m_probe, t);
@@ -1964,6 +1970,7 @@ inline SimulationResult run_transient_trbdf2(
         if (lin) {
             history.refresh_derivatives(x_trial, dtp);
             if (lt) lt->slots_rewritten();
+            hs.refresh_derivatives(x_trial, dtp);
             edge_slots_t = t;
             edge_slots_m = m_probe;
         } else {
