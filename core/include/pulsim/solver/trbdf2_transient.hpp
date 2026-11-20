@@ -1862,7 +1862,9 @@ inline SimulationResult run_transient_trbdf2(
     // commit reached (snapshot: x is then the pre-edge solve, the slots
     // post-edge; a sliver step to t_end may still follow).
     Real slots_only_t = std::numeric_limits<Real>::quiet_NaN();
-    auto restart_after_gate_event = [&](bool settled, Real t_gates,
+    Size sdirk_left = 0;       // SDIRK restart steps still owed (set below)
+    bool sdirk_gate = false;   // the pending restart came from a gate edge
+    auto restart_after_gate_event =[&](bool settled, Real t_gates,
                                         Real hp, bool commit) {
         if (!opts.refresh_after_event) {
             return;
@@ -1898,8 +1900,20 @@ inline SimulationResult run_transient_trbdf2(
         const Real dtp = last_probe_dt;
         ++st.n_derivative_refreshes;
         post_event_pending = true;
-        // No commit across t_end or a controller tick (it would fire
-        // dtp late): replace the slots only.
+        // The step after the edge is the SDIRK(2,2) restart from the
+        // committed x, as after a diode event: its backward-Euler stages
+        // read no derivative slot, so it starts from the consistent x0+
+        // (the states are continuous at the edge; the algebraic unknowns
+        // follow in the new mode). The probe used to be COMMITTED as a
+        // trapezoidal step of h_p = 1e-6 x the pre-edge step, whose first
+        // slot is the PRE-edge derivative: across a channel / C_oss loop of
+        // tau = 0.6 ps it stopped at 38.94 V where the ODE is at 30.67 V,
+        // and the loss port booked it from the right limit's 2.3 MW
+        // (+4.4 % conduction energy, release group D3).
+        sdirk_left = std::max(sdirk_left, Size{1});
+        sdirk_gate = true;
+        // No sample across t_end or a controller tick (the step to it
+        // starts from x anyway): replace the slots only, for a snapshot.
         if (!commit || t + dtp >= opts.t_end - h_min
             || t + dtp >= queue.next_of(events::Kind::ControlTick) - h_min) {
             history.refresh_derivatives(x_trial, dtp);
@@ -1908,33 +1922,24 @@ inline SimulationResult run_transient_trbdf2(
             slots_only_t = t + dtp;   // where the unused probe reached
             return;
         }
-        history.update_from_state(x_trial, dtp);
-        hs.commit(x_trial, dtp, pwl::TrBdf2Stage::Trapezoidal);
-        // The toggle is at the edge, not at the next step's start
-        // (t + dtp): dtp differs per edge and biased gate_pulse_min.
+        // The toggle is at the edge, not at the next step's start.
         if (learn_gates) {
             // m_probe is a stamped mask: a gated device's bit there is its
             // conduction state, not its gate.
             gate.learn_toggles(diodes.num_gated() > 0 ? switch_fn(t_gates)
                                                       : m_probe, t);
         }
-        x = x_trial;
-        x_sig = x;
-        const Real t_hook0 = t;
-        t += dtp;
+        // The probe is recorded, not committed (as a diode event's): the
+        // trace shows the edge as a jump, not a ramp across the restart
+        // step (losses and charges integrated over the samples, DECISIONS 7).
+        x_sig = x_trial;
+        gates_decided = m_probe;
         drop_superseded_event_sample(t);
-        push_time(t, "gate-edge");
-        result.states.push_back(x);
+        push_time(t + dtp, "post-edge");
+        result.states.push_back(x_trial);
         result.event_iteration_count.push_back(0);
         result.record_switch_state(m_probe);
-        device_state_once(t, x);   // #31: the probe committed the histories
-        if (hooks) hooks->accepted(t_hook0, t, x, m_probe);
-        // the probe is a trapezoidal step
-        if (lt) lt->accept_step(t_hook0, t, x, m_probe, nullptr, 0.5, 0, 0.5);
-        if (structure.active()) reinit.note(m_probe);
-        x_mask = m_probe;
-        x_mask_known = true;
-        gates_decided = m_probe;
+        event_sample_t = t + dtp;
     };
 
     // ---- L-stable SDIRK(2,2) restart (Alexander, gamma_s = 1 - 1/sqrt2) ----
@@ -1962,7 +1967,7 @@ inline SimulationResult run_transient_trbdf2(
     const bool sdirk_off_lin = opts.sdirk_after_turn_off
                                && !nl_effective && !sdirk_ok;
     bool sdirk_event = false;   // the pending restart came from such an event
-    auto restart_ok = [&]() { return sdirk_ok || sdirk_event; };
+    auto restart_ok = [&]() { return sdirk_ok || sdirk_event || sdirk_gate; };
     // A diode with g_off > 0 turned off (an ideal branch-form diode leaves
     // no L*g_off mode; its entries re-initialise by D4).
     auto turned_off = [&](const std::vector<bool>& before) {
@@ -2121,7 +2126,7 @@ inline SimulationResult run_transient_trbdf2(
                          : switch_fn(t));
         event_sample_t = tp;
     };
-    Size sdirk_left = has_diodes ? opts.sdirk_after_settle : Size{0};
+    sdirk_left = has_diodes ? opts.sdirk_after_settle : Size{0};
     // A run start with a stateful kind is an SDIRK restart step: the kinds'
     // derivative slots are init's zeros, not the current they carry (a
     // current-driven nonlinear capacitor: esdirk43's explicit first stage
@@ -3968,7 +3973,7 @@ inline SimulationResult run_transient_trbdf2(
                     history.restore(hist_s2);
                     history.update_from_state(x_1, hg);
                     if (sdirk_left > 0) --sdirk_left;
-                    if (sdirk_left == 0) sdirk_event = false;
+                    if (sdirk_left == 0) sdirk_event = sdirk_gate = false;
                     if (reinit_step) {
                         reinit_left = kReinitSteps - 1;
                         ++st.n_reinit_steps;
