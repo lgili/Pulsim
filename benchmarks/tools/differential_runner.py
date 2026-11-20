@@ -284,6 +284,16 @@ def classify(rec, res, case, cols, ref, tol, step=None):
     return rec
 
 
+def event_steps(res):
+    """The run's own event instants as exclude intervals [e, e+ulp]: the trace's
+    sample at an event is its left limit (a jump's right limit is in the result's
+    right-limit arrays), so the chord leaving it is not covered by the rule, even
+    for an event with no switch-state column (a diode, a vcswitch, a reinit)."""
+    te = getattr(res, "event_times", None)
+    return [(float(e), float(np.nextafter(e, np.inf)))
+            for e in np.asarray(te if te is not None else [], dtype=float)]
+
+
 def rule_check(res, ref, cols, rtol, atol=1e-9):
     """The output rule's promise on a cell that ran under it (metrics.rule_ratio):
     the worst ratio over the observables, the steps that hold a switch-state change
@@ -291,7 +301,9 @@ def rule_check(res, ref, cols, rtol, atol=1e-9):
     tr = traces(res, cols)
     t, ys, sa = tr
     tr_, yr, sb = ref
-    excl = switching_steps(sa, t) + switching_steps(sb, tr_)
+    excl = switching_steps(sa, t) + switching_steps(sb, tr_) + event_steps(res)
+    if len(tr_) > 1:   # the reference's t0 sample is its given (maybe inconsistent) start
+        excl.append((float(tr_[0]), float(tr_[1])))
     return float(np.nanmax([metrics.rule_ratio(t, ys[c], (tr_, yr[c]), rtol=rtol, atol=atol, exclude=excl)
                             for c in cols]))
 

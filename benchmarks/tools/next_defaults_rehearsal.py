@@ -302,7 +302,8 @@ def analytic_worker(unit, names, emit):
             rec.update(err_rms=e, outcome="agree" if e <= ceil else "disagree", tol=ceil, **_diag(r))
             rt = _rule_rtol(r)
             if rt:
-                rec["rule_ratio"] = metrics.rule_ratio(np.asarray(r.times), c.observe(r), c.exact, rtol=rt, atol=1e-9)
+                rec["rule_ratio"] = metrics.rule_ratio(np.asarray(r.times), c.observe(r), c.exact, rtol=rt,
+                                                     atol=1e-9, exclude=dr.event_steps(r))
         except dr.REFUSAL as ex:
             rec.update(outcome="refused", message=f"{type(ex).__name__}: {ex}"[:300])
         except Exception as ex:  # noqa: BLE001 - classified
