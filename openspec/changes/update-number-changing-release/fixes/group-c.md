@@ -55,7 +55,7 @@ the label stays in the message. C++ test in `test_mode_selector.cpp` ("F-3-2" se
 (`test_release_findings_g.py::test_ideal_voltage_loop_refusal_names_the_device[lcp]`): it XPASSes
 after this branch merges — remove the mark at integration.
 
-## F-4-1 — an ideal voltage loop refused as `consistent_mode` under 'auto' (exact engine) [M]
+## F-4-1 — an ideal voltage loop refused as `consistent_mode` under 'auto' (exact engine) [M] FIXED
 
 pwl's LCP path already classified a failed selection (`mode_lcp_site`: a shorted ideal port, or the
 mode with every not-reverse-biased ideal port closed run through the structure check). The exact
@@ -72,7 +72,7 @@ refusal's name, as `rejected_loop_` already did for the settle). pwl's LCP solve
 settle's structural pass first, so `floating_node` is named there too (it was a singular factor and
 an abort after 64 sub-steps).
 
-## F-4-2 — PSFB, branch form R_on = 1e-6, refused at 339 µs under 'auto' [M]
+## F-4-2 — PSFB, branch form R_on = 1e-6, refused at 339 µs under 'auto' [M] FIXED
 
 Truth: conductance twin at g_on = 1e6, 24.071424 V; the settle (branch) 24.071411 V; at R_on = 1e-3
 both selectors agree (24.066152 / 24.066152). Trace of the refusal (env-guarded print of the first
@@ -97,7 +97,7 @@ and solves that. Only a run that would have been refused takes the new path (cou
 `ModeSelection::recoordinated`). The fixed engine's selector is not anchored (it poses its site
 once): not covered there; no fixed-engine refusal of this kind was found.
 
-## F-5-3 — a 1 ps gate pulse dropped by the exact engine under 'auto' [M]
+## F-5-3 — a 1 ps gate pulse dropped by the exact engine under 'auto' [M] FIXED
 
 Not a merged simultaneity: both edges are events (799 event times on 400 periods, the falling edge
 at k·T + 1e-12 s on both selectors). Trace (`diagnostics['mode_selection']`, 3 periods): h_e = 1e-12,
@@ -133,7 +133,7 @@ repairs). The LCP poses the BE companion over h_e, where the coupling is visible
 A default-path defect the release's flip to 'auto' fixes; not changed here (not a one-line fix).
 Test: `test_the_flyback_secondary_conducts_on_the_exact_engine` ('auto' passes, 'legacy' strict xfail).
 
-## F-4-3 — ideal PSFB with C_oss / C_j: D1 left ON at −2.2 A under 'auto' [M]
+## F-4-3 — ideal PSFB with C_oss / C_j: D1 left ON at −2.2 A under 'auto' [M] FIXED
 
 Truth: the settle runs to 30 µs, v_out(27–30 µs) 1.0358473 V; the conductance twins at R_on = 1e-3 /
 1e-4 give 1.0357080 / 1.0358334 V on both selectors (Δ per decade 1.25e-4 → 1.25e-5: limit
@@ -155,3 +155,21 @@ remaining TIES (ports no pass decided) and reopened a port the first pass had de
 
 Fix: `ModeSelection::tied` (per port: left OFF as a remaining tie); `release_band_ties_` considers only
 those ports (both callers: `lcp_apply_` and the guard's repair).
+After: 'auto' runs to 30 µs, v_out(27–30 µs) 1.0358472569 V against the settle's 1.0358473 V and the
+twins' limit ≈ 1.035846 V. The gated bridge from rest (`test_a_gated_bridge_from_rest_turns_its_tie_on_under_the_lcp`,
+the case `release_band_ties_` was written for) still passes: its D1 is a remaining tie.
+
+## Verification (tip after the WIP safety push b8fc0e0b, trace prints stripped)
+
+- Extension build; C++ `pulsim_core_mode_tests` (9206 assertions / 40 cases, includes the new F-3-2
+  section) and `pulsim_core_dsed_tests` (40935 / 141) pass on Eigen 5. Full ctest not run.
+- `test_release_findings_c.py` 19 pass + 1 strict xfail (legacy flyback); area files (18) 397 pass.
+- Byte compares against the PR head 27c00520 (`.scratch/c_base`): golden ALL IDENTICAL; trbdf2 identity
+  371/371 (modes default, lcp, shadow); bit-identity 36/36 default and 36/36 shadow; pwl identity
+  389/390. The one difference is `static rect_lcp` (`mode_selection=2`, opt-in, not the default): one
+  bit, x[0] at t = 0 is +0.0 instead of −0.0 (the island correction on the quiet exit adds a zero);
+  every other value and every mode bit identical. No default-path number moved.
+- ruff clean; stubs `--check` up to date.
+- Cost, instructions per accepted step (interleaved head/branch, min of 3): buck pwl 3102.8 → 3088.0
+  (−0.48 %), vsi pwl 4770.8 → 4767.4 (−0.07 %), buck trbdf2 11033.4 → 11032.2 (−0.01 %), bridge trbdf2
+  12785.3 → 12807.6 (+0.17 %). All within 0.5 %.

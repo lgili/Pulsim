@@ -1640,11 +1640,6 @@ private:
                 held_x_ = x;
                 project_(t, x);
                 resettle_projected_(t, x, mask, held_x_, mk);
-                if (std::getenv("PULSIM_TRACE_LCP")) {  // TRACE-C
-                    std::fprintf(stderr, "LCP final=");
-                    for (const auto& d : diodes_) std::fprintf(stderr, "%d", mask.get(d.switch_idx) ? 1 : 0);
-                    std::fprintf(stderr, "\n");
-                }
                 return;
             }
             if (shadow_.enabled || guard_) shadow_x_ = x;
@@ -1787,12 +1782,6 @@ private:
                      const MaskT& prev_bits, const MaskT& rec, ModeShadowReport& rep)
         requires HasNodePairVoltage<System> {
         const auto sel = run_selector_(t, x_held, gates_prev, prev_bits, rec, rep);
-        if (std::getenv("PULSIM_TRACE_LCP")) {  // TRACE-C
-            std::fprintf(stderr, "LCP t=%.12e prev=", t);
-            for (const auto& d : diodes_) std::fprintf(stderr, "%d", prev_bits.get(d.switch_idx) ? 1 : 0);
-            std::fprintf(stderr, " on="); for (auto v : sel.on) std::fprintf(stderr, "%d", (int)v);
-            std::fprintf(stderr, " status=%d ties=%d pins=%d pj=%d wid=%d\n", (int)sel.status, sel.ties, sel.leak_pins, sel.pin_judgements, sel.widenings);
-        }
         events::raise_if_refused(sel, "dsed", t, shadow_labels_, passivity_, &shadow_names_);
         rejected_loop_.reset();   // a mode was selected: a later refusal is not that loop's
         for (std::size_t j = 0; j < diodes_.size(); ++j)
@@ -1802,11 +1791,6 @@ private:
         pose_or_open_loops_(t, x_held, gates_prev, m);
         release_band_ties_(t, x_held, m, sel.tied);
         pose_or_open_loops_(t, x_held, gates_prev, m);
-        if (std::getenv("PULSIM_TRACE_LCP")) {  // TRACE-C
-            std::fprintf(stderr, "LCP applied=");
-            for (const auto& d : diodes_) std::fprintf(stderr, "%d", m.get(d.switch_idx) ? 1 : 0);
-            std::fprintf(stderr, "\n");
-        }
         return m;
     }
 
@@ -1895,8 +1879,6 @@ private:
                     if (!(std::abs(sig) <= tol) || !zero_band_on_(t, x, d, mask, tol, false))
                         continue;
                     diode_bits_.set(d.switch_idx, true);
-                    if (std::getenv("PULSIM_TRACE_LCP"))  // TRACE-C
-                        std::fprintf(stderr, "RBT ON %s sig=%.3e tol=%.3e\n", d.label.c_str(), sig, tol);
                     mask = mask.overlay(diode_bits_, diode_owned_);
                     system_.set_mask(mask);
                     if constexpr (HasExactStep<System>) (void)system_.has_exact_step();
@@ -2940,8 +2922,6 @@ private:
                 // no significant rung: zero to double precision up to the cap,
                 // the diode keeps its mode (rest and exact ties stay quiet)
                 on = sg > 0;
-                if (std::getenv("PULSIM_TRACE_LCP"))  // TRACE-C
-                    std::fprintf(stderr, "ZB %s t=%.12e sg=%d dj=%.3e cap=%.3e\n", d.label.c_str(), t, sg, dj, decision_cap_(t0));
             }
         }
         system_.set_mask(mask);

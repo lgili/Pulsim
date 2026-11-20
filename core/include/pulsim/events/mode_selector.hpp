@@ -42,8 +42,6 @@
 #include <limits>
 #include <type_traits>
 #include <vector>
-#include <cstdio>
-#include <cstdlib>  // TRACE-C
 
 #include <Eigen/Dense>
 
@@ -522,11 +520,6 @@ public:
                                 || status == LcpStatus::Unenumerable;
             if (pass == 0) out.status = status;
             if (failed && pass == 0) {
-                if (std::getenv("PULSIM_TRACE_LCP")) {  // TRACE-C
-                    std::fprintf(stderr, "LCPFAIL status=%d k=%ld h=%g\nH=\n", (int)status, (long)k, h);
-                    for (Eigen::Index r = 0; r < k; ++r) { for (Eigen::Index c = 0; c < k; ++c) std::fprintf(stderr, " %.6e", H_he_(r, c)); std::fprintf(stderr, "\n"); }
-                    std::fprintf(stderr, "q="); for (Eigen::Index r = 0; r < k; ++r) std::fprintf(stderr, " %.6e", q_he_[r]); std::fprintf(stderr, "\nanchor="); for (auto a : anchor_) std::fprintf(stderr, "%d", (int)a); std::fprintf(stderr, "\n");
-                }
                 out.enumerations = enum_;
                 return out;
             }
@@ -546,14 +539,6 @@ public:
         }
         out.enumerations = enum_;
         out.nonunique_modes = nonunique_;
-        if (std::getenv("PULSIM_TRACE_LCP")) {  // TRACE-C
-            std::fprintf(stderr, "SEL h_e=%g st=", h_e); for (int v : st_) std::fprintf(stderr, "%d,", v);
-            std::fprintf(stderr, " pin="); for (auto v : pin_) std::fprintf(stderr, "%d", (int)v);
-            std::fprintf(stderr, " i="); for (Eigen::Index j = 0; j < k; ++j) std::fprintf(stderr, " %.3e", i_[j]);
-            std::fprintf(stderr, " w="); for (Eigen::Index j = 0; j < k; ++j) std::fprintf(stderr, " %.3e", wg_[j]);
-            std::fprintf(stderr, " q0="); for (Eigen::Index j = 0; j < k; ++j) std::fprintf(stderr, " %.3e", q_he_[j]);
-            std::fprintf(stderr, "\n");
-        }
         bool any_pin = false;
         for (Eigen::Index j = 0; j < k; ++j) {
             const auto ju = static_cast<std::size_t>(j);
