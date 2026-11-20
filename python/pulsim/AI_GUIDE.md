@@ -448,8 +448,8 @@ are time shifts in SECONDS (`t - phase`); `modulation_phase` and the
 `phase` of `add_sine_voltage_source` are radians.
 `add_capacitor(c0=, esr=, esl=)` / `add_inductor(i0=, esr=, c_par=, rac=)`:
 datasheet ESR, ESL, C_par; fixed step `dt <= 1/(20*f_res)`. MLCC bias:
-`passives.fit_mlcc_dc_bias`. Lines: `model='pi'` only (no Bergeron), with
-`passives.recommend_line_sections(delay, t_rise)` sections.
+`passives.fit_mlcc_dc_bias`. Lines: `model='pi'` only (no Bergeron);
+sections: `passives.recommend_line_sections(delay, t_rise)`.
 Other `simulate` keywords: `switch_fn`, `t_start`, `store_every`,
 `auto_regularize`, `progress`.
 
@@ -460,16 +460,16 @@ Each row was measured on this version. The fix column is what to write.
 | # | Wrong assumption | What actually happens | Do this instead |
 |---|---|---|---|
 | 1 | `V_th` of `add_diode` / `add_bridge_rectifier` is a forward drop | It is the turn-on threshold. On-state is `V_f + I/g_on`: 10 A into `g_on = 20 S` gives 0.500 V for `V_th = 0` and `0.7` alike, 1.200 V with `V_f = 0.7`. `add_three_phase_vsi(V_f=)` and the MOSFET/IGBT diode `V_F` ARE drops | Pass `V_f` (losses include `V_f*I`), or `b.add_shockley_diode`. Never also a `conduction_specs` `V_f0` |
-| 2 | `v.mean()` over a result is the average | A grid without `dt` clusters at events. Rectifier of 6.2: `.mean()` 6.234 V vs 6.330 V | `p.steady_state_stats`, `p.time_average`, `p.time_rms`, `np.trapezoid(y, t) / (t[-1] - t[0])` |
+| 2 | `v.mean()` over a result is the average | No-`dt` grids cluster at events. Rectifier of 6.2: `.mean()` 6.234 V vs 6.330 V | `p.steady_state_stats`, `p.time_average`, `p.time_rms`, `np.trapezoid(y, t) / (t[-1] - t[0])` |
 | 3 | `p.SwitchStateMask(1)` sets bit 0 | It is a mask of SIZE 1, all OFF | `m = p.SwitchStateMask(b.graph.num_switches); m.set(i, True)` |
 | 4 | MOSFET k is switch bit k | `add_mosfet` adds `<name>_body`, so bits interleave with diodes (below) | `b.switch_index_of(name)` |
 | 5 | Loosening `tol_newton_dx` / `tol_newton_res` fixes a Newton abort | Both are absolute on purpose. Snubbed flyback, `tol_newton_dx=1e-5, tol_newton_res=1e-4`: `auto` 3.53 V, fixed engine 15.31 V, silently | Keep the defaults; read the abort; run `engine='pwl'` with `dt`; fix gate edges, body diodes, initial state |
 | 6 | `p.scope` is a module | `p.scope(b, res, signals=[...])` plots (matplotlib) | `from pulsim.scope import LiveScope` (needs pyqtgraph); `import pulsim.scope as m` gives you the function |
 | 7 | Tie an isolated secondary or a floating neutral to ground with a tiny resistor | A milliohm tie is a galvanic bond. Tutorial 04's VSI: a 1 mOhm neutral-to-rail tie drove 58.8 A DC per phase | Leave it to `auto_regularize` (default on): the run's copy gets 1 GOhm per floating subnet (`res.plan.ties`), your builder none. Own tie: >= 1 MOhm |
 | 8 | `res.v` of a floating DC rail is the DC voltage | It is to ground. Bridge with `ac_b="gnd"`, load across `dp`/`dn`: `v("dp")` spans -0.7..325.0 V, `v("dn")` -325.0..0.7 V; `dp - dn` averages 321.85 V | `res.v("dp") - res.v("dn")`, or ground one DC rail (3.3) |
-| 9 | `discontinuity_restart=False` is harmless | It brings back the old stale history at each gate edge, source jump and start: first order, ringing | Keep the default (6.3) |
+| 9 | `discontinuity_restart=False` is harmless | Stale history at each gate edge, source jump and start: first order, ringing | Keep the default |
 | 10 | Any `dt` works with PWM | Gate edges land on the `dt` grid unless split. Buck D = 0.25, 100 kHz, `make_pwm_switch_fn`: 6.24 V at `dt=2e-7` (12.5 steps run as 13), 6.00 V at `1e-7` | Whole-step `D/f_sw` (3.2), or 6.3 + `enable_substep_state_correction=True`: helper edges are split, order 2 |
-| 11 | Omitting `switch_fn` leaves switches open | Undriven controlled switches are refused by name; `undriven='closed'` runs them ALL CLOSED: the buck of 3.2 then settles at 24.0 V, not 12 V | Always pass `switch_fn` when the circuit has controlled switches |
+| 11 | Omitting `switch_fn` leaves switches open | Undriven switches are refused by name; `undriven='closed'` runs them ALL CLOSED: the buck of 3.2 then settles at 24.0 V, not 12 V | Pass `switch_fn` for controlled switches |
 | 12 | `except Exception:` around `simulate` keeps a script robust | A broad except turns a refusal into a silent wrong answer | Let it raise, or catch `p.PulsimError` (`.engine`, `.feature`) |
 | 13 | A warning from a run without `dt` is noise | It names what TR-BDF2 could not guarantee (a diode on its conduction boundary, a pulse narrower than its sampling). Silence is no proof: a one-shot pulse under a quarter of the step ceiling (`dt`, else `t_end/1000`) can be skipped | Rerun with `dt`, compare (6.2); `dt` <= 4x the narrowest pulse |
 | 14 | `p.time_rms` (and `.rms`) of a switched current is exact on a fixed grid | Each edge is a one-step ramp: low by about `h / (3 t_on)` in `i^2`. Buck MOSFET (D = 0.25): 1.4942 / 1.4993 / 1.5019 A at `dt` = 1e-7 / 5e-8 / 2.5e-8, exact 1.5044 A. Same for `device_loss_summary`'s `i_rms`, not `P_avg` | `np.sqrt(p.time_average(t, i**2, t_from=...))`: 1.5044 A at all three |
