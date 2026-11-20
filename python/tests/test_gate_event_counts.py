@@ -62,11 +62,11 @@ def test_two_edges_of_one_bit_inside_one_fixed_step_are_both_counted():
 
 
 def test_a_pulse_narrower_than_the_snap_is_counted_and_reported():
-    # 0.2 ns < split_snap*dt = 0.69 ns: each fall merges into its rise,
-    # except the first (its rise is the initial gate; the fall is taken
-    # at the step start)
+    # 20 fs < split_snap*dt = 69 fs (split_snap 1e-6, F-SB-2): each fall
+    # merges into its rise, except the first (its rise is the initial gate;
+    # the fall is taken at the step start)
     with pytest.warns(UserWarning, match="n_gate_events_unresolved"):
-        c = _pwl(1e-5).counters
+        c = _pwl(1e-9).counters
     assert c["n_gate_events"] == EDGES_NARROW
     assert c["n_gate_events_unresolved"] == 5
 

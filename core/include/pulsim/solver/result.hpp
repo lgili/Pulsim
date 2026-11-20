@@ -489,9 +489,10 @@ struct SimulationResult {
     Size stage2_retries = 0;
     Size stage2_be_kept = 0;
     Size stage2_retry_failures = 0;
-    // Event splitting: steps whose gate changed with no edge oracle to
-    // locate it (taken at the next grid point), and steps whose event
-    // list overflowed (kMaxStepEvents or the per-step search cap).
+    // Event splitting: gate changes of a switch_fn with no edge oracle
+    // that were not bisected (more than kMaxStepEvents in one step), and
+    // steps whose event list overflowed (kMaxStepEvents or the per-step
+    // search cap).
     Size unlocated_gate_steps = 0;
     Size split_event_overflows = 0;
     // Event splitting with an edge oracle (tasks 5.3/5.5): the declared
@@ -503,6 +504,14 @@ struct SimulationResult {
     // counter). 0 without splitting.
     Size n_gate_events = 0;
     Size n_gate_events_unresolved = 0;
+    // Event splitting with an opaque switch_fn (F-SB-2): gate changes
+    // between a step's two samples (t_prev, t) bisected to split_snap*dt
+    // and split at. A pulse that opens and closes between two samples is
+    // not seen. 0 without splitting or with an oracle.
+    Size n_gate_events_bisected = 0;
+    // Event splitting: trial solves the diode-crossing locator took
+    // (events::illinois on trapezoidal re-steps from the step start).
+    Size split_locator_trials = 0;
     // add-unified-event-queue group 5: the fixed engine's control ticks
     // (one count per TickPlan source) and the largest lateness of a tick
     // on the grid (step time minus scheduled instant).

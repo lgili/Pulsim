@@ -53,3 +53,41 @@ So two defects: the 1 % snap (oracle), and no location at all for an opaque call
 the next grid point, DECISIONS 4 of the split change). Without the split the restart rule
 samples the gate at the step START (restart design D4), so an edge inside a step is taken at
 the NEXT grid point, while plain pwl (sampling at the step end) takes it at the one before.
+
+## The fixes
+
+1. **Diode crossing (F-SB-4)**, `locate_islands`: after the chord (and the island grouping),
+   the earliest crossing is refined with `events::illinois` (the one locator; TR-BDF2 uses it
+   the same way) on trapezoidal TRIAL solves from the step start under the start bits:
+   restore the snapshot, `accumulate_b_extra(tau, tau - a)`, `run_event_iteration(tau, tau -
+   a, false, true)` (one solve, no re-decision), signal = the same `crossing_signal` (summed
+   over the crossers sharing the estimate: one diode, or a floating island's group; mixed
+   directions keep the chord). Stop: bracket or two successive trial instants within
+   `snap`; the instant is the final bracket's unweighted chord root. The split then solves
+   sub-step 1 to that instant, as before. Counter `split_locator_trials`. A failed trial
+   (singular / non-finite) keeps the bracket (the chord, if it is the first).
+   What is located is the crossing of the trapezoidal sub-step trajectory from x(t_prev):
+   its distance to the true instant is the state's global error over the signal's slope.
+2. **Oracle gate edges (F-SB-2)**: `SimulationOptions.split_snap` default 0.01 -> 1e-6
+   (G30's value, which `control_tick='state'` already set; the two modes now agree). It is
+   also the locator's and the bisection's resolution.
+3. **Opaque switch_fn with the split (F-SB-2)**: the event collection reads the gate at t_prev
+   and t (two calls per step, as before: the old block read t_prev and t_prev - snap for the
+   `unlocated_gate_steps` count) and bisects each change between them to `snap`, then
+   splits at the post side like an oracle edge (up to 8 per step; more -> `unlocated_gate_steps`
+   and the overflow path). Counter `n_gate_events_bisected`. A pulse that opens and closes
+   between two grid samples is not seen (no interior samples: they would cost a switch_fn
+   call each on every step). This reverses DECISIONS 4 of add-fixed-step-event-splitting:
+   a grid-indexed closure (`round(t/dt) % N`) changes value at the HALF step, and is now split
+   there (it was taken at the next grid point); such a closure should be written with
+   `floor` or as a schedule with `next_edge_after`.
+4. **Restart rule without the split**: the gate of step (t_{k-1}, t_k] is read just before its
+   end, `switch_fn(t_k - dt/100)` (was `switch_fn(t_{k-1})`). An edge inside a step now takes
+   effect from t_{k-1}, the side plain pwl takes (plain pwl reads `switch_fn(t_k)`); an edge on
+   a grid point t_{k-1} is still exact (design D4's order-2 case is kept); an edge in
+   (t_k - dt/100, t_k) is taken at t_k (error < dt/100). Why dt/100 and not an ulp or `snap`:
+   a closure with its own tolerance band (the discontinuity-order test's buck, `floor(ph + 1e-9)`)
+   reads `t_k - 1e-6 dt` as "at the edge" once 1e-6 dt < 1e-9 T (N = 1600 per period): the
+   on-grid edge then fired one step early (7.3e-4 A). A grid-indexed `round(t/dt)` closure
+   reads the same index as plain pwl (it read one step earlier). Same on the static path
+   (`st_gate_t`).

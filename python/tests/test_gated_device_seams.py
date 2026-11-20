@@ -187,13 +187,11 @@ def test_the_split_fires_a_declared_gate_edge_on_time():
                                enable_substep_state_correction=True) < 1e-9
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "owner: the event-queue track (add-unified-event-queue). Under "
-    "discontinuity_restart alone the fixed engine samples the gate at the "
-    "step start and does not read the schedule's declared edges: the "
-    "60 deg edge fires one 1 us step late (0.80 of the 10 V span at that "
-    "sample). The split lands it (test above)."))
 def test_the_restart_rule_fires_a_declared_gate_edge_on_time():
+    # Under the rule alone the step that contains the 60 deg edge carries the
+    # new gate (read at t_k - dt/100, plain pwl's side, F-SB-2): every SAMPLE
+    # agrees with the reference (it read the gate at the step start and fired
+    # one 1 us step late, 0.80 of the span at that sample).
     assert _scr_halfwave_error(discontinuity_restart=True) < 1e-9
 
 

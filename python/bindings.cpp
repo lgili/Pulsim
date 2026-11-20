@@ -3179,7 +3179,7 @@ void init_module(py::module_& m) {
                         &SimulationOptions::enable_substep_state_correction)
         .def_readwrite("split_snap", &SimulationOptions::split_snap,
                         "Split events within split_snap*dt of a step "
-                        "boundary are taken at it (default 0.01).")
+                        "boundary are taken at it (default 1e-6).")
         .def_readwrite("resolution_diagnostics",
                         &SimulationOptions::resolution_diagnostics,
                         "Record SimulationResult.resolution (truncation "
@@ -3601,6 +3601,8 @@ void init_module(py::module_& m) {
                 d["split_event_overflows"] = r.split_event_overflows;
                 d["n_gate_events"] = r.n_gate_events;
                 d["n_gate_events_unresolved"] = r.n_gate_events_unresolved;
+                d["n_gate_events_bisected"] = r.n_gate_events_bisected;
+                d["split_locator_trials"] = r.split_locator_trials;
                 d["mode_structure_checks"] = r.mode_structure_checks;
                 d["ideal_loop_releases"] = r.ideal_loop_releases;
                 return d;
