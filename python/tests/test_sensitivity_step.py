@@ -376,5 +376,6 @@ def test_a_transmission_line_is_refused_by_name(engine):
     b.add_transmission_line("T", "b", "gnd", "c", "gnd", Z0=50.0, delay=1e-7,
                             model="bergeron")
     b.add_resistor("RL", "c", "gnd", 50.0)
-    with pytest.raises(p.UnsupportedError, match="TransmissionLine"):
+    with pytest.raises(p.UnsupportedError, match="TransmissionLine") as ei:
         p.simulate(b, t_end=1e-6, dt=1e-8, engine=engine, sensitivities=["R.R"])
+    assert ei.value.feature == "sensitivities"
