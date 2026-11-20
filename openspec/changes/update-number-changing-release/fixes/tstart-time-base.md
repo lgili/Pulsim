@@ -38,6 +38,7 @@ Each input on a stateless circuit (the output at t is the input at t), run on
 | Python gate with `next_edge_after` | ABS | ABS | MIXED | SHIFTED | ABS |
 | `b_extra_fn` | ABS | ABS | refused at any t_start (no exact step) | SHIFTED | ABS (bdf2); refusal unchanged |
 | sine / pulse / PWM / PWL sources (the circuit's own) | ABS | ABS | SHIFTED | SHIFTED | REFUSED by name (`feature='t_start'`, device named) |
+| a gate that follows a controller (`_closed_loop`, `follows_controller`, graph gates) without ticks | ABS | ABS | SHIFTED | SHIFTED | REFUSED by name |
 | control ticks (controller_period, closed loops, graphs, monitors) | callable gets absolute t; grid origin t_start (documented contract) | same | refused by name | refused by name | unchanged (refused) |
 | sensitivities run (exact path) | — | — | gate SHIFTED (65 % of samples wrong) | — | ABS |
 | `periodic_steady_state` | has no t_start | | | | n/a |
@@ -53,6 +54,7 @@ Outputs of a fresh exact-engine `t_start` run:
 | mode diagnostics (`mode_shadow` / `mode_selection` / `mode_guard` disagreement `t`, `repair_times`) | engine clock | absolute |
 | recorders (stored-array pass on the relabelled times; the in-loop feed is off for a fresh t_start run) | absolute | absolute (windows and periods checked) |
 | `final_snapshot` | invalid, by name | unchanged |
+| `ConvergenceError` / `DiodeModeInconsistentError` `.t_failed` | engine clock | absolute (`relabel_failure`, in `_run_dsed`) |
 | kernel error messages ("at t = … s") | engine clock | engine clock (C++ text; not fixed) |
 
 ## What needs C++
@@ -91,6 +93,40 @@ statistics over absolute windows.
 
 Without the fix 40 cells of the file fail (patched back in a plugin).
 
+## Reviewer (fresh context, opus): what the first version missed, all fixed
+
+1. HIGH: `tau + t0` rounds onto or across an edge once ulp(t0) exceeds the
+   engine's margin past an edge (`advance_past`: max(1e-15, 4 eps |tau|) on
+   the engine's small clock). A gate that switches strictly after its edges
+   ran INVERTED at t0 = 20 s (on-time 0.749 for 0.3). The wrapper now keeps
+   every read in order with every handed-out edge (bisect over the edges:
+   at the edge reads e, after it reads after e, before it reads before e).
+2. t_start exactly ON an edge: the start read the mask before the edge for a
+   whole interval (strictly-after gate: duty 0.44 for 0.30); the start now
+   reads the mask after it, as the uninterrupted run does.
+3. The wrapper hid a controller-following gate (`_closed_loop`,
+   `follows_controller`, graph gates) from the sensitivity path's refusal:
+   such a gate is refused by name with t_start on the exact engine (its
+   controller is not shifted either).
+4. `.t_failed` of the exact engine's typed give-ups was on the engine clock.
+
+Tests: `test_gate_switching_after_its_edges_at_a_large_or_edge_t_start`
+(fails with the plain `tau + t0` wrapper at all three t0), the controller
+refusal on both paths.
+
+## What did not move (t_start = 0)
+
+Against the base's code (3b6f2a34, a detached worktree with the same
+extension): goldens + counters, stateful, engines (incl. dsed / exact),
+steps, `pwl_identity` 390/390, `trbdf2_identity` 371/371 (one entry's
+message differs only by the worktree's path), and a digest of every
+`simulate()` result (times, states, loss ledgers, loss events, reinit
+records, event times) in 50 exact / dsed / loss / resume / recorder test
+files: 842 results, one differs — `test_a_fresh_t_start_run_books_the_zero_
+start_ledgers_relabelled`, a t_start run (t0 = one gate period, so the
+test's assertions hold under both rules; its docstring now states the new
+one). `test_simulate_overhead.py` passes (the shift is under `if t_start`).
+
 ## Side findings (not fixed here)
 
 1. pwl resumed EXACTLY on a control-tick instant is not bit-identical (the
@@ -99,4 +135,12 @@ Without the fix 40 cells of the file fail (patched back in a plugin).
    the resumed run's tick reads the snapshot's x(t). Same under
    `control_tick='state'`. Off the tick grid the resume is bit-identical.
 2. (from exact-stateless) edge counting at the run's first instant still
-   differs: the leg from t_start = 5e-5 (an HS edge): trbdf2 n_on = 1, dsed 0.
+   differs: the leg from t_start = 5e-5 (an HS edge): trbdf2 n_on = 1, dsed 0
+   (the start is not an event on the exact engine; the waveform after it is
+   right now).
+3. A native SwitchSchedule becomes a Python callable (GIL per call) on a
+   fresh exact-engine t_start run: slower, off the default path.
+4. (not a defect) the reviewer's "tail duty 0.3058 vs 0.2997" at t0 = 20.00005
+   is a trapezoid over the stored samples clipped at a window start that is
+   not a sample of the uninterrupted run; its event instants equal the fresh
+   run's.
