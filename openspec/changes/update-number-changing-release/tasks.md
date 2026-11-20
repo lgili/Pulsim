@@ -56,7 +56,7 @@ Rehearsal at fe75ee01 (the regenerated report's header names the runs its sectio
 - [x] R1.3 `R2_BUCKETS.md` from one full pytest and one full ctest run on the flipped tree (`probes/r2_buckets.py`)
 - [x] R1.4 Bucket 0: shared helpers / tools / stub overlay; pytest plugin = the no-op check
 - [x] R1.5 Goldens regenerated with `RELEASE_GOLDEN_DIFF.md`; analytic ceilings tightened where earned (none loosened)
-- [ ] R1.6 `REFERENCE_STATUS.md` + triage freezes and `EXACT_SCOREBOARD.md` regenerated; proofs B(ii) / B(iii)
+- [x] R1.6 `REFERENCE_STATUS.md` + triage freezes and `EXACT_SCOREBOARD.md` regenerated; proofs B(ii) / B(iii) (proofs + evidence 4c6ba3cb; the 72 stale triage freezes migrated entry by entry 2ae30180, DECISIONS.md section 9: 69 a + 2 a* renamed, 0 b, 1 c = F-X-4; `reference_status` 0 `UNEXPECTED`, rc 0)
 
 ## R2. The red suite (six agents, `R2_BUCKETS.md`)
 - [x] R2.1 Bucket 1 (eb7dec5a): 79 -> 0 (79 digests re-pinned, rule e)
@@ -71,14 +71,22 @@ Rehearsal at fe75ee01 (the regenerated report's header names the runs its sectio
 - [x] R2.9 Second integrator (2026-11-20): merged `feat/core-integration` b9e46778 (fad54e51) and `release/h-call-overhead` (1b3f7ecc); ctest 1071/1071; full pytest 11 failed (2 accepted goldens + 9 counter gates, both pending their regeneration) / 6123 passed / 110 skipped / 67 xfailed, no XPASS; FINDINGS 36 open / 2 closed
 
 ## R2.5 Findings (FINDINGS.md; each group handed to a fix agent on the PR line, arriving here by merge)
-- [ ] R2.5.A Impulsive events / the restart rule: F-3-1, F-3-3, F-3-7, F-5-1, F-5-10, F-6-1 — IN PROGRESS on the PR line (857898c7, not merged here)
+- [ ] R2.5.A Impulsive events / the restart rule: F-3-1, F-3-3, F-3-7, F-5-1, F-5-10, F-6-1 — IN PROGRESS (`fix/core-release-a-impulsive` a324a2db, not merged here)
 - [ ] R2.5.B Event samples and result integrals: F-2-2, F-4-4, F-5-4, F-5-5, F-5-6, F-5-7, F-6-2, F-6-4, F-6-5 — FIXED on the PR line (36836230), waits for PR batch 14q; still parked here
 - [ ] R2.5.C The new mode selection: F-2-3, F-3-2, F-4-1, F-4-2, F-4-3, F-5-3, F-5-9 — FIXED on the PR line (d014f049), waits for PR batch 14q; still parked here
-- [ ] R2.5.D trbdf2: F-3-4, F-4-5 — OPEN
-- [ ] R2.5.E Control tick: F-3-5, F-4-7 — OPEN
-- [ ] R2.5.F The exact route / output rule: F-2-4, F-3-6, F-5-2, F-5-8, F-6-6, F-6-7, F-X-1, F-X-3 — IN PROGRESS (`fix/core-release-f-exact-output`); F-X-3 keeps `ladder500_rc` / dsed out of the counter freeze
+- [ ] R2.5.D trbdf2: F-3-4, F-4-5 — `fix/core-release-de-trbdf2-tick` 85637327 (F-4-5 fixed, F-3-4 traced and still OPEN); not merged here
+- [ ] R2.5.E Control tick: F-3-5, F-4-7 — `fix/core-release-de-trbdf2-tick` 85637327 (F-4-7 fixed fc16563e); not merged here
+- [ ] R2.5.F The exact route / output rule: F-2-4, F-3-6, F-5-2, F-5-8, F-6-6, F-6-7, F-X-1, F-X-3, F-X-4 — IN PROGRESS (`fix/core-release-f-exact-output` a5b9a485); F-X-3 keeps `ladder500_rc` / dsed out of the counter freeze
 - [ ] R2.5.G Thermal summary on branch-form devices: F-2-1, F-6-3 — FIXED on the PR line (6db843c0), waits for PR batch 14q; still parked here
 - [x] R2.5.H Call overhead: F-4-6, F-X-2 — CLOSED: `release/h-call-overhead` 26d059b0 merged (1b3f7ecc); warm call 3057 -> 2800 (fixed step, ceiling 2890), 5609 -> 3634 (no dt, exact route, ceiling 3760); gate 3/3 pass
+
+### R2.5 / R3 state (hand-off, 2026-11-20, tip 2ae30180)
+- FINDINGS.md: 37 open + 2 closed. New: F-X-4 (group F, C), from the triage migration: `auto` without dt lands on dsed and writes 2,000,002 samples for a 2 s DC resistor; frozen `auto: disagree (0.00178)` on `thermal/electrothermal_resistor_self_heating.yaml`.
+- Fixed on the PR line, waiting for integration batch 14q, still parked here: G (6db843c0), C (d014f049), B (36836230).
+- D + E: `fix/core-release-de-trbdf2-tick` 85637327, F-3-4 open (traced, not fixed).
+- A (`fix/core-release-a-impulsive` a324a2db) and F (`fix/core-release-f-exact-output` a5b9a485, now with F-X-4): in progress.
+- H: merged here (1b3f7ecc), F-4-6 / F-X-2 closed.
+- R3 stays BLOCKED until every finding is closed or accepted by the owner.
 
 ## R3. Delete the legacy paths (after one release) — BLOCKED on R2.5 (every finding closed or accepted by the owner)
 - [ ] R3.1 Remove the `legacy` values and the today-branches they keep: `form='conductance'` default paths, `mode_selection='legacy'`, `control_tick='label'`, `device_path='legacy'` (and the hand stamps, 3.4), `undriven=None` per-engine behaviour, `UNIFORM_ENGINE_RULES` switch
