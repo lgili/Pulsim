@@ -3938,6 +3938,11 @@ def _run_dsed(plan):
     mode_selection = plan.events.mode_selection
     _mode_auto = plan.events.mode_auto
     _dsed = _dsed_dispatch_module
+    if t_start and i.resume_from is None:
+        # t_start is an absolute label (docs/internals/run-planning.md): the
+        # engine's clock runs from 0, so the drive is shifted onto it here
+        switch_fn, b_extra_fn = _dsed.on_absolute_clock(
+            builder, float(t_start), switch_fn, b_extra_fn)
     # The DSED branch returns here, ~400 lines before the PWL
     # tail that attaches `_builder` / `_preflight`. Attach the
     # preflight report on the way out, so `result._preflight` —

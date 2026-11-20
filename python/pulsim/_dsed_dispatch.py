@@ -618,6 +618,77 @@ def _has_edge_oracle(sf) -> bool:
     return hasattr(sf, "next_edge_after")
 
 
+# The circuit's own time-varying sources: the native adapter evaluates them at
+# the engine's clock (C++), which no Python wrapper can move.
+_TIMED_SOURCE_KINDS = frozenset((
+    "sine_voltage_source", "sine_current_source", "pulse_voltage_source",
+    "pulse_current_source", "pwm_voltage_source", "pwl_current_source"))
+
+
+class _OnAbsoluteClock:
+    """A gate / ``b_extra_fn`` read at the absolute time ``tau + t0`` while
+    the exact engine's clock ``tau`` runs from 0. An edge handed to the engine
+    as ``tau_e = e - t0`` is read back at ``e`` itself: ``(e - t0) + t0`` can
+    round below ``e`` and read the mask before the edge."""
+
+    __slots__ = ("fn", "t0", "_edges")
+
+    def __init__(self, fn, t0: float):
+        self.fn, self.t0, self._edges = fn, t0, {}
+
+    def _abs(self, tau: float) -> float:
+        e = self._edges.get(tau)
+        return tau + self.t0 if e is None else e
+
+    def __call__(self, tau):
+        return self.fn(self._abs(tau))
+
+
+class _OnAbsoluteClockEdges(_OnAbsoluteClock):
+    """... and its edge oracle, shifted the same way."""
+
+    __slots__ = ()
+
+    def next_edge_after(self, tau):
+        e = float(self.fn.next_edge_after(self._abs(tau)))
+        if not (e < float("inf")):
+            return e
+        te = e - self.t0
+        if te <= tau:       # rounding: the edge is still after tau
+            te = _np.nextafter(tau, _np.inf)
+        if len(self._edges) > 4096:   # an edge is read back right after it is handed out
+            self._edges.clear()
+        self._edges[te] = e
+        return te
+
+
+def on_absolute_clock(builder, t0: float, switch_fn, b_extra_fn):
+    """``simulate(t_start=t0)`` on the exact engine, a fresh run: the engine
+    runs on its own clock from 0 and its outputs are relabelled by ``t0``
+    (``_result_from_native``, the loss events in the binding), so every input
+    it reads a time from is shifted here, the one place (``_run_dsed``): the
+    gate and its edge oracle, ``b_extra_fn``. The circuit's own time-varying
+    sources are evaluated by the native adapter and cannot be shifted from
+    Python: refused by name. Control ticks with t_start are refused by
+    ``_compose_for``."""
+    for c in builder.components():
+        if c["kind"] in _TIMED_SOURCE_KINDS:
+            raise unsupported(
+                "dsed", "t_start", device=c["name"], message=
+                f"simulate(engine='dsed', t_start={t0!r}): the exact engine runs a "
+                f"fresh run on its own clock from 0, and the time-varying source "
+                f"{c['name']!r} ({c['kind']}) is evaluated on that clock (it would "
+                f"run {t0!r} s early). Start at t_start=0 (resume_from a snapshot "
+                "continues on the absolute clock), or use engine='pwl' / 'trbdf2'.")
+    if switch_fn is not None:
+        cls = (_OnAbsoluteClockEdges if _has_edge_oracle(switch_fn)
+               else _OnAbsoluteClock)
+        switch_fn = cls(switch_fn, t0)
+    if b_extra_fn is not None:
+        b_extra_fn = _OnAbsoluteClock(b_extra_fn, t0)
+    return switch_fn, b_extra_fn
+
+
 # add-complementarity-mode-selection D5: the event step of the shadow LCP.
 # h_e = H_E_REL * T_ref (measured band 1e-9..1e-6, probes/h_e_band.out), T_ref the shortest declared period (sine / PWM
 # source) or the run length (see DECISIONS.md for the measured band).
@@ -948,7 +1019,7 @@ def run_dsed_from_builder(
     # Eagerly resolve the initial mask so any extractor failure
     # (floating cap, nonlinear device, etc.) surfaces NOW with the
     # bridge-fallback message rather than mid-simulation.
-    initial_mask = sf(opts.t_start)
+    initial_mask = sf(0.0)   # the engine's clock (simulate() shifts the gate)
     if resume_from is not None:
         initial_mask = SwitchStateMask(builder.graph.num_switches)
         for _i, _b in enumerate(resume_from.stamped_mask):
