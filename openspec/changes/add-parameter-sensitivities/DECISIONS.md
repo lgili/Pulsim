@@ -585,3 +585,57 @@ ESDIRK / Newton refusals beyond the tests.
   of the test tree this session; full ctest (track agent rule).
 - NEXT: (1) buck_pwl cost; (2) 6.3 at rtol 1e-9 (the floor-path bias
   above); (3) 4.4 saturable inductor (item 4 of the hand-off list).
+
+### Cost gate, step tests, landing review (2026-11-20, third session; WIP)
+
+- WHAT COST THE +0.59 % on buck_pwl (sensitivities off). Measured with a
+  standalone C++ driver (`.scratch/c7/rtbench.cpp`: diode buck, pwl, dt
+  1e-7, differential instructions per step (I(4 ms) − I(2 ms))/ΔN, min of 3;
+  30 s per variant against a header tree) — it reproduces the Python gate:
+  base 41860812 2845–2850 (PWM) / 2831–2833 (gate held on), tip e149fc47
+  2863–2868 / 2851 (+18). Bisection by deleting hook groups from the tip:
+  restart hooks only −0; split hooks only −3; per-step pre-block only −3;
+  pre-block+split −0…−10 (noisy); pre-block+restart −5; ALL of them
+  −18 (2844–2853 / 2833: parity). No single hook: the cost is the closures
+  `run_restart` and `split_step`, defined inside step_take and therefore
+  BUILT ON EVERY STEP (whether called or not): each by-reference capture is
+  one load + one store per step, and the hooks added 8 captures (sens,
+  sens_begin, sens_stage to run_restart; sens, sens_gate_event, sens_begin,
+  sens_stage, sens_diode_events to split_step) = 16 instructions, plus the
+  pre-step `if (sens.on())` block. Seen in the disassembly (store pairs
+  before the split_step call in the step body).
+- CHANGED (run_transient.hpp, uncommitted→this commit): (1) the pre-step
+  block is gone — the step's gate change at t_prev is taken lazily by
+  `sens_open()` at the step's first call into the recurrence (sens_begin,
+  or the closing block of a plain step; `gate_t0`, `t_prev_step`); one
+  `sens.on()` test per step, as in the base; (2) the inner closures reach
+  the recurrence through ONE reference `sx` (a const struct: cached `on`,
+  sens, the hook lambdas); (3) `split_step` is defined inside `if (split)`
+  where it runs, so a run without the split builds no closure for it.
+  Bench after: (1)+(2) alone +7…+10; with (3) 2798–2801 / 2785–2791 —
+  −1.6 % against the base, and parity (±3) against the base with the same
+  move applied (2802 / 2785): the off path costs nothing measurable beyond
+  the move's own gain. Real-extension four-case gate and byte compares:
+  PENDING (extension build started 14:19; see the next entry or the report).
+- REVIEW of e66913b3..e149fc47 (fresh-context opus, scripts in
+  `.scratch/c7/review/`): carry's sign and side correct; the bordered
+  re-init is independent of which resident factor (linear). dt_land is NOT
+  ps: 0.2–5 ns on the 40 T DCM buck at rtol 1e-10 (the floor bounds the
+  bracket width, not its distance from t) — comment fixed in
+  sensitivity.hpp. No case found where the displacement is most of the
+  answer (share ≤ 2e-3; everything coarser refuses at the floor). FINDING
+  (medium): an event within ~3e-13 s of t_end left PENDING returned the
+  left limit — duty edge on the pulse RC: dv/dD 0.000 vs truth 7.38; diode
+  turn-on: dv/dR −6.7e-4 vs +4.4e-3. FIX: `StageSensitivity::finish`
+  refuses by name when an event with dτ/dp ≠ 0 is still pending ("whose
+  jump in the derivative was not applied"). Audit cells for it: NOT YET
+  ADDED (needs the rebuilt extension to pin each engine's outcome;
+  reproducers `edge_at_tend2.py`, `diode_at_tend2.py`). Not reachable,
+  noted: `qdv_n_` is left at x_n by carry (exact only for V_f = 0).
+- pulsim_core_step_tests: NOT built this session (`.scratch/build-ctest`,
+  LTO on, has a 10:37 binary of older code).
+- NEXT: (a) when the extension is built: four-case gate (`.scratch/bl/cost.sh
+  6`), g6cmp byte compares vs 41860812 (`.scratch/g6cmp.sh compare`), the
+  reproducers → audit cells `*_at_t_end` (expected: refusal on trbdf2),
+  audit + sensitivity tests, full pytest, ruff, openspec validate; (b) build
+  and run pulsim_core_step_tests; (c) 6.3 at rtol 1e-9 unchanged.

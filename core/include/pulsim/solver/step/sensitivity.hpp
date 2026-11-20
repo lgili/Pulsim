@@ -208,7 +208,17 @@ public:
     }
 
     /// The run ended at (t, x): the last committed state must be ours.
-    [[gnu::noinline]] void finish(Real t, const Vector& x) const { check_contiguous_(t, x); }
+    /// An event whose instant moves with p, still pending (its jump is applied
+    /// at the first post-event stage, and none came: it fell within the
+    /// time resolution of t_end), leaves x(t_end) one-sided in p: refused.
+    [[gnu::noinline]] void finish(Real t, const Vector& x) const {
+        check_contiguous_(t, x);
+        if (pend_.on && pend_.dtau.cwiseAbs().maxCoeff() > Real{0}) {
+            refuse_step(t, std::format("an event ({}) at t = {} whose jump in the "
+                                       "derivative was not applied: the run ends at it",
+                                       pend_.what, pend_.tau));
+        }
+    }
 
     /// Stage `s` (0-based in the step) converged at X under `mask`. `fac`
     /// holds the factor the stage solved with; `J_lin` is the linear part of
@@ -435,9 +445,14 @@ public:
 
     /// A landing interpolated between two states of the current mode, below
     /// the engine's conditioning floor (no solve: TR-BDF2's turn-off at its
-    /// bracket floor). Its length dt is a few ps: dq/dp moves by dt·dq̇/dp
-    /// (first order in dt, the scheme's own order there), the slots are
-    /// kept, and S is re-initialised consistent with dq/dp at x1 by one
+    /// bracket floor). Its length dt is up to about the step (the floor
+    /// bounds the bracket's width, not its distance from t: 0.2–5 ns on the
+    /// 40 T DCM buck at rtol 1e-10): dq/dp moves by dt·dq̇/dp (explicit
+    /// Euler on the pre-event slot, O(dt²) per landing, a fixed number of
+    /// landings: second order overall like the state), the slots are
+    /// kept (q̇ at x_n: exact only for a jump-free turn-off, V_f = 0 — a
+    /// turn-off with a jump is refused at the floor today), and S is
+    /// re-initialised consistent with dq/dp at x1 by one
     /// bordered solve per parameter on `fac` (any factor of the mode, a =
     /// 2/its dt) — no factorization. Call after `begin_step`.
     [[gnu::noinline]] void carry(Real t1, const topology::SwitchStateMask& mask, const Vector& x1,
