@@ -273,6 +273,40 @@ def test_a_saturable_core_cut_by_its_switch_is_refused_by_name():
     _pathless_saturable(engine="pwl")    # restart-less: the rule is not on
 
 
+def _switched_junction(t_end, **kw):
+    """A 1 nF nonlinear capacitor across a buck switch (R_on 1 mOhm): the turn-on at 10 us
+    discharges it in tau = 1 ps << dt = 20 ns (a real impulse); the turn-off at 5 us
+    recharges it through the inductor current (a kink, not a jump)."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", 24.0)
+    b.add_switch("S", "vin", "sw", 1e3, 1e-9)
+    b.add_diode("D1", "gnd", "sw", 1e3, 1e-9)
+    b.add_inductor("L", "sw", "out", 100e-6)
+    b.add_capacitor("C", "out", "gnd", 47e-6)
+    b.add_resistor("R", "out", "gnd", 2.0)
+    b.add_nonlinear_capacitor("Cj", "vin", "sw", 1e-9, 1.0)
+    n, k = b.graph.num_switches, b.switch_index_of("S")
+
+    def fn(t):
+        m = p.SwitchStateMask(n)
+        m.set(k, (t % 1e-5) < 5e-6 - 1e-12)
+        return m
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return p.simulate(b, t_end=t_end, dt=2e-8, switch_fn=fn, **kw)
+
+
+def test_a_nonlinear_capacitor_shorted_by_its_switch_is_refused_by_name():
+    """The rule reads a nonlinear capacitor's rate before the event from its law
+    (i_prev / C(v_prev)): the turn-off kink at 5 us passes, the 1 ps discharge at the
+    10 us turn-on is refused naming the capacitor."""
+    _switched_junction(9e-6, **RESTART)
+    with pytest.raises(p.UnsupportedError, match="nonlinear_capacitor 'Cj'") as ei:
+        _switched_junction(1.2e-5, **RESTART)
+    assert ei.value.device == "Cj" and ei.value.feature == "impulse"
+    _switched_junction(1.2e-5, engine="pwl")
+
+
 def _two_rectifiers(which, dt=1e-4):
     """Two INDEPENDENT half-wave rectifiers, the second's sine 0.1 dt late: their turn-offs
     fall in the same grid step."""

@@ -2,14 +2,15 @@
 
 > **THIRD SESSION (2026-11-20) — the impulse detector is ONE rule [M].** The second session's stack
 > (energy ratio 0.81, 1e-6 stored-energy floor, 1 % of the kind's magnitude, 1e-4 A/V floor) is gone.
-> - **Probe.** x2 = a second BE stage of γh from x1 (stage 1's bits frozen, BUILT-IN sources moved to
->   t2 = t + 2γh unless one of them jumps in (t1, t2]; a `b_extra_fn` keeps its t1 value — it is called
->   once per solve time), x0+ = 2·x1 − x2. The second session's probe re-solved the SAME stage (sources
->   frozen at t1): a fast mode that TRACKS its forcing then extrapolates to x0 + γh·ẋ, i.e. reads its own
->   O(h) motion as a jump. Trace (`test_dt_retry_of_a_step_that_holds_an_edge`, Newton rectifier from
->   rest, dt 1 ms): frozen probe t = 0 / 1 / 2 ms d = 43.1 / 40.2 / 30.5 V on C, classified impulsive,
->   histories moved, the dt-retry ladder then fired at 4, 5, 6 ms; advanced probe d = −0.31 / 2.3 / 3.7 V
->   against the bound 149 / 144 / 102 V: no impulse, retries 21, 22, 23 ms (the test passes).
+> - **Probe: two readings, a jump must show in BOTH.** x2 = a second BE stage of γh from x1 (stage 1's
+>   bits frozen, same factor), x0+ = 2·x1 − x2, read twice: (a) sources frozen at t1, (b) BUILT-IN sources
+>   moved to t2 = t + 2γh (unless one jumps in (t1, t2]; a `b_extra_fn` keeps its t1 value — called once
+>   per solve time). (a) alone fails on a fast mode that TRACKS its forcing (it extrapolates to x0 + γh·ẋ:
+>   `test_dt_retry_of_a_step_that_holds_an_edge`, rectifier from rest, frozen d = 43.1 / 40.2 / 30.5 V on C
+>   at t = 0 / 1 / 2 ms, histories moved, dt-retries at 4, 5, 6 ms; moved d = −0.31 / 2.3 / 3.7 V against
+>   the bound 149 / 144 / 102 V, retries 21, 22, 23 ms, test passes). (b) alone fails on a source-driven
+>   device kink: the MOSFET level-1 gate ramp crossing V_th at t = 0 (`mos_l1` golden, pwl+restart) gave
+>   a 1.8e-14 J record; with both readings 0 records and the engines compare is identical again.
 > - **Rule** (per state: capacitor voltage, inductor current; linear algebra and constants in the
 >   `consistent_start` comment): impulsive iff some state has
 >   |x0+ − x0| > h·max(|ẋ(0−)|, |x2 − x1|/γh) + 1e-8·(1 + |x0| + |x1|) [+ G_off·(1 + V_max) for currents].
@@ -28,10 +29,15 @@
 >   event, and their laws would read x0+'s extrapolated algebraic entries (F-5-1: v_sw −6.8e8 V). The O(h)
 >   lag of "start from x1" is gone. Not measured on a circuit with a stateful device AT an impulse.
 > - **Saturable inductors / nonlinear capacitors (reviewer item): refused by name.** Their state (core
->   current, capacitor voltage) is probed by the same rule (rate after the event; no history slot); their
+>   current, capacitor voltage) is probed by the same rule; the rate before the event comes from the law
+>   (V_L_old / L(i_L_old), i_prev / C(v_prev)) — without it the `everything` circuit's S turn-off kink at
+>   5.02 us was refused (Cj −1.57e-3 V); with it only the 10 us turn-on, which shorts Cj (1 nF) through
+>   R_on 1 mΩ (τ = 1 ps vs dt 20 ns: a real −24 V discharge), is refused; their
 >   histories cannot be moved to x0+ (λ(i), q(v) read x0+), so a jump on one raises
 >   `UnsupportedError(feature='impulse', device=<name>, kind='saturable_inductor'|'nonlinear_capacitor')`
->   under the rule. Test: a saturable core cut by its switch.
+>   under the rule ("run this circuit without discontinuity_restart"). Tests: a saturable core cut by its
+>   switch; a nonlinear capacitor across a buck switch (no refusal through the 5 us turn-off, refused at
+>   the 10 us turn-on). The stateful compare's `everything_pwl_restart` therefore raises now.
 > - **Split: summed signal only on a FLOATING island (reviewer item).** Diodes the decided mode flips that
 >   touch the same node island (union of every branch but the OFF diodes) with no path to ground share
 >   one summed signal (the island's common mode is set by the OFF diodes' leakage alone: F-3-1's
@@ -43,6 +49,21 @@
 > - **Numbers on this rule** (F-5-1 / F-3-3 unchanged): F-5-1 i_L 100 -> −3.8e-5 A, one record dW
 >   4.99999881 J (truth 5 J); F-3-3 peak 16.381985087 / 16.381988999 / 16.381990009 A at dt 10 / 5 / 2.5 ns
 >   (exact 16.381990162), min +1.5e-7 A. 9 restart files + release_findings_a: all pass (F-3-7 xfail).
+> - **Verified at this tip [M]** (ext build of the committed header): the 41 test files that use
+>   discontinuity_restart / event_split: 1128 passed, 3 skipped, 6 xfailed; test_release_findings_a 9 passed
+>   1 xfailed. Byte compares vs the PR head, DEFAULT options: goldens all identical (buck/vsi_pwl_restart
+>   identical, only `cache.event_hits` counters move), stateful identical except `everything_pwl_restart`
+>   (now refused, above), engines ALL identical, steps ALL identical, trbdf2_identity 371/371,
+>   pwl_identity 347/379 — the 32 that differ are all pwl+restart / pwl+split. Classified: 9 counter-only
+>   (the probe's Newton solves: ll15 split, ll16 ×2, buck_mosfet_nonlinear ×2, ll08 ×2, ll11 ×2); the 23
+>   others carry reinit records (impulsive events at commutations: ll14, ll15 restart, half_bridge_transformer_dc,
+>   stiff_two_timescale_rc (Ca at t = 0), boost_pfc_open_loop, ll12, ll09, active_clamp_forward, flyback,
+>   forward, ll13, synchronous_flyback). Three LOSE the `_implausible_voltage` warning the head had
+>   (half_bridge_transformer_dc, ll13, synchronous_flyback). Cost (instructions per accepted step, min of 3,
+>   same tree): buck_pwl 1.0053 (first run 1.0006 on the same default path — re-measuring), vsi_pwl 1.0032,
+>   buck_trbdf2 0.9999, bridge_trbdf2 0.9983; rule on: buck 1.0553, vsi 1.0207. NOT yet on this tip: one
+>   full pytest, reference_status (last run before the two readings: no case worse, flyback 0.110 -> 2.3e-6
+>   and forward 0.092 -> 2.6e-6 disagree -> agree), the reviewer.
 > - **F-3-7** still open: with this rule the saturable PSFB aborts at t = 44.95 us (Newton ||dx|| 803 V at
 >   rect_neg, residual 9e-7); restart-less 6.911 V, linear primary 6.890 V.
 
