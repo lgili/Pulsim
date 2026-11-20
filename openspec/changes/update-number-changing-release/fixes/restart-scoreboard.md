@@ -370,19 +370,23 @@ definition`, long-form full table; `--previous` compares `exact_old` with an old
 `exact_parts(truth_after=, parasitic=, limits_tol=)`, `exact_scoreboard.PARASITIC`,
 `event_record` flags an engine event when a `reinit_records` entry lies within 4 ulp of its
 instant; the rehearsal passes the same window). Condition (i): a projection record at the
-event. Condition (ii): the truth, at t_e + W·2^-k (k < 60, W = dt/100 for dsed, h for pwl),
-settles (a doubling of the offset moves it ≤ 1e-9 of span) within the cell's tol of the
-engine's right value. Then: instants += (truth right − engine right)²·tau_eff; limits for that
-value = its distance to the settled truth; `n_projected` counts it (`p<n>` in the full table).
-Tests: `test_exact_measure.py` (the reported case; the residual kept in limits; no record;
-settles elsewhere / after the window / drifts; an impulse the truth makes too).
+event. Condition (ii): the truth, on 32 W·2^-k (k < 60) cut at irrational fractions (W = dt/100
+for dsed, h/32 for pwl), never past the next truth event, settles (a doubling moves it
+≤ max(1e-9 span, 1e-6 jump)) and stays within the cell's tol of the engine's right value from
+its settling offset tau_eff on. Then: instants += ∫(truth − engine)² over [t_e, t_e + tau_eff]
+(once per truth instant); limits for that value = its distance to the settled truth;
+`n_projected` counts it (`p<n>` in the full table). Tests: `test_exact_measure.py` (the reported
+case; the residual kept in limits; no record; settles elsewhere / slower than W / drifts / a
+truth event inside / a dyadic-period ringing; an overshoot priced by its size; an impulse the
+truth makes too). The first version (jump²·tau_eff on bare dyadic offsets) was broken by the
+reviewer (an overshoot 184x span read 7.1e-4, honest 2.5e-2); fixed in 6b85d9b5.
 
 **The field.** `res.reinit_records` (`ReinitRecord.t`, `.dW`, `.states`, `.sample`). It is the
 only per-event projection report; the exact engine writes it only for the constraint re-init
 (`builder_adapter.hpp`, above 1e-9 of the scale), never for the slow-manifold projection
 (`scheduler.hpp` `project_` → `project_slow`) that produces `diode_half_wave_rl_load`'s
 −3.1e-6 V. So rule (1) changes no cell today (F-SB-3). Forced in a probe (every event flagged):
-dsed 0.0304 limits → 3.40e-5 instants, limits 3.05e-7 (the projected value −3.14e-6 V against
+dsed 0.0304 limits → 4.8e-6 instants (3.4e-5 under the first version's jump²·tau_eff), limits 3.05e-7 (the projected value −3.14e-6 V against
 the settled truth −6.28e-6 V: the projection freezes the source, missing L·g_off·dv/dt).
 
 **Impulse vs projection.** A fixed-engine impulse record (restart rule) books a jump of

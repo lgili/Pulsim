@@ -439,14 +439,15 @@ moves. The measure, the old one kept beside it, the tests and the triage are in
    tag is compared on `exact_old`.
 2. **Rule (1), a projected transient (decided by the orchestrator).** At a matched event where
    the engine REPORTS a projection (a `reinit_records` entry within 4 ulp of its instant) and
-   records a right value the truth does not have at its instant, the truth is evaluated at
-   t_e + W·2^-k (k < 60; W = the engine's declared parasitic window, `PARASITIC`: dt/100 for the
-   exact engine, from `project_`'s threshold 100/dt_max with dt_max = dt in the harness; h for
-   pwl). If it settles inside W (one doubling of the offset moves it by at most 1e-9 of span)
-   within the cell's tol of the engine's value, the right value is a transient collapsed in time:
-   priced in instants as (truth right − engine right)²·tau_eff (tau_eff = the settling offset, an
-   upper bound within 2x), its residual against the settled truth kept in limits, counted in
-   `n_projected`. Either condition failing leaves the limit as it is. A fixed-engine impulse
+   records a right value the truth does not have at its instant, the truth is followed to
+   32 W (W = the engine's declared parasitic window, `PARASITIC`: dt/100 for the exact engine,
+   from `project_`'s threshold 100/dt_max with dt_max = dt in the harness; h/32 for pwl, so
+   followed to h), on the offsets 32 W·2^-k (k < 60) cut at irrational fractions, never past the
+   next truth event. If it settles (one doubling moves it ≤ max(1e-9 span, 1e-6 jump)) and every
+   value from its settling offset tau_eff on is within the cell's tol of the engine's value, the
+   right value is a transient collapsed in time: priced in instants by its true L2 cost
+   ∫(truth − engine)² over [t_e, t_e + tau_eff] (once per truth instant), its residual against
+   the settled truth kept in limits, counted in `n_projected`. Either condition failing leaves the limit as it is. A fixed-engine impulse
    record is told apart by the data: the truth makes that jump too (its own right limit is
    already the recorded value, carrying the jump energy dW the record books), so nothing is
    collapsed and the rule does not apply; a projection's record would carry only the transient's
@@ -456,8 +457,16 @@ moves. The measure, the old one kept beside it, the tests and the triage are in
    `project_slow`) writes none; `reinit_records` comes only from the constraint re-init
    (`builder_adapter.hpp`), and only above 1e-9 of the circuit's scale. On
    `diode_half_wave_rl_load` dsed the rule WOULD apply (forced in a probe: 0.030 limits →
-   3.4e-5 instants, limits 3.0e-7 = the frozen-source error of the projected value, −3.1e-6 V
+   4.8e-6 instants, limits 3.0e-7 = the frozen-source error of the projected value, −3.1e-6 V
    against the settled truth's −6.3e-6 V; 3 turn-offs). Finding F-SB-3.
+   Reviewer (fresh context, adversarial): the first version (cost jump²·tau_eff on the bare
+   dyadic offsets W·2^-k) hid an overshoot of 184x the span (7.1e-4 against an honest 2.5e-2), a
+   ringing of 10x the span whose period was a dyadic fraction of W (3.5e-4 against 2.9e-3), and
+   charged a transient once per device; fixed in 6b85d9b5 as above, each case a test. Left as
+   written: the projection flag is per instant, not per state (any record at that instant arms
+   the rule; condition (ii) still gates it); a narrow pulse between two evaluated offsets can
+   still be missed, but the truth is one LTI segment there (no truth event inside), a sum of
+   exponentials, so only a ringing can hide and the irrational cut defeats the aliasing.
 4. **Triage of the cells the one-sided-limits part set.** See `fixes/restart-scoreboard.md`
    ("Triage"). F-SB-1's test (each right-limit row at a restart-window step with no event
    replaced by the engine's own left value, re-graded) moved none of them: none is F-SB-1.

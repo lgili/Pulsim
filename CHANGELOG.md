@@ -27,7 +27,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   reports a projection at an event (`reinit_records`) and the truth itself
   settles to the engine's recorded right value within the engine's declared
   parasitic window (dt/100 for the exact engine, h for pwl), that value is
-  priced as a transient collapsed in time (instants, jump²·tau_eff), not as
+  priced as a transient collapsed in time (instants, its true L2 cost), not as
   a wrong limit; the cell counts it (`n_projected`). No engine writes such a
   record at the events it was made for yet (the exact engine's slow-manifold
   projection writes none: finding F-SB-3), so no cell moved.

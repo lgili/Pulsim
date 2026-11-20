@@ -48,7 +48,7 @@ CELLS = {
     "circuits/diodes/diode_half_wave_rl_load.yaml": {
         # finding F-SB-3: the right limit of V(out) at D1's turn-off is the projected value
         # (-3.1e-6 V; the truth -0.314 V) with no projection record: limits 0.030. With a
-        # record, rule (1) prices it as a 1 ns collapsed transient (~3e-5)
+        # record, rule (1) prices it as a 1 ns collapsed transient (~5e-6)
         "dsed F-SB-3": ("dsed", {}, 1e-2, 0.1, "limits"),
     },
 }
