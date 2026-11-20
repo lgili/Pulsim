@@ -48,6 +48,7 @@
 #include "pulsim/pwl/interface_stamps.hpp"
 #include "pulsim/pwl/nonlinear_refresh_mosfet_level1.hpp"
 #include "pulsim/solver/result.hpp"
+#include "pulsim/solver/step/esdirk43.hpp"
 #include "pulsim/solver/unsupported.hpp"
 #include "pulsim/sparse/matrix.hpp"
 #include "pulsim/sparse/solver.hpp"
@@ -91,6 +92,18 @@ struct StagePsi {
 [[nodiscard]] inline StagePsi psi_sdirk_stage2(Real factor_dt, Real r) noexcept {
     StagePsi p{Real{2} / factor_dt, Real{1} - r, Real{0}, 1, {}, {}};
     p.c_q[0] = r;
+    return p;
+}
+
+/// ESDIRK4(3)6L[2]SA implicit stage s of the step hh, on the factor of hh/2:
+/// ψ_s = q_n + a_{s+1,0}·hh·q̇_n + Σ_{j<s} (a_{s+1,j+1}/γ)·γ·hh·q̇_j (the
+/// increments q(Y_j) − ψ_j = γ·hh·q̇_j).
+[[nodiscard]] inline StagePsi psi_esdirk43(int s, Real hh) noexcept {
+    using E = Esdirk43;
+    StagePsi p{Real{1} / (E::gamma * hh), Real{1}, E::explicit_weight(s) * hh, s, {}, {}};
+    for (int j = 0; j < s; ++j) {
+        p.c_d[static_cast<std::size_t>(j)] = E::weight(s, j) * E::gamma * hh;
+    }
     return p;
 }
 
@@ -289,7 +302,8 @@ private:
     struct Param {
         enum class Kind : std::uint8_t { R, C, L, Law };
         Kind kind = Kind::R;
-        Index branch = -1;
+        Index branch = -1;   // the pool's branch id
+        Index gidx = -1;     // the graph's branch index
         Index from = -1, to = -1, row = -1;
         Real value = Real{0};
         SK sk = SK::Resistor;
@@ -345,6 +359,7 @@ private:
         const auto& br = graph_.branch(bid);
         Param p;
         p.branch = br.id;
+        p.gidx = bid;
         p.from = br.from;
         p.to = br.to;
         p.sk = pool_.kind_of(br.id);
@@ -440,7 +455,7 @@ private:
             return;
         }
         if (p.kind != Param::Kind::Law) return;
-        with_law_(p.sk, graph_.branch(p.branch),
+        with_law_(p.sk, graph_.branch(p.gidx),
                   [&]<class L, std::size_t R>(const std::array<Index, R>& at,
                                               const typename L::template Params<Real>& prm) {
             constexpr std::size_t NP = L::n_params;

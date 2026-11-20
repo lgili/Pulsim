@@ -789,14 +789,10 @@ inline SimulationResult run_transient_trbdf2(
     step::StageSensitivity sens{graph, pool, opts.sensitivities, "trbdf2",
                                 opts.tol_newton_dx};
     if (sens.on()) {
-        if (resume_from != nullptr || opts.integrator != 0) {
+        if (resume_from != nullptr) {
             throw UnsupportedError("trbdf2", "sensitivities", "", "",
-                resume_from != nullptr
-                    ? "sensitivities with resume_from: the sensitivity state is "
-                      "not part of a snapshot; run from the start."
-                    : "sensitivities with integrator='esdirk43': not yet "
-                      "carried by the stage recurrence; use the default "
-                      "TR-BDF2.");
+                "sensitivities with resume_from: the sensitivity state is not "
+                "part of a snapshot; run from the start.");
         }
         sens.start(opts.t_start, x);
     }
@@ -804,6 +800,16 @@ inline SimulationResult run_transient_trbdf2(
     topology::SwitchStateMask nl_seg_mask(
         static_cast<std::size_t>(graph.num_switches()));
     bool nl_seg_valid = false;
+    // the sensitivity of a converged stage, on the factor it solved with
+    // (the Newton workspace's, or the cache's resident one for (m, fdt))
+    auto sens_stage = [&](int s, const step::StagePsi& psi, const SwitchStateMask& m,
+                          Real fdt, const Vector& X, Real tx) {
+        if (nl_effective) {
+            sens.stage(s, psi, m, X, tx, *newton_ws.solver, &nl_seg.J);
+        } else {
+            sens.stage(s, psi, m, X, tx, cache.resident_factor(m, fdt), nullptr);
+        }
+    };
     // Returns false when Newton did not converge. The caller
     // REJECTS the step and shrinks h — which is a thing only a
     // variable-step engine can do, and it is why this engine
@@ -2391,6 +2397,11 @@ inline SimulationResult run_transient_trbdf2(
                     ok = solve_dispatch(m, fdt, b_stage, ys);
                     ++st.n_solves;
                     if (!ok) break;
+                    if (sens.on()) {
+                        if (s == 0) sens.begin_step(t, x);
+                        sens_stage(s, step::psi_esdirk43(s, hh), m, fdt, ys,
+                                   t + spec.t_off);
+                    }
                     if (nq > 0) hs.stage_increment(ys, ed_spsi.data(), ed_sd[si].data());
                     for (Size i = 0; i < ne; ++i) {
                         const auto& e = ed_hist[i];
@@ -2702,16 +2713,6 @@ inline SimulationResult run_transient_trbdf2(
         // take: the step mask, the re-initialisation decision, the two stages
         // (kE: integrator='esdirk43'; one instantiation per integrator,
         // selected once per run in run_twin, no per-step branch)
-        // the sensitivity of a converged stage, on the factor it solved with
-        auto sens_stage = [&](int s, const step::StagePsi& psi, const Vector& X,
-                              Real tx) {
-            if (nl_effective) {
-                sens.stage(s, psi, mask_step, X, tx, *newton_ws.solver, &nl_seg.J);
-            } else {
-                sens.stage(s, psi, mask_step, X, tx,
-                           cache.resident_factor(mask_step, hg), nullptr);
-            }
-        };
         auto tb_take = [&]<bool kE = false>() PULSIM_STEP_PHASE {
             // names read only under kE, captured by reference outside it (MSVC)
             (void)ed_take; (void)ed_forced; (void)ed_sf; (void)ed_sdirk_base; (void)ed_hs_snap;
@@ -2836,7 +2837,8 @@ inline SimulationResult run_transient_trbdf2(
             if (sens.on() && stage_ok) {
                 sens.begin_step(t, x);
                 sens_stage(0, sdirk ? step::psi_backward_euler_on(hg)
-                                    : step::psi_trapezoidal(hg), x_g, t + h_pt);
+                                    : step::psi_trapezoidal(hg), mask_step, hg, x_g,
+                           t + h_pt);
             }
 
             // A gate edge before the breakpoint shortened the step.
@@ -2894,7 +2896,8 @@ inline SimulationResult run_transient_trbdf2(
                 ++st.n_solves;
                 if (sens.on() && stage_ok) {
                     sens_stage(1, sdirk ? step::psi_sdirk_stage2(hg, (Real{1} - gs) / gs)
-                                        : step::psi_bdf2_stage2(hg), x_1, t + h);
+                                        : step::psi_bdf2_stage2(hg), mask_step, hg,
+                               x_1, t + h);
                 }
             }
             if constexpr (kE) {   // no stage leaves a trace; the commit re-applies ψ

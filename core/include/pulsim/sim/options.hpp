@@ -158,8 +158,9 @@ inline constexpr std::array<OptionSpec, 52> kRunOptionTable{{
     {"controller_period", kEvery, Unset::Always, "None", ""},
     {"resume_from", kEvery, Unset::Always, "None", ""},
     {"solver", kEvery, Unset::Always, "None", ""},
-    {"sensitivities", kExact, Unset::None, "None",
-     "sensitivities are computed on the exact path only"},
+    // pwl / trbdf2: the stage recurrence (add-parameter-sensitivities
+    // group 5), a run that meets an event refused by name there
+    {"sensitivities", kEvery, Unset::None, "None", ""},
     {"mode_selection", kEvery, Unset::Legacy, "None ('legacy')", ""},
     {"allow_implicit_segments", kExact, Unset::None, "None",
      "allow_implicit_segments governs the exact engine's numeric segments"},

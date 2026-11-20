@@ -2741,7 +2741,44 @@ def simulate(
         should_continue, closed_loops, live_stream, mmc_arms, on_cache,
         controller_period, resume_from, control_tick, solver, sensitivities,
         mode_selection, allow_implicit_segments, undriven, recorders, output_rtol)))
+    if sensitivities is not None and plan.engine != "dsed":
+        return _step_sensitivities(plan, sensitivities)
     return _finalize(_ENGINES[plan.engine](plan), plan)
+
+
+def _step_sensitivities(plan, names):
+    """simulate(engine='pwl' / 'trbdf2', sensitivities=[...]): the kernel's
+    stage recurrence (add-parameter-sensitivities group 5) carried by the
+    run itself; ``res.sensitivity`` / ``res.sens`` as on the exact path."""
+    from .sensitivity import StepSensitivityResult, _step_names
+    engine = plan.engine
+    names = _step_names(names, engine)
+    d = plan.drive
+    ctl = d.control
+    if (d.user_b_extra_fn is not None or d.user_step_observer is not None
+            or d.user_closed_loops or (ctl is not None and ctl.ticks)):
+        raise _unsupported(
+            engine, "sensitivities",
+            f"simulate(engine={engine!r}, sensitivities=...): a b_extra_fn, "
+            "step_observer, closed loop or control tick feeds the circuit "
+            "values the sensitivity recurrence cannot differentiate (a "
+            "Python callable). Use engine='dsed' for a closed loop.")
+    via = (plan.step.via_simulation if engine == "pwl"
+           else plan.circuit is not None and plan.kernel_run is None)
+    if not via:
+        raise _unsupported(
+            engine, "sensitivities",
+            f"simulate(engine={engine!r}, sensitivities=...): this run takes "
+            "the driver outside the kernel Simulation object (a sweep "
+            "replay or a control_tick='state' graph), which carries no "
+            "sensitivities.")
+    plan.step.run_options.sensitivities = names
+    res = _finalize(_ENGINES[engine](plan), plan)
+    sr = StepSensitivityResult.from_trace(
+        res.sensitivity_trace, plan.builder, engine)
+    res.sensitivity = sr
+    res.sens = sr.sens
+    return res
 
 
 # Stage A's plan.resolved_from compares each keyword with these: taken from
@@ -3601,18 +3638,18 @@ def _plan_run(
         _undriven_plan = _undriven_policy(
             builder, undriven or _planning.DEFAULT_UNDRIVEN, engine)
 
-    # ---- Parameter sensitivities: the exact path only. Above the
-    # dispatch (planned for every engine), so every engine refuses or
-    # honours it.
-    if sensitivities is not None and engine != "dsed":
+    # ---- Parameter sensitivities: the exact path, and the stage
+    # recurrence of the time-stepping engines (add-parameter-sensitivities
+    # group 5: pwl / trbdf2, no events). Above the dispatch (planned for
+    # every engine), so every engine refuses or honours it.
+    if sensitivities is not None and engine not in ("dsed", "pwl", "trbdf2"):
         raise _unsupported(
             engine, "sensitivities",
             f"simulate(engine={engine!r}, sensitivities=...): forward "
-            "sensitivities are computed on the exact path only "
-            "(engine='dsed'); on this engine a gradient would be a "
-            "finite difference of runs whose events sit on the step grid "
-            "(off by a factor of ten on the DCM buck). Pass "
-            "engine='dsed'.")
+            "sensitivities are computed by the engine named: pass "
+            "engine='dsed' (the exact path, events included), or "
+            "engine='pwl' / 'trbdf2' (the derivative of the discrete step; "
+            "a run that meets an event is refused there).")
     if sensitivities is not None and mode_selection in ("shadow", "lcp"):
         raise _unsupported(
             engine, "sensitivities",
