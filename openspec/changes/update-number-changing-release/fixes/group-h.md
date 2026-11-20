@@ -188,3 +188,70 @@ The difference (release - pre-release; |delta| >= 10):
   `CircuitBuilderAdapter` built twice; `_dsed_refused` evaluated twice by the
   `auto` route (the second time on the same answer); `c_blocks_of` /
   `control_decls` walking empty side lists (shared by every route).
+
+## 2. What was removed (Python only; behaviour unchanged)
+
+| call | pre-release | release (abbee805) | now | ceiling |
+|---|---:|---:|---:|---:|
+| fixed step (`dt` given) | 2879 | 3057 | **2800** | 2890 |
+| no dt (release route: the exact engine) | 3705 (trbdf2) | 5609 | **3634** | 3760 |
+| no dt, `engine='trbdf2'` | 3699 | 3860 | **3622** | 3760 |
+
+Where the bytecodes went, measured after each step (cumulative, warm call):
+
+| step | file | pwl | exact | trbdf2 |
+|---|---|---:|---:|---:|
+| release tip | | 3057 | 5609 | 3860 |
+| 1. `ResolvedFrom.__getitem__` resolves only the key asked for (the exact run reads `output_rtol`; the mapping built all 53: ~650 of this step's exact figure); `_dsed_refused` a module function, not a closure built on every route, and the `auto` -> exact route reuses its first answer; `_resolve_mode_auto` without a per-call `from . import _pulsim`, pwl's `'lcp'` record inline; `_uniform_checks` called only when one of its four inputs is set, pwl's duplicate count checks only with the uniform rules off | `_plan.py`, `__init__.py` | 2970 (-87) | 4742 (-867) | 3792 (-68) |
+| 2. `c_blocks_of` / `control_decls`: no walk of empty side lists | `_circuit_ir.py` | 2800 (-170) | 4572 (-170) | 3622 (-170) |
+| 3. the dispatcher's function-local relative imports -> attribute reads of the package / extension at call time; a second `CircuitBuilderAdapter` built and discarded | `_dsed_dispatch.py` | 2800 | 4286 (-286) | 3622 |
+| 4. the segment record (`np.r_`, `np.any`, `np.flatnonzero`, per-row generators -> ufuncs + `tolist`) and the right-limit check (`np.all(np.diff)` -> a ufunc) | `_exact_route.py`, `_dsed_dispatch.py` | 2800 | 3634 (-652) | 3622 |
+
+The route was NOT the cost: deciding "every device has an exact segment" is
+one `_require_supported(graph, pool, 'exact')` binding call (C++, no Python
+walk of the components) plus the option table; no cache was added, so there
+is nothing to invalidate. `test_auto_route_follows_circuit.py` pins that a
+builder mutated between two calls (a Newton device, a C block) moves the next
+no-dt call off the exact engine. (A switch's form has no setter and the
+builder has no parameter binding: those two mutations do not exist on this
+API.) No precomputed resolved-defaults record either: the tri-state defaults
+are read from `_plan` at call time as before (tests monkeypatch them).
+
+The gate (`test_simulate_overhead.py`) is un-parked and gains the no-dt call
+on its release route against the no-dt ceiling 3760. Ceilings unchanged.
+
+What remains on the exact route (3634): `_plan_run` 569 (shared with every
+engine), `run_dsed_from_builder` ~500 (the dispatcher's option resolution,
+refusal branches and the eager start-mask extraction), `_exact_result` +
+`_result_from_native` ~600 (the result's fields, the right limits, the
+output-grid diagnostics), the segment record ~240 (one row per visited mask),
+the dataclass `__init__`s (ControlPlan, DSEDOptions) ~190, `_run_dsed` 190.
+
+## 3. Verification (macOS, CPython 3.13, extension of the release tip; full ctest NOT run: no C++ changed)
+
+- Full pytest, per test, against one baseline run of the untouched abbee805
+  tree (a `git archive` extract with the same extension): baseline 12 failed /
+  6039 passed / 111 skipped / 69 xfailed; this branch 6044 passed / 110 skipped
+  / 67 xfailed / 13 failed, where the 7 differing tests are: the two un-parked
+  gate cases (xfail -> pass), the new gate case `[exact]` and the two new
+  route tests (pass), `test_no_home_paths` (skipped on the extract: not a git
+  checkout), and `test_simulate_snapshots_every_refusable_option`, an `ast`
+  test whose function list now names `_dsed_refused` (the refusal literal
+  moved there from `_route`'s closure): it passes after that list update. The
+  12 baseline failures fail identically. Warnings: 497 = 497, the same
+  multiset of (test, phase, category, text, file, line-outside-pulsim).
+- Byte compares vs the abbee805 baseline: a new exact-route oracle (280 calls:
+  10 circuits x 28 option sets on the no-dt / exact / trbdf2 / pwl routes,
+  hashing every array of the result, `res.exact` incl. `segments` and
+  `auto_would_route`, diagnostics, stats, warnings with their file, refusals
+  with their feature, and every SimPlan field) ALL IDENTICAL; goldens ALL
+  IDENTICAL; stateful ALL IDENTICAL; engines ALL IDENTICAL; options ALL
+  IDENTICAL; hooks IDENTICAL; `pwl_identity` 390/390; `trbdf2_identity`
+  370/371, the one difference the recorded refusal text naming the tree's
+  own path (the same on a self-compare of the untouched tree).
+- Wall time, tiny buck, best of 50, five interleaved rounds, minimum
+  (information only; shared Mac): pre-release / release / now — fixed step
+  50.8 / 52.5 / 49.5 us; no dt 338.6 (trbdf2) / 405.0 / 389.5 us (exact);
+  `engine='trbdf2'` 335.8 / 381.6 / 377.4 us (the trbdf2 difference between
+  the pre-release and the release is the extension's, not Python's).
+- ruff clean; stubs `--check` up to date.
