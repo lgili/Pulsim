@@ -136,3 +136,54 @@ def test_f58_recovery_energy_on_the_exact_rule_grid(R_load):
     assert d_ex["n_turn_off_events"] == d_ref["n_turn_off_events"]
     assert d_ex["n_turn_off_events_unresolved"] == 0
     assert d_ex["E_sw_total"] == pytest.approx(d_ref["E_sw_total"], rel=1e-3)
+
+
+def _branch_bridges(n):
+    """_paralleled_bridges with branch-form diodes (the release's add_diode default):
+    R_on = 1/g_on, the same g_off."""
+    orig = p.CircuitBuilder.add_diode
+
+    def branch(self, name, a, k, g_on=None, g_off=None, V_th=0.0, V_f=0.0):
+        return orig(self, name, a, k, g_off=g_off, V_th=V_th, V_f=V_f, form="branch", R_on=1.0 / g_on)
+    p.CircuitBuilder.add_diode = branch
+    try:
+        return _paralleled_bridges(n)
+    finally:
+        p.CircuitBuilder.add_diode = orig
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "release finding F-X-1: under output_rtol the event projection keeps every mode but the "
+    "parasitic cluster (1/(1e-6 * 1 us) = 1e12 /s); ten branch-form bridges keep their "
+    "~2e-10 s common mode (L / R_g), and after Dt0c turns OFF at 19.96896 ms the b-phase "
+    "bottom diodes chatter (Db0b located OFF 18 times in 43 ns, intervals shrinking ~0.85x: "
+    "a Zeno approach to a sliding mode) until the settle leaves one OFF 0.73 V forward. "
+    "The old projection (100/dt_max) removes that mode and the run passes; it is not the "
+    "fix (it projects ll06's real 100 ns transient, 1.1e-2 off the truth). Needs a "
+    "sliding-mode rule in the exact engine's event decisions (zero_band_on_ / settle)"))
+def test_fx1_ten_branch_form_bridges_run_under_the_rule():
+    r = _run(_branch_bridges(10), 0.02, output_rtol=1e-5)
+    assert r.times[-1] == pytest.approx(0.02)
+
+
+def _ladder(n):
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "n0", "gnd", 10.0)
+    for k in range(n):
+        b.add_resistor(f"R{k}", f"n{k}", f"n{k + 1}", 10.0)
+        b.add_capacitor(f"C{k}", f"n{k + 1}", "gnd", 1e-9)
+    return b
+
+
+def test_fx3_ladder_far_nodes_do_not_cut_every_step_to_the_floor():
+    """F-X-3: a 100-section RC ladder, 2e-5 s. The far nodes sit at ~0 V (tolerance
+    rtol*atol = 1e-14) while the chord bound sums volts of modes that cancel there: every
+    step was cut to the floor, 197 755 samples. A state the bound cannot certify even at
+    the modes' own resolution is not held to it (counted, warned): 2 140 samples. The
+    state carried is the rule-free run's."""
+    off = _run(_ladder(100), 2e-5)
+    on = _run(_ladder(100), 2e-5, output_rtol=1e-5)
+    og = on.diagnostics["output_grid"]
+    assert og["n_output_samples"] < 5000
+    assert og["n_output_uncertified"] >= 1
+    assert np.array_equal(np.asarray(on.states)[-1], np.asarray(off.states)[-1])

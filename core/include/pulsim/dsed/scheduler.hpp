@@ -523,6 +523,7 @@ public:
         // state range restarts at the snapshot instant), nothing is carried
         output_lo_.resize(0);
         output_count_ = output_events_ = n_output_capped_ = n_output_unbounded_ = 0;
+        n_output_uncertified_ = 0;
         output_total_ = 0;
         output_budget_t_ = std::numeric_limits<Real>::quiet_NaN();
         if (resume == nullptr) {
@@ -1000,8 +1001,10 @@ public:
     /// (exact_chord_step), at most `cap` cut steps between two events
     /// (n_output_capped counts the intervals where the cap bit), at most
     /// `budget` cut steps in the run (past it the rule stops cutting:
-    /// output_budget_t is the time it ran out, NaN when it did not). The event
-    /// projection then removes the parasitic cluster only (project_).
+    /// output_budget_t is the time it ran out, NaN when it did not). The
+    /// samples are read from the step's start (push_output_samples_): the
+    /// steps are the rule-free ones. The event projection removes the
+    /// parasitic cluster only (project_).
     void set_output_rule(Real rtol, Real atol, std::size_t cap,
                          std::size_t budget = std::size_t{2000000}) noexcept {
         output_rtol_ = rtol;
@@ -1012,6 +1015,8 @@ public:
     [[nodiscard]] Real output_budget_t() const noexcept { return output_budget_t_; }
     [[nodiscard]] std::size_t n_output_capped() const noexcept { return n_output_capped_; }
     [[nodiscard]] std::size_t n_output_unbounded() const noexcept { return n_output_unbounded_; }
+    /// Samples where some state's chord could not be bounded (exact_chord_step).
+    [[nodiscard]] std::size_t n_output_uncertified() const noexcept { return n_output_uncertified_; }
 
     // Test hooks: the step cap (default 10M) and the settle's round cap
     // (default 64). A small cap reaches the give-up deterministically on
@@ -3160,7 +3165,7 @@ private:
     Real output_atol_ = Real{0};
     std::size_t output_cap_ = 0, output_count_ = 0, output_events_ = 0;
     Real output_target_ = Real{0};   // the interval's next time event
-    std::size_t n_output_capped_ = 0, n_output_unbounded_ = 0;
+    std::size_t n_output_capped_ = 0, n_output_unbounded_ = 0, n_output_uncertified_ = 0;
     std::size_t output_budget_ = 0, output_total_ = 0;   // cut steps allowed / taken in the run
     Real output_budget_t_ = std::numeric_limits<Real>::quiet_NaN();
     Vector output_lo_, output_hi_, output_tol_, output_end_;   // range of each state so far
@@ -3208,6 +3213,7 @@ private:
                 d = system_.exact_output_step(t, x, output_tol_, output_rtol_, h, bounded, output_work_);
             }
             if (!bounded) ++n_output_unbounded_;
+            if (output_work_.n_uncertified > 0) ++n_output_uncertified_;
             if (!(d < h)) return h;
             ++output_total_;
             if (++output_count_ == output_cap_) ++n_output_capped_;

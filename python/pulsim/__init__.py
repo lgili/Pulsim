@@ -2666,14 +2666,18 @@ def simulate(
         ``output_rtol`` of each STATE's scale (its range so far, floored at
         1e-3 of its peak and at ``atol``; an observable that is a difference of large
         states gets that absolute error, not ``output_rtol`` of itself). The
-        event projection then removes only the parasitic cluster. Read
+        samples are read from the exact steps the run takes without the rule
+        (``n_exact_steps`` counts steps, the samples are ``n_output_samples``);
+        the event projection then removes only the parasitic cluster. Read
         ``res.diagnostics['output_grid']``: ``n_output_capped`` (intervals
         where the 4096-sample cap bit) and ``n_output_unbounded`` (steps of
         a mode without a diagonalising basis, which keep the step cap's
         grid); both warn. ``output_budget_t`` is the time the run's sample
         budget (2e6 cut steps, ``pulsim._dsed_dispatch.OUTPUT_BUDGET``) ran
         out, from where the step cap's grid holds (warns; ``None`` when it
-        did not). Ignored with ``dt`` / ``store_every`` /
+        did not). ``n_output_uncertified``: samples where the bound could not
+        certify some state (one near zero against a cancelling sum of modes:
+        that state is not held to the tolerance there; warns). Ignored with ``dt`` / ``store_every`` /
         recorders; refused by name on the other engines, with
         ``integrator='bdf2'``, sensitivities, and the non-native fallback.
 

@@ -1665,6 +1665,7 @@ void init_module(py::module_& m) {
             if (output_rtol > Real{0}) {
                 d["n_output_capped"] = sim.n_output_capped();
                 d["n_output_unbounded"] = sim.n_output_unbounded();
+                d["n_output_uncertified"] = sim.n_output_uncertified();
                 d["output_budget_t"] = sim.output_budget_t();
             }
             d["exact"] = exact_report_dict(adapter, res.n_predicate_evals);

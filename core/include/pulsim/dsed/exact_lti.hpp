@@ -94,6 +94,7 @@ struct ExactLTI {
     mutable DenseMatrix chord_vabs;
     mutable std::vector<Eigen::Index> chord_order;
     mutable Vector chord_s;
+    mutable Real chord_rho = Real{0};   // max |λ_k|
 };
 
 /// The output rule's work arrays (exact_chord_step, the adapter's
@@ -103,6 +104,8 @@ struct ChordWork {
     Vector xa, ta, c0, c1, v, s;            // the adapter's augmented state / sources
     Vector cr, ci, a;                       // V⁻¹c (re, im); |z̈_k| (decaying / zero modes)
     Vector gB, gC;                          // the growing modes' terms at one probe
+    Vector eb, tol_eff;                     // the bound at one probe; the tolerance it is held to
+    Eigen::Index n_uncertified = 0;         // states the bound cannot certify (exact_chord_step)
     std::vector<Eigen::Index> grow;         // modes with Re λ > 0
     Eigen::VectorXcd zdd;
     DenseMatrix S, B, C, A0;                // n × (n+1) sums per split (exact_chord_step)
@@ -823,6 +826,7 @@ inline constexpr Real kSettleTau = Real{40};
                                            const Vector& tol, Real h, bool& bounded,
                                            ChordWork& w) {
     bounded = e.valid && e.tier == 1;
+    w.n_uncertified = 0;
     if (!bounded || !(h > Real{0})) return h;
     const auto n = x.size();
     constexpr Real kInf = std::numeric_limits<Real>::infinity();
@@ -839,6 +843,7 @@ inline constexpr Real kSettleTau = Real{40};
                          [&](Eigen::Index a, Eigen::Index b) { return s[a] < s[b]; });
         e.chord_s.resize(n);
         for (Eigen::Index q = 0; q < n; ++q) e.chord_s[q] = s[e.chord_order[static_cast<std::size_t>(q)]];
+        e.chord_rho = e.lambda.size() > 0 ? e.lambda.cwiseAbs().maxCoeff() : Real{0};
     }
     // modal coordinates: z = V⁻¹x, ż = Λz + w (+ V⁻¹c0), z̈ = Λż (+ V⁻¹c1)
     e.z_re.noalias() = e.Vinv_re * x;
@@ -887,15 +892,16 @@ inline constexpr Real kSettleTau = Real{40};
         const Eigen::Index k = e.chord_order[static_cast<std::size_t>(q)];
         w.S.col(q + 1) = w.S.col(q) + e.chord_vabs.col(k) * (w.a[k] * e.chord_s[q]);
     }
-    // whether step d satisfies the bound for every component
-    auto fits = [&](Real d) {
+    // the bound on |e_j| at step d, per component, into w.eb (false: not finite)
+    auto bound = [&](Real d) {
         const Real q = d * d / Real{8};
         const auto i = static_cast<Eigen::Index>(
             std::lower_bound(e.chord_s.data(), e.chord_s.data() + n_sat, q) - e.chord_s.data());
         if (w.grow.empty()) {
-            return ((w.S.col(i).array()
-                     + q * w.B.col(i).array().min(w.A0.col(i).array().abs() + d * w.C.col(i).array()))
-                    <= tol.array()).all();
+            w.eb = (w.S.col(i).array()
+                    + q * w.B.col(i).array().min(w.A0.col(i).array().abs() + d * w.C.col(i).array()))
+                       .matrix();
+            return true;
         }
         w.gB.setZero(n);
         w.gC.setZero(n);
@@ -905,11 +911,29 @@ inline constexpr Real kSettleTau = Real{40};
             w.gB += e.chord_vabs.col(k) * m;
             w.gC += e.chord_vabs.col(k) * (m * std::abs(e.lambda[k]));
         }
-        return ((w.S.col(i).array()
-                 + q * (w.B.col(i) + w.gB).array().min(
-                           w.A0.col(i).array().abs() + d * (w.C.col(i) + w.gC).array()))
-                <= tol.array()).all();
+        w.eb = (w.S.col(i).array()
+                + q * (w.B.col(i) + w.gB).array().min(
+                          w.A0.col(i).array().abs() + d * (w.C.col(i) + w.gC).array()))
+                   .matrix();
+        return true;
     };
+    // A state the bound cannot certify even at the modes' own resolution (d·ρ = 1e-3,
+    // where its chord error is q·|ẍ_j(0)| to 1e-3) is not held to it: there the bound
+    // is the triangle inequality over the modes against a cancellation between them
+    // it cannot see (the far nodes of an RC ladder, ~0 V, against a sum of volts),
+    // and it would cut every step to the floor (F-X-3: a 500-section ladder > 29 min).
+    // w.n_uncertified counts them; the caller reports it.
+    w.tol_eff = tol;
+    if (e.chord_rho > Real{0} && bound(std::min(h, Real{1e-3} / e.chord_rho))) {
+        for (Eigen::Index j = 0; j < n; ++j) {
+            if (w.eb[j] > tol[j]) {
+                w.tol_eff[j] = kInf;
+                ++w.n_uncertified;
+            }
+        }
+    }
+    // whether step d satisfies the bound for every component
+    auto fits = [&](Real d) { return bound(d) && (w.eb.array() <= w.tol_eff.array()).all(); };
     if (fits(h)) return h;
     // bisect in log d; lo always fits, so the result is a bound whatever the split does
     Real lo = h * Real{1e-12}, hi = h;
