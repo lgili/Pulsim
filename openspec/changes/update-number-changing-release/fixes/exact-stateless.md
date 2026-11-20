@@ -95,6 +95,11 @@ dsed is held to 1e-12.
   circuit with no L or C by name before (ValueError).
 - `scheduler.hpp:210/701/895/2158`, `period_integrals.hpp:422–700` — index the
   time / sample arrays (≥ 1 sample), not the state.
+- `step_controller.hpp:71` (`sqrt(s2 / n)`) and `bdf2_integrator.hpp:169`
+  (`.mean()`) — 0/0 = NaN for n = 0 (no crash; a NaN error norm would reject
+  every step). LATENT, not guarded: not reached by any zero-state input the
+  reviewer tried on the numeric integrators (sine / pulse sources,
+  `b_extra_fn`, rk45 / bdf2 / auto integrators all ran).
 - `loss_port.hpp` `step_heat_` (junction loop) — reached only with a deposit
   node; a node without capacitance is refused by name (ValueError) before the
   run, one with a capacitor is a state (n ≥ 1). Both covered by tests.
@@ -115,3 +120,18 @@ Cost (instructions, dsed leg with an R-L load and two loss ports, 5 ms,
 min of six interleaved): 20 150 849 → 20 078 766 (−0.36 %, the base `.so` is a
 different build of the same source; the change is a size test on a path taken
 once per accepted step).
+
+## Side findings (reviewer, not fixed here; none caused by this fix)
+
+1. SILENT DIVERGENCE with `t_start > 0` (reproduced): the exact engine runs
+   the 0-start run and relabels its times (`_dsed_dispatch.py` ~801), so the
+   gate schedule is read at t − t_start; trbdf2 reads it at absolute t. The
+   leg with `t_start=5e-5, t_end=1e-4` (HS scheduled off there): dsed books
+   HS conducting the whole window (E_cond 1.7996e-4 J, v(a) 599.94 V), trbdf2
+   HS off (1.8e-8 J, one turn-on, v(a) 6e-10 V). No warning; affects circuits
+   with states too.
+2. Edge counting at the run's ends differs: trbdf2 counts an edge at t = 0 or
+   exactly at t_end, dsed does not (t_end = 1 ms: n_on 10 vs 9). The test uses
+   t_end = 975 us to stay off an edge.
+3. An ideal switch closing on a charged capacitor (a state): dsed's E_on reads
+   the post-impulse current (~1 A), trbdf2 the spike (~94 A).
