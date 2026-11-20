@@ -378,3 +378,19 @@ Results on the FINAL build (TEMP removed):
   trbdf2 stateful error norm incl. its 15-row list, fs5, test_newton_*,
   test_trbdf2_*, test_esdirk43_* incl. the 1.3e-7 V nonlinear-capacitor
   start, stateful, test_dc_*): 465 passed, 5 xfailed. ruff clean.
+- COST (Newton buck MOSFET L1 + Shockley, instructions per accepted step,
+  min of 6, same flags; base = 14b0c81a built in `.scratch/wt14`): pwl
+  30234 -> 30817 (+1.93 %, FAILS the 0.5 % gate), trbdf2 59461 -> 59535
+  (+0.12 %). Cause: the 32-entry shift of the ||dx|| history per Newton
+  iteration (from 6e5241a6) plus the fill per call. Fix in progress: a ring
+  buffer (one store per iteration), unrolled only at budget exhaustion
+  (same values, so the same decisions). Re-measure after the build.
+- Fresh-context reviewer (opus): 107 triage circuits x 7 configurations on
+  tip vs cedac36b: no new abort except ll13 at esdirk43 rtol 1e-6 (34 us)
+  and trbdf2 rtol 1e-7 (45 us); in exchange trbdf2 rtol 1e-6 / 3e-8 / 1e-8
+  abort on cedac36b and run on the tip. Both builds fail the same way:
+  constant ||dx|| ~1e-8, declined on backward error 6.6e5-1.3e6 eps against
+  the START-state row scale, taken before the ~1e8 V dead-time spike
+  (dx/|x| 2.8e-17): a row-scale question (10a), not the windows; not fixed
+  here (open). No wrong accepted state: ll13 vs the pwl reference at 25
+  instants 1.97e-5 (default) … 1.3e-6 (rtol 1e-8/1e-9), shrinking with rtol.
