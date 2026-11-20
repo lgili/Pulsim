@@ -266,6 +266,12 @@ public:
     /// the last or the next sample): counted, never fabricated.
     [[nodiscard]] Size n_dropped() const noexcept { return n_dropped_; }
     [[nodiscard]] const std::vector<Recorder>& recorders() const noexcept { return recs_; }
+    [[nodiscard]] const std::vector<StateReading>& readings() const noexcept { return readings_; }
+    /// Every recorder's pieces from `s` (Recorder::set_segment_source; the
+    /// exact engine's closed forms), nullptr to stop. `s` outlives its use.
+    void set_segment_source(SegmentSource* s) noexcept {
+        for (Size k = 0; k < recs_.size(); ++k) recs_[k].set_segment_source(s, k);
+    }
     /// RingSink for recorder k (`Recorder::stream_to`): its kept rows are
     /// pushed into `ring` as the run goes (the ring must outlive the runs).
     void stream_to(Size k, streaming::LiveRing* ring) { recs_.at(k).stream_to(ring); }

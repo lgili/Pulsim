@@ -90,6 +90,7 @@ if(PULSIM_BUILD_TESTS)
         tests/dsed/test_event_projection.cpp
         tests/dsed/test_scheduler_auto.cpp  # Gate 4.D — auto-dispatch RK45↔BDF2 per mode
         tests/dsed/test_period_integrals.cpp  # period map, M, closed-form integrals
+        tests/dsed/test_segment_integrals.cpp  # the recorders' closed forms (F-B2-1)
         tests/dsed/test_periodic_orbit.cpp  # the Newton shooting loop in the kernel
         tests/dsed/test_design_batch.cpp  # the kernel batch evaluator of pulsim.design
         tests/dsed/test_period_thermal.cpp  # the junction fixed point on an orbit

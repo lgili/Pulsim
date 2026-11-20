@@ -118,6 +118,10 @@ public:
     }
     /// The probe is one reading, unchanged.
     [[nodiscard]] bool plain() const noexcept { return plain_; }
+    /// The compiled expression (Param k = atom k; also for a plain probe).
+    [[nodiscard]] std::span<const ir::Expr::Instr> program() const noexcept {
+        return expr_.program();
+    }
 
 private:
     static bool ident(char c) noexcept {

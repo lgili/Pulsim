@@ -413,7 +413,17 @@ r.feeding, res.recorder_feed                       # 'in-loop' | 'stored-arrays'
   trbdf2 where its settle did not report). No right limit is invented.
 - RMS integrates the line between samples exactly, `h(a² + ab + b²)/3`;
   a product probe is linear between its own samples, as
-  `time_average` of the product trace is.
+  `time_average` of the product trace is. EXCEPT in the exact engine's
+  loop: there each step's integral and RMS are the closed form of its mode
+  (exact for the trajectory, the same at any `dt` / `output_rtol`; a probe
+  that is a polynomial of degree ≤ 2 in its readings). A piece with no
+  closed form (another probe, time-varying sources) is the line and warns;
+  `res.recorder_feed["closed_form"]` counts both. min / max are the values
+  at the samples and window edges.
+- `res.avg` / `res.rms` / `res.integral` and the stored-array pass are the
+  line between STORED samples: exact for the fixed engine's rule, O(h²)
+  otherwise — `engine='exact'` without `dt` stores one sample per 10 µs
+  (1e-4 off on a buck's window average). Use an in-loop recorder there.
 - **Feeding mode per engine** (`r.feeding`, `res.recorder_feed`):
 
   | engine | mode | |

@@ -16,6 +16,7 @@ from __future__ import annotations
 import warnings
 
 import numpy as np
+import pytest
 
 import pulsim as p
 
@@ -63,18 +64,26 @@ def test_a_resumed_run_with_the_output_rule_equals_the_uninterrupted_one():
         np.testing.assert_allclose(ev_u[ev_u > t_split], ev_r[ev_r > t_split], rtol=0, atol=1e-15)
 
 
-def test_the_output_rule_is_ignored_with_a_recorder_as_with_dt():
-    """simulate()'s docstring: ignored with dt / store_every / recorders (the
-    exact engine refuses store_every by name). The samples are then exactly
-    today's, and no output-grid report is written."""
+def test_the_output_rule_runs_with_a_recorder_and_is_ignored_with_dt():
+    """simulate()'s docstring: ignored with dt / store_every (the exact engine
+    refuses store_every by name): the samples are then exactly today's, with
+    no output-grid report. A recorder keeps the rule (F-B2-1): the run is
+    the one without it (samples and states byte for byte), and its window
+    statistics, each segment's closed form, are those of the run without
+    the rule to 1e-12."""
+    rec = [p.Recorder("s", ["v(vout)"], keep="none", windows=[(10e-6, 90e-6)])]
     b, fn = _ccm()
-    base = _sim(b, 100e-6, fn, recorders=[p.Recorder("s", ["v(vout)"], keep="every")])
+    bare = _sim(b, 100e-6, fn, output_rtol=OUT)
     b, fn = _ccm()
-    ruled = _sim(b, 100e-6, fn, output_rtol=OUT,
-                 recorders=[p.Recorder("s", ["v(vout)"], keep="every")])
-    assert "output_grid" not in ruled.diagnostics
-    assert np.asarray(ruled.times).tobytes() == np.asarray(base.times).tobytes()
-    assert np.asarray(ruled.states).tobytes() == np.asarray(base.states).tobytes()
+    ruled = _sim(b, 100e-6, fn, output_rtol=OUT, recorders=rec)
+    assert "output_grid" in ruled.diagnostics
+    assert np.asarray(ruled.times).tobytes() == np.asarray(bare.times).tobytes()
+    assert np.asarray(ruled.states).tobytes() == np.asarray(bare.states).tobytes()
+    b, fn = _ccm()
+    base = _sim(b, 100e-6, fn, recorders=rec)
+    w0 = base.recorded["s"].windows["v(vout)"]["integral"][0]
+    w1 = ruled.recorded["s"].windows["v(vout)"]["integral"][0]
+    assert w1 == pytest.approx(w0, rel=1e-12, abs=0)
     b, fn = _ccm()
     plain = _sim(b, 100e-6, fn, dt=1e-6)
     b, fn = _ccm()

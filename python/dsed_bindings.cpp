@@ -49,6 +49,7 @@
 #include "pulsim/dsed/period_integrals.hpp"
 #include "pulsim/dsed/loss_port.hpp"
 #include "pulsim/dsed/loop_feed_adapter.hpp"
+#include "pulsim/dsed/segment_integrals.hpp"
 #include "pulsim/record/loop_feed.hpp"
 #include "pulsim/dsed/periodic_orbit.hpp"
 #include "pulsim/dsed/design_batch.hpp"
@@ -1553,6 +1554,13 @@ void init_module(py::module_& m) {
             // loop: its kick moves the state after the step's hooks, so the
             // feed's sample would miss the step's heat (the stored arrays have it)
             std::optional<pulsim::dsed::ExactFeedAdapter<NativeAdapter>> feed_ad;
+            // F-B2-1: the recorders' pieces in closed form (segment_integrals.hpp);
+            // the feed outlives this call, so its pointer is cleared on every exit
+            std::optional<pulsim::dsed::ExactSegmentSource<NativeAdapter>> seg_src;
+            struct SegGuard {
+                pulsim::record::LoopFeed* f = nullptr;
+                ~SegGuard() { if (f != nullptr) f->set_segment_source(nullptr); }
+            } seg_guard;
             std::string feed_refused;
             if (!loop_feed.is_none()) {
                 if (loss && loss->has_heat()) {
@@ -1566,6 +1574,10 @@ void init_module(py::module_& m) {
                                     resume != nullptr ? resume->t : Real{0});
                     feed_ad->attach(loss_hooks);
                     sim.set_hooks(&loss_hooks);
+                    seg_src.emplace(adapter, f);
+                    f.set_segment_source(&*seg_src);
+                    seg_guard.f = &f;
+                    feed_ad->set_segment(&*seg_src);
                 }
             }
             // session 24: resume at a snapshot's committed instant
@@ -1662,6 +1674,13 @@ void init_module(py::module_& m) {
                 d["heat_pending"] = out.heat_pending;
             }
             if (!feed_refused.empty()) d["loop_feed_refused"] = feed_refused;
+            if (seg_src) {
+                py::dict cf;
+                cf["n_closed"] = seg_src->n_closed();
+                cf["n_line"] = seg_src->n_line();
+                cf["why"] = seg_src->why();
+                d["recorder_closed_form"] = cf;
+            }
             if (!tick_cbs.empty()) d["control_tick_counts"] = sim.tick_counts();
             if (output_rtol > Real{0}) {
                 d["n_output_capped"] = sim.n_output_capped();

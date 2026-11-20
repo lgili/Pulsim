@@ -499,8 +499,11 @@ def _result_from_native(native_res, t_start: float):
                 f"simulate(engine='exact', output_rtol=...): the output grid's sample cap "
                 f"bit in {og['n_output_capped']} interval(s) and {og['n_output_unbounded']} "
                 "step(s) had no diagonalising basis to bound: linear interpolation between "
-                "those samples is NOT within output_rtol (diagnostics['output_grid']). "
-                "Pass dt for a fixed output step.", RuntimeWarning, stacklevel=4)
+                "those samples is NOT within output_rtol (diagnostics['output_grid']), and "
+                "integrals taken from the stored record there (res.avg / res.integral / "
+                "with_event_limits) are chords over those gaps; in-loop recorders integrate "
+                "the exact trajectory. Pass dt for a fixed output step.",
+                RuntimeWarning, stacklevel=4)
     # dependent states: the impulsive re-initialisations at mode entry
     # are the result's own `reinit_records` (filled by _exact_result)
     return res
@@ -1144,6 +1147,8 @@ def run_dsed_from_builder(
                        if ticks else {}))
                 if "loop_feed_refused" in native_res:
                     _rec.exact_feed_refused(native_res["loop_feed_refused"])
+                if "recorder_closed_form" in native_res:
+                    _rec.exact_closed_form(native_res["recorder_closed_form"])
             elif opts.integrator == "bdf2":
                 native_res = run_bdf2_b11(
                     native_adapter, sf, x0, t_window,

@@ -2684,8 +2684,12 @@ def simulate(
         (:class:`pulsim.Recording`). Fed in the loop where the engine
         allows it, otherwise by a kernel-side pass over the stored arrays
         (``res.recorder_feed["why"]``; ``store_every > 1`` is refused by
-        name there). ``resume_from`` continues the record from the
-        snapshot's recorder state. Without it nothing changes.
+        name there). In the loop of ``engine='exact'`` each step's integral
+        and RMS are the closed form of its mode (independent of the output
+        grid); a piece without one (``res.recorder_feed["closed_form"]``)
+        is the line between samples and warns. ``resume_from`` continues
+        the record from the snapshot's recorder state. Without it nothing
+        changes.
 
     output_rtol
         ``engine='exact'`` only, default ``None`` (today's samples: one per
@@ -2711,8 +2715,10 @@ def simulate(
         grid); both warn. ``output_budget_t`` is the time the run's sample
         budget (2e6 cut steps, ``pulsim._dsed_dispatch.OUTPUT_BUDGET``) ran
         out, from where the step cap's grid holds (warns; ``None`` when it
-        did not). Ignored with ``dt`` / ``store_every`` /
-        recorders; refused by name on the other engines, with
+        did not). Ignored with ``dt`` / ``store_every``; with recorders the
+        run is the one without them (the rule also sets how events are
+        located and projected), and their statistics stay closed forms
+        (see ``recorders``); refused by name on the other engines, with
         ``integrator='bdf2'``, sensitivities, and the non-native fallback.
 
     Returns
@@ -2750,8 +2756,9 @@ def simulate(
     # add-probes-and-recorders: above every engine dispatch, so every
     # engine's result goes through the same kernel recorder pass.
     if recorders:
-        # a recorder samples on its own grid: the output-grid rule stays off
-        _kw = {k: v for k, v in locals().items() if k not in ("recorders", "output_rtol")}
+        # F-B2-1: in-loop recorders on the exact engine integrate each step in
+        # closed form, so output_rtol is kept: the run is the one without them
+        _kw = {k: v for k, v in locals().items() if k != "recorders"}
         from ._recorders import simulate_with_recorders as _with_rec
         return _with_rec(simulate, _kw, recorders)
     # add-kernel-simulation-object Stage A: plan -> engine table -> finalize.
@@ -3709,12 +3716,13 @@ def _plan_run(
         # adaptive-RK selector below is PWL-specific and must NOT apply
         # to DSED integrator names.
         # update-number-changing-release: the output-grid rule acts only where
-        # the engine picks the samples (no dt, no store_every, no recorders);
-        # anything explicit keeps today's samples exactly.
+        # the engine picks the samples (no dt, no store_every); anything
+        # explicit keeps today's samples exactly. With recorders it acts as
+        # without them (their statistics are closed forms: F-B2-1).
         if output_rtol is not None:
             if isinstance(output_rtol, bool) or not 0.0 < output_rtol < float("inf"):
                 raise ValueError(f"simulate(output_rtol={output_rtol!r}): must be > 0 (None = off)")
-            if dt is not None or recorders or (store_every or 1) != 1:
+            if dt is not None or (store_every or 1) != 1:
                 output_rtol = None
         step = _planning.new(_planning.ExactStep, (
             dt, rtol, atol, dt_init, integrator, stiffness_threshold, h_bdf2,
