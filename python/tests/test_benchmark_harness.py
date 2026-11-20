@@ -443,6 +443,27 @@ def test_benchmark_runner_imports_without_the_retired_backend():
     import benchmark_runner  # noqa: F401
 
 
+def test_benchmark_runner_runs_v1_files_against_their_stored_expectations(tmp_path):
+    """The runner end to end on 2.0 (benchmarks.yaml -> v1 reader -> pulsim.simulate -> the
+    file's own validation): an analytic RC step, a baseline-CSV bridge, a transformer. A scenario
+    whose v1 solver selection or component has no 2.0 equivalent is refused by name."""
+    import benchmark_runner as br
+
+    ids = ["rc_step", "bridge_resistive_pure", "transformer_step_up", "saturating_inductor_step"]
+    got = {(r.benchmark_id, r.scenario): r
+           for r in br.run_benchmarks(BENCH / "manifests" / "benchmarks.yaml", tmp_path, selected=ids)}
+    for bid in ids[:3]:
+        r = got[(bid, "direct_trap")]
+        assert r.status == "passed" and r.max_error is not None, (bid, r.message)
+    assert got[("rc_step", "direct_trap")].max_error < 5e-3                 # measured 2.5e-3
+    assert got[("bridge_resistive_pure", "direct_trap")].max_error < 1e-6  # measured 3.3e-10
+    for key in [("rc_step", "gmres_trbdf2"), ("rc_step", "jfnk_trbdf2")]:
+        assert got[key].status == "skipped"
+        assert got[key].message.startswith("refused: v1 integrator 'trbdf2' (fixed step)")
+    sat = [r for (b, _), r in got.items() if b == "saturating_inductor_step"]
+    assert sat and all(r.status == "skipped" and "saturable_inductor" in r.message for r in sat)
+
+
 def test_a_suspect_reference_grades_nothing_and_a_frozen_error_may_not_grow():
     # checkpoint review M1 / M7 (integration batch 6b)
     sus = {"status": "runs", "reference": "suspect", "reference_reason": "broken"}
