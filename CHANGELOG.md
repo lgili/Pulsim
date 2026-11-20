@@ -30,6 +30,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `None` keeps today's samples; refused by name off the exact engine.
   A run resumed with it samples its own grid (the rule's state ranges
   restart at the snapshot instant); the events and states agree.
+* **Fixed** `benchmarks.kpi.compute_junction_temperature` solves each
+  interval exactly for a power linear between samples (it was explicit
+  Euler on the right-hand sample): the KPI no longer depends on the
+  sample grid (147.7105 °C on 2 or 1 004 samples). Every engine's T_j KPI
+  moves to the closed form.
+* **Fixed** `engine='dsed'` / `'exact'` no longer hangs when a
+  `switch_fn`'s `next_edge_after(t)` returns `t` itself: it is refused by
+  name (`UnsupportedError`, feature `switch_fn`), on the auto and BDF2
+  schedulers too.
 * **Added** the exact engine keeps a snapshot and resumes
   (`final_snapshot` / `resume_from`, on its own absolute clock, also on
   the default `integrator='auto'`), runs the junction temperature loop

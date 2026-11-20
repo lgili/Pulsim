@@ -346,7 +346,8 @@ public:
             //    scheduler is forced to land at that boundary and
             //    re-sample the switch_fn via `fire_gate_event_`
             //    (which catches any discovered mask change).
-            const Real t_gate_raw = switch_fn_.next_edge_after(t);
+            const Real t_gate_raw =
+                events::require_after(t, switch_fn_.next_edge_after(t), events::Kind::GateEdge);
             constexpr Real kPollFractionOfDtMax = Real{0.1};
             Real t_gate = std::isfinite(t_gate_raw)
                 ? std::min(t_gate_raw, t_end)

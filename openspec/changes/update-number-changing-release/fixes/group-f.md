@@ -177,7 +177,7 @@ run with a dt: the rule is not engaged). auto+next: 132 agree / 2 disagree / 2 e
   correctly. Fix needed (localisation, not the output rule): a rigorous no-crossing test per scan
   interval — the chord bound of `exact_chord_step` applied to the predicate's row (|g − chord| ≤
   Σ_k |c·V_k| |z̈_k| ...): an interval whose end values exceed the bound in the same sign cannot
-  hold a root, otherwise it is split. Left open (new finding F-X-4).
+  hold a root, otherwise it is split. Left open (new finding F-X-5; F-X-4 is the orchestrator's id for the DC sample count below).
 * `switching/basic/snubber_rc.yaml` err_rms against the reference 2.16e-8 -> 6.92e-8 (3.2×, err_max
   1.97e-7 -> 1.96e-7, tol 1e-3; no truth for this circuit). NOT the floor: with `atol=1e-14` (the
   old floor rtol·atol = 1e-14, exactly) the cell is bit-equal (1 177 samples, 6.918e-8). From the
@@ -206,3 +206,145 @@ of V(vin) against the closed form (constant): 0.
 Not changed (owner decision, default path): the poll itself — every exact run whose gate names
 no edge steps at dt_max/10 = 1 µs, not the documented 10 µs; treating an infinite answer as
 "no edge" would move every such default run's step grid.
+
+## F-T-2 — a gate oracle that does not advance hung the exact engine
+
+**Trace.** `next_edge_after(t)` returning t: `EventQueue::next_after` re-asks a function source
+whose pending event is not after t; the answer t gives `h_use = 0`, the scheduler fires the
+"edge" at t (same mask, dropped), and asks again — forever (dsed). trbdf2 "returned" only
+because its step controller forced steps at its h floor (a floor warning; the edges were never
+located). periodic_steady_state refuses such a gate by name.
+
+**Rule (one, shared).** The refusal by name, `events::require_after` (event_queue.hpp), called
+wherever an oracle is asked: the event queue (`EventQueue::next_after`: the exact engine's RK45
+scheduler and trbdf2's native oracles) and the exact engine's auto and BDF2 schedulers, which
+ask the switch_fn directly (the hang reproduced on the auto scheduler, `integrator='auto'`): an
+answer not strictly after t raises `UnsupportedError(feature='switch_fn')` naming
+`next_edge_after(t)`, the answer and t — periodic_steady_state's rule. trbdf2 never asks a
+Python gate's oracle (it bisects a Python gate's edges: sim_bindings "the variable step lands
+native edges only"), so it runs this gate, correctly, with its usual floor warning. Test
+`test_ft2_a_gate_oracle_that_does_not_advance_is_refused_by_name` (integrator auto / rk45 /
+bdf2, milliseconds).
+
+## F-X-1 — cause found (session 2)
+
+**The decision depended on t_end.** Ten branch-form bridges under the rule: t_end = 0.02 refuses
+at 19.969 ms; t_end = 0.0205 / 0.025 / 0.03 run (113 / 138 / 163 events). Cause:
+`resolved_scale_(t) = next_time_event_(t) − last_time_event_t_`. The bridges have no gate
+oracle (the default constant mask), so (i) `next_time_event_` is the run's end, and (ii) every
+dt_max/10 poll landing fired a same-mask "gate_edge" that set `last_time_event_t_` before the
+"drop spurious same-mask gate edges" return. So t_res = the time LEFT in the run: 31 µs at
+19.969 ms of a 20 ms run, the parasitic cut 1/(1e-6·31 µs) = 3.2e10 /s, and the bridges' common
+mode L/R_g (5e9 /s) left the cluster: neither projected nor settled over (the previous trace's
+"1e12 /s" was this same quantity a µs before the end). Earlier in the run (t_res ≫) the same
+mode is in the cluster.
+
+**Fix.** A poll landing that changed nothing is not a time event: `fire_event_` restores
+`last_time_event_t_` at the same-mask return when the landing is the poll boundary
+(`poll_t_`, set in `next_gate_edge_`). t_res is then the span since the last real time event
+(the run's start here): constant, not shrinking toward t_end.
+
+**After.** Ten branch-form bridges, `output_rtol=1e-5`, t_end 0.02: runs, 111 events, the
+19.969 ms one alone (19.96895575516 ms, no chatter), event times equal to the rule-off run's to
+9.8e-13 s, end state to 1e-12 V (test `test_fx1_ten_branch_form_bridges_run_under_the_rule`).
+The answer to the brief's question: the 2e-10 s mode IS part of the cluster by the engine's own
+definition at every instant but the last 3 % of a run; the settle and the projection were right,
+t_res was wrong. Default path: the settle reads the same t_res (`settled_`), so oracle-less runs
+near their end may decide differently (measured in the byte compares below).
+
+## F-X-6 (new, OPEN) — a trial mode's projection survives the settle under the rule (forward converter)
+
+Found by item 3 (the six transformer circuits against their mpmath truths, conductance form,
+no dt). `switching/isolated/forward_converter.yaml`, exact_scoreboard `exact` (RMS of the samples
+against the truth): rule off 4.7e-8; `output_rtol` 1e-4 / 1e-5 / 1e-6: 0.0457 (V(out) up to
+0.175 V off, from 48 µs to ~65 µs). The same at the PR head's extension (0.04567, so not this
+session's change). Under the release profile (`auto+next`, branch form) the cell is 1.0e-9.
+
+**Trace.** Switch-off event at 48 µs: before it (SW on, D_rect on, D_fw off), I(L_o) = 5.620787 A
+(truth 5.620787). The truth then has D_fw ON 5e-14 s later; I(L_o) does not move. The engine's
+first sample after the event (2.2e-13 s) has I(L_o) = 6.206321 A (+0.585 A in 0.2 ps through 47 µH).
+The settle's first trial mode is (SW off, D_rect on, D_fw off), eigenvalues 1.12e11, 1.21e10,
+1.0e3 ± 6.3e3j, 0 (truth's own eigenbasis). The rule's projection cut there is
+1/(1e-6·12 µs) = 8.3e10: it projects out 1.12e11 and keeps 1.21e10. That partial spectral
+projection, computed independently in the truth's mpmath eigenbasis of the trial mode, gives
+I(L_o) = 6.206321 A and V(n_lo) = −3.08e6 V: the engine's number to 7 digits. D_fw then turns on
+(mask changed), the final mode's fast mode (5.13e10) is below the cut, and nothing undoes the
+trial mode's jump: `settle_and_project_` restarts from the pre-event state only when the reinit
+log grew (`track && changed && reinit_log_size_() > mark`). The rule-off cut (100/dt_max)
+projects both fast modes; the same truth-basis computation gives 0.776 A there, so rule-off is
+right for another reason (not traced).
+
+**Fix needed (not made: it changes `settle_and_project_` on the default path too).** A trial
+mode's projection must not survive a mask change: on `changed`, restart from `settle_x0_` and
+project in the settled mode only, whatever the reinit log says; or a cut that never splits a
+cluster of g_off modes. Either needs the byte compares and the scoreboard on the rule-off path.
+
+## Session 2 — item 3 and verification on 44ab0a81
+
+* **Event-instant states across `output_rtol`** (`.scratch/item3/evstates.py`, every
+  `benchmarks/circuits` netlist the exact engine runs without dt: 99 ran, 27 refused/unmapped):
+  event times and the full states at them are bit-identical for 1e-4 / 1e-5 / 1e-6 on all 99,
+  the six transformer / coupled-inductor circuits included. The brief's open point of
+  DECISIONS (6.7e-8 on the flyback) is closed by F-6-7: the steps no longer depend on the grid.
+* **Rule on vs rule off** (same netlists): equal event counts and states within 1e-12 except
+  ll06_buck_vcswitch (7.9e-3 of scale: rule off is the less accurate one, exact 6.3e-6 vs 8.8e-12),
+  cuk 3.3e-11, diode_rectifier 1.3e-11, sepic 3.2e-12, full_bridge_dc 1.6e-12,
+  diode_clamp_overvoltage 1.4e-12; event COUNT differs on cl_boost_pi, half_bridge_transformer_dc,
+  boost_pfc_open_loop, flyback, forward (the rule resolves modes rule-off projects).
+  Against the mpmath truth (`exact`, RMS of the samples): half_bridge_transformer_dc 3.0e-6 off →
+  8.5e-13 on; flyback 2.1e-6 → 3.9e-7; cuk 5.5e-15 → 7.1e-15; sepic 4.6e-14 → 4.5e-14;
+  forward 4.7e-8 → 0.0457 (F-X-6, open, pre-existing at the PR head); active_clamp_forward
+  refuses under the rule (F-X-5, open).
+* **Default path**: goldens identical; dsed bit-identity 34/36 against `.scratch/bitid_pr.npz`
+  with bridge1_vf07/dsed different — the PR head's own extension (so_27c00520) gives the same
+  34/36 against that file, and the tip's six dsed bit-identity circuits are np.array_equal to the
+  PR head's (`.scratch/b1cmp.py`): no default number moved, the F-X-1 `last_time_event_t_` change
+  included.
+* ladder500_rc: 13.1 s vs 8.1 s rule off (1.6×), 3 072 samples, no cap, no warning. ladder100:
+  2 083 samples, 0.78 s. `benchmarks/tools/counters.py` finishes (exit 0).
+* F-X-1 independent truth: the local mpmath solve of the ten bridges around 19.969 ms does not
+  finish (61 diodes, 91-state augmented modes: mpmath QR fails to converge at 20 digits; > 2 h at
+  30 digits). The event at 19.96895575516 ms is backed by the rule-off run (event times to
+  9.8e-13 s, end state 1e-12), not by an independent truth.
+
+## Session 2 reviewer (fresh context, read only) — fixed / left
+
+1. FIXED (high): a deferred end could hide the loss port's kick (heat lands after the cover
+   check). A kicked end is never deferred. Underneath it the reviewer's scenario found a
+   session-1 regression: under the rule with heat the samples read INSIDE a step missed the
+   step's heat (RL chopper + RC junction, closed form: 0.0399 K off on a 7.47 K rise; PR head
+   1.35e-13). With a state kick the rule's samples are steps again (the PR head's behaviour for
+   that case only): 1.35e-13 restored (test `test_fx4_a_heated_step_end_is_stored_under_the_rule`).
+2. FIXED (high): the F-X-1 restore keyed on the oracle-less poll only; a plain Python gate
+   (EdgeSearch, `has_edge_oracle()` false) lands on finite poll boundaries the same way. The
+   restore now also covers `!has_edge_oracle()`. Test: the ten-bridge F-X-1 test with a Python
+   gate. Default path: dsed Python-gate runs of buck_ccm / buck_dcm / boost / bridge1_vf07 /
+   bridge3 np.array_equal to the PR head's extension (`.scratch/pygate_cmp.py`); goldens and the
+   dsed bit-identity set as before.
+3. LEFT (medium): with no edge known, t_res is still "t_end − last real event": the parasitic cut
+   depends on t_end. Needs a schedule- or ceiling-based scale; only the rule-off run backs F-X-1.
+4. FIXED (medium): a deferral is accepted only if the run's chained state at the step end is
+   within 1e-3 of the tolerance of the flow from the last stored sample (one O(n²) advance per
+   deferred step, under the rule only).
+5. LEFT (low): the cover check does a full output_step_ (wasted work when it fails).
+6. LEFT (low, design): the absolute floor is one scalar atol for every state kind.
+7. LEFT (low): `require_after` lets NaN through as "no edge".
+   The KPI change is now in the CHANGELOG (it moves every engine's T_j KPI to the closed form).
+
+### Rehearsal re-run (session 2, on 44ab0a81: F-X-4 deferral in)
+
+auto+next 123 agree / 11 disagree / 2 error (base 133 / 2 / 1); dsed:output_grid and dsed+next
+120 / 2 disagree / 14 refused (base 122 / 0 / 14). The ACCEPTANCE "no cell worse by > 2×" IS NOT
+MET, and the cause is the F-X-4 deferral (the after-floor run a5b9a485 had none of these):
+* 9 DC / resistive cells (current_divider_3way, ll01, voltage_divider_3stage, bridge_resistive_pure,
+  bode_rlc_low_pass, stiff_rlc, pulse_voltage_rl, analytic wheatstone, pwl_diode_drop) now store
+  2 samples, err_max 0.0; the harness drops each trace's first sample, its err_rms is NaN and the
+  cell is "disagree (undersampled)". A harness limit, not an error, but an outcome change.
+* 25 cells agree with err_rms up to ~10× the base (rc_step 4.3e-7 → 5.9e-6, tol 1e-3): the base
+  read the 1 µs poll grid's extra ends. Checked against the truth on diode_half_wave_rl_load:
+  every sample exact (5.7e-16), the worst chord midpoint 9.96e-5 on a 10.3 V range =
+  0.97·rtol·range: the rule's promise, met; the scoreboard `exact` there 4.9e-6 → 8.1e-4
+  is dominated by the event jumps.
+Decision needed (orchestrator): F-X-4 (store only what the tolerance needs) and the rehearsal's
+2× bar cannot both hold; either the harness learns a 2-sample exact trace and the 2× bar is read
+against the rule's tolerance, or F-X-4 is reverted to "every step end stored".
