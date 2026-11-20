@@ -167,13 +167,20 @@ def _psfb(primary):
     return b
 
 
-def _psfb_vout(primary, **kw):
+def _psfb_vout(primary, on_grid=False, **kw):
     """The output voltage v(vout) - v(rect_neg). The secondary floats: its common mode is
-    set by the diodes' g_off leaks alone (mV, rounding), not a circuit quantity."""
+    set by the diodes' g_off leaks alone (mV, rounding), not a circuit quantity.
+    ``on_grid``: every gate edge moved to the grid point the restart rule without the
+    split takes it at (the gate read at t_k - dt/100 acts over (t_{k-1}, t_k])."""
     b = _psfb(primary)
     sw = p.make_phase_shift_full_bridge_fn(
         switching_frequency=100e3, phase_shift=1.0, leg_a_hs_idx=0, leg_a_ls_idx=1,
         leg_b_hs_idx=2, leg_b_ls_idx=3, num_switches=b.graph.num_switches, dead_time=100e-9)
+    if on_grid:
+        dt, sw0 = kw["dt"], sw
+
+        def sw(t):   # an opaque function: the split bisects its changes onto the grid
+            return sw0(dt * np.ceil(t / dt - 1e-9) - dt / 100)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         res = p.simulate(b, t_end=0.2e-3, switch_fn=sw, **kw)
@@ -203,11 +210,16 @@ def test_f37_saturable_psfb_runs_under_the_restart_rule(selector):
     assert v_lin == pytest.approx(F37_LINEAR_TRUTH, abs=2e-7)
     v_sat = _psfb_vout("saturable", dt=50e-9, **split)
     assert v_sat == pytest.approx(F37_SATURABLE_LIMIT, abs=2e-7)
-    # without the split leg B's edges act at the grid (another circuit, no truth): it runs,
-    # and the saturable - linear difference is the split's to 1e-3 of it
+    # without the split leg B's edges act at the grid (another circuit): its reference is
+    # the split run of that circuit (the switch_fn's edges moved to the grid points the
+    # plain run takes them at; measured 6e-5 apart on the saturable - linear difference,
+    # 3e-6 V on v_out). The old pin (the split's own difference, rel 0.05) held only
+    # while the plain run took an off-grid edge on the ceil side (0.008827 vs 0.008123).
     plain = dict(RESTART, mode_selection=selector, enable_substep_state_correction=False)
     d = _psfb_vout("saturable", dt=50e-9, **plain) - _psfb_vout("linear", dt=50e-9, **plain)
-    assert d == pytest.approx(F37_SATURABLE_LIMIT - F37_LINEAR_TRUTH, rel=0.05)
+    d_ref = (_psfb_vout("saturable", True, dt=50e-9, **split)
+             - _psfb_vout("linear", True, dt=50e-9, **split))
+    assert d == pytest.approx(d_ref, rel=1e-3)
 
 
 def test_f37_lcp_refuses_the_saturable_psfb_by_name():
