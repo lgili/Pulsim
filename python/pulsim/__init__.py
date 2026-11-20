@@ -4198,7 +4198,7 @@ def _run_dsed(plan):
                 mode_auto=_mode_auto,
             )
             _save_control_state(_plan.graphs, _dsed_res)   # the snapshot's controllers
-    except Exception as e:
+    except (PulsimError, RuntimeError) as e:   # typed give-ups (DiodeModeInconsistentError is a RuntimeError)
         if t_start and i.resume_from is None:   # the engine's clock: relabel
             _dsed.relabel_failure(e, float(t_start))
         raise
