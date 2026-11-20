@@ -194,3 +194,70 @@ to 1e-4 at +0.16 %. Its band in `test_coss_turn_on_energy_is_e_oss_on_the_variab
 went 5 % → 8 % with the cause written next to it, and a NEW strict xfail
 `test_coss_conduction_energy_to_1pc_at_defaults[trbdf2, esdirk43]` holds the
 1 % the probe fix must reach.
+
+## Review (fresh-context, opus medium, read-only) and its fix
+
+1. HIGH, fixed (5ebaa41d): `SaturableInductorHistory::stage_increment` fell
+   to the atan closed form for a Jiles-Atherton core, so TR-BDF2's SDIRK
+   stage-2 base and its q-row estimate used the wrong flux law (esdirk43
+   refuses JA; TR-BDF2 never took the stage form before this slice). The
+   full pytest on 450e5406 caught it too:
+   `test_hysteretic_permeance_equals_the_ja_inductor[trbdf2]` failed; it
+   passes after the fix (test_permeance_magnetic.py 100 % pass).
+2. LOW, pre-existing, not changed: a diode crossing localised INSIDE an SDIRK
+   restart step commits a trapezoidal landing sub-step (`hs.commit(...,
+   Trapezoidal)`), which reads the slots the restart was avoiding. The
+   restart's guarantee holds for the step it takes, not for a landing
+   inside it.
+3. Latent, not reachable: the `Verdict::End` sliver return in the singular
+   catch skips the `hs` rollback; it cannot happen with a stateful kind
+   (`nl_effective` is non-null whenever `hs.any()`, so the catch rethrows).
+
+## The wider moved set (stateful identity oracle, `.scratch/stateful_bitid.py`)
+
+Every trbdf2 run with a stateful kind moves (the first step is now the
+restart step): 11 of the oracle's trbdf2 cases, plus `satind_trbdf2` of the
+engines oracle (`.scratch/engines_bitid.py`: dsed, exact, pwl, pwl restart,
+bdf1, adaptive identical). Truths: trbdf2 rtol 1e-10 on the base (tro) and
+on the tip (trn), and pwl + restart at dt = t_end/1e6 (pw). Rms error per
+component at the engine's own samples, relative to its max, mean over
+components (old → new):
+
+| case | vs tro | vs trn | vs pw |
+|---|---|---|---|
+| coss (sine through R into a nonlinear C, i_C(0) = 0.6 A) | 1.7e-6 → 3.2e-5 | 3.1e-5 → 1.8e-6 | 3.1e-5 → 1.5e-6 |
+| saturable, gapped, lauritzen, rect_linear | same (≤ 0.2 %) | same | same |
+| igbt_tail | same | same | 1.24e-2 → 1.17e-2 |
+| pmsm | 4.04e-3 → 4.21e-3 | 6.22e-3 → 5.88e-3 | 3.13e-2 → 2.58e-2 |
+| satind (sine, R, saturable L; no switch) | 4.73e-7 → 4.95e-7 | 4.74e-7 → 4.94e-7 | 4.43e-7 → 4.43e-7 |
+| gbuck_coss | 9.08e-3 → 8.64e-3 | 8.72e-3 → 8.20e-3 | same |
+| everything (five kinds + diodes + gate) | 4.20e-3 → 4.56e-3 | 4.19e-3 → 4.55e-3 | same |
+| gbuck_lauritzen | 5.40e-3 → 6.46e-3 | 7.49e-3 → 1.27e-2 | same |
+| rect_atan / rect_gapped | 2.17e-3 → 2.36e-3 / 1.90e-3 → 2.42e-3 | same as tro | same / 2.92e-3 → 3.13e-3 |
+
+Reading it: on `coss` the base's own tight run is NOT a truth — the base
+converges at every tolerance to a start that ignores the 0.6 A the capacitor
+carries at t = 0 (old vs pw 3.1e-5); the tip agrees with pwl to 1.5e-6. The
+"away" rows of the switching circuits are ALGEBRAIC variables at the switching
+instants: per component, `everything` moves away only on br0 (the input
+source's current, 1.2e-2 → 1.8e-2) while its states move closer (out 9.5e-6
+→ 8.7e-6, x 9.9e-6 → 9.1e-6, c 7.3e-5 → 2.2e-5); `rect_gapped` only on the
+diode node m (8.8e-3 → 1.1e-2) with o, i_L equal; `gbuck_lauritzen` on two
+components of the same kind (1.2e-2 → 1.5e-2, 2.0e-2 → 2.4e-2) with the
+others equal. Those values are the samples' placement around the events,
+not the trajectory. `satind` (no event) moves +5 % against both tight truths
+and not at all against pwl, at an error of 5e-7 relative (rtol 1e-3): the
+first step is now first order. NOT shown toward the truth on every row; the
+states are same-or-closer everywhere, the algebraic variables at events are not.
+
+## Cost (instructions per accepted step, simulate() only, min of 3 after a warm-up; `.scratch/d2_instr.py`)
+
+| case | base 85637327 | tip | Δ |
+|---|---|---|---|
+| buck_trbdf2 (no stateful kind) | 14735 | 14779 | +0.30 % |
+| bridge_trbdf2 (no stateful kind) | 12898 | 12935 | +0.29 % |
+| vsi_trbdf2 (no stateful kind) | 46162 | 46225 | +0.14 % |
+| flyback, saturable transformer (new path) | 103750 | 99836 | −3.8 % (Newton retries 33 → 0) |
+| Coss buck (new path) | 74443 | 73187 | −1.7 % |
+
+Gate 0.5 % on the cases off the new path: met (+0.14 .. +0.30 %).
