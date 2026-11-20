@@ -340,3 +340,14 @@ sweeps `.scratch/f5w/sweep.py len|tol|rand 200`; `.scratch/b14/rec.sh new
 compare`; `.scratch/ll13/heavy.py` (circuits > 50 accepts -> pytest);
 Python ll13 regression test; cut-set rtol 1e-9 strict xfail; cost; stateful
 and error-norm test files; full pytest; reviewer.
+
+Results on the FINAL build (TEMP removed):
+- ll13 trbdf2: runs, 1555 accepted steps, 359 roundoff accepts; state error
+  at 25 smooth instants vs pwl+restart dt 5e-10: 1.9738e-5 of range;
+  cedac36b extension (= 14b0c81a numbers: 1538 steps, 345 accepts):
+  1.9738e-5. Reference's own error 1.6e-8.
+- ll08_buck_mosfet trbdf2: 1993 steps / 117 roundoff accepts (cedac36b and
+  14b0c81a: 2020 / 138; e5310710: 1998 / 135). vs pwl+restart dt 5e-9 at 200
+  instants: tip 2.2730e-6, cedac36b 2.2730e-6 (max over v_out, i_L1); the
+  reference's own error (dt 1e-8 vs 5e-9) is 2.3e-6, so both are at the
+  reference's resolution: not worse.
