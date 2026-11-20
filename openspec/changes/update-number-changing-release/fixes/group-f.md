@@ -552,3 +552,81 @@ reference_status exit 0; ruff clean; `openspec validate --all --strict` 79/79;
 output_rtol 1e-4/1e-5/1e-6 on 100 benchmark circuits (26 skipped by the tool), forward converter
 and active clamp included. Not run: Eigen 3.4.0, Windows/MSVC, a second reviewer pass on the
 review fixes.
+
+## Session 5 — branch `fix/core-release-f5-settle-decisions` (from 6cb51c00): two settle decisions
+
+Base for every "before": the extension built at 6cb51c00 (`.scratch/f5/base_py`). Truth: the
+circuits' own state equations solved per mode in mpmath (augmented [x; u; u'] matrix exponential,
+40 digits; `python/tests/test_exact_settle_decisions.py`), cross-checked on the pulse circuits
+against `exact_truth.py` (fa4b5c71, in `.scratch/f5/`, not committed): turn-off 59.2793718175008149 µs
+(v0 = 0) and 58.9377110436850184 µs (v0 = −1), the two agree to 1e-24 s; V(o)(100 µs) 5.92758587765985 /
+5.91795535047949 V. Circuit: pulse v0 → 10 V (5 µs, rise 1 µs, width 50 µs, fall 30 µs) → D1 (g_on 1e3,
+g_off 1e-9) → 100 Ω → 0.1 µF ∥ 1 kΩ.
+
+### (a) A source corner on an exact zero — FIXED
+
+Cause (code read + the run): `fire_event_` dropped a same-mask gate edge before any decision
+("Drop spurious same-mask gate edges silently"); a source corner is fired as one. The scan of the
+next step (`locate_event_exact_`, `dio && ga == 0` branch) ladders the exact-zero start, finds it
+leaving on its event side (sg = +1 for an OFF diode's DiodeOn) and `continue`s — "the mode
+decision's case" — which no one runs. D1 OFF under 10 V; `DiodeModeInconsistentError` at 6 µs.
+
+Rule: at a time event that keeps the mask, `undecided_at_time_event_` runs the settle cascade's own
+first-round test per diode (in band → `zero_band_on_`, the sign of the first non-vanishing
+derivative after t on the OFF-mode trajectory; past the threshold beyond the band → the value law
+confirmed by `zero_band_on_`); if a diode would flip, the event runs the full decision
+(`decide_modes_`, all three selectors). In-band diodes are re-decided only at a SOURCE CORNER
+(`corner_event_`, set by the four callers that know `at_corner`): a first version re-decided them
+at every same-mask time event, and a poll landing in `bridge1_vf07` (bit-identity set) turned OFF
+a leakage-level ON diode (D1 carrying D4's g_off current, 7e-10 A) 1 µs after its located partner's
+turn-off; the mpmath truth (`exact_truth.py` patched for V_f in `.scratch/f5/exact_truth_vf.py`) keeps
+one of the pair ON until 5.3663208617 ms (base 5.3660157816 ms, that version 5.10287 ms). Nothing
+changes a rate at a poll, so continuity keeps the mode there.
+
+Numbers: v0 = 0, all selectors, both forms: D1 ON at 5 µs exactly (truth 5 µs), turn-off
+59.27937181726 µs (truth 59.2793718175008, 2.4e-16 s), V(o)(100 µs) 5.92758588 (truth
+5.9275858777); before: `DiodeModeInconsistentError` on all three selectors and both forms.
+Variants (all in the test file, against the truth): one ulp of 0 and of 10 V below the zero (ON at the
+corner) and above it (the start decides ON, the corner is no event; base: the turn-off defect
+below); a corner with ġ = 0 too (an RC prefilter: g = ġ = 0, g̈ > 0) — DECIDED by the next
+derivative (the ladder's first significant rung), ON at 5 µs on all selectors (base: error); the
+same drive from a PWL table current source into 1 Ω (base: error; tip: turn-off within 4e-17 s);
+a ramp ending on a zero (resistive diode path; base: error; tip: OFF at 86 µs, current 0 after);
+a sine's zero crossings on the diode's zeros (passed on base too, kept as a guard); a pulse whose
+rise starts at t = 0 (start decision: ON from 0, turn-off 54.2793718 µs; checked, not a test).
+
+### (b) A located turn-off kept ON — FIXED
+
+Cause (trace of the earlier session + this one): at the located root the ON signal is zero only to
+its significance bound B (~1e-15 V); the post-event decision's ladder (`zero_band_on_` → `ladder_sign_`)
+already discounted the root's error, but only as a STATE error over t_tol (`loc_dx_`); the OFF
+mode reads B amplified by 1 + R·g_on = 1e5 (+1.35e-10 V), which is a TIME error of the root times the
+OFF signal's own rate (the source ramp, −2.77e5 V/s), and kept D1 ON.
+
+Rule: `root_time_error_` — the root is known to t_tol + B/|ġ|, B = `signal_bound_` of the crossing
+signal at the root, ġ its slope along the pre-event mode (the secant to the ladder's first
+significant rung); `ladder_sign_(…, dt0)` treats the post-mode signal's own movement over that
+window (sources included) as noise, max with the state term. No tuned constant: B, t_tol and the
+ladder are the existing ones. Trace on the pulse: t_tol 1e-18 s, B/|ġ| 2.5e-15 s, the OFF signal
+then decides −1 at the 1e-15 s rung.
+
+Numbers: v0 = −1, conductance form, all selectors: turn-on 5.090909086439 µs (truth
+5.0909090864381347, < 1e-15 s), turn-off 58.93771104320 µs (truth 58.9377110436850, 4.9e-16 s),
+V(o)(100 µs) 5.91795535 (truth 5.9179553505); before: `DiodeModeInconsistentError` (ON carrying
+−2.64e-3 A) on all three selectors. Branch form was NOT affected (it passed on base): its ON signal
+is the current itself, no 1e5 gain.
+
+Selectors: (a) legacy, lcp, auto, both forms; (b) legacy, lcp, auto, conductance form only.
+
+### Still open (found here, not fixed)
+
+* t_end 1–4 ulps past a source corner (reviewer): the corner snaps onto t_end and never fires;
+  the end sample reads 8.5e-15 V of forward bias as a law break. Same on base.
+* The numeric path (`allow_implicit_segments`, `b_extra_fn`): `zero_band_on_` has no exact OFF-mode
+  ladder and falls back to OFF in the band, so (a) is not decided there. Same on base.
+* bridge1_vf07: the all-OFF recovery of a series pair splits 1.4 V with a 3.4e-8 V asymmetry
+  (rounding of a g_off = 1e-9 / 0.01 S solve, above `signal_bound_`), so the wrong diode of the pair
+  (D1, truth D4) keeps the leakage; the pair's turn-off is 3e-7 s early (5.3660157816 vs
+  5.3663208617 ms). Pre-existing; unchanged here.
+* Cost of (a) in the worst case: a diode resting at an exact zero at every corner runs the full ladder
+  (~14 propagations) per corner (reviewer: 6 idle diodes × 800 corners, +35 % on that synthetic run).
