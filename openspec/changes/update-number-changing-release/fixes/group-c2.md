@@ -114,5 +114,45 @@ restart step of every circuit; its own reference_status pass).
   need their own reference_status pass. **Open**, strict xfail
   `test_a_continuous_gate_fall_inside_a_restart_step_is_an_impulse[split]`.
 
-## Verification
-(in progress)
+## Verification (tip 65b95c3c, extension built from the committed header) [M]
+- Byte compares against the branch base 27d83718 (baselines recorded with its extension): goldens ALL
+  IDENTICAL, stateful ALL IDENTICAL, engines, steps identical, pwl_identity 379/379 (the restart / split
+  entries included), trbdf2_identity 371/371.
+- reference_status (all five configurations) cell by cell against 27d83718's run (`.scratch/refstat_a5.json`):
+  pwl+restart 89/19/1, pwl+split 91/17/1 as before; NO cell moved (outcome or err_rms) — no reference
+  circuit has a Newton device with a diode commutating at a located restart event that the decision flips.
+- Cost, instructions per accepted step vs 27d83718 (min of six, same flags): buck_pwl 1.0004, vsi_pwl
+  1.0008, buck_trbdf2 1.0000, bridge_trbdf2 0.9999; rule on (linear: the decision does not run)
+  buck_pwl_restart 1.0021, vsi_pwl_restart 1.0010. A first version inside `run_event_iteration` measured
+  buck_pwl +0.6 %, a per-step closure +1.1 %: hence the out-of-line helper built once per run.
+- Tests: the 63 restart / split / mode-selection files (incl. release_findings_a / c / c2) 1491 passed,
+  5 skipped, 11 xfailed. C++ (Eigen 5): pulsim_core_step_tests 801 assertions / 32 cases, pulsim_core_mode_tests
+  9206 / 40: all pass. ONE full pytest on 65b95c3c: 6150 passed, 110 skipped, 14 xfailed, 0 failed.
+- ruff clean; no binding signature changed (stubs not regenerated).
+- NOT run: full ctest, Eigen 3.4.0, g++ (integration batch).
+
+## Review (fresh-context, opus, on 4de6c514)
+- M1 (rule-on numbers unverified): done above — no identity entry, golden or reference cell moved.
+- M2 (a linearization's flip the converged state undid counted as a mode change, widening the impulse
+  allowance): FIXED — the flips count only when the settle does not end on the entry bits.
+- M3 (the saturable expected value is the engine's own limit): stated in the test; second references
+  tried (above): trbdf2 / esdirk43 abort on it; the default trapezoid confirms the saturable increment to
+  ~1e-5. Left as is.
+- L1 (a singular decided mask: the decision reads x0 and may ping-pong up to max_event_iterations): left;
+  the settle after it is unchanged and corrects the mode; bounded.
+- L2 (rule-on cost of the decision: Eigen LU on a call-local workspace + a thrown "not converged" per
+  round, located Newton restarts only): left; not measured on a Newton circuit (no Newton case in the
+  cost set; the saturable PSFB aborted before).
+- L3 (flag consumed after the lcp early return): moot — the decision is now a call in run_restart.
+
+## State and next steps
+- Strict xfails the release merge must handle: `test_release_findings_a.py::test_f37_*` is now a PASS (the
+  F-3-7 xfail is removed on this branch). New strict xfails (open, with cause):
+  `test_release_findings_c2.py::test_a_gate_jump_inside_a_restart_step_without_the_split[*]` (explicit
+  split off: not a release configuration) and
+  `::test_a_continuous_gate_fall_inside_a_restart_step_is_an_impulse[*]` (ramp corners not landings).
+  The group-A strict xfail of the t = 0 start-from-initial-conditions stop is unchanged.
+- Open, outside the restart rule (default path / trbdf2): the floating-secondary saturable PSFB aborts
+  restart-less at dt 5 ns (1.495 µs) and on trbdf2 / esdirk43 (t = 0, or 5 µs grounded) — the same
+  "Newton discovers the commutation" class on the other loops (trbdf2's edge, the plain trapezoidal step).
+- Task 2 trade (synchronous_flyback) stays listed; the quadratic probe extrapolation is the named remedy.
