@@ -66,7 +66,28 @@ tables dominate).
 
 ## F-4-7 — control_tick='state' never fires the tick at t_end − dt
 
-(see below, filled in with the fix)
+Fixed-engine observer protocol (measured): calls labelled t_0 (priming, x_0),
+t_1 (x_0), …, t_N = t_end (x_{N−1}); x_N is never observed. Tick counts of a
+rate group against t_end = n·dt (b9e46778), label / state:
+
+| period, offset | n = 1 | 2 | 6 | 10 | 11 |
+|---|---|---|---|---|---|
+| dt, 0 | 1 / 0 | 2 / 1 | 6 / 5 | 10 / 9 | 11 / 10 |
+| 2.5 dt, 0 | 1 / 0 | 1 / 1 | 3 / 2 | 4 / 4 | 5 / 4 |
+| 3 dt, dt | 0 / 0 | 1 / 0 | 2 / 2 | 3 / 3 | 4 / 3 |
+
+The END is dropped, never t0: the label path fires every tau ≤ t_{N−1} (the
+graph's state time t_n − dt at the last call); the state path queues each
+group instant at tau + dt (`fixed_tick_kwargs`: origin + dt, "one step late")
+on run_transient's queue, whose run end is half-open (t_end − tol), so the
+last servable tick, tau = t_{N−1} queued AT t_end, was cut. Fix: those
+sources' Rate has `closed_end` (the queue's existing opt-in, t_end + tol),
+passed through a new `tick_closed_ends` argument of `run_transient`. After:
+label = state in every cell above (n = 1..11); a tick strictly inside the last
+step (2.5 dt at t_end = 3 dt) is the resumed run's first on both modes, and a
+run split at 3, 4, 5 or 6 dt fires the uninterrupted run's count. The count
+identity is a test on pwl (tau_k ≤ t_end − dt), trbdf2 and dsed
+(ceil((t_end − t0 − offset)/T), already exact there).
 
 ## F-6-1 — steady_state's default probe inside the restart engine's round-off
 
@@ -100,4 +121,36 @@ branch/branch RUNS (15.310393 V) and branch-switch / conductance-diode ABORTS
 at 0.47 ms: Newton at h_min, ||dx|| stagnated at 4.442e-8 on node T1.pm,
 residual 6.1e-5 at KCL sec_neg, res/|b| = 1.1e-16 with |b| up to 5.5e11,
 row backward error 67 eps at KCL sec_anode (roundoff acceptance limit 8 eps).
-(trace in progress)
+Trace (temporary per-attempt trace in the trbdf2 loop, removed): 53171
+accepted steps, 1784 error rejects, 20 Newton rejects before the abort. Each
+of the 47 diode landings (D1) is followed by an error-reject cascade whose
+largest entry is branch 4 = T1.lp (the primary leakage, on the all-inductor
+node T1.pm); the estimate is linear in h (the abort's landing: err 16295 at
+h = 3.3e-9, 1632 at 3.3e-10, 163 at 3.3e-11, 27 at 5.4e-12, accepted at
+2.0e-13): a stale derivative slot, not a stiff mode (which reads constant in
+h). The min step after a landing: 1.0e-14 .. 2.5e-14 (median 8.4e-13) on this
+pair, 3.2e-14 .. 4.8e-14 (median 4.1e-13) on conductance/conductance, which
+survives the same collapse only because Newton still converges at 3e-14.
+At 1e-14 = h_min Newton stalls (||dx|| 4.44e-8, three equal iterates; the
+2L/h rows put |b| at 5.5e11): the memory's "the h_min stall is the absolute
+dx test" — the stall is the symptom, the collapse is the cause.
+
+Cause: TR-BDF2 restarts a GATE edge by committing a trapezoidal probe (fresh
+derivative slots), and a DIODE turn-off by one SDIRK(2,2) step (L-stable, no
+derivative slots) — but `sdirk_possible = !hs.any()`: with any stateful kind
+(here the saturable transformer) the TR-BDF2 stage pair has no SDIRK step, so
+the step after every diode commutation reads the pre-event slots. The error
+norm with q rows (ecb07507) only moved which pair aborts.
+
+Not fixed in this slice (strict xfail with the cause). It needs the SDIRK
+restart with stateful kinds on the TR-BDF2 stage pair: the esdirk43
+integrator already has it (`ed_sdirk_base` / `ed_hs_commit`: the q rows'
+backward Euler from the linear entries' pseudo previous state), and runs all
+four pairs to 15.31034 V in 0.34 s. Porting it lifts `sdirk_possible`'s
+stateful exclusion, which also turns today's `dependent_states` refusal
+(trbdf2 + an ideal-device re-initialisation + a stateful kind) into a run:
+a default-path change of every trbdf2 circuit with a stateful kind and a
+diode, to be measured against esdirk43 at tight tolerance. Not a refusal by
+name: three of four pairs (the default conductance pair included) run today,
+by the margin above. What an ideal-device circuit needs on this engine today:
+no stateful kind, or integrator='esdirk43'.

@@ -193,6 +193,11 @@ class ControlPlan:
         nan, unknown = float("nan"), 2 ** 64 - 1
         kw["tick_origins"] = origins[:n_py] if origins else [nan] * n_py
         kw["tick_next_ks"] = ks[:n_py] if ks else [unknown] * n_py
+        # A group's instant tau is queued at tau + dt, so the last one the
+        # run can serve (tau = t_end - dt, at the call labelled t_end) sits
+        # AT t_end: the queue's run end is closed for them (release finding
+        # F-4-7: the half-open end dropped it, n steps -> n - 1 fires).
+        kw["tick_closed_ends"] = [False] * n_py + [True] * len(self._queue_groups)
         for cxx, gi in self._queue_groups:
             # the graph continues its grid unless time goes back (it then
             # rearms at t_start: rearm_if_restarted)

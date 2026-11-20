@@ -163,10 +163,7 @@ def _fires(engine, tick, period, offset, n_steps):
 CASES = [(1.0, 0.0), (2.0, 0.0), (2.5, 0.0), (3.0, 1.0)]   # (period, offset) / dt
 
 
-@pytest.mark.parametrize("engine", [
-    pytest.param("pwl", marks=pytest.mark.xfail(strict=True, reason=(
-        "release finding F-4-7: the state-time queue drops the tick at t_end - dt"))),
-    "trbdf2", "dsed"])
+@pytest.mark.parametrize("engine", ["pwl", "trbdf2", "dsed"])
 @pytest.mark.parametrize("period,offset", CASES)
 def test_both_tick_modes_fire_the_same_instants(engine, period, offset):
     """F-4-7: under control_tick='state' the fixed engine dropped the tick at
@@ -187,7 +184,25 @@ def test_both_tick_modes_fire_the_same_instants(engine, period, offset):
         assert got == [want, want], (n, got, want)
 
 
-@pytest.mark.xfail(strict=True, reason="release finding F-4-7")
+@pytest.mark.parametrize("tick", ["label", "state"])
+@pytest.mark.parametrize("period", [1.0, 2.5])
+def test_a_split_run_fires_the_uninterrupted_runs_ticks(tick, period):
+    """A tick inside the fixed engine's last step (2.5 dt at t_end = 3 dt) is
+    the resumed run's first: a split at any step fires the same count."""
+    def run(splits):
+        b = _rc()
+        ch = p.MixedDomainBlockChain(rate=p.Rate(period * DT))
+        ch.add("i", p.Integrator(), inputs=dict(x=1.0, dt="dt"), output="y")
+        obs, snap = ch.make_step_observer(b), None
+        for n in splits:
+            snap = p.simulate(b, n * DT, dt=DT, control_tick=tick,
+                              step_observer=obs, resume_from=snap).final_snapshot
+        return int(ch._cxx_chain.tick_counts()[1])
+    full = run([11])
+    assert full == math.ceil(11 / period - 1e-9)
+    assert [run([n, 11]) for n in (3, 4, 5, 6)] == [full] * 4
+
+
 def test_the_c_block_fires_on_every_tick_before_t_end_under_state_ticks(tmp_path):
     """F-4-7's call: a C block of period dt over ten steps fires ten times."""
     import test_control_graph_export_c as X
@@ -260,15 +275,30 @@ def _flyback_dc(form_s, form_d, **kw):
     return float(np.trapezoid(v[m], t[m]) / (t[m][-1] - t[m][0]))
 
 
-@pytest.mark.parametrize("forms", [
-    ("conductance", "conductance"), ("branch", "branch"), ("conductance", "branch"),
-    pytest.param(("branch", "conductance"), marks=pytest.mark.xfail(strict=True, reason=(
-        "release finding F-3-4: Newton fails at h_min (t = 0.47 ms) with ||dx|| "
-        "stagnated at 4.4e-8 on T1.pm; under investigation"))),
+_PAIRS = [("conductance", "conductance"), ("branch", "branch"),
+          ("conductance", "branch"), ("branch", "conductance")]
+
+
+@pytest.mark.parametrize("forms,integrator", [
+    *[(f, "esdirk43") for f in _PAIRS], *[(f, "trbdf2") for f in _PAIRS[:3]],
+    pytest.param(("branch", "conductance"), "trbdf2", marks=pytest.mark.xfail(strict=True, reason=(
+        "release finding F-3-4: TR-BDF2 takes no L-stable restart after a diode "
+        "event when the circuit has a stateful kind (sdirk_possible = !hs.any(); "
+        "the saturable transformer), so the step after each of the 47 landings "
+        "reads the pre-event derivative slot of the leakage inductor T1.lp next "
+        "to the all-inductor node T1.pm: the estimate grows as h (err 16295 at "
+        "3.3e-9 s, 1632 at 3.3e-10) and every landing collapses h to 1e-13 .. "
+        "1e-14 s, where Newton's absolute dx test stalls on the 2L/h rows "
+        "(abort at the 46th, t = 0.47 ms; the other form pairs survive the same "
+        "collapse by luck). Needs the SDIRK restart for stateful kinds on the "
+        "TR-BDF2 stage pair (esdirk43 has it: all four pairs run, 15.31034 V)"))),
 ])
-def test_branch_form_flyback_runs_on_trbdf2(forms):
+def test_branch_form_flyback_runs_on_trbdf2(forms, integrator):
     """F-3-4: SimulationAborted (Newton at h_min, t = 0.41 ms) with BOTH
-    devices in the branch form. Truth: the fixed engine at dt = 1e-8,
-    15.3095 V (test_saturable_transformer)."""
-    dc = _flyback_dc(*forms, engine="trbdf2", rtol=1e-6, atol=1e-9)
+    devices in the branch form (b9e46778); with the TR-BDF2 q rows merged
+    (ecb07507) that pair runs and branch switch / conductance diode aborts
+    instead (t = 0.47 ms). Truth: the fixed engine at dt = 1e-8, 15.3095 V
+    (test_saturable_transformer); esdirk43 15.31034 V on all four pairs."""
+    dc = _flyback_dc(*forms, engine="trbdf2", integrator=integrator,
+                     rtol=1e-6, atol=1e-9)
     assert dc == pytest.approx(15.3095, rel=2e-4)
