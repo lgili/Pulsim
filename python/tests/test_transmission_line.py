@@ -192,6 +192,58 @@ def test_resume_equals_the_uninterrupted_run():
     np.testing.assert_allclose(np.interp(tb, tf, vf), vb, rtol=0, atol=1e-12)
 
 
+def _dc_lattice():
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "s", "gnd", 1.0)
+    b.add_resistor("Rs", "s", "k", 10.0)
+    b.add_transmission_line("T", "k", "gnd", "m", "gnd", Z0=Z0, delay=TAU,
+                            model="bergeron")
+    b.add_resistor("RL", "m", "gnd", 200.0)
+    return b
+
+
+def test_resume_at_another_t_start_moves_the_line_past_with_the_clock():
+    # DC source, line at rest at the start: the run depends on t - t_start only
+    full = p.simulate(_dc_lattice(), t_end=6 * TAU, dt=1e-9, engine="pwl")
+    a = p.simulate(_dc_lattice(), t_end=2.35 * TAU, dt=1e-9, engine="pwl")
+    t0 = 10 * TAU
+    b = p.simulate(_dc_lattice(), t_start=t0, t_end=t0 + 3.65 * TAU, dt=1e-9,
+                   engine="pwl", resume_from=a.final_snapshot)
+    tf, vf = np.asarray(full.times), np.asarray(full.v("m"))
+    tb, vb = np.asarray(b.times) - t0 + 2.35 * TAU, np.asarray(b.v("m"))
+    keep = tb > 2.4 * TAU   # off the split's step
+    np.testing.assert_allclose(np.interp(tb[keep], tf, vf), vb[keep], rtol=0, atol=1e-9)
+
+
+@pytest.mark.parametrize("engine", ["pwl", "trbdf2"])
+def test_a_capacitor_c0_launches_no_wave_before_tau(engine):
+    # a given state that is not the line's steady state (v_a = 1, v_b = 0):
+    # the line starts at rest and the far end stays at 0 for one delay
+    b = p.CircuitBuilder()
+    b.add_capacitor("C", "k", "gnd", 1e-9, c0=1.0)
+    b.add_transmission_line("T", "k", "gnd", "m", "gnd", Z0=Z0, delay=TAU,
+                            model="bergeron")
+    b.add_resistor("RL", "m", "gnd", Z0)
+    r = p.simulate(b, t_end=3 * TAU, dt=1e-9, engine=engine)
+    t, vm = np.asarray(r.times), np.asarray(r.v("m"))
+    assert np.max(np.abs(vm[t < TAU * (1 - 1e-6)])) < 1e-9
+    # then the capacitor's discharge into Z0 arrives: e^{-(t - tau)/(Z0 C)}
+    assert _at(r, "m", TAU + 10e-9) == pytest.approx(np.exp(-10e-9 / 50e-9), rel=2e-2)
+
+
+def test_trbdf2_refuses_a_step_floor_above_the_delay():
+    # h_min >= 16 eps t_end: a 1 fs line on a 1 s run
+    b2 = p.CircuitBuilder()
+    b2.add_voltage_source("V", "s", "gnd", 1.0)
+    b2.add_resistor("Rs", "s", "k", 10.0)
+    b2.add_transmission_line("T", "k", "gnd", "m", "gnd", Z0=Z0, delay=1e-15,
+                             model="bergeron")
+    b2.add_resistor("RL", "m", "gnd", 200.0)
+    with pytest.raises(p.UnsupportedError, match="'T'") as ei:
+        p.simulate(b2, t_end=1.0, engine="trbdf2")
+    assert (ei.value.feature, ei.value.device) == ("h_min", "T")
+
+
 def test_snapshot_without_a_line_pickles_as_before():
     b = p.CircuitBuilder()
     b.add_voltage_source("V", "s", "gnd", 1.0)

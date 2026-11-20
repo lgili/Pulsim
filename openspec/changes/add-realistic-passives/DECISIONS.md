@@ -385,9 +385,23 @@ in the plan.
   Truth: lattice 5/3, 5/9, 35/27 V to 2.2e-16. Non-integer τ/dt = 100.5:
   plateaus exact; the sine far-end error falls with order 1.97 and 1.99
   (5.93e-5, 1.51e-5, 3.82e-6 at τ/dt = 25.5, 50.5, 100.5).
-- **pwl start rule.** The waves come from x when the run starts from a DC
-  point or a given `initial_state`. Otherwise the line is at rest (zero
-  waves). The static (no-reactive) path and `dt > τ` are refused by name.
+- **Start rule (pwl and trbdf2; corrected after review).** The waves
+  come from x only when the run starts from a DC point or a given
+  `initial_state` AND x holds the line as a wire (v_a = v_b, i_a = −i_b
+  to 1e-9 relative), its only steady state. Otherwise the line is at rest
+  (zero waves). The first version took the waves from any given state:
+  builder ICs (a capacitor's `c0`) become `initial_state`, and the far end
+  then moved at t = 0, before τ. Test: a 1 V `c0` capacitor into a matched
+  line leaves the far end at 0 (< 1e-9) for one delay on both engines.
+  The static (no-reactive) path and `dt > τ` are refused by name.
+- **Resume at another t_start.** The line's past moves by t_start − the
+  snapshot's t, as the sources' clock does (the first version read it
+  from the old times and failed past its last sample). Test: a resume at
+  t_start = 10τ equals the uninterrupted run shifted, to 1e-9.
+- **trbdf2 never steps past τ.** The no-final-sliver stretch to t_end is
+  skipped when it would exceed h_max with a line, and a step floor h_min
+  above τ_min is refused by name (feature `h_min`). From Python it is the
+  default floor, reached when 16·eps·t_end > τ (a 1 fs line on a 1 s run).
 - **trbdf2.** `h_max = min(h_max, τ_min)` at setup. The commit is the
   first line of `device_state_once`, the funnel every commit site calls,
   and a repeat at the same t is ignored. `inject` sits in
@@ -458,3 +472,26 @@ in the plan.
 - **R ≤ Z0.** The lossy composite refuses R > Z0 by name (the lumped
   thirds are then a poor line). The `R ≪ Z0` warning of task 5.1 is this
   refusal.
+
+### Hand-off (2026-11-20)
+
+- Left out on purpose: the `R ≪ Z0` warning (R > Z0 is refused instead);
+  coupled multi-conductor lines; a frequency-dependent loss (skin
+  effect); esdirk43 with cubic Hermite lookup (the upgrade named in (2)).
+- Known limit: the TR-BDF2 error estimate does not include the line's
+  interpolation error. A smooth wave on a line-only circuit is not
+  refined below the step that first recorded it (6.6 mV of 0.5 V, 3.3 MHz
+  through 100 ns). The upgrade is a line-error term in the controller.
+- Integration: snapshot pickle field 19 (`line_state`) is written only
+  when a line exists. A branch that also appends field 19 must renumber
+  one of them; readers here accept 17 to 20 fields.
+- Review (one read-only reviewer on the diff from b9e46778), fixed here:
+  the start rule (an inconsistent `initial_state` launched a wave at
+  t = 0), a resume at another `t_start`, the no-final-sliver stretch past
+  τ, a step floor above τ. Left: `next_kink_after` rescans the window on
+  each attempt (cost on line circuits only; marking kinks once per sample
+  is the upgrade); `n_source_breakpoints` may count a landing near bp_t
+  twice (a stats count only); the right-limit loop in `at_time` is
+  unreachable (commits never repeat a time); the lossy line's `dt`
+  refusal names the half line's τ/2.
+- Not verified: the full ctest; Eigen 3.4.0; MSVC and Linux CI.

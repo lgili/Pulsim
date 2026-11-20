@@ -1574,7 +1574,8 @@ inline SimulationResult run_transient(
                 opts.dt, line_history->tau_min(), lname));
         }
         if (resume_snap != nullptr) {
-            line_history->restore(resume_snap->line_state, "run_transient");
+            line_history->restore(resume_snap->line_state, "run_transient",
+                                  opts.t_start - resume_snap->t);
         } else {
             // a DC point or a given state (seeded as one, as the companions
             // are): its waves; the zero start: the line at rest

@@ -109,14 +109,17 @@ public:
     }
 
     /// The run's start: the past is constant. `consistent` (a DC operating
-    /// point or another solved state): the waves of `x`; otherwise the line
-    /// is at rest (zero waves).
+    /// point or a given state) AND `x` holds the line as a wire (v_a = v_b,
+    /// i_a = −i_b, its only steady state): the waves of `x`. Otherwise the
+    /// line is at rest (zero waves): a given state with only a capacitor's
+    /// c0 set is not a past in which the line carried that voltage.
     void start(Real t0, const Vector& x, bool consistent) {
         for (auto& l : lines_) {
             l.t.clear(); l.wa.clear(); l.wb.clear(); l.head = 0;
             l.t.push_back(t0);
-            l.wa.push_back(consistent ? wave_(x, l.af, l.at, l.ra, l.Z0) : Real{0});
-            l.wb.push_back(consistent ? wave_(x, l.bf, l.bt, l.rb, l.Z0) : Real{0});
+            const bool from_x = consistent && l.is_wire(x);
+            l.wa.push_back(from_x ? wave_(x, l.af, l.at, l.ra, l.Z0) : Real{0});
+            l.wb.push_back(from_x ? wave_(x, l.bf, l.bt, l.rb, l.Z0) : Real{0});
         }
     }
 
@@ -173,9 +176,9 @@ public:
         return s;
     }
 
-    /// Resume: refuses, naming the line, a snapshot whose lines are not
+    /// Resume (`shift` = t_start − the snapshot's t): refuses, naming the line, a snapshot whose lines are not
     /// this circuit's (count, Z0, tau) or that carries no line state.
-    void restore(const std::vector<Real>& s, const char* engine) {
+    void restore(const std::vector<Real>& s, const char* engine, Real shift) {
         auto refuse = [&](const std::string& why) {
             throw std::invalid_argument(
                 std::string(engine) + "(resume_from=...): " + why
@@ -207,6 +210,13 @@ public:
             }
         }
         if (p != s.size()) refuse("the line state has trailing values.");
+        // A resume at a t_start other than the snapshot's time moves the
+        // clock, as it does for the sources: the line's past moves with it.
+        if (shift != Real{0}) {
+            for (auto& l : lines_) {
+                for (auto& tk : l.t) tk += shift;
+            }
+        }
     }
 
     /// Samples held for line `k` (tests: the buffer is bounded).
@@ -251,6 +261,17 @@ private:
             wb_o = wb[j - 1] + th * (wb[j] - wb[j - 1]);
         }
         void pick(Size k, Real& wa_o, Real& wb_o) const { wa_o = wa[k]; wb_o = wb[k]; }
+
+        [[nodiscard]] bool is_wire(const Vector& x) const {
+            const Real va = stamping::read_node_voltage(x, af)
+                - stamping::read_node_voltage(x, at);
+            const Real vb = stamping::read_node_voltage(x, bf)
+                - stamping::read_node_voltage(x, bt);
+            const Real scale = Real{1} + std::abs(va) + std::abs(vb)
+                + Z0 * (std::abs(x[ra]) + std::abs(x[rb]));
+            return std::abs(va - vb) <= Real{1e-9} * scale
+                && Z0 * std::abs(x[ra] + x[rb]) <= Real{1e-9} * scale;
+        }
 
         [[nodiscard]] bool kink(const std::vector<Real>& w, Size k, Real h, Real rtol,
                                 Real atol) const {

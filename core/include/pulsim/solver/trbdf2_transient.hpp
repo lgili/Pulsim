@@ -601,6 +601,13 @@ inline SimulationResult run_transient_trbdf2(
         * std::max(std::abs(opts.t_start), std::abs(opts.t_end));
     const Real h_min = opts.h_min > Real{0}
         ? opts.h_min : std::max(t_ulp, span_ref * Real{1e-11});
+    if (lines && h_min > lines->tau_min()) {
+        const auto& lname = lines->tau_min_name();
+        throw UnsupportedError("trbdf2", "h_min", lname, "TransmissionLine", std::format(
+            "run_transient_trbdf2: h_min = {} s is longer than the delay {} s of the "
+            "transmission line '{}': a step could read its far end from the "
+            "future. Use h_min < delay.", h_min, lines->tau_min(), lname));
+    }
     // Probe steps are a DIFFERENT quantity from the step floor.
     // A probe is a throwaway solve whose only job is to pin (v, i)
     // and ask the diodes which way they conduct — nothing is
@@ -696,7 +703,8 @@ inline SimulationResult run_transient_trbdf2(
     }
     if (lines) {   // D18 (4): the snapshot's past, else constant (seeded state) or at rest
         if (resume_from != nullptr) {
-            lines->restore(resume_from->line_state, "run_transient_trbdf2");
+            lines->restore(resume_from->line_state, "run_transient_trbdf2",
+                           opts.t_start - resume_from->t);
         } else {
             lines->start(opts.t_start, x, initial_state.has_value());
         }
@@ -2737,7 +2745,8 @@ inline SimulationResult run_transient_trbdf2(
             if (landed_on_edge && !hs.any() && t + h < t_stop
                 && t_stop - (t + h) <= Real{64} * h_min
                 && (!landed_on_bp || bp_t >= t_stop)
-                && !(t_next_tick > t && t_next_tick < t_stop - h_min)) {
+                && !(t_next_tick > t && t_next_tick < t_stop - h_min)
+                && (!lines || t_stop - t <= h_max)) {   // D18: never past tau
                 h = t_stop - t;
                 landed_on_edge = false;
                 gates_flat = true;
