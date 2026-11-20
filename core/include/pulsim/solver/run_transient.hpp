@@ -856,7 +856,7 @@ inline SimulationResult run_transient(
     // record phase); and the event's right limit x0+ at event_rl_t (NaN: none
     // this step), for the event-sample storage to read.
     Vector ip_x1, ip_b, ip_h0, ip_h1, ip_x2, ip_x3f, ip_x2m, ip_s2, ip_s3;
-    std::vector<Real> ip_hist, ip_d;
+    std::vector<Real> ip_hist, ip_d, ip_r;
     pwl::StatefulHistories::Snapshot ip_hs;
     std::vector<solver::ReinitRecord> impulse_pending;
     Vector event_rl_x;
@@ -1765,16 +1765,12 @@ inline SimulationResult run_transient(
         bool edge_restart_step = false;
         bool restart = false;
         bool committed_be = false;
-        // The impulse probe's domain (consistent_start): a restart whose
-        // start may be inconsistent — an event at it (a trigger, a split
-        // event, the first step), or the end of a non-restart solve (the
-        // trapezoid reflects what it does not resolve, R(∞) = −1). The end
-        // of a restart solve in the same mode is not: it was probed at its
-        // own start and its L-stable stages leave only |R(z)| of what they
-        // relaxed (the 1 ps mode of a 1 nF junction shorted at 5 µs: 1.5 mV).
-        bool prev_be = false;      // the last committed step ended on a restart stage
-        bool step_fresh = false;   // this step's start: trigger, or !prev_be
-        bool rs_fresh = false;     // the next run_restart's start (set by each caller)
+        // The last restart trigger (written only when one fires) and how far
+        // its event can lie from the step start (a built-in source / b_extra
+        // jump inside a step without the split): δt_loc of the impulse
+        // probe (consistent_start) at a TIME event.
+        Real rs_trig_t = std::numeric_limits<Real>::quiet_NaN();
+        Real rs_trig_loc = 0;
         Real be_commit_h = kGamma * opts.dt;
         // The step hooks, called in the shared phases (slice 3c,
         // DECISIONS 17): probes R1 (`StepHooks::step`, the step's start
@@ -1830,6 +1826,21 @@ inline SimulationResult run_transient(
         // (1 + 1/γ)|d'| ≈ 4.4·|d| an extremum (Δ2 ≈ 0). Neither reads the rate
         // before the event: an 8 A cut of 1 µH at 100 V, dt 0.1 µs, is a jump
         // although h·V/L = 10 A (reviewer A1, third session).
+        // The event-time allowance δt_loc·|ẋ(0−)|: d is measured from the
+        // step start, so a kink of the state at an instant θ inside the
+        // probe (a diode turning an inductor off at zero current) gives
+        // |d| ≤ θ·|ẋ(0−)|, ẋ(0−) the state's rate before the event (history
+        // slot i/C, v/L; L⁻¹v for coupled windings; the law's L(i), C(v)).
+        // δt_loc is how far the event can be from the step start: 0 at a
+        // TIME event (a gate edge, a source jump at its scheduled instant,
+        // the first step) — any jump above noise is a jump there; the split's
+        // resolution `snap` at a located diode crossing; the probe window γh
+        // when the event is not located (a window step, a stage-1 diode flip:
+        // a crossing the previous solve had not reached lies inside it).
+        // ONE number per restart, chosen by the caller (`loc`); a stage-1
+        // flip widens it to γh for every state of that step (shortcut: a
+        // real jump below γh·|ẋ(0−)| at a gate edge whose stage 1 also
+        // flips a diode is integrated, not recorded).
         // The tolerance: 1e-8 relative with a one-unit floor is the event
         // services' noise level (`events::held_tolerance`; it holds the Newton
         // tolerance 1e-9 and the round-off). For an inductor current, plus the
@@ -1837,21 +1848,22 @@ inline SimulationResult run_transient(
         // element: G_off (every switch's and diode's g_off) times the node
         // voltages — a current the OFF elements' leakage can carry (a buck's
         // 2.4e-8 A settling at a zero start) is the model's own noise. Then
-        // the jump is recorded (½·dᵀM·d: the part of it the step cannot
-        // resolve), the histories move to x0+ and stage 1 is solved again
+        // the jump J = κ·d is recorded (½·JᵀM·J, κ = 1/(1 − a)²: the whole
+        // jump, see below), the histories move to x0 + J and stage 1 is solved again
         // from there; else nothing of the probe is kept (the restart is the
         // plain one, bit for bit).
         // Built once per run, out of line: a closure built per step (in the
         // step body) cost the default path 62-77 instructions per step.
         auto consistent_start = [&](auto& run_event_iteration, Real t_from, Real h_s,
-                                    Real dt_eq, Size& iters_1,
+                                    Real dt_eq, Real loc, Size& iters_1,
                                     bool& breach_1) PULSIM_STEP_DRIVER -> bool {
             const auto& ents = history.entries();
-            if ((!rs_fresh && !breach_1) || (ents.empty() &&
+            if (ents.empty() &&
                 hs.get<pwl::SaturableInductorHistory>().entries().empty() &&
-                hs.get<pwl::NonlinearCapacitorHistory>().entries().empty())) {
+                hs.get<pwl::NonlinearCapacitorHistory>().entries().empty()) {
                 return false;
             }
+            const Real dt_loc = breach_1 ? std::max(loc, h_s) : loc;
             ip_x1 = x;
             ip_b = b_extra;
             history.snapshot_into(ip_hist);
@@ -1957,6 +1969,22 @@ inline SimulationResult run_transient(
             };
             const Size ne = ents.size();
             ip_d.resize(2 * ne);
+            // ẋ(0−) per state, from the history slots at x0 (restored above)
+            ip_r.resize(ne);
+            for (Size k = 0; k < ne; ++k) {
+                const auto& e = ents[k];
+                ip_r[k] = (is_cap(e) ? e.i_prev : e.v_prev) / e.C_or_L;
+            }
+            for (const auto& tc : history.transformer_couplings()) {
+                const Real m =
+                    models::TwoWindingTransformer::mutual_inductance(tc.params);
+                const auto& ep = ents[tc.p_entry_idx];
+                const auto& es = ents[tc.s_entry_idx];
+                const Real det = ep.C_or_L * es.C_or_L - m * m;
+                if (!(det > Real{0})) continue;   // k = 1: keep v/L
+                ip_r[tc.p_entry_idx] = (es.C_or_L * ep.v_prev - m * es.v_prev) / det;
+                ip_r[tc.s_entry_idx] = (ep.C_or_L * es.v_prev - m * ep.v_prev) / det;
+            }
             Real v_max = 0;   // node voltages after the event
             for (Index n = 0; n < graph.num_nodes(); ++n) {
                 v_max = std::max({v_max, std::abs(ip_x1[n]), std::abs(x[n])});
@@ -1974,13 +2002,14 @@ inline SimulationResult run_transient(
             Real e_jump = 0;
             Size dom = 0;
             Real dom_e = -1;
+            Real dom_a = 0;   // the dominant jump's a = d'/d (moved reading)
             bool jumped = false;
             for (Size k = 0; k < ne; ++k) {
                 const auto& e = ents[k];
                 const Real s0 = is_cap(e) ? e.v_prev : e.i_prev;
                 const Real s1 = state(e, ip_x1);
                 const Real tol = Real{1e-8} * (Real{1} + std::abs(s0) + std::abs(s1)) +
-                                 (is_cap(e) ? Real{0} : tol_i);
+                                 (is_cap(e) ? Real{0} : tol_i) + dt_loc * std::abs(ip_r[k]);
                 const Real s2 = state(e, ip_x2m);
                 const Real dp = Real{2} * s1 - s2 - s0;
                 const bool jk = jumps(s0, s1, s2, state(e, x), tol) &&
@@ -1990,7 +2019,11 @@ inline SimulationResult run_transient(
                 jumped = jumped || jk;
                 const Real ek = Real{0.5} * e.C_or_L * dp * dp;
                 e_jump += ek;
-                if (ek > dom_e) { dom_e = ek; dom = k; }
+                if (jk && ek > dom_e) {
+                    dom_e = ek;
+                    dom = k;
+                    dom_a = (Real{2} * s2 - s1 - state(e, x)) / dp;
+                }
             }
             for (const auto& tc : history.transformer_couplings()) {
                 const Real m =
@@ -2001,11 +2034,11 @@ inline SimulationResult run_transient(
             // are states too, under the same rule. Their histories
             // are not moved to x0+ (the laws λ(i), q(v) read x0+'s algebraic
             // entries), so a jump on one is refused by name.
-            auto refuse_jump = [&](Index br, Real s0, auto&& st, const char* kind,
+            auto refuse_jump = [&](Index br, Real s0, Real r0, auto&& st, const char* kind,
                                    const char* unit) {
                 const Real s1 = st(ip_x1), s2 = st(ip_x2m);
                 const Real tol = Real{1e-8} * (Real{1} + std::abs(s0) + std::abs(s1)) +
-                                 (unit[0] == 'A' ? tol_i : Real{0});
+                                 (unit[0] == 'A' ? tol_i : Real{0}) + dt_loc * std::abs(r0);
                 if (!solved || !jumps(s0, s1, s2, st(x), tol) ||
                     !jumps(s0, s1, st(ip_x2), st(ip_x3f), tol)) {
                     return;
@@ -2021,8 +2054,10 @@ inline SimulationResult run_transient(
                                 "circuit without discontinuity_restart.",
                                 t_from, kind, name, dp, unit));
             };
+            // (ẋ(0−) from the law: V_L / L(i), i / C(v))
             for (const auto& e : hs.get<pwl::SaturableInductorHistory>().entries()) {
-                refuse_jump(e.branch_id, e.i_L_old,
+                const Real l0 = models::SaturableInductor::inductance(e.i_L_old, e.params);
+                refuse_jump(e.branch_id, e.i_L_old, l0 > Real{0} ? e.V_L_old / l0 : Real{0},
                             [&](const Vector& y) { return y[e.branch_var_id]; },
                             "saturable_inductor", "A");
             }
@@ -2031,7 +2066,9 @@ inline SimulationResult run_transient(
                     return stamping::read_node_voltage(y, e.from) -
                            stamping::read_node_voltage(y, e.to);
                 };
-                refuse_jump(e.branch_id, e.v_prev, v, "nonlinear_capacitor", "V");
+                const Real c0 = models::NonlinearCapacitor::capacitance(e.params, e.v_prev);
+                refuse_jump(e.branch_id, e.v_prev, c0 > Real{0} ? e.i_prev / c0 : Real{0}, v,
+                            "nonlinear_capacitor", "V");
             }
             // A mode with structural dependent states (ideal elements) keeps
             // the SDIRK x3 projection and the tracker's record (one service
@@ -2050,8 +2087,18 @@ inline SimulationResult run_transient(
                 stamped_mask = stamped_s;
                 return false;
             }
+            // The whole jump, not its unresolved part: per mode d = −J(1 − a)²
+            // and d' = a·d, so x0+ = x0 + κ·d, κ = 1/(1 − a)², a from the
+            // dominant jump (a < γ/(1 + γ) by the rule: κ ≤ 1.67). With κ = 1
+            // the a(2 − a)·J left in x0+ came back reversed through stage 2's
+            // pseudo-state: 0.68 A of a 100 A IGBT cut (a = 0.0034, τ = L·g_off
+            // = 1 ps at dt 1 ns) stayed in the free-wheeling diode (0.955 A,
+            // truth 0). The other states' d (O(h²) on a smooth trajectory)
+            // take the same κ (shortcut: one a per event, exact for one mode).
+            const Real a_j = std::clamp(dom_a, Real{0}, kGamma / (Real{1} + kGamma));
+            const Real kappa = Real{1} / ((Real{1} - a_j) * (Real{1} - a_j));
             // The record (every non-structural device kind). dW =
-            // ½ΔᵀMΔ > 0 by the test above (M is positive semidefinite).
+            // ½·JᵀM·J > 0 by the test above (M is positive semidefinite).
             {
                 const auto& de = ents[dom];
                 const bool cut = de.kind != pwl::DevicePool::StoredKind::Capacitor;
@@ -2064,14 +2111,18 @@ inline SimulationResult run_transient(
                     }
                 }
                 // the flux (V·s) or charge (C) moved on the dominant state
-                rec.lambda = de.C_or_L * ip_d[2 * dom];
+                rec.lambda = de.C_or_L * kappa * ip_d[2 * dom];
                 for (const auto& tc : history.transformer_couplings()) {
                     const Real m =
                         models::TwoWindingTransformer::mutual_inductance(tc.params);
-                    if (tc.p_entry_idx == dom) rec.lambda += m * ip_d[2 * tc.s_entry_idx];
-                    if (tc.s_entry_idx == dom) rec.lambda += m * ip_d[2 * tc.p_entry_idx];
+                    if (tc.p_entry_idx == dom) {
+                        rec.lambda += m * kappa * ip_d[2 * tc.s_entry_idx];
+                    }
+                    if (tc.s_entry_idx == dom) {
+                        rec.lambda += m * kappa * ip_d[2 * tc.p_entry_idx];
+                    }
                 }
-                rec.dW = e_jump;
+                rec.dW = kappa * kappa * e_jump;
                 // The devices that opened: the switching / nonlinear
                 // elements at the dominant state's terminals.
                 Index dev0 = kInvalidIndex;
@@ -2115,7 +2166,8 @@ inline SimulationResult run_transient(
             // through the event (only the C / L states are probed), and
             // their laws read x0+'s algebraic entries, which carry the
             // extrapolated impulse (F-5-1: -6.8e8 V).
-            history.extrapolate_previous(event_rl_x, Real{1});
+            // (event_rl_x keeps the stages' line 2·x1 − x2; the states take κ)
+            history.extrapolate_previous(event_rl_x, kappa);
             history.compute_b_extra_backward_euler(h_s, ip_h1);
             b_extra = ip_b - ip_h0 + ip_h1;
             x = ip_x1;   // the solve's start (Newton): the relaxed stage
@@ -2736,9 +2788,22 @@ inline SimulationResult run_transient(
                   (split ? b_jump_after(t_prev - snap) < t_prev + snap
                          : b_jump_after(t_prev - left_by) < t - left_by)))) {
                 restart_left = kRestartSteps;
-                step_fresh = true;
-            } else {
-                step_fresh = !prev_be;
+                rs_trig_t = t_prev;
+                // without the split a built-in source / b_extra jump inside
+                // the step is solved from t_prev: δt_loc is its offset
+                // (a stage reads it only up to t_prev + γh)
+                rs_trig_loc = 0;
+                if (!split) {
+                    Real tj = t;
+                    if (has_jump_sources) {
+                        tj = std::min(tj, sources::next_source_jump_after(
+                                              pool, graph, t_prev - left_by));
+                    }
+                    if (has_b_jumps) tj = std::min(tj, b_jump_after(t_prev - left_by));
+                    if (tj < t) {
+                        rs_trig_loc = std::clamp(tj - t_prev, Real{0}, kGamma * opts.dt);
+                    }
+                }
             }
             restart = restart_left > 0;
             if (restart) --restart_left;
@@ -2772,7 +2837,8 @@ inline SimulationResult run_transient(
             // the mode change is real and the SDIRK stage 2 is restored bit
             // for bit (a BE remainder there cost DCM buck 8× in accuracy).
             //
-            auto run_restart = [&](Real t_from, Real h) {
+            // loc: δt_loc of the event at t_from (consistent_start)
+            auto run_restart = [&](Real t_from, Real h, Real loc) {
                 const Real h_s = kGamma * h;
                 const Real dt_eq = Real{2} * h_s;
                 be_commit_h = h_s;
@@ -2784,7 +2850,7 @@ inline SimulationResult run_transient(
                 if (breach_1 && has_diodes && !last_solved_bits.empty()) {
                     diodes.restore_on_bits(last_solved_bits);
                 }
-                consistent_start(run_event_iteration, t_from, h_s, dt_eq, iters_1, breach_1);
+                consistent_start(run_event_iteration, t_from, h_s, dt_eq, loc, iters_1, breach_1);
                 if (has_diodes) {
                     rs_x1 = x;
                     diodes.snapshot_on_bits_into(rs_bits);
@@ -2925,8 +2991,12 @@ inline SimulationResult run_transient(
                         any_split = true;
                     }
                     if (be) {
-                        rs_fresh = i > 0 || step_fresh;
-                        run_restart(a, h);
+                        // a scheduled event (merged within snap) or the step's
+                        // trigger: time events; a window step: not located
+                        run_restart(a, h,
+                                    i > 0 ? ev_s[i - 1] - ev_t[i - 1]
+                                    : rs_trig_t == t_prev ? rs_trig_loc
+                                                          : kGamma * h);
                     } else {
                         if (i > 0 || h != opts.dt) {
                             accumulate_b_extra(b, h);
@@ -3006,8 +3076,7 @@ inline SimulationResult run_transient(
                                 be = true;
                                 restart_left = std::max(restart_left,
                                                         kRestartSteps - 1);
-                                rs_fresh = true;
-                                run_restart(a, h);
+                                run_restart(a, h, snap);   // crossing within snap of a
                             } else if (b - t_d < snap) {
                                 x = x_first;
                                 stamped_mask = mask_first;
@@ -3028,8 +3097,7 @@ inline SimulationResult run_transient(
                                 commit_trap(h1);
                                 diodes.restore_on_bits(post_event_bits);
                                 h = b - t_d;
-                                rs_fresh = true;
-                                run_restart(t_d, h);
+                                run_restart(t_d, h, snap);   // located to snap
                                 be = true;
                                 any_split = true;
                             }
@@ -3083,8 +3151,8 @@ inline SimulationResult run_transient(
                     }
                 }
                 if (restart) {
-                    rs_fresh = step_fresh;
-                    run_restart(t_prev, opts.dt);
+                    run_restart(t_prev, opts.dt,
+                                rs_trig_t == t_prev ? rs_trig_loc : kGamma * opts.dt);
                     committed_be = true;
                 }
                 }   // !split
@@ -3158,8 +3226,10 @@ inline SimulationResult run_transient(
                         }
                         try {
                             if (sub_restart) {
-                                rs_fresh = j == 0 && step_fresh;
-                                run_restart(t_sub - sub_dt, sub_dt);
+                                run_restart(t_sub - sub_dt, sub_dt,
+                                            j == 0 && rs_trig_t == t_prev
+                                                ? std::min(rs_trig_loc, kGamma * sub_dt)
+                                                : kGamma * sub_dt);
                             } else {
                                 run_event_iteration(t_sub, sub_dt);
                             }
@@ -3497,7 +3567,6 @@ inline SimulationResult run_transient(
             //    the trap history. `committed_dt` is opts.dt on the normal
             //    path and dt2 when sub-step correction split the step (whose
             //    sub-step 1 already committed the dt1 half above).
-            prev_be = committed_be;
             if (committed_be) {
                 commit_backward_euler(be_commit_h);
             } else {
