@@ -57,16 +57,8 @@ def long_case(fn):
 RTOL, ATOL = 1e-6, 1e-9          # explicit accuracy of the variable-step engines
 K_RTOL = 10.0                    # a controlled run's global error: a few rtol
 
-F_L_1 = ("finding F-L-1: pwl discontinuity_restart=True records one sample per gate "
-         "edge (the left limit), so every edge reads as a one-step ramp: integrals over "
-         "the record (input power, energy ledger) miss O(dt) per edge and the error "
-         "grows with run length (residual 2.5e-3 of the input energy at dt = T/100)")
-
-F_L_2 = ("finding F-L-2: the exact engine (dsed) records one sample per gate edge, the "
-         "left limit, with or without output_rtol: integrals over its record miss the "
-         "switched waveform (buck energy ledger over 10 ms: residual 0.109 of the input "
-         "energy with output_rtol unset, 5.6e-3 with output_rtol=1e-6 against a grid bound "
-         "of 1.4e-4)")
+# F-L-1 / F-L-2 (FINDINGS.md): a ledger over the stored record read each gate
+# edge's left limit only; the ledgers read both limits (pulsim.with_event_limits).
 
 
 def _engines(dt):
@@ -198,8 +190,7 @@ def test_buck_settles_on_the_closed_form_steady_state(eng):
     assert abs(per[-1] - buck_pss()["v"]) <= bound * buck_pss()["v"]
 
 
-@pytest.mark.parametrize("eng", [pytest.param(e, marks=pytest.mark.xfail(strict=True, reason=F_L_1))
-                                 if e == "pwl-restart" else e for e in ENGINES])
+@pytest.mark.parametrize("eng", ENGINES)
 def test_buck_input_power_matches_the_closed_form(eng):
     r = _buck_record(eng, 20e-3)
     pin = r.recorded["e"].periods["-v(vin)*i(Vin)"]["avg"]
@@ -208,6 +199,7 @@ def test_buck_input_power_matches_the_closed_form(eng):
 
 
 def _buck_ledger(r):
+    r = p.with_event_limits(r)   # both limits of every edge (release group B)
     t = np.asarray(r.times)
     vin, vsw, vout = (np.asarray(r.v(n)) for n in ("vin", "sw", "out"))
     p_in = -vin * np.asarray(r.i("Vin"))
@@ -218,11 +210,7 @@ def _buck_ledger(r):
     return compute_conservation_drift(list(p_in), list(p_out), e[0], e[-1], list(t))
 
 
-_XF = {"pwl-restart": F_L_1, "dsed": F_L_2, "dsed-output_rtol": F_L_2}
-
-
-@pytest.mark.parametrize("eng", [pytest.param(e, marks=pytest.mark.xfail(strict=True, reason=_XF[e]))
-                                 if e in _XF else e for e in ENGINES + ["dsed-output_rtol"]])
+@pytest.mark.parametrize("eng", ENGINES + ["dsed-output_rtol"])
 def test_buck_energy_ledger_closes_over_the_record(eng):
     """Source work = load + switch + diode dissipation + stored energy,
     each from its own branch, over the whole 10 ms record from rest."""
@@ -456,6 +444,7 @@ def _branch_power(r, name, a, b):
 def _ledger(r, sources, dissipators, stores):
     """sources / dissipators: (name, n+, n-); stores: (value, kind, name-or-node,
     n-) with kind 'C' (1/2 C v^2 across n+, n-) or 'L' (1/2 L i^2)."""
+    r = p.with_event_limits(r)   # both limits of every edge (release group B)
     p_in = -sum(_branch_power(r, *s) for s in sources)
     p_out = sum(_branch_power(r, *d) for d in dissipators)
     e = 0.0
@@ -499,17 +488,7 @@ def _mmc_case():
 
 
 _CASES = {"gan": _gan_case, "stiff": _stiff_case, "mmc": _mmc_case}
-_XF_LEDGER = {"pwl-restart": F_L_1, "dsed": F_L_2}
-
-
-def _ledger_param(case, eng):
-    reason = _XF_LEDGER.get(eng)
-    if reason:
-        return pytest.param(case, eng, marks=pytest.mark.xfail(strict=True, reason=reason))
-    return (case, eng)
-
-
-@pytest.mark.parametrize("case,eng", [_ledger_param(c, e) for c in sorted(_CASES) for e in ENGINES])
+@pytest.mark.parametrize("case,eng", [(c, e) for c in sorted(_CASES) for e in ENGINES])
 def test_conservation_kpi_closes_on_the_other_long_run_circuits(case, eng):
     """Source work = dissipation + stored energy, every branch on its own,
     over a record from rest: the spec's 1 % and the grid's own bound."""
@@ -517,7 +496,7 @@ def test_conservation_kpi_closes_on_the_other_long_run_circuits(case, eng):
     r = _sim(b, t_end, switch_fn=fn, **_engines(dt)[eng])
     resid = _ledger(r, src, diss, stores)
     bound = _acc_bound(eng, r.times, w)
-    if bound >= 1.0 and eng not in _XF_LEDGER:
+    if bound >= 1.0:
         # esdirk43 crosses the stiff loop's 10 ns RC in 0.16-tau steps
         # ((w h_max)^2 = 3.3): a trapezoid through that record is not a KPI
         # (it misses 1.25 %), the engine's states are right (test above)
@@ -669,8 +648,7 @@ def test_long_closed_loop_on_the_variable_step_engines(eng):
 # ---------------------------------------------------------------------------
 
 @long_case
-@pytest.mark.parametrize("eng", [pytest.param(e, marks=pytest.mark.xfail(strict=True, reason=F_L_1))
-                                 if e == "pwl-restart" else e for e in ENGINES])
+@pytest.mark.parametrize("eng", ENGINES)
 def test_long_run_drift_buck_one_second(eng):
     """1 s at 100 kHz (1e7 pwl steps). The record is decimated on pwl
     (store_every) and complete on the variable-step engines; the
