@@ -910,3 +910,40 @@ interval and three tests time out — (2) and (3) arrived with session 4's recov
 * Hand-off correction: the re-run chain was terminated (SIGTERM, exit 143) during the full pytest
   at 80 % (after the two timeouts in test_release_findings_f.py; `[python]` unfinished). The
   full pytest did NOT complete and `-m reference` did NOT run on this tip.
+
+## Session 7 — the three defects of session 6 (logs in `.scratch/f8/`, prefix `S7_`)
+
+F7's background chain (PID 43140 + its pytest 48697) stopped by PID before the rebuild.
+
+### D-1 — a source corner deferred (FIXED, d365c847)
+
+* Instrumented (env-guarded print, removed): the rule-on run's landings near 2.52 ms —
+  `t = 2.5199999999999966e-3, t_gate = t_sw = the poll, corner pending 2.52e-3, at_corner 0,
+  out_defer 1, transparent 1` — the no-edge gate poll lands 3.4e-18 s SHORT of the pulse's fall
+  corner (not on it): `at_corner = t_gate < t_sw` is false, the landing is "transparent", the
+  end is deferred, and the next step treats the corner as passed. F7's reading confirmed (the
+  tie is a near-tie, not an exact one).
+* Fix: `corner_at_(t)` — the landing is never deferred when the corner pending in the queue is
+  at its instant (`near_time`, finite only: `near_time(t, inf)` is true). Rule-on only (behind
+  `out_defer`).
+* Numbers (`.scratch/f8/clamp_check.py`, rule-on line vs a 1e-7 s rule-off grid): unfixed
+  9.67 × at 2.52 ms, corner not stored; fixed: corner stored (10 samples), worst 0.000.
+  **PR head 8c921c81 (so_8c921c81 + `git archive 8c921c81 python/pulsim`): YES, the same
+  defect, 9.666 × at 2.52 ms, 9 samples, corner not stored.**
+* Test: `test_f8_a_source_corner_is_always_a_stored_sample` (the four corners stored; the
+  referee's ratio ≤ 1).
+
+### The referee (benchmarks/tools/output_rule_referee.py, new)
+
+* The flow is the same route with the rule off, run as a CHAIN of windows that tile the run at
+  stored instants (`resume_from` the previous window's snapshot; one build, so a closed loop's
+  Python controller continues); each window's dt = its shortest stored line / 6, so every line
+  of non-zero length holds ≥ 5 reference instants wherever they fall. A line with none, a NaN,
+  other events, a window without a snapshot, a suspended rule (cap / unbounded / budget), a
+  floored column without a floor mapping: a harness FAILURE (`comparable` false, the reason).
+  Denominator: `max(rtol·range, atol, floor of that column)` (range: the run's, ≥ 1e-3 of the
+  peak; floor: `output_floor_by_column` mapped through the observable), no other slack. The
+  first line after an event counts (both limits of a jump are in the trace; only reference
+  instants within 1e-12 s of an event are skipped).
+* On the clamp: unfixed engine 9.666 (`S7_referee_clamp_unfixed.jsonl`), fixed 3.6e-7
+  (`S7_referee_clamp_fixed.jsonl`). Test `test_f8_the_referee_fails_a_line_it_cannot_read`.
