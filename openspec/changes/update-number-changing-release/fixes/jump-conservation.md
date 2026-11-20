@@ -132,3 +132,7 @@ Held (reviewer): default path bit-identical (md5); ringing modes (pH loop induct
   vsi_pwl 1.0008, buck_trbdf2 0.9997, bridge_trbdf2 1.0000; rule on buck_pwl_restart 1.0068, vsi_pwl_restart 1.0025.
 - The 60 restart / split test files at d7100f19: 1685 passed, 23 skipped, 33 xfailed, 2 failed (the two
   test_f24_exact_thermal_ratio… of the base).
+- Full pytest at 3d3516c1 (code = 09126877): 6821 passed, 133 skipped, 37 xfailed, 2 failed — the two
+  `test_release_findings_b.py::test_f24_exact_thermal_ratio_matches_the_fixed_engine[500.0 / 20.0]` that fail
+  with the base extension (not this change).
+- NOT run: full ctest, Eigen 3.4.0, g++, openspec strict, stubs (no binding signature changed).
