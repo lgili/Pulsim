@@ -2555,7 +2555,11 @@ private:
                 && loc_t_tol_ > Real{0} && system_.has_exact_step()) {
                 advance_(t_event, x, loc_t_tol_, loc_dx_);
                 loc_dx_ -= x;
-                loc_dt_ = root_time_error_(t_event, x, aux_index);
+                // the root, kept for root_time_error_ (computed only if a decision
+                // would revert this crossing: zero_band_on_)
+                loc_root_x_ = x;
+                loc_root_mask_ = old_mask;
+                loc_fired_ = aux_index;
             }
         }
 
@@ -2663,7 +2667,8 @@ private:
         }
         settle_decisions_ = false;
         loc_dx_.resize(0);
-        loc_dt_ = Real{0};
+        loc_fired_ = -1;
+        loc_dt_ = std::numeric_limits<Real>::quiet_NaN();
 
         // Consistent reinitialization (Phase-3 item 2). The event
         // deposits x off the new mode's slow manifold — a µA of
@@ -2700,11 +2705,10 @@ private:
     /// amplifies the ON signal's B by 1 + R·g_on (1e5: +1.35e-10 V at a located
     /// turn-off on a falling ramp, which kept the diode ON while v_D fell at
     /// −2.77e5 V/s). t_tol alone when the signal never becomes significant.
-    [[nodiscard]] Real root_time_error_(Real t, const Vector& x, int aux_index)
+    /// Read at (t, x) under the pre-event mask, `on` the diode's pre-event state.
+    [[nodiscard]] Real root_time_error_(Real t, const Vector& x, const SchedulerDiode* d, bool on)
         requires HasExactStep<System> {
-        const SchedulerDiode* d = aux_index >= 0 ? diode_of_(aux_index) : nullptr;
         if (d == nullptr) return loc_t_tol_;
-        const bool on = diode_bits_.get(d->switch_idx);   // the pre-event mode
         const auto prm = d->params();
         const auto g_of = [&](Real tau, const Vector& xx) {
             return models::SwitchedDiode::crossing_signal(on, law_v_(*d, tau, xx), prm);
@@ -3164,11 +3168,27 @@ private:
                     dx0 = &dxs;
                 }
                 Real dj = Real{0};
-                const int sg = ladder_sign_(t0, x0, d, decision_cap_(t0),
-                    [&](Real tau, const Vector& xx) {
-                        return models::SwitchedDiode::crossing_signal(
-                            false, system_.node_pair_voltage(d.from, d.to, tau, xx), prm);
-                    }, dj, dx0, dx0 ? loc_dt_ : Real{0});
+                const auto g_off_mode = [&](Real tau, const Vector& xx) {
+                    return models::SwitchedDiode::crossing_signal(
+                        false, system_.node_pair_voltage(d.from, d.to, tau, xx), prm);
+                };
+                int sg = ladder_sign_(t0, x0, d, decision_cap_(t0), g_off_mode, dj, dx0);
+                // F5 (b): a decision that reverts the located crossing (the fired
+                // diode back to its pre-event state) must be significant beyond the
+                // root's TIME error too (root_time_error_); computed once per event,
+                // and only here: an agreeing decision needs no more noise
+                if (dx0 && loc_fired_ == static_cast<int>(d.switch_idx)
+                    && (sg > 0) == loc_root_mask_.get(d.switch_idx)) {
+                    if (std::isnan(loc_dt_)) {
+                        system_.set_mask(loc_root_mask_);
+                        loc_dt_ = root_time_error_(t, loc_root_x_, &d,
+                                                   loc_root_mask_.get(d.switch_idx));
+                        diode_bits_.set(d.switch_idx, false);   // back to the candidate OFF mode
+                        system_.set_mask(mask.overlay(diode_bits_, diode_owned_));
+                        diode_bits_.set(d.switch_idx, was);
+                    }
+                    sg = ladder_sign_(t0, x0, d, decision_cap_(t0), g_off_mode, dj, dx0, loc_dt_);
+                }
                 // no significant rung: zero to double precision up to the cap,
                 // the diode keeps its mode (rest and exact ties stay quiet)
                 on = sg > 0;
@@ -3602,8 +3622,11 @@ private:
     // The located root's time tolerance (locator) and the state error it
     // carries, x(t + t_tol) − x(t) in the pre-event mode (fire_event_).
     Real loc_t_tol_ = Real{0};
-    Real loc_dt_ = Real{0};
-    bool corner_event_ = false;   // the next fire_event_ lands on a source corner   // root_time_error_ of the located diode event being decided
+    Real loc_dt_ = std::numeric_limits<Real>::quiet_NaN();   // root_time_error_, NaN until read
+    int loc_fired_ = -1;          // the located event's diode (switch index), -1 outside one
+    MaskT loc_root_mask_{};       // its pre-event mask
+    Vector loc_root_x_;           // its root state
+    bool corner_event_ = false;   // the next fire_event_ lands on a source corner
     Vector loc_dx_, x_lad2_, x_offp_;
     std::vector<Vector> scan_x_;
     Eigen::VectorXcd scan_zdd_;   // locate_event_exact_'s certificate: z̈ at the step start
