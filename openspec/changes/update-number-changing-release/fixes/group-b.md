@@ -76,7 +76,7 @@ Measured on this branch with the release options explicit
 | F-2-2 | fixed, verified | boost D1 charge vs load charge (CCM and DCM): trapezoid of the two-limit trace 1e-9, summary i_avg 1e-6 |
 | F-5-7 | fixed, verified | DCM duty 0.2180 vs exact 0.2210 -> within 2e-3 (V_th 0.7 and 0) |
 | F-6-4 | fixed, verified | RL chopper cond S1 1.86e-3 -> <= 2.5e-4, error ratio dt/(dt/2) >= 3 (second order; closed form) |
-| F-6-5 | fixed, verified on pwl | Rsq vs Ip rows 3e-4/6e-4/8e-4 now equal (1e-9); the exact engine takes the same left read — NOT checked against its rows |
+| F-6-5 | fixed, verified on pwl and exact | Rsq vs Ip rows equal to 1e-9 on pwl (rule off/on) and the exact engine (its event row sits one ulp after the grid sample: 1.0 -> 3e-13); a PWL ramp into a flat segment (a corner) is not read as a jump |
 | F-2-4 | fixed, verified | ratio 0.9777/1.0109 -> 0.9947/0.9943 (pwl T/1000 0.9946/0.9943) |
 | F-5-2 | fixed, verified | settle 1.3e-4 "not_settled" -> ok |
 | F-5-5 | estimator limit REFUTED: with the restart lines the sample trapezoid closes to round-off (<= 1e-9) at V_th = 0 too |
@@ -93,30 +93,54 @@ event results), `thermal.compute_temperature(piecewise_linear=)`,
 `stats.steady_state_stats`, `design._settle_error`, `res.i` of waveform
 current sources.
 
-NOT verified: full pytest, ctest, the instruction-count cost of the four
-cases (the change adds work only on restart steps: one state copy at stage 1
-and one axpy), stubs `--check` (new properties: regenerate
-`_pulsim.pyi`), reviewer pass, Eigen 3.4.0. Byte compares: see the commit
+Second session (2026-11-19, after the coordinator's list):
 
-
-Next three steps for a successor:
-1. F-4-4: feed the LoopFeed the step's lines. In `step_record`, when
-   `q_ok && !lines.empty()`, call `hooks->step` per line (start right limit
-   as the step's start state = the feed's "jump" row; one hook step per inner
-   event) instead of the one step; the feed's Capacitor reading returns the
-   companion's END current for any x, so pass the capacitor currents of each
-   line point (stage 1: C·(X1 − x0)/(γh); the line start 2·w1·i(X1) +
-   (1 − 2·w1)·i(X2)) — e.g. an `i_cap` override span in `StepHooks::step`.
-   Truth: the window charge = C·Δv (test_f44).
-2. Run the full pytest and list every existing test whose number moved
-   (restart-rule pwl summaries, dsed thermal T_j, design on restart runs);
-   regenerate stubs; reviewer.
-3. Cost: instructions per accepted step on buck/vsi pwl and buck/bridge
-   trbdf2 (rule off must be unchanged: `lines` is touched only when
-   `restart_rule`).
-
-Byte compares against the PR-head baseline (`.scratch/base_b.sh`, default
-options): golden, stateful, engines, steps all byte-identical. pwl_identity
-(1/390) and trbdf2_identity (152/371) differ only by `inner_events` /
-`right_limit_*` being present on one side; with those lines excluded the diff
-is empty, so the trajectories are unchanged. The 151 MB baseline was deleted.
+- Stubs regenerated, `generate_stubs.py --check` clean.
+- Cost, instructions per accepted step, PR head 27c00520 built with this
+  worktree's ext config (`.scratch/build_base.sh`; the saved
+  `so_27c00520` differs in build), interleaved, min of 3 x 3: buck pwl
+  3098.4 -> 3111.4 (+0.42 %), vsi pwl 4767.3 -> 4779.6 (+0.26 %), buck
+  trbdf2 11028.0 -> 11026.3, bridge trbdf2 12776.3 -> 12775.7. Before the
+  last two commits it was +0.9 % / +0.7 %: the step state now sits in one
+  StepLines allocated under the rule only, reset at a step's first restart
+  (not every step). Rule on (information): buck +1.45 %, vsi +0.69 %.
+- Full pytest (c95fa4ec + stubs): 6107 passed, 1 failed, 110 skipped,
+  9 xfailed. The failure was the raise ratchet (563 > 562, the new
+  non-decreasing check); fixed (561). No existing test's assertion moved
+  out of its tolerance; numbers moved inside tolerances are not enumerated.
+- Identity tools: an attribute absent from the baseline is not a
+  difference (`pwl_identity.first_difference`, test_identity_tool):
+  pwl_identity 390/390, trbdf2_identity 371/371 identical against the PR
+  head. golden / stateful / engines / steps were byte-identical before the
+  reviewer fixes and are covered since by the identity tools' goldens only.
+- Reviewer (opus, medium) findings and what was done:
+  1. kept backward-Euler stage 2: the stored start is first order as a
+     value (quadrature-exact for integrals) -> documented (shortcut
+     comment, result.hpp, binding doc); not changed.
+  2. thermal PL path ran on reinit-record pwl/trbdf2 runs (default) ->
+     gated to event-limit results.
+  3. design settle nearest-sample on every engine -> event-limit results
+     only.
+  4. res.i jump heuristic misread a ramp-to-flat corner -> second left
+     probe (a corner moves both steps alike).
+  5. design traces ignored inner events -> with_inner_events; recorders
+     fed from stored arrays still ignore them (open, with F-4-4).
+  6. store_every > 1 kept empty limits -> no event limits (None), test.
+  7. inner row gate state -> the gate before the edge.
+  8. binding over-read -> size checks.
+  9. identity tool looser for new attributes -> by design (requested).
+- F-4-4: not started (strict xfail). Needs, in this order: (a) a
+  per-line feed in `step_record` when `L->owner == t && L->ok &&
+  !L->empty()` (the start right limit as a jump row, one hook step per
+  inner event); (b) capacitor currents per line point, since the feed's
+  Capacitor reading is the companion's END current for any x (stage 1:
+  C·(X1 − x0)/(γh); line start 2·w1·i(X1) + (1 − 2·w1)·i(X2)), e.g. an
+  `i_cap` override span on `StepHooks::step`
+  (core/include/pulsim/events/step_hooks.hpp, record/loop_feed.hpp
+  `device()`); (c) the same for `_recorders.record_result` (inner events
+  as rows). Truth: the window charge = C·Δv (test_f44); the buck's energy
+  balance back to ~1e-5. Then cost again (the feed runs only with
+  recorders).
+- NOT verified: ctest, Eigen 3.4.0, a second full pytest after the
+  ratchet fix (the touched files' tests pass), stateful/engines/steps
+  byte compares after the reviewer fixes.
