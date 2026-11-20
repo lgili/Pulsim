@@ -439,8 +439,21 @@ def _exact_result(
 
 
 def _result_from_native(native_res, t_start: float):
-    """The result of a Bridge.11 run (``run_*_native_builder``)."""
+    """The result of a Bridge.11 run (``run_*_native_builder``). ``t_start``:
+    the engine ran on its own clock from 0; every time it reports is
+    relabelled here (the loss events in the binding, ``t_offset``)."""
     import numpy as np
+    if t_start:
+        for rd in native_res.get("reinit_records", ()):
+            rd["t"] += t_start
+        for key in ("mode_shadow", "mode_selection", "mode_guard"):
+            g = native_res.get(key)
+            if g is not None:
+                for s in (g, g.get("lcp", {})):
+                    for e in s.get("disagreements", ()):
+                        e["t"] += t_start
+                if "repair_times" in g:
+                    g["repair_times"] = [t + t_start for t in g["repair_times"]]
     # One array conversion, not one per sample.
     times = (np.asarray(native_res["times"], dtype=float)
              + float(t_start))
