@@ -378,3 +378,70 @@ test_simulate_overhead, test_engine_auto: 68 passed, 4 xfailed; ruff clean; stub
 The byte compares of the earlier section no longer apply: with the C++ reverted every case is the
 PR head's own extension (identical by construction); the Python change only adds a warning on
 `engine='dsed'` results whose right limits breach the voltage bound.
+
+## Fourth session (2026-11-20): the jump test without the old rate (A1), A3 [M]
+
+Branch `fix/core-release-a4-jump-test` from 1cec4e8b. Code tip 0bd28e03 (criterion below is IN the code).
+
+**The orchestrator's J = 2·D(h/2) − D(h) is the probe's existing d.** With D1 = x1 − x0 (one BE stage of
+γh) and D2 = x2 − x0 (two stages), d = 2·x1 − x2 − x0 = 2·D1 − D2 is the same Richardson estimate
+(steps γh / 2γh instead of h/2 / h): per mode d = −J·(r/(1+r))², O(r²) slow, → −J fast. No new solve
+gives J; the question was only the BOUND it is compared with. Compared with the noise floor alone it
+flags every curved trajectory: the DCM buck's C at a gate edge has d = 6.4e-7 V = (γh)²ẍ (ẍ ≈ 3e9
+V/s²) against tol 2.9e-7 V. So "J vs noise" is refuted by the buck_dcm trace.
+
+**Criterion in the code (0bd28e03).** A third BE stage x3 (same factor, discarded) gives
+d' = Δ2 − Δ3 (Δk = xk − x(k−1)); per mode d' = a·d (a = 1/(1+r)); on a smooth trajectory d' ≈ d.
+Impulsive iff, in both readings (frozen / moved),
+  |d| > max(|Δ2|/γ, (1 + 1/γ)·|d'|) + 1e-8·(1 + |x0| + |x1|) [+ G_off·(1 + V_max) for currents].
+For one mode both terms give the predecessor's threshold τ < γ²h; |Δ2|/γ covers an inflection,
+(1+1/γ)|d'| an extremum. No r0. Same rule for saturable L / nonlinear C (their r0 from the law removed).
+Domain: the probe runs only when the restart's start may be inconsistent — a trigger at t_prev, a split
+event, the first step, a stage-1 flip (breach_1), or after a non-restart (trapezoid) solve
+(`prev_be`/`step_fresh`/`rs_fresh`). Not at window steps 2–3 that start from a restart solve's end.
+A3: a source jump in (t1, T] is read at its left limit (`add_source_rows(out, t_jump, T, left_by)`);
+a second jump in the interval -> frozen reading only. NB `source_jump_in(a, b)` counts [a, b).
+
+**Builds.** b1: trace prints only (1cec4e8b numbers). b2: the d' criterion + third stage — segfault
+(unsized `ip_s2/ip_s3`, found at b3). b3: [t1,T) interval fix. b4: vectors sized — A1, A3, DCM pass;
+`test_a_nonlinear_capacitor_shorted_by_its_switch_is_refused_by_name` FAILED: refused at 5.02 µs,
+Cj d = −1.529e-3 V, d' = −4e-8 V (a real 1 ps-mode residual the 5.0 µs restart step left: SDIRK
+|R(z)| at z = 2e4 times the 24 V transient). b5: refuse_jump trace (diagnosis above). b6: the
+fresh-start domain — all of test_release_findings_a passes (12 passed, F-3-7 xfail). b7: same code,
+trace stripped (building when this was written).
+
+**Measured (b4–b6 builds, the committed rule; trace d / d' / |Δ2|/γ):**
+| case | d | d' | result |
+|---|---|---|---|
+| A1 (1 µH, 100 V, dt 0.1 µs, 8 A cut) | −8.000 A | −5.5e-7 A | 1 record 3.19976e-5 J; truth ½·L·7.9997² = 3.19976e-5 J (7.9997 A: closed form with R_on 1 mΩ); i_L -> 2.0e-7 A (was −8.38 A) |
+| DCM buck C at gate edge t = 223.1 µs | 6.4e-7 V | 6.3e-7 V | no record (extremum: Δ2 = −1e-8 V) |
+| DCM buck L at diode turn-offs (5 events) | −4e-4 .. −1.5e-3 A | ~−1e-8 A | recorded, 7.8e-12 .. 1.2e-10 J (real discrete cut; masked before by h·r0 = 7e-3 A). buck_dcm analytic err_rms pwl+restart 5.3158e-8 -> 5.3074e-8 (better) |
+| snubber Rs 1 Ω + Cs 1 nF, τ = 1 ns, dt 100 ns, turn-on 1 µs | −93.8 V | −3.1 V | recorded (as before), 4.40 µJ of ½·C·100.36² = 5.04 µJ: the fraction (r/(1+r))² = 0.876 the grid cannot resolve; the rest is integrated |
+| snubber Rs 100 Ω (τ = dt) | — | — | no record (r = 0.29 < 1/γ) |
+| F-5-1 | −100 A | −4.7e-6 A | 1 record 4.999998812 J (unchanged) |
+| A3 rectifier + 1 V pulse edge at 0.4 dt | −1.44e-2 V (moved) | 1.0e-3 V | no record; equals the pulse-free run to 5.7e-14 V (was 0.96 mJ record) |
+Without the domain restriction (b4) the snubber also recorded the SDIRK residuals at the window steps
+(1.1 µs: 0.27 V, 3.6e-11 J), and the waveform stopped ringing (−0.278, 0.0108, 0.0100 vs truth 0.0100);
+with it (b6) those records and that improvement are gone (old waveform: 0.0227, 0.0094, 0.0105 ...).
+
+Analytic set (27 cases × pwl+restart / pwl+split) on b4: identical to the predecessor's refstat_t7 except
+buck_dcm restart (above). NOT re-run on b6/b7.
+
+**Verified at 0bd28e03 (b6 build = committed code + inert trace):** test_release_findings_a 12 passed 1 xfailed.
+**NOT verified yet:** the 48 restart/split test files; full pytest; byte compares (default path —
+expected identical: the change is inside the rule's probe plus two bool stores per step); cost
+(default path gains `prev_be = committed_be` and one `step_fresh` assignment per step — must be measured,
+buck_pwl was at the 0.5 % gate); reference_status differential; group numbers F-3-3 / F-3-1 on this tip
+(script `.scratch/group_nums.py`); dt-retry test, mos_l1, `everything` stateful case; reviewer; ruff on
+the header-free files is clean.
+
+**Next steps for a successor.** 1) build ext (`.scratch/build.sh ext`, ccache launcher now set);
+2) `python .scratch/group_nums.py`; the 48 files `grep -l 'discontinuity_restart\|enable_substep_state_correction' python/tests/*.py`;
+3) byte compares `.scratch/baseA.sh t8 compare` (baselines = PR head; the predecessor's 32 pwl_identity
+restart/split entries already differ — classify any NEW differences); 4) `.scratch/cost.sh` (needs
+`so_head_same.so` = 1cec4e8b build, not available: build 1cec4e8b ext once or compare to the PR head's
+`so_<hash>`); 5) reference_status `--json` vs `.scratch/refstat_t7.json` cell by cell (save and restore
+benchmarks/REFERENCE_STATUS.md, the tool rewrites it); 6) reviewer; 7) full pytest.
+Open by design: a jump on a smooth Newton device region change at a window step without a diode flip
+is no longer probed (no bits to see it); the window-step residual of a restart solve is integrated,
+not recorded.
