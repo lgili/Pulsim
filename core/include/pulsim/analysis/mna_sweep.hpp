@@ -51,6 +51,7 @@
 #include "pulsim/topology/switch_state.hpp"
 
 #include <Eigen/Sparse>
+#include <cmath>
 #include <complex>
 #include <format>
 #include <stdexcept>
@@ -142,6 +143,66 @@ assemble_sweep_matrices(const topology::Graph& graph,
     return linearize(graph, pool, mask, op.x, dc_opts.t_eval);
 }
 
+/// One Bergeron line's rows (add-realistic-passives D18 (5)).
+struct LineRows {
+    Index ra, rb, af, at, bf, bt;
+    Real Z0, tau;
+};
+
+/// The lines of the circuit, and minus G's entries in their rows (the
+/// transient's v − Z0·i rows), so `line_rows` replaces those rows.
+inline void collect_lines(const topology::Graph& graph, const pwl::DevicePool& pool,
+                          const sparse::Matrix& G, std::vector<LineRows>& lines,
+                          std::vector<Eigen::Triplet<Complex, Index>>& minus_g) {
+    for (const auto& lp : pool.line_pairs()) {
+        const auto& p = pool.transmission_line_params(lp.a);
+        lines.push_back({pool.branch_var_id_for_source(lp.a, graph),
+                         pool.branch_var_id_for_source(lp.b, graph),
+                         graph.branch(lp.a).from, graph.branch(lp.a).to,
+                         graph.branch(lp.b).from, graph.branch(lp.b).to,
+                         p.Z0, p.delay});
+    }
+    if (lines.empty()) return;
+    for (Index k = 0; k < G.outerSize(); ++k) {
+        for (sparse::Matrix::InnerIterator it(G, k); it; ++it) {
+            for (const auto& l : lines) {
+                if (it.row() == l.ra || it.row() == l.rb) {
+                    minus_g.emplace_back(it.row(), it.col(), Complex{-it.value(), Real{0}});
+                }
+            }
+        }
+    }
+}
+
+/// The lines' rows at `omega`, plus `minus_g`: row a  V_a − cos·V_b +
+/// j·Z0·sin·i_b = 0, row b  i_a − (j/Z0)·sin·V_b + cos·i_b = 0 (θ = ωτ;
+/// i_a, i_b into the line; the ABCD form, finite at every θ). At θ = 0
+/// these are the DC rows: a wire.
+[[nodiscard]] inline ComplexSparseMatrix line_rows(
+    const std::vector<Eigen::Triplet<Complex, Index>>& minus_g,
+    const std::vector<LineRows>& lines, Index n, Real omega) {
+    std::vector<Eigen::Triplet<Complex, Index>> t = minus_g;
+    auto add = [&](Index r, Index c, Complex v) {
+        if (c >= 0) t.emplace_back(r, c, v);   // ground (-1) is not a column
+    };
+    for (const auto& l : lines) {
+        const Real th = omega * l.tau;
+        const Real c = std::cos(th), s = std::sin(th);
+        add(l.ra, l.af, Real{1});
+        add(l.ra, l.at, Real{-1});
+        add(l.ra, l.bf, -c);
+        add(l.ra, l.bt, c);
+        add(l.ra, l.rb, Complex{Real{0}, l.Z0 * s});
+        add(l.rb, l.ra, Real{1});
+        add(l.rb, l.bf, Complex{Real{0}, -s / l.Z0});
+        add(l.rb, l.bt, Complex{Real{0}, s / l.Z0});
+        add(l.rb, l.rb, c);
+    }
+    ComplexSparseMatrix D(n, n);
+    D.setFromTriplets(t.begin(), t.end());
+    return D;
+}
+
 [[nodiscard]] inline ComplexSparseMatrix to_complex(const sparse::Matrix& A) {
     ComplexSparseMatrix out(A.rows(), A.cols());
     std::vector<Eigen::Triplet<Complex, Index>> triplets;
@@ -225,6 +286,11 @@ assemble_sweep_matrices(const topology::Graph& graph,
     }
     const ComplexSparseMatrix J_c = detail::to_complex(sm.G);
     const ComplexSparseMatrix E_c = detail::to_complex(sm.C);
+    // add-realistic-passives D18 (5): a Bergeron line's two rows become the
+    // exact two-port at each omega (the transient rows' G entries removed).
+    std::vector<detail::LineRows> lines;
+    std::vector<Eigen::Triplet<Complex, Index>> line_g;
+    detail::collect_lines(graph, pool, sm.G, lines, line_g);
 
     // 4. Per-frequency factor + solve.
     MnaSweepResult result;
@@ -248,6 +314,7 @@ assemble_sweep_matrices(const topology::Graph& graph,
         const Complex j_omega{Real{0}, omega};
 
         ComplexSparseMatrix M = J_c + j_omega * E_c;
+        if (!line_g.empty()) M += detail::line_rows(line_g, lines, n, omega);
         M.makeCompressed();
 
         // v1.4.0: in-house complex sparse LU (no third-party LU on the

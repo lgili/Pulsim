@@ -1041,6 +1041,21 @@ void init_module(py::module_& m) {
               py::return_value_policy::reference,
               "Air gap: permeance mu0*area/length (area [m^2], length [m]; "
               "no fringing).")
+        .def("add_transmission_line",
+              &builder::CircuitBuilder::add_transmission_line,
+              py::arg("name"), py::arg("a"), py::arg("a_ref"),
+              py::arg("b"), py::arg("b_ref"), py::arg("Z0"),
+              py::arg("delay"), py::arg("R") = 0.0,
+              py::return_value_policy::reference,
+              "Bergeron transmission line (openspec add-realistic-passives "
+              "D18): surge impedance Z0 [ohm], one-way delay [s], between "
+              "port a (a, a_ref) and port b (b, b_ref). Branches 'name' "
+              "(port a) and 'name.b' (port b) carry the current INTO the "
+              "line. R > 0 [ohm, total, R <= Z0]: lumped R/4 - R/2 - R/4 "
+              "around two half lines. pwl (dt <= delay) and trbdf2 (step "
+              "<= delay); the AC sweep stamps the exact two-port; a wire "
+              "at DC. Refused by name on the exact engine, bdf1 and "
+              "integrator='esdirk43'.")
         .def("add_excess_loss", &builder::CircuitBuilder::add_excess_loss,
               py::arg("name"), py::arg("m_a"), py::arg("m_b"), py::arg("c"),
               py::arg("eps"),
@@ -2179,6 +2194,13 @@ void init_module(py::module_& m) {
                               kind_str = "ideal_transformer";
                               break;
                           }
+                          case K::TransmissionLine: {
+                              kind_str = "transmission_line";
+                              const Index pb = pool.line_partner(bid);
+                              params["partner"] = std::string(self.name_of(pb));
+                              params["port"] = pool.is_line_port_b(bid) ? "b" : "a";
+                              break;
+                          }
                           // add-controlled-source-set
                           case K::VCCS: {
                               kind_str = "vccs";
@@ -2755,7 +2777,8 @@ void init_module(py::module_& m) {
         .value("PwlCurrentSource",    pwl::DevicePool::StoredKind::PwlCurrentSource)
         .value("InductionMachineMna", pwl::DevicePool::StoredKind::InductionMachineMna)
         .value("ExternalDevice", pwl::DevicePool::StoredKind::ExternalDevice)
-        .value("ExcessLoss", pwl::DevicePool::StoredKind::ExcessLoss);
+        .value("ExcessLoss", pwl::DevicePool::StoredKind::ExcessLoss)
+        .value("TransmissionLine", pwl::DevicePool::StoredKind::TransmissionLine);
 
     // ---- Phase 4 C.4: exact B–H replay for the in-loop JA device ----------
     m.def("ja_replay",
@@ -4550,6 +4573,10 @@ void init_module(py::module_& m) {
             "recorder fed in the loop, or an older snapshot.")
         .def_readwrite("recorder_spec", &SolverSnapshot::recorder_spec,
             "Signature of the recorders that wrote recorder_state.")
+        .def_readwrite("line_state", &SolverSnapshot::line_state,
+            "The transmission lines' committed past (pickle field 19, "
+            "present only with a line): per line Z0, delay, n, then n x "
+            "(t, w_a, w_b). Empty: no line.")
         .def_readwrite("tick_origin", &SolverSnapshot::tick_origin,
             "Per control-tick source, in registration order: the origin of "
             "its grid (ticks at origin + offset + k*period). simulate("
@@ -4710,7 +4737,7 @@ void init_module(py::module_& m) {
                 // Version 4 had four layouts on parallel branches (13, 14
                 // or 15 fields; field 12 a bool or a tuple); all still load.
                 const auto& L = s.legacy;
-                return py::make_tuple(
+                py::tuple base = py::make_tuple(
                     std::string("SolverSnapshot"), 5, s.t, s.x, s.dev_state,
                     s.dev_layout, s.layout_signature, s.mask, s.stamped_mask,
                     s.restart_steps_left, s.valid,
@@ -4740,6 +4767,13 @@ void init_module(py::module_& m) {
                     s.recorder_spec.empty() && s.recorder_state.empty()
                         ? py::object(py::none())
                         : py::object(py::make_tuple(s.recorder_spec, s.recorder_state)));
+                // 19 the transmission lines' past (add-realistic-passives
+                // D18), appended only when present: a snapshot without a
+                // line pickles exactly as before
+                if (s.line_state.empty()) return base;
+                py::list all(base);
+                all.append(py::cast(s.line_state));
+                return py::tuple(all);
             },
             [](py::tuple t) {
               try {
@@ -4750,13 +4784,13 @@ void init_module(py::module_& m) {
                     if (t[0].cast<std::string>() != "SolverSnapshot"
                         || !((ver == 3 && (n == 12 || n == 13))
                              || (ver == 4 && n >= 13 && n <= 15)
-                             || (ver == 5 && (n == 17 || n == 18 || n == 19)))) {
+                             || (ver == 5 && n >= 17 && n <= 20))) {
                         throw std::runtime_error(
                             "SolverSnapshot: pickle version "
                             + std::to_string(ver) + " with "
                             + std::to_string(n)
                             + " fields; this Pulsim reads version 3 "
-                              "(12 or 13 fields), 4 (13 to 15) and 5 (17 to 19)");
+                              "(12 or 13 fields), 4 (13 to 15) and 5 (17 to 20)");
                     }
                     // Where each block sits (npos = absent). Version 4's
                     // variants differ in field 12: a bool there is the
@@ -4828,7 +4862,10 @@ void init_module(py::module_& m) {
                     if (ver == 5 && n >= 18) {
                         s.loss_state = t[17].cast<std::vector<Real>>();
                     }
-                    if (ver == 5 && n == 19 && !t[18].is_none()) {
+                    if (ver == 5 && n == 20) {
+                        s.line_state = t[19].cast<std::vector<Real>>();
+                    }
+                    if (ver == 5 && n >= 19 && !t[18].is_none()) {
                         const auto rs = t[18].cast<py::tuple>();
                         s.recorder_spec = rs[0].cast<std::string>();
                         s.recorder_state = rs[1].cast<std::vector<Real>>();

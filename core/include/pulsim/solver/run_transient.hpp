@@ -73,6 +73,7 @@
 #include "pulsim/pwl/branch_structure.hpp"
 #include "pulsim/pwl/reinit.hpp"
 #include "pulsim/pwl/mode_ports.hpp"
+#include "pulsim/pwl/transmission_line_history.hpp"
 
 #include <algorithm>
 #include <array>
@@ -1554,6 +1555,34 @@ inline SimulationResult run_transient(
     std::optional<LossTracker> loss_tracker;
     if (!pool.device_losses().empty()) loss_tracker.emplace(graph, pool, "pwl");
     LossTracker* const lt = loss_tracker ? &*loss_tracker : nullptr;
+    // add-realistic-passives D18: the Bergeron lines' committed past (none:
+    // no object, nothing below reads or writes it).
+    std::optional<pwl::LineHistory> line_history;
+    if (!pool.line_pairs().empty()) {
+        line_history.emplace(graph, pool);
+        const auto& lname = line_history->tau_min_name();
+        if (!(cache.dt() > Real{0})) {
+            throw UnsupportedError("pwl", "static_path", lname, "TransmissionLine",
+                "run_transient: the transmission line '" + lname + "' needs the "
+                "dynamic path (a cache built with dt > 0, as simulate() builds it).");
+        }
+        if (opts.dt > line_history->tau_min()) {
+            throw UnsupportedError("pwl", "dt", lname, "TransmissionLine", std::format(
+                "run_transient: dt = {} s is longer than the delay {} s of the "
+                "transmission line '{}': its far-end wave would be read from the "
+                "future. Use dt <= delay (a divisor of it is exact).",
+                opts.dt, line_history->tau_min(), lname));
+        }
+        if (resume_snap != nullptr) {
+            line_history->restore(resume_snap->line_state, "run_transient");
+        } else {
+            // a DC point or a given state (seeded as one, as the companions
+            // are): its waves; the zero start: the line at rest
+            line_history->start(opts.t_start, x,
+                                start_from_dc_op || initial_state != nullptr);
+        }
+    }
+    pwl::LineHistory* const lines = line_history ? &*line_history : nullptr;
     // `backward_euler`: a restart stage (no stored derivative), the
     // BE-like solve of size for_dt/2 on the factor of for_dt.
     auto accumulate_b_extra = [&](Real at_t, Real for_dt,
@@ -1579,6 +1608,7 @@ inline SimulationResult run_transient(
             b_extra += be_iwave;
         }
         if (lt) lt->inject(b_extra);   // heat owed for this step
+        if (lines) lines->inject(b_extra, at_t);   // the waves tau ago (D18)
     };
 
     // v2.0 Phase 2: a run that dies part-way keeps what it computed.
@@ -3034,6 +3064,7 @@ inline SimulationResult run_transient(
             // add-in-kernel-event-losses: the step is accepted; read its
             // commutations and conduction energy (reading rule).
             if (lt) lt->accept(t_prev, t, x, stamped_mask);
+            if (lines) lines->commit(t, x);   // the one write of the line past (D18)
         };  // step_commit
 
         auto step_record = [&](Size k) PULSIM_STEP_PHASE {
@@ -3585,6 +3616,7 @@ inline SimulationResult run_transient(
     }
     result.final_snapshot.valid = true;
     if (lt) result.final_snapshot.loss_state = lt->save();
+    if (lines) result.final_snapshot.line_state = lines->save();
     result.newton = newton_ws.take_counters();
     if (lt) lt->write(result);
     result.gate_mask_fn = nullptr;   // it reads this frame's diode state

@@ -450,6 +450,24 @@ inline SimulationResult run_transient_trbdf2(
     std::optional<LossTracker> loss_tracker;
     if (!pool.device_losses().empty()) loss_tracker.emplace(graph, pool, "trbdf2");
     LossTracker* const lt = loss_tracker ? &*loss_tracker : nullptr;
+    // add-realistic-passives D18 (2): the Bergeron lines' committed past
+    // (null: no line, nothing reads or writes it). Read by every solve
+    // (accumulate_sources), written once per committed time
+    // (device_state_once, the funnel every commit site calls).
+    std::optional<pwl::LineHistory> line_history;
+    if (!pool.line_pairs().empty()) {
+        line_history.emplace(graph, pool);
+        if (opts.integrator == 1) {
+            const auto& lname = line_history->tau_min_name();
+            throw UnsupportedError("trbdf2", "integrator=esdirk43", lname,
+                "TransmissionLine",
+                "run_transient_trbdf2: integrator='esdirk43' does not run the "
+                "transmission line '" + lname + "' yet: its linear far-end "
+                "interpolation is second order, below the method's (D18). "
+                "Use integrator='trbdf2'.");
+        }
+    }
+    pwl::LineHistory* const lines = line_history ? &*line_history : nullptr;
 
     // ---- scope census ----
     // Nonlinear devices are fine: each stage becomes a Newton
@@ -562,8 +580,11 @@ inline SimulationResult run_transient_trbdf2(
         default: break;
         }
     }
-    const Real h_max = opts.h_max > Real{0} ? opts.h_max
-                                             : h_default;
+    // D18 (2): every stage reads the far end at most one delay back, which
+    // must be committed: h <= tau_min (circuits with a line only).
+    const Real h_max = std::min(opts.h_max > Real{0} ? opts.h_max : h_default,
+                                lines ? lines->tau_min()
+                                      : std::numeric_limits<Real>::infinity());
     // Span-free floors (update-trbdf2-error-control D3): every floor
     // scales with the resolved ceiling instead of t_end - t_start, as
     // the old span fraction of span_ref = 1000 * h_max. While the
@@ -637,6 +658,7 @@ inline SimulationResult run_transient_trbdf2(
     Real ds_t = std::numeric_limits<Real>::quiet_NaN();
     const bool hook_ds = hooks != nullptr && hooks->has_device_state();   // run-invariant
     auto device_state_once = [&](Real tc, const Vector& xc) {
+        if (lines) lines->commit(tc, xc);   // D18: the one write (a repeat is ignored)
         if (!hook_ds || tc == ds_t) return;
         ds_t = tc;
         hooks->device_state(tc, xc, hs);
@@ -667,6 +689,13 @@ inline SimulationResult run_transient_trbdf2(
         hs.load(*resume_from, history, "run_transient_trbdf2");
         if (!resume_from->mask.empty()) {
             diodes.restore_on_bits(resume_from->mask);
+        }
+    }
+    if (lines) {   // D18 (4): the snapshot's past, else constant (seeded state) or at rest
+        if (resume_from != nullptr) {
+            lines->restore(resume_from->line_state, "run_transient_trbdf2");
+        } else {
+            lines->start(opts.t_start, x, initial_state.has_value());
         }
     }
 
@@ -735,6 +764,7 @@ inline SimulationResult run_transient_trbdf2(
             out += be_iwave;
         }
         if (lt) lt->inject(out);   // the heat owed, on every solve
+        if (lines) lines->inject(out, at_t);   // the waves tau ago (D18)
     };
 
     // ---- the single solve point ----
@@ -4247,6 +4277,7 @@ inline SimulationResult run_transient_trbdf2(
     result.final_snapshot.controller = lte_ctrl.save();
     result.final_snapshot.valid = true;
     if (lt) result.final_snapshot.loss_state = lt->save();
+    if (lines) result.final_snapshot.line_state = lines->save();
     result.newton = newton_ws.take_counters();
     result.gate_mask_fn = nullptr;   // it reads this frame's diode state
     if (lt) lt->write(result);

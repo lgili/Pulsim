@@ -266,8 +266,16 @@ def add_transmission_line(self, name: str, k_pos: str, k_neg: str,
     with 50 sections); a finite edge needs
     :func:`recommend_line_sections` sections to stay near 5 %.
 
-    ``model="bergeron"`` (exact delay) needs a kernel device that does
-    not exist yet and is refused by name.
+    ``model="bergeron"``: the kernel's travelling-wave line (openspec
+    add-realistic-passives D18), exact for a lossless line: branches
+    ``{name}`` (port ``k``) and ``{name}.b`` (port ``m``) carry the current
+    INTO the line. ``R`` is lumped as R/4 - R/2 - R/4 around two half
+    lines (``R <= Z0``). ``pwl`` needs ``dt <= delay`` (exact when ``delay``
+    is a multiple of ``dt``; otherwise the far end is interpolated, first
+    order on a front, plateaus exact); ``trbdf2`` caps its step at
+    ``delay``; the AC sweep stamps the exact two-port; a wire at DC. The
+    exact engine, ``bdf1``, ``integrator='esdirk43'`` and periodic
+    shooting refuse it by name. ``sections`` is not used.
 
     Sub-elements: ``{name}.l{k}``, ``{name}.c{k}``, ``{name}.r{k}``;
     internal nodes ``{name}.n{k}``; ``{name}.ret`` (0 V source) joins
@@ -275,16 +283,7 @@ def add_transmission_line(self, name: str, k_pos: str, k_neg: str,
     impedance is lumped into the forward one).
     """
     who = f"add_transmission_line({name!r})"
-    if model == "bergeron":
-        from ._refusal import unsupported
-        raise unsupported(
-            "", "model",
-            f"{who}: model='bergeron' needs a travelling-wave kernel "
-            "device (openspec add-realistic-passives, section 5) that "
-            "is not implemented yet. Use model='pi' with "
-            "sections=recommend_line_sections(delay, t_rise).",
-            device=name)
-    if model != "pi":
+    if model not in ("pi", "bergeron"):
         raise ValueError(f"{who}: model must be 'pi' or 'bergeron' "
                          f"(got {model!r}).")
     per_m = (L_per_m, C_per_m, length)
@@ -306,6 +305,11 @@ def add_transmission_line(self, name: str, k_pos: str, k_neg: str,
         raise ValueError(f"{who}: delay must be finite and > 0 "
                          f"(got {delay!r}).")
     r_tot = _nonneg(who, "R", R)
+    if model == "bergeron":
+        if sections is not None:
+            raise ValueError(f"{who}: sections is a model='pi' parameter.")
+        native = type(self).add_transmission_line._pulsim_native
+        return native(self, name, k_pos, k_neg, m_pos, m_neg, z0, tau, r_tot)
     if sections is None or int(sections) != sections or int(sections) < 1:
         raise ValueError(f"{who}: sections must be an integer >= 1 "
                          f"(got {sections!r}); see recommend_line_sections.")
@@ -461,7 +465,9 @@ def install(builder_cls) -> None:
         builder_cls.add_inductor = _wrap_inductor(ind, cap)
         builder_cls.add_inductor_coupling = _wrap_coupling(
             builder_cls.add_inductor_coupling)
-    if not hasattr(builder_cls, "add_transmission_line"):
+    tl = builder_cls.add_transmission_line
+    if not hasattr(tl, "_pulsim_native"):
         add_transmission_line.__qualname__ = (
             "CircuitBuilder.add_transmission_line")
+        add_transmission_line._pulsim_native = tl  # type: ignore[attr-defined]
         builder_cls.add_transmission_line = add_transmission_line

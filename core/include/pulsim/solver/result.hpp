@@ -230,6 +230,10 @@ struct SolverSnapshot {
     /// the field (pickle field 18).
     std::vector<Real> recorder_state;
     std::string recorder_spec;
+    /// add-realistic-passives D18: the transmission lines' committed past
+    /// (pwl::LineHistory::save). Empty: no line (pickle field 19, written
+    /// only when non-empty, so a snapshot without a line pickles as before).
+    std::vector<Real> line_state;
     /// MNA unknowns at `t`.
     Vector x;
     /// Every device state the run carries (add-unified-device-interface
