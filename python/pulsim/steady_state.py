@@ -365,6 +365,21 @@ def steady_state(builder, *, period: float, dt: float | None = None,
                              dtype=float)
         residual = float(np.abs(h_back - h_star).max())
         n_runs += 1
+        # One chord step on the measured residual. The columns carry the
+        # period map's round-off divided by the probe (release finding
+        # F-6-1: 1.9e-8 at the default probe on the restart engine, whose
+        # floor is 2e-11); the step removes that error whatever the probe,
+        # and is kept only if a run measures it smaller.
+        if residual > 0.0:
+            h_c = h_star + np.linalg.solve(np.eye(n) - Phi, h_back - h_star)
+            snap_c = _snapshot_like(base_in, h_c)
+            chk_c = run_period(snap_c)
+            n_runs += 1
+            h_back_c = np.asarray(list(chk_c.final_snapshot.history),
+                                  dtype=float)
+            res_c = float(np.abs(h_back_c - h_c).max())
+            if res_c < residual:
+                h_star, snap, chk, residual = h_c, snap_c, chk_c, res_c
         # The returned snapshot's `x` should be the one the orbit
         # actually passes through, not the base run's first sample.
         snap.x = np.asarray(chk.states)[-1].copy()
