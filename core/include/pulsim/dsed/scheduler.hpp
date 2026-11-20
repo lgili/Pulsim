@@ -530,11 +530,8 @@ public:
             const MaskT prev0 = diode_bits_;
             const MaskT old0 = m0;
             start_decision_ = true;
-            const Vector x_given = x;
-            const std::size_t n_rec0 = reinit_log_size_();
             decide_modes_(t, x, m0, old0, prev0, old0, result);
             start_decision_ = false;
-            refuse_lost_start_state_(x_given, x, n_rec0);
             // The ticks at t = 0 run before the first sample; the gate is
             // sampled again with what they wrote.
             if (run_due_ticks_(t, x)) {
@@ -1979,35 +1976,6 @@ private:
         const std::size_t mk = reinit_log_size_();
         project_(t, x);
         resettle_projected_(t, x, mask, shadow_x_, mk);
-    }
-
-    /// The start keeps the state it was GIVEN (F-S-4): a decision at t = 0 that
-    /// changed a nonzero given state by more than 1e-6 of it, with no
-    /// re-initialisation record accounting for it, is refused by name — a mode
-    /// the given state is not consistent with was chosen, and its projection
-    /// would continue the run silently from another state (L_o's 24 A became
-    /// -2.8e-9 A). Parasitic relaxations of states given as 0 are not covered.
-    void refuse_lost_start_state_(const Vector& xg, const Vector& x, std::size_t n_rec0) {
-        if (reinit_log_size_() > n_rec0 || xg.size() != x.size()) return;
-        for (Index i = 0; i < x.size(); ++i) {
-            if (xg[i] == Real{0}) continue;
-            const Real d = std::abs(x[i] - xg[i]);
-            if (!(d > Real{1e-6} * std::abs(xg[i]))) continue;   // NaN refuses too
-            std::string who = "state " + std::to_string(i);
-            Real m = Real{0};
-            if constexpr (requires { system_.state_label(i); system_.state_mass(i); }) {
-                who = system_.state_label(i);
-                m = system_.state_mass(i);
-            }
-            throw UnsupportedError(
-                "dsed", "consistent_start", who, "State",
-                "dsed at t = 0: the start's mode decision moved the given " + who
-                + " from " + sci_(xg[i]) + " to " + sci_(x[i]) + " (stored energy "
-                + sci_(Real{0.5} * m * (xg[i] * xg[i] - x[i] * x[i])) + " J removed) with "
-                "no re-initialisation to account for it: the diode mode chosen is not "
-                "consistent with the given state. Use engine='pwl' with "
-                "discontinuity_restart=True or engine='trbdf2'.");
-        }
     }
 
     /// After the LCP's mode is projected: the projection jumps over the mode's

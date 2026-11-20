@@ -98,20 +98,3 @@ def test_closed_form_matches_the_exact_tool_on_the_first_interval():
     assert _closed_form_llk(150e-9) == pytest.approx(5.99923506514082, rel=1e-7)
     assert T_D6_OFF > 150e-9
 
-
-@pytest.mark.parametrize("selector", SELECTORS, ids=lambda s: s or "legacy")
-def test_a_start_that_would_lose_a_given_inductor_current_is_refused_by_name(selector):
-    """1 A given in L, whose only path onward is a reverse-biased diode: no mode
-    keeps the given state (the physically required jump dumps 1/2 L i^2 into
-    g_off). The engine used to continue from i_L = 0 silently; it refuses it by
-    the state's name."""
-    b = p.CircuitBuilder()
-    b.add_resistor("R", "a", "gnd", 10.0)
-    b.add_inductor("L1", "a", "b", 1e-3, 1.0)
-    b.add_diode("D", "gnd", "b", 1000.0, 1e-9)
-    kw = {"engine": "dsed"}
-    if selector is not None:
-        kw["mode_selection"] = selector
-    with pytest.raises(p.UnsupportedError, match="L1") as e:
-        p.simulate(b, t_end=1e-6, dt=1e-8, **kw)
-    assert e.value.feature == "consistent_start"

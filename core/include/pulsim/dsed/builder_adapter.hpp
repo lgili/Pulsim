@@ -1350,25 +1350,11 @@ public:
         ensure_current_resolved_();
         const LTIEntry& e = *current_entry_;
         Real vs = Real{1}, is = Real{1e-12};
-        for (Index i = 0; i < x.size() && static_cast<Size>(i) < e.state_is_cap.size(); ++i)
-            (e.state_is_cap[static_cast<Size>(i)] ? vs : is) = std::max(
-                e.state_is_cap[static_cast<Size>(i)] ? vs : is, std::abs(x[i]));
+        for (Index i = 0; i < x.size() && static_cast<Size>(i) < e.state_is_cap.size(); ++i) {
+            if (e.state_is_cap[static_cast<Size>(i)]) vs = std::max(vs, std::abs(x[i]));
+            else is = std::max(is, std::abs(x[i]));
+        }
         return port_scale_full(Vector{}, vs, is);
-    }
-
-    /// A reduced state's name and its C or L under the current mask (refusals).
-    [[nodiscard]] std::string state_label(Index i) const {
-        ensure_current_resolved_();
-        const LTIEntry& e = *current_entry_;
-        const auto k = static_cast<Size>(i);
-        if (k < e.state_labels.size()) return e.state_labels[k];
-        return k < e.state_row_indices.size() ? pwl::row_label(graph_, pool_, e.state_row_indices[k])
-                                              : "state " + std::to_string(i);
-    }
-    [[nodiscard]] Real state_mass(Index i) const {
-        ensure_current_resolved_();
-        const auto& m = current_entry_->state_mass;
-        return static_cast<Size>(i) < m.size() ? m[static_cast<Size>(i)] : Real{0};
     }
 
     /// Same, from a full-MNA vector (`vs0`, `is0`: floors of the two scales).

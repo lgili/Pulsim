@@ -93,30 +93,31 @@ See "Selectors and the flyback" below.
    after an event the projected state IS the jump's physics (the forward converter's
    collapsed transformer current, the function's own comment), so the general form
    was wrong and was reverted to start-only.
-4. `PEDSimulator::refuse_lost_start_state_` (new, scheduler.hpp): the rule "a
-   projection that changes a state the user supplied is never silent", as a refusal
-   by name. After the t = 0 decision, a NONZERO given state moved by more than 1e-6
-   of itself with no re-initialisation record raises
-   `UnsupportedError('dsed', 'consistent_start', <state label>, 'State')` with the
-   given and kept values and the stored energy removed. Example (new test): 1 A
-   given in L1 whose only onward path is a reverse-biased diode — the head
-   continued from 0 A silently on all selectors (trbdf2 shows the 1 A decaying
-   through g_off). Not covered: states given as 0 (the parasitic relaxation of a
-   start from rest moves them by 1e-8..1.6e-5 in 13 tests of the exact test files:
-   physics of the start's fast cluster, not a lost given value) — a report of those
-   as records would change `reinit_records` / `on_impulse='error'` for every such
-   start and is left out. Survey (temporary fprintf, all `test_dsed*` / `test_exact*`
-   files): no nonzero given state is moved by more than 1e-9 relative at t = 0.
-   `NativeCircuitBuilderAdapter::state_label` / `state_mass` (new) name it.
+4. NOT done — the second half of the rule ("a projection that changes a state the user
+   supplied is never silent: the reported jump or a refusal"). A refusal was written
+   (a nonzero given state moved by > 1e-6 of itself at t = 0 with no record ->
+   `consistent_start`) and REMOVED after review: the slow projection also removes
+   fast modes through REAL conductances, and the refusal fired on consistent starts
+   on the default path (10 V -> diode ON -> 1 nF given 8 V: the 1 ps inrush through
+   g_on moves it to 10 V; 200 pF given 1 V across 1 mOhm with any diode in the
+   circuit). Distinguishing a lost given value from a physical fast relaxation needs
+   the jump REPORTED, not refused: a start-projection record with its energy, and the
+   energy must count the sources' impulsive work (as exact_truth.py's impulsive loss
+   does). That changes `reinit_records` / `on_impulse='error'` for every start from
+   rest with a parasitic cluster (13 tests of the exact files move by 1e-8..1.6e-5),
+   so it is a separate, listed change. Still silent on this tip: a GIVEN state that
+   no mode can keep (1 A in an inductor whose only onward path is a reverse-biased
+   diode starts at 0 A on every selector; trbdf2 shows the 1 A decaying through
+   g_off). With the mode choice fixed, F-S-4's case itself no longer reaches it.
 
 ## Functions touched (for the merge with the output-rule branch)
 
-* `core/include/pulsim/dsed/builder_adapter.hpp`: `port_scale_state`, `state_label`,
-  `state_mass` (new), `port_scale_full` (two defaulted floor parameters).
+* `core/include/pulsim/dsed/builder_adapter.hpp`: `port_scale_state` (new),
+  `port_scale_full` (two defaulted floor parameters).
 * `core/include/pulsim/dsed/scheduler.hpp`: `simulate()` (the t = 0 block around
   `decide_modes_`, one reset next to `settle_decisions_ = false`), `run_selector_`
-  (the scale), `resettle_projected_` (the confirmation's state at the start),
-  `refuse_lost_start_state_` (new), one member `start_decision_`.
+  (the scale), `resettle_projected_` (the confirmation's state at the start), one
+  member `start_decision_`.
   No change in the output rule, `exact_lti.hpp`, the stepping or the sampling.
 
 ## Selectors and the flyback
@@ -129,3 +130,33 @@ See "Selectors and the flyback" below.
   defect: it happens at every gate-off, not at the start, and the start's scale is
   not involved. On this tip: legacy v_out(0.8-1 ms) = -4.3e-14 V (unchanged),
   'auto' 16.365091 V (truth 16.365).
+
+## After (this tip)
+
+All three selectors, all four variants, with and without `output_rtol=1e-5`:
+i_Lo(0) = 24 A, i_Llk(200 ns) = 6.0605091 A (truth 6.06050914046 A, within 1e-6
+relative; i_Llk(100 ns) within 1e-6 of the closed form). No warning, no refusal.
+
+## Moved cases
+
+None on the default path or the scoreboard's exact cells: byte compares against the PR
+head's extension (so_b9e46778): golden ALL IDENTICAL, stateful 40/40, engines 35/35,
+bit-identity 36/36 default + 36/36 shadow, and the exact engine on every scoreboard
+circuit (configs `dsed` and `dsed+next`, the scoreboard's own run_cell path) 162/162
+bit-identical — so the scoreboard's dsed row (81 / 77 / 70) is unchanged. Only the
+opt-in selectors' t = 0 decision (and the default guard's t = 0 LCP repair) can read
+the new scale; on circuits where `port_scale_state` < `port_scale` at a CONSISTENT
+initial mask (a step-up transformer's secondary above every source, voltage-source
+branch currents) the t = 0 tie bands are tighter — no case in these suites (review
+note, reasoned, not shown).
+
+## Review (fresh context, opus medium, read-only)
+
+* HIGH, fixed by removal: the start-state refusal fired on consistent starts (see 4).
+* MEDIUM, left: `resume_landing_(decide=true)` (a snapshot of another engine, "decided
+  at t as at a start") reads `rec` from that engine's stamped mask without the state
+  scale. That mask is the other engine's integrated mode at the instant, not a guess;
+  not changed, not shown either way.
+* LOW, left: at the start `zero_band_on_` reads `x_held` under the decided mask without
+  `reinit_to_constraint` (a mode with dependent states judges an unconstrained state).
+* The scale change is at the cause; truth constants and the closed form checked.
