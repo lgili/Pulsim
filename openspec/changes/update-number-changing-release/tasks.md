@@ -11,6 +11,7 @@ Rehearsal at fe75ee01 (the regenerated report's header names the runs its sectio
 - [x] 1.6 A branch-form switch refuses a bound `g_on` (`bind_param`; 7 tests in `test_circuit_scopes.py`). Done (DECISIONS 1.3): g_on -> R_on = 1/g_on, g_off bindable; parameters stay finite, R_on = 0 by `set_value`; twin within 1e-4 (`test_branch_form_bind_param.py`)
 - [x] 1.7 bdf1 and `ac_sweep` cannot simulate a branch-form switch / diode (3 tests). Done (DECISIONS 1.4): `ac_sweep` stamps branch form (RC closed form, twin rtol 1e-7); bdf1 refuses by name, saying it is retired and naming pwl / trbdf2; conformance table updated
 - [x] 1.8 `enable_substep_state_correction`'s default must follow `discontinuity_restart`: a caller that sets the rule off is refused once the split defaults on (1 test, `test_device_losses_kernel.py`). Done (DECISIONS 1.2): the split's default follows the rule's resolved value
+- [x] 1.10 The output rule's cost: ten paralleled bridges ran > 8 min under `output_rtol=1e-5` (`test_exact_route.py::test_ten_paralleled_bridges_agree_with_pwl`). Done (DECISIONS 3): a projected parasitic mode's rounding x lambda^2 set a constant step; each mode's chord contribution now saturates at its amplitude, per-mode data cached, no per-step allocation, a per-run sample budget (`output_budget_t`)
 - [ ] 1.9 Re-run `next_defaults_rehearsal.py run` and the pytest blast radius on the release candidate; no cell left in the first three worse classes, no refusal group in section 1b
 
 ## 2. Owner decisions before the flip

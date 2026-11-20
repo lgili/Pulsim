@@ -40,6 +40,10 @@ largest magnitude seen so far, floored at `atol`), from a closed-form bound
 of the chord error over the mode's eigen-decomposition. A step cap per
 interval SHALL bound the samples; when it bites the run SHALL say so by name
 (`diagnostics['output_grid']['n_output_capped']` and a `RuntimeWarning`).
+A per-run sample budget SHALL bound the cut steps of the whole run; past it the
+rule SHALL stop cutting and say so by name (`diagnostics['output_grid']['output_budget_t']`
+and one `RuntimeWarning`). A mode whose amplitude is below the tolerance SHALL NOT
+shorten the step.
 With `output_rtol` set the event projection SHALL remove only the parasitic
 cluster, not every mode faster than the default step cap. `output_rtol=None`
 (the default until the number-changing release) SHALL leave every result
@@ -53,6 +57,13 @@ today's samples; the other engines SHALL refuse the keyword by name.
 - **THEN** its samples score below 1e-7 of span against the mpmath truth
   (the D1 turn-off right limit included) and the strict gate, interpolating
   linearly, agrees where the 10 µs default grid disagreed
+
+#### Scenario: A parasitic mode at rounding does not set the step
+
+- **WHEN** paralleled diode bridges (a 1 Mohm bus tie, 1 nS OFF diodes) run on the exact
+  engine with `output_rtol=1e-5`
+- **THEN** the samples stay within a small multiple of the default grid's count, not a
+  constant nanosecond step per interval
 
 #### Scenario: Default unchanged
 

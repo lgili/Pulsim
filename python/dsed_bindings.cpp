@@ -1329,7 +1329,7 @@ void init_module(py::module_& m) {
            std::vector<Real> tick_origins,
            std::vector<std::uint64_t> tick_next_k,
            py::object loop_feed,
-           Real t_offset) {
+           Real t_offset, std::size_t output_budget) {
             PySwitchFnSSM sf(std::move(switch_fn_obj));
             // add-unified-event-queue group 3: control ticks on the
             // scheduler's queue; each gets the full MNA state.
@@ -1493,7 +1493,7 @@ void init_module(py::module_& m) {
             sim.set_event_projection(enable_event_projection);
             sim.set_settle_round_cap(settle_round_cap);
             sim.set_diode_law_check(diode_law_rel);
-            if (output_rtol > Real{0}) sim.set_output_rule(output_rtol, atol, output_cap);
+            if (output_rtol > Real{0}) sim.set_output_rule(output_rtol, atol, output_cap, output_budget);
             if (!tick_cbs.empty()) {
                 pulsim::events::TickPlan plan;
                 for (std::size_t j = 0; j < tick_periods.size(); ++j) {
@@ -1662,6 +1662,7 @@ void init_module(py::module_& m) {
             if (output_rtol > Real{0}) {
                 d["n_output_capped"] = sim.n_output_capped();
                 d["n_output_unbounded"] = sim.n_output_unbounded();
+                d["output_budget_t"] = sim.output_budget_t();
             }
             d["exact"] = exact_report_dict(adapter, res.n_predicate_evals);
             if (mode_shadow_h_e > Real{0}) {
@@ -1724,6 +1725,7 @@ void init_module(py::module_& m) {
         py::arg("tick_next_k") = std::vector<std::uint64_t>{},
         py::arg("loop_feed") = py::none(),
         py::arg("t_offset") = Real{0},
+        py::arg("output_budget") = std::size_t{2000000},
         "Bridge.11 — native PEDSimulator (DOPRI5) over a "
         "NativeCircuitBuilderAdapter. RHS / b_vector / A_matrix all "
         "execute in C++ without GIL roundtrips; the only Python "
