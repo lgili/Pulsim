@@ -1340,11 +1340,29 @@ public:
         return port_scale_full(xf);
     }
 
-    /// Same, from a full-MNA vector.
-    [[nodiscard]] events::CircuitScale port_scale_full(const Vector& xf) const {
+    /// The scale of the state alone — its capacitor voltages and inductor
+    /// currents, with the sources, drops and conductances — not of the node
+    /// voltages a mask's recovery map makes of it. The start's decision reads
+    /// x under a GUESSED diode mode (F-S-4): an inductor's 24 A pushed through
+    /// the guessed OFF bridge's g_off read as 1.2e10 V, the LCP's tie band
+    /// grew to 1.2e4 A and its four 12 A conducting ports were decided OFF.
+    [[nodiscard]] events::CircuitScale port_scale_state(const Vector& x) const {
+        ensure_current_resolved_();
+        const LTIEntry& e = *current_entry_;
+        Real vs = Real{1}, is = Real{1e-12};
+        for (Index i = 0; i < x.size() && static_cast<Size>(i) < e.state_is_cap.size(); ++i) {
+            if (e.state_is_cap[static_cast<Size>(i)]) vs = std::max(vs, std::abs(x[i]));
+            else is = std::max(is, std::abs(x[i]));
+        }
+        return port_scale_full(Vector{}, vs, is);
+    }
+
+    /// Same, from a full-MNA vector (`vs0`, `is0`: floors of the two scales).
+    [[nodiscard]] events::CircuitScale port_scale_full(const Vector& xf, Real vs0 = Real{1},
+                                                       Real is0 = Real{1e-12}) const {
         const Index nn = graph_.num_nodes();
         events::CircuitScale sc;
-        Real vs = Real{1}, is = Real{1e-12}, gmax = Real{0}, gon_max = Real{0};
+        Real vs = vs0, is = is0, gmax = Real{0}, gon_max = Real{0};
         for (Index i = 0; i < static_cast<Index>(xf.size()); ++i) {
             if (i < nn) vs = std::max(vs, std::abs(xf[i]));
             else is = std::max(is, std::abs(xf[i]));
