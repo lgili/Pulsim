@@ -50,7 +50,8 @@ def _event_rows(r):
 
 def test_f67_event_states_do_not_depend_on_the_output_grid():
     """Ten bridges over 3 ms (dozens of diode events): the event instants and the states there
-    are the same bits whatever the rule samples in between."""
+    are the same bits whatever the rule samples in between. (Not the rule-off run's: the rule
+    gates the event projection and the root rule, test_exact_output_grid.)"""
     ref = _event_rows(_run(_paralleled_bridges(10), 3e-3, output_rtol=1e-4))
     assert len(ref[0]) > 10
     for rt in (1e-5, 1e-6):
@@ -82,6 +83,34 @@ def test_f36_numeric_segment_counts_its_integrator_steps(rt):
     assert r.n_exact_steps == 0
     assert r.n_rk45_steps + r.n_bdf2_steps > 0
     assert np.asarray(r.v("o"))[-1] == pytest.approx(5.0 * (1 - np.exp(-1.0)), rel=1e-5)
+
+
+def test_f67_chords_from_rest_are_within_the_rule():
+    """RC charging from 0 V: every chord between consecutive samples is within output_rtol
+    of the closed form at its midpoint, the first one (state at rest, floor tolerance)
+    included."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "a", "gnd", 5.0)
+    b.add_resistor("R", "a", "o", 1e3)
+    b.add_capacitor("C", "o", "gnd", 1e-6)
+    rt = 1e-6
+    r = _run(b, 5e-3, output_rtol=rt)
+    t = np.asarray(r.times)
+    v = np.asarray(r.v("o"))
+    tm = 0.5 * (t[:-1] + t[1:])
+    err = np.abs(0.5 * (v[:-1] + v[1:]) - 5.0 * (1.0 - np.exp(-tm / 1e-3)))
+    assert err.max() <= rt * 5.0, (err.argmax(), err.max())
+
+
+def test_f36_bdf2_reports_no_rk45_steps():
+    """F-3-6's DOPRI5 count is the exact engine's: a BDF2 run's steps are not RK45 ones."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "a", "gnd", 5.0)
+    b.add_resistor("R", "a", "o", 1e3)
+    b.add_capacitor("C", "o", "gnd", 1e-6)
+    r = p.simulate(b, t_end=1e-3, engine="dsed", integrator="bdf2")
+    assert r.n_accept > 0 and r.n_exact_steps == 0
+    assert r.n_rk45_steps == 0
 
 
 def test_f36_exact_steps_are_steps_not_samples():
@@ -178,12 +207,13 @@ def _ladder(n):
 def test_fx3_ladder_far_nodes_do_not_cut_every_step_to_the_floor():
     """F-X-3: a 100-section RC ladder, 2e-5 s. The far nodes sit at ~0 V (tolerance
     rtol*atol = 1e-14) while the chord bound sums volts of modes that cancel there: every
-    step was cut to the floor, 197 755 samples. A state the bound cannot certify even at
-    the modes' own resolution is not held to it (counted in diagnostics): 2 140 samples. The
-    state carried is the rule-free run's."""
+    step was cut to the floor, 197 755 samples. A state held to the floor (it has not moved
+    more than atol over the step) that the bound cannot certify even at the modes' own
+    resolution is not held to it (counted in diagnostics): 6 215 samples. The state carried
+    is the rule-free run's."""
     off = _run(_ladder(100), 2e-5)
     on = _run(_ladder(100), 2e-5, output_rtol=1e-5)
     og = on.diagnostics["output_grid"]
-    assert og["n_output_samples"] < 5000
+    assert og["n_output_samples"] < 10000
     assert og["n_output_uncertified"] >= 1
     assert np.array_equal(np.asarray(on.states)[-1], np.asarray(off.states)[-1])

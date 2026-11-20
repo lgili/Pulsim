@@ -2675,10 +2675,11 @@ def simulate(
         grid); both warn. ``output_budget_t`` is the time the run's sample
         budget (2e6 cut steps, ``pulsim._dsed_dispatch.OUTPUT_BUDGET``) ran
         out, from where the step cap's grid holds (warns; ``None`` when it
-        did not). ``n_output_uncertified``: samples where the bound could not
-        certify some state (one near zero against a cancelling sum of modes,
-        e.g. a start from rest: that state is not held to the tolerance
-        there; not warned). Ignored with ``dt`` / ``store_every`` / recorders; refused by name on the other engines, with
+        did not). ``n_output_uncertified``: chords where the bound could not
+        certify a state that has not moved more than ``atol`` (near zero
+        against a cancelling sum of modes): that state is not held to the
+        tolerance there (not warned). Ignored with ``dt`` / ``store_every`` /
+        recorders; refused by name on the other engines, with
         ``integrator='bdf2'``, sensitivities, and the non-native fallback.
 
     Returns

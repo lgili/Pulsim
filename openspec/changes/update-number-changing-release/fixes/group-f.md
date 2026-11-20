@@ -97,9 +97,34 @@ floor is always held: the first version (any component) let `test_exact_lti`'s r
 dropped every moving state at `output_rtol` ≲ 1e-7. The state carried is the rule-free run's
 (F-6-7), so this changes only where samples fall.
 
-**After.** n=100: 2 140 samples, 0.15 s (test). n=500 (ladder500_rc): 66 798 samples, 104 s
-against 7.6 s rule off = 13.7× — the 3× target is NOT met. The remaining cost is the O(n²)
+**After.** n=100: 6 215 samples, 0.55 s (test; one capped interval). n=500 (ladder500_rc):
+70 873 samples, 162 s against 7.6 s rule off (≈21×, shared machine under load; 11 capped
+intervals, so the run warns) — the 3× target is NOT met. Reviewer fix: the range is widened
+over the step before any state is left uncertified (a state from rest that really moves is
+then held; the first version let the resonant tank's first chord out unchecked and had
+2 140 samples at n=100). The remaining cost is the O(n²)
 per-sample bound on the near nodes. Experiment (not committed): treating `atol` as an absolute
 floor, tol_j = max(rtol·|x_j|, atol), gives 7 160 samples, 14.8 s (≈2×). That changes what the
 rule guarantees on every rule-on grid (it loosens the floor 1e-14 → 1e-9 V), so it is an owner
 decision, not a fix made here.
+
+## Group C cross-check (F-X-1)
+
+Group C's tip `fix/core-release-c-mode-selection` d014f049 (its own built extension, read
+only, rule at 1e30 so the projection is gated with almost no samples): the same refusal, Db8b
+OFF 0.7296 V forward at 1.99690 e-2 s. Their tie-release / pin-judge fix is not this site.
+
+## Reviewer (fresh context, read only) — fixed
+
+1. A state from rest at the floor was left uncertified before the range was widened over the
+   step: widen when any state is uncertified too (tank back to its pre-exclusion grid,
+   209 / 325 samples; test `test_f67_chords_from_rest_are_within_the_rule`).
+2. `n_rk45_steps = n_accept − n_exact_steps` was set for BDF2 results too (a default-path
+   counter): now only on the two PEDSimulator bindings (test `test_f36_bdf2_reports_no_rk45_steps`).
+3. `losses` read every rule-on result as interpolable: now only when no interval was capped,
+   no mode unbounded and the budget not spent (`_rule_held`).
+4./5. Comment and counter wording (a floor state that really moves is left uncertified too;
+   the counter counts chords decided, not samples).
+
+Left: no independent truth for the excluded far-node chords (F-X-3); the F-5-8 pwl reference
+is one dt (10 ns), its convergence order not measured.

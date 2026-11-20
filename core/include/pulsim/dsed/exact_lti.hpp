@@ -920,10 +920,11 @@ inline constexpr Real kSettleTau = Real{40};
     };
     // A state held only to the floor tolerance (w.floor: it has not moved more than the
     // caller's atol) that the bound cannot certify even at the modes' own resolution
-    // (d·ρ = 1e-3) is not held to it: there the bound is the triangle inequality over the
-    // modes against a cancellation between them it cannot see (the far nodes of an RC
+    // (d·ρ = 1e-3) is not held to it: typically the bound is the triangle inequality over
+    // the modes against a cancellation between them it cannot see (the far nodes of an RC
     // ladder, ~0 V, against a sum of volts), and it would cut every step to the floor
-    // (F-X-3: a 500-section ladder > 29 min). A tolerance above the floor is always held
+    // (F-X-3: a 500-section ladder > 29 min); a floor state that really moves within atol
+    // is left uncertified the same way (counted). A tolerance above the floor is always held
     // (a tight rtol on a moving state is a real constraint). w.n_uncertified counts them.
     w.tol_eff = tol;
     if (w.floor > Real{0} && e.chord_rho > Real{0} && bound(std::min(h, Real{1e-3} / e.chord_rho))) {

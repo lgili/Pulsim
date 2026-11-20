@@ -797,6 +797,13 @@ def _chatter_gaps(trace) -> "tuple[np.ndarray, int]":
     return in_gap, n_gaps
 
 
+def _rule_held(og) -> bool:
+    """Whether the exact engine's output rule held on the whole grid (its chords are
+    within output_rtol): no capped interval, no unbounded mode, the budget not spent."""
+    return (og is not None and og["n_output_capped"] == 0 and og["n_output_unbounded"] == 0
+            and og["output_budget_t"] is None)
+
+
 def _diode_turn_offs(trace, times: np.ndarray,
                      t_rr: float = _DEFAULT_T_RR,
                      other_flip: "Optional[np.ndarray]" = None,
@@ -2358,7 +2365,7 @@ def device_loss_summary(
                     d_trace, times, t_rr=t_rr, other_flip=d_flip,
                     i_peak=None if win.whole else entry["i_peak"],
                     controlled=getattr(result, "engine_used", None) == "trbdf2",
-                    interpolable="output_grid" in (getattr(result, "diagnostics", None) or {}))
+                    interpolable=_rule_held((getattr(result, "diagnostics", None) or {}).get("output_grid")))
                 if not win.whole:
                     offs = [ev for ev in offs
                             if win.a <= ev["t_off"] < win.b]

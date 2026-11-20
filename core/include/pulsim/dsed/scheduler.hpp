@@ -1015,7 +1015,7 @@ public:
     [[nodiscard]] Real output_budget_t() const noexcept { return output_budget_t_; }
     [[nodiscard]] std::size_t n_output_capped() const noexcept { return n_output_capped_; }
     [[nodiscard]] std::size_t n_output_unbounded() const noexcept { return n_output_unbounded_; }
-    /// Samples where some state's chord could not be bounded (exact_chord_step).
+    /// Rule evaluations (one per chord decided) that left a floor state uncertified (exact_chord_step).
     [[nodiscard]] std::size_t n_output_uncertified() const noexcept { return n_output_uncertified_; }
 
     // Test hooks: the step cap (default 10M) and the settle's round cap
@@ -3203,10 +3203,10 @@ private:
             output_work_.floor = output_atol_ * output_rtol_;   // set_tol's floor, bit for bit
             bool bounded = true;
             Real d = system_.exact_output_step(t, x, output_tol_, output_rtol_, h, bounded, output_work_);
-            if (d < h) {
+            if (d < h || output_work_.n_uncertified > 0) {
                 // the scale of the interval ahead too (a state starting from rest
-                // would otherwise be cut to its atol floor); only a step the bound
-                // cuts needs it: a wider range only lengthens the step
+                // would otherwise be cut to its atol floor, or left uncertified at
+                // it); only a step the bound cuts or a floor state needs it
                 advance_(t, x, h, output_end_);
                 output_lo_ = output_lo_.cwiseMin(output_end_);
                 output_hi_ = output_hi_.cwiseMax(output_end_);
