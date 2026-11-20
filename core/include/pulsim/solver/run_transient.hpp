@@ -850,8 +850,20 @@ inline SimulationResult run_transient(
     bool rs_first_valid = false;
     std::vector<Real> rs_hist;
     pwl::StatefulHistories::Snapshot rs_hs;
+    // Consistent initialisation at a restart (release group A, F-5-1/F-3-3):
+    // stage 1 (x1), the histories at x0, the stage's b_extra and the history
+    // parts of it; the impulse records owed by the attempt (written in the
+    // record phase); and the event's right limit x0+ at event_rl_t (NaN: none
+    // this step), for the event-sample storage to read.
+    Vector ip_x1, ip_b, ip_h0, ip_h1;
+    std::vector<Real> ip_hist, ip_d;
+    pwl::StatefulHistories::Snapshot ip_hs;
+    std::vector<solver::ReinitRecord> impulse_pending;
+    Vector event_rl_x;
+    Real event_rl_t = std::numeric_limits<Real>::quiet_NaN();
     std::vector<CommutationEvent> step_events;      // per-step event scratch
     std::vector<bool> post_event_bits;              // event-split scratch
+    std::vector<bool> decided_bits;                 // the split's decided mode
     // add-fixed-step-event-splitting workspace: the step's first solve
     // (pre-event bits) and its mask, the located gate/source events,
     // the diode events located in the step.
@@ -2248,6 +2260,8 @@ inline SimulationResult run_transient(
             committed_dt = opts.dt;
             step_retried = false;
             mask_cycle = false;    // per OUTER step, not per sub-step
+            impulse_pending.clear();
+            event_rl_t = std::numeric_limits<Real>::quiet_NaN();
             // a gated device's record compares with the last OUTER step's
             // stamp: restart stages and split sub-steps re-stamp in between
             if (diodes.num_gated() > 0) gated_prev_stamp = stamped_mask;
@@ -2311,6 +2325,194 @@ inline SimulationResult run_transient(
             // (`be_commit_h` tells the commit which step that was); else
             // the mode change is real and the SDIRK stage 2 is restored bit
             // for bit (a BE remainder there cost DCM buck 8× in accuracy).
+            //
+            // Consistent initialisation (release group A, F-5-1 / F-3-3): an
+            // SDIRK step may only start from a consistent state. Stage 1 (BE of
+            // γh from x0) relaxes every mode faster than γh; when x0 is
+            // inconsistent with the new mode (an inductor's path cut) its
+            // increment x1 − x0 is O(1), not O(h), and x0* reverses it: stage 2
+            // solves from −√2·x0 (100 A -> −141 A) and a device that conducts
+            // there keeps it. x0+, the state right after the event, is the
+            // limit ε -> 0 of the BE solve x(ε) of the new mode, on the grid's
+            // scale (modes faster than γh relaxed, the rest held): x0+ = x1 −
+            // γh·x'(γh) with x'(γh) = A⁻¹(C/γh)(x1 − x0) on the stage's own
+            // matrix, i.e. x0+ = 2·x1 − S(x1), S the same stage solved from x1
+            // (same mask and factor). A mode with |λ|γh ≪ 1 moves by
+            // O((λγh)²); a relaxed one keeps x1. (The vanishing step proper
+            // keeps a current cut into g_off > 0: τ = L·g_off is not a
+            // constraint at ε -> 0, only on the grid's scale.) The event is
+            // impulsive when the jump x0+ − x0 holds over a quarter of the
+            // increment's energy (it is then made by modes with |λ|γh ≳ 1: it
+            // does not shrink with h) and moves a state by over 1 % of its
+            // kind's magnitude (not a residual's relaxation). Then the jump is recorded, the histories
+            // move to x0+ and stage 1 is solved again from there; else nothing
+            // of this probe is kept (the restart is the plain one, bit for bit).
+            auto consistent_start = [&](Real t_from, Real h_s, Real dt_eq) -> bool {
+                const auto& ents = history.entries();
+                if (ents.empty()) return false;
+                ip_x1 = x;
+                ip_b = b_extra;
+                history.snapshot_into(ip_hist);
+                hs.snapshot_into(ip_hs);
+                const Size iters_s = iters;
+                const bool flipped_s = flipped;
+                const bool cycle_s = mask_cycle;
+                const auto stamped_s = stamped_mask;
+                // S(x1): the stage again, from x1, under stage 1's bits. The
+                // history part of b_extra is swapped (the rest is the stage's).
+                history.compute_b_extra_backward_euler(h_s, ip_h0);
+                history.extrapolate_previous(ip_x1, Real{1});
+                hs.extrapolate_previous(ip_x1, Real{1});
+                history.compute_b_extra_backward_euler(h_s, ip_h1);
+                b_extra = ip_b - ip_h0 + ip_h1;
+                bool solved = true;
+                try {
+                    run_event_iteration(t_from + h_s, dt_eq, true, true);
+                } catch (const pwl::NewtonRoundoffBudgetExceeded&) {
+                    throw;
+                } catch (const std::runtime_error&) {
+                    solved = false;   // no probe: the plain restart
+                }
+                history.restore(ip_hist);
+                hs.restore(ip_hs);
+                event_rl_x = Real{2} * ip_x1 - x;
+                // Per state (C or L): the jump x0+ − x0 and the increment
+                // x1 − x0; energies ½ΔᵀMΔ with the transformers' mutuals.
+                auto state = [&](const pwl::HistoryEntry& e, const Vector& v) {
+                    return e.kind == pwl::DevicePool::StoredKind::Capacitor
+                        ? stamping::read_node_voltage(v, e.from) -
+                              stamping::read_node_voltage(v, e.to)
+                        : v[e.inductor_branch_var_id];
+                };
+                const Size ne = ents.size();
+                ip_d.resize(2 * ne);
+                Real e_jump = 0, e_step = 0;
+                Real scale[2] = {0, 0};   // largest |state| per kind: V, A
+                Size dom = 0;
+                Real dom_e = -1;
+                auto is_cap = [](const pwl::HistoryEntry& e) {
+                    return e.kind == pwl::DevicePool::StoredKind::Capacitor;
+                };
+                for (Size k = 0; k < ne; ++k) {
+                    const auto& e = ents[k];
+                    const Real s0 = is_cap(e) ? e.v_prev : e.i_prev;
+                    const Real s1 = state(e, ip_x1);
+                    const Real dp = state(e, event_rl_x) - s0;
+                    Real& sc = scale[is_cap(e) ? 0 : 1];
+                    sc = std::max({sc, std::abs(s0), std::abs(s1)});
+                    ip_d[2 * k] = dp;
+                    ip_d[2 * k + 1] = s1 - s0;
+                    const Real ek = Real{0.5} * e.C_or_L * dp * dp;
+                    e_jump += ek;
+                    e_step += Real{0.5} * e.C_or_L * (s1 - s0) * (s1 - s0);
+                    if (ek > dom_e) { dom_e = ek; dom = k; }
+                }
+                // An impulse moves a state by a fraction of its kind's
+                // magnitude (the cut current itself); the relaxation of the
+                // integrator's own O(h^2) residual in a mode with |λ|γh ~ 1
+                // (a rectifier's capacitor through g_on after its turn-on,
+                // 3e-3 V on 100 V) does not: 1 % of the kind's largest state.
+                // shortcut: plus 1e-6 (A or V) for leakage settling at a zero
+                // start (2e-8 A through g_off); upgrade with a per-circuit
+                // scale if µA impulses must be recorded.
+                bool visible = false;
+                for (Size k = 0; k < ne; ++k) {
+                    visible = visible ||
+                              std::abs(ip_d[2 * k]) >
+                                  Real{1e-2} * scale[is_cap(ents[k]) ? 0 : 1] + Real{1e-6};
+                }
+                for (const auto& tc : history.transformer_couplings()) {
+                    const Real m =
+                        models::TwoWindingTransformer::mutual_inductance(tc.params);
+                    e_jump += m * ip_d[2 * tc.p_entry_idx] * ip_d[2 * tc.s_entry_idx];
+                    e_step += m * ip_d[2 * tc.p_entry_idx + 1] *
+                              ip_d[2 * tc.s_entry_idx + 1];
+                }
+                const bool impulsive = solved && visible && e_jump > Real{0.25} * e_step;
+                if (!impulsive) {
+                    x = ip_x1;
+                    b_extra = ip_b;
+                    iters = iters_s;
+                    flipped = flipped_s;
+                    mask_cycle = cycle_s;
+                    stamped_mask = stamped_s;
+                    return false;
+                }
+                // The record (every device kind; a structural dependent
+                // mode is the tracker's, recorded after the commit). dW =
+                // ½ΔᵀMΔ > 0 by the test above (M is positive semidefinite).
+                const bool structural =
+                    structure.active() && !reinit.entering(structure, stamped_mask).empty();
+                if (!structural) {
+                    const auto& de = ents[dom];
+                    const bool cut = de.kind != pwl::DevicePool::StoredKind::Capacitor;
+                    solver::ReinitRecord rec;
+                    rec.t = t_from;
+                    rec.kind = cut ? "cut_set" : "capacitor_loop";
+                    for (Size k = 0; k < ne; ++k) {
+                        const Real ek = Real{0.5} * ents[k].C_or_L * ip_d[2 * k] * ip_d[2 * k];
+                        if (ek >= Real{1e-3} * dom_e) {
+                            rec.states.emplace_back(graph.branch_name(ents[k].branch_id));
+                        }
+                    }
+                    // the flux (V·s) or charge (C) moved on the dominant state
+                    rec.lambda = de.C_or_L * ip_d[2 * dom];
+                    for (const auto& tc : history.transformer_couplings()) {
+                        const Real m =
+                            models::TwoWindingTransformer::mutual_inductance(tc.params);
+                        if (tc.p_entry_idx == dom) rec.lambda += m * ip_d[2 * tc.s_entry_idx];
+                        if (tc.s_entry_idx == dom) rec.lambda += m * ip_d[2 * tc.p_entry_idx];
+                    }
+                    rec.dW = e_jump;
+                    // The devices that opened: the switching / nonlinear
+                    // elements at the dominant state's terminals.
+                    Index dev0 = kInvalidIndex;
+                    for (Index b = 0; b < graph.num_branches(); ++b) {
+                        const auto& br = graph.branch(b);
+                        if (br.kind != topology::BranchKind::Switch &&
+                            br.kind != topology::BranchKind::Nonlinear) {
+                            continue;
+                        }
+                        auto touches = [&](Index n) {
+                            return stamping::node_is_active(n) &&
+                                   (br.from == n || br.to == n);
+                        };
+                        if (!touches(de.from) && !touches(de.to)) continue;
+                        if (dev0 == kInvalidIndex) dev0 = b;
+                        rec.devices.emplace_back(graph.branch_name(b));
+                    }
+                    rec.cause = rec.devices.empty() ? std::string{} : rec.devices.front();
+                    if (opts.on_impulse_error) {
+                        std::string sts;
+                        for (const auto& s : rec.states) sts += (sts.empty() ? "" : ", ") + s;
+                        throw UnsupportedError(
+                            "pwl", "impulse", rec.cause,
+                            dev0 != kInvalidIndex && pool.is_registered(dev0)
+                                ? std::string(pwl::stored_kind_name(pool.kind_of(dev0)))
+                                : std::string{},
+                            std::format(
+                                "on_impulse='error': at t = {} '{}' makes {} "
+                                "dependent ({}); re-initialising them moves "
+                                "{:.6g} {} and removes {:.6g} J.",
+                                t_from, rec.cause, sts,
+                                cut ? "an inductor cut-set" : "a capacitor loop",
+                                rec.lambda, cut ? "V*s" : "C", rec.dW));
+                    }
+                    impulse_pending.push_back(std::move(rec));
+                }
+                event_rl_t = t_from;
+                // Histories at x0+ (device states at the relaxed x1: x0+'s
+                // algebraic entries carry the extrapolated impulse).
+                // shortcut: device histories (hs) start O(h) late; exact
+                // for circuits without stateful Newton devices.
+                history.extrapolate_previous(event_rl_x, Real{1});
+                hs.extrapolate_previous(ip_x1, Real{1});
+                history.compute_b_extra_backward_euler(h_s, ip_h1);
+                b_extra = ip_b - ip_h0 + ip_h1;
+                x = ip_x1;   // the solve's start (Newton): the relaxed stage
+                if (has_diodes) diodes.snapshot_on_bits_into(rs_bits0);
+                return true;
+            };
             auto run_restart = [&](Real t_from, Real h) {
                 const Real h_s = kGamma * h;
                 const Real dt_eq = Real{2} * h_s;
@@ -2318,10 +2520,19 @@ inline SimulationResult run_transient(
                 accumulate_b_extra(t_from + h_s, dt_eq, true);
                 if (has_diodes) diodes.snapshot_on_bits_into(rs_bits0);
                 run_event_iteration(t_from + h_s, dt_eq, true);
-                const Size iters_1 = iters;
-                const bool breach_1 = flipped;
+                Size iters_1 = iters;
+                bool breach_1 = flipped;
                 if (breach_1 && has_diodes && !last_solved_bits.empty()) {
                     diodes.restore_on_bits(last_solved_bits);
+                }
+                if (consistent_start(t_from, h_s, dt_eq)) {
+                    // stage 1 from x0+, its mode decided there
+                    run_event_iteration(t_from + h_s, dt_eq, true);
+                    iters_1 += iters - 1;
+                    if (flipped && has_diodes && !last_solved_bits.empty()) {
+                        diodes.restore_on_bits(last_solved_bits);
+                    }
+                    breach_1 = breach_1 || flipped;
                 }
                 if (has_diodes) {
                     rs_x1 = x;
@@ -2501,6 +2712,52 @@ inline SimulationResult run_transient(
                                               on, v1, e.params()));
                                 t_d = std::min(t_d, cross_scratch[j]);
                             }
+                            // F-3-1: the event is the commutation of the
+                            // DECIDED post-event mode (the event iteration's
+                            // final bits). When it flips two or more of the
+                            // diodes that crossed, all one way, it is located
+                            // on the sum of their signals: a floating bridge's
+                            // series pair conducts together, its total voltage
+                            // is well defined, and the split of it between the
+                            // two OFF diodes is leakage and rounding (one ulp
+                            // of C moved the first single crossing by 1e-7 s).
+                            // shortcut: two independent diodes crossing one way
+                            // in one step are located at their mean crossing.
+                            diodes.snapshot_on_bits_into(decided_bits);
+                            {
+                                Real s0 = 0, s1 = 0;
+                                Size n_mode = 0;
+                                int dir = 0;
+                                bool mixed = false;
+                                for (Size j = 0; j < ents.size(); ++j) {
+                                    if (cross_scratch[j] > b ||
+                                        decided_bits[j] == diodes_snap[j]) {
+                                        continue;
+                                    }
+                                    const int d = decided_bits[j] ? 1 : -1;
+                                    mixed = mixed || (dir != 0 && d != dir);
+                                    dir = d;
+                                    const auto& e = ents[j];
+                                    const bool on = diodes_snap[j];
+                                    s0 += models::SwitchedDiode::crossing_signal(
+                                        on, e.law_voltage(x_prev, on), e.params());
+                                    s1 += models::SwitchedDiode::crossing_signal(
+                                        on, e.law_voltage(x_first, on), e.params());
+                                    ++n_mode;
+                                }
+                                if (n_mode >= 2 && !mixed) {
+                                    // OFF -> ON stays off while s < 0; ON -> OFF
+                                    // stays on while s > 0.
+                                    const bool far = dir > 0 ? s0 >= Real{0} : s0 <= Real{0};
+                                    t_d = far ? a : interp_commutation_time(a, b, s0, s1);
+                                    for (Size j = 0; j < ents.size(); ++j) {
+                                        cross_scratch[j] =
+                                            decided_bits[j] != diodes_snap[j] &&
+                                                    cross_scratch[j] <= b
+                                                ? t_d : b + h;
+                                    }
+                                }
+                            }
                             // Back to the step start, then: the crossing
                             // at a (an SDIRK step, as the rule alone), at
                             // b (keep the pre-event solve, flip there) or
@@ -2660,6 +2917,8 @@ inline SimulationResult run_transient(
                     capture_first = false;
                     split_events.clear();
                     rs_first_valid = false;
+                    impulse_pending.clear();
+                    event_rl_t = std::numeric_limits<Real>::quiet_NaN();
 
                     const Size n_sub = Size{1} << h;
                     const Real sub_dt =
@@ -3137,6 +3396,14 @@ inline SimulationResult run_transient(
                     rd_since_store = 0;
                 }
             }
+            // The restart's impulsive re-initialisations of this step
+            // (consistent_start), on the committed attempt only.
+            for (auto& r : impulse_pending) {
+                r.sample = k % opts.store_every == 0
+                               ? static_cast<long>(result.times.size()) - 1 : -1L;
+                result.reinit_records.push_back(std::move(r));
+            }
+            impulse_pending.clear();
             // add-branch-form-ideal-switch D4 (task 5.1): a dependent mode
             // entered this step was re-initialised by the SDIRK x3 restart;
             // record the explicit projection from the step's start state.

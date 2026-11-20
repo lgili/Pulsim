@@ -29,24 +29,31 @@ def _freewheel(**kw):
     return p.simulate(b, t_end=1e-6, dt=1e-9, **kw)
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "release finding F-5-1: traced - stage 1 of the restart's SDIRK(2,2) relaxes i_L 100 -> 0 "
-    "A (v_sw = -3.41e8 V); stage 2 starts from x0* = x0 + ((1-g)/g)(x1-x0) = -141.42 A, where "
-    "the SMOOTH IGBT's forward channel conducts, so stage 2 keeps it (-141.42 A, v_sw 8.57 V). "
-    "The stage-2 mode check that fixes F-3-3 reads diode bits; a Newton device has none. "
-    "Needs a region test for Newton devices (or the BE re-take on a stage-1 impulse) and the "
-    "stage-1 voltage reported to the voltage-sanity guard"))
 def test_f51_pathless_inductor_never_gains_energy_and_is_named():
-    """No conduction path: the 100 A is an impulse (the IGBT blocks reverse current). The
-    restart must not turn it into -141 A (energy 5 J -> 10 J, no source in the loop), and the
-    voltage-sanity guard must name the open path, as it does restart-less."""
-    with pytest.warns(UserWarning, match="conduction path opens"):
+    """No conduction path (the IGBT blocks reverse current): the 100 A is an impulse.
+    Truth: flux conservation in the cut leaves i_L = 0 and removes 1/2 L i0^2 = 5 J.
+    Before the fix the restart's stage 2 solved from the pseudo-state x0* = -sqrt(2) x0
+    and the IGBT's forward channel kept -141.42 A (energy 5 J -> 10 J, no source in the
+    loop). The consistent start x0+ = 2 x1 - S(x1) takes the jump first and records it."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
         res = _freewheel(**RESTART)
     i = np.asarray(res.i("L"))
     # stored energy never exceeds the initial 5 J (flux cannot be created)
     assert np.max(np.abs(i)) <= 100.0 * (1 + 1e-12), np.max(np.abs(i))
     # the cut-set leaves no path: the flux is gone after the impulse
     assert np.max(np.abs(i[1:])) < 1e-3, i[:4]
+    recs = list(res.reinit_records)
+    assert len(recs) == 1, recs
+    r = recs[0]
+    assert r.t == 0.0 and r.kind == "cut_set" and r.states == ["L"]
+    assert r.cause == "QL" and "QL" in r.devices
+    assert r.dW == pytest.approx(5.0, rel=1e-5)
+    assert r.lambda_ == pytest.approx(-0.1, rel=1e-5)   # L * (0 - 100 A) V*s
+    with pytest.raises(Exception, match="on_impulse='error'.*'QL'"):
+        _freewheel(on_impulse="error", **RESTART)
+    with pytest.warns(UserWarning, match="impulsive re-initialisation"):
+        _freewheel(on_impulse="warn", **RESTART)
 
 
 # ---- F-3-3: the flyback's MOSFET turned off into its body diode ------------------------------
@@ -82,16 +89,6 @@ def _run_flyback(t_end=1e-3, **kw):
     return np.asarray(res.i("T1.p"))[m]
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "release finding F-3-3: traced - at the turn-off stage 1 of the restart's SDIRK(2,2) "
-    "relaxes i_p to -7e-6 A (v_sw 3567 V, D1 on); stage 2 solves from x0* = -sqrt(2) x0 and "
-    "turns the body diode ON (off at x0 and in stage 1), keeping the reversed current. "
-    "run_restart's stage-2 check excludes a fresh stage-2 turn-on. Including it (BE re-take "
-    "from x1) fixes this (peak 16.38199 vs exact 16.381990, 2nd order) but re-breaks the zero "
-    "start of a CCM buck (test_buck_ccm_stays_second_order_to_t_over_1600: BE kept, a "
-    "dt-independent 7e-10 A). Needs a test that tells the pseudo-state's turn-on from a real "
-    "one, e.g. include the fresh turn-on only when stage 1 itself commutated (iters_1 > 1, as "
-    "at this turn-off) - unmeasured"))
 def test_f33_flyback_turn_off_does_not_enter_the_body_diode():
     """Truth: the exact engine (LCP mode selection) takes the primary to ~0 at turn-off (the
     leakage current has no path but R_off = 1 GOhm) with a 16.382 A peak. The restart's
@@ -101,6 +98,15 @@ def test_f33_flyback_turn_off_does_not_enter_the_body_diode():
     assert ip_exact.min() > -1e-6 and ip_exact.max() == pytest.approx(16.382, abs=1e-3)
     assert ip.min() > -1e-3, ip.min()
     assert ip.max() == pytest.approx(ip_exact.max(), rel=2e-3)
+
+
+def test_f33_flyback_peak_converges_at_second_order():
+    """The restart from the consistent state x0+ is second order through the
+    impulsive turn-off: peak primary current against the exact engine's
+    16.381990162 A (measured 5.1e-6, 1.2e-6 A at dt 10, 5 ns)."""
+    peak_exact = 16.381990162
+    e = [abs(_run_flyback(dt=dt, **RESTART).max() - peak_exact) for dt in (1e-8, 5e-9)]
+    assert e[0] < 1e-5 and e[0] / e[1] > 3.5, e
 
 
 # ---- F-5-10: the exact engine relaxes an interrupted inductor current silently ---------------

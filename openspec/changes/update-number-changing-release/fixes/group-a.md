@@ -1,5 +1,35 @@
 # Group A — impulsive events under the restart rule (F-5-1, F-3-3, F-3-7, F-3-1, F-5-10)
 
+> **Second session, results so far (WIP commit, 2026-11-19) [M]:**
+> - F-5-1 (restart): i_L 100 -> -141.42135 A before; after: 100 -> -3.8e-5 A (max |i_L[1:]| 3.3e-4 A),
+>   ONE record t=0 cut_set states=['L'] devices/cause 'QL', dW = 4.99999881 J (truth ½·1e-3·100² = 5 J),
+>   lambda -0.1 V·s; on_impulse='error' raises naming 'QL'. Voltage-sanity report of the stage-1 voltage:
+>   NOT done (needs a result field; the record is the report) — the test asks for the record instead.
+> - F-3-3 (restart, flyback): peak/min before -20.92 A min; after peak 16.381985087 / 16.381988999 /
+>   16.381990009 A at dt 10 / 5 / 2.5 ns vs exact engine 16.381990162 (errors 5.1e-6, 1.2e-6, 1.5e-7:
+>   order 2.1, 2.9), min i_p +1.5e-7 A.
+> - CCM buck zero start / restart counters: a first detector (energy ratio only) flagged the zero-start
+>   leakage settling (2.9e-20 J) and broke `test_one_factor_per_mask_and_no_refactor` (8 vs 4); with the
+>   1e-6 floor: 4 factorizations, 0 stage-2 retries, 0 records (driver). A second false positive
+>   (bridge capacitor's residual relaxation after a turn-on, 2.5e-7 J records at window steps) led to
+>   the 1 %-of-kind-magnitude test, being built at this commit. Full test files not yet re-run on it.
+> - F-3-1 (split): locating the DECIDED mode's commutation on the summed signal of the diodes it flips:
+>   1-ulp sensitivity 3.1e-4 -> 2.4e-11 V (k = 1..5, first build); error pattern vs exact still being
+>   checked (it was confounded by the false-positive records above).
+> - Reference cells (`reference_status`, `pwl_identity` restart/split columns): NOT yet measured.
+
+> **For group C (mode selection), second session, 2026-11-19 [M]:** the restart rule now starts every
+> SDIRK step from a CONSISTENT state (`consistent_start` in `run_transient.hpp`, beside `run_restart`):
+> after stage 1, x0+ = 2·x1 − S(x1) (S = the same stage re-solved from x1 on the same factor, bits
+> frozen); when the jump x0+ − x0 holds > 1/4 of the stage increment's energy (and > 1e-6 A/V) the
+> event is impulsive: recorded (`ReinitRecord`, any device kind), histories moved to x0+, stage 1
+> re-solved from x0+ with its full event iteration (the mode is decided there, from a consistent
+> start). F-5-1 and F-3-3 pass with it. If F-2-3 / F-5-9's forbidden OFF diode sits in a restart
+> stage-2 right after an impulsive stage 1 (x1 − x0 = O(1)), it is this defect and this branch
+> changes it; a site outside `run_restart` (plain trapezoidal step, settle/LCP choice on a consistent
+> state) is not. The right limit x0+ is exposed for group B as `event_rl_x` at `event_rl_t`
+> (NaN when the step had no impulsive event), locals of the run beside `x_prev`.
+
 Branch `fix/core-release-a-impulsive` on the PR head 27c00520. Reproductions:
 `python/tests/test_release_findings_a.py` (F-5-1, F-3-3 so far; F-5-10, F-3-7, F-3-1 to add).
 Status marks: **[R]** = read in the code, **[M]** = measured on 27c00520, **[H]** = hypothesis, not yet
