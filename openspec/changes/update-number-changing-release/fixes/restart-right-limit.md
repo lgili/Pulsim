@@ -140,3 +140,44 @@ New, not worse at the head:
 
 Mispriced by the measure: none separated; every remaining worse cell above
 is a real right-row value.
+
+## Gates (on 8d7b2a44's code, vs the branch base .so)
+
+- Default options byte-identical: goldens, stateful (sbit), engines, steps,
+  trbdf2_identity (371/371) — rc 0. pwl_identity default entries identical.
+- Rule-on (pwl+restart, pwl+split): stored times and states identical to the
+  base. Differences are only the right-limit / inner-event rows,
+  `_implausible_voltage` (the new scan), and on 8 Newton circuits the work
+  counters of the right-limit solves (`newton.*`, `stats.n_*`, total_bytes).
+  The mode-selector counters (mode_guard, lcp) no longer move.
+- Cost, default path: not certifiable to 0.5 % on this machine (load 10; buck
+  pwl min-of-six 0.38–0.74 ms across alternating runs of the SAME binaries).
+  ll09: pwl 2.317 vs 2.356 ms, trbdf2 8.6 vs 9.6 ms (new vs base). The default
+  path's new work is one bool test in the voltage scan and the record
+  condition. Rule-on: ll09 pwl+restart 3.73 vs 3.82 ms; buck 0.56–0.70 vs
+  0.55–1.40 ms (noise).
+- Overhead gate `test_simulate_overhead.py`: 2 passed.
+
+## Must-hold items
+
+1. Minimal case: one row (2.5 µs), v_C right − left 1.8e-14 V at dt 0.5 µs,
+   none at 3.0 / 3.5 µs, none at t = 0 (split and not). ll09: continuous on
+   all 239 rows (scoreboard cell 9.8e-3 → 1.85e-7).
+2. Jumping states: C onto source and L cut — right − left = record's jump to
+   1e-9, equal to dsed's (tests).
+3. Recorder untouched: lines keep the quadrature start; buck window / energy /
+   window-impulse-convention tests pass. test_f44 still XFAIL (window END
+   inside a restart step reads the line start: a recorder item, not a right
+   limit); kept.
+4. Group A: the F-5-10 row shows i_L/g_off and the guard warns on pwl; the
+   scan runs inside the existing finalize call (overhead gate passes).
+5. F-W-1: does not fall out (both xfails stand: the pulse step's END state,
+   not the right limit).
+
+## State and next step
+
+Open: D4 (no test), D6, D7; diode_half_wave_rl_load split (located turn-off
+read through g_off), ll10 (2.46e-6, conditioning), cascaded_boost_buck split,
+chopper restart (+2.8 %). Next step for the turn-off: at a located diode
+crossing, take the ε solves in the mode where the commutating diode is ON
+(i = 0 there; the OFF mode amplifies the location residual by 1/g_off).
