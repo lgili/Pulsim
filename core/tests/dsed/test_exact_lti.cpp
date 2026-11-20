@@ -751,13 +751,16 @@ TEST_CASE("Exact: the output rule bounds the rows of an output map (a high-imped
     // 5000 Ω × (x1 − x2) holds x's errors times 5000; bounding x alone let its chord
     // error reach 596 × its tolerance (ll06_buck_vcswitch's V(sw)).
     DenseMatrix A(2, 2);
-    A << 0.0, 1.0, -4e12, -2e5;   // a fast ring: ω = 2e6 rad/s, lightly damped
+    // a fast ring: ω = 2e6 rad/s, lightly damped; x2 is scaled by 1/ω so the eigenbasis is
+    // well conditioned (the unscaled [0 1; -4e12 -2e5] is refused: tier 3)
+    A << 0.0, 2e6, -2e6, -2e5;
     const Vector b = Vector::Zero(2);
     Vector x(2);
     x << 1.0, 0.0;
     DenseMatrix O(1, 2);
-    O << 5000.0, -5000.0 * 1e-7;   // y = 5000·x1 − 5e-4·x2 (a node behind 5 kΩ)
+    O << 5000.0, -1000.0;   // y = 5000·x1 − 5e-4·(2e6·x2) (a node behind 5 kΩ)
     const auto e = make_exact_lti(A, b);
+    INFO("reason: " << e.reason);
     REQUIRE(e.tier == 1);
     DenseMatrix P(3, 2);
     P.topRows(2).setIdentity();
@@ -765,7 +768,7 @@ TEST_CASE("Exact: the output rule bounds the rows of an output map (a high-imped
     e.chord_P_re = P * e.V_re;
     e.chord_P_im = P * e.V_im;
     Vector tol(3);
-    tol << 1e-5 * 2.0, 1e-5 * 4e6, 1e-5 * 2.0;   // the node's range is that of x1's, not 5000×
+    tol << 1e-5 * 2.0, 1e-5 * 2.0, 1e-5 * 2.0;   // the node's range is that of x1's, not 5000×
     ChordWork w;
     for (int s = 0; s < 20; ++s) {
         bool bounded = false;
