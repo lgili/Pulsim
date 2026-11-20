@@ -1,0 +1,163 @@
+"""Finding F-S-5: the variable-step engine aborted on a half bridge whose
+nonlinear output capacitances make a current-driven (zero-voltage) transition.
+
+Case A of ``test_soft_switching_validation.py`` (feat/core-integration-14t),
+copied here with its closed forms: 400 V bus, 10 A pulled out of the switch
+node, C_oss(v) = C0 / (1 + v/V0)^m (C0 1 nF, V0 25 V, m 0.5) on each switch.
+It ran at b9e46778; trbdf2 aborted at 1 us from be5454f3 and both integrators
+at t = 0 from cedac36b (Newton at h_min). Notes:
+openspec/changes/update-number-changing-release/fixes/f-s-5.md.
+"""
+from __future__ import annotations
+
+import functools
+import sys
+import warnings
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+import pulsim as p
+from pulsim.losses import device_loss_summary
+
+mp = pytest.importorskip("mpmath")
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "benchmarks"))
+from kpi import compute_zvs_fraction  # noqa: E402 - pure python
+
+VDC, C0, V0, M = 400.0, 1e-9, 25.0, 0.5
+GON, GOFF, VF = 1e3, 1e-9, 0.7
+TR = 100e-9                     # source ramp: a consistent start at 0 V
+FSW = 1e6
+I_A = 10.0
+DEAD_A = 100e-9
+T_TOL = 0.05e-9
+
+mp.mp.dps = 25
+
+
+# ------------------------------------------------------------------ truths --
+def _C(v):
+    return mp.mpf(C0) / (1 + mp.mpf(v) / V0) ** M
+
+
+def _Q(v):
+    return mp.quad(_C, [0, v])
+
+
+def _W(v):
+    return mp.quad(lambda u: u * _C(u), [0, v])
+
+
+def _t_cross_A(level):
+    v0 = VDC - I_A / GON
+    t_off = 0.5 / FSW - DEAD_A
+    return float(t_off + ((_Q(v0) - _Q(level)) + (_Q(VDC - level) - _Q(VDC - v0))) / I_A)
+
+
+def _e_hard_A(t_pre, t_post):
+    va, vb = -(VF + I_A / GON), VDC - I_A / GON
+    imp = VDC * (_Q(vb) - _Q(va)) - (_W(VDC - vb) - _W(VDC - va)) - (_W(vb) - _W(va))
+    cond = (VF * I_A + I_A ** 2 / GON) * t_pre + I_A ** 2 / GON * t_post
+    return float(imp + cond)
+
+
+# ------------------------------------------------------------ simulations --
+def _builder():
+    b = p.CircuitBuilder()
+    b.add_pulse_voltage_source("Vdc", "vdc", "gnd", 0.0, VDC, 0.0, 1.0, 0.0, TR, 0.0)
+    b.add_switch("Sh", "vdc", "sw", GON, GOFF)
+    b.add_switch("Sl", "sw", "gnd", GON, GOFF)
+    b.add_diode("Dh", "sw", "vdc", GON, GOFF, V_f=VF)
+    b.add_diode("Dl", "gnd", "sw", GON, GOFF, V_f=VF)
+    b.add_nonlinear_capacitor("Ch", "vdc", "sw", C0, V0, M)
+    b.add_nonlinear_capacitor("Cl", "sw", "gnd", C0, V0, M)
+    b.add_pulse_current_source("I", "gnd", "sw", 0.0, I_A, 0.0, 1.0, 0.0, TR, 0.0)
+    return b
+
+
+def _gates(b):
+    return p.make_dead_time_pwm_pair_fn(FSW, 0.5, b.switch_index_of("Sh"),
+                                        b.switch_index_of("Sl"), b.graph.num_switches, DEAD_A)
+
+
+ENGINES = {
+    "trbdf2": dict(engine="trbdf2"),
+    "esdirk43": dict(engine="trbdf2", integrator="esdirk43"),
+}
+
+
+@functools.lru_cache(maxsize=None)
+def _run(engine, t_end=2.2 / FSW, **extra):
+    b = _builder()
+    fn = _gates(b)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(b, t_end=t_end, switch_fn=fn, **ENGINES[engine], **extra)
+    return b, fn, r
+
+
+def _cross(t, v, level, t0, t1):
+    k = np.nonzero((t >= t0) & (t <= t1))[0]
+    for a, c in zip(k[:-1], k[1:]):
+        if (v[a] - level) * (v[c] - level) <= 0 and v[a] != v[c]:
+            return t[a] + (level - v[a]) * (t[c] - t[a]) / (v[c] - v[a])
+    raise AssertionError(f"no crossing of {level} V in [{t0}, {t1}]")
+
+
+def _window_loss(b, fn, r, t0, t1):
+    rows = device_loss_summary(b, r, switch_fn=fn, t_from=t0, t_to=t1)
+    return sum(e["E_total"] for e in rows if e["name"] in ("Sh", "Sl", "Dh", "Dl"))
+
+
+@pytest.fixture(params=list(ENGINES))
+def engine(request):
+    return request.param
+
+
+# ---------------------------------------------- the ten cells of case A --
+@pytest.mark.parametrize("level", [300.0, 200.0, 100.0])
+def test_current_driven_transition_time_is_the_charge_closed_form(engine, level):
+    _, _, r = _run(engine)
+    t, v = np.asarray(r.times), np.asarray(r.v("sw"))
+    t_off = 0.5 / FSW - DEAD_A
+    got = _cross(t, v, level, t_off - 1e-9, t_off + DEAD_A)
+    assert abs(got - _t_cross_A(level)) <= T_TOL
+
+
+def test_zvs_fraction_soft_low_side_hard_high_side(engine):
+    b, fn, r = _run(engine)
+    t, v = np.asarray(r.times), np.asarray(r.v("sw"))
+    gate = [fn(x) for x in t]
+    hs, ls = b.switch_index_of("Sh"), b.switch_index_of("Sl")
+    lo = compute_zvs_fraction([g.get(ls) for g in gate], list(v), threshold_v=5.0)
+    hi = compute_zvs_fraction([g.get(hs) for g in gate], list(VDC - v), threshold_v=5.0)
+    assert (lo["zvs_fraction"], lo["total_turn_on_events"]) == (1.0, 2.0)
+    assert (hi["zvs_fraction"], hi["total_turn_on_events"]) == (0.0, 2.0)
+
+
+def test_hard_turn_on_energy_is_booked(engine):
+    tp, tq = 2e-9, 20e-9
+    b, fn, r = _run(engine)
+    got = _window_loss(b, fn, r, 1.0 / FSW - tp, 1.0 / FSW + tq)
+    assert got == pytest.approx(_e_hard_A(tp, tq), rel=0.05)
+
+
+# ------------------------------------------------- the same run, other knobs --
+@pytest.mark.parametrize("extra", [dict(rtol=1e-4), dict(rtol=1e-8), dict(dt=1e-10)],
+                         ids=["rtol1e-4", "rtol1e-8", "dt1e-10"])
+def test_case_a_transition_under_other_controls(engine, extra):
+    _, _, r = _run(engine, **extra)
+    t, v = np.asarray(r.times), np.asarray(r.v("sw"))
+    t_off = 0.5 / FSW - DEAD_A
+    got = _cross(t, v, 200.0, t_off - 1e-9, t_off + DEAD_A)
+    assert abs(got - _t_cross_A(200.0)) <= T_TOL
+
+
+def test_case_a_short_run_follows_the_bus(engine):
+    """50 ns: inside the source ramp, the high side ON (1 mOhm across Ch):
+    v(sw) = vdc - 1 mOhm x (the switch current), within 0.1 V of the ramp."""
+    _, _, r = _run(engine, t_end=50e-9)
+    t, v = np.asarray(r.times), np.asarray(r.v("sw"))
+    assert t[-1] == pytest.approx(50e-9)
+    assert np.max(np.abs(v - VDC * t / TR)) < 0.1
