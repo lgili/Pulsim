@@ -90,6 +90,27 @@ Strict xfail: `test_exact_engine_keeps_the_output_inductor_current_at_a_rectifie
 The benchmark PSFB starts in its freewheel state (L_lk -4 A, L_o 18 A) and
 runs on dsed within 1.8e-7 A of the truth.
 
+### On the integration line (batch 14t merge, extension of 733ccbe2)
+
+- F-S-1 CLOSED: the minimal case and case B partial ZVS run on esdirk43;
+  case B hard turn-on 1.7070 uJ (truth 1.6878, +1.1 %).
+- F-S-4 CLOSED: i_Lo(0) = 24 A, i_Llk(200 ns) = 6.060509140 A, also with the
+  b -> 400 V diode (the draft PSFB start now runs).
+- trbdf2's hard-turn-on overbooking is gone with the state error norm: case
+  B 1.6891 uJ (truth 1.6878, +7.4e-4; was 2.1955). Case A cannot be read: F-S-5.
+- F-S-5 NEW (OPEN): case A (I_A = 10 A pulled from the node, nonlinear C_oss)
+  aborts on trbdf2 AND esdirk43: Newton at h_min, ||dx|| 7.9e-7 at I(Vdc),
+  ||res|| 8.3e-7 at node sw. Bisected on stored extensions: b9e46778 runs
+  both (esdirk43 case A 62.9246 uJ vs 62.8335); be5454f3 (trbdf2 state
+  error norm) trbdf2 aborts at t = 1 us (the hard turn-on); cedac36b (D2
+  restart / esdirk43 start) both abort at t = 0. rtol 1e-4, dt 1e-10 and a
+  50 ns run abort the same. Marked strict xfail raises=SimulationAborted.
+- F-S-6 NEW (refusal by name): `discontinuity_restart=True` refuses every
+  case (the low-side turn-on at 0.5 us moves Ch by -0.69 V case A / 61.4 V
+  case B in an instant; the consistent restart re-initialises only linear
+  C / L). Since cedac36b (group A's impulse rule); at b9e46778 it ran (and
+  booked 1.44 uJ of 62.83 case A). Marked strict xfail raises=UnsupportedError.
+
 ## Known items measured here (cited, not new)
 
 Hard turn-on of the half-bridge, total switch + diode energy in a 2 ns + 20 ns

@@ -181,11 +181,24 @@ def _run(engine, case, frac=None):
     return b, fn, r
 
 
-def _fs1(request, engine, case, frac=None):
-    """F-S-1: esdirk43 aborts at t = 0 on case B with i0 < 0 (partial ZVS)."""
-    if engine == "esdirk43" and case == "B" and frac is not None and frac < 1:
-        request.applymarker(pytest.mark.xfail(strict=True, raises=p.SimulationAborted,
-                                              reason="finding F-S-1: esdirk43 aborts at t = 0"))
+F_S_5 = ("finding F-S-5: trbdf2 / esdirk43 abort at t = 0 on case A (Newton at h_min, "
+         "||dx|| 7.9e-7 at I(Vdc)); ran at b9e46778, trbdf2 aborts at 1 us since be5454f3 "
+         "and both at t = 0 since cedac36b")
+F_S_6 = ("finding F-S-6: discontinuity_restart refuses by name an event that moves a "
+         "nonlinear capacitor (the low-side turn-on at 0.5 us moves Ch); ran at b9e46778, "
+         "refused since cedac36b")
+
+
+def _line_marks(request, engine, case):
+    """F-S-5 / F-S-6, found when this suite was merged onto the integration
+    line (batch 14t). True when a mark was applied."""
+    if engine == "pwl_restart":
+        request.applymarker(pytest.mark.xfail(strict=True, raises=p.UnsupportedError, reason=F_S_6))
+        return True
+    if engine in ("trbdf2", "esdirk43") and case == "A":
+        request.applymarker(pytest.mark.xfail(strict=True, raises=p.SimulationAborted, reason=F_S_5))
+        return True
+    return False
 
 
 def _cross(t, v, level, t0, t1):
@@ -225,7 +238,8 @@ def engine(request):
 
 
 @pytest.mark.parametrize("level", [300.0, 200.0, 100.0])
-def test_current_driven_transition_time_is_the_charge_closed_form(engine, level):
+def test_current_driven_transition_time_is_the_charge_closed_form(engine, level, request):
+    _line_marks(request, engine, "A")
     _, _, r = _run(engine, "A")
     t, v = np.asarray(r.times), np.asarray(r.v("sw"))
     t_off = 0.5 / FSW - DEAD_A
@@ -233,7 +247,8 @@ def test_current_driven_transition_time_is_the_charge_closed_form(engine, level)
     assert abs(got - _t_cross_A(level)) <= T_TOL.get(engine, 0.05e-9)
 
 
-def test_zvs_fraction_soft_low_side_hard_high_side(engine):
+def test_zvs_fraction_soft_low_side_hard_high_side(engine, request):
+    _line_marks(request, engine, "A")
     b, fn, r = _run(engine, "A")
     t, v = np.asarray(r.times), np.asarray(r.v("sw"))
     gate = [fn(x) for x in t]
@@ -244,19 +259,18 @@ def test_zvs_fraction_soft_low_side_hard_high_side(engine):
     assert (hi["zvs_fraction"], hi["total_turn_on_events"]) == (0.0, 2.0)
 
 
+# trbdf2's overbooking (1381.7 uJ case A at b9e46778) is gone with the
+# state error norm: case B reads 1.6891 uJ (truth 1.6878); case A is F-S-5.
+# pwl_restart (1.44 uJ case A at b9e46778) is refused now: F-S-6.
 KNOWN_LOSS = {
     "pwl": "known open item: the fixed engine books almost none of E_oss (unresolved RC collapse)",
-    "pwl_restart": "known open item: the fixed engine books almost none of E_oss (unresolved RC collapse)",
-    "trbdf2": "known open item: trbdf2 overbooks a hard turn-on with nonlinear C_oss "
-              "(fixed on fix/core-trbdf2-state-error-norm, not merged)",
 }
 
 
 @pytest.mark.parametrize("case", ["A", "B"])
 def test_hard_turn_on_energy_is_booked(engine, case, request):
-    if engine in KNOWN_LOSS:
+    if not _line_marks(request, engine, case) and engine in KNOWN_LOSS:
         request.applymarker(pytest.mark.xfail(strict=True, reason=KNOWN_LOSS[engine]))
-    _fs1(request, engine, case, 0.7)
     tp, tq = 2e-9, 20e-9
     if case == "A":
         b, fn, r = _run(engine, "A")
@@ -272,7 +286,7 @@ def test_hard_turn_on_energy_is_booked(engine, case, request):
 
 
 def test_partial_zvs_trough_is_the_energy_closed_form(engine, request):
-    _fs1(request, engine, "B", 0.7)
+    _line_marks(request, engine, "B")
     _, _, r = _run(engine, "B", 0.7)
     i0, i_off, t_off, sol = _case_B(0.7, DEAD_PART)
     v0 = mp.mpf(VDC) - mp.mpf(i_off) / GON
@@ -293,7 +307,7 @@ def test_partial_zvs_trough_is_the_energy_closed_form(engine, request):
 
 @pytest.mark.parametrize("frac", [0.7, 1.5])
 def test_resonant_trajectory_is_the_ode_truth(engine, frac, request):
-    _fs1(request, engine, "B", frac)
+    _line_marks(request, engine, "B")
     _, _, r = _run(engine, "B", frac)
     dead = DEAD_PART if frac < 1 else DEAD_FULL
     _, _, t_off, sol = _case_B(frac, dead)
@@ -305,6 +319,7 @@ def test_resonant_trajectory_is_the_ode_truth(engine, frac, request):
 
 
 def test_full_zvs_low_side_turns_on_at_its_diode_clamp(engine, request):
+    _line_marks(request, engine, "B")
     if engine == "pwl":
         # the clamping diode's current alternates ~5 A / 0 A step by step
         # around i_L = 2.5 A (a trapezoidal ring of the 1 ps clamp under a
@@ -324,12 +339,11 @@ def test_full_zvs_low_side_turns_on_at_its_diode_clamp(engine, request):
     assert -(VF + 4.0 / GON) < v_on < -VF
 
 
-@pytest.mark.xfail(strict=True, reason="finding F-S-1: esdirk43 aborts at t = 0 (Newton at h_min) "
-                                       "with a nonlinear capacitor driven by a current source")
 def test_esdirk43_starts_a_current_driven_nonlinear_capacitor():
     """Minimal: R + charge-form capacitor (m = 0, i.e. a LINEAR law) + 10 A
     current source. ``add_capacitor`` in its place runs; trbdf2 runs both.
-    At b9e46778: Newton fails at t = 0, h_min, ||residual|| 7.6e-6 at node sw."""
+    Finding F-S-1: at b9e46778 Newton failed at t = 0, h_min, ||residual||
+    7.6e-6 at node sw; closed on the integration line (batch 14t)."""
     b = p.CircuitBuilder()
     b.add_voltage_source("V", "a", "gnd", 0.0)
     b.add_resistor("R", "a", "sw", 1e-3)
@@ -715,8 +729,6 @@ def test_psfb_zvs_fraction_kpi(psfb_engine, request):
         assert k["zvs_fraction"] == 1.0 and k["total_turn_on_events"] >= 2.0, (sw, k)
 
 
-@pytest.mark.xfail(strict=True, reason="finding F-S-4: the exact engine drops an inductor's initial "
-                                       "current at a rectifier start (L_o 24 A -> 0, no warning)")
 def test_exact_engine_keeps_the_output_inductor_current_at_a_rectifier_start():
     """Minimal (11 elements, from the PSFB's power-transfer start): 400 V ->
     L_lk (10 uH, 0 A) -> ideal 4:1 primary (p, b); b to ground through 1 mOhm
@@ -726,7 +738,9 @@ def test_exact_engine_keeps_the_output_inductor_current_at_a_rectifier_start():
     -2.8e-9 A and reaches i_Llk(200 ns) = 0.2424 A (truth 6.0605 A); without
     the 200 pF or the body diode it agrees; with a diode b -> 400 V added it
     raises DiodeModeInconsistentError (the body diode ON at -1.2e-4 A at
-    0.2 ns: the predecessor's PSFB failure)."""
+    0.2 ns: the predecessor's PSFB failure). Finding F-S-4, closed on the
+    integration line (batch 14t): 24 A kept, 6.06050914 A, with the b -> 400 V
+    diode as well."""
     b = p.CircuitBuilder()
     b.add_voltage_source("Va", "a", "gnd", 400.0)
     b.add_resistor("S4", "b", "gnd", 1e-3)
