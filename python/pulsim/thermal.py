@@ -223,7 +223,8 @@ def compute_temperature(t: np.ndarray,
                             stages,
                             T_amb_C: float = 25.0,
                             *,
-                            should_continue=None) -> np.ndarray:
+                            should_continue=None,
+                            piecewise_linear: bool = False) -> np.ndarray:
     """Convolve P(t) with Z_th(t) to get ΔT_j(t), then add T_amb.
 
     Uses the standard Foster decomposition: for each pole
@@ -240,13 +241,25 @@ def compute_temperature(t: np.ndarray,
     with ``where='compute_temperature'`` so a GUI's cancel button
     can preempt a long convolution within ~1 ms on a 100 kHz / 10 s
     trace.
+
+    ``piecewise_linear=True``: no resample. Each pole is advanced over
+    each step ``[t[n-1], t[n]]`` (any spacing, repeated instants
+    included) EXACTLY for the power line from ``p[n-1]`` to ``p[n]``,
+    ``T_i(h) = α T_i(0) + R_th (c − α a − (c − a) τ (1 − α) / h)``
+    (``a``, ``c`` the line's ends): the time-weighted reading of the
+    trace (the stats module's piecewise-linear waveform). One value
+    per input sample.
     """
     t = np.asarray(t, dtype=float)
     p = np.asarray(p_loss, dtype=float)
-    if t.shape != p.shape:
-        raise ValueError("t and p_loss must have the same shape")
-    if len(t) < 2:
-        raise ValueError("need at least 2 samples")
+    bad = ("t and p_loss must have the same shape" if t.shape != p.shape
+           else "need at least 2 samples" if len(t) < 2
+           else "t must be non-decreasing"
+           if piecewise_linear and np.any(np.diff(t) < 0) else None)
+    if bad:
+        raise ValueError(bad)
+    if piecewise_linear:
+        return _foster_piecewise_linear(t, p, stages, T_amb_C, should_continue)
     # The IIR below advances on a FIXED dt. A variable-step trace
     # (engine='auto') has none — its spacing swings by orders of
     # magnitude between event clusters and smooth strides, so
@@ -281,6 +294,34 @@ def compute_temperature(t: np.ndarray,
             delta += state[i]
         T_out[n] = T_amb_C + delta
     return T_out
+
+
+def _foster_piecewise_linear(t, p, stages, T_amb_C, should_continue):
+    """compute_temperature(piecewise_linear=True): the exact response of
+    each Foster pole to the piecewise-linear power through the samples."""
+    h = np.diff(t)   # non-decreasing: compute_temperature checked it
+    out = np.full(t.shape, 0.0)
+    a, c = p[:-1], p[1:]
+    for s in stages:
+        x = h / s.tau_s
+        alpha = np.exp(-x)
+        # tau (1 - alpha) / h, -> 1 as h -> 0 (a repeated instant: no change)
+        ratio = np.ones_like(x)
+        nz = x > 0
+        ratio[nz] = -np.expm1(-x[nz]) / x[nz]
+        drive = s.R_th_K_per_W * (c - alpha * a - (c - a) * ratio)
+        T = 0.0
+        Ts = np.empty(t.shape)
+        Ts[0] = 0.0
+        check = max(1, min(1000, h.size // 100))
+        for n in range(h.size):
+            if should_continue is not None and n % check == 0 and not should_continue():
+                from . import Cancelled as _Cancelled
+                raise _Cancelled("compute_temperature", point_index=n)
+            T = alpha[n] * T + drive[n]
+            Ts[n + 1] = T
+        out += Ts
+    return T_amb_C + out
 
 
 # =============================================================================
@@ -768,6 +809,12 @@ def device_thermal_summary(
     # (_result_views.solved_part). T_j_trace keeps one sample per
     # result.times: the dropped rows read T_ambient, where the network
     # starts.
+    # The events inside stored steps as rows (the fixed engine's event
+    # split; _result_views.with_inner_events); T_j_trace drops them again.
+    result = _views.with_inner_events(result)
+    inner_keep = getattr(result, "_inner_keep", None)
+    has_limits = (inner_keep is not None
+                  or getattr(result, "right_limit_index", None) is not None)
     t_all = np.asarray(result.times, dtype=float)
     n_full = int(t_all.shape[0])
     result = _views.solved_part(result)
@@ -997,34 +1044,44 @@ def device_thermal_summary(
 
         t_aug, p_aug = _with_step_starts(times, P_cond_t + P_constant,
                                          P_start_t + P_constant)
-        T_j_int = compute_temperature(t_aug, p_aug, stages, T_amb_dev)
-        if t_aug.size == times.size and not is_dsed:
-            # pwl / trbdf2: unchanged (compute_temperature's own grid;
-            # a variable-step trace is resampled to a uniform one).
+        on_grid = t_aug.size == times.size and not is_dsed
+        pl = not on_grid and (is_dsed or has_limits)
+        # pwl / trbdf2 without event limits: compute_temperature's own
+        # grid (a variable-step trace resampled to a uniform one). An
+        # event result (engine='dsed', or step-start powers inserted): the
+        # exact response to the piecewise-linear power on its own grid, no
+        # resample. The resample's grid fell between the edges unless its
+        # spacing divided the period: on the exact engine's output-rule
+        # grid (T_j_avg - 25)/R_th/P_cond_avg read 0.978 / 1.011 on a
+        # boost, 0.994 / 0.994 with the grid on the edges (F-2-4).
+        T_j_int = compute_temperature(t_aug, p_aug, stages, T_amb_dev,
+                                      piecewise_linear=pl)
+        if on_grid:
             T_j_trace = T_j_int
             T_j_avg = float(np.mean(T_j_trace))
             T_j_peak = float(np.max(T_j_trace))
             on_times = _views.grid_is_uniform(times)
-        else:
-            # engine='dsed': its event grid is not uniform, and where
-            # the step-start power differs from the stored sample it was
-            # inserted, so the IIR ran on a uniform resample of a longer
-            # grid. Every DSED device takes this branch, inserted
-            # samples or not (a resistor's power has no step-start
-            # jump: its trace was the resample itself, index 500 at
-            # 485.9 µs against t[500] = 497.8 µs on a 1 ms boost).
-            # Sample it back at result.times, one value per sample, and
-            # average over TIME on the uniform internal grid (a plain
-            # mean of the trace at the clustered event times is not).
+        elif not pl:
+            # step starts inserted on a result without event limits (pwl /
+            # trbdf2 reinit records): the uniform resample, as before
             t_int = (t_aug if _views.grid_is_uniform(t_aug)
                      else _views.resample_uniform(t_aug, p_aug)[0])
             T_j_trace = np.interp(times, t_int, T_j_int)
             T_j_avg = float(np.mean(T_j_int))
             T_j_peak = float(np.max(T_j_int))
             on_times = True
+        else:
+            # one value per result.times sample (t_aug holds every one of
+            # them), averaged over TIME (a plain mean of the trace at the
+            # clustered event times is not)
+            T_j_trace = np.interp(times, t_aug, T_j_int)
+            T_j_avg = (_views.pl_integral(t_aug, T_j_int)
+                       / float(t_aug[-1] - t_aug[0]))
+            T_j_peak = float(np.max(T_j_int))
+            on_times = True
         if not win.whole:
             # Over the window, on the grid the network ran on.
-            t_net = (t_aug if _views.grid_is_uniform(t_aug)
+            t_net = (t_aug if pl or _views.grid_is_uniform(t_aug)
                      else _views.resample_uniform(t_aug, p_aug)[0])
             w_net = _views.TimeWindow(t_net, win.a, win.b,
                                       what="device_thermal_summary")
@@ -1036,6 +1093,8 @@ def device_thermal_summary(
             # variable-step trace is on its own grid and stays so).
             T_j_trace = np.concatenate(
                 (np.full(n_lead, T_amb_dev), T_j_trace))
+        if inner_keep is not None and np.shape(T_j_trace) == inner_keep.shape:
+            T_j_trace = np.asarray(T_j_trace)[inner_keep]
         P_cond_avg = _losses.conduction_power_avg(loss)
         extra = {} if P_impulse_avg is None else {"form": "branch",
                                                   "P_impulse_avg": P_impulse_avg}

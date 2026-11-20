@@ -3685,6 +3685,126 @@ void init_module(py::module_& m) {
             "builder.switch_index_of(name); False for every other "
             "column). switch_states holds the stamped conduction state. "
             "None in a circuit without a gated device.")
+        // Release group B: the event limits kept beside the samples (the
+        // fixed engine under the restart rule; the exact engine's adapter
+        // assigns its own). None: no record.
+        .def_property("right_limit_index",
+            [](const SimulationResult& r) -> py::object {
+                if (!r.has_event_limits) return py::none();
+                const auto m = static_cast<py::ssize_t>(r.right_limit_index.size());
+                py::array_t<std::int64_t> out(m);
+                for (py::ssize_t j = 0; j < m; ++j)
+                    out.mutable_data()[j] = static_cast<std::int64_t>(r.right_limit_index[j]);
+                out.attr("setflags")(py::arg("write") = false);
+                return std::move(out);
+            },
+            [](SimulationResult& r, py::object v) {
+                r.right_limit_index.clear();
+                if (v.is_none()) {
+                    r.has_event_limits = false;
+                    return;
+                }
+                const auto a = py::array_t<std::int64_t, py::array::forcecast>(v);
+                for (py::ssize_t j = 0; j < a.size(); ++j)
+                    r.right_limit_index.push_back(static_cast<Size>(a.data()[j]));
+                r.has_event_limits = true;
+            },
+            "Sample indices (increasing) whose RIGHT limit is kept: a "
+            "stored sample at an event is its left limit, the next step "
+            "starts from right_limit_states[j]. pulsim.with_event_limits(res) "
+            "is the trace with both. None: the result keeps no event limits.")
+        .def_property("right_limit_states",
+            [](const SimulationResult& r) -> py::object {
+                if (!r.has_event_limits) return py::none();
+                const auto m = static_cast<py::ssize_t>(r.right_limit_index.size());
+                const auto w = static_cast<py::ssize_t>(r.event_limit_width);
+                if (r.right_limit_states.size() != static_cast<std::size_t>(m * w))
+                    throw std::invalid_argument(
+                        "SimulationResult: right_limit_states does not hold "
+                        "len(right_limit_index) rows of the state width");
+                py::array_t<double> out(std::vector<py::ssize_t>{m, w});
+                if (m * w > 0)
+                    std::copy_n(r.right_limit_states.data(), m * w, out.mutable_data());
+                out.attr("setflags")(py::arg("write") = false);
+                return std::move(out);
+            },
+            [](SimulationResult& r, py::object v) {
+                r.right_limit_states.clear();
+                if (v.is_none()) return;
+                const auto a = py::array_t<double, py::array::c_style | py::array::forcecast>(v);
+                if (a.ndim() == 2) r.event_limit_width = static_cast<Size>(a.shape(1));
+                r.right_limit_states.assign(a.data(), a.data() + a.size());
+            },
+            "(len(right_limit_index), n_states): the right limit of each "
+            "of those samples (where the next step starts). On the fixed "
+            "engine under the restart rule it is the start of the line "
+            "whose trapezoid is the restart step's own SDIRK quadrature "
+            "(exact for the step's integral of a quantity linear in the "
+            "state; as a value the right limit to second order, to first "
+            "order after a kept backward-Euler stage 2).")
+        .def_property("right_limit_switch_states",
+            [](const SimulationResult& r) -> py::object {
+                if (!r.has_event_limits) return py::none();
+                const auto m = static_cast<py::ssize_t>(r.right_limit_index.size());
+                const auto nb = static_cast<py::ssize_t>(r.event_limit_switches);
+                py::array_t<bool> out(std::vector<py::ssize_t>{m, nb});
+                for (py::ssize_t k = 0; k < m * nb; ++k)
+                    out.mutable_data()[k] = static_cast<std::size_t>(k) < r.right_limit_switch_bits.size()
+                        && r.right_limit_switch_bits[static_cast<std::size_t>(k)] != 0;
+                out.attr("setflags")(py::arg("write") = false);
+                return std::move(out);
+            },
+            [](SimulationResult& r, py::object v) {
+                r.right_limit_switch_bits.clear();
+                if (v.is_none()) return;
+                const auto a = py::array_t<bool, py::array::c_style | py::array::forcecast>(v);
+                if (a.ndim() == 2) r.event_limit_switches = static_cast<Size>(a.shape(1));
+                for (py::ssize_t k = 0; k < a.size(); ++k)
+                    r.right_limit_switch_bits.push_back(a.data()[k] ? 1 : 0);
+            },
+            "(len(right_limit_index), n_switches) bool: the mask each "
+            "right limit is under.")
+        .def_property_readonly("inner_events",
+            [](const SimulationResult& r) -> py::object {
+                if (!r.has_event_limits) return py::none();
+                const auto m = static_cast<py::ssize_t>(r.inner_event_times.size());
+                const auto w = static_cast<py::ssize_t>(r.event_limit_width);
+                const auto nb = static_cast<py::ssize_t>(r.event_limit_switches);
+                py::array_t<std::int64_t> after(m);
+                py::array_t<double> times(m);
+                for (py::ssize_t j = 0; j < m; ++j) {
+                    after.mutable_data()[j] = static_cast<std::int64_t>(r.inner_event_after[j]);
+                    times.mutable_data()[j] = r.inner_event_times[j];
+                }
+                auto rows = [&](const std::vector<Real>& v) {
+                    if (v.size() != static_cast<std::size_t>(m * w))
+                        throw std::logic_error("SimulationResult.inner_events: row size");
+                    py::array_t<double> out(std::vector<py::ssize_t>{m, w});
+                    if (m * w > 0) std::copy_n(v.data(), m * w, out.mutable_data());
+                    return out;
+                };
+                auto bits = [&](const std::vector<std::uint8_t>& v) {
+                    if (v.size() != static_cast<std::size_t>(m * nb))
+                        throw std::logic_error("SimulationResult.inner_events: mask size");
+                    py::array_t<bool> out(std::vector<py::ssize_t>{m, nb});
+                    for (py::ssize_t k = 0; k < m * nb; ++k) out.mutable_data()[k] = v[k] != 0;
+                    return out;
+                };
+                py::dict d;
+                d["after"] = after;
+                d["times"] = times;
+                d["left_states"] = rows(r.inner_event_left);
+                d["left_switch_states"] = bits(r.inner_event_left_bits);
+                d["right_states"] = rows(r.inner_event_right);
+                d["right_switch_states"] = bits(r.inner_event_right_bits);
+                return std::move(d);
+            },
+            "Events INSIDE a stored step (the fixed engine's event split "
+            "under the restart rule): dict of arrays, per event the sample "
+            "it follows ('after'), its time, its left limit (state and "
+            "mask of the sub-step that ended there) and its right limit "
+            "(a NaN row: none). None: no record. "
+            "pulsim.with_event_limits(res) inserts them as rows.")
         .def_property_readonly("switch_states_unsolved",
             [](const SimulationResult& r) -> py::object {
                 if (!r.switch_states_complete()) {

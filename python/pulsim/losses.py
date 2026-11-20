@@ -1922,6 +1922,9 @@ def device_loss_summary(
     """
     # The window every statistic is taken over (the whole run by
     # default), checked against the run as simulated.
+    # The events inside stored steps as rows (the fixed engine's event
+    # split under the restart rule; _result_views.with_inner_events).
+    result = _views.with_inner_events(result)
     t_all = np.asarray(result.times, dtype=float)
     span = (float(t_all[0]), float(t_all[-1])) if t_all.size else None
     # From the first solved sample on: a seeded, unsolved row 0 has no

@@ -63,6 +63,7 @@
 #include <algorithm>
 #include <array>
 #include <format>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -70,6 +71,41 @@
 #include <vector>
 
 namespace pulsim::solver {
+
+/// Release group B: the lines a fixed step taken by the restart rule is
+/// integrated on, as the stored result keeps them (the step's start right
+/// limit `x_start`, and per event inside the step its left limit and the
+/// start of the restart sub-step after it). A restart (sub)step's start is
+/// the value that makes the line's trapezoid the integrator's own
+/// quadrature, 2·w1·X1 + (2·w2 − 1)·X2 (SDIRK(2,2): w = (1 − γ, γ)): a
+/// quantity linear in the state integrates exactly as the step did, a
+/// product to second order. Empty: the step's ends only.
+struct StepLines {
+    static constexpr Size kMax = 9;
+    bool start = false;
+    Vector x_start;
+    topology::SwitchStateMask m_start;
+    Size n = 0;
+    std::array<Real, kMax> t{};
+    std::array<Vector, kMax> left, right;
+    std::array<topology::SwitchStateMask, kMax> m_left, m_right;
+    std::array<bool, kMax> right_ok{};
+    // the run's bookkeeping (run_transient): stage 1 of the last restart
+    // (sub)step, whether its stage 2 was the backward-Euler re-take, and
+    // whether the step is representable (false: the dt-retry ladder)
+    Vector x1;
+    topology::SwitchStateMask m1;
+    bool be_kept = false;
+    bool ok = true;
+    // the step (its end time) the lines belong to: run_transient resets
+    // them at a step's first restart, not every step
+    Real owner = -std::numeric_limits<Real>::infinity();
+    void clear() noexcept {
+        start = false;
+        n = 0;
+    }
+    [[nodiscard]] bool empty() const noexcept { return !start && n == 0; }
+};
 
 class LossTracker {
 public:
@@ -136,9 +172,16 @@ public:
         for (const auto& q : pred_) b[q.node] -= q.e;   // W (advance(h, hist) only)
     }
 
-    /// One accepted step from (t0, x0) to (t1, x1) under `mask`.
+    /// One accepted step from (t0, x0) to (t1, x1) under `mask`. `lines`
+    /// (a restart-rule step, StepLines): the conduction energy is the
+    /// integral of its lines; the commutation is read on the step's ends.
     void accept(Real t0, Real t1, const Vector& x1,
-                const topology::SwitchStateMask& mask) {
+                const topology::SwitchStateMask& mask,
+                const StepLines* lines = nullptr) {
+        if (lines != nullptr && !lines->empty()) {
+            accept_lines_(t0, t1, x1, mask, *lines);
+            return;
+        }
         const Real h = t1 - t0;
         // the power of this step has reached the network
         for (const auto& n : now_) injected_.add(n.e);
@@ -193,6 +236,88 @@ public:
         }
     }
 
+private:
+    /// accept() over a step's lines: per line from (a) to (b), the line
+    /// product under one stamp, the trapezoid of the end powers across a
+    /// stamp change (the rule of accept()); V_on tables trapezoidal.
+    void accept_lines_(Real t0, Real t1, const Vector& x1,
+                       const topology::SwitchStateMask& mask, const StepLines& L) {
+        const Real h = t1 - t0;
+        for (const auto& n : now_) injected_.add(n.e);
+        now_.clear();
+        for (auto& d : devs_) {
+            const bool on1 = mask.get(static_cast<Size>(d.law.bit));
+            const Real v1 = v_of_(d, x1);
+            const Real i1 = i_of_(d, x1, on1);
+            const Real tj0 = tj_of_(d);
+            const bool closed = d.node >= 0 && d.spec.closed_loop();
+            auto tj_at = [&](const Vector& x) {
+                return closed ? stamping::read_node_voltage(x, d.node) : tj0;
+            };
+            Real e_el = 0, e_t = 0;
+            auto line = [&](Real ha, Real va, Real ia, bool oa, Real tja,
+                            Real vb, Real ib, bool ob, Real tjb) {
+                e_el += oa == ob
+                    ? ha * (Real{2} * va * ia + va * ib + vb * ia + Real{2} * vb * ib) / Real{6}
+                    : ha * (va * ia + vb * ib) / Real{2};
+                if (d.spec.v_on) {
+                    const auto& c = *d.spec.v_on;
+                    const Real a = oa ? c(std::abs(ia), tja) * std::abs(ia) : 0;
+                    const Real z = ob ? c(std::abs(ib), tjb) * std::abs(ib) : 0;
+                    e_t += ha * (a + z) / Real{2};
+                }
+            };
+            // the first line's start: the step's right limit, else the last end
+            Real ta = t0, va = d.v, ia = d.i, tja = tj0;
+            bool oa = d.on;
+            if (L.start) {
+                oa = L.m_start.get(static_cast<Size>(d.law.bit));
+                va = v_of_(d, L.x_start);
+                ia = i_of_(d, L.x_start, oa);
+                tja = tj_at(L.x_start);
+            }
+            for (Size j = 0; j < L.n; ++j) {
+                const bool ol = L.m_left[j].get(static_cast<Size>(d.law.bit));
+                const Real vl = v_of_(d, L.left[j]);
+                const Real il = i_of_(d, L.left[j], ol);
+                line(L.t[j] - ta, va, ia, oa, tja, vl, il, ol, tj_at(L.left[j]));
+                ta = L.t[j];
+                const Vector& xr = L.right_ok[j] ? L.right[j] : L.left[j];
+                oa = (L.right_ok[j] ? L.m_right[j] : L.m_left[j])
+                         .get(static_cast<Size>(d.law.bit));
+                va = v_of_(d, xr);
+                ia = i_of_(d, xr, oa);
+                tja = tj_at(xr);
+            }
+            const Real tj1 = closed ? stamping::read_node_voltage(x1, d.node) : tj0;
+            line(t1 - ta, va, ia, oa, tja, v1, i1, on1, tj1);
+            d.e_el.add(e_el);
+            Real heat = 0;
+            if (d.spec.v_on) {
+                d.e_tab_last_ = e_t;
+                d.e_tab.add(e_t);
+                if (d.spec.conduction == thermal::ConductionHeat::Table) heat = e_t;
+            }
+            if (d.spec.conduction == thermal::ConductionHeat::Electrical) heat = e_el;
+            d.last = {h, e_el, d.spec.v_on ? d.e_tab_last_ : Real{0}, false};
+            if (on1 != d.on) {
+                const auto pt = thermal::commutation_point(on1, d.v, d.i, v1, i1);
+                const auto& tab = on1 ? d.spec.e_on : d.spec.e_off;
+                const Real e = tab ? (*tab)(pt.v, pt.i, tj0) : Real{0};
+                d.rec.events.push_back({t0, on1, pt.v, pt.i, tj0, e});
+                (on1 ? d.e_on : d.e_off).add(e);
+                ++(on1 ? d.rec.n_on : d.rec.n_off);
+                heat += e;
+            }
+            if (d.node >= 0) add_(queue_, d.node, heat);
+            d.on = on1;
+            d.v = v1;
+            d.i = i1;
+            d.x_tj = closed ? stamping::read_node_voltage(x1, d.node) : d.x_tj;
+        }
+    }
+
+public:
     /// Variable-step accept of [t0, t1] ending in x1 under `mask`. The
     /// quadrature of the conduction power is w0·p(start) + wg·p(xg) +
     /// w1·p(x1) (the integrator's stage weights, Σw = 1; xg may be null

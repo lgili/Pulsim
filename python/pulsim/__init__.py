@@ -222,6 +222,7 @@ from .periodic import (
 )
 from .stats import TimeStats, time_window, time_average, time_rms, steady_state_stats
 from ._recorders import Recorder, Recording
+from ._result_views import with_event_limits
 from .kpi import (
     KpiGate,
     KpiReport,
@@ -689,6 +690,7 @@ __all__ = [
     "Recording",
     "time_rms",
     "steady_state_stats",
+    "with_event_limits",
     # KPI gates + baselines (Phase E.5).
     "KpiGate",
     "KpiReport",
@@ -1413,8 +1415,32 @@ def _result_i(self, name: str, t=None, *, port=None):
     if kind in ("sine_current_source", "pulse_current_source",
                 "pwl_current_source"):
         val = builder.pool.current_waveform_value
-        return _finalize(_np.array([val(b_id, float(tt))
-                                    for tt in _ta(self)], dtype=float))
+        tt_all = _np.asarray(_ta(self), dtype=float)
+        out = _np.array([val(b_id, float(tt)) for tt in tt_all], dtype=float)
+        if getattr(self, "right_limit_index", None) is not None and out.size > 1:
+            # A result that keeps event limits stores the LEFT limit at an
+            # event (the restart rule and the exact engine solve the row at
+            # a source jump with the pre-jump value): read a jump's left
+            # side there too (release finding F-6-5). Rows 1..: row 0 is
+            # the run's start.
+            # the engine's left read, value_at(t - dt*1e-3); a jump is where
+            # the step to it dwarfs the next step further left (a slope or
+            # a corner moves both alike; a jump only the first)
+            # (the step before the row: an exact-engine event row one ulp
+            # after a grid sample reads the spacing before that sample)
+            g = _np.diff(tt_all)
+            real = g > 1e-12 * max(float(_np.max(_np.abs(tt_all))), 1e-300)
+            lb = 1e-3 * g[_np.maximum.accumulate(
+                _np.where(real, _np.arange(g.size), 0))]
+            left = _np.array([val(b_id, float(tt - d))
+                              for tt, d in zip(tt_all[1:], lb)], dtype=float)
+            left2 = _np.array([val(b_id, float(tt - 2 * d))
+                               for tt, d in zip(tt_all[1:], lb)], dtype=float)
+            dl = _np.abs(left - out[1:])
+            jump = (dl > 1e3 * _np.abs(left2 - left)
+                    + 1e-12 * (_np.abs(left) + _np.abs(out[1:])))
+            out[1:] = _np.where(jump, left, out[1:])
+        return _finalize(out)
     if kind == "vccs":
         v_c = (_node_v(states, int(params["in_pos"]))
                - _node_v(states, int(params["in_neg"])))

@@ -49,6 +49,32 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `|cos|^1.5` is `Γ(5/4)/(√π·Γ(7/4)) = 0.5564179`, not 0.5563852 (the
   fitted `c` was 5.9e-5 high).
 
+### Event samples keep both limits; result integrals across events
+
+* **Added** results with event limits (the exact engine; the fixed engine
+  with `discontinuity_restart=True`) keep the right limit beside the stored
+  sample: `res.right_limit_index`, `res.right_limit_states`,
+  `res.right_limit_switch_states` (a stored sample at an event is its LEFT
+  limit; the next step starts from the right one). Events inside a fixed
+  step are in `res.inner_events`. `res.times` is unchanged; `None` where a
+  result keeps no limits (every default run).
+* **Added** `pulsim.with_event_limits(res)`: the trace with the inner events
+  inserted and each right limit one ulp after its left. Use it (or
+  `np.trapezoid` on it) for integrals and peaks across events; `np.interp`
+  on the raw arrays still reads only the left limits.
+* **Fixed** on those results the loss and thermal summaries, `time_average`
+  / `steady_state_stats`, `design` settle checks and `res.i` of waveform
+  current sources read both limits: averages, charges and peaks across a
+  switching event agree with KCL and the summaries (diode average 0.160684
+  -> 0.161027, a pwl bridge charge error 4.9e-3 -> 1e-9, a DCM duty 0.2180
+  -> within 2e-3 of the exact 0.2210, conduction loss second order in `dt`).
+  `design` traces of a rule run use its stored right limits and inner
+  events instead of extrapolating them from the gate schedule. Recorders
+  fed from the stored arrays see the right limits but not yet the inner
+  events. pwl without the rule and trbdf2 are byte-identical; exact-engine
+  results change in these summaries (its junction temperature is the exact
+  Foster response to the piecewise-linear power, no resample).
+
 ### Thermal networks on the variable-step engine; the exact engine's output grid
 
 * **Fixed** `engine='trbdf2'` (and `integrator='esdirk43'`) with a loss

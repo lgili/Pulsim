@@ -212,7 +212,10 @@ class _ResultView:
 
     def __getattr__(self, name):
         import types
-        attr = getattr(type(self._result), name, None)
+        base = self._result
+        while isinstance(base, _ResultView):   # a view of a view
+            base = object.__getattribute__(base, "_result")
+        attr = getattr(type(base), name, None)
         if isinstance(attr, types.FunctionType):
             return attr.__get__(self)
         return getattr(self._result, name)
@@ -264,6 +267,102 @@ def with_right_limits(result):
     out.right_limit_switch_states = None if rl_sw is None else np.zeros(
         (0, np.asarray(rl_sw).shape[1]), dtype=bool)
     return out
+
+
+def with_inner_events(result):
+    """``result`` with the events INSIDE its stored steps as rows (the
+    fixed engine's event split under the restart rule,
+    ``result.inner_events``): at each, a row at the event's time holding
+    its left limit (the sub-step that ended there, under its mask), and
+    its right limit added to the view's ``right_limit_*``. Every index
+    the view carries (right limits, ``reinit_records[].sample``) is
+    renumbered; ``view._inner_keep`` marks the original samples. The
+    result itself when it has none."""
+    ev = getattr(result, "inner_events", None)
+    if ev is None or len(ev["times"]) == 0:
+        return result
+    import types
+    t = np.asarray(result.times, dtype=float)
+    n = t.size
+    after = np.asarray(ev["after"], dtype=np.int64)
+    pos = after + 1
+    m = after.size
+    new_of = np.arange(n) + np.searchsorted(after, np.arange(n), side="left")
+    new_inner = pos + np.arange(m)
+    out = _ResultView(result)
+    out.times = np.insert(t, pos, np.asarray(ev["times"], dtype=float))
+    out.states = np.insert(states_as_array(result), pos,
+                           np.asarray(ev["left_states"], dtype=float), axis=0)
+    keep = np.ones(n + m, dtype=bool)
+    keep[new_inner] = False
+    out._inner_keep = keep
+    sw = getattr(result, "switch_states", None)
+    if sw is not None:
+        out.switch_states = np.insert(np.asarray(sw, dtype=bool), pos,
+                                      np.asarray(ev["left_switch_states"]), axis=0)
+    uns = getattr(result, "switch_states_unsolved", None)
+    if uns is not None:
+        out.switch_states_unsolved = np.insert(np.asarray(uns, dtype=bool), pos, False)
+    gs = getattr(result, "gate_states", None)
+    if gs is not None:
+        gs = np.asarray(gs, dtype=bool)
+        out.gate_states = np.insert(gs, pos, gs[after], axis=0)   # the gate before the edge
+    # right limits: the samples' (renumbered) and the inner events'
+    rl_i = getattr(result, "right_limit_index", None)
+    rl_s = getattr(result, "right_limit_states", None)
+    rl_m = getattr(result, "right_limit_switch_states", None)
+    w = out.states.shape[1]
+    idx = [] if rl_i is None else [new_of[np.asarray(rl_i, dtype=np.int64)]]
+    st = [] if rl_s is None else [np.asarray(rl_s, dtype=float).reshape(-1, w)]
+    mk = [] if rl_m is None else [np.asarray(rl_m, dtype=bool)]
+    right = np.asarray(ev["right_states"], dtype=float)
+    ok = np.all(np.isfinite(right), axis=1)
+    idx.append(new_inner[ok])
+    st.append(right[ok])
+    mk.append(np.asarray(ev["right_switch_states"], dtype=bool)[ok])
+    idx = np.concatenate(idx)
+    order = np.argsort(idx, kind="stable")
+    out.right_limit_index = idx[order]
+    out.right_limit_states = np.concatenate(st)[order]
+    out.right_limit_switch_states = (np.concatenate(mk)[order]
+                                     if len(mk) == len(st) else None)
+    recs = getattr(result, "reinit_records", None) or []
+    if recs and not isinstance(recs[0], dict):
+        moved = []
+        for r in recs:
+            k = int(getattr(r, "sample", -1))
+            d = {a: getattr(r, a) for a in dir(r) if not a.startswith("_")
+                 and not callable(getattr(r, a))}
+            d["sample"] = int(new_of[k]) if 0 <= k < n else k
+            moved.append(types.SimpleNamespace(**d))
+        out.reinit_records = moved
+    return out
+
+
+def with_event_limits(result):
+    """The result's trace with BOTH limits of every event (public
+    accessor, ``pulsim.with_event_limits``).
+
+    Storage convention (every engine): ``result.times`` holds one row
+    per stored sample, and a sample at an event instant is the LEFT
+    limit there (the state the step that ended at it produced). Where a
+    quantity jumps at an event (a diode's turn-on through V_th, a switch
+    current at a gate edge) its RIGHT limit, where the next step starts,
+    is kept beside the samples (``result.right_limit_index`` /
+    ``right_limit_states`` / ``right_limit_switch_states``). ``res.v()``
+    / ``res.i()`` and ``np.interp`` over ``result.times`` therefore see
+    the left limits only, and a trapezoid over them spreads each jump
+    as a ramp over the following step.
+
+    The view returned here inserts each right limit as its own row one
+    ulp after the event (``nextafter(t, +inf)``), so ``view.times`` is
+    strictly increasing and ``view.v()`` / ``view.i()`` /
+    ``pulsim.time_average(view.times, view.i(name))`` integrate every
+    jump as a jump. An event INSIDE a stored step (the fixed engine's
+    event split) is inserted as its own rows, left limit at its time and
+    right limit one ulp later. A result without event limits is returned
+    as it is."""
+    return with_right_limits(with_inner_events(result))
 
 
 def pl_integral(times: np.ndarray, y: np.ndarray,

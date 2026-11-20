@@ -2189,6 +2189,11 @@ class SimulationResult:
         Inductors whose current a post-solve guard overwrote. Empty unless a guard was enabled AND fired.
         """
     @property
+    def inner_events(self) -> typing.Any:
+        """
+        Events INSIDE a stored step (the fixed engine's event split under the restart rule): dict of arrays, per event the sample it follows ('after'), its time, its left limit (state and mask of the sub-step that ended there) and its right limit (a NaN row: none). None: no record. pulsim.with_event_limits(res) inserts them as rows.
+        """
+    @property
     def kernel_tick_counts(self) -> list[int]:
         """
         Ticks delivered per tick_fns source (run_transient tick_periods=); simulate() copies them into control_tick_counts.
@@ -2274,6 +2279,30 @@ class SimulationResult:
         """
         Resolution diagnostics of a pwl run (None when off, and for trbdf2/dsed). See pulsim.ResolutionWarning.
         """
+    @property
+    def right_limit_index(self) -> typing.Any:
+        """
+        Sample indices (increasing) whose RIGHT limit is kept: a stored sample at an event is its left limit, the next step starts from right_limit_states[j]. pulsim.with_event_limits(res) is the trace with both. None: the result keeps no event limits.
+        """
+    @right_limit_index.setter
+    def right_limit_index(self, arg1: typing.Any) -> None:
+        ...
+    @property
+    def right_limit_states(self) -> typing.Any:
+        """
+        (len(right_limit_index), n_states): the right limit of each of those samples (where the next step starts). On the fixed engine under the restart rule it is the start of the line whose trapezoid is the restart step's own SDIRK quadrature (exact for the step's integral of a quantity linear in the state; as a value the right limit to second order, to first order after a kept backward-Euler stage 2).
+        """
+    @right_limit_states.setter
+    def right_limit_states(self, arg1: typing.Any) -> None:
+        ...
+    @property
+    def right_limit_switch_states(self) -> typing.Any:
+        """
+        (len(right_limit_index), n_switches) bool: the mask each right limit is under.
+        """
+    @right_limit_switch_states.setter
+    def right_limit_switch_states(self, arg1: typing.Any) -> None:
+        ...
     @property
     def states(self) -> typing.Any:
         """
