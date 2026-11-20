@@ -516,6 +516,9 @@ struct SimulationResult {
     // Event splitting: trial solves the diode-crossing locator took
     // (events::illinois on trapezoidal re-steps from the step start).
     Size split_locator_trials = 0;
+    // ... and its give-ups (the chord kept: mixed directions, a signal
+    // that does not bracket, a failed trial, the 40-trial cap)
+    Size split_locator_giveups = 0;
     // add-unified-event-queue group 5: the fixed engine's control ticks
     // (one count per TickPlan source) and the largest lateness of a tick
     // on the grid (step time minus scheduled instant).

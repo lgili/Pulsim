@@ -619,6 +619,12 @@ inline SimulationResult run_transient(
         diodes.restore_on_bits(resume_snap->mask);
     }
     const auto diode_owned = diodes.diode_owned_bits();
+    // the diode-owned bits a gate does not drive (H3: a gated device's bit
+    // flipping at its gate edge is a gate event, not a diode flip)
+    auto diode_owned_ungated = diode_owned;
+    for (const auto& d : diodes.entries()) {
+        if (d.gate != models::SwitchedDiode::Gate::None) diode_owned_ungated.set(d.switch_idx, false);
+    }
     const bool has_diodes = diodes.num_diodes() > 0;
     // the commanded gate per sample (2.2); cleared before the result leaves
     if (diodes.num_gated() > 0) {
@@ -947,6 +953,7 @@ inline SimulationResult run_transient(
     // (pre-event bits) and its mask, the located gate/source events,
     // the diode events located in the step.
     Vector x_first;
+    Vector loc_xt;   // the split locator's trial at a refined instant
     topology::SwitchStateMask mask_first(
         static_cast<std::size_t>(graph.num_switches()));
     constexpr Size kMaxStepEvents = 8;
@@ -2742,7 +2749,7 @@ inline SimulationResult run_transient(
             auto& ncm = hs.get<pwl::NonlinearCapacitorHistory>().mutable_entries();
             for (Size k = 0; k < ncm.size(); ++k) {
                 if (ip_nc[3 * k + 2] != Real{0}) {
-                    if (ip_nc[3 * k + 2] == Real{2}) rl_nc0.emplace_back(k, ncm[k].v_prev, ncm[k].q_prev);
+                    rl_nc0.emplace_back(k, ncm[k].v_prev, ncm[k].q_prev);   // the row's x0
                     ncm[k].v_prev = ip_nc[3 * k];
                     ncm[k].q_prev = ip_nc[3 * k + 1];
                 }
@@ -2833,9 +2840,12 @@ inline SimulationResult run_transient(
             if (!lin) {
                 rl_lsb = last_solved_bits;
                 hs.snapshot_into(rl_hs);
-                // a nonlinear capacitor the probe only MOVED (flag 2) is
-                // continuous at t_from: x0's (v, q), put back with rl_hs
-                // below; a recorded jump (flag 1) keeps its (v0+, q0+)
+                // a nonlinear capacitor the probe carried is continuous at
+                // t_from: x0's (v, q), put back with rl_hs below. Not an ideal
+                // element's state (the structural path refuses those), so a
+                // recorded jump (flag 1) is a fast mode that collapses AFTER
+                // t_e+: the record reports it, the regular part starts at
+                // x0 + J (_result_views.step_start_states), the row is x0
                 auto& ncm = hs.get<pwl::NonlinearCapacitorHistory>().mutable_entries();
                 for (const auto& [k, v0, q0] : rl_nc0) {
                     ncm[k].v_prev = v0;
@@ -2869,21 +2879,17 @@ inline SimulationResult run_transient(
             // (flag 2) is continuous at t_from, and a conductance-form jump
             // keeps the model's own right limit (states at x0)
             if (ip_moved) {
+                // every state from x0: a fast mode behind a resistor is
+                // continuous (H1); an ideal element's dependent states are left
+                // to its constraint, whose ε solve carries the jump's charge /
+                // flux exactly (from x0 + J of the probe's FLAGGED states only, a
+                // dependent state it did not flag — C1 of C1 -S- C2 || R — was
+                // shared twice: 9.977 V for 9.524 V)
                 rl_hist = ip_hist;
-                // only the ideal element's dependent states jump (H1: a state
-                // the probe saw jump numerically, a 1 ns RC behind a resistor,
-                // is continuous in the ideal circuit)
                 rl_dep.clear();
                 if (ip_jump && ip_struct) {
                     for (const auto& ds : structure.check(stamped_mask, true).dependent) {
                         rl_dep.insert(rl_dep.end(), ds.states.begin(), ds.states.end());
-                    }
-                }
-                for (Size k = 0; ip_jump && ip_struct && k < ents.size(); ++k) {
-                    if (ip_d[2 * k + 1] == Real{1} &&
-                        std::find(rl_dep.begin(), rl_dep.end(), ents[k].branch_id) != rl_dep.end()) {
-                        rl_hist[2 * k + (ents[k].kind == pwl::DevicePool::StoredKind::Capacitor
-                                             ? 0 : 1)] += ip_d[2 * k];
                     }
                 }
                 history.restore(rl_hist);
@@ -3144,40 +3150,49 @@ inline SimulationResult run_transient(
             // TR-BDF2) on trapezoidal trial solves from the step start under
             // the start bits, to snap. The crossers that share the estimate
             // (one diode, or a floating island's group) share the signal.
-            const Real t_g = t_d;
-            if (!(t_g > a && t_g < b)) return;
-            int dir = 0;
-            for (Size j = 0; j < ents.size(); ++j) {
-                if (cross_scratch[j] != t_g) continue;
-                const int d = diodes_snap[j] ? -1 : 1;
-                if (dir != 0 && d != dir) return;   // mixed directions: keep the chord
-                dir = d;
-            }
-            auto signal = [&](const Vector& xv) {
-                Real s = 0;
+            // Then every OTHER crosser is checked on a trial solve at the
+            // refined instant: one whose signal changed sign there crossed
+            // earlier (two independent diodes, one signal convex and one
+            // concave: the chords order them wrongly) and is refined on [a,
+            // t_new] in turn (at most once per diode). A give-up keeps the
+            // chord and is counted (split_locator_giveups).
+            Real hi = b;
+            const Vector* x_hi = &x_first;
+            for (Size round = 0; round <= ents.size(); ++round) {
+                const Real t_g = t_d;
+                if (!(t_g > a && t_g < hi)) return;
+                int dir = 0;
                 for (Size j = 0; j < ents.size(); ++j) {
                     if (cross_scratch[j] != t_g) continue;
-                    const bool on = diodes_snap[j];
-                    s += models::SwitchedDiode::crossing_signal(
-                        on, ents[j].law_voltage(xv, on), ents[j].params());
+                    const int d = diodes_snap[j] ? -1 : 1;
+                    if (dir != 0 && d != dir) {   // mixed directions: keep the chord
+                        ++result.split_locator_giveups;
+                        return;
+                    }
+                    dir = d;
                 }
-                return s;
-            };
-            const Real s_a = signal(x_prev), s_b = signal(x_first);
-            if (!(dir > 0 ? (s_a < Real{0} && s_b > Real{0})
-                          : (s_a > Real{0} && s_b < Real{0}))) {
-                return;
-            }
-            events::Bracket br{a, s_a, b, s_b, s_a, s_b, 0};
-            // converged: the bracket, or two successive trial instants,
-            // within snap
-            auto narrow = [&](const events::Bracket& q) { return q.tb - q.ta <= snap; };
-            Real t_cur = a, t_was = b;
-            const int n_trials = events::illinois(br, 40,
-                [&](Real, const events::Bracket& q) { return narrow(q); },
-                [&](Real t_loc, Real& sm) {
-                    t_was = t_cur;
-                    t_cur = t_loc;
+                auto signal = [&](const Vector& xv) {
+                    Real s = 0;
+                    for (Size j = 0; j < ents.size(); ++j) {
+                        if (cross_scratch[j] != t_g) continue;
+                        const bool on = diodes_snap[j];
+                        s += models::SwitchedDiode::crossing_signal(
+                            on, ents[j].law_voltage(xv, on), ents[j].params());
+                    }
+                    return s;
+                };
+                const Real s_a = signal(x_prev), s_b = signal(*x_hi);
+                if (!(dir > 0 ? (s_a < Real{0} && s_b > Real{0})
+                              : (s_a > Real{0} && s_b < Real{0}))) {
+                    ++result.split_locator_giveups;
+                    return;
+                }
+                events::Bracket br{a, s_a, hi, s_b, s_a, s_b, 0};
+                // converged: the bracket, or two successive trial instants,
+                // within snap
+                auto narrow = [&](const events::Bracket& q) { return q.tb - q.ta <= snap; };
+                // one trapezoidal trial from the step start under the start bits
+                auto trial = [&](Real t_loc) {
                     x = x_prev;
                     history.restore(history_snap);
                     hs.restore(hs_snap);
@@ -3188,27 +3203,67 @@ inline SimulationResult run_transient(
                     } catch (const pwl::NewtonRoundoffBudgetExceeded&) {
                         throw;
                     } catch (const std::runtime_error&) {
-                        return false;   // a failed trial ends the search: the bracket's chord
+                        return false;
                     }
-                    if (!x.allFinite()) return false;
-                    sm = signal(x);
-                    return true;
-                },
-                [](events::BracketEnd) {},
-                [&](const events::Bracket& q) {
-                    return narrow(q) || std::abs(t_cur - t_was) <= snap ||
-                           q.sa_raw == Real{0} || q.sb_raw == Real{0};
-                });
-            result.split_locator_trials += static_cast<Size>(n_trials);
-            // the root of the final bracket's unweighted chord
-            const Real t_new = br.sa_raw == Real{0} ? br.ta
-                : br.sb_raw == Real{0} ? br.tb
-                : std::clamp(br.ta - br.sa_raw * (br.tb - br.ta) / (br.sb_raw - br.sa_raw),
-                             br.ta, br.tb);
-            t_d = b;
-            for (Size j = 0; j < ents.size(); ++j) {
-                if (cross_scratch[j] == t_g) cross_scratch[j] = t_new;
-                t_d = std::min(t_d, cross_scratch[j]);
+                    return x.allFinite();
+                };
+                Real t_cur = a, t_was = hi;
+                bool failed = false;
+                const int n_trials = events::illinois(br, 40,
+                    [&](Real, const events::Bracket& q) { return narrow(q); },
+                    [&](Real t_loc, Real& sm) {
+                        t_was = t_cur;
+                        t_cur = t_loc;
+                        if (!trial(t_loc)) {
+                            failed = true;
+                            return false;   // a failed trial ends the search: the bracket's chord
+                        }
+                        sm = signal(x);
+                        return true;
+                    },
+                    [](events::BracketEnd) {},
+                    [&](const events::Bracket& q) {
+                        return narrow(q) || std::abs(t_cur - t_was) <= snap ||
+                               q.sa_raw == Real{0} || q.sb_raw == Real{0};
+                    });
+                result.split_locator_trials += static_cast<Size>(n_trials);
+                if (failed || (n_trials >= 40 && !narrow(br))) ++result.split_locator_giveups;
+                // the root of the final bracket's unweighted chord
+                const Real t_new = br.sa_raw == Real{0} ? br.ta
+                    : br.sb_raw == Real{0} ? br.tb
+                    : std::clamp(br.ta - br.sa_raw * (br.tb - br.ta) / (br.sb_raw - br.sa_raw),
+                                 br.ta, br.tb);
+                t_d = b;
+                bool others = false;
+                for (Size j = 0; j < ents.size(); ++j) {
+                    if (cross_scratch[j] == t_g) cross_scratch[j] = t_new;
+                    others = others || (cross_scratch[j] > t_new && cross_scratch[j] <= b);
+                    t_d = std::min(t_d, cross_scratch[j]);
+                }
+                if (!others || failed || !(t_new > a)) return;
+                if (!trial(t_new)) {
+                    ++result.split_locator_giveups;
+                    return;
+                }
+                loc_xt = x;
+                bool earlier = false;
+                for (Size j = 0; j < ents.size(); ++j) {
+                    if (!(cross_scratch[j] > t_new && cross_scratch[j] <= b)) continue;
+                    const bool on = diodes_snap[j];
+                    const Real s0 = models::SwitchedDiode::crossing_signal(
+                        on, ents[j].law_voltage(x_prev, on), ents[j].params());
+                    const Real s1 = models::SwitchedDiode::crossing_signal(
+                        on, ents[j].law_voltage(loc_xt, on), ents[j].params());
+                    if (on ? s1 <= Real{0} && s0 > Real{0} : s1 >= Real{0} && s0 < Real{0}) {
+                        cross_scratch[j] = interp_commutation_time(a, t_new, s0, s1);
+                        earlier = true;
+                    }
+                }
+                if (!earlier) return;
+                hi = t_new;
+                x_hi = &loc_xt;
+                t_d = b;
+                for (Size j = 0; j < ents.size(); ++j) t_d = std::min(t_d, cross_scratch[j]);
             }
         };
 
@@ -3768,7 +3823,7 @@ inline SimulationResult run_transient(
                 // t = 0: a probed jump only; a resume seam is an event (D7)
                 rs_trig_ev = stamped_known && (t_prev != opts.t_start || resume_snap != nullptr);
                 rs_trig_dio = stamped_known && !has_jump_sources && !has_b_jumps &&
-                              combine_masks(mask_pre, stamped_mask, diode_owned) == stamped_mask;
+                              combine_masks(mask_pre, stamped_mask, diode_owned_ungated) == stamped_mask;
                 // without the split a built-in source / b_extra jump inside
                 // the step is solved from t_prev: δt_loc is its offset
                 // (a stage reads it only up to t_prev + γh)
@@ -4256,8 +4311,11 @@ inline SimulationResult run_transient(
                                     if (post_event_bits[j] != diodes_snap[j] && !post_event_bits[j]) {
                                         lc.off = true;
                                     }
+                                    // a gated latching device (H2/H3): its turn-off at
+                                    // I_H and a gate-fired turn-on are no meeting point
                                     if (post_event_bits[j] != diodes_snap[j] &&
                                         (ents[j].V_f != Real{0} ||
+                                         ents[j].gate != models::SwitchedDiode::Gate::None ||
                                          (post_event_bits[j] && ents[j].V_th != Real{0}))) {
                                         lc.vf0 = false;
                                     }

@@ -346,17 +346,15 @@ def test_h1_a_state_the_probe_only_moved_is_continuous_at_the_right_limit(split)
     assert np.asarray(v.i("R"))[j + 1] == pytest.approx(8.0, rel=1e-6)
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "open (restart line STATUS, work item M1): the probe flags this 50 ns RC's charge as a "
-    "recorded jump (flag 1); putting x0's charge back in the row moves the soft-switching "
-    "hard turn-on energy 6.3e-5 -> 0.054 J (the loss booking reads the row's state)"))
 @pytest.mark.parametrize("split", [False, True])
 def test_m1_a_nonlinear_capacitor_is_continuous_in_charge_at_the_right_limit(split):
     """M1: 10 V -> switch (1 uohm / 1e-12 S) -> 1 ohm -> junction capacitor
     50 nF from 0 V (tau ~ 50 ns << dt). The probe moves the capacitor's charge
     inside the step; the right limit keeps x0's charge (v_C+ = 0) and the
-    current the closing drives through it, (10 - 0)/(1 + 1e-6) A. The row
-    used to read the moved state (10.01 V, -0.011 A) or one unpinned BE step."""
+    current the closing drives through it, (10 - 0)/(1 + 1e-6) A (KVL at
+    t_e+ with the charge continuous). The row used to read the probe's
+    recorded state (10.01 V, -0.011 A): the record reports the collapse that
+    follows t_e+, the row does not carry it."""
     b = p.CircuitBuilder()
     b.add_voltage_source("V", "vin", "gnd", 10.0)
     b.add_ideal_switch("S", "vin", "a", 1e-6, 1e-12)
@@ -369,3 +367,178 @@ def test_m1_a_nonlinear_capacitor_is_continuous_in_charge_at_the_right_limit(spl
     vc, i = np.asarray(v.v("c"))[j + 1], np.asarray(v.i("R"))[j + 1]
     assert abs(vc) <= 1e-6 * 10.0, vc
     assert i == pytest.approx(10.0 / (1.0 + 1e-6), rel=1e-6)
+
+
+def _dump(nl, split):
+    """C1 1 uF at 10 V -> S (1 uohm / 1e-12 S) -> R 1 mohm -> C2 50 nF at 0 V,
+    no source: tau ~ 50 ps << dt, a fast mode the step cannot resolve."""
+    b = p.CircuitBuilder()
+    b.add_capacitor("C1", "a", "gnd", 1e-6, 10.0)
+    b.add_switch("S", "a", "m", 1e6, 1e-12)
+    b.add_resistor("R", "m", "c", 1e-3)
+    if nl:
+        b.add_nonlinear_capacitor("C2", "c", "gnd", 50e-9, 0.7, 0.5)
+    else:
+        b.add_capacitor("C2", "c", "gnd", 50e-9, 0.0)
+    fn = _gate(b, "S", False)
+    r = _quiet(p.simulate, b, t_end=6e-6, dt=DT, switch_fn=fn,
+               enable_substep_state_correction=split, **RULE)
+    return b, fn, r
+
+
+@pytest.mark.parametrize("split", [False, True])
+@pytest.mark.parametrize("nl", [False, True])
+def test_row_waveform_and_ledger_agree_on_an_unresolved_collapse(nl, split):
+    """Item 0 of the restart line: ONE definition. x(t_e+) keeps C2's charge
+    (continuous: a finite resistor in its path), so the row reads v_C2+ = 0
+    and i_R+ = 10 V / (1 uohm + 1 mohm) (KVL at t_e+). The ~50 ps collapse
+    after it is the record's (J, dW); the regular part starts after the
+    collapse, so record + window integral = the energy the event dissipates.
+    Truth (closed form / mpmath, derived here): the charge C1*10 is shared,
+    v_inf solves C1*v + Q2(v) = C1*10, E = W(before) - W(after); linear
+    E = C1*C2/(C1 + C2)*50 = 2.380952e-6 J. The window integral used to start
+    from the row: 0.0167 J (7000x) on the linear circuit."""
+    from pulsim.losses import device_loss_summary
+    mp = pytest.importorskip("mpmath")
+    b, fn, r = _dump(nl, split)
+    v, t, k = _limits(r)
+    (j,) = k
+    assert abs(np.asarray(v.v("c"))[j + 1]) <= 1e-6
+    assert np.asarray(v.i("R"))[j + 1] == pytest.approx(10.0 / (1e-6 + 1e-3), rel=1e-6)
+    c1, c0, v0, m = mp.mpf("1e-6"), mp.mpf("50e-9"), mp.mpf("0.7"), mp.mpf("0.5")
+
+    def q2(x):
+        return c0 * v0 / (1 - m) * ((1 + x / v0) ** (1 - m) - 1) if nl else c0 * x
+
+    def w2(x):
+        return mp.quad(lambda u: u * c0 / mp.sqrt(1 + u / v0), [0, x]) if nl else c0 * x * x / 2
+    vinf = mp.findroot(lambda x: c1 * x + q2(x) - c1 * 10, 9)
+    e_loss = float(c1 * 50 - c1 * vinf ** 2 / 2 - w2(vinf))
+    assert np.asarray(r.v("c"))[-1] == pytest.approx(float(vinf), rel=1e-6)
+    rows = device_loss_summary(b, r, switch_fn=fn, t_from=0.0, t_to=6e-6)
+    regular = sum(e["E_total"] for e in rows if e["name"] in ("S", "R"))
+    impulse = sum(x.dW for x in r.reinit_records)
+    assert regular + impulse == pytest.approx(e_loss, rel=1e-3)
+
+
+@pytest.mark.parametrize("split", [False, True])
+@pytest.mark.parametrize("rl", [5.0, 0.5, 1e3])
+def test_a_charge_sharing_row_shares_the_charge_once(rl, split):
+    """C1 1 uF (10 V) -ideal S- C2 50 nF (0 V) || RL. At the closing the
+    ideal loop shares the charge: v+ = 10*C1/(C1 + C2) = 9.5238095 V (closed
+    form), on both capacitors. The row used to add the probe's jump to the
+    states it flagged only (C2) and let the constraint share again:
+    9.977 V at RL = 5 ohm, 9.956 V at 0.5 ohm, no fallback counted
+    (fresh review of the restart line, item 0)."""
+    b = p.CircuitBuilder()
+    b.add_capacitor("C1", "a", "gnd", 1e-6, 10.0)
+    b.add_ideal_switch("S", "a", "c", 0.0, 0.0)
+    b.add_capacitor("C2", "c", "gnd", 50e-9, 0.0)
+    b.add_resistor("RL", "c", "gnd", rl)
+    r = _quiet(p.simulate, b, t_end=6e-6, dt=DT, switch_fn=_gate(b, "S", False),
+               enable_substep_state_correction=split, **RULE)
+    v, t, k = _limits(r)
+    (j,) = k
+    vl = np.asarray(v.v("a"))[j]
+    want = vl * 1e-6 / (1e-6 + 50e-9)    # C1's charge at the left limit, C2 empty
+    assert np.asarray(v.v("a"))[j + 1] == pytest.approx(want, rel=1e-6)
+    assert np.asarray(v.v("c"))[j + 1] == pytest.approx(want, rel=1e-6)
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "open (restart line STATUS, item 0 review #1): the row's eps = 1e-9*gamma*h solve is "
+    "slower than this cut's mode tau = L*g_off = 1e-18 s, so the row is not the eps -> 0 "
+    "limit (i_L 0.027 A for 1 A); it is counted, but the counter also fires on right rows"))
+def test_a_cut_faster_than_the_row_solve_keeps_the_current():
+    """10 V -> R 10 ohm -> L 1 uH (1 A) -> S (1 uohm / 1e-12 S) opens: the
+    flux is continuous at t_e+, i_L+ = i_L- (truth: the inductor's state law)."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "vin", "gnd", 10.0)
+    b.add_resistor("R", "vin", "x", 10.0)
+    b.add_inductor("L", "x", "s", 1e-6, 1.0)
+    b.add_switch("S", "s", "gnd", 1e6, 1e-12)
+    r = _quiet(p.simulate, b, t_end=6e-6, dt=DT, switch_fn=_gate(b, "S", True), **RULE)
+    v, t, k = _limits(r)
+    (j,) = k
+    il = np.asarray(v.i("L"))
+    assert il[j + 1] == pytest.approx(il[j], rel=1e-6)
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "open (restart line STATUS, item 0 review #3): the stored sample after an ideal "
+    "element's jump carries a residue of the jump current: i(V) = +3.83 A for -1 A"))
+@pytest.mark.parametrize("split", [False, True])
+def test_the_sample_after_an_ideal_jump_carries_no_jump_current(split):
+    """10 V -ideal S- C2 50 nF || RL 10 ohm: after the closing v_c = 10 V,
+    i_C = 0, so every stored sample after the edge has |i(V)| = 10/RL = 1 A
+    (KCL; the right-limit row itself reads it)."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "vin", "gnd", 10.0)
+    b.add_ideal_switch("S", "vin", "c", 0.0, 0.0)
+    b.add_capacitor("C2", "c", "gnd", 50e-9, 0.0)
+    b.add_resistor("RL", "c", "gnd", 10.0)
+    r = _quiet(p.simulate, b, t_end=6e-6, dt=DT, switch_fn=_gate(b, "S", False),
+               enable_substep_state_correction=split, **RULE)
+    t, iv = np.asarray(r.times), np.asarray(r.i("V"))
+    after = t > T_E + 1e-12
+    assert np.abs(iv[after]) == pytest.approx(np.ones(after.sum()), rel=1e-6)
+
+
+def _scr(**kw):
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("V", "in", "gnd", 0.0, 10.0, 50.0)
+    b.add_thyristor("T", "in", "out", R_on=1e-3, R_off=1e9, **kw)
+    b.add_resistor("R", "out", "gnd", 2.0)
+    b.add_capacitor("C", "out", "gnd", 1e-6, 0.0)
+    ns, k = b.graph.num_switches, b.switch_index_of("T")
+
+    def fn(t):
+        m = p.SwitchStateMask(ns)
+        m.set(k, 1e-3 <= t < 2e-3)
+        return m
+    return b, fn
+
+
+@pytest.mark.parametrize("dt", [20e-6, 23.39182767e-6])   # inside a step / landed on b
+def test_h2_a_thyristor_turn_off_at_i_h_is_no_continuity_point(dt):
+    """H2: a gated latching device turns off at I_H = 1 A (gate off): its ON
+    and OFF laws do not meet (i jumps from I_H to the leakage), so the row is
+    solved: i_T+ = (v_in - v_out)*g_off (KCL, v_out continuous on C)."""
+    b, fn = _scr(I_H=1.0)
+    r = _quiet(p.simulate, b, t_end=10e-3, dt=dt, switch_fn=fn,
+               enable_substep_state_correction=True, **RULE)
+    v, t, k = _limits(r)
+    (j,) = [j for j in k if t[j] > 5e-3]
+    assert np.asarray(v.i("T"))[j] == pytest.approx(1.0, rel=1e-6)
+    vin = 10.0 * np.sin(2 * np.pi * 50.0 * t[j])
+    vo = np.asarray(v.v("out"))[j + 1]
+    assert np.asarray(v.v("out"))[j] == pytest.approx(vo, rel=1e-9)
+    assert abs(np.asarray(v.i("T"))[j + 1]) <= 10 * abs(vin - vo) * 1e-9
+
+
+def test_h3_a_gate_fired_turn_on_on_a_landed_crossing_is_solved():
+    """H3: a V_f = 0 diode's crossing landed on the grid point where a
+    thyristor's gate fires (10 V -> T -> 1 ohm): the gate edge is no diode
+    flip, the row is solved: i_T+ = 10/(1 + 1e-3) A (KVL)."""
+    dt = 1.999800025923e-05      # D2's turn-off at 500*dt (the run's own location)
+    tg = 500 * dt
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("V1", "in", "gnd", 0.0, 10.0, 50.0)
+    b.add_diode("D2", "in", "o2", 1e3, 1e-9)
+    b.add_resistor("R2", "o2", "gnd", 10.0)
+    b.add_capacitor("C2", "o2", "gnd", 1e-7, 0.0)
+    b.add_voltage_source("V3", "s3", "gnd", 10.0)
+    b.add_thyristor("T", "s3", "o3", R_on=1e-3, R_off=1e9)
+    b.add_resistor("R3", "o3", "gnd", 1.0)
+    ns, k = b.graph.num_switches, b.switch_index_of("T")
+
+    def fn(t):
+        m = p.SwitchStateMask(ns)
+        m.set(k, t >= tg)
+        return m
+    r = _quiet(p.simulate, b, t_end=11e-3, dt=dt, switch_fn=fn,
+               enable_substep_state_correction=True, **RULE)
+    v, t, kk = _limits(r)
+    (j,) = [j for j in kk if t[j] > 5e-3]
+    assert t[j] == pytest.approx(tg, rel=1e-12)
+    assert np.asarray(v.i("T"))[j + 1] == pytest.approx(10.0 / (1.0 + 1e-3), rel=1e-6)

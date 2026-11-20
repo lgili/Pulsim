@@ -147,3 +147,55 @@ def test_diode_rectifier_turn_on_is_located():
     on = [f[0] for f in _flips(r, k) if f[1] and f[0] > 1e-5]
     truth = 2.4375423059672187e-05            # exact_truth (mpmath), D1+ after the first discharge
     assert abs(on[0] - truth) <= 1e-3 * case.dt, (on[0] - truth) / case.dt
+
+
+W2 = 2 * np.pi * 50e3
+LOOPS2 = {1: (-7.845461538461539, -4.279175963571965), 2: (9.915404682274248, -1.7637933521060212)}
+
+
+def _two_diodes():
+    """Two independent loops, Vk 10*sin(w*t + phi_k) -> Dk -> 1 ohm -> E_k.
+    Dk turns on when 10*sin(w*t + phi_k) = E_k (closed form):
+    t_k = (asin(E_k/10) - phi_k)/w: D1 10.75 us, D2 10.20 us, both in the
+    step [10, 11] us at dt = 1 us; D1's signal is convex, D2's concave, so
+    the chords order them wrongly (D1 10.71 us, D2 10.90 us)."""
+    b = p.CircuitBuilder()
+    for k, (e, ph) in LOOPS2.items():
+        b.add_sine_voltage_source(f"V{k}", f"s{k}", "gnd", 0.0, 10.0, 50e3, phase=ph)
+        b.add_diode(f"D{k}", f"s{k}", f"m{k}", 1e3, 1e-9)
+        b.add_resistor(f"R{k}", f"m{k}", f"e{k}", 1.0)
+        b.add_voltage_source(f"E{k}", f"e{k}", "gnd", e)
+    return b, p.simulate(b, t_end=12e-6, dt=1e-6, engine="pwl", **SPLIT)
+
+
+def _truth2(k):
+    e, ph = LOOPS2[k]
+    return (np.arcsin(e / 10) - ph) / W2
+
+
+def test_two_independent_diodes_in_one_step_the_earlier_is_located():
+    """Only the earliest CHORD's crosser used to be refined: D1 to 10.75 us,
+    and D2 taken at D1's instant (+0.55 h), held OFF since 10.20 us, with no
+    counter. Every other crosser is now checked at the refined instant: D2
+    is located at its truth and D1 stays OFF through it (its own turn-on
+    lies in the sub-step after the split; see the strict xfail below)."""
+    b, r = _two_diodes()
+    v = p.with_event_limits(r)
+    t = np.asarray(v.times)
+    k2 = b.switch_index_of("D2")
+    (got,) = [x for x, on in _flips(r, k2) if on and 10e-6 < x < 11e-6]
+    assert got == pytest.approx(_truth2(2), abs=1e-4 * 1e-6)
+    (j,) = [j for j in np.flatnonzero(t[1:] == np.nextafter(t[:-1], np.inf)) if 10e-6 < t[j] < 11e-6]
+    assert abs(np.asarray(v.i("D1"))[j + 1]) < 1e-6   # D1 off at D2's right limit
+    assert r.counters["split_locator_giveups"] == 0
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "open (restart line STATUS, item 2): a crossing in the sub-step AFTER a located "
+    "event is not located (the locator runs on the trapezoidal interval 0 only): D1 "
+    "is taken at the step end 11 us"))
+def test_two_independent_diodes_in_one_step_the_later_is_located_too():
+    b, r = _two_diodes()
+    v = p.with_event_limits(r)
+    t = np.asarray(v.times)
+    assert np.any(np.abs(t - _truth2(1)) < 1e-4 * 1e-6)

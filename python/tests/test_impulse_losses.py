@@ -241,8 +241,11 @@ def test_a_decimated_pulse_interval_moves_no_row():
     # store_every = 4 stores t = 0, 4h, 8h, 12h, ...: the pulse step (11h, 12h] is
     # the last of the stored interval (8h, 12h]; its first three steps conducted
     # from the pre-jump state, so the interval's start row is not replaced
+    # (the edge at 11.5h: the restart rule takes an edge from the step that
+    # contains it, (11h, 12h], since the split-location merge; at 10.5h the
+    # pulse step (10h, 11h] ends on no stored sample)
     from pulsim._result_views import _reinit_step_starts
-    _, r = _caploop_closing(1e-6, store_every=4)
+    _, r = _caploop_closing(1e-6, k_close=11, store_every=4)
     assert r.reinit_records
     t = np.asarray(r.times)
     # the case under test: a stored pulse sample whose interval spans earlier steps
