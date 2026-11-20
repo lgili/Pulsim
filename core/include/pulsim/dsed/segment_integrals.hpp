@@ -325,6 +325,7 @@ public:
     void start(const Vector& x0) {
         xt0_ = e_.d.cwiseProduct(detail::augment(x0));
         if (e_.modal) z_ = e_.Vi * xt0_.template cast<seg::Cplx>();
+        ends_L_ = std::numeric_limits<Real>::quiet_NaN();
     }
 
     /// The closed form's end after L against the engine's end x1, in the
@@ -394,12 +395,17 @@ private:
     std::vector<DenseMatrix> Qt_;
     Vector xt0_;
     Eigen::VectorXcd z_, zeta_, alpha_;
+    Vector xa_, xb_;   // |x̃| at the piece's ends (modal_'s gate), for (ends_s0_, ends_L_)
+    Real ends_s0_ = 0, ends_L_ = std::numeric_limits<Real>::quiet_NaN();
     Eigen::MatrixXcd beta_;
 
     struct Kern {
         Real L = std::numeric_limits<Real>::quiet_NaN();
         Eigen::VectorXcd p1, E;
-        Eigen::MatrixXcd P2, P4;
+        Eigen::MatrixXcd P2, P4, EE;
+        // the cancellation gate's |kernels| (sums_ok_), with the kernels' lifetime
+        Vector p1a;
+        DenseMatrix P2a, P4a;
         bool have4 = false;
     };
     std::array<Kern, 2> kern_;
@@ -416,6 +422,9 @@ private:
         detail::phi1_kernel(e_.mu, L, k.p1);
         detail::phi1_pair_kernel(e_.mu, L, k.P2);
         k.E = (e_.mu * L).array().exp().matrix();
+        k.EE = k.E * k.E.transpose();
+        k.p1a = k.p1.cwiseAbs();
+        k.P2a = k.P2.cwiseAbs();
         kern_last_ = s;
         return k;
     }
@@ -429,6 +438,7 @@ private:
             for (Index j = i; j < n1; ++j) sig[p++] = e_.mu[i] + e_.mu[j];
         }
         detail::phi1_pair_kernel(sig, k.L, k.P4);
+        k.P4a = k.P4.cwiseAbs();
         k.have4 = true;
     }
 
@@ -444,9 +454,18 @@ private:
             zp = &zeta_;
         }
         Kern& k = kern_of_(L);
-        // the state at both ends (the sums' natural scale, sums_ok_)
-        const Vector xa = (e_.V * *zp).real();
-        const Vector xb = (e_.V * zp->cwiseProduct(k.E)).real();
+        // the cancellation gate (sums_ok_) reads only exosystem modes
+        const bool gate = nx_ >= 0;
+        // |state| at both ends (the sums' natural scale, sums_ok_): once per
+        // piece, shared by every probe
+        if (gate && !(ends_L_ == L && ends_s0_ == s0)) {
+            xa_ = (e_.V * *zp).real().cwiseAbs();
+            xb_ = (e_.V * zp->cwiseProduct(k.E)).real().cwiseAbs();
+            ends_L_ = L;
+            ends_s0_ = s0;
+        }
+        const Vector& xa = xa_;
+        const Vector& xb = xb_;
         if (dg == 1) {
             alpha_ = r_[g].cwiseProduct(*zp);
             out[0] = alpha_.cwiseProduct(k.p1).sum().real();
@@ -455,23 +474,26 @@ private:
             out[3] = alpha_.cwiseProduct(k.E).sum().real();
             mag[0] = alpha_.cwiseAbs().sum();
             mag[1] = alpha_.cwiseProduct(k.E).cwiseAbs().sum();
+            if (!gate) return true;
             const Vector la = lt_[g].cwiseAbs();
-            const Real ys = std::max(la.dot(xa.cwiseAbs()), la.dot(xb.cwiseAbs()));
+            const Real ys = std::max(la.dot(xa), la.dot(xb));
             const Vector aa = alpha_.cwiseAbs();
-            return sums_ok_(aa.dot(k.p1.cwiseAbs()), ys * L)
-                   && sums_ok_(aa.dot(k.P2.cwiseAbs() * aa), ys * ys * L);
+            return sums_ok_(aa.dot(k.p1a), ys * L)
+                   && sums_ok_(aa.dot(k.P2a * aa), ys * ys * L);
         }
         beta_ = B_[g].cwiseProduct(*zp * zp->transpose());
         out[0] = beta_.cwiseProduct(k.P2).sum().real();
         out[2] = beta_.sum().real();
-        const Eigen::MatrixXcd EE = k.E * k.E.transpose();
+        const Eigen::MatrixXcd& EE = k.EE;
         out[3] = beta_.cwiseProduct(EE).sum().real();
         mag[0] = beta_.cwiseAbs().sum();
         mag[1] = beta_.cwiseProduct(EE).cwiseAbs().sum();
-        const DenseMatrix Qa = Qt_[g].cwiseAbs();
-        const Real ys = std::max(xa.cwiseAbs().dot(Qa * xa.cwiseAbs()),
-                                 xb.cwiseAbs().dot(Qa * xb.cwiseAbs()));
-        if (!sums_ok_(beta_.cwiseAbs().cwiseProduct(k.P2.cwiseAbs()).sum(), ys * L)) return false;
+        Real ys = Real{0};
+        if (gate) {
+            const DenseMatrix Qa = Qt_[g].cwiseAbs();
+            ys = std::max(xa.dot(Qa * xa), xb.dot(Qa * xb));
+            if (!sums_ok_(beta_.cwiseAbs().cwiseProduct(k.P2a).sum(), ys * L)) return false;
+        }
         if (!sq) {
             out[1] = std::numeric_limits<Real>::quiet_NaN();
             return true;
@@ -483,8 +505,9 @@ private:
             for (Index j = i; j < n1; ++j) gam[p++] = i == j ? beta_(i, i) : beta_(i, j) + beta_(j, i);
         }
         out[1] = (gam.transpose() * k.P4 * gam)(0).real();
+        if (!gate) return true;
         const Vector ga = gam.cwiseAbs();
-        return sums_ok_(ga.dot(k.P4.cwiseAbs() * ga), ys * ys * L);
+        return sums_ok_(ga.dot(k.P4a * ga), ys * ys * L);
     }
 
     // A modal sum whose terms (|·| summed: `terms`) cancel by more than

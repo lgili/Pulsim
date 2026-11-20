@@ -545,3 +545,101 @@ same flags): goldens with counters ALL IDENTICAL; dsed bit-identity 36/36;
 auto-route stored times + states (sync buck, LC ×2, pulse RLC) 8/8 arrays;
 loss port energies + period map 74/74; recorder values of the rk45 route
 (the predecessor's AC/pulse 64 and DC 48) 64/64 and 48/48 identical.
+
+## 3. Pulse ramp into a diode: `DiodeModeInconsistentError` (OPEN, strict xfail)
+
+Smallest circuit (`test_exact_source_paths.py::_pulse_diode`): pulse
+v0 → 10 V, start 5 µs, rise 1 µs, width 50 µs, fall 30 µs, period 200 µs;
+D1 (g_on 1e3, g_off 1e-9) in → a; 100 Ω a → o; 0.1 µF ∥ 1 kΩ at o.
+Reproduces on f7a7aeba and on the F3 branch's built tip (5e2f0aeb +). Two
+defects, both in the settle / scan, neither in source handling:
+
+* v0 = 0 (the reported one): v_D = 0 EXACTLY at the corner (5 µs) and the
+  rise drives it +10 V/µs. The corner changes no mask, so it is a time event
+  with no settle; the next step's scan starts on an exact zero, which the
+  scan leaves "to the mode decision" (`locate_event_exact_`, ladder comment)
+  — and no decision runs. D1 stays OFF, forward-biased by 10 V at 6 µs.
+* v0 = −1 (a second one found with it): the turn-on during the rise is
+  found (5.0909 µs), the turn-off on the falling ramp is LOCATED
+  (i_D = 0 at 58.937711 µs) but D1 stays ON and carries −2.6e-3 A after it.
+  Trace at the root (state from the run with the law check disabled,
+  `DIODE_LAW_REL = 1e30`; the adapter read from Python): the OFF mode's v_D
+  is +1.35e-10 V at the root and −2.774e5 V/s after it (rhs and
+  `node_pair_voltage` at t + δ for δ = 1e-12…1e-7: −2.77e-7 … −2.77e-2 V),
+  i.e. the source's ramp IS in the propagation; the +1.35e-10 V is the
+  located root's residual current amplified by 1 + R·g_on = 1e5 (the
+  ON/OFF-zero mismatch STATE.md records for the parked predicate rows). The
+  decision takes that residual as significant. The mode guard is not
+  involved (same result with h_e = 0: `repair` at the same instant only
+  reports it).
+
+Both are the settle's / scan's (`dsed/scheduler.hpp`), the other agent's
+territory; F3's F-X-5 certificate does not change either (run on its build).
+Left as strict xfails with these traces.
+
+## 4. Three-phase bridge: two diode flips merged (OPEN, strict xfail)
+
+Truth (`benchmarks/tools/exact_truth.py`, 40 digits): D2 ON at
+5.000000250912935 ms with D5 still ON, D5 OFF at 5.001350943090826 ms
+(and the same pair at 11.666666917716 / 11.668019423484 ms). The engine
+(f7a7aeba and here, unchanged) flips D5 OFF and D2 ON in ONE settle at
+5.0000002509 ms (mask (…, D5 ON, D2 OFF) → (…, D5 OFF, D2 ON) at
+consecutive samples): 8 events instead of 10, end states 1.8e-9 off.
+It is a settle decision at the located instant, not a missed crossing in a
+scan interval; F-X-5 (fix/core-release-f3-exact-leftovers e5c17abd) is a
+scan certificate for modes WITHOUT sine sources, so it does not reach this
+circuit. Not merged; strict xfail
+`test_three_phase_bridge_keeps_the_overlap_of_d2_and_d5` (both truth
+instants within 1e-9 s). The source-integrals test stays at 1e-8.
+
+## 5. R4 — the untested source paths (`test_exact_source_paths.py`)
+
+Truth: each circuit is first order, y' = (K·u − y)/τ with u piecewise
+linear, y in closed form per piece; the window ∫ and rms by mpmath
+quadrature (40 digits). All at 1e-11, with no line and no warning.
+
+* a PWL table current source into R ∥ C: its own i(I) (an exosystem row,
+  `exo_current_row`), v(o)·i(I) and v(o). `p(I)` of a table current source
+  is refused by name by the recorder ("not a two-terminal power this pass
+  knows the sign of"); the test asserts the refusal and uses v·i.
+* a PWM voltage source's level v(in), i(L) and v(in)·i(L) of an RL;
+* PWM + a pulse with 20 / 30 µs ramps in series, one mode with both kinds;
+* sine with f ≤ 0 (f = 0 and f = −50 Hz): DECIDED — the model's documented
+  law (`models/sine_voltage_source.hpp` `value_at`: f ≤ 0 → v_dc, amplitude
+  and phase unused) on every engine (pwl and trbdf2 checked: v(in) = v_dc);
+  the exact engine's closed form agrees with it. Refusing would change the
+  other engines' default numbers: not this slice.
+
+## 2. The cost (reviewer R3)
+
+Profiled first (`sample` on 20 single-phase bridges × 20 ms, one recorder,
+4 probes, window + period): the recorder's share was NOT Gramians (matrix_
+was 80 of ~1650 samples; no source here ramps — sines are oscillator
+states, modal). It was the cancellation gate `sums_ok_` in `modal_`:
+|P2|, |p1|, |P4| (complex abs, M² = 784 hypot per call for a quartic) and
+E·Eᵀ rebuilt per probe per step, the ends' states V·z per probe, and all of
+it also on DC modes where the gate is off. Now, in the EXISTING per-mode,
+per-step-length kernel cache (`Kern`, two slots per SegmentMode keyed by L;
+the mode by (mask, ramp)): |p1|, |P2|, E·Eᵀ with the kernel, |P4| with the
+quartic kernel; |x̃| at the piece's ends once per (s0, L) for all probes;
+the gate's inputs skipped on DC modes. Values: every recorder value
+byte-identical to f7a7aeba (AC/pulse 64/64, DC 48/48, the route values),
+loss port / period map 74/74.
+
+Instructions per run (min of six interleaved for the no-recorder pair, min
+of three for the final recorder pair; base f7a7aeba rebuilt from
+`git archive` with the same flags; import-only runs subtracted):
+
+| | base f7a7aeba | tip | |
+|---|---|---|---|
+| no recorder | 1.702e9 | 1.703e9 | +0.06 % |
+| one recorder | 3.466e9 | 2.806e9 | −19 % |
+
+Target (within 15 % of the no-source recorder, 1.928e9 at 20affaf9) NOT
+reached: 2.806e9 is +46 % over it; the recorder's own share went 1.76e9 →
+1.10e9. What is left is the closed forms themselves: per probe and step a
+complex quadratic form αᵀP2α (n+1 = 7 here: 4 states + one oscillator
+pair + the constant) and, for the degree-2 probe v·i, the quartic γᵀP4γ
+(28 × 28 complex). Next step if wanted: real arithmetic over conjugate
+mode pairs (half the work) or reusing the period piece for the window when
+they coincide.
