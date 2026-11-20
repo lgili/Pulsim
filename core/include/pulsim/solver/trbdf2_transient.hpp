@@ -2071,12 +2071,14 @@ inline SimulationResult run_transient_trbdf2(
         }
         x_edge = x_trial;
         x_edge_t = t;
+        // x is the pre-edge solve and the slots are the probe's on both
+        // paths: a snapshot taken before the next commit (a cancel stop)
+        // must say so (post_edge_derivatives), or a resume reads the
+        // post-edge slots as x's own without the restart (review A of D3).
+        slots_only_t = t_plus;   // where the unused probe reached
         // No sample across t_end or a controller tick (the step to it
         // starts from x anyway): the slots only, for a snapshot.
-        if (!sampled) {
-            slots_only_t = t_plus;   // where the unused probe reached
-            return;
-        }
+        if (!sampled) return;
         // The toggle is at the edge, not at the next step's start.
         if (learn_gates) {
             // m_probe is a stamped mask: a gated device's bit there is its
