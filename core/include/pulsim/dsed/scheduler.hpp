@@ -1583,9 +1583,9 @@ private:
                                                   output_rtol_ == Real{0});
                     }
                 } else if (dio && ga * gb > Real{0} && static_cast<Real>(s) * ga > Real{0}
+                           && aq_of() && !certified(ta, ga, tb, gb)
                            && std::abs(ga) > bound_at(ta, xa())
-                           && std::abs(gb) > bound_at(tb, x_at(k + 1))
-                           && aq_of() && !certified(ta, ga, tb, gb)) {
+                           && std::abs(gb) > bound_at(tb, x_at(k + 1))) {
                     // F-X-5: halve until each piece is certified or holds a significant
                     // sign change (the first in time); a piece at the depth cap or
                     // touching zero inside the band is left (no event, as before)
