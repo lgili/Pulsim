@@ -2341,9 +2341,11 @@ inline SimulationResult run_transient(
             // O((λγh)²); a relaxed one keeps x1. (The vanishing step proper
             // keeps a current cut into g_off > 0: τ = L·g_off is not a
             // constraint at ε -> 0, only on the grid's scale.) The event is
-            // impulsive when the jump x0+ − x0 holds over a quarter of the
-            // increment's energy (it is then made by modes with |λ|γh ≳ 1: it
-            // does not shrink with h) and moves a state by over 1 % of its
+            // impulsive when the jump x0+ − x0 holds over 0.81 of the
+            // increment's energy (|x0+ − x0|_M > 0.9 |x1 − x0|_M: the increment
+            // is made by modes with |λ|γh > 9, relaxed by stage 1 and not
+            // shrinking with h; a mode with |λ|γh ~ 1, which the probe's
+            // linear extrapolation cannot place, is left to the SDIRK step) and moves a state by over 1 % of its
             // kind's magnitude (not a residual's relaxation). Then the jump is recorded, the histories
             // move to x0+ and stage 1 is solved again from there; else nothing
             // of this probe is kept (the restart is the plain one, bit for bit).
@@ -2386,7 +2388,7 @@ inline SimulationResult run_transient(
                 };
                 const Size ne = ents.size();
                 ip_d.resize(2 * ne);
-                Real e_jump = 0, e_step = 0;
+                Real e_jump = 0, e_step = 0, e_store = 0;
                 Real scale[2] = {0, 0};   // largest |state| per kind: V, A
                 Size dom = 0;
                 Real dom_e = -1;
@@ -2405,6 +2407,7 @@ inline SimulationResult run_transient(
                     const Real ek = Real{0.5} * e.C_or_L * dp * dp;
                     e_jump += ek;
                     e_step += Real{0.5} * e.C_or_L * (s1 - s0) * (s1 - s0);
+                    e_store += Real{0.5} * e.C_or_L * std::max(s0 * s0, s1 * s1);
                     if (ek > dom_e) { dom_e = ek; dom = k; }
                 }
                 // An impulse moves a state by a fraction of its kind's
@@ -2412,14 +2415,17 @@ inline SimulationResult run_transient(
                 // integrator's own O(h^2) residual in a mode with |λ|γh ~ 1
                 // (a rectifier's capacitor through g_on after its turn-on,
                 // 3e-3 V on 100 V) does not: 1 % of the kind's largest state.
-                // shortcut: plus 1e-6 (A or V) for leakage settling at a zero
-                // start (2e-8 A through g_off); upgrade with a per-circuit
+                // And the jump's energy over 1e-6 of the stored energy (a motor's
+                // rotor-bar capacitor settling at its start: 1.8e-12 J).
+                // shortcut: plus 1e-4 (A or V) for leakage settling at a zero
+                // start (2e-8 A through g_off; a motor's rotor-bar capacitor, 2e-6 V);
+                // upgrade with a per-circuit
                 // scale if µA impulses must be recorded.
                 bool visible = false;
                 for (Size k = 0; k < ne; ++k) {
                     visible = visible ||
                               std::abs(ip_d[2 * k]) >
-                                  Real{1e-2} * scale[is_cap(ents[k]) ? 0 : 1] + Real{1e-6};
+                                  Real{1e-2} * scale[is_cap(ents[k]) ? 0 : 1] + Real{1e-4};
                 }
                 for (const auto& tc : history.transformer_couplings()) {
                     const Real m =
@@ -2428,7 +2434,14 @@ inline SimulationResult run_transient(
                     e_step += m * ip_d[2 * tc.p_entry_idx + 1] *
                               ip_d[2 * tc.s_entry_idx + 1];
                 }
-                const bool impulsive = solved && visible && e_jump > Real{0.25} * e_step;
+                // A mode with structural dependent states (ideal elements) keeps
+                // the SDIRK x3 projection and the tracker's record (linear: exact
+                // there; a diode entering one is consistent by its own crossing).
+                const bool impulsive =
+                    solved && visible && e_jump > Real{0.81} * e_step &&
+                    e_jump > Real{1e-6} * e_store &&
+                    !(structure.active() &&
+                      !structure.check(stamped_mask, true).dependent.empty());
                 if (!impulsive) {
                     x = ip_x1;
                     b_extra = ip_b;
@@ -2438,12 +2451,9 @@ inline SimulationResult run_transient(
                     stamped_mask = stamped_s;
                     return false;
                 }
-                // The record (every device kind; a structural dependent
-                // mode is the tracker's, recorded after the commit). dW =
+                // The record (every non-structural device kind). dW =
                 // ½ΔᵀMΔ > 0 by the test above (M is positive semidefinite).
-                const bool structural =
-                    structure.active() && !reinit.entering(structure, stamped_mask).empty();
-                if (!structural) {
+                {
                     const auto& de = ents[dom];
                     const bool cut = de.kind != pwl::DevicePool::StoredKind::Capacitor;
                     solver::ReinitRecord rec;
@@ -2510,7 +2520,9 @@ inline SimulationResult run_transient(
                 history.compute_b_extra_backward_euler(h_s, ip_h1);
                 b_extra = ip_b - ip_h0 + ip_h1;
                 x = ip_x1;   // the solve's start (Newton): the relaxed stage
-                if (has_diodes) diodes.snapshot_on_bits_into(rs_bits0);
+                // rs_bits0 stays the bits at x0: the stage-2 guard's undo of a
+                // turn-off of a diode conducting at the interval start (the
+                // flyback's secondary) still applies.
                 return true;
             };
             auto run_restart = [&](Real t_from, Real h) {
@@ -3398,12 +3410,15 @@ inline SimulationResult run_transient(
             }
             // The restart's impulsive re-initialisations of this step
             // (consistent_start), on the committed attempt only.
-            for (auto& r : impulse_pending) {
-                r.sample = k % opts.store_every == 0
-                               ? static_cast<long>(result.times.size()) - 1 : -1L;
-                result.reinit_records.push_back(std::move(r));
+            if (!impulse_pending.empty()) {
+                for (auto& r : impulse_pending) {
+                    r.sample = k % opts.store_every == 0
+                                   ? static_cast<long>(result.times.size()) - 1 : -1L;
+                    result.reinit_records.push_back(std::move(r));
+                }
+                impulse_pending.clear();
+                if (lt) lt->impulses(result.reinit_records);   // booked to `cause`
             }
-            impulse_pending.clear();
             // add-branch-form-ideal-switch D4 (task 5.1): a dependent mode
             // entered this step was re-initialised by the SDIRK x3 restart;
             // record the explicit projection from the step's start state.

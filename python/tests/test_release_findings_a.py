@@ -180,10 +180,12 @@ def _psfb_vout(primary, **kw):
 
 @pytest.mark.xfail(strict=True, reason=(
     "release finding F-3-7: traced - NOT the stage-2 pseudo-state: the restart step at "
-    "t = 21.5 us (a gate edge, rectifier bits 00001001) fails in STAGE 1's Newton solve at "
-    "every halving down to dt/64 (diode-mask chatter inside Newton with the saturable "
-    "primary, ||dx|| 1.1e4 V at vout); the restart-less trapezoid takes the same step. Needs "
-    "the Newton loop's diode re-decision fixed for the backward-Euler stage"))
+    "t = 21.5 us (a gate edge, rectifier bits 00001001) failed in STAGE 1's Newton solve at "
+    "every halving down to dt/64 (||dx|| 1.1e4 V at vout). The consistent start (x0+ before "
+    "the stages) moves the failure to t = 31.55 us (||dx|| 60 V at rect_neg, residual 6e-6; hypothesis, untraced: "
+    "Newton cycles with the rectifier's diode bits re-decided per iteration); restart-less "
+    "6.911 V, linear primary 6.890 V. Needs the in-Newton diode re-decision traced per "
+    "iteration (which bit flips, the residual) and fixed for the backward-Euler stage"))
 def test_f37_saturable_psfb_runs_under_the_restart_rule():
     """Below its knee the saturable primary is the linear one: the restart rule must run it
     and land with the linear primary (restart-less: 6.913 V vs 6.857 V linear)."""

@@ -57,14 +57,10 @@ def test_a_failed_stage2_retry_is_counted_warned_and_keeps_sdirk():
         bad = _rect3(50e-6, True)
     c = bad.counters
     # Every re-try throws (singular factor) and the SDIRK stage 2 stands:
-    # the bus overshoots the 24 V the working fallback keeps. (Before the
-    # consistent start (release group A) the zero start's 0 -> 21 V charge of
-    # Cout (tau = 5 us, gamma*dt = 15 us: an impulse on the grid) also went
-    # through the pseudo-state: 10 failures, 37.20 V; from x0+ it is 12 and
-    # 28.016 V.)
-    assert c["stage2_retry_failures"] == c["stage2_retries"] >= 10, c
+    # the bus returns to the pre-fallback overshoot, 37.20 V (CHANGELOG).
+    assert c["stage2_retry_failures"] == c["stage2_retries"] == 10, c
     assert c["stage2_be_kept"] == 0
-    assert 25.0 < max(bad.v("out")) < 37.3
+    assert max(bad.v("out")) == pytest.approx(37.2032291, abs=1e-6)
     assert np.abs(np.asarray(bad.v("q"))).max() == 0.0
 
 
