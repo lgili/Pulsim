@@ -217,3 +217,20 @@ transient at the now exactly-located turn-off; half_wave_rectifier_sine pwl+spli
 2.56e-6 -> 5.37e-6; interleaved_buck_3ph pwl+restart smooth 0.00249 -> 0.00966, limits
 0.00528 -> 0.0198 (side change). Better: boost_pfc_open_loop pwl+restart limits 0.0613 ->
 0.0387, voltage_doubler, chopper_with_rc_snubber, full_bridge_dc limits, ll06 restart instants.
+
+## Full pytest on f2be579d (bisection cap included)
+
+Build OK; area files 213 passed, 1 xfailed. Full run: 6 failed, 6778 passed,
+133 skipped, 46 xfailed (544 s). Two are the known base failures
+(`test_f24_exact_thermal_ratio_matches_the_fixed_engine[500.0|20.0]`). Four are
+new, caused by this branch, not yet fixed:
+
+- `test_design_evaluation.py::test_unlocated_gate_edges_are_failed_not_ok` -
+  expects the unlocated-gate UserWarning; an opaque gate is now bisected, so
+  nothing warns. The test needs a case with more than kMaxStepEvents changes in a step.
+- `test_impulse_losses.py::test_a_decimated_pulse_interval_moves_no_row` -
+  not diagnosed.
+- `test_release_findings_a.py::test_f37_saturable_psfb_runs_under_the_restart_rule[legacy|auto]` -
+  pinned 0.008827 +- 4.4e-4, now 0.008123: the restart gate is sampled at
+  t - dt/100 (floor side). The pin was taken on the ceil side; it must be
+  re-derived against truth, not re-pinned blindly.
