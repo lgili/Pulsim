@@ -29,6 +29,11 @@ def test_dc_machine_yaml_is_the_python_composite():
     b.add_dc_machine("M", "a", "gnd", "w", R_a=0.5, L_a=1e-3, K=0.1,
                      J=1e-5, B=1e-4, T_load=0.2)
     assert _components(y) == _components(b)
+    assert y.composites() == b.composites()
+    em = [c for c in y.components() if c.get("composite") == "dc_machine"]
+    assert len(em) == 1 and em[0]["composite_params"] == {
+        "R_a": pytest.approx(0.5, rel=1e-12), "L_a": 1e-3, "K": 0.1,
+        "J": 1e-5, "B": pytest.approx(1e-4, rel=1e-12), "T_load": 0.2}
     x = p.compute_dc_op(y, gmin=0.0)
     w_ss = (10.0 - 0.5 * 0.2 / 0.1) / (0.1 + 0.5 * 1e-4 / 0.1)
     assert x[y.node_id_of("w")] == pytest.approx(w_ss, rel=1e-9)

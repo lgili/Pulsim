@@ -1742,6 +1742,10 @@ def device_loss_summary(
       ``i_rms``, ``i_peak``, ``P_avg`` / ``E_total`` (``v · i`` across the
       drain-source / collector-emitter / anode-cathode pins). A tailed
       IGBT, a Lauritzen diode and a nonlinear capacitor are not listed.
+    * **excess_loss** (``add_excess_loss``) — the same kernel-law path:
+      ``i_*`` are the MMF statistics, ``P_avg`` / ``E_total`` the in-loop
+      excess core loss ``F·dΦ/dt``; ``category='core_loss'``, with the
+      law's ``c`` and ``eps``.
 
     By default every figure covers the whole run, start-up included.
     ``t_from`` / ``t_to`` restrict it to a window: on a 230 V bridge
@@ -2231,7 +2235,8 @@ def device_loss_summary(
             })
             continue
 
-        if kind in ("mosfet_level1", "igbt_level1", "nonlinear_diode"):
+        if kind in ("mosfet_level1", "igbt_level1", "nonlinear_diode",
+                    "excess_loss"):
             # add-unified-device-interface 9.3: the static Newton kinds'
             # current from the kernel's device law at each stored state
             # (and right limit), integrated as the Shockley diode's above.
@@ -2252,9 +2257,18 @@ def device_loss_summary(
                 E = _views.pl_integral_product(times_w, v_D, i_D, v_D_s, i_D_s)
             else:
                 i_avg, E = float(i_D.mean()), 0.0
+            extra = {}
+            if kind == "excess_loss":
+                # add-permeance-magnetic-domain 4.2: the "current" is the
+                # MMF F [A] and the "voltage" the flux rate u [V] of the
+                # unit winding's node, so P_avg is the in-loop excess loss
+                prm = desc.get("params", {})
+                extra = {"category": "core_loss", "c": float(prm.get("c", float("nan"))),
+                         "eps": float(prm.get("eps", float("nan")))}
             summary.append({
                 "branch_id": int(bid),
                 "kind": kind,
+                **extra,
                 "name": name,
                 "i_avg": float(i_avg),
                 "i_rms": _time_weighted_rms(i_D, times_w, i_D_s),

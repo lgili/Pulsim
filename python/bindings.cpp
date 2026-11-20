@@ -876,6 +876,30 @@ void init_module(py::module_& m) {
               "tangent in the Jacobian -- no dummy source, no observer, no "
               "one-step lag. i(name) is the winding current; replay the "
               "B-H trajectory from it with pulsim.compute_bh_loop.")
+        .def("add_hysteretic_permeance",
+              [](builder::CircuitBuilder& b, const std::string& name,
+                 const std::string& m_a, const std::string& m_b,
+                 double area, double length,
+                 double Ms, double a, double alpha, double c, double k,
+                 int substeps_min, double M0) -> builder::CircuitBuilder& {
+                  models::JilesAthertonParams ja;
+                  ja.Ms = Ms; ja.a = a; ja.alpha = alpha; ja.c = c; ja.k = k;
+                  return b.add_hysteretic_permeance(
+                      name, m_a, m_b, area, length, ja, substeps_min, M0);
+              },
+              py::arg("name"), py::arg("m_a"), py::arg("m_b"),
+              py::arg("area"), py::arg("length"),
+              py::arg("Ms"), py::arg("a"), py::arg("alpha"), py::arg("c"),
+              py::arg("k"), py::arg("substeps_min") = 8, py::arg("M0") = 0.0,
+              py::return_value_policy::reference,
+              "Hysteretic permeance: a core segment (area [m^2], length [m]) "
+              "with the Jiles-Atherton law (Ms, a, alpha, c, k) between "
+              "magnetic nodes m_a, m_b -- the dual of a one-turn "
+              "add_hysteretic_core_inductor: a unit winding '<name>.w' on "
+              "the internal node '<name>.e' and the JA inductor '<name>' "
+              "(N = 1, no gap). The MMF F(m_a) - F(m_b) is i(name) (H = "
+              "F/length), the flux rate is v('<name>.e'). Newton engines "
+              "(pwl, trbdf2) only.")
         .def("add_multi_winding_transformer",
               [](builder::CircuitBuilder& b, const std::string& name,
                  const std::vector<std::tuple<std::string, std::string, double>>& windings,
@@ -1017,6 +1041,20 @@ void init_module(py::module_& m) {
               py::return_value_policy::reference,
               "Air gap: permeance mu0*area/length (area [m^2], length [m]; "
               "no fringing).")
+        .def("add_excess_loss", &builder::CircuitBuilder::add_excess_loss,
+              py::arg("name"), py::arg("m_a"), py::arg("m_b"), py::arg("c"),
+              py::arg("eps"),
+              py::return_value_policy::reference,
+              "Excess (anomalous) core loss between magnetic nodes m_a, m_b: "
+              "F = c*u/(u^2 + eps^2)^0.25 for the flux rate u [V] through it "
+              "(m_a -> m_b), Bertotti's square-root law c*sign(u)*|u|^0.5 "
+              "(c = k_x*l/sqrt(A) [A/V^0.5]) made linear below |u| ~ eps [V]. "
+              "Sine loss within (3/4)*(eps/U)^2 of c*U^1.5*0.55641 at flux-rate "
+              "amplitude U: eps <= 1.15e-3*U for 1e-6. A unit winding "
+              "'<name>.w' on the internal node '<name>.e' (its voltage is u) "
+              "and the ExcessLoss conductance '<name>' (i(name) is F). Newton "
+              "engines (pwl, trbdf2) and the AC sweep; the exact engine "
+              "refuses it by name.")
         .def("add_magnetic_resistance",
               &builder::CircuitBuilder::add_magnetic_resistance,
               py::arg("name"), py::arg("m_a"), py::arg("m_b"), py::arg("R_m"),
@@ -1089,6 +1127,17 @@ void init_module(py::module_& m) {
                   } else if (mag && k == K::Gyrator) {
                       d["kind"] = "winding";
                       d["turns"] = Real{1} / pool.gyrator_params(bid).g;
+                  } else if (k == K::SaturableInductor &&
+                             br.from != topology::Graph::ground() &&
+                             g.node(br.from).name == std::string{name} + ".e") {
+                      // add_hysteretic_permeance: Φ depends on the JA state,
+                      // not on F alone
+                      throw py::key_error(std::format(
+                          "'{}' is a hysteretic permeance: its flux depends on "
+                          "the Jiles-Atherton state, so flux / b_field / "
+                          "h_field are not derived from F. Read the MMF as "
+                          "res.i('{}') and the flux rate as res.v('{}.e')",
+                          name, name, name));
                   } else {
                       throw py::key_error(std::format(
                           "'{}' is not a magnetic element (winding, permeance, "
@@ -1109,6 +1158,31 @@ void init_module(py::module_& m) {
               "'permeance', 'saturable_permeance', 'magnetic_resistance'), "
               "its magnetic nodes m_a, m_b, its value (P, law, R_m or turns) "
               "and area / length (None without geometry). KeyError otherwise.")
+        .def("record_composite",
+              [](builder::CircuitBuilder& b, const std::string& kind,
+                 const std::string& name, const std::string& anchor,
+                 std::vector<std::string> members) -> builder::CircuitBuilder& {
+                  return b.record_composite(kind, name, anchor, std::move(members));
+              },
+              py::arg("kind"), py::arg("name"), py::arg("anchor"),
+              py::arg("members"), py::return_value_policy::reference,
+              "Record a composite built from existing kinds by an authoring "
+              "helper (add_dc_machine does): components() then gives its "
+              "anchor member's entry the keys composite, composite_name, "
+              "sub_elements (and composite_params for a dc_machine). "
+              "Metadata only; to_yaml / from_yaml keep it.")
+        .def("composites",
+              [](const builder::CircuitBuilder& b) {
+                  py::list out;
+                  for (const auto& c : b.composites()) {
+                      py::dict d;
+                      d["kind"] = c.kind; d["name"] = c.name;
+                      d["anchor"] = c.anchor; d["members"] = c.members;
+                      out.append(d);
+                  }
+                  return out;
+              },
+              "The recorded composites: [{kind, name, anchor, members}].")
         .def("magnetic_nodes",
               [](const builder::CircuitBuilder& self) {
                   std::vector<std::string> out;
@@ -2084,6 +2158,8 @@ void init_module(py::module_& m) {
                               kind_str = "nonlinear_capacitor"; break;
                           case K::ShockleyDiode:
                               kind_str = "shockley_diode"; break;
+                          case K::ExcessLoss:
+                              kind_str = "excess_loss"; break;
                           case K::LauritzenDiode:
                               kind_str = "lauritzen_diode"; break;
                           case K::ExternalDevice: {
@@ -2174,6 +2250,34 @@ void init_module(py::module_& m) {
                           desc["internal_branch"] = static_cast<int>(
                               std::find(ep.branches.begin(), ep.branches.end(), bid)
                               - ep.branches.begin());
+                      }
+                      // add-mna-native-machines D2: a recorded composite's
+                      // anchor entry carries it, its parameters read back
+                      // from the members (never stale after with_value).
+                      for (const auto& cr : self.composites()) {
+                          if (cr.anchor != self.name_of(bid)) continue;
+                          desc["composite"] = cr.kind;
+                          desc["composite_name"] = cr.name;
+                          desc["sub_elements"] = cr.members;
+                          if (cr.kind == "dc_machine") {
+                              auto member = [&](const char* sfx) -> std::optional<Index> {
+                                  const std::string m = cr.name + sfx;
+                                  if (std::find(cr.members.begin(), cr.members.end(), m)
+                                      == cr.members.end()) return std::nullopt;
+                                  return self.branch_id_of(m);
+                              };
+                              py::dict pd;
+                              const auto ra = member(".ra");
+                              pd["R_a"] = ra ? Real{1} / pool.resistor_params(*ra).G : Real{0};
+                              pd["L_a"] = pool.inductor_params(member(".la").value()).L;
+                              pd["K"] = pool.ideal_transformer_params(member(".em").value()).n;
+                              pd["J"] = pool.capacitor_params(member(".j").value()).C;
+                              const auto bb = member(".b");
+                              pd["B"] = bb ? pool.resistor_params(*bb).G : Real{0};
+                              const auto tl = member(".tl");
+                              pd["T_load"] = tl ? pool.current_source_params(*tl).I : Real{0};
+                              desc["composite_params"] = pd;
+                          }
                       }
                       // add-power-mosfet-datasheet-device: the channel's
                       // entry stands for the whole composite.
@@ -2650,7 +2754,8 @@ void init_module(py::module_& m) {
         .value("PulseCurrentSource",  pwl::DevicePool::StoredKind::PulseCurrentSource)
         .value("PwlCurrentSource",    pwl::DevicePool::StoredKind::PwlCurrentSource)
         .value("InductionMachineMna", pwl::DevicePool::StoredKind::InductionMachineMna)
-        .value("ExternalDevice", pwl::DevicePool::StoredKind::ExternalDevice);
+        .value("ExternalDevice", pwl::DevicePool::StoredKind::ExternalDevice)
+        .value("ExcessLoss", pwl::DevicePool::StoredKind::ExcessLoss);
 
     // ---- Phase 4 C.4: exact B–H replay for the in-loop JA device ----------
     m.def("ja_replay",
@@ -6706,7 +6811,8 @@ void init_module(py::module_& m) {
            std::vector<bool> observer_monitors,
            std::vector<Real> observer_origins,
            std::vector<std::uint64_t> observer_next_k,
-           device::DevicePath device_path, int mode_selection, int integrator) {
+           device::DevicePath device_path, int mode_selection, int integrator,
+           int roundoff_floor) {
             solver::BExtraFn b_extra_fn;
             std::function<Real(Real)> unused_next_jump;  // trbdf2 lands its ticks
             resolve_b_extra(b_extra_obj, b_extra_fn, unused_next_jump);
@@ -6773,6 +6879,7 @@ void init_module(py::module_& m) {
             o.on_impulse_error = on_impulse_error;
             o.mode_selection = mode_selection;
             o.integrator = integrator;
+            o.roundoff_floor = roundoff_floor;   // C++-level handle (DECISIONS 17)
             const pwl::NonlinearRefreshFn nl_refresh = transient_refresh(
                 graph, pool, enable_nonlinear_refresh, "trbdf2");
             std::optional<Vector> x0;
@@ -6868,6 +6975,7 @@ void init_module(py::module_& m) {
         py::arg("device_path") = device::DevicePath::Legacy,
         py::arg("mode_selection") = 0,
         py::arg("integrator") = 0,
+        py::arg("roundoff_floor") = 0,
         "Variable-step TR-BDF2 transient (engine='auto'): "
         "L-stable, 2nd order, LTE-controlled step, gate edges "
         "landed by bisection, diode crossings localized by "

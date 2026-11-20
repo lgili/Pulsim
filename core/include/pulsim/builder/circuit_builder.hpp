@@ -1055,6 +1055,71 @@ public:
         return add_saturable_inductor_params_(name, from, to, p);
     }
 
+    /// Hysteretic permeance (add-permeance-magnetic-domain 4.1): a core
+    /// segment of `area` [m²], `length` [m] with the Jiles-Atherton law
+    /// between magnetic nodes m_a, m_b. The dual of a one-turn
+    /// `add_hysteretic_core_inductor`: a unit winding `{name}.w` whose
+    /// electrical port is the internal node `{name}.e` (to ground) and the
+    /// JA inductor `{name}` (N = 1, no gap) across it, so the MMF across
+    /// the segment is the inductor's current (`res.i(name)`, H = F/length),
+    /// the flux through it its flux linkage (Φ = A·B) and the flux rate the
+    /// voltage of `{name}.e`. Existing kinds only: every engine treats it
+    /// as a gyrator plus a JA inductor (Newton engines; the others refuse
+    /// it by name).
+    CircuitBuilder& add_hysteretic_permeance(
+        std::string_view name, std::string_view m_a, std::string_view m_b,
+        Real area, Real length, const models::JilesAthertonParams& ja,
+        int substeps_min = 8, Real M0 = Real{0}) {
+        require_geometry_("add_hysteretic_permeance", name, area, length);
+        const std::string n{name};
+        // validate before the winding is added (no half-built element)
+        models::JilesAthertonCore::Params c;
+        c.N = Real{1}; c.Ae = area; c.le = length; c.lg = Real{0}; c.ja = ja;
+        c.substeps_min = substeps_min; c.M0 = M0;
+        models::JilesAthertonCore::validate(
+            c, std::format("add_hysteretic_permeance(\"{}\")", name));
+        // magnetic ports swapped: the flux rate v_e enters at m_a and
+        // leaves at m_b, so F(m_a) − F(m_b) is the inductor's current
+        add_winding(n + ".w", n + ".e", "gnd", m_b, m_a, Real{1});
+        return add_hysteretic_core_inductor(n, n + ".e", "gnd", Real{1}, area,
+                                            length, Real{0}, ja, substeps_min,
+                                            M0);
+    }
+
+    /// Excess (anomalous) loss of a core segment (add-permeance-magnetic-
+    /// domain 4.2) between magnetic nodes m_a, m_b: the MMF drop
+    /// F = c·u/(u² + ε²)^¼ for the flux rate u through it (m_a → m_b), the
+    /// square-root law c·sign(u)·|u|^½ of Bertotti's k_x·|dB/dt|^1.5
+    /// (c = k_x·l/√A) made smooth below |u| ≈ ε [V]. Under a sine flux
+    /// rate of amplitude Û its loss is within (3/4)·(ε/Û)² of
+    /// c·Û^1.5·0.55641: pick ε ≤ 1.15e-3·Û for 1e-6. Built as the
+    /// hysteretic permeance is: a unit winding `{name}.w` on the internal
+    /// node `{name}.e` (its voltage is u) and the excess-loss conductance
+    /// `{name}` (`res.i(name)` is F) to ground. Newton engines only.
+    CircuitBuilder& add_excess_loss(std::string_view name, std::string_view m_a,
+                                    std::string_view m_b, Real c, Real eps) {
+        const models::ExcessLoss::Params p{.c = c, .eps = eps};
+        try {   // validate before the winding is added (no half-built element)
+            models::ExcessLoss::validate(p);
+        } catch (const std::invalid_argument& e) {
+            throw std::invalid_argument(std::format(
+                "add_excess_loss(\"{}\"): {}", name, e.what()));
+        }
+        const std::string n{name};
+        if (branch_index_.contains(n)) {  // before the winding: no half-built element
+            throw std::invalid_argument(std::format(
+                "add_excess_loss(\"{}\"): the name is already used", name));
+        }
+        // ports swapped: the flux rate enters at m_a, leaves at m_b
+        add_winding(n + ".w", n + ".e", "gnd", m_b, m_a, Real{1});
+        const Index e_idx = resolve_node_(n + ".e");
+        const Index g_idx = resolve_node_("gnd");
+        const Index b_id = add_branch_(name, e_idx, g_idx,
+                                       topology::BranchKind::Nonlinear);
+        pool_.add_excess_loss(b_id, p);
+        return *this;
+    }
+
     /// One secondary of a saturable transformer: terminals, turns,
     /// and its own leakage inductance.
     struct SecondaryWinding {
@@ -2526,6 +2591,95 @@ public:
         return *this;
     }
 
+    /// A composite built from existing kinds by an authoring helper (the
+    /// DC machine of add-mna-native-machines, D2): its `kind`, `name`, the
+    /// member whose `components()` entry stands for it (`anchor`) and the
+    /// members in build order. Metadata only: no stamp reads it.
+    struct CompositeRecord {
+        std::string kind;
+        std::string name;
+        std::string anchor;
+        std::vector<std::string> members;
+    };
+
+    /// Record a composite; every member (the anchor included) must already
+    /// exist. Refused by name otherwise or when `name` is already recorded.
+    CircuitBuilder& record_composite(std::string_view kind, std::string_view name,
+                                     std::string_view anchor,
+                                     std::vector<std::string> members) {
+        for (const auto& c : composites_) {
+            if (c.name == name) {
+                throw std::invalid_argument(std::format(
+                    "record_composite(\"{}\"): already recorded as a {}",
+                    name, c.kind));
+            }
+        }
+        if (std::find(members.begin(), members.end(), anchor) == members.end()) {
+            throw std::invalid_argument(std::format(
+                "record_composite(\"{}\"): the anchor \"{}\" is not a member",
+                name, anchor));
+        }
+        for (const auto& m : members) {
+            if (branch_index_.find(m) == branch_index_.end()) {
+                throw std::invalid_argument(std::format(
+                    "record_composite(\"{}\"): no device named \"{}\"",
+                    name, m));
+            }
+        }
+        if (kind == "dc_machine") check_dc_machine_record_(name, anchor, members);
+        composites_.push_back(CompositeRecord{std::string{kind}, std::string{name},
+                                              std::string{anchor}, std::move(members)});
+        return *this;
+    }
+
+    [[nodiscard]] const std::vector<CompositeRecord>& composites() const noexcept {
+        return composites_;
+    }
+
+private:
+    // components() reads a dc_machine's parameters from its members, so a
+    // record (hand-written YAML included) must name members of the right kind.
+    void check_dc_machine_record_(std::string_view name, std::string_view anchor,
+                                  const std::vector<std::string>& members) const {
+        using SK = pwl::DevicePool::StoredKind;
+        const std::string n{name};
+        if (anchor != n + ".em") {
+            throw std::invalid_argument(std::format(
+                "record_composite(\"{}\"): a dc_machine's anchor is \"{}.em\", not \"{}\"",
+                name, name, anchor));
+        }
+        struct Want { const char* sfx; SK kind; bool required; };
+        for (const Want w : {Want{".ra", SK::Resistor, false}, Want{".la", SK::Inductor, true},
+                             Want{".em", SK::IdealTransformer, true},
+                             Want{".j", SK::Capacitor, true}, Want{".b", SK::Resistor, false},
+                             Want{".tl", SK::CurrentSource, false}}) {
+            const std::string m = n + w.sfx;
+            const bool listed = std::find(members.begin(), members.end(), m) != members.end();
+            if (!listed) {
+                if (w.required) {
+                    throw std::invalid_argument(std::format(
+                        "record_composite(\"{}\"): a dc_machine needs the member \"{}\"",
+                        name, m));
+                }
+                continue;
+            }
+            if (pool_.kind_of(branch_index_.at(m)) != w.kind) {
+                throw std::invalid_argument(std::format(
+                    "record_composite(\"{}\"): member \"{}\" has the wrong kind for a dc_machine",
+                    name, m));
+            }
+        }
+        for (const auto& m : members) {
+            if (!m.starts_with(n + ".")) {
+                throw std::invalid_argument(std::format(
+                    "record_composite(\"{}\"): \"{}\" is not a dc_machine sub-element",
+                    name, m));
+            }
+        }
+    }
+
+public:
+
     /// The power-MOSFET record whose channel is `branch_id`, or nullptr.
     [[nodiscard]] const models::PowerMosfet::Record*
     power_mosfet_record(Index branch_id) const {
@@ -3611,6 +3765,7 @@ private:
     std::unordered_map<std::string, AliasTarget> aliases_;
     // add-power-mosfet-datasheet-device: channel branch id -> composite.
     std::unordered_map<Index, models::PowerMosfet::Record> power_mosfets_;
+    std::vector<CompositeRecord> composites_;
     // add-immutable-circuit-ir group 3: opaque control declarations.
     std::vector<ir::ControlDecl> controls_;
 };

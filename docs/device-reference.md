@@ -351,3 +351,13 @@ Builder: `CircuitBuilder.add_induction_machine_mna`.
 Builder: `CircuitBuilder.add_external_device`.
 
 No scalar value fields (its parameters are a table or its model's own field list).
+
+
+## `excess_loss`
+
+Builder: `CircuitBuilder.add_excess_loss`.
+
+| Name | Key | Unit | Bound | Default | Builder | Description |
+|---|---|---|---|---|---|---|
+| `c` |  | A/V^0.5 | a finite number > 0 | - | required | excess-loss coefficient: F = c*sign(u)*|u|^0.5 for |u| >> eps (*in components()*) |
+| `eps` |  | V | a finite number > 0 | - | required | flux rate below which the law is linear (slope c/sqrt(eps)) (*in components()*) |

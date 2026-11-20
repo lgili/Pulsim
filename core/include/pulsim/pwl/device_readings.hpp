@@ -133,7 +133,7 @@ namespace readings_detail {
 /// `n` counts the instances per kind (the reading's `index`).
 template <class Fn>
 void static_branch(const topology::Graph& graph, const DevicePool& pool, const Vector& x,
-                   Index b, std::size_t (&n)[4], Fn&& fn) {
+                   Index b, std::size_t (&n)[5], Fn&& fn) {
     namespace L = device::laws;
     using SK = DevicePool::StoredKind;
     const auto& br = graph.branch(b);
@@ -158,6 +158,9 @@ void static_branch(const topology::Graph& graph, const DevicePool& pool, const V
     case SK::ShockleyDiode:
         two(L::ShockleyDiode{}, L::ShockleyDiode::from(pool.shockley_diode_params(br.id)), 1);
         break;
+    case SK::ExcessLoss:
+        two(L::ExcessLoss{}, L::ExcessLoss::from(pool.excess_loss_params(br.id)), 4);
+        break;
     case SK::MosfetLevel1:
         three(L::MosfetLevel1{}, L::MosfetLevel1::from(pool.mosfet_level1_params(br.id)),
               detail::mosfet_level1_terminals(pool, br), 2);
@@ -177,7 +180,7 @@ void static_branch(const topology::Graph& graph, const DevicePool& pool, const V
 template <class Fn>
 void for_each_static_reading(const topology::Graph& graph, const DevicePool& pool,
                              const Vector& x, Fn&& fn) {
-    std::size_t n[4] = {0, 0, 0, 0};
+    std::size_t n[5] = {0, 0, 0, 0, 0};
     for (Index b = 0; b < graph.num_branches(); ++b) {
         readings_detail::static_branch(graph, pool, x, b, n, fn);
     }
@@ -188,7 +191,7 @@ void for_each_static_reading(const topology::Graph& graph, const DevicePool& poo
 /// a static Newton branch; `out.index` is 0.
 [[nodiscard]] inline bool static_reading(const topology::Graph& graph, const DevicePool& pool,
                                          const Vector& x, Index b, DeviceReading& out) {
-    std::size_t n[4] = {0, 0, 0, 0};
+    std::size_t n[5] = {0, 0, 0, 0, 0};
     bool seen = false;
     readings_detail::static_branch(graph, pool, x, b, n, [&](const DeviceReading& d) {
         out = d;

@@ -123,6 +123,13 @@ def add_dc_machine(self, name: str, a_pos: str, a_neg: str,
         self.add_vccs(f"{name}.th", omega_node, "gnd", theta_node, "gnd",
                       1.0)
         self.add_capacitor(f"{name}.ct", theta_node, "gnd", 1.0, 0.0)
+    # One `components()` entry for the machine (on `{name}.em`), its
+    # parameters read back from the members (D2).
+    members = ([f"{name}.ra"] * (r_a > 0.0) + [f"{name}.la", f"{name}.em",
+               f"{name}.j"] + [f"{name}.b"] * (b > 0.0)
+               + [f"{name}.tl"] * (t_load != 0.0)
+               + [f"{name}.th", f"{name}.ct"] * (theta_node is not None))
+    self.record_composite("dc_machine", name, f"{name}.em", members)
     return self
 
 

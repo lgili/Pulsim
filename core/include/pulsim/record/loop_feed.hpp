@@ -174,6 +174,7 @@ public:
             case SK::Capacitor: d.law = L::Capacitor; break;
             case SK::NonlinearDiode:
             case SK::ShockleyDiode:
+            case SK::ExcessLoss:
             case SK::MosfetLevel1:
             case SK::IgbtLevel1: d.law = L::Static; break;
             case SK::SaturableInductor:

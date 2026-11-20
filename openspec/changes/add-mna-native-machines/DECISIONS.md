@@ -380,3 +380,26 @@ Each entry: question → option taken → why → how to reverse.
   `test_inverter_fed_start_agrees_on_pwl_and_trbdf2` (no Windows here).
   The flux-map stamp is NOT yet a `Device`-contract law (the port agent
   takes `refresh_flux_map_entry_` with the rest).
+
+## D23. `components()` entry of the DC machine (task 1.2, closeout 2026-11-19)
+
+- Option: a small composite registry in the C++ builder,
+  `record_composite(kind, name, anchor, members)` (metadata only: no
+  stamp reads it). `add_dc_machine` (Python) and the YAML loader's
+  `dc_machine` expansion both record `("dc_machine", name, "{name}.em",
+  members)`. `components()` keeps one entry per branch; the anchor's entry
+  (`{name}.em`, kind still `ideal_transformer`) gains `composite`,
+  `composite_name`, `sub_elements` and `composite_params` (`R_a`, `L_a`,
+  `K`, `J`, `B`, `T_load`) READ BACK from the members' current values —
+  so a `with_value` on a member never leaves the entry stale, and nothing
+  has to refuse member edits (unlike the power MOSFET, whose element values
+  are derived from a datasheet record). `to_yaml` writes a `composites:`
+  block and `from_yaml` reads it (value hash unchanged: the block is not
+  hashed, like the power-MOSFET record). A `dc_machine` record is checked
+  member by member (anchor `{name}.em`; `.la` inductor, `.em` ideal
+  transformer, `.j` capacitor required; `.ra`/`.b` resistor, `.tl` current
+  source optional; no foreign member), because `components()` reads them
+  and a hand-written YAML `composites:` block is untrusted.
+- Why not a separate entry: `components()` consumers index by
+  `branch_id`; an entry without a branch would break them.
+- Reverse: drop the registry; the members stay as they are.

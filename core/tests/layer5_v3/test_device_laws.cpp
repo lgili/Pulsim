@@ -803,6 +803,78 @@ TEST_CASE("the MOSFET law is monotone in V_DS around zero, to 1 pA",
     }
 }
 
+// add-permeance-magnetic-domain 4.2: the excess-loss law F = c·u/(u²+ε²)^¼.
+TEST_CASE("the excess-loss law: both paths, slope, monotone to 1e-12, regularisation",
+          "[device][laws][excess]") {
+    const models::ExcessLoss::Params mp{.c = 0.01, .eps = 0.01};
+    check_static<L::ExcessLoss, models::ExcessLoss>(mp, -12.0, 12.0, 41);
+    check_static<L::ExcessLoss, models::ExcessLoss>(mp, -0.05, 0.05, 42);
+    check_param_tangent<L::ExcessLoss>({}, L::ExcessLoss::from(mp), {0.3, -0.2});
+    check_param_tangent<L::ExcessLoss>({}, L::ExcessLoss::from(mp), {-7.0, 0.0});
+    const auto at = [&](Real u) {
+        const std::array<Real, 2> v{u, 0.0};
+        return models::ExcessLoss::current<Real>(v.data(), mp);
+    };
+    // dF/du (the AD stamp's) against the closed form and a central
+    // difference, from inside the core to 10^3·ε (1e-7 of the slope)
+    for (Real u : {0.0, 1e-9, 3e-4, 0.004, 0.01, 0.03, 0.2, 1.0, 10.0, -0.02, -9.0}) {
+        models::ModelInputs<models::ExcessLoss> vin{u, 0.0};
+        const auto [i, g] = models::evaluate_current_and_jacobian<models::ExcessLoss>(vin, mp);
+        const Real d = 1e-6 * std::max(std::abs(u), mp.eps);
+        const Real cd = (at(u + d) - at(u - d)) / (2.0 * d);
+        INFO("u " << u << " AD " << g[0] << " closed " << models::ExcessLoss::slope(mp, u)
+                  << " CD " << cd);
+        CHECK(close(g[0], models::ExcessLoss::slope(mp, u), g[0], 16));
+        CHECK(std::abs(g[0] - cd) <= 1e-7 * g[0]);
+        CHECK(g[0] > 0.0);
+        CHECK(close(i, at(u), i, 0));
+    }
+    // c/√ε at u = 0: the regularised core (the AC sweep's small-signal model)
+    CHECK(close(models::ExcessLoss::slope(mp, 0.0), mp.c / std::sqrt(mp.eps), 1.0, 4));
+    // strictly increasing at 1e-12 spacing around 0, the knee ε and the rated
+    // amplitude 10 V (spacing 1e-12 of the scale), both signs; odd
+    for (Real centre : {0.0, 0.01, 10.0, -0.01, -10.0}) {
+        const Real step = 1e-12 * std::max(std::abs(centre), Real{1});
+        Real prev = at(centre - 2001 * step);
+        for (int k = -2000; k <= 2000; ++k) {
+            const Real u = centre + k * step;
+            const Real f = at(u);
+            INFO("centre " << centre << " k " << k);
+            REQUIRE(f > prev);
+            REQUIRE(at(-u) == -f);
+            prev = f;
+        }
+    }
+    // the square-root law outside the core: −(1/4)(ε/u)² relative
+    for (Real u : {0.1, 1.0, 10.0}) {
+        const Real ideal = mp.c * std::sqrt(u);
+        const Real rel = (at(u) - ideal) / ideal;
+        CHECK(std::abs(rel + 0.25 * (mp.eps / u) * (mp.eps / u)) <= 0.2 * std::pow(mp.eps / u, 4));
+    }
+    // both device paths stamp the same numbers (one body; 1e-12 gate)
+    builder::CircuitBuilder b;
+    b.add_voltage_source("V", "a", "gnd", 1.0);
+    b.add_excess_loss("X", "a", "gnd", 0.01, 0.01);
+    const auto& g = b.graph();
+    const auto& pool = b.pool();
+    Vector x = Vector::Zero(g.num_nodes() + g.num_branches());
+    const Index e = b.node_id_of("X.e");
+    for (Real u : {0.0, 2e-3, 0.7, -5.0}) {
+        x.setZero();
+        x(e) = u;
+        const Index n = x.size();
+        sparse::Matrix J1(n, n), J2(n, n);
+        J1.insert(e, e) = 0.0; J2.insert(e, e) = 0.0;
+        Vector f1 = Vector::Zero(n), f2 = Vector::Zero(n);
+        pwl::make_combined_diode_mosfet_refresh()(x, J1, f1, g, pool);
+        pwl::make_interface_static_refresh()(x, J2, f2, g, pool);
+        INFO("u " << u);
+        CHECK(std::abs(f1(e) - f2(e)) <= 1e-12 * std::max(std::abs(f1(e)), Real{1e-300}));
+        CHECK(std::abs(dense(J1, e, e) - dense(J2, e, e)) <= 1e-12 * dense(J1, e, e));
+        CHECK(close(f1(e), at(u), at(u), 0));
+    }
+}
+
 TEST_CASE("a static reading describes the law both paths stamp",
           "[device][laws][mosfet]") {
     // V_GS at the leak's peak (a = 2.4/κ), V_DS = 0.1 mV: where the raw

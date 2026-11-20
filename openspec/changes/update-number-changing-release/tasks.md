@@ -11,7 +11,7 @@ Rehearsal at fe75ee01 (the regenerated report's header names the runs its sectio
 - [x] 1.6 A branch-form switch refuses a bound `g_on` (`bind_param`; 7 tests in `test_circuit_scopes.py`). Done (DECISIONS 1.3): g_on -> R_on = 1/g_on, g_off bindable; parameters stay finite, R_on = 0 by `set_value`; twin within 1e-4 (`test_branch_form_bind_param.py`)
 - [x] 1.7 bdf1 and `ac_sweep` cannot simulate a branch-form switch / diode (3 tests). Done (DECISIONS 1.4): `ac_sweep` stamps branch form (RC closed form, twin rtol 1e-7); bdf1 refuses by name, saying it is retired and naming pwl / trbdf2; conformance table updated
 - [x] 1.8 `enable_substep_state_correction`'s default must follow `discontinuity_restart`: a caller that sets the rule off is refused once the split defaults on (1 test, `test_device_losses_kernel.py`). Done (DECISIONS 1.2): the split's default follows the rule's resolved value
-- [x] 1.10 The output rule's cost: ten paralleled bridges ran > 8 min under `output_rtol=1e-5` (`test_exact_route.py::test_ten_paralleled_bridges_agree_with_pwl`). Done (DECISIONS 3): a projected parasitic mode's rounding x lambda^2 set a constant step; each mode's chord contribution now saturates at its amplitude, per-mode data cached, no per-step allocation, a per-run sample budget (`output_budget_t`)
+- [x] 1.10 The output rule's cost: ten paralleled bridges ran > 8 min under `output_rtol=1e-5` (`test_exact_route.py::test_ten_paralleled_bridges_agree_with_pwl`). Done (DECISIONS 5): a projected parasitic mode's rounding x lambda^2 set a constant step; each mode's chord contribution now saturates at its amplitude, per-mode data cached, no per-step allocation, a per-run sample budget (`output_budget_t`)
 - [ ] 1.9 Re-run `next_defaults_rehearsal.py run` and the pytest blast radius on the release candidate; no cell left in the first three worse classes, no refusal group in section 1b
 
 ## 2. Owner decisions before the flip
@@ -30,6 +30,8 @@ Rehearsal at fe75ee01 (the regenerated report's header names the runs its sectio
 - [ ] 3.3 `engine='auto'` route as `add-exact-propagator-strategy` D11 (task 19.1 there) once its default-flip gate holds
 - [ ] 3.4 Delete what the owning changes list at the flip (device-interface DECISIONS 25: the hand stamps)
 - [ ] 3.5 Re-run the rehearsal on the release tree: configuration (a) is then the new default and must equal the regenerated `REFERENCE_STATUS.md`
+- [ ] 3.6 `add_igbt(reverse_blocking=...)` defaults to `True` (YAML `igbt` the same); update helpers and examples that relied on reverse conduction (`add-pwl-igbt-and-thyristor` 8.1, DECISIONS 4 there)
+- [ ] 3.7 YAML `induction_motor` defaults to `model: mna` (BREAKING, CHANGELOG) (`add-mna-native-machines` 5.3)
 
 ## 4. Regeneration (one re-baseline)
 - [ ] 4.1 Goldens, `pwl_identity` / `trbdf2_identity` baselines
@@ -42,6 +44,7 @@ Rehearsal at fe75ee01 (the regenerated report's header names the runs its sectio
 - [ ] 5.1 CHANGELOG: one BREAKING entry per flipped option with its old value and the keyword that restores it
 - [ ] 5.2 Deprecation notes: the old values stay reachable for one release; `'dsed'` as an alias of `'exact'` (roadmap decision 8)
 - [ ] 5.3 `integrator='esdirk43'` documented as opt-in (not flipped)
+- [ ] 5.4 One release AFTER this one: delete the four deprecated `update_*` bindings and the subsystem proxy's string-prefix code (`add-immutable-circuit-ir` 11.1 / 11.2; deprecated with a `DeprecationWarning` naming `with_value` / `set_value`, DECISIONS 10 there)
 
 ## 6. Verification
 - [ ] 6.1 ruff, full pytest, full ctest, `pytest -m reference`, `reference_status` exit 0, `DO_NOT_TRACK=1 openspec validate --all --strict`, stubs `--check`, Eigen 3.4.0 for touched C++
