@@ -115,3 +115,44 @@ conservative option was taken.
    now converges on the in-house LU. The warning names the start-state
    scale, says that a wrong start state can be accepted all the way,
    and gives the budget.
+
+11. **Stagnation is judged over WINDOWS, not two steps (orchestrator
+   decision, 2026-11-20; amends 8 and 10b).** Release finding F-S-5
+   (`update-number-changing-release/fixes/f-s-5.md`): a half bridge with
+   charge-law output capacitances aborted at h_min on 9 of 30 run lengths
+   (trbdf2) and 1 of 30 (esdirk43), and at rtol 1e-7 / 1e-8 / 1e-10 /
+   1e-9. Traced per iteration: at the failing step Newton cycles EXACTLY
+   (period 6 at t_end 1.3 µs, 7 at 2.7 µs, 10 at 5.23 µs), ||dx||
+   3.1e-7 … 1.1e-5, residual 4.7e-7 … 1.4e-5 A, row backward error
+   0.08 … 2.44 eps at every iterate — the companion's representation floor
+   eps·Q_Ch/(γ·h_min) ≈ 2–5e-6 A against the absolute 1e-9 A. The solve
+   is converged to what double precision gives; refusing it shrinks h, and
+   a smaller h only RAISES that floor, so the refusal could only end at
+   h_min. Rule 8's two-step test read the phases where ||dx_k|| < ¼
+   ||dx_{k−2}|| (e.g. 9.1e-6, 8.7e-7, 5.2e-7) as "still contracting"; rule
+   10b's three-vs-three maxima read a period-10 cycle as "growing".
+   New rule, in the one place the solver decides it
+   (`pwl/nonlinear_solve.hpp`, shared by both engines): with k =
+   min(16, iterations/2), the newer window holds the last k ||dx||, the
+   older one the k before. NO IMPROVEMENT: min(newer) ≥ ¼·min(older).
+   NOT GROWING: max(newer) ≤ 2·max(older). Both, plus the unchanged
+   omega ≤ 8 eps (at x_k, against the start state's row scale) and
+   ||dx_k|| ≤ 1e-6·max(1, |x_0|), accept x_k.
+   WHAT SEPARATES A CYCLE AT THE FLOOR FROM SLOW CONVERGENCE: in a cycle of
+   period ≤ k both windows contain a whole period, so their best ||dx||
+   is the SAME (ratio 1 in all three traces); in convergence the best
+   iterate keeps improving, so the newer window's best is below the
+   older's by the rate to the k-th power. A geometric sequence of rate r
+   is declined as long as r^k < ¼; two steps declined only r² < ¼, so
+   the window is STRICTER on every monotone convergence than rule 8 was
+   (rate 0.7 at a roundoff residual: rule 8 accepted it, the window
+   declines it, C++ test "slow convergence near the floor is declined").
+   Not covered: a cycle of period > k (it may still be declined; budget
+   50 gives k = 16), and a slowly drifting iterate at rate r ≥ 4^(−1/16)
+   = 0.917 per iteration with a residual already at ≤ 8 eps: accepted,
+   as rule 8 accepted it — its backward error is the guarantee, not the
+   iterate's distance to the root.
+   Unchanged: transient only (the DC cascade passes no acceptance; the C++
+   scan test and `test_newton_stall_and_mask_chatter.py`'s spurious-root
+   test stay green); the absolute tol_dx is untouched; the run budget
+   (10d) and the state kept (10c) are as before.

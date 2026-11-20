@@ -166,3 +166,44 @@ DC cascade excluded (absolute dx), then rerun the reviewer's t_end sweep
 (`.scratch/review/q3_caseA3.py`) and remove the strict xfail. Second: commit the
 probe's right-limit current to the slot instead of 2·i+ − i− (cause of (a) and of
 the corner sample), which would make the TR-BDF2-only flag unnecessary.
+
+## Session 2 (2026-11-20): the roundoff limit cycle — evidence and the window rule
+
+STATE: WIP. `pwl/nonlinear_solve.hpp` carries the window rule plus TEMPORARY
+instrumentation (`PULSIM_RO_TRACE`, `PULSIM_RO_OLD` = the old two-step rule,
+`<cstdio>/<cstdlib>`, `ro_trace_buf`), all marked `TEMP`: remove before the
+final build. Baseline for the byte compares (14b0c81a extension) recorded in
+`.scratch/b14/base` (`.scratch/b14/rec.sh base record`; compare with
+`rec.sh new compare`). Scripts: `.scratch/f5w/{ev.py,sweep.py,cut.py,cxx.sh}`.
+
+Evidence (old rule, trbdf2 defaults, the last budget-exhausted solve, h = h_min
+= span·1e-11): Newton cycles EXACTLY.
+- t_end 1.3 us (h_min 1.3e-17 s): period 6, ||dx|| 1.11e-5, 9.06e-6, 8.74e-7,
+  5.24e-7, 3.12e-7, 3.70e-7; residual 4.7e-7 … 1.4e-5 A; omega 0.08 … 2.44 eps.
+  Floor eps·Q_Ch/(γh) = 2.2e-16·1.56e-7/(0.586·1.3e-17) = 4.5e-6 A.
+  Two-step window: "still contracting" (5.24e-7 < ¼·9.06e-6).
+- t_end 2.7 us (h_min 2.7e-17 s): period 7, ||dx|| 5.36e-6 … 1.50e-8; residual
+  2.8e-7 … 6.6e-6 A (half of 1.3 us: amplitude ∝ 1/h); omega 0.10 … 2.44 eps;
+  floor 2.2e-6 A. Two-step: "still contracting".
+- t_end 5.2324 us (random sweep, first window rule k = 8): period 10; the
+  8-vs-8 window read it as "growing" (max 2.76e-6 vs 2.19e-7) — hence k = 16.
+Window minima were equal in both windows in all three (ratio 1.00).
+
+Rule as in the code: k = min(16, iterations/2); accept x_k iff
+min(last k ||dx||) ≥ ¼·min(k before) AND max(last k) ≤ 2·max(k before) AND
+omega ≤ 8 eps AND ||dx_k|| ≤ 1e-6·max(1,|x_0|). 16 covers periods ≤ 16 at the
+50-iteration budget (observed 6, 7, 10). DECISIONS 11 of
+add-newton-roundoff-acceptance has the full statement. New C++ tests in
+`test_newton_roundoff_acceptance.cpp`: a period-7 cycle accepted at budgets
+30–36; slow convergence (rate 0.7, residual at 1.6 eps) declined "still
+contracting" at budgets 20/25/30 (the two-step rule ACCEPTED it).
+
+Results with k = 8 (before the period-10 case): run-length sweep 0/30 trbdf2,
+0/30 esdirk43 (old rule, same build: 9/30 and 1/30, the reviewer's lengths);
+tolerance sweep 1e-4 … 1e-10 no abort (old: trbdf2 1e-7/1e-8/1e-10 and esdirk43
+1e-9/1e-10 abort); crossings within 15.6 ps of the closed form at every
+rtol, → 0.01 ps at 1e-10; E_hard trbdf2 62.8490 (default) → 62.8367 uJ,
+esdirk43 62.9259 (default, unchanged from session 1) → 62.8368 uJ, cf 62.8335
+(esdirk43 rtol 1e-8 63.0082 is the same under the old rule). Random 200
+lengths: trbdf2 1 abort (5.2324 us, the period-10 cycle), esdirk43 0.
+Running: build with k = 16, then the three sweeps again (expect 0 aborts).
