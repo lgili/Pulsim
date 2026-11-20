@@ -160,11 +160,10 @@ on-steps per period: [50]
 For a half bridge, `p.make_dead_time_pwm_pair_fn` drives the high- and
 low-side bits with a dead time; for a three-phase bridge see 3.7.
 Helpers name their edges (`pwm.next_edge_after(t)`); variable-step
-engines land on them. A plain callable has no edges: `trbdf2` can step
-over a short pulse or dead time silently (D = 0.03: 0.17 V vs 1.20 V);
-`dsed` bisects only changes seen at its `dt_max / 10` polls (and
-warns). Use a helper or pass `dt`. Both call it out of time order:
-keep it a pure function of `t`.
+engines land on them. A plain callable has none: `trbdf2` samples it
+(trap 13); `dsed` bisects only changes seen at its `dt_max / 10` polls
+(and warns). Use a helper or pass `dt`. Both call it out of time
+order: keep it a pure function of `t`.
 
 ### 3.3 Bridge rectifier from `pulsim.topology`
 
