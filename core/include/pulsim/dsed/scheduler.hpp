@@ -743,7 +743,8 @@ public:
                             // nothing: the chord across it stays one LTI piece (F-X-4)
                             out_transparent = on_edge && !at_corner && !ticked
                                               && system_.current_mask() == mask_before
-                                              && (x.array() == x_pre_event.array()).all();
+                                              && (x.array() == x_pre_event.array()).all()
+                                              && !(out_defer && corner_at_(t));
                             plan_fast_samples_(
                                 t, (on_edge && at_corner)
                                        || !(system_.current_mask() == mask_before));
@@ -3472,6 +3473,18 @@ private:
     Vector output_x_;   // push_output_samples_: the sample being read
     bool output_certified_ = false;   // output_step_: the bound decided its step
     bool output_pend_ = false;   // the current step start is an end not stored (F-X-4)
+    /// A source corner at the landing `t` (the corner the step aimed at, pending in the
+    /// queue): a kink of the output, so the rule never defers it. A gate poll a few
+    /// ulps short of the corner lands it with at_corner false (diode clamp, 2.52 ms:
+    /// poll 2.5199999999999966e-3, corner 2.52e-3; the chord ran across it 9.64x).
+    [[nodiscard]] bool corner_at_(Real t) const {
+        if constexpr (requires { system_.next_source_corner_after(Real{0}); }) {
+            const Real c = queue_.pending(corner_src_);
+            return std::isfinite(c) && near_time(t, c);   // near_time(t, inf) is true
+        }
+        (void)t;
+        return false;
+    }
     void output_flush_(Real t, const Vector& x, PEDResult<MaskT>& result) {
         const MaskT m = system_.current_mask();
         ped_push_sample(result, t, x, m, m, nullptr);

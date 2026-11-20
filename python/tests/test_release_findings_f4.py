@@ -11,6 +11,7 @@ import warnings
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 import pulsim as p
 from pulsim._result_views import with_right_limits
@@ -80,3 +81,38 @@ def test_f4_rule_ratio_flow_never_extrapolates_one_short_dense_piece():
     yd = np.array([0.0, 1.8e-3 + 1e-6, 1.0])
     r = metrics.rule_ratio_flow(t, y, td, yd, rtol=1e-3, atol=0.0)
     assert r < 1e-3
+
+
+CLAMP = "circuits/diodes/diode_clamp_overvoltage.yaml"
+
+
+def test_f8_a_source_corner_is_always_a_stored_sample():
+    """D-1 (session 7): the no-edge gate poll landed at 2.5199999999999966e-3, 3.4e-18 s short
+    of the pulse's fall corner at 2.52e-3: at_corner was false, the landing counted as
+    transparent and the rule deferred it, so the stored line 1.02 ms -> 2.533 ms ran straight
+    across the corner (9.64x its tolerance at 2.5162 ms). A corner is a kink of the output:
+    it is stored whatever lands on its instant, and the referee reads every line."""
+    import output_rule_referee as F
+    case = v1_reader.load(ROOT / "benchmarks" / CLAMP)
+    r = _no_dt(case, output_rtol=1e-5)
+    t = np.asarray(r.times)
+    for c in (1e-3, 1.02e-3, 2.52e-3, 2.54e-3):
+        assert np.min(np.abs(t - c)) <= 1e-12, c
+    rec = F.check(CLAMP)
+    assert rec["comparable"], rec
+    assert rec["ratio"] <= 1.0, rec
+
+
+def test_f8_the_referee_fails_a_line_it_cannot_read():
+    """The referee reads every stored line at reference instants inside it: a line with no
+    instant inside, or a NaN, is a harness failure (session 6: the dense flow shared the
+    clamp's 11 samples and read 0 inside the violating line)."""
+    import output_rule_referee as F
+    t = np.array([0.0, 1.0, 2.0])
+    y = np.array([0.0, 1.0, 1.0])
+    with pytest.raises(F.RefereeError, match="without a reference instant"):
+        F.lines_ratio(t, y, np.array([0.5]), np.array([0.5]), 1e-3)
+    with pytest.raises(F.RefereeError, match="NaN"):
+        F.lines_ratio(t, np.array([0.0, np.nan, 1.0]), np.array([0.5, 1.5]), np.array([0.5, 1.0]), 1e-3)
+    r, at = F.lines_ratio(t, y, np.array([0.5, 1.5]), np.array([0.5, 1.0 + 2e-3]), 1e-3)
+    assert r == pytest.approx(2.0) and at == 1.5
