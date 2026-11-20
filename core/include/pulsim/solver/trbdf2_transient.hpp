@@ -110,6 +110,7 @@
 #include "pulsim/solver/step/controllers.hpp"
 #include "pulsim/solver/step/esdirk43.hpp"
 #include "pulsim/solver/step/integrators.hpp"
+#include "pulsim/solver/step/sensitivity.hpp"
 #include "pulsim/solver/step/stepper.hpp"
 #include "pulsim/solver/run_transient.hpp"   // combine_masks, SimulationAborted
 #include "pulsim/sources/pwm_b_extra.hpp"
@@ -268,6 +269,8 @@ struct TrBdf2Options {
     /// The phases are shared; only the stages, the estimate and the history
     /// commit differ (DECISIONS 15).
     int integrator = 0;
+    /// add-parameter-sensitivities group 5 (see SimulationOptions).
+    std::vector<std::string> sensitivities;
 };
 
 struct TrBdf2Stats {
@@ -829,10 +832,34 @@ inline SimulationResult run_transient_trbdf2(
     // allocation (24 % of the bridge rectifier's run time).
     pwl::SegmentAssembler seg_asm;
     pwl::NewtonWorkspace newton_ws;   // one Newton analysis per pattern per run
+    // add-parameter-sensitivities group 5: the stage recurrence (step/
+    // sensitivity.hpp); off (no params) it is one test per stage.
+    step::StageSensitivity sens{graph, pool, opts.sensitivities, "trbdf2",
+                                opts.tol_newton_dx};
+    if (sens.on()) {
+        if (resume_from != nullptr) {
+            throw UnsupportedError("trbdf2", "sensitivities", "", "",
+                "sensitivities with resume_from: the sensitivity state is not "
+                "part of a snapshot; run from the start.");
+        }
+        sens.refuse_setup(lt != nullptr, static_cast<bool>(nl_refresh),
+                          opts.enable_newton_lm);
+        sens.start(opts.t_start, x);
+    }
     Real nl_seg_dt = Real{-1};
     topology::SwitchStateMask nl_seg_mask(
         static_cast<std::size_t>(graph.num_switches()));
     bool nl_seg_valid = false;
+    // the sensitivity of a converged stage, on the factor it solved with
+    // (the Newton workspace's, or the cache's resident one for (m, fdt))
+    auto sens_stage = [&](int s, const step::StagePsi& psi, const SwitchStateMask& m,
+                          Real fdt, const Vector& X, Real tx) {
+        if (nl_effective) {
+            sens.stage(s, psi, m, X, tx, sens.newton_factor(newton_ws, tx), &nl_seg.J);
+        } else {
+            sens.stage(s, psi, m, X, tx, cache.resident_factor(m, fdt), nullptr);
+        }
+    };
     // Returns false when Newton did not converge. The caller
     // REJECTS the step and shrinks h — which is a thing only a
     // variable-step engine can do, and it is why this engine
@@ -1962,6 +1989,10 @@ inline SimulationResult run_transient_trbdf2(
         // dtp late): replace the slots only.
         if (!commit || t + dtp >= opts.t_end - h_min
             || t + dtp >= queue.next_of(events::Kind::ControlTick) - h_min) {
+            if (sens.on()) [[unlikely]] {   // the slots move, x and t do not
+                sens.refuse_step(t, "followed by a slot-only derivative refresh "
+                                    "(an event probe near t_end or a tick)");
+            }
             history.refresh_derivatives(x_trial, dtp);
             if (lt) lt->slots_rewritten();
             hs.refresh_derivatives(x_trial, dtp);
@@ -2458,6 +2489,11 @@ inline SimulationResult run_transient_trbdf2(
                     ok = solve_dispatch(m, fdt, b_stage, ys);
                     ++st.n_solves;
                     if (!ok) break;
+                    if (sens.on()) [[unlikely]] {
+                        if (s == 0) sens.begin_step(t, x);
+                        sens_stage(s, step::psi_esdirk43(s, hh), m, fdt, ys,
+                                   t + spec.t_off);
+                    }
                     if (nq > 0) hs.stage_increment(ys, ed_spsi.data(), ed_sd[si].data());
                     for (Size i = 0; i < ne; ++i) {
                         const auto& e = ed_hist[i];
@@ -2887,6 +2923,12 @@ inline SimulationResult run_transient_trbdf2(
                 stage_singular = true;
             }
             ++st.n_solves;
+            if (sens.on() && stage_ok) [[unlikely]] {
+                sens.begin_step(t, x);
+                sens_stage(0, sdirk ? step::psi_backward_euler_on(hg)
+                                    : step::psi_trapezoidal(hg), mask_step, hg, x_g,
+                           t + h_pt);
+            }
 
             // A gate edge before the breakpoint shortened the step.
             if (landed_on_bp && t + h < bp_t - h_min) {
@@ -2939,6 +2981,11 @@ inline SimulationResult run_transient_trbdf2(
                 stage_ok =
                     solve_dispatch(mask_step, hg, b_stage, x_1);
                 ++st.n_solves;
+                if (sens.on() && stage_ok) [[unlikely]] {
+                    sens_stage(1, sdirk ? step::psi_sdirk_stage2(hg, (Real{1} - gs) / gs)
+                                        : step::psi_bdf2_stage2(hg), mask_step, hg,
+                               x_1, t + h);
+                }
             }
             // the q rows' stage-2 increment q(x_1) − ψ for the estimate, read
             // under the stage's own last stamp; then no stage leaves a trace
@@ -4079,6 +4126,7 @@ inline SimulationResult run_transient_trbdf2(
                 x = x_1;
                 x_sig = x;
                 t += h;
+                if (sens.on()) [[unlikely]] sens.commit(t);
                 newton_at_start = false;
                 // the slots are this step's own, not a refresh-only probe's;
                 // a sliver step after a landed edge keeps the flag (its
@@ -4314,6 +4362,7 @@ inline SimulationResult run_transient_trbdf2(
             (void)step::run<step::TrBdf2>(clock, body);
         };
         run_twin();
+        if (sens.on()) sens.finish(t, x);
         if (hooks != nullptr) hooks->flush_steps();   // the step sink's batched steps
         // A run stopped by should_continue right after an event: the
         // record ends on the committed state, as the snapshot does.
@@ -4394,6 +4443,7 @@ inline SimulationResult run_transient_trbdf2(
         st.n_line_bound_steps = lines->n_at_bound();
     }
     result.newton = newton_ws.take_counters();
+    if (sens.on()) result.sensitivity = sens.take_trace();
     result.gate_mask_fn = nullptr;   // it reads this frame's diode state
     if (lt) lt->write(result);
     return result;

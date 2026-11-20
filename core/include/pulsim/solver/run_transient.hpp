@@ -62,6 +62,7 @@
 #include "pulsim/solver/step/controllers.hpp"
 #include "pulsim/solver/step/integrators.hpp"
 #include "pulsim/solver/step/stepper.hpp"
+#include "pulsim/solver/step/sensitivity.hpp"
 #include "pulsim/solver/unsupported.hpp"
 #include "pulsim/sources/pulse_b_extra.hpp"
 #include "pulsim/sources/current_waveform_b_extra.hpp"
@@ -841,6 +842,20 @@ inline SimulationResult run_transient(
     Vector x_prev;                                  // pre-step state snapshot
     pwl::PwlSegment retry_seg;                      // off-nominal-dt companion
     pwl::NewtonWorkspace newton_ws;   // one Newton analysis per pattern per run
+    const sparse::Matrix* sens_J_lin = nullptr;   // the last Newton solve's J_lin
+    // add-parameter-sensitivities group 5: the stage recurrence (step/
+    // sensitivity.hpp); off (no params) it is one test per step.
+    step::StageSensitivity sens{graph, pool, opts.sensitivities, "pwl",
+                                opts.tol_newton_dx};
+    if (sens.on() && (resume_from != nullptr || start_from_dc_op)) {
+        throw UnsupportedError("pwl", "sensitivities", "", "",
+            resume_from != nullptr
+                ? "sensitivities with resume_from: the sensitivity state is not "
+                  "part of a snapshot; run from the start."
+                : "sensitivities with start_from_dc_op: the DC point depends on "
+                  "the parameters and its derivative is not carried; start "
+                  "from a parameter-free state.");
+    }
     std::vector<Real> history_snap;                 // rollback: (v_prev, i_prev) pairs
     // Phase 4 C.1 — the Coss rolls back with everything else. The
     // saturable inductor cannot, which is the second reason it
@@ -1719,6 +1734,11 @@ inline SimulationResult run_transient(
         }
 
         if (hooks) hooks->start(x, stamped_mask, {&history, &hs, nullptr});
+        if (sens.on()) {
+            sens.refuse_setup(lt != nullptr, static_cast<bool>(nl_refresh),
+                              opts.enable_newton_lm);
+            sens.start(opts.t_start, x);
+        }
 
         // ---- discontinuity restart (add-discontinuity-restart-rule) --
         // The next step restarts: the first step of a run that does
@@ -2795,6 +2815,7 @@ inline SimulationResult run_transient(
                 if (nl_refresh_effective) {
                     if (for_dt == opts.dt && !newton_only_rows) {
                         const auto& seg = nominal_segment(mask);
+                        sens_J_lin = &seg.J;
                         x = pwl::solve_with_newton_b_extra(
                             seg, nl_refresh_effective, graph, pool,
                             /*x_init=*/x, b_extra,
@@ -2816,6 +2837,7 @@ inline SimulationResult run_transient(
                             retry_seg.J, retry_seg.b_constant);
                         sparse::compress_in_place(retry_seg.J);
                         retry_seg.state_size = state_size;
+                        sens_J_lin = &retry_seg.J;
                         x = pwl::solve_with_newton_b_extra(
                             retry_seg, nl_refresh_effective, graph,
                             pool, /*x_init=*/x, b_extra,
@@ -3645,6 +3667,27 @@ inline SimulationResult run_transient(
                             : ""));
                 }
             }
+            if (sens.on()) [[unlikely]] {
+                // one trapezoidal stage of opts.dt, or refused by name
+                if (split || restart || step_retried || n_ev > 0 || iters != 1) {
+                    sens.refuse_step(t, split ? "split at its events (substep "
+                                                "state correction)"
+                                     : restart ? "a restart (SDIRK) step"
+                                     : step_retried ? "retried at a smaller dt"
+                                     : n_ev > 0 ? "crossed by a mode event "
+                                                  "(a gate edge or a commutation)"
+                                     : "solved by the event iteration (a "
+                                       "mode change)");
+                }
+                sens.begin_step(t_prev, x_prev);
+                if (nl_refresh_effective) {
+                    sens.stage(0, step::psi_trapezoidal(opts.dt), stamped_mask, x, t,
+                               sens.newton_factor(newton_ws, t), sens_J_lin);
+                } else {
+                    sens.stage(0, step::psi_trapezoidal(opts.dt), stamped_mask, x, t,
+                               cache.resident_factor(stamped_mask, opts.dt), nullptr);
+                }
+            }
         };  // step_take
 
         auto step_after_solve = [&]() PULSIM_STEP_PHASE {
@@ -3898,6 +3941,7 @@ inline SimulationResult run_transient(
             if (lt) lt->accept(t_prev, t, x, stamped_mask,
                                L && L->owner == t && L->ok ? L : nullptr);
             if (lines) lines->commit(t, x);   // the one write of the line past (D18)
+            if (sens.on()) [[unlikely]] sens.commit(t);
         };  // step_commit
 
         // Release group B: a step's lines into the result's event limits
@@ -4132,6 +4176,7 @@ inline SimulationResult run_transient(
             (void)step::run<step::Trapezoidal>(clock, body);
         };
         run_twin();
+        if (sens.on()) sens.finish(t_reached, x);
         if (hook_step) hooks->flush_steps();   // the step sink's batched steps
         if (diag && rd_steps > 0) {
             rd.unestimated_fraction =
@@ -4150,6 +4195,11 @@ inline SimulationResult run_transient(
         // No dynamic devices → cache.solve gives the DC operating
         // point for the requested switch state. Diode iteration
         // still applies.
+        if (sens.on()) {
+            throw UnsupportedError("pwl", "sensitivities", "", "",
+                "sensitivities: the circuit has no capacitor or inductor (the "
+                "static path): there is no step to differentiate.");
+        }
         if (lt) {
             throw UnsupportedError(
                 "pwl", "device_losses", pool.device_losses().front().device, "",
@@ -4529,6 +4579,7 @@ inline SimulationResult run_transient(
     if (lt) result.final_snapshot.loss_state = lt->save();
     if (lines) result.final_snapshot.line_state = lines->save();
     result.newton = newton_ws.take_counters();
+    if (sens.on()) result.sensitivity = sens.take_trace();
     if (lt) lt->write(result);
     result.gate_mask_fn = nullptr;   // it reads this frame's diode state
 

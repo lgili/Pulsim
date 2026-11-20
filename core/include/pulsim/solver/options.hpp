@@ -26,6 +26,7 @@
 
 #include <cmath>
 #include <string>
+#include <vector>
 
 namespace pulsim::solver {
 
@@ -75,6 +76,10 @@ struct SimulationOptions {
     /// kind's law on the `device::Device` contract. A circuit with a kind
     /// not yet ported refuses `Interface` by name.
     device::DevicePath device_path = device::DevicePath::Legacy;
+
+    /// add-parameter-sensitivities group 5: '<component>.<field>' names
+    /// whose forward sensitivities the run carries (empty: none, no cost).
+    std::vector<std::string> sensitivities;
 
     // ---- Newton (Layer 5 V4) ----------------------------------------
     //

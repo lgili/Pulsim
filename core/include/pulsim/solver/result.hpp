@@ -409,11 +409,29 @@ struct NewtonCounters {
     std::vector<std::uint16_t> iterations_per_solve;
 };
 
+/// add-parameter-sensitivities group 5: the run's sensitivities, sampled at the start and at every accepted step
+/// (the engine's own step times).
+struct SensitivityTrace {
+    std::vector<std::string> params;
+    std::vector<Real> times;
+    /// times.size() × params.size() × n_state, parameter-major per sample.
+    std::vector<Real> states;
+    Size n_state = 0;
+    std::uint64_t n_sens_solves = 0;       ///< first back-substitutions
+    std::uint64_t n_sens_iterations = 0;   ///< refinement back-substitutions
+    /// back-substitutions (first + refinement) of attempts that were rejected
+    std::uint64_t n_sens_discarded = 0;
+};
+
 struct SimulationResult {
     std::vector<Real> times;
 
     /// Newton counters of the run (update-newton-persistent-solver).
     NewtonCounters newton;
+
+    /// Forward parameter sensitivities (`sensitivities=` on pwl / trbdf2);
+    /// empty `params` when none were requested.
+    SensitivityTrace sensitivity;
 
     /// v2.0 Phase 4 — the run's final state, complete enough to
     /// resume from exactly (`simulate(resume_from=...)`).

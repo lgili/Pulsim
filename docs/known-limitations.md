@@ -122,7 +122,7 @@ engine accepts a keyword and ignores it. The defaults are
 | `controller_period` | yes | yes | yes | None |
 | `resume_from` | yes | yes | yes | None |
 | `solver` | yes | yes | yes | None |
-| `sensitivities` | refused | refused | yes | None |
+| `sensitivities` | yes | yes | yes | None |
 | `mode_selection` | yes | yes | yes | None ('legacy') |
 | `allow_implicit_segments` | refused | refused | yes | None |
 | `output_rtol` | refused | refused | yes | None (today's samples) |

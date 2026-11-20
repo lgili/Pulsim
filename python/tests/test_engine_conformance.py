@@ -723,10 +723,10 @@ def test_fixed_step_feature_refused_by_name(feature, engine):
 
 @pytest.mark.parametrize("engine", ("pwl", "trbdf2", "auto", "dsed"))
 def test_sensitivities_cell(engine):
-    """add-parameter-sensitivities: honoured on the exact path only;
-    every other engine refuses the keyword by name (a gradient there
-    would be a difference of runs with events on the step grid)."""
-    if engine != "dsed":
+    """add-parameter-sensitivities: honoured on the exact path and, by the
+    stage recurrence (group 5), on pwl and trbdf2; 'auto' refuses the
+    keyword by name (the gradient is the named engine's discrete map)."""
+    if engine == "auto":
         with pytest.raises(p.UnsupportedError) as ei:
             _sim(engine, sensitivities=["R.R"])
         assert (ei.value.engine, ei.value.feature) == (

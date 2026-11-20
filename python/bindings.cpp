@@ -3668,6 +3668,33 @@ void init_module(py::module_& m) {
                        &SimulationResult::event_iteration_count)
         .def_readonly("newton", &SimulationResult::newton,
                       "Newton counters of the run (NewtonCounters).")
+        // add-parameter-sensitivities group 5: the stage recurrence's trace
+        // (pwl / trbdf2), None when no sensitivities were requested.
+        .def_property_readonly("sensitivity_trace",
+            [](const SimulationResult& r) -> py::object {
+                const auto& tr = r.sensitivity;
+                if (tr.params.empty()) return py::none();
+                const auto nt = static_cast<py::ssize_t>(tr.times.size());
+                const auto np = static_cast<py::ssize_t>(tr.params.size());
+                const auto ns = static_cast<py::ssize_t>(tr.n_state);
+                py::array_t<Real> st({nt, np, ns});
+                std::copy(tr.states.begin(), tr.states.end(), st.mutable_data());
+                py::dict d;
+                d["params"] = tr.params;
+                d["times"] = py::array_t<Real>(nt, tr.times.data());
+                d["states"] = st;   // (sample, param, state)
+                d["n_sens_solves"] = tr.n_sens_solves;
+                d["n_sens_iterations"] = tr.n_sens_iterations;
+                d["n_sens_discarded"] = tr.n_sens_discarded;
+                return d;
+            },
+            "Forward parameter sensitivities of a pwl / trbdf2 run "
+            "(add-parameter-sensitivities group 5): a dict with 'params', "
+            "'times' (the start and every accepted step), 'states' "
+            "(sample, param, state) and the counters 'n_sens_solves', "
+            "'n_sens_iterations' (of accepted steps), 'n_sens_discarded' "
+            "(back-substitutions of rejected attempts); None without "
+            "sensitivities.")
         // Per-sample record of the STAMPED switch / diode mask
         // (result.hpp, `switch_state_bits`). Unpacked here into a
         // (num_steps, num_switches) bool array; column j is bit j of
