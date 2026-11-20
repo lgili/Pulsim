@@ -24,7 +24,9 @@ def _window(t, y, exclude_t0: bool):
     if exclude_t0:
         # The first stored sample of an algebraic node on pwl / trbdf2 is the
         # initial state, not the t = 0+ solution (design.md, Context).
-        k = int(np.searchsorted(t, t[0], side="right"))
+        # A right limit one ulp after t[0] (with_right_limits on a
+        # restart-rule run) belongs to the initial instant too.
+        k = int(np.searchsorted(t, np.nextafter(t[0], np.inf), side="right"))
         t, y = t[k:], y[k:]
     return t, y
 
