@@ -395,6 +395,29 @@ TEST_CASE("Params<Real> evaluates the legacy law to rounding",
     }
 }
 
+TEST_CASE("the junction charge is relative to Q near 0 V on both paths (F-S-5)",
+          "[device][laws]") {
+    // pow(1+u, 1-m) - 1 held Q only to C0·V0·eps absolute: at 1 nF, 25 V a
+    // femtosecond companion turned that into a 1e-8 A Newton residual floor.
+    for (Real m : {0.0, 0.5}) {
+        const auto jn = models::NonlinearCapacitor::junction(1e-9, 25.0, m);
+        const auto lp = L::NonlinearCapacitor::from(jn);
+        const auto la = L::NonlinearCapacitor::aux_from(jn);
+        for (Real v : {1e-15, -3e-12, 1e-9, 2e-6, 0.7}) {
+            // Taylor about 0: Q = C0·v·(1 − m·u/2 + m(m+1)·u²/6), u = v/V0
+            const Real u = v / 25.0;
+            const Real ref = 1e-9 * v * (1 - m * u / 2 + m * (m + 1) * u * u / 6);
+            const Real tol = std::abs(ref) * (v < 1e-3 ? 1e-14 : 1e-5);
+            CHECK(std::abs(models::NonlinearCapacitor::charge(jn, v) - ref) <= tol);
+            CHECK(std::abs(L::NonlinearCapacitor::charge<Real>(la, lp, v) - ref) <= tol);
+        }
+        // m = 0 is the linear law C0·v to a few ulp
+        if (m == 0.0) {
+            CHECK(std::abs(models::NonlinearCapacitor::charge(jn, 3e-13) - 3e-22) <= 3e-22 * 1e-15);
+        }
+    }
+}
+
 TEST_CASE("below its floor the junction Coss keeps C(floor) on both paths",
           "[device][laws]") {
     // DECISIONS #26 / #29: Q is flat below u = v_floor, and both Jacobians

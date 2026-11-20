@@ -106,3 +106,38 @@ Vdc–Ch–Cl). At h ≈ 1e-16 the companion's representation floor eps·Q_h/(γ
 (3.5e-23 C / 4e-17 s ≈ 1e-6 A) is above Newton's 1e-9 A: abort. Before be5454f3 no
 q row existed, nothing shrank the step, and the run booked 1381.7 uJ for 62.8 uJ.
 Not the dependent states: per row the estimates are each right for a wrong slot.
+
+Not this finding (recorded): two nonlinear capacitors in a loop with the bus and a
+10 A source out of their mid node, NO diode or switch (`.scratch/f5/loop2.py`)
+aborts at 54 ns on every build (b9e46778 too): the source drags Cl to −22.29 V,
+the law's floor (u = −0.9, −22.5 V), where Q is flat by design (DECISIONS #26) and
+nothing can sink the current. Case A's diodes clamp the node at −0.7 V.
+
+## Fixes
+
+- (b) `models/nonlinear_capacitor.hpp` and `device/laws.hpp` (model and interface
+  path, Real and AD): Q = C0·V0/(1−m)·expm1((1−m)·log1p(u)). Same function, relative
+  to Q to a few ulp at every bias; C++ test in `test_device_laws.cpp`.
+- (a) `trbdf2_transient.hpp`: a mode-changing gate edge in a run with a stateful kind
+  makes the next step the SDIRK restart (no slot read), TR-BDF2 only. On ESDIRK4(3)
+  forcing it broke the defaults at 1.5 us: the SDIRK estimate reads the 700 A ZVS
+  spike (0.7 V on Cl through Sl's 1 mOhm, tau 1 ps) as an O(jump) error, h fell to
+  ~1e-16 s, below Ch's companion floor, Newton stalled. ESDIRK4(3) keeps its own
+  restart (explicit stage from the committed probe), which ran with fix (b) alone.
+
+Case A after both (2.2 us): trbdf2 crossings −12.34 / −0.51 / +1.28 ps,
+E 62.8490 uJ; esdirk43 −7.62 / +0.54 / +15.39 ps, E 62.9259 uJ (closed form
+62.8335; b9e46778 62.9246: 1.3 nJ further, within the 5 % cell). Knobs: all pass
+except trbdf2 rtol 1e-8.
+
+## Remaining: trbdf2 at rtol 1e-8 (strict xfail)
+
+Aborts at the 1.5 us edge (Sl on across conducting Dl). The post-edge h is the
+remembered same-parity h (`h_mem_gate`), 2.2e-17 s = h_min, because resolving the
+1 ps edge to rtol 1e-8 needs it. There Ch's charge (1.56e-7 C) gives the companion a
+floor eps·Q/(γh) ≈ 1e-6 A against Newton's absolute 1e-9 A. Roundoff acceptance
+sees omega 0.23 eps (would accept) but declines on "still contracting": a period-~7
+limit cycle whose last ||dx|| (5.4e-6, 5.2e-7, 3.1e-7) contract by chance. Next
+step: a stagnation test over the cycle (e.g. a longer window) in
+`pwl/nonlinear_solve.hpp`, a change to add-newton-roundoff-acceptance DECISIONS 8/10b
+(maintainer criterion), so not made here.
