@@ -118,3 +118,100 @@ Implementation choices not covered by the design:
     event lists on pwl, `_trbdf2_stats` on trbdf2, the dsed fields — not
     `res.stats`. 4.1 / 4.2 stay open (kernel work); 4.3 is met but for the
     scratch-build proof of the extra factorisation.
+
+14. **v1 reader unit tests (task 1.2): `python/tests/test_v1_reader.py`.**
+    One hand-checked circuit per mapped type (resistor + dc source: the
+    bridge re-derived from the file's own values, 6.6667 / 4.0000 V within
+    1e-6; capacitor and inductor with `ic`; snubber_rc; sine, pulse and pwm
+    sources; current source; binary diode both ways; Shockley diode (KCL root
+    by bisection); static switch open / closed; vcswitch under a pwm control
+    node; mosfet; igbt; ideal transformer; coupled inductor; pi_controller →
+    pwm_generator loop) and six refusals by name (saturable_inductor,
+    `is_nmos: false`, mosfet loss block, `pmos`, `lookup_table`, a PI that
+    drives no switch). 24 pass, 1 strict xfail. Two engine facts set the
+    tolerances, neither is the reader's: the first stored sample of an
+    algebraic node is unsolved (OQ8, excluded), and a stored state starts with
+    zero history current, which lags the fixed-engine trace by dt/2 (seen as
+    exactly 5·e^{-dt/2τ} at the first step), so a transient truth is compared
+    within scale·dt/τ. Findings against the v1 kernel (git 990995e4):
+    - **R1 (debt, not fixed): MOSFET K.** The reader passes `K = kp`; v1's law
+      is `id = kp (vov vds − vds²/2)(1 + λ vds)` (`components/mosfet.hpp:77-83`),
+      i.e. 2.0's `K = kp/2`. `mosfet_nmos_dc` reads ≈ 0.025 V where the v1 law
+      gives 0.0502 V (the file's own comment, re-derived). Affects
+      `mosfet_nmos_dc`, `buck_mosfet_nonlinear`, `ll08_buck_mosfet`. Not fixed
+      here: it moves two goldens, one counter cell, the ll08 triage `known_err`
+      and the reference / scoreboard reports — a number-changing integration
+      item. `test_nmos_triode_dc_point_is_the_v1_law` is a strict xfail that
+      turns red when it is fixed.
+    - R2: v1's IGBT is `ic = g_on·vce` when on — `v_ce_sat` cancels
+      (`components/igbt.hpp:63-66`). The reader keeps the file's stated drop
+      (`add_igbt_level1`, `V_CE_sat`), as decision 7 kept the files' pwm phase
+      intent; ngspice is the arbiter (`buck_igbt` only).
+    - R3: v1's parser ignored a diode's `is` / `n` (always binary,
+      `yaml_parser.cpp:2479`); the reader maps them to the Shockley diode (12
+      files).
+    - R4: v1's parser read a switch's `initial_state` only; all 11 files write
+      `initial_closed`, so v1 ran them open. The reader honours `initial_closed`.
+    - R5: a mosfet's `g_off` (3 files) is dropped: the Level-1 law has none.
+    - Defaults aligned with v1 (`kp` 0.1, `lambda` 0.01, igbt `g_on` 1e4);
+      every file sets these keys, so no number moves.
+    - Decision 7 is superseded: the reader reads a pwm `phase` as a fraction of
+      the period (module docstring, batch 6b), not radians.
+
+15. **"The benchmark runner is broken on 2.0" / "the YAMLs do not load on
+    2.0" — the facts (named debt BR-1, now closed except as listed).**
+    - The claim "`benchmark_runner.py` imports the deleted
+      `pulsim_python_backend`" is true of `origin/main` only (lines 22-24 there).
+      On `feat/core-integration` (77ce4a28) and on
+      `origin/feat/core-soft-switching-validation` the module imports nothing
+      of the kind (this change ported it to `v1_reader` + `pulsim.simulate`,
+      task 1.4); `test_benchmark_runner_imports_without_the_retired_backend`
+      pins it.
+    - What WAS broken on 77ce4a28, command
+      `PYTHONPATH=python python3 benchmarks/tools/benchmark_runner.py --quiet
+      --output-dir .scratch/bench_out`: (a) the whole run died with
+      `ImportError: attempted relative import with no known parent package` at
+      `from .kpi import (...)` — the first circuit with a `kpi:` block, because
+      `benchmarks/` (home of the `kpi` package) is not on `sys.path` when the
+      runner is a script (it is under pytest); (b) every scenario compared the
+      unsolved t = 0 sample of algebraic nodes (`bridge_resistive_pure` failed
+      with max_error 6.67 = V(a)); (c) the v1 solver scenarios
+      (`gmres_trbdf2`, `jfnk_trbdf2`, `trbdf2`, `direct_bdf1`, `rosenbrockw`)
+      ran the pwl default under their own names (rc_step: three identical
+      errors). Fixed: `benchmarks/` on `sys.path`; t0 dropped from the
+      comparison (OQ8); `v2_refusal()` skips those scenarios as
+      `refused: v1 integrator '…'` / `v1 linear solver …` / Newton-Krylov;
+      an unmappable component or periodic mode is `skipped` + `refused: <name>`
+      instead of `failed`. The switching-loss KPI call site (`window_s` on the
+      soft-switching branch) is untouched.
+    - After the fix, the default manifest end to end: 43 passed, 38 skipped
+      (refused), the rest failed. Of the failures: 2 baselines missing
+      (`current_source_rc`, `pulse_voltage_rl`), ~20 `max_error` against v1
+      CSV baselines on switching circuits (10–48 V: a pointwise max of a
+      waveform whose edges moved by a step is the full swing — the reason the
+      harness grades time-weighted errors), 1 `run_transient` failure
+      (`buck_igbt`, step at 7.8 µs not taken in 64 sub-steps), 1
+      `observable 'out'` (`bode_rlc_low_pass`), plus the closed-loop control
+      blocks the reader refuses. Many "passed" rows have no validation block
+      (status = it ran). Test:
+      `test_benchmark_harness.py::test_benchmark_runner_runs_v1_files_against_their_stored_expectations`
+      (rc_step analytic, bridge baseline CSV, transformer_step_up; two refused
+      scenarios; a refused component). It failed before the t0 fix (bridge
+      6.67 > 1e-6).
+    - **Gate drive in a 2.0 YAML (claim "a 2.0 YAML file has no way to
+      specify the gate drive")** — `core/include/pulsim/yaml/loader.hpp`:
+      the top-level keys are only `circuit` and `simulation` (loader.hpp:38,
+      1968). The PWL switch types `switch`, `mosfet`,
+      `mosfet_with_body_diode`, `igbt` (loader.hpp:955-1000) take two power
+      terminals and no gate, schedule or controller key: their state comes
+      only from `simulate(switch_fn=…)` (a `SwitchSchedule` /
+      `make_pwm_switch_fn` / a bound controller) in Python —
+      `test_shipped_yaml_examples.py` runs every shipped YAML with all gates
+      OFF for that reason. TRUE for those. NOT true for the gate-node devices:
+      `mosfet_level1` (loader.hpp:596), `igbt_level1` (:757) and
+      `power_mosfet` (:1372) take a `gate` node, and `pwm_voltage_source`
+      (:565) / `pulse_voltage_source` (:584) can drive it — an open-loop PWM
+      expressible in YAML, at the price of a Newton device. No closed-loop
+      controller (PI / PWM block) exists in the YAML schema; the `chain:`
+      wiring (`python/pulsim/yaml_chain.py`) covers machines and observers,
+      not gate drive.
