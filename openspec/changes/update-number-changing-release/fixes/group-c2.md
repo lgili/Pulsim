@@ -25,7 +25,8 @@ Linear primary: its stage is one LU solve per mask, so the event iteration's own
 decision (none kept from a stale mask) — it passed by construction of the linear path, not by luck;
 'lcp' / 'auto' decide at the site (`mode_lcp_site`) before any solve.
 
-**Fix** (`run_transient.hpp`, one place: `run_event_iteration`, set by `run_restart`). Restart stage 1
+**Fix** (`run_transient.hpp`, one place: `decide_edge_mode`, called by `run_restart` before stage 1 —
+rule-on only; a first version inside `run_event_iteration` cost +0.6 % on the default buck_pwl). Restart stage 1
 at a LOCATED event (`loc < γh`: gate edge / unknown start / source jump at the step start, a scheduled
 split event, a split-located crossing) first decides the diode set consistent with the pre-event state x0
 in the new switch configuration: one Newton iteration from x0 (the stage's linearization at x0, written
