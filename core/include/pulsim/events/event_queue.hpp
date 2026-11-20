@@ -27,9 +27,11 @@
 
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
+#include "pulsim/solver/unsupported.hpp"
 
 #include <cmath>
 #include <cstdint>
+#include <format>
 #include <functional>
 #include <limits>
 #include <span>
@@ -51,6 +53,26 @@ enum class Kind : std::uint8_t {
     /// re-sample a gate or cap a step. Last at an instant.
     Monitor = 5,
 };
+
+/// F-T-2, one rule for every engine that asks a time-event oracle (the event
+/// queue: exact, trbdf2; the exact engine's auto / BDF2 schedulers): its answer
+/// is the first event STRICTLY after t, or +inf. An answer at or before t cannot
+/// be landed on (the exact engine re-fired the same instant forever): refused by
+/// name, as periodic_steady_state refuses it. Returns e.
+inline Real require_after(Real t, Real e, Kind k) {
+    if (!(e > t) && !std::isnan(e)) {
+        throw UnsupportedError(
+            "", "switch_fn", "", "",
+            std::format("{} returned {:.17g} when asked for the first event after t = {:.17g}, "
+                        "not a later instant: its edges cannot be located (it must return "
+                        "the first edge strictly after t, or +inf).",
+                        k == Kind::GateEdge ? "the switch_fn's next_edge_after(t)"
+                                            : "a time-event oracle",
+                        e, t));
+    }
+    return e;
+}
+
 
 /// Bit of `kind` in a kind mask (`take_due`).
 [[nodiscard]] constexpr std::uint32_t kind_bit(Kind k) noexcept {
@@ -232,6 +254,7 @@ public:
             if (!s.valid || s.pending <= t) {
                 s.pending = s.next(t);
                 s.valid = true;
+                require_after(t, s.pending, s.kind);
             }
         } else if (!s.periodic && !s.once && s.valid && s.pending <= t) {
             s.valid = false;

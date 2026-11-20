@@ -187,6 +187,7 @@ struct PEDResult {
     std::size_t n_reject = 0;
     std::size_t n_events = 0;
     std::size_t n_exact_steps = 0;   // closed-form LTI propagator
+    std::size_t n_output_samples = 0;   // the output rule's samples (no step)
     std::size_t n_predicate_evals = 0;  // exact path (D10)
     Real cpu_time_seconds = Real{0};
     ModeShadowReport mode_shadow;      // mode_selection='shadow' / 'lcp'
@@ -523,6 +524,7 @@ public:
         // state range restarts at the snapshot instant), nothing is carried
         output_lo_.resize(0);
         output_count_ = output_events_ = n_output_capped_ = n_output_unbounded_ = 0;
+        output_pend_ = false;
         output_total_ = 0;
         output_budget_t_ = std::numeric_limits<Real>::quiet_NaN();
         if (resume == nullptr) {
@@ -578,6 +580,7 @@ public:
 
             // 0. A control tick not taken at a landing (a run that sits
             // on its instant): run it and sample the gate again.
+            if (output_pend_ && tick_due_(t)) output_flush_(t, x, result);
             if (run_due_ticks_(t, x)) {
                 const MaskT before = system_.current_mask();
                 rk_state.invalidate();
@@ -601,6 +604,7 @@ public:
             Real h_use = std::min({h, dt_max_, t_target - t});
             if (h_use <= Real{0}) {
                 // Sitting exactly on a gate edge — fire it.
+                if (output_pend_) output_flush_(t, x, result);
                 if (t_gate < t_end) {
                     const MaskT before = system_.current_mask();
                     fire_event_(t_gate, "gate_edge", PredicateType::GateEdge,
@@ -645,7 +649,11 @@ public:
                     if (fast_k_ < fast_t_.size()) {
                         h_ex = std::min(h_ex, fast_t_[fast_k_] - t);
                     }
-                    if (output_rtol_ > Real{0}) h_ex = output_step_(t, x, h_ex, result.n_events, t_target);
+                    // the junction loop's heat lands at each step's end (state_kick_), so a
+                    // sample read inside a step would miss it: there the rule's samples are
+                    // steps (0.04 K of a 7.5 K rise missed otherwise)
+                    const bool out_steps = output_rtol_ > Real{0} && static_cast<bool>(state_kick_);
+                    if (out_steps) h_ex = output_step_(t, x, h_ex, result.n_events, t_target);
                     // no sliver step short of the edge (scheduler_auto.hpp)
                     if (h_ex < t_target - t && near_time(t + h_ex, t_target)) {
                         h_ex = t_target - t;
@@ -658,6 +666,35 @@ public:
                         evt = locate_event_exact_(t, x, h_ex, x_new_,
                                                   result);
                     }
+                    // the output rule's samples inside the step, read from its start
+                    // (the step itself is the rule-free one: F-6-7). F-X-4: the step's
+                    // start may be a deferred end (output_pend_): when the chord from the
+                    // last stored sample covers this step too nothing is stored; else that
+                    // start is stored first. out_defer: the step's end is covered (certified).
+                    bool out_defer = false;
+                    if (output_rtol_ > Real{0} && !out_steps) {
+                        const Real t1 = evt ? evt->t_event : t + h_ex;
+                        if (output_pend_) {
+                            if (!evt) {
+                                const Real ts = result.times.back();
+                                const Real d = output_step_(ts, result.states.back(), t1 - ts,
+                                                            result.n_events, t_target, false);
+                                out_defer = output_certified_ && !(d < t1 - ts);
+                                // the chord ends at the run's chained state, not at the flow
+                                // from ts the bound saw: their gap must stay at rounding level
+                                if (out_defer) {
+                                    advance_(ts, result.states.back(), t1 - ts, output_end_);
+                                    out_defer = ((x_new_ - output_end_).cwiseAbs().array()
+                                                 <= Real{1e-3} * output_tol_.array()).all();
+                                }
+                            }
+                            if (!out_defer) output_flush_(t, x, result);
+                        }
+                        if (!out_defer)
+                            out_defer = push_output_samples_(t, x, t1, result.n_events, t_target, result)
+                                        && !evt;
+                    }
+                    bool out_transparent = !evt;   // the end's fire (if any) moved nothing
                     // An event at the very end of the step fires too:
                     // the next step starts past the crossing and could
                     // never see it again.
@@ -680,10 +717,15 @@ public:
                             if (on_edge && at_corner) t = t_gate;
                             x_pre_event = x;
                             step_fired = true;
-                            run_due_ticks_(t, x);   // a tick at the edge's instant first (D2)
+                            const bool ticked = run_due_ticks_(t, x);   // a tick at the edge's instant first (D2)
                             fire_event_(on_edge ? t_gate : t, on_edge ? "gate_edge" : "control_tick",
                                           PredicateType::GateEdge,
                                           x, rk_state, result);
+                            // a poll landing of a gate that names no edge, which changed
+                            // nothing: the chord across it stays one LTI piece (F-X-4)
+                            out_transparent = on_edge && !at_corner && !ticked
+                                              && system_.current_mask() == mask_before
+                                              && (x.array() == x_pre_event.array()).all();
                             plan_fast_samples_(
                                 t, (on_edge && at_corner)
                                        || !(system_.current_mask() == mask_before));
@@ -693,9 +735,15 @@ public:
                     ++result.n_accept;
                     ++result.n_exact_steps;
                     hook_accepted_(t_step0, t, step_fired ? x_pre_event : x, step_mask);
-                    if (state_kick_) state_kick_(x, step_fired ? &x_pre_event : nullptr);
+                    // a kick (heat on the thermal states) is a jump the LTI chord does not see
+                    const bool kicked = state_kick_ && state_kick_(x, step_fired ? &x_pre_event : nullptr);
                     ++step_idx;
-                    if (step_idx % store_every_ == 0) {
+                    // F-X-4: under the output rule an end the chord from the last stored
+                    // sample covers is not stored (stored later only if a chord needs it)
+                    if (out_defer && out_transparent && !kicked && t < t_end && !near_time(t, t_end)) {
+                        output_pend_ = true;
+                    } else if (step_idx % store_every_ == 0) {
+                        output_pend_ = false;
                         ped_push_sample(result, t, x,
                                         system_.current_mask(), step_mask,
                                         step_fired ? &x_pre_event
@@ -708,6 +756,7 @@ public:
                 }
             }
 
+            if (output_pend_) output_flush_(t, x, result);   // a numeric step stores its own ends
             // 3. Snapshot k1 BEFORE step (needed for Hermite backtrack
             // when a predicate fires inside the step).
             const bool need_pred_scan = (predictor_.size() > 0);
@@ -994,12 +1043,16 @@ public:
 
     /// The output-grid rule (update-number-changing-release; off = rtol 0):
     /// each exact step is cut so that linear interpolation between samples
-    /// is within rtol·max(|x_j| seen so far, atol) of every state
+    /// is within max(rtol·range_j, atol) of every state (range_j: its range
+    /// so far, at least 1e-3 of its peak; atol: the run's one absolute
+    /// tolerance, an absolute floor, not scaled by rtol)
     /// (exact_chord_step), at most `cap` cut steps between two events
     /// (n_output_capped counts the intervals where the cap bit), at most
     /// `budget` cut steps in the run (past it the rule stops cutting:
-    /// output_budget_t is the time it ran out, NaN when it did not). The event
-    /// projection then removes the parasitic cluster only (project_).
+    /// output_budget_t is the time it ran out, NaN when it did not). The
+    /// samples are read from the step's start (push_output_samples_): the
+    /// steps are the rule-free ones. The event projection removes the
+    /// parasitic cluster only (project_).
     void set_output_rule(Real rtol, Real atol, std::size_t cap,
                          std::size_t budget = std::size_t{2000000}) noexcept {
         output_rtol_ = rtol;
@@ -1108,6 +1161,7 @@ private:
                 // re-read at each landing; without it a plain Python gate
                 // ran with its t = 0 mask frozen.
                 t_sw = std::min(t_now + dt_max_ * Real{0.1}, t_end);
+                poll_t_ = t_sw;
             }
         }
         if constexpr (requires { system_.next_source_corner_after(t_now); }) {
@@ -2402,6 +2456,7 @@ private:
                        int aux_index = -1) {
         const MaskT old_mask = system_.current_mask();
         const MaskT prev_bits = diode_bits_;
+        const Real prev_time_event_t = last_time_event_t_;
         if (ptype == PredicateType::GateEdge) last_time_event_t_ = t_event;   // next_time_event_
         // the event's left limit for a step hook listening to events (the loss port)
         const bool hook_event = hooks_ != nullptr && hooks_->has_event();
@@ -2453,6 +2508,16 @@ private:
 
         // Drop spurious same-mask gate edges silently.
         if (ptype == PredicateType::GateEdge && new_mask == old_mask) {
+            // F-X-1: a poll landing of a gate that names no edge, which changed
+            // nothing, is not a time event: as one it made resolved_scale_ the time
+            // left to t_end, so the parasitic cluster shrank as the run neared its
+            // end (ten bridges: a 2e-10 s mode left the cluster 31 us before t_end).
+            // A gate whose next_edge_after is itself a poll boundary (a Python gate's
+            // EdgeSearch: has_edge_oracle() false) lands there the same way.
+            bool polled = t_event == poll_t_;
+            if constexpr (requires { switch_fn_.has_edge_oracle(); })
+                polled = polled || !switch_fn_.has_edge_oracle();
+            if (polled) last_time_event_t_ = prev_time_event_t;
             return;
         }
 
@@ -3250,7 +3315,9 @@ private:
     ChordWork output_work_;
 
     /// The exact step from (t, x) cut by the output rule (exact_chord_step).
-    Real output_step_(Real t, const Vector& x, Real h, std::size_t n_events, Real t_target) {
+    Real output_step_(Real t, const Vector& x, Real h, std::size_t n_events, Real t_target,
+                      bool count = true) {
+        output_certified_ = false;   // true only when the bound decided the returned step
         if constexpr (requires(bool& b, ChordWork& w) {
                           system_.exact_output_step(t, x, x, Real{}, h, b, w); }) {
             // a new interval: an event fired, or a time event (tick, edge, corner) passed
@@ -3271,27 +3338,35 @@ private:
             output_lo_ = output_lo_.cwiseMin(x);
             output_hi_ = output_hi_.cwiseMax(x);
             // relative to each state's range so far (a ripple on a large DC level
-            // is what a plot reads), floored at 1e-3 of its peak and at atol
+            // is what a plot reads; at least 1e-3 of its peak), with the run's atol
+            // as an ABSOLUTE floor (F-X-3): a state sitting at ~0 V is held to atol,
+            // not to rtol·atol = rounding (a 500-section ladder's far nodes cut
+            // every chord to 1e-14 V against a bound that cannot see their cancellation)
             auto set_tol = [&] {
-                output_tol_ = (output_hi_ - output_lo_)
-                                  .cwiseMax(Real{1e-3} * output_hi_.cwiseAbs().cwiseMax(output_lo_.cwiseAbs()))
-                                  .cwiseMax(Vector::Constant(x.size(), output_atol_)) * output_rtol_;
+                output_tol_ = ((output_hi_ - output_lo_)
+                                   .cwiseMax(Real{1e-3} * output_hi_.cwiseAbs().cwiseMax(output_lo_.cwiseAbs()))
+                               * output_rtol_)
+                                  .cwiseMax(Vector::Constant(x.size(), output_atol_));
             };
             set_tol();
             bool bounded = true;
             Real d = system_.exact_output_step(t, x, output_tol_, output_rtol_, h, bounded, output_work_);
             if (d < h) {
                 // the scale of the interval ahead too (a state starting from rest
-                // would otherwise be cut to its atol floor); only a step the bound
-                // cuts needs it: a wider range only lengthens the step
+                // would otherwise be cut to its atol floor); only a step the bound cuts needs it
                 advance_(t, x, h, output_end_);
                 output_lo_ = output_lo_.cwiseMin(output_end_);
                 output_hi_ = output_hi_.cwiseMax(output_end_);
                 set_tol();
                 d = system_.exact_output_step(t, x, output_tol_, output_rtol_, h, bounded, output_work_);
             }
-            if (!bounded) ++n_output_unbounded_;
+            if (!bounded) {
+                if (count) ++n_output_unbounded_;
+                return h;
+            }
+            output_certified_ = true;
             if (!(d < h)) return h;
+            if (!count) return d;
             ++output_total_;
             if (++output_count_ == output_cap_) ++n_output_capped_;
             // never below the time's own resolution (a zero tolerance is floored by atol)
@@ -3301,10 +3376,44 @@ private:
         (void)t; (void)x; (void)n_events; (void)t_target;
         return h;
     }
+    Vector output_x_;   // push_output_samples_: the sample being read
+    bool output_certified_ = false;   // output_step_: the bound decided its step
+    bool output_pend_ = false;   // the current step start is an end not stored (F-X-4)
+    void output_flush_(Real t, const Vector& x, PEDResult<MaskT>& result) {
+        const MaskT m = system_.current_mask();
+        ped_push_sample(result, t, x, m, m, nullptr);
+        output_pend_ = false;
+    }
+
+    /// The output rule's samples strictly inside the exact step [t0, t1) taken
+    /// from (t0, x0). Each is EVALUATED from the step's start, x(τ) = Φ(τ − t0)·x0,
+    /// never propagated from the sample before it: the run's state, its steps
+    /// and every event located on them are the rule-free run's, whatever is
+    /// sampled (F-6-7: a chained Φ(δ) per sample accumulated a rounding of the
+    /// mode's basis each, 6.6e-8 A on ten bridges at 1e-5, 2.1e-6 A at 1e-8).
+    /// True when the last chord (to t1) was certified by the bound (not the
+    /// cap / budget / an unbounded mode): only then may t1 go unstored (F-X-4).
+    bool push_output_samples_(Real t0, const Vector& x0, Real t1, std::size_t n_events,
+                              Real t_target, PEDResult<MaskT>& result) {
+        const MaskT mask = system_.current_mask();
+        Real tau = t0;
+        output_x_ = x0;
+        for (;;) {
+            const Real h = t1 - tau;
+            const Real d = output_step_(tau, output_x_, h, n_events, t_target);
+            // no sample a sliver short of the step's end (the end is a sample)
+            if (!(d < h) || near_time(tau + d, t1)) return output_certified_ && !(d < h);
+            tau += d;
+            advance_(t0, x0, tau - t0, output_x_);
+            ped_push_sample(result, tau, output_x_, mask, mask, nullptr);
+            ++result.n_output_samples;
+        }
+    }
     Real probe_t_end_ = std::numeric_limits<Real>::infinity();   // next_time_event_
     std::size_t reinit_mark_ = 0;   // reinit_log_size_() before the settle
     Vector settle_x0_;   // settle_and_project_: the pre-event state (its records)
     Real last_time_event_t_ = std::numeric_limits<Real>::quiet_NaN();   // last gate edge / corner fired
+    Real poll_t_ = std::numeric_limits<Real>::quiet_NaN();   // next_gate_edge_: the last poll boundary
     // add-unified-event-queue group 3: the run's time events (start_time_events_)
     events::EventQueue queue_;
     events::TickPlan ticks_;

@@ -2692,11 +2692,19 @@ def simulate(
         10 us step cap without ``dt``). Without ``dt``, ``store_every`` or
         recorders, the exact engine returns every event instant (both
         limits where the state jumps) and between events samples spaced so
-        that linear interpolation between consecutive samples is within
-        ``output_rtol`` of each STATE's scale (its range so far, floored at
-        1e-3 of its peak and at ``atol``; an observable that is a difference of large
-        states gets that absolute error, not ``output_rtol`` of itself). The
-        event projection then removes only the parasitic cluster. Read
+        that, between events, linear interpolation of the returned samples
+        is within ``max(output_rtol * range, atol)`` of the exact solution
+        for every STATE (``range``: the state's range so far, at least 1e-3
+        of its peak; ``atol``: the run's absolute tolerance, one scalar for
+        every state, default 1e-9 — an absolute floor, so a state near 0 is
+        held to ``atol``, not to rounding; an observable that is a difference
+        of large states gets that absolute error, not ``output_rtol`` of
+        itself). The
+        samples are read from the exact steps the run takes without the rule
+        (``n_exact_steps`` counts steps, the samples are ``n_output_samples``;
+        a step end that the chord from the last stored sample already covers
+        is not stored, so a slow or constant stretch keeps few samples);
+        the event projection then removes only the parasitic cluster. Read
         ``res.diagnostics['output_grid']``: ``n_output_capped`` (intervals
         where the 4096-sample cap bit) and ``n_output_unbounded`` (steps of
         a mode without a diagonalising basis, which keep the step cap's

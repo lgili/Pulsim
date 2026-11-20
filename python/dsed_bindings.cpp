@@ -652,6 +652,7 @@ py::dict ped_result_to_dict(
     d["n_reject"] = res.n_reject;
     d["n_events"] = res.n_events;
     d["n_exact_steps"] = res.n_exact_steps;
+    d["n_output_samples"] = res.n_output_samples;
     d["n_predicate_evals"] = res.n_predicate_evals;
     d["cpu_time_seconds"] = res.cpu_time_seconds;
     event_arrays(res, d);
@@ -930,7 +931,9 @@ void init_module(py::module_& m) {
                 std::move(pred), dt_init, dt_max,
                 store_every);
             auto res = sim.simulate(x0, t_end);
-            return ped_result_to_dict(res);
+            auto d = ped_result_to_dict(res);
+            d["n_rk45_steps"] = res.n_accept - res.n_exact_steps;   // its non-exact steps are DOPRI5 (F-3-6)
+            return d;
         },
         py::arg("system"),
         py::arg("switch_fn"),
@@ -1621,6 +1624,7 @@ void init_module(py::module_& m) {
             auto res = sim.simulate(x0, t_end, rs ? &*rs : nullptr);
             py::gil_scoped_acquire acquire;
             auto d = ped_result_to_dict(res, event_log);
+            d["n_rk45_steps"] = res.n_accept - res.n_exact_steps;   // its non-exact steps are DOPRI5 (F-3-6)
             {   // the end instant as a snapshot (pickle version 5; field 14 kind Exact)
                 const auto& f = sim.final_state();
                 pulsim::solver::SolverSnapshot snap;

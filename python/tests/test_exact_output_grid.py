@@ -102,8 +102,8 @@ def test_the_rule_bounds_linear_interpolation():
     r = pulsim.simulate(build(), 2e-3, engine="exact", output_rtol=rtol)
     t = np.asarray(r.times)
     assert np.all(np.diff(t) > 0)
-    assert r.diagnostics["output_grid"] == {"n_output_capped": 0, "n_output_unbounded": 0,
-                                            "output_budget_t": None}
+    og = r.diagnostics["output_grid"]
+    assert (og["n_output_capped"], og["n_output_unbounded"], og["output_budget_t"]) == (0, 0, None)
     # the trajectory at the chords' interior points, from runs whose grid holds them
     q = np.sort(np.concatenate([t[:-1] + f * np.diff(t) for f in (0.25, 0.5, 0.75)]))
     dense = pulsim.simulate(build(), 2e-3, engine="exact", dt=2e-8)
@@ -115,9 +115,10 @@ def test_the_rule_bounds_linear_interpolation():
         # the dense run's own chords are far finer: its interpolant is the truth here
         err = np.abs(np.interp(q, t, y) - np.interp(q, td, yd)).max() / scale
         assert err < 4 * rtol, (name, err)
-    # 10 us grid of today: the same circuit without the rule is coarser
+    # without the rule every step end (1 us here) is stored; the rule stores what its
+    # tolerance needs (a step end its chord covers is not stored, F-X-4)
     r0 = pulsim.simulate(build(), 2e-3, engine="exact")
-    assert len(r0.times) < len(t)
+    assert len(t) < len(r0.times)
 
 
 def test_default_and_explicit_dt_keep_todays_samples():
@@ -226,8 +227,8 @@ def test_a_parasitic_mode_at_rounding_does_not_set_the_output_step():
     on = pulsim.simulate(_bridges(2), 0.02, engine="exact", output_rtol=1e-5)
     t = np.asarray(on.times)
     assert np.all(np.diff(t) >= 0)
-    assert on.diagnostics["output_grid"] == {"n_output_capped": 0, "n_output_unbounded": 0,
-                                             "output_budget_t": None}
+    og = on.diagnostics["output_grid"]
+    assert (og["n_output_capped"], og["n_output_unbounded"], og["output_budget_t"]) == (0, 0, None)
     assert len(t) - len(off.times) <= 1300
 
 
@@ -252,7 +253,7 @@ def test_the_run_budget_stops_the_rule_with_one_warning(monkeypatch):
     assert tb is not None and 0.0 < tb < 2e-3
     t = np.asarray(r.times)
     assert np.all(np.diff(t) > 0)
-    assert len(t) < len(full.times)
+    assert len(t) > len(full.times)   # past the budget every step end is stored again
     # past the budget the default grid of a run without the rule (the last step ends at t_end)
     grid = np.diff(np.asarray(pulsim.simulate(b, 2e-3, engine="exact").times)).max()
     assert np.diff(t[t > tb])[:-1].min() >= 0.99 * grid

@@ -110,11 +110,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   without one are unchanged.
 * **Added** `simulate(engine='exact', output_rtol=r)`: without `dt`,
   `store_every` or recorders, every event instant is a sample and the steps
-  between events are cut so that linear interpolation is within `r` of
-  every state's range (counters in `diagnostics['output_grid']`). Default
+  between events are cut so that, between events, linear interpolation of
+  the returned samples is within `max(r·range, atol)` of the exact solution
+  for every state (`range`: the state's range so far, at least 1e-3 of its
+  peak; `atol`: the run's one absolute tolerance, default 1e-9, an absolute
+  floor — a state near 0 is not chased to rounding). Where that cannot be
+  certified (sample cap, no diagonalising basis, budget) the run warns
+  (counters in `diagnostics['output_grid']`). A step end that this chord
+  rule already covers is not stored: a DC stretch keeps two samples (a
+  2 s DC run stored 2 000 002 samples on the 1 µs step grid). Default
   `None` keeps today's samples; refused by name off the exact engine.
   A run resumed with it samples its own grid (the rule's state ranges
   restart at the snapshot instant); the events and states agree.
+* **Fixed** `benchmarks.kpi.compute_junction_temperature` solves each
+  interval exactly for a power linear between samples (it was explicit
+  Euler on the right-hand sample): the KPI no longer depends on the
+  sample grid (147.7105 °C on 2 or 1 004 samples). Every engine's T_j KPI
+  moves to the closed form.
+* **Fixed** `engine='dsed'` / `'exact'` no longer hangs when a
+  `switch_fn`'s `next_edge_after(t)` returns `t` itself: it is refused by
+  name (`UnsupportedError`, feature `switch_fn`), on the auto and BDF2
+  schedulers too.
 * **Added** the exact engine keeps a snapshot and resumes
   (`final_snapshot` / `resume_from`, on its own absolute clock, also on
   the default `integrator='auto'`), runs the junction temperature loop
