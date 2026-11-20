@@ -1664,13 +1664,15 @@ def impulse_losses(builder, result, *, t_from: Optional[float] = None,
     switch: 24 uJ). No resistor or switch conduction integral carries it.
     Returns ``{switch name: {"E_impulse_total", "n_impulses", "records"}}``;
     a record counts when its step starts inside ``[t_from, t_to)`` (the rule
-    of the switching events). Engines without records give ``{}``.
+    of the switching events). Engines without records give ``{}``. The exact
+    engine's ``start_projection`` record (a given initial state the start mode
+    cannot keep) is caused by no device and is not booked here.
     """
     out: Dict[str, Dict[str, Any]] = {}
     lo = -np.inf if t_from is None else float(t_from)
     hi = np.inf if t_to is None else float(t_to)
     for rec in getattr(result, "reinit_records", None) or []:
-        if not (lo <= float(rec.t) < hi):
+        if not (lo <= float(rec.t) < hi) or getattr(rec, "kind", "") == "start_projection":
             continue
         name = _impulse_cause(builder, result, rec)
         e = out.setdefault(name, {"E_impulse_total": 0.0, "n_impulses": 0, "records": []})
@@ -2483,7 +2485,8 @@ def device_loss_summary(
     # A branch-form element always carries the category (0 J when nothing
     # was booked to it): its conduction is ~0 by construction, so leaving
     # the key out would read as "not computed".
-    has_records = bool(getattr(result, "reinit_records", None))
+    has_records = any(getattr(r, "kind", "") != "start_projection"
+                      for r in getattr(result, "reinit_records", None) or ())
     if has_records or any(e.get("form") == "branch" for e in summary):
         for entry in summary:
             if entry.get("kind") in ("switch", "diode") and (

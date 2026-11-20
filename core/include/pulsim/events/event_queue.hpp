@@ -60,12 +60,14 @@ enum class Kind : std::uint8_t {
 /// be landed on (the exact engine re-fired the same instant forever): refused by
 /// name, as periodic_steady_state refuses it. Returns e.
 inline Real require_after(Real t, Real e, Kind k) {
-    if (!(e > t) && !std::isnan(e)) {
+    // NaN is refused too: it is no instant, and as a pending event it compared
+    // false everywhere, so the queue never asked the oracle again (no edge, silently)
+    if (!(e > t)) {
         throw UnsupportedError(
             "", "switch_fn", "", "",
             std::format("{} returned {:.17g} when asked for the first event after t = {:.17g}, "
                         "not a later instant: its edges cannot be located (it must return "
-                        "the first edge strictly after t, or +inf).",
+                        "the first edge strictly after t, or +inf; NaN is not an instant).",
                         k == Kind::GateEdge ? "the switch_fn's next_edge_after(t)"
                                             : "a time-event oracle",
                         e, t));

@@ -688,6 +688,51 @@ public:
         }
     }
 
+    /// The start's projection, reported (F-S-4's leftover): a given state x0 that
+    /// the start mode's settle / projection moved to x is a state jump at t like
+    /// any other, so it gets a record (kind "start_projection", the moved states,
+    /// dW = ½ΔᵀWΔ with Δ = x0 − x: the energy-weighted distance of the jump, which
+    /// in the ideal limit is the energy the jump dissipates INCLUDING the sources'
+    /// impulsive work, as for the dependent-state records above: an ideal 10 V
+    /// closing onto 1 µF at 0 V loses ½CV²). Significant: a move above 1e-6 of
+    /// max(|x0_i|, the circuit's scale of its kind, port_scale_state) -- not the
+    /// dependent-state records' 1e-9: a start from rest that the projection only
+    /// gives its g_off leakage (10 V · 1 nS = 1e-8 A in a 1 A circuit) needs no
+    /// report, and writes none. Not written when the
+    /// start already wrote dependent-state records (`mark`: the jump is reported).
+    /// W: the mode's energy weight when it has one, else diag(C, L) (shortcut: a
+    /// coupled winding's mutual term is left out of dW there; upgrade when the
+    /// extraction gives every mode its weight).
+    void record_start_projection(Real t, const Vector& x0, const Vector& x, std::size_t mark) {
+        if (reinit_log_.size() > mark || x0.size() != x.size()) return;
+        ensure_current_resolved_();
+        const LTIEntry& e = *current_entry_;
+        const auto n = x.size();
+        const auto sc = port_scale_state(x0);
+        const Vector d = x0 - x;
+        ReinitRecord rec;
+        rec.t = t;
+        rec.kind = "start_projection";
+        for (Index i = 0; i < n; ++i) {
+            const bool cap = static_cast<Size>(i) < e.state_is_cap.size() && e.state_is_cap[static_cast<Size>(i)];
+            const Real xs = std::max(std::abs(x0[i]), cap ? sc.vscale : sc.iscale);
+            if (!(std::abs(d[i]) > Real{1e-6} * xs)) continue;
+            if (static_cast<Size>(i) < e.state_labels.size())
+                rec.states.push_back(e.state_labels[static_cast<Size>(i)]);
+            else
+                rec.states.push_back("x" + std::to_string(i));
+        }
+        if (rec.states.empty()) return;
+        if (e.energy_weight.rows() == n && e.energy_weight.cols() == n) {
+            rec.dW = Real{0.5} * d.dot(e.energy_weight * d);
+        } else {
+            for (Index i = 0; i < n && static_cast<Size>(i) < e.state_mass.size(); ++i)
+                rec.dW += Real{0.5} * e.state_mass[static_cast<Size>(i)] * d[i] * d[i];
+        }
+        rec.projection_gap = d.cwiseAbs().maxCoeff();
+        reinit_log_.push_back(std::move(rec));
+    }
+
     /// Records so far, and dropping those of a projection the scheduler
     /// undid (it restored the pre-event state and projects again).
     [[nodiscard]] std::size_t reinit_log_size() const noexcept { return reinit_log_.size(); }

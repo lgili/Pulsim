@@ -4438,6 +4438,13 @@ def _finalize(out, plan):
         # recorded after the run): 'error' refuses the run as pwl's kernel
         # does at the event, 'warn' warns.
         _recs = list(getattr(res, "reinit_records", None) or ())
+        if _recs and on_impulse == "error" and _recs[0].kind == "start_projection":
+            r0 = _recs[0]
+            raise _unsupported(
+                "dsed", "impulse",
+                f"on_impulse='error': the given initial state is not a state of the start "
+                f"mode: projecting it moves {', '.join(r0.states)} by up to "
+                f"{r0.projection_gap:.6g} at t = {r0.t:g} and removes {r0.dW:.6g} J.")
         if _recs and on_impulse == "error":
             r0 = _recs[0]
             cut = r0.kind == "cut_set"

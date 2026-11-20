@@ -533,8 +533,13 @@ public:
             const MaskT prev0 = diode_bits_;
             const MaskT old0 = m0;
             start_decision_ = true;
+            const std::size_t start_mark = reinit_log_size_();
+            const Vector x_given = x;
             decide_modes_(t, x, m0, old0, prev0, old0, result);
             start_decision_ = false;
+            // a projection that moved the given state is a reported jump, never silent
+            if constexpr (requires { system_.record_start_projection(t, x_given, x, start_mark); })
+                system_.record_start_projection(t, x_given, x, start_mark);
             // The ticks at t = 0 run before the first sample; the gate is
             // sampled again with what they wrote.
             if (run_due_ticks_(t, x)) {

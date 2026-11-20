@@ -1842,7 +1842,7 @@ class EventIterationBreach:
         ...
 class ReinitRecord:
     """
-    One impulsive re-initialisation (add-branch-form-ideal-switch D4): kind 'cut_set' (lambda = flux, V*s) or 'capacitor_loop' (lambda = charge, C); dW the energy removed [J]; sample the stored sample of the step that carried the pulse (-1: not stored).
+    One impulsive re-initialisation (add-branch-form-ideal-switch D4): kind 'cut_set' (lambda = flux, V*s) or 'capacitor_loop' (lambda = charge, C), or on the exact engine 'start_projection' (a given initial state the start mode cannot keep, moved at t0; projection_gap the largest move); dW the energy removed [J]; sample the stored sample of the step that carried the pulse (-1: not stored).
     """
     @property
     def cause(self) -> str:
