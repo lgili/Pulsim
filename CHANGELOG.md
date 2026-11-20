@@ -33,6 +33,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   under `control_tick='label'` (it arrived as `SimulationAborted` from
   inside the run).
 
+### Bergeron transmission line
+
+* **Added** `add_transmission_line(..., model="bergeron")`: the exact
+  lossless travelling-wave line (`Z0`, `delay`) as the new kind
+  `StoredKind.TransmissionLine`, with the optional series `R` as
+  `R/4 + half line + R/2 + half line + R/4`. Ports `name` and `name.b`
+  (`res.i` is the current into each port). On pwl, `dt > delay` is refused
+  by name. With the delay a multiple of `dt` the line is exact to rounding
+  (lattice 5/3, 5/9, 35/27 V to 2.2e-16); otherwise it is second order.
+  On trbdf2 the step is capped at the delay (`n_line_bound_steps`), and a
+  kink in a recorded wave is landed a delay later at the other end. The AC sweep stamps the
+  exact two-port; the DC point treats the line as a wire. Refused by name:
+  esdirk43, exact/dsed, bdf1 and `periodic_steady_state`. YAML type
+  `transmission_line` (user and IR); the snapshot carries the line's past
+  (`line_state`, pickle field 19, written only when a line exists).
+  Docs: `docs/transmission-line.md`.
+
 ### Excess core loss in the permeance network
 
 * **Added** `CircuitBuilder.add_excess_loss(name, m_a, m_b, c, eps)`:

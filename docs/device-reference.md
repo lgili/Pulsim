@@ -361,3 +361,13 @@ Builder: `CircuitBuilder.add_excess_loss`.
 |---|---|---|---|---|---|---|
 | `c` |  | A/V^0.5 | a finite number > 0 | - | required | excess-loss coefficient: F = c*sign(u)*|u|^0.5 for |u| >> eps (*in components()*) |
 | `eps` |  | V | a finite number > 0 | - | required | flux rate below which the law is linear (slope c/sqrt(eps)) (*in components()*) |
+
+
+## `transmission_line`
+
+Builder: `CircuitBuilder.add_transmission_line`.
+
+| Name | Key | Unit | Bound | Default | Builder | Description |
+|---|---|---|---|---|---|---|
+| `Z0` |  | Ohm | a finite number > 0 | - | not an argument | surge (characteristic) impedance (*in components()*) |
+| `delay` |  | s | a finite number > 0 | - | not an argument | one-way travel time; the step must not exceed it (*in components()*) |

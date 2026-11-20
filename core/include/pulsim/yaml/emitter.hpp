@@ -61,7 +61,7 @@ inline constexpr std::array<std::string_view, pwl::DevicePool::kNumKinds> kKindY
     "shockley_diode", "lauritzen_diode", "pmsm_mna", "ideal_transformer",
     "vccs", "cccs", "ccvs", "gyrator", "sine_current_source",
     "pulse_current_source", "pwl_current_source", "induction_machine_mna",
-    "external_device", "excess_loss"};
+    "external_device", "excess_loss", "transmission_line"};
 
 namespace yaml_detail {
 
@@ -310,6 +310,27 @@ namespace yaml_detail {
         }
         Map e;
         e.add("kind", std::string{kKindYaml[static_cast<std::size_t>(kind)]});
+        if (kind == K::TransmissionLine) {
+            // add-realistic-passives D18: one entry, written with port a
+            if (pool.is_line_port_b(bi)) continue;
+            const Index pb = pool.line_partner(bi);
+            if (pb != bi + 1) {
+                throw std::invalid_argument(std::format(
+                    "to_yaml: transmission line \"{}\": its port branches are "
+                    "not consecutive", dev.name));
+            }
+            std::string ports = "[";
+            for (const Index q : {bi, pb}) {
+                const auto& br = g.branch(q);
+                ports += (q == bi ? "" : ", ") + Map{}
+                    .add("name", quote(g.branch_name(q)))
+                    .add("pins", "[" + node(br.from) + ", " + node(br.to) + "]").str();
+            }
+            e.add("ports", ports + "]");
+            put_fields(e, prm, fields_of(kind));
+            o += "  - " + e.str() + "\n";
+            continue;
+        }
         if (kind == K::PmsmMna || kind == K::InductionMachineMna) {
             auto owns = [&](const auto& mc) {
                 return std::ranges::find(mc.branch_id, bi) != mc.branch_id.end();
@@ -653,7 +674,20 @@ struct YamlIo {
             if (it == kKindYaml.end()) fail(ks, "unknown kind");
             const auto kind = static_cast<K>(it - kKindYaml.begin());
             Pending p{d, kind, {}, {}};
-            if (kind == K::PmsmMna || kind == K::InductionMachineMna) {
+            if (kind == K::TransmissionLine) {
+                const auto ps = d["ports"];
+                if (!ps || !ps.IsSequence() || ps.size() != 2) fail(ks, "needs two ports");
+                p.name = text(ps[0]["name"], ks, "name");
+                for (const auto& x : ps) {
+                    if (!x.IsMap()) fail(p.name, "each port is {name, pins}");
+                    const auto nm = text(x["name"], p.name, "name");
+                    const auto pins = x["pins"];
+                    if (!pins || !pins.IsSequence() || pins.size() != 2) fail(nm, "needs two pins");
+                    const std::array<Index, 2> ab{pin(pins[0], nm), pin(pins[1], nm)};
+                    p.branches.push_back(b.add_branch_(nm, ab[0], ab[1],
+                                                       topology::BranchKind::Source));
+                }
+            } else if (kind == K::PmsmMna || kind == K::InductionMachineMna) {
                 const auto ph = d["phases"];
                 p.name = ph && ph.IsSequence() && ph.size() == 3
                     ? text(ph[0]["name"], ks, "name") : ks;
@@ -921,7 +955,7 @@ private:
         const auto row = fields_of(kind);
         keys(n, who, {"kind", "name", "pins", "role", "control", "phases", "omega", "theta",
                       "rotor", "harmonics", "table", "ja", "law", "t", "i", "periodic", "gate", "I_H",
-                      "omega0", "theta0"}, row);
+                      "omega0", "theta0", "ports"}, row);
         if ((n["omega0"] && kind != K::PmsmMna && kind != K::InductionMachineMna) ||
             (n["theta0"] && kind != K::PmsmMna)) {
             fail(who, "omega0 / theta0 are machine keys (theta0: pmsm_mna only)");
@@ -990,6 +1024,10 @@ private:
                 pool.add_nonlinear_capacitor(bi, charge(n, who));
             } else if constexpr (std::is_same_v<P, m::ShockleyDiode::Params>) pool.add_shockley_diode(bi, p);
             else if constexpr (std::is_same_v<P, m::ExcessLoss::Params>) pool.add_excess_loss(bi, p);
+            else if constexpr (std::is_same_v<P, m::TransmissionLine::Params>) {
+                if (br.size() != 2) fail(who, "a transmission_line needs its two ports");
+                pool.add_transmission_line(br[0], br[1], p);
+            }
             else if constexpr (std::is_same_v<P, m::LauritzenDiode::Params>) pool.add_lauritzen_diode(bi, p);
             else if constexpr (std::is_same_v<P, m::PmsmMna::Params>) {
                 if (const auto hn = n["harmonics"]) {

@@ -441,6 +441,14 @@ def _check_circuit(builder, T, comps):
             "interface; use a long transient meanwhile.")
     for c in comps:
         kind = c["kind"]
+        if kind == "transmission_line":
+            # D18: the line's state is its last tau of waves, not in x.
+            raise _unsup(
+                "", device=c["name"], kind="TransmissionLine", msg=
+                f"the Bergeron line {c['name']!r} keeps the last delay of "
+                "travelling waves as its state, which a shooting solve on "
+                "the node and branch vector cannot read or set; use a long "
+                "transient, or model='pi'.")
         if kind in ("pwm_voltage_source", "pulse_voltage_source"):
             raise _unsup(
                 "", device=c["name"],

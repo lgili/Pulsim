@@ -390,6 +390,7 @@ circuit:
     - {type: multi_winding_transformer, name: T2, windings: [{from: q, to: gnd, L: 1.0e-3}, {from: r, to: gnd, L: 1.0e-3}], k: [[1, 0.9], [0.9, 1]]}
     - {type: saturable_transformer, name: T3, N_p: 10, Ae: 1.0e-4, le: 0.1, lg: 1.0e-3, p_from: r, p_to: gnd, s_from: s, s_to: gnd, N_s: 10}
     - {type: ideal_transformer, name: T4, p_from: s, p_to: gnd, s_from: t, s_to: gnd, n: 2}
+    - {type: transmission_line, name: TL, a_pos: t, a_neg: gnd, b_pos: tb, b_neg: gnd, Z0: 50, delay: 1.0e-6}
     - {type: induction_motor, name: IM, R_s: 1, L_s: 1.0e-2, R_r: 1, L_r: 1.0e-2, L_m: 9.0e-3, phase_nodes: [u, v, x], neutral_node: nn}
     - {type: hysteretic_inductor, name: Lh, from: t, to: gnd, N_turns: 10, l_m: 0.1, A_core: 1.0e-4, Ms: 1.6e6, a: 1000, alpha: 1.0e-3, c: 0.2, k: 2000}
     - {type: power_mosfet, name: PM, drain: u, source: gnd, gate: c, K: 1.0, V_T: 3.0, C_gs: 1.0e-9}

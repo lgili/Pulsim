@@ -54,6 +54,8 @@ def _one_of_everything():
                    0.5, 1e-3, 3e-3, 0.05, 4, 1e-3)
     b.add_winding("W1", "q", "gnd", "mq", "gnd", 1.0)
     b.add_excess_loss("X1", "mq", "gnd", 0.01, 0.01)
+    b.add_transmission_line("T1", "r", "gnd", "r2", "gnd", Z0=50.0, delay=1e-6,
+                            model="bergeron")
     return b
 
 
@@ -78,3 +80,5 @@ def test_the_new_level_two_devices_are_named():
     assert kind("D4") == "StoredKind.LauritzenDiode"
     assert kind("M2_a") == "StoredKind.PmsmMna"
     assert kind("X1") == "StoredKind.ExcessLoss"
+    assert kind("T1") == "StoredKind.TransmissionLine"
+    assert kind("T1.b") == "StoredKind.TransmissionLine"

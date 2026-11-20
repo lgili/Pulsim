@@ -176,6 +176,20 @@ def _xfmr(on):
     return b
 
 
+def _tline(on):
+    # Bergeron line, matched source, far end into the RC tail: one front
+    # arrives after the delay (100 dt), the plateaus are compared.
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "s", "gnd", 10.0)
+    b.add_resistor("Rs", "s", "in", 1e3)
+    b.add_resistor("Rx", "x", "gnd", 1e6)
+    if on:
+        b.add_transmission_line("Tl", "in", "gnd", "x", "gnd", Z0=1e3,
+                                delay=1e-5, model="bergeron")
+    _rc_tail(b, "x")
+    return b
+
+
 def _coupled(on):
     b = p.CircuitBuilder()
     b.add_sine_voltage_source("V", "in", "gnd", 0.0, 10.0, 1e3)
@@ -340,6 +354,7 @@ CELLS = {
         b.add_excess_loss("Xd", "md", "gnd", 3e-3, 1e-2))),
         "o", "Xd", 2e-3, 2e-7, False),
     "IdealTransformer": (_xfmr, "o", "Td", 5e-4, 1e-7, False),
+    "TransmissionLine": (_tline, "o", "Tl", 5e-4, 1e-7, False),
     "VCCS": (_ctl(lambda b: b.add_vccs("Gd", "a", "gnd", "x", "gnd", 5e-3)),
              "o", "Gd", 5e-4, 1e-7, False),
     "CCCS": (_ctl(lambda b: b.add_cccs("Fd", "V", "x", "gnd", 5.0)),

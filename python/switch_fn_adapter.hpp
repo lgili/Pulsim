@@ -141,6 +141,7 @@ inline pybind11::dict trbdf2_stats_dict(const pulsim::solver::TrBdf2Stats& st) {
     d["n_gate_boundary_settles"] = st.n_gate_boundary_settles;
     d["h_max_basis"] = st.h_max_basis;
     d["n_source_breakpoints"] = st.n_source_breakpoints;
+    if (st.n_line_bound_steps) d["n_line_bound_steps"] = st.n_line_bound_steps;
     d["n_derivative_refreshes"] = st.n_derivative_refreshes;
     d["n_refresh_probes"] = st.n_refresh_probes;
     d["h_post_event_min"] = st.h_post_event_min;

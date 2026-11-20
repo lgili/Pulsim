@@ -366,6 +366,15 @@ inline void assemble_impl(const topology::Graph& graph,
                     pool.branch_var_id_for_source(branch.id, graph);
                 stamping::stamp_ideal_transformer(
                     S, b, x, coord, p_from, p_to, branch_var_id, tp.n);
+            } else if (src_kind ==
+                       DevicePool::StoredKind::TransmissionLine) {
+                // add-realistic-passives D18: v − Z0·i = E(t), E the other
+                // end's wave tau ago (b-source each solve, LineHistory).
+                const Index branch_var_id = source_var();
+                stamping::stamp_voltage_source(S, b, x, coord,
+                                                branch_var_id, Real{0});
+                S.coeffRef(branch_var_id, branch_var_id) -=
+                    pool.transmission_line_params(branch.id).Z0;
             } else {
                 const auto& p = bl != nullptr
                     ? *static_cast<const models::VoltageSource::Params*>(bl->params)
@@ -698,6 +707,7 @@ private:
             case SK::PulseVoltageSource:
             case SK::VCVS:
             case SK::IdealTransformer:
+            case SK::TransmissionLine:
                 e.var = pool.branch_var_id_for_source(br.id, graph);
                 break;
             default: break;

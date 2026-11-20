@@ -45,6 +45,21 @@ TEST_CASE("kKindCaps has one row per StoredKind, named as the enum",
     REQUIRE(stored_kind_name(DevicePool::StoredKind::VCCS) == "VCCS");
     REQUIRE(stored_kind_name(DevicePool::StoredKind::PwlCurrentSource)
             == "PwlCurrentSource");
+    // add-realistic-passives D18: the Bergeron line, the one LinearDelay kind
+    REQUIRE(stored_kind_name(DevicePool::StoredKind::TransmissionLine)
+            == "TransmissionLine");
+    {
+        const auto& tl = kKindCaps[static_cast<std::size_t>(
+            DevicePool::StoredKind::TransmissionLine)];
+        REQUIRE(tl.cls == SolveClass::LinearDelay);
+        REQUIRE(tl.supports(Engine::TrBdf2));
+        REQUIRE(tl.supports(Engine::AcSweep));
+        REQUIRE_FALSE(tl.supports(Engine::Dsed));
+        REQUIRE_FALSE(tl.supports(Engine::Bdf1));
+        std::size_t n_delay = 0;
+        for (const auto& row : kKindCaps) n_delay += row.cls == SolveClass::LinearDelay;
+        REQUIRE(n_delay == 1);
+    }
     for (const auto& row : kKindCaps) {
         INFO(row.name);
         REQUIRE(row.supports(Engine::FixedTrap));  // the reference engine
@@ -101,6 +116,28 @@ TEST_CASE("require_supported names the branch, the kind and the engine",
             REQUIRE(err.device() == "Cn");
             REQUIRE(err.kind() == "NonlinearCapacitor");
             REQUIRE(err.feature().empty());
+        }
+        REQUIRE(threw);
+    }
+    REQUIRE_NOTHROW(require_supported(b.graph(), b.pool(), Engine::FixedTrap));
+    REQUIRE_NOTHROW(require_supported(b.graph(), b.pool(), Engine::TrBdf2));
+}
+
+TEST_CASE("the exact engine and bdf1 refuse the Bergeron line by name",
+          "[layer4][capabilities]") {
+    builder::CircuitBuilder b;
+    b.add_voltage_source("V", "s", "gnd", 1.0);
+    b.add_resistor("Rs", "s", "k", 50.0);
+    b.add_transmission_line("T", "k", "gnd", "m", "gnd", 50.0, 1e-7);
+    b.add_resistor("RL", "m", "gnd", 50.0);
+    for (const Engine e : {Engine::Dsed, Engine::Bdf1}) {
+        bool threw = false;
+        try {
+            require_supported(b.graph(), b.pool(), e);
+        } catch (const UnsupportedError& err) {
+            threw = true;
+            REQUIRE(err.device() == "T");
+            REQUIRE(err.kind() == "TransmissionLine");
         }
         REQUIRE(threw);
     }

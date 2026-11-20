@@ -340,6 +340,9 @@ struct TrBdf2Stats {
     /// Steps clamped to a source breakpoint (a pulse or PWM-source
     /// corner) and landed on it.
     Size n_source_breakpoints = 0;
+    /// Accepted steps as long as the shortest transmission-line delay:
+    /// the line, not accuracy, set them (h_max is clamped to it, D18).
+    Size n_line_bound_steps = 0;
     /// Probe solves retaken at 100x the step because Newton did not
     /// converge (see `probe_solve`).
     Size n_probe_newton_retries = 0;
@@ -457,6 +460,24 @@ inline SimulationResult run_transient_trbdf2(
     std::optional<LossTracker> loss_tracker;
     if (!pool.device_losses().empty()) loss_tracker.emplace(graph, pool, "trbdf2");
     LossTracker* const lt = loss_tracker ? &*loss_tracker : nullptr;
+    // add-realistic-passives D18 (2): the Bergeron lines' committed past
+    // (null: no line, nothing reads or writes it). Read by every solve
+    // (accumulate_sources), written once per committed time
+    // (device_state_once, the funnel every commit site calls).
+    std::optional<pwl::LineHistory> line_history;
+    if (!pool.line_pairs().empty()) {
+        line_history.emplace(graph, pool);
+        if (opts.integrator == 1) {
+            const auto& lname = line_history->tau_min_name();
+            throw UnsupportedError("trbdf2", "integrator=esdirk43", lname,
+                "TransmissionLine",
+                "run_transient_trbdf2: integrator='esdirk43' does not run the "
+                "transmission line '" + lname + "' yet: its linear far-end "
+                "interpolation is second order, below the method's (D18). "
+                "Use integrator='trbdf2'.");
+        }
+    }
+    pwl::LineHistory* const lines = line_history ? &*line_history : nullptr;
 
     // ---- scope census ----
     // Nonlinear devices are fine: each stage becomes a Newton
@@ -569,8 +590,11 @@ inline SimulationResult run_transient_trbdf2(
         default: break;
         }
     }
-    const Real h_max = opts.h_max > Real{0} ? opts.h_max
-                                             : h_default;
+    // D18 (2): every stage reads the far end at most one delay back, which
+    // must be committed: h <= tau_min (circuits with a line only).
+    const Real h_max = std::min(opts.h_max > Real{0} ? opts.h_max : h_default,
+                                lines ? lines->tau_min()
+                                      : std::numeric_limits<Real>::infinity());
     // Span-free floors (update-trbdf2-error-control D3): every floor
     // scales with the resolved ceiling instead of t_end - t_start, as
     // the old span fraction of span_ref = 1000 * h_max. While the
@@ -584,6 +608,13 @@ inline SimulationResult run_transient_trbdf2(
         * std::max(std::abs(opts.t_start), std::abs(opts.t_end));
     const Real h_min = opts.h_min > Real{0}
         ? opts.h_min : std::max(t_ulp, span_ref * Real{1e-11});
+    if (lines && h_min > lines->tau_min()) {
+        const auto& lname = lines->tau_min_name();
+        throw UnsupportedError("trbdf2", "h_min", lname, "TransmissionLine", std::format(
+            "run_transient_trbdf2: h_min = {} s is longer than the delay {} s of the "
+            "transmission line '{}': a step could read its far end from the "
+            "future. Use h_min < delay.", h_min, lines->tau_min(), lname));
+    }
     // Probe steps are a DIFFERENT quantity from the step floor.
     // A probe is a throwaway solve whose only job is to pin (v, i)
     // and ask the diodes which way they conduct — nothing is
@@ -644,6 +675,7 @@ inline SimulationResult run_transient_trbdf2(
     Real ds_t = std::numeric_limits<Real>::quiet_NaN();
     const bool hook_ds = hooks != nullptr && hooks->has_device_state();   // run-invariant
     auto device_state_once = [&](Real tc, const Vector& xc) {
+        if (lines) lines->commit(tc, xc);   // D18: the one write (a repeat is ignored)
         if (!hook_ds || tc == ds_t) return;
         ds_t = tc;
         hooks->device_state(tc, xc, hs);
@@ -674,6 +706,14 @@ inline SimulationResult run_transient_trbdf2(
         hs.load(*resume_from, history, "run_transient_trbdf2");
         if (!resume_from->mask.empty()) {
             diodes.restore_on_bits(resume_from->mask);
+        }
+    }
+    if (lines) {   // D18 (4): the snapshot's past, else constant (seeded state) or at rest
+        if (resume_from != nullptr) {
+            lines->restore(resume_from->line_state, "run_transient_trbdf2",
+                           opts.t_start - resume_from->t);
+        } else {
+            lines->start(opts.t_start, x, initial_state.has_value());
         }
     }
 
@@ -742,6 +782,7 @@ inline SimulationResult run_transient_trbdf2(
             out += be_iwave;
         }
         if (lt) lt->inject(out);   // the heat owed, on every solve
+        if (lines) lines->inject(out, at_t);   // the waves tau ago (D18)
     };
 
     // ---- the single solve point ----
@@ -1738,10 +1779,26 @@ inline SimulationResult run_transient_trbdf2(
     // Earliest source corner strictly after t (+inf when none).
     // Earliest source breakpoint strictly after t + h_min/2, through the
     // queue's breakpoint source (asked again only once it is passed).
+    // D18 (2): a front a source corner c launches into a line arrives at
+    // c + tau: a breakpoint too, landed and restarted as a corner is (one
+    // hop; what follows is found by the line's kinks in tb_clamp).
+    std::vector<Real> line_taus;
+    if (lines) line_taus = lines->taus();
+    Real line_bp = -std::numeric_limits<Real>::infinity();   // cached, like the queue's
     auto next_breakpoint_after = [&](Real at_t) {
-        const Real bp = queue.next_after(bp_src, at_t + Real{0.5} * h_min);
+        const Real after = at_t + Real{0.5} * h_min;
+        Real bp = queue.next_after(bp_src, after);
         // "none" is not cached: the old per-step query asked again.
         if (!std::isfinite(bp)) queue.invalidate(bp_src);
+        if (!line_taus.empty()) {
+            if (!(line_bp > after)) {
+                line_bp = std::numeric_limits<Real>::infinity();
+                for (const Real tau : line_taus) {
+                    line_bp = std::min(line_bp, breakpoint_oracle(after - tau) + tau);
+                }
+            }
+            bp = std::min(bp, line_bp);
+        }
         return bp;
     };
 
@@ -2645,6 +2702,21 @@ inline SimulationResult run_transient_trbdf2(
                     landed_on_bp = true;
                 }
             }
+            // D18 (2): the estimate does not see a line (its port source is
+            // the interpolant of committed samples), so what the run resolved
+            // at one end is landed a delay later at the other: a committed
+            // sample where the wave's slope changes by more than stepping over
+            // it with h_max could interpolate within the
+            // tolerance (a reflection, a curved transient). The source stays
+            // continuous there: no restart (restarting at every kink cost
+            // accuracy and rejects; the corner + tau landings above restart).
+            if (lines) {
+                const Real lk = lines->next_kink_after(t, h_max, opts.rtol, opts.atol);
+                if (lk <= t + h) {
+                    h = std::max(lk - t, h_min);
+                    if (landed_on_bp && t + h < bp_t - h_min) landed_on_bp = false;
+                }
+            }
 
             // ---- gate-edge landing ----
             landed_on_edge = false;
@@ -2702,7 +2774,8 @@ inline SimulationResult run_transient_trbdf2(
             if (landed_on_edge && !hs.any() && t + h < t_stop
                 && t_stop - (t + h) <= Real{64} * h_min
                 && (!landed_on_bp || bp_t >= t_stop)
-                && !(t_next_tick > t && t_next_tick < t_stop - h_min)) {
+                && !(t_next_tick > t && t_next_tick < t_stop - h_min)
+                && (!lines || t_stop - t <= h_max)) {   // D18: never past tau
                 h = t_stop - t;
                 landed_on_edge = false;
                 gates_flat = true;
@@ -4316,6 +4389,10 @@ inline SimulationResult run_transient_trbdf2(
     result.final_snapshot.controller = lte_ctrl.save();
     result.final_snapshot.valid = true;
     if (lt) result.final_snapshot.loss_state = lt->save();
+    if (lines) {
+        result.final_snapshot.line_state = lines->save();
+        st.n_line_bound_steps = lines->n_at_bound();
+    }
     result.newton = newton_ws.take_counters();
     result.gate_mask_fn = nullptr;   // it reads this frame's diode state
     if (lt) lt->write(result);

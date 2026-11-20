@@ -204,7 +204,7 @@ def _normalise(recorders) -> "list[Recorder]":
 _P_KINDS = frozenset({
     "resistor", "inductor", "diode", "switch", "shockley_diode",
     "voltage_source", "pwm_voltage_source", "sine_voltage_source",
-    "pulse_voltage_source"})
+    "pulse_voltage_source", "transmission_line"})
 # Readings of these kinds exist only IN THE LOOP (item 1, DECISIONS 20):
 # the committed companion current of a capacitor (KCL-consistent), a Newton
 # law at the committed state, a VCVS's current column. A stored result has
