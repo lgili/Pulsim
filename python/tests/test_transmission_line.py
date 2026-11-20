@@ -254,6 +254,19 @@ def test_snapshot_without_a_line_pickles_as_before():
     assert list(s.line_state) == []
 
 
+def test_snapshot_layout_field_19_is_the_line_and_older_layouts_load():
+    # field 17 loss tracker, 18 recorder state, 19 the line's past (only with
+    # a line): a 20-field tuple and its 19 / 18 / 17-field prefixes all load
+    a = p.simulate(_line(10.0, load=200.0), t_end=2.35 * TAU, dt=1e-9, engine="pwl")
+    st = a.final_snapshot.__getstate__()
+    assert len(st) == 20 and list(st[19]) == list(a.final_snapshot.line_state)
+    for n in (20, 19, 18, 17):
+        s = type(a.final_snapshot).__new__(type(a.final_snapshot))
+        s.__setstate__(st[:n])
+        assert list(s.x) == list(a.final_snapshot.x)
+        assert (len(s.line_state) > 0) == (n == 20)
+
+
 def test_refusals_by_name():
     with pytest.raises(p.UnsupportedError, match="'T'") as ei:
         p.simulate(_line(Z0), t_end=TAU, dt=2 * TAU, engine="pwl")
