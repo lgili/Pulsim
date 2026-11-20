@@ -177,7 +177,7 @@ run with a dt: the rule is not engaged). auto+next: 132 agree / 2 disagree / 2 e
   correctly. Fix needed (localisation, not the output rule): a rigorous no-crossing test per scan
   interval — the chord bound of `exact_chord_step` applied to the predicate's row (|g − chord| ≤
   Σ_k |c·V_k| |z̈_k| ...): an interval whose end values exceed the bound in the same sign cannot
-  hold a root, otherwise it is split. Left open (new finding F-X-4).
+  hold a root, otherwise it is split. Left open (new finding F-X-5; F-X-4 is the orchestrator's id for the DC sample count below).
 * `switching/basic/snubber_rc.yaml` err_rms against the reference 2.16e-8 -> 6.92e-8 (3.2×, err_max
   1.97e-7 -> 1.96e-7, tol 1e-3; no truth for this circuit). NOT the floor: with `atol=1e-14` (the
   old floor rtol·atol = 1e-14, exactly) the cell is bit-equal (1 177 samples, 6.918e-8). From the
@@ -251,3 +251,58 @@ The answer to the brief's question: the 2e-10 s mode IS part of the cluster by t
 definition at every instant but the last 3 % of a run; the settle and the projection were right,
 t_res was wrong. Default path: the settle reads the same t_res (`settled_`), so oracle-less runs
 near their end may decide differently (measured in the byte compares below).
+
+## F-X-6 (new, OPEN) — a trial mode's projection survives the settle under the rule (forward converter)
+
+Found by item 3 (the six transformer circuits against their mpmath truths, conductance form,
+no dt). `switching/isolated/forward_converter.yaml`, exact_scoreboard `exact` (RMS of the samples
+against the truth): rule off 4.7e-8; `output_rtol` 1e-4 / 1e-5 / 1e-6: 0.0457 (V(out) up to
+0.175 V off, from 48 µs to ~65 µs). The same at the PR head's extension (0.04567, so not this
+session's change). Under the release profile (`auto+next`, branch form) the cell is 1.0e-9.
+
+**Trace.** Switch-off event at 48 µs: before it (SW on, D_rect on, D_fw off), I(L_o) = 5.620787 A
+(truth 5.620787). The truth then has D_fw ON 5e-14 s later; I(L_o) does not move. The engine's
+first sample after the event (2.2e-13 s) has I(L_o) = 6.206321 A (+0.585 A in 0.2 ps through 47 µH).
+The settle's first trial mode is (SW off, D_rect on, D_fw off), eigenvalues 1.12e11, 1.21e10,
+1.0e3 ± 6.3e3j, 0 (truth's own eigenbasis). The rule's projection cut there is
+1/(1e-6·12 µs) = 8.3e10: it projects out 1.12e11 and keeps 1.21e10. That partial spectral
+projection, computed independently in the truth's mpmath eigenbasis of the trial mode, gives
+I(L_o) = 6.206321 A and V(n_lo) = −3.08e6 V: the engine's number to 7 digits. D_fw then turns on
+(mask changed), the final mode's fast mode (5.13e10) is below the cut, and nothing undoes the
+trial mode's jump: `settle_and_project_` restarts from the pre-event state only when the reinit
+log grew (`track && changed && reinit_log_size_() > mark`). The rule-off cut (100/dt_max)
+projects both fast modes; the same truth-basis computation gives 0.776 A there, so rule-off is
+right for another reason (not traced).
+
+**Fix needed (not made: it changes `settle_and_project_` on the default path too).** A trial
+mode's projection must not survive a mask change: on `changed`, restart from `settle_x0_` and
+project in the settled mode only, whatever the reinit log says; or a cut that never splits a
+cluster of g_off modes. Either needs the byte compares and the scoreboard on the rule-off path.
+
+## Session 2 — item 3 and verification on 44ab0a81
+
+* **Event-instant states across `output_rtol`** (`.scratch/item3/evstates.py`, every
+  `benchmarks/circuits` netlist the exact engine runs without dt: 99 ran, 27 refused/unmapped):
+  event times and the full states at them are bit-identical for 1e-4 / 1e-5 / 1e-6 on all 99,
+  the six transformer / coupled-inductor circuits included. The brief's open point of
+  DECISIONS (6.7e-8 on the flyback) is closed by F-6-7: the steps no longer depend on the grid.
+* **Rule on vs rule off** (same netlists): equal event counts and states within 1e-12 except
+  ll06_buck_vcswitch (7.9e-3 of scale: rule off is the less accurate one, exact 6.3e-6 vs 8.8e-12),
+  cuk 3.3e-11, diode_rectifier 1.3e-11, sepic 3.2e-12, full_bridge_dc 1.6e-12,
+  diode_clamp_overvoltage 1.4e-12; event COUNT differs on cl_boost_pi, half_bridge_transformer_dc,
+  boost_pfc_open_loop, flyback, forward (the rule resolves modes rule-off projects).
+  Against the mpmath truth (`exact`, RMS of the samples): half_bridge_transformer_dc 3.0e-6 off →
+  8.5e-13 on; flyback 2.1e-6 → 3.9e-7; cuk 5.5e-15 → 7.1e-15; sepic 4.6e-14 → 4.5e-14;
+  forward 4.7e-8 → 0.0457 (F-X-6, open, pre-existing at the PR head); active_clamp_forward
+  refuses under the rule (F-X-5, open).
+* **Default path**: goldens identical; dsed bit-identity 34/36 against `.scratch/bitid_pr.npz`
+  with bridge1_vf07/dsed different — the PR head's own extension (so_27c00520) gives the same
+  34/36 against that file, and the tip's six dsed bit-identity circuits are np.array_equal to the
+  PR head's (`.scratch/b1cmp.py`): no default number moved, the F-X-1 `last_time_event_t_` change
+  included.
+* ladder500_rc: 13.1 s vs 8.1 s rule off (1.6×), 3 072 samples, no cap, no warning. ladder100:
+  2 083 samples, 0.78 s. `benchmarks/tools/counters.py` finishes (exit 0).
+* F-X-1 independent truth: the local mpmath solve of the ten bridges around 19.969 ms does not
+  finish (61 diodes, 91-state augmented modes: mpmath QR fails to converge at 20 digits; > 2 h at
+  30 digits). The event at 19.96895575516 ms is backed by the rule-off run (event times to
+  9.8e-13 s, end state 1e-12), not by an independent truth.
