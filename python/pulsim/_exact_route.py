@@ -34,9 +34,12 @@ def segments_from_exact(exact: dict, switch_states: Any) -> list[dict]:
     runs: dict[tuple, int] = {}
     if S is not None and S.ndim == 2 and len(S):
         # a row holds the mask of the interval ending at it; a segment is a maximal run of rows
-        starts = np.flatnonzero(np.r_[True, np.any(S[1:] != S[:-1], axis=1)])
-        for i in starts:
-            key = tuple(bool(v) for v in S[i])
+        # (row 0, then each row whose mask differs from the previous one; ufuncs and
+        # tolist(), not np.r_ / np.any / per-row generators: simulate() builds this
+        # record on every exact run)
+        starts = (np.logical_or.reduce(S[1:] != S[:-1], axis=1).nonzero()[0] + 1).tolist()
+        starts.insert(0, 0)
+        for key in map(tuple, S[starts].tolist()):
             runs[key] = runs.get(key, 0) + 1
     for m in exact.get("masks", []):
         tier, detail = int(m["tier"]), str(m.get("reason", ""))
@@ -49,7 +52,7 @@ def segments_from_exact(exact: dict, switch_states: Any) -> list[dict]:
             "kind": "",
             "detail": "" if ok else detail,
             "tier": tier,
-            "n_segments": runs.get(tuple(bool(v) for v in m["mask"]), 0),
+            "n_segments": runs.get(tuple(map(bool, m["mask"])), 0),
         })
     return rows
 

@@ -25,8 +25,11 @@ pytestmark = pytest.mark.skipif(
     or sys.version_info[:2] != (3, 13),
     reason="local bytecode gate (CPython 3.13 on the developer Mac)")
 
-# bytecodes per warm call; measured 2834 / 3683 (2026-11-19), ~2 % margin
-_CEILING = {"pwl": 2890, "trbdf2": 3760}
+# bytecodes per warm call; measured 2834 / 3683 (2026-11-19), ~2 % margin.
+# The release (update-number-changing-release group H): pwl 2800, trbdf2 3622,
+# and the no-dt call, which the release routes to the exact engine, 3634
+# against the no-dt ceiling (3760, measured on trbdf2 before the release).
+_CEILING = {"pwl": 2890, "trbdf2": 3760, "exact": 3760}
 
 _SCRIPT = r"""
 import gc, sys, warnings
@@ -42,6 +45,8 @@ b.add_resistor("R", "out", "gnd", 5.0)
 sw = p.make_pwm_switch_fn(frequency=50e3, duty=0.4, switch_idx=0, num_switches=2)
 if sys.argv[1] == "pwl":
     call = lambda: p.simulate(b, 2e-6, dt=1e-7, switch_fn=sw)
+elif sys.argv[1] == "exact":   # no dt, no engine: the release's route (the exact engine)
+    call = lambda: p.simulate(b, 4e-5, switch_fn=sw)
 else:   # engine named: since the release a no-dt linear circuit routes to the exact engine
     call = lambda: p.simulate(b, 4e-5, switch_fn=sw, engine="trbdf2")
 n = [0]
@@ -59,11 +64,7 @@ print(n[0])
 """
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "release finding F-4-6: the fixed overhead grew past the ratchet: pwl 3056 / trbdf2 3859 "
-    "bytecodes on the release defaults (2950 / 3767 with every legacy option pinned; "
-    "ceilings 2890 / 3760, measured 2834 / 3683 before the release merge)"))
-@pytest.mark.parametrize("engine", ["pwl", "trbdf2"])
+@pytest.mark.parametrize("engine", ["pwl", "trbdf2", "exact"])
 def test_simulate_fixed_overhead_in_bytecodes(engine):
     env = dict(os.environ,
                PYTHONPATH=str(pathlib.Path(p.__file__).resolve().parents[1]))
