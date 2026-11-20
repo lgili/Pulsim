@@ -646,6 +646,11 @@ public:
                     if (fast_k_ < fast_t_.size()) {
                         h_ex = std::min(h_ex, fast_t_[fast_k_] - t);
                     }
+                    // the junction loop's heat lands at each step's end (state_kick_), so a
+                    // sample read inside a step would miss it: there the rule's samples are
+                    // steps (0.04 K of a 7.5 K rise missed otherwise)
+                    const bool out_steps = output_rtol_ > Real{0} && static_cast<bool>(state_kick_);
+                    if (out_steps) h_ex = output_step_(t, x, h_ex, result.n_events, t_target);
                     // no sliver step short of the edge (scheduler_auto.hpp)
                     if (h_ex < t_target - t && near_time(t + h_ex, t_target)) {
                         h_ex = t_target - t;
@@ -664,7 +669,7 @@ public:
                     // last stored sample covers this step too nothing is stored; else that
                     // start is stored first. out_defer: the step's end is covered (certified).
                     bool out_defer = false;
-                    if (output_rtol_ > Real{0}) {
+                    if (output_rtol_ > Real{0} && !out_steps) {
                         const Real t1 = evt ? evt->t_event : t + h_ex;
                         if (output_pend_) {
                             if (!evt) {
@@ -672,6 +677,13 @@ public:
                                 const Real d = output_step_(ts, result.states.back(), t1 - ts,
                                                             result.n_events, t_target, false);
                                 out_defer = output_certified_ && !(d < t1 - ts);
+                                // the chord ends at the run's chained state, not at the flow
+                                // from ts the bound saw: their gap must stay at rounding level
+                                if (out_defer) {
+                                    advance_(ts, result.states.back(), t1 - ts, output_end_);
+                                    out_defer = ((x_new_ - output_end_).cwiseAbs().array()
+                                                 <= Real{1e-3} * output_tol_.array()).all();
+                                }
                             }
                             if (!out_defer) output_flush_(t, x, result);
                         }
@@ -720,11 +732,12 @@ public:
                     ++result.n_accept;
                     ++result.n_exact_steps;
                     hook_accepted_(t_step0, t, step_fired ? x_pre_event : x, step_mask);
-                    if (state_kick_) state_kick_(x, step_fired ? &x_pre_event : nullptr);
+                    // a kick (heat on the thermal states) is a jump the LTI chord does not see
+                    const bool kicked = state_kick_ && state_kick_(x, step_fired ? &x_pre_event : nullptr);
                     ++step_idx;
                     // F-X-4: under the output rule an end the chord from the last stored
                     // sample covers is not stored (stored later only if a chord needs it)
-                    if (out_defer && out_transparent && t < t_end && !near_time(t, t_end)) {
+                    if (out_defer && out_transparent && !kicked && t < t_end && !near_time(t, t_end)) {
                         output_pend_ = true;
                     } else if (step_idx % store_every_ == 0) {
                         output_pend_ = false;
@@ -2428,8 +2441,13 @@ private:
             // F-X-1: a poll landing of a gate that names no edge, which changed
             // nothing, is not a time event: as one it made resolved_scale_ the time
             // left to t_end, so the parasitic cluster shrank as the run neared its
-            // end (ten bridges: a 2e-10 s mode left the cluster 31 us before t_end)
-            if (t_event == poll_t_) last_time_event_t_ = prev_time_event_t;
+            // end (ten bridges: a 2e-10 s mode left the cluster 31 us before t_end).
+            // A gate whose next_edge_after is itself a poll boundary (a Python gate's
+            // EdgeSearch: has_edge_oracle() false) lands there the same way.
+            bool polled = t_event == poll_t_;
+            if constexpr (requires { switch_fn_.has_edge_oracle(); })
+                polled = polled || !switch_fn_.has_edge_oracle();
+            if (polled) last_time_event_t_ = prev_time_event_t;
             return;
         }
 

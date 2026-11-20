@@ -306,3 +306,45 @@ cluster of g_off modes. Either needs the byte compares and the scoreboard on the
   finish (61 diodes, 91-state augmented modes: mpmath QR fails to converge at 20 digits; > 2 h at
   30 digits). The event at 19.96895575516 ms is backed by the rule-off run (event times to
   9.8e-13 s, end state 1e-12), not by an independent truth.
+
+## Session 2 reviewer (fresh context, read only) — fixed / left
+
+1. FIXED (high): a deferred end could hide the loss port's kick (heat lands after the cover
+   check). A kicked end is never deferred. Underneath it the reviewer's scenario found a
+   session-1 regression: under the rule with heat the samples read INSIDE a step missed the
+   step's heat (RL chopper + RC junction, closed form: 0.0399 K off on a 7.47 K rise; PR head
+   1.35e-13). With a state kick the rule's samples are steps again (the PR head's behaviour for
+   that case only): 1.35e-13 restored (test `test_fx4_a_heated_step_end_is_stored_under_the_rule`).
+2. FIXED (high): the F-X-1 restore keyed on the oracle-less poll only; a plain Python gate
+   (EdgeSearch, `has_edge_oracle()` false) lands on finite poll boundaries the same way. The
+   restore now also covers `!has_edge_oracle()`. Test: the ten-bridge F-X-1 test with a Python
+   gate. Default path: dsed Python-gate runs of buck_ccm / buck_dcm / boost / bridge1_vf07 /
+   bridge3 np.array_equal to the PR head's extension (`.scratch/pygate_cmp.py`); goldens and the
+   dsed bit-identity set as before.
+3. LEFT (medium): with no edge known, t_res is still "t_end − last real event": the parasitic cut
+   depends on t_end. Needs a schedule- or ceiling-based scale; only the rule-off run backs F-X-1.
+4. FIXED (medium): a deferral is accepted only if the run's chained state at the step end is
+   within 1e-3 of the tolerance of the flow from the last stored sample (one O(n²) advance per
+   deferred step, under the rule only).
+5. LEFT (low): the cover check does a full output_step_ (wasted work when it fails).
+6. LEFT (low, design): the absolute floor is one scalar atol for every state kind.
+7. LEFT (low): `require_after` lets NaN through as "no edge".
+   The KPI change is now in the CHANGELOG (it moves every engine's T_j KPI to the closed form).
+
+### Rehearsal re-run (session 2, on 44ab0a81: F-X-4 deferral in)
+
+auto+next 123 agree / 11 disagree / 2 error (base 133 / 2 / 1); dsed:output_grid and dsed+next
+120 / 2 disagree / 14 refused (base 122 / 0 / 14). The ACCEPTANCE "no cell worse by > 2×" IS NOT
+MET, and the cause is the F-X-4 deferral (the after-floor run a5b9a485 had none of these):
+* 9 DC / resistive cells (current_divider_3way, ll01, voltage_divider_3stage, bridge_resistive_pure,
+  bode_rlc_low_pass, stiff_rlc, pulse_voltage_rl, analytic wheatstone, pwl_diode_drop) now store
+  2 samples, err_max 0.0; the harness drops each trace's first sample, its err_rms is NaN and the
+  cell is "disagree (undersampled)". A harness limit, not an error, but an outcome change.
+* 25 cells agree with err_rms up to ~10× the base (rc_step 4.3e-7 → 5.9e-6, tol 1e-3): the base
+  read the 1 µs poll grid's extra ends. Checked against the truth on diode_half_wave_rl_load:
+  every sample exact (5.7e-16), the worst chord midpoint 9.96e-5 on a 10.3 V range =
+  0.97·rtol·range: the rule's promise, met; the scoreboard `exact` there 4.9e-6 → 8.1e-4
+  is dominated by the event jumps.
+Decision needed (orchestrator): F-X-4 (store only what the tolerance needs) and the rehearsal's
+2× bar cannot both hold; either the harness learns a 2-sample exact trace and the 2× bar is read
+against the rule's tolerance, or F-X-4 is reverted to "every step end stored".

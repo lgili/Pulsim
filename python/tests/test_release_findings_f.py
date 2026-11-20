@@ -182,7 +182,8 @@ def _branch_bridges(n):
         p.CircuitBuilder.add_diode = orig
 
 
-def test_fx1_ten_branch_form_bridges_run_under_the_rule():
+@pytest.mark.parametrize("gate", ["constant", "python"])
+def test_fx1_ten_branch_form_bridges_run_under_the_rule(gate):
     """F-X-1: refused at 19.969 ms (Db8b OFF 0.73 V forward after Db0b chattered 18 times in
     43 ns), and only for t_end = 0.02: t_end = 0.0205 / 0.025 / 0.03 ran. The parasitic cut is
     1/(1e-6 t_res), t_res = next time event - last time event; with no gate oracle the next is
@@ -190,9 +191,12 @@ def test_fx1_ten_branch_form_bridges_run_under_the_rule():
     run (31 us there) and the common mode L/R_g = 2e-10 s left the cluster near the end. A poll
     landing that changes nothing is not a time event: the rule's run takes the rule-free run's
     events (111, one at 19.96895575516 ms, no chatter) to 1e-12 s and its end state to 1e-12 of
-    each state's peak (measured 1e-12 V on the bus)."""
-    on = _run(_branch_bridges(10), 0.02, output_rtol=1e-5)
-    off = _run(_branch_bridges(10), 0.02)
+    each state's peak (measured 1e-12 V on the bus). 'python': a plain Python gate (no
+    next_edge_after: its EdgeSearch answers a finite poll boundary) lands the same way."""
+    n = _branch_bridges(10).graph.num_switches
+    kw = {} if gate == "constant" else {"switch_fn": lambda t: p.SwitchStateMask(n)}
+    on = _run(_branch_bridges(10), 0.02, output_rtol=1e-5, **kw)
+    off = _run(_branch_bridges(10), 0.02, **kw)
     assert on.times[-1] == pytest.approx(0.02)
     eon, _, fon = _event_rows(on)
     eoff, _, foff = _event_rows(off)
@@ -262,6 +266,27 @@ def test_fx4_deferred_ends_keep_the_rule_on_an_rc():
     tm = 0.5 * (t[:-1] + t[1:])
     err = np.abs(0.5 * (v[:-1] + v[1:]) - 5.0 * (1.0 - np.exp(-tm / 1e-3)))
     assert err.max() <= rt * 5.0, (err.argmax(), err.max())
+
+
+def test_fx4_a_heated_step_end_is_stored_under_the_rule():
+    """Review of F-X-4: the loss port's kick moves the junction at each accepted step after the
+    deferral's cover check, which saw the heat-free flow; a kicked end is stored. T_j at every
+    sample off a gate edge against the closed form (test_exact_junction_loop), rule on, at the
+    rule's tolerance of the rise."""
+    from .test_device_losses_variable_step import FSW, T_END, _rl_chopper
+    from .test_exact_junction_loop import C_TH, R_TH, T_AMB, _rc_truth
+    b, fn = _rl_chopper(thermal=(R_TH, C_TH))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(b, T_END, switch_fn=fn, engine="dsed", output_rtol=1e-5)
+    t = np.asarray(r.times)
+    tj = np.asarray(r.v("tj"))
+    edge = 0.5 / FSW
+    off = np.abs(t / edge - np.round(t / edge)) > 1e-6
+    truth = _rc_truth(t[off])
+    rise = truth.max() - T_AMB
+    assert rise > 1.0
+    np.testing.assert_allclose(tj[off], truth, rtol=0, atol=1e-5 * rise)
 
 
 def test_fx4_thermal_kpi_is_exact_on_any_sample_grid():
