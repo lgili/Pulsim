@@ -53,6 +53,7 @@ where the book was not at hand, and say so):
 """
 from __future__ import annotations
 
+import functools
 import math
 
 import mpmath as mp
@@ -347,3 +348,134 @@ def spwm_builder(Vd, R, L, gon, goff, i0):
         b.add_inductor("L", "m", "B", L, i0=i0)
         return b
     return build
+
+
+# ------------------------------------------------------------ dc-dc cases --
+# name: (topology factory args, g_on, g_off, f, D, dt). The buck is the
+# repo's benchmarks/circuits/switching/buck/textbook_erickson_buck_ccm.yaml
+# (Vin 24 V, D 0.5, 50 kHz, 47 uH, 100 uF, g 200 / 1e-6 S) at R = 10 ohm
+# (the file's load) and at R = 5 ohm.
+
+DCDC = {
+    "buck_R10": ("buck", (24.0, 47e-6, 100e-6, 10.0), 200.0, 1e-6, 50e3, 0.5),
+    "buck_R5": ("buck", (24.0, 47e-6, 100e-6, 5.0), 200.0, 1e-6, 50e3, 0.5),
+    "buckboost_ccm": ("buckboost", (12.0, 100e-6, 100e-6, 10.0), 1e3, 1e-9, 100e3, 0.6),
+    "buckboost_dcm": ("buckboost", (12.0, 100e-6, 100e-6, 200.0), 1e3, 1e-9, 100e3, 0.6),
+    "boost_RL": ("boost", (12.0, 47e-6, 47e-6, 10.0, 0.1), 1e3, 1e-9, 50e3, 0.4),
+}
+DT_DCDC = 1e-8
+N_PER = 4
+TOPO = {"buck": _buck, "buckboost": _buckboost, "boost": _boost}
+
+
+@functools.lru_cache(maxsize=None)
+def dcdc_truth(name):
+    kind, args, gon, goff, f, D = DCDC[name]
+    return dcdc_orbit(TOPO[kind](*args), gon, goff, f, D)
+
+
+def dcdc_builder(name):
+    kind, args, gon, goff, f, D = DCDC[name]
+    tr = dcdc_truth(name)
+    i0, c0 = float(tr["iL0"]), float(tr["vC0"])
+
+    def build():
+        b = p.CircuitBuilder()
+        b.add_voltage_source("Vin", "vin", "gnd", args[0])
+        if kind == "buck":
+            b.add_switch("S", "vin", "sw", gon, goff)
+            b.add_diode("D", "gnd", "sw", gon, goff)
+            b.add_inductor("L", "sw", "out", args[1], i0=i0)
+        elif kind == "buckboost":
+            b.add_switch("S", "vin", "x", gon, goff)
+            b.add_diode("D", "out", "x", gon, goff)
+            b.add_inductor("L", "x", "gnd", args[1], i0=i0)
+        else:
+            b.add_resistor("RLw", "vin", "m", args[4])
+            b.add_inductor("L", "m", "x", args[1], i0=i0)
+            b.add_switch("S", "x", "gnd", gon, goff)
+            b.add_diode("D", "x", "out", gon, goff)
+        b.add_capacitor("C", "out", "gnd", args[2], c0=c0)
+        b.add_resistor("R", "out", "gnd", args[3])
+        return b
+    return build
+
+
+def engine_tol(cfg, r):
+    """Relative tolerance of an engine at step ratio r = dt / T (module
+    docstring): first order 10 r, second order 10 r^2, error-controlled
+    50 rtol (local control, accumulated over the run's steps), exact engine
+    10 output_rtol (interpolated window means)."""
+    return {"pwl": 10 * r, "pwl_restart": 10 * r * r, "trbdf2": 50e-6,
+            "esdirk43": 50e-6, "dsed": 1e-5}[cfg]
+
+
+def _ripple_vc(tr, name, n=400):
+    """Peak-to-peak output ripple of the orbit (sampled, n per mode)."""
+    kind, args, gon, goff, f, D = DCDC[name]
+    A, _ = TOPO[kind](*args)
+    gon, goff = mp.mpf(gon), mp.mpf(goff)
+    x = mp.matrix([tr["iL0"], tr["vC0"], 1])
+    vs = []
+    for Am, h in ((A(gon, goff), tr["DT"]), (A(goff, gon), tr["td"]),
+                  (A(goff, goff), tr["T"] - tr["DT"] - tr["td"])):
+        E = mp.expm(Am * h / n)
+        for _ in range(n):
+            x = E * x
+            vs.append(x[1])
+    return max(vs) - min(vs)
+
+
+def test_truth_buck_ccm_matches_erickson():
+    """Erickson ch. 2: V = D Vg, dI_pp = (Vg - V) D Ts / L, dV_pp =
+    dI_pp / (8 f C). R = 5 ohm: K = 2 L / (R Ts) = 0.94 > K_crit = 0.5."""
+    tr = dcdc_truth("buck_R5")
+    assert tr["mode"] == "CCM"
+    V, dI, dV = 12.0, (24 - 12) * 0.5 / 50e3 / 47e-6, (24 - 12) * 0.5 / 50e3 / 47e-6 / (8 * 50e3 * 100e-6)
+    assert dI == pytest.approx(2.5532, rel=1e-4) and dV == pytest.approx(0.063830, rel=1e-4)
+    assert float(tr["vC_mean"]) == pytest.approx(V, rel=0.02)
+    assert float(tr["iL_pk"] - tr["iL0"]) == pytest.approx(dI, rel=0.02)
+    assert float(_ripple_vc(tr, "buck_R5")) == pytest.approx(dV, rel=0.02)
+
+
+def test_truth_buck_yaml_point_is_dcm():
+    """FINDING F-T-1 (benchmark, not engine): the repo's "CCM" buck
+    (textbook_erickson_buck_ccm.yaml, R = 10 ohm) is in DCM:
+    K = 2 * 47e-6 * 50e3 / 10 = 0.47 < K_crit = 1 - D = 0.5. Its steady
+    state follows Erickson ch. 5, M = 2 / (1 + sqrt(1 + 4 K / D^2)) =
+    0.51035 (12.248 V), not D Vg = 12 V (2.1 % off, outside the proposal's
+    +-2 %), and the inductor current is zero for 0.42 us of each period."""
+    tr = dcdc_truth("buck_R10")
+    assert tr["mode"] == "DCM"
+    K, D = 2 * 47e-6 * 50e3 / 10.0, 0.5
+    M = 2 / (1 + math.sqrt(1 + 4 * K / D**2))
+    assert float(tr["vC_mean"]) == pytest.approx(M * 24, rel=0.02)
+    assert abs(float(tr["vC_mean"]) / 12.0 - 1) > 0.02
+
+
+def test_truth_buckboost_matches_erickson():
+    """Erickson ch. 5: CCM M = -D / (1 - D) for K > (1 - D)^2 = 0.16;
+    DCM M = -D / sqrt(K)."""
+    ccm, dcm = dcdc_truth("buckboost_ccm"), dcdc_truth("buckboost_dcm")
+    assert (ccm["mode"], dcm["mode"]) == ("CCM", "DCM")
+    assert float(ccm["vC_mean"]) == pytest.approx(-12 * 0.6 / 0.4, rel=0.02)
+    K = 2 * 100e-6 * 100e3 / 200.0
+    assert float(dcm["vC_mean"]) == pytest.approx(-12 * 0.6 / math.sqrt(K), rel=0.02)
+
+
+def test_truth_boost_matches_erickson():
+    """Erickson ch. 3: V / Vg = (1 / D') / (1 + R_L / (D'^2 R))."""
+    tr = dcdc_truth("boost_RL")
+    assert tr["mode"] == "CCM"
+    Dp = 0.6
+    assert float(tr["vC_mean"]) == pytest.approx(12 / Dp / (1 + 0.1 / (Dp**2 * 10)), rel=0.02)
+
+
+@pytest.mark.parametrize("cfg", list(ENGINES))
+@pytest.mark.parametrize("name", list(DCDC))
+def test_dcdc_engine_matches_orbit(name, cfg):
+    kind, args, gon, goff, f, D = DCDC[name]
+    tr = dcdc_truth(name)
+    tol = engine_tol(cfg, DT_DCDC * f)
+    err, ok = check_dcdc(tr, dcdc_builder(name), "S", f, D, cfg, DT_DCDC, N_PER, tol)
+    assert ok, f"{name} on {cfg}: relative errors {err} > {tol:.1e}"
