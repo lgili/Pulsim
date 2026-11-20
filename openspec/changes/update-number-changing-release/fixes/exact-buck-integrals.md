@@ -461,3 +461,20 @@ port energies + period map integrals 74/74 arrays; DC recorder statistics
   a PWM source's level, a sine with f ≤ 0, mixed PWM + ramping pulse —
   left untested (no truth built for them here).
 - nits: kNoFourth message updated; unused exo_may_ramp removed.
+
+## Cost (instructions retired, min of six, base 20affaf9 rebuilt with the tip's flags)
+
+20 single-phase bridges × 20 ms, engine='exact'. A process includes the
+import (n=0: base 3.13e9, tip 2.31e9 — the base runs from a `git archive`
+tree; the difference is in the import, not in the engine), so per run =
+(total − import) / 20.
+
+| | base | tip | |
+|---|---|---|---|
+| no recorder, per run | 1.705e9 | 1.703e9 | −0.2 % |
+| one recorder (4 probes, window + period), per run | 1.928e9 | 3.463e9 | +80 % |
+
+The recorder's own share went from 0.22e9 to 1.76e9 per run: the exact
+∫ / rms with the source modes (n + 2 states per piece, a Gramian per new
+step length on the Padé tier) instead of the trapezoid. R3 (a cache of
+the doubled Gramian per (mask, h)) is where that would come back.
