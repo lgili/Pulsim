@@ -784,3 +784,28 @@ events gate).
 4. The three-phase bridge: fix the mode guard's judge horizon (above), then the strict xfail of
    fix/core-exact-integrals-sources with the two truth instants.
 5. Item 2's list above on the final tip; then item 4 only if context remains.
+
+## Session 6 — acceptance of the output rule (verification only; logs in `.scratch/f7/`)
+
+Tip at start dde945bd (extension = e88a06dc's C++, `build/python/pulsim` is a symlink to
+`python/pulsim`, the same .so).
+
+* **Rule off unchanged.** Goldens ALL IDENTICAL; dsed bit-identity 36/36 default and 36/36
+  shadow (`bitid_goldens_ruleoff.log`). `dsedall` tip vs 075feac9: 243 same, 0 moved
+  (`dsedall_cmp_vs_075.log`).
+* **`pulsim_core_dsed_tests` (Eigen 5, `.scratch/build-ctest`)**: first build of the two new
+  cases. The `chord_row_bound` case PASSES. The recovered-row case (c83fe230) FAILED at its
+  precondition (`e.tier == 1`: 3 — `[0 1; -4e12 -2e5]` has a near-defective eigenbasis, the
+  case had never been built). Fixed in the test (f8babadc: same ring, x2 scaled by 1/ω; the
+  bound still binds, worst > 0.5 every step). After: 144 cases / 41 365 assertions pass
+  (`ctest_dsed_run_eigen5.log`, `..._after_testfix.log`).
+* **NEW, OPEN, blocks the full pytest — ten paralleled bridges under the rule.**
+  `test_release_findings_f.py::test_f67_event_states_do_not_depend_on_the_output_grid` (ten
+  bridges, 3 ms, output_rtol 1e-4/1e-5/1e-6) did not finish in 18 CPU-minutes (killed).
+  `bridges10.py` (1e-4 s, output_rtol 1e-5): EVERY one of the 100 intervals capped
+  (`n_output_capped` 100, 409 600 rule samples, 409 701 stored), 2.386e12 instructions —
+  identical on base075 (075feac9, 2.386e12) and on the tip, so it is NOT e88a06dc; the test
+  passed in session 3's full pytest on ffdf5007, so it came with session 4's recovered-row
+  bound (`bridges10_1e-5.log`). Likely cause (not confirmed in source): a diode node between
+  two OFF diodes reads i(L)/(2·g_off); the fast mode's F share 2|q z| is d-independent, so no
+  chord certifies while it is above the node's tolerance. Not a few-line fix: reported.
