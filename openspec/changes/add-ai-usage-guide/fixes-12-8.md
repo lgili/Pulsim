@@ -168,3 +168,19 @@ dead time all classify correctly). Left open, with what each needs:
    Q1), the hard edge of a soft commutation lands on the switch without
    a spec, so that energy is not reported at all. Correct per device;
    give both switches of a leg their tables.
+
+## Verification run (tip)
+
+Extension build (Release+LTO); C++ `pulsim_core_thermal_tests` (114
+assertions) and `pulsim_core_dsed_tests` (41265) on Eigen 5, pass;
+`test_commutation_edge_rule.py` 23 pass; the 29 loss / thermal / design /
+examples-claims / guide / doc files pass; ONE full pytest from
+`python/tests`: 6214 passed, 110 skipped, 8 xfailed, 1 failed
+(`test_exact_route` three_phase_diode_rectifier: a repo-root-relative
+YAML path; passes from the repo root, 5/5). Byte compares vs 01ea9c7d:
+`pwl_identity --goldens --reference` 379/379 identical; 18 loss-port runs
+(VSI + leg, dead 0 / 1 us, pwl / trbdf2 / dsed) times, states,
+switch_states identical. Ruff clean; stubs regenerated, `--check` clean;
+`openspec validate add-ai-usage-guide --strict` and
+`add-in-kernel-event-losses --strict` valid. NOT run: full ctest, Eigen
+3.4.0, g++, trbdf2_identity, the dsed bit-identity set.
