@@ -116,10 +116,25 @@ struct StepLines {
     // from x0+ for the lines (an ideal element's jump): not the run's i_prev
     std::vector<Real> c_end;
     bool end_own = false;
+    // F-SB-1: the RIGHT LIMIT of an event as a state value, x(t_e+) (the
+    // result's right_limit_* / inner_events), apart from the quadrature
+    // starts above (x_start, right[]: the lines' business, never a limit).
+    // `rl_*`: run_restart's scratch; `rl_start*`: at the step start, set
+    // only where something happens; `rl_right*`: per inner event; `held`:
+    // the mixed step's held-pieces row (quadrature, not an event).
+    Vector rl_x, rl_start;
+    topology::SwitchStateMask rl_m, rl_m_start;
+    // rl_left / rl_start_left: a continuity point (a located V_f = 0
+    // crossing alone): the row is the left value
+    bool rl_ok = false, rl_start_ok = false, rl_left = false, rl_start_left = false;
+    std::array<Vector, kMax> rl_right;
+    std::array<topology::SwitchStateMask, kMax> rl_m_right;
+    std::array<bool, kMax> rl_right_ok{}, held{};
     void clear() noexcept {
         start = false;
         n = 0;
         end_own = false;
+        rl_start_ok = false;
     }
     [[nodiscard]] bool empty() const noexcept { return !start && n == 0; }
 };

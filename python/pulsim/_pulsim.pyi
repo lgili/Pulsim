@@ -413,6 +413,11 @@ class SimulationResult:
         Steps taken as SDIRK(2,2) restart steps (discontinuity_restart). 0 with the rule off.
         """
     @property
+    def n_right_limit_fallbacks(self) -> int:
+        """
+        Restart rule: event right limits in which an unknown failed the epsilon-limit smoothness test at every epsilon and took the fallback (the impulse rule's x0+, else the left value). 0 with the rule off.
+        """
+    @property
     def n_rk45_steps(self):
         """
         Exact engine only: res.stats.n_rk45_steps.
@@ -459,7 +464,7 @@ class SimulationResult:
     @property
     def right_limit_states(self) -> typing.Any:
         """
-        (len(right_limit_index), n_states): the right limit of each of those samples (where the next step starts). On the fixed engine under the restart rule it is the start of the line whose trapezoid is the restart step's own SDIRK quadrature (exact for the step's integral of a quantity linear in the state; as a value the right limit to second order, to first order after a kept backward-Euler stage 2).
+        (len(right_limit_index), n_states): the right limit of each of those samples: the state value one instant after the event (each capacitor / inductor state continuous, or moved by an ideal element's jump; the other unknowns solved in the event's mode). Recorded only at events; on the fixed engine under the restart rule never at a restart window's later steps nor at t = 0 unless the start is a probed jump.
         """
     @right_limit_states.setter
     def right_limit_states(self, arg1: typing.Any) -> None:

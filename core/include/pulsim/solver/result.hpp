@@ -454,6 +454,10 @@ struct SimulationResult {
     /// Steps split at an event inside them
     /// (SimulationOptions::enable_substep_state_correction). 0 off.
     Size n_split_steps = 0;
+    /// Restart rule: event right limits in which an unknown's ε → 0 limit
+    /// failed its smoothness test at every ε and took the fallback (the
+    /// impulse rule's x0+, else the left value). 0 off.
+    Size n_right_limit_fallbacks = 0;
     /// update-fixed-step-loop-bookkeeping loop counters (`res.counters`):
     /// `switch_fn` evaluations in the step loop, segment lookups the
     /// last-segment memo did not absorb, and rollback snapshots taken.
@@ -617,13 +621,16 @@ struct SimulationResult {
     /// `right_limit_index[j]` is the sample the j-th right limit belongs to
     /// (increasing), its state row `right_limit_states[j*w .. (j+1)*w)` (w =
     /// `event_limit_width`) and its mask `right_limit_switch_bits[j*nb ..]`
-    /// (one byte 0/1 per switch bit, nb = `event_limit_switches`). The fixed
-    /// engine under the restart rule records, at the start sample of each
-    /// SDIRK restart step, the start of the line whose trapezoid is the
-    /// step's own quadrature (StepLines in loss_tracker.hpp): the right
-    /// limit to second order (first order after a kept backward-Euler stage
-    /// 2), exact for the step's integral of any quantity
-    /// linear in the state. `inner_event_*`: an event INSIDE a fixed step
+    /// (one byte 0/1 per switch bit, nb = `event_limit_switches`). A right
+    /// limit is a STATE VALUE, x(t_e+), recorded only where something
+    /// happens (F-SB-1): on the fixed engine under the restart rule, at a
+    /// restart step that starts at an event (a gate edge, a source edge, a
+    /// located split event) or whose start the impulse rule found jumping —
+    /// each capacitor / inductor state continuous (x0) or moved by an ideal
+    /// element's jump (x0 + J), every other unknown the event's mode solved
+    /// there. Never a restart window's later steps, never t = 0 unless the
+    /// start is a probed jump. The lines' quadrature starts are not here
+    /// (StepLines in loss_tracker.hpp). `inner_event_*`: an event INSIDE a fixed step
     /// (the event split): after sample `inner_event_after[j]`, at
     /// `inner_event_times[j]`, the left limit (the sub-step that ended
     /// there, under its mask) and the right limit as above (a NaN row:

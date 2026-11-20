@@ -110,14 +110,21 @@ def test_f56_exact_summary_peak_is_a_value_of_the_two_limit_trace():
 
 @pytest.mark.parametrize("V_th", (0.7, 0.0))
 def test_f54_f55_pwl_restart_steps_close_the_bridge_charge(V_th):
-    """F-5-4 / F-5-5 (fixed engine, restart rule + split): integrated by
-    the quadrature of the steps that produced them, the stored samples
-    close the DC-side charge to round-off, as the restart-less trapezoidal
-    engine did (3e-12); measured on the left-limit samples alone: 4.9e-3
-    (V_th = 0.7), 1.3e-5 (V_th = 0)."""
-    _, r = _bridge_run(V_th, "pwl")
-    q_in, q_dc = _charges(p.with_event_limits(r))
-    assert abs(q_in / q_dc - 1) <= 1e-9, (q_in, q_dc)
+    """F-5-4 / F-5-5 (fixed engine, restart rule + split). The two-limit
+    trace holds STATE VALUES at its events (F-SB-1: no longer the restart
+    lines' quadrature starts), so its trapezoid closes the DC-side charge at
+    second order, not to round-off: measured 3.1e-4 / 5.6e-5 / 9.3e-6 at dt
+    1 / 0.5 / 0.25 us (V_th = 0.7), 1.5e-5 / 2.4e-6 / 2.8e-7 (V_th = 0). The
+    quadrature-exact identity is the in-loop recorder's (its window charge
+    is C·dv to 1e-11 of scale, test_release_findings_b2). Left limits alone:
+    4.9e-3 / 1.0e-3 / 1.2e-3 at V_th = 0.7 (they do not converge)."""
+    e = []
+    for dt in (1e-6, 5e-7):
+        b = _bridge(V_th)
+        r = _quiet(p.simulate, b, 0.06, **dict(PWL_REL, dt=dt))
+        q_in, q_dc = _charges(p.with_event_limits(r))
+        e.append(abs(q_in / q_dc - 1))
+    assert e[0] <= 4e-4 and e[0] / e[1] >= 3.5, e
 
 
 # ---------------------------------------------------------------------------

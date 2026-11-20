@@ -191,6 +191,35 @@ struct ImplausibleVoltage {
             }
         }
     }
+    // The right limits kept beside the samples (an event's state one ulp
+    // after it): a cut's spike lives there only (F-5-10). A NaN row is an
+    // inner event without a right limit, not a value.
+    if (result.has_event_limits && result.event_limit_width > 0) {
+        const Size w = result.event_limit_width;
+        const Index n = std::min<Index>(n_nodes, static_cast<Index>(w));
+        auto scan = [&](const std::vector<Real>& rows, auto&& time_of) {
+            for (Size j = 0; (j + 1) * w <= rows.size(); ++j) {
+                const Real* r = rows.data() + j * w;
+                if (std::isnan(r[0])) continue;
+                for (Index i = 0; i < n; ++i) {
+                    const Real a = std::abs(r[i]);
+                    if (!(a <= bound) && !(a <= out.peak)) {
+                        out.node = i;
+                        out.peak = a;
+                        out.t_peak = time_of(j);
+                    }
+                }
+            }
+        };
+        scan(result.right_limit_states, [&](Size j) {
+            return j < result.right_limit_index.size() &&
+                           result.right_limit_index[j] < result.times.size()
+                       ? result.times[result.right_limit_index[j]] : Real{0};
+        });
+        scan(result.inner_event_right, [&](Size j) {
+            return j < result.inner_event_times.size() ? result.inner_event_times[j] : Real{0};
+        });
+    }
     if (out.node != kInvalidIndex) {
         out.source_scale = scale;
     }
