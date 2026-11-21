@@ -37,7 +37,9 @@ def _rc_truth(a, b):
 RUNS = {
     "pwl": dict(engine="pwl", dt=1e-6),
     "trbdf2": dict(engine="trbdf2", rtol=1e-8, atol=1e-11),
-    "exact": dict(engine="exact"),
+    # release: the step-end samples — these tests compare a recorder with the stored samples
+    # (two summation paths, rows by interpolation), not with the default output rule's grid
+    "exact": dict(engine="exact", output_rtol=0),
 }
 # The run's own accuracy on the RC charge. pwl starts first order from the
 # inconsistent t = 0 state (owner note fixed-engine-first-order-start): its
@@ -157,7 +159,7 @@ def test_bridge_bus_average_against_the_mpmath_truth():
     runs = {"pwl dt=1e-6": (dict(engine="pwl", dt=1e-6), 1e-5),
             "trbdf2 rtol=1e-7": (dict(engine="trbdf2", rtol=1e-7,
                                       atol=1e-10), 1e-3),
-            "exact": (dict(engine="exact"), 1e-6)}
+            "exact": (dict(engine="exact", output_rtol=0), 1e-6)}
     rows = []
     for label, (kw, bound) in runs.items():
         res = p.simulate(_bridge(np.zeros(6), "conductance"), t_end=40e-3,

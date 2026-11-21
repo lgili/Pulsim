@@ -41,6 +41,8 @@ def _sim(b, t_end, engine, dt=None, **kw):
         kw["engine"] = "pwl"
     else:
         kw["engine"] = engine
+        if engine == "dsed":   # release: the loss summary reads the step-end samples here
+            kw.setdefault("output_rtol", 0)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         return p.simulate(b, t_end, **kw)
