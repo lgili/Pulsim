@@ -7,7 +7,7 @@ counters:
   rc_charge:
     pwl:
       event_builds: 1
-      event_hits: 5
+      event_hits: 11
       event_refactors: 0
       rank1_hits: 0
       multi_bit_rank1_hits: 0
@@ -29,7 +29,7 @@ counters:
       n_chatter_breaks: 0
       n_forced_accepts: 0
     dsed:
-      n_accept: 5008
+      n_accept: 5000
       n_reject: 0
       n_events: 0
       n_rk45_steps: 0
@@ -37,7 +37,7 @@ counters:
   ladder500_rc:
     pwl:
       event_builds: 1
-      event_hits: 5
+      event_hits: 11
       event_refactors: 0
       rank1_hits: 0
       multi_bit_rank1_hits: 0
@@ -64,7 +64,7 @@ counters:
   buck_ccm:
     pwl:
       event_builds: 4
-      event_hits: 557
+      event_hits: 1037
       event_refactors: 0
       rank1_hits: 0
       multi_bit_rank1_hits: 0
@@ -86,7 +86,7 @@ counters:
       n_chatter_breaks: 0
       n_forced_accepts: 0
     dsed:
-      n_accept: 1117
+      n_accept: 80
       n_reject: 0
       n_events: 79
       n_rk45_steps: 0
@@ -94,7 +94,7 @@ counters:
   buck_dcm:
     pwl:
       event_builds: 4
-      event_hits: 597
+      event_hits: 1191
       event_refactors: 75
       rank1_hits: 0
       multi_bit_rank1_hits: 0
@@ -116,7 +116,7 @@ counters:
       n_chatter_breaks: 0
       n_forced_accepts: 0
     dsed:
-      n_accept: 858
+      n_accept: 99
       n_reject: 0
       n_events: 98
       n_rk45_steps: 0
@@ -124,7 +124,7 @@ counters:
   hard_switched_rc:
     pwl:
       event_builds: 2
-      event_hits: 58
+      event_hits: 123
       event_refactors: 0
       rank1_hits: 0
       multi_bit_rank1_hits: 0
@@ -146,7 +146,7 @@ counters:
       n_chatter_breaks: 0
       n_forced_accepts: 1
     dsed:
-      n_accept: 1189
+      n_accept: 74
       n_reject: 0
       n_events: 9
       n_rk45_steps: 0
@@ -193,9 +193,9 @@ counters:
       n_event_iterations: 0
       n_commutations: 0
     trbdf2:
-      n_accept: 1003
+      n_accept: 1004
       n_reject: 0
-      n_solves: 2006
+      n_solves: 2008
       n_newton_retries: 0
       n_gate_events: 0
       n_diode_events: 0
@@ -206,7 +206,7 @@ counters:
   half_bridge_inverter:
     pwl:
       event_builds: 2
-      event_hits: 1198
+      event_hits: 2398
       event_refactors: 0
       rank1_hits: 0
       multi_bit_rank1_hits: 0
@@ -228,7 +228,7 @@ counters:
       n_chatter_breaks: 0
       n_forced_accepts: 0
     dsed:
-      n_accept: 1321
+      n_accept: 200
       n_reject: 0
       n_events: 199
       n_rk45_steps: 0
@@ -236,7 +236,7 @@ counters:
   three_phase_diode_rectifier:
     pwl:
       event_builds: 12
-      event_hits: 428
+      event_hits: 1576
       event_refactors: 249
       rank1_hits: 0
       multi_bit_rank1_hits: 0
@@ -258,7 +258,7 @@ counters:
       n_chatter_breaks: 0
       n_forced_accepts: 1
     dsed:
-      n_accept: 80284
+      n_accept: 80042
       n_reject: 0
       n_events: 96
       n_rk45_steps: 0
@@ -292,7 +292,7 @@ counters:
   flyback_converter:
     pwl:
       event_builds: 4
-      event_hits: 1399
+      event_hits: 2999
       event_refactors: 200
       rank1_hits: 0
       multi_bit_rank1_hits: 0
@@ -314,7 +314,7 @@ counters:
       n_chatter_breaks: 0
       n_forced_accepts: 0
     dsed:
-      n_accept: 8885
+      n_accept: 1597
       n_reject: 0
       n_events: 296
       n_rk45_steps: 0
@@ -322,7 +322,7 @@ counters:
   diode_bridge_rectifier:
     pwl:
       event_builds: 3
-      event_hits: 96
+      event_hits: 336
       event_refactors: 56
       rank1_hits: 0
       multi_bit_rank1_hits: 0
@@ -344,7 +344,7 @@ counters:
       n_chatter_breaks: 0
       n_forced_accepts: 0
     dsed:
-      n_accept: 50347
+      n_accept: 50010
       n_reject: 0
       n_events: 19
       n_rk45_steps: 0

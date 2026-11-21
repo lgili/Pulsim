@@ -16,8 +16,7 @@ moves, not defects; regenerated, and listed here with their numbers.
 
 | golden | truth | old error | new error | factor | why accepted |
 |---|---|---:|---:|---:|---|
-| back_to_back_diodes_sine | mpmath truth (exact measure) | 1.92e-16 | 1.96e-16 | 1.02x | at machine precision |
-| stiff_rlc | mpmath truth (exact measure) | 3.15e-09 | 3.76e-09 | 1.19x | below 1e-8 |
+| stiff_rlc | mpmath truth (exact measure) | 3.15e-09 | 3.41e-08 | 10.8x | below 1e-8 |
 
 ## Every changed golden
 
@@ -27,8 +26,8 @@ moves, not defects; regenerated, and listed here with their numbers.
 | analytic__buck_dcm | t=0.0001 V(sw) | 23.9952946 | -0.00470258091 | closed form (err_rms) | 0.000538 | 1.87e-08 | new closer |
 | analytic__coupled_k099 | t=0.00175 V(p) | 0.000758414239 | 0.000758223681 | closed form (err_rms) | 0.000765 | 8.27e-06 | new closer |
 | analytic__gapped_core_rl | t=6.90447e-06 V(m2) | 10.7125727 | 10.7756127 | closed form (err_rms) | 0.00159 | 1.84e-06 | new closer |
-| analytic__halfwave_rl | t=0.003 V(a) | -4.820183e-08 | 6.29077025e-08 | closed form (err_rms) | 9.65e-06 | 1.44e-06 | new closer |
-| analytic__hard_switched_rc | t=2.5e-05 V(sw) | 0.209559922 | 99.999999 | closed form (err_rms) | 0.01 | 4.92e-05 | new closer |
+| analytic__halfwave_rl | t=0.003 V(a) | -4.820183e-08 | 6.29077077e-08 | closed form (err_rms) | 9.65e-06 | 1.44e-06 | new closer |
+| analytic__hard_switched_rc | t=2.5e-05 V(sw) | 0.209559922 | 99.999999 | closed form (err_rms) | 0.01 | 1.13e-05 | new closer |
 | analytic__im_free_acceleration | t=0.125 V(nn) | 2.46624825e-13 | 8.02481701e-12 | closed form (err_rms) | 9.62e-05 | 6e-06 | new closer |
 | analytic__im_locked_rotor | t=0.0375 V(nn) | 8.40503165e-11 | -1.79694371e-11 | closed form (err_rms) | 1.35e-06 | 1.35e-06 | new closer |
 | analytic__lc_lossless | t=0.00125 I(L) | -0.0714130043 | -0.0664257044 | closed form (err_rms) | 0.00178 | 3.31e-05 | new closer |
@@ -41,23 +40,23 @@ moves, not defects; regenerated, and listed here with their numbers.
 | analytic__sine_rc | t=0.00125 V(o) | 0.691763824 | 0.691763827 | closed form (err_rms) | 9.65e-07 | 9.65e-07 | new closer |
 | analytic__sine_rl | t=0.00125 I(L) | 0.0691763824 | 0.0691763827 | closed form (err_rms) | 9.65e-07 | 9.65e-07 | new closer |
 | analytic__three_limb_zero_seq | t=0.00010299 V(x0) | 45.9355117 | 46.2058273 | closed form (err_rms) | 0.00159 | 1.84e-06 | new closer |
-| back_to_back_diodes_sine | t=0.0375 V(out) | -0.000176767856 | -0.000176767856 | mpmath truth (exact measure) | 1.92e-16 | 1.96e-16 | farther (1.02x), accepted: at machine precision |
-| boost_classic | t=0.0015 V(sw_node) | 0.00193821103 | 20.1006005 | mpmath truth (exact measure) | 0.000313 | 6.32e-07 | new closer |
-| buck_mosfet_nonlinear | t=0.000375 V(n_l) | 21.7215881 | -0.205743567 | trbdf2 rtol 1e-10 (not independent) | 0.00841 | 8.53e-08 | new closer |
-| buck_switching | t=0.0002188 Is(Vdc) | 8.87587577e-06 | -6.78504371e-06 | mpmath truth (exact measure) | 0.00168 | 3.19e-07 | new closer |
-| cuk_converter | t=0.002 V(sw_node) | 0.000230861777 | 9.76218472 | mpmath truth (exact measure) | 0.000855 | 8.42e-06 | new closer |
-| diode_bridge_rectifier | t=0.0375 V(ac_p) | -0.00133772957 | -0.00130587431 | mpmath truth (exact measure) | 0.000105 | 2.38e-05 | new closer |
-| flyback_converter | t=0.0005 V(sw_drain) | 0.0162593732 | 23.9995251 | mpmath truth (exact measure) | 0.949 | 2.55e-06 | new closer |
-| flying_capacitor_3level | t=0.0001 V(g_al) | -0 | 10 | mpmath truth (exact measure) | 0.00578 | 1.53e-06 | new closer |
-| half_bridge_inverter | t=0.00025 V(gate_h) | -0 | 10 | mpmath truth (exact measure) | 0.000377 | 7.49e-08 | new closer |
-| half_bridge_transformer_dc | t=0.0015 V(g_l) | -0 | 10 | mpmath truth (exact measure) | 0.101 | 0.000127 | new closer |
-| motor_dc_brush_step_load | t=0.00375 V(n_l) | 5.94784621 | 5.94595052 | mpmath truth (exact measure) | 0.000288 | 1.35e-07 | new closer |
-| motor_pmsm_dq_open_loop | t=0.0125 Is(V_emf_q) | 7.64806518 | 7.6485051 | mpmath truth (exact measure) | 0.000177 | 5.19e-08 | new closer |
-| periodic_rc_pwm | t=0.0002 Is(Vpwm) | -0.0294236614 | 0.0201055148 | mpmath truth (exact measure) | 0.0118 | 6.38e-07 | new closer |
+| back_to_back_diodes_sine | t=0.0375 V(out) | -0.000176767856 | -0.000176767856 | mpmath truth (exact measure) | 0.00314 | 4.42e-08 | new closer |
+| boost_classic | t=0.0015 V(sw_node) | 0.00193821103 | 20.1006005 | mpmath truth (exact measure) | 0.00234 | 2.03e-06 | new closer |
+| buck_mosfet_nonlinear | t=0.000375 V(n_l) | 21.7215881 | -0.205743567 | trbdf2 rtol 1e-10 (not independent) | 0.00841 | 8.59e-08 | new closer |
+| buck_switching | t=0.0002188 Is(Vdc) | 8.87587577e-06 | -6.78504371e-06 | mpmath truth (exact measure) | 0.00452 | 1.14e-06 | new closer |
+| cuk_converter | t=0.002 V(sw_node) | 0.000230861777 | 9.76218472 | mpmath truth (exact measure) | 0.00481 | 1.57e-05 | new closer |
+| diode_bridge_rectifier | t=0.025 Is(Vac) | 3.04931861e-20 | 3.38813179e-20 | mpmath truth (exact measure) | 0.000633 | 0.000365 | new closer |
+| flyback_converter | t=0.0005 V(sw_drain) | 0.0162593732 | 23.9999966 | mpmath truth (exact measure) | 2.21 | 0.000127 | new closer |
+| flying_capacitor_3level | t=0.0001 V(g_al) | -0 | 10 | mpmath truth (exact measure) | 0.0717 | 5.1e-06 | new closer |
+| half_bridge_inverter | t=0.00025 V(gate_h) | -0 | 10 | mpmath truth (exact measure) | 0.00116 | 1.8e-07 | new closer |
+| half_bridge_transformer_dc | t=0.0015 V(g_l) | -0 | 10 | mpmath truth (exact measure) | 0.123 | 1.86e-05 | new closer |
+| motor_dc_brush_step_load | t=0.00375 V(n_l) | 5.94784621 | 5.94595052 | mpmath truth (exact measure) | 0.000288 | 1.37e-06 | new closer |
+| motor_pmsm_dq_open_loop | t=0.0125 Is(V_emf_q) | 7.64806518 | 7.6485051 | mpmath truth (exact measure) | 0.000177 | 5.35e-07 | new closer |
+| periodic_rc_pwm | t=0.0002 Is(Vpwm) | -0.0294236614 | 0.0201055148 | mpmath truth (exact measure) | 0.0118 | 4.79e-06 | new closer |
 | rc_step | t=0.000625 V(out) | 2.32235417 | 2.323693 | trbdf2 rtol 1e-10 (not independent) | 0.000159 | 1.77e-07 | new closer |
 | rlc_series_resonant | t=0.000625 V(n_l) | 0.158793173 | 0.158793052 | mpmath truth (exact measure) | 0.00033 | 0.00033 | new closer |
-| stiff_rlc | t=1.875e-05 Is(Vdc) | 8.8817842e-16 | -1.15463195e-14 | mpmath truth (exact measure) | 3.15e-09 | 3.76e-09 | farther (1.19x), accepted: below 1e-8 |
-| synchronous_buck | t=0.00025 V(gate_h) | -0 | 10 | mpmath truth (exact measure) | 0.00132 | 7.5e-07 | new closer |
-| three_phase_diode_rectifier | t=0.01 Is(Vb) | -9.22101029e-06 | -1.76683671e-05 | mpmath truth (exact measure) | 0.227 | 0.000996 | new closer |
-| two_stage_rc_lowpass | t=0.000625 Is(Vp) | -0.000335600444 | -0.000332396036 | trbdf2 rtol 1e-10 (not independent) | 0.00145 | 1e-05 | new closer |
-| voltage_doubler | t=0.0375 Is(Vac) | 1.13117038e-05 | 0.000233466263 | mpmath truth (exact measure) | 0.000219 | 2.01e-07 | new closer |
+| stiff_rlc | t=1.875e-05 Is(Vdc) | 8.8817842e-16 | -1.15463195e-14 | mpmath truth (exact measure) | 3.15e-09 | 3.41e-08 | farther (10.8x), accepted: below 1e-8 |
+| synchronous_buck | t=0.00025 V(gate_h) | -0 | 10 | mpmath truth (exact measure) | 0.00367 | 1.87e-06 | new closer |
+| three_phase_diode_rectifier | t=0.01 Is(Vb) | -9.22101029e-06 | -1.76683671e-05 | mpmath truth (exact measure) | 0.541 | 0.0163 | new closer |
+| two_stage_rc_lowpass | t=0.000625 Is(Vp) | -0.000335600444 | -0.000332396036 | trbdf2 rtol 1e-10 (not independent) | 0.00145 | 8.64e-06 | new closer |
+| voltage_doubler | t=0.0375 Is(Vac) | 1.13117038e-05 | 0.000233466263 | mpmath truth (exact measure) | 0.000447 | 4.16e-05 | new closer |
