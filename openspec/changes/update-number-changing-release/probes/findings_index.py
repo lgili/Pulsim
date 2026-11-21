@@ -149,6 +149,14 @@ F = [
      "routes to dsed: 2,000,002 samples on a 1 us grid; V(vin) right, but the reference's uic sample "
      "V(vin)(0) = 0 interpolated to 5 V at 2e-5 s spans 20 output samples: err_rms 1.78e-3 > tol 1e-3, err_max 1.0 "
      "(disagree, frozen `auto` in v2_triage.yaml citing this id)"),
+    ("F-X-7", "F", "W", "the default output rule does not bound an output that is not a state (a current-fed bridge's bus reads 39.6 V off between samples)",
+     "`simulate(B.FAMILIES['bridge3_overlap'].builder(0.0, form='branch'), t_end=0.02, engine='exact')`, bus = v(p) - v(n) "
+     "interpolated linearly at 4001 instants (test_exact_route::test_inductor_cut_set_runs_and_agrees_with_pwl)",
+     "pwl + restart + split at dt 1e-7 (it moves 6.3e-3 V from dt 2e-7); the exact engine with output_rtol=0 is 0.0107 V from it",
+     "0.0107 V (20036 samples: before the merge of the PR line's batch 14s the rule also stored every step end)",
+     "39.56 V at t = 0.12 ms of a 173 V range with the default rule (2713 samples); 27.9 V with output_rtol=1e-7 (24033 samples). "
+     "The rule's promise covers the states only; a node voltage recovered algebraically is a chord between two stored samples. "
+     "The bound on recovered rows is on fix/core-release-f4-chord-bound (not mergeable: three defects found by its verification)"),
     ("F-X-2", "H", "C", "the `auto` routing costs 4745 bytecodes per call",
      "`test_simulate_overhead` no-dt script", "ceiling 3760 bytecodes", "3683 (trbdf2 route)", "5456 (pulsim.exact_route alone 4745)"),
 ]
