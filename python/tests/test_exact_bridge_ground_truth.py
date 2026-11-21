@@ -48,7 +48,7 @@ def test_exact_engine_matches_the_bridge_ground_truth(mode):
     b = _bridge([0.0] * 6)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        r = p.simulate(b, 0.04, engine="exact", **kw)
+        r = p.simulate(b, 0.04, engine="exact", output_rtol=0, **kw)  # release: the subject is the engine, not the default output rule's samples
     s = np.asarray(r.switch_states).astype(int)[:, [b.switch_index_of(f"D{k}") for k in range(1, 5)]]
     assert tuple(s[0]) == (1, 0, 0, 1)
     changes = np.flatnonzero(np.any(s[1:] != s[:-1], axis=1)) + 1

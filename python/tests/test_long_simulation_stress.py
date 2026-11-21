@@ -276,7 +276,8 @@ def test_exact_engine_resume_chain_at_gate_edges_continues_the_run():
     """dsed: splits at period starts (gate edges the uninterrupted run stops
     at). Bit for bit on this machine; 1e-12 for CI (another platform)."""
     splits = [k * 50 * BUCK.T for k in range(1, 8)]
-    whole, parts = _chain("dsed", splits, 4e-3)
+    # release: the step-end samples (the default output rule's grid depends on where a run starts, F-6-7)
+    whole, parts = _chain("dsed", splits, 4e-3, output_rtol=0)
     tw, xw = np.asarray(whole.times), np.asarray(whole.states)
     scale = float(np.max(np.abs(xw)))
     for r in parts:

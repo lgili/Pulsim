@@ -97,7 +97,7 @@ def test_the_exact_engine_matches_the_ground_truth():
     # integration batch 11: -4.5e-10 V measured (0.0272 V low before the
     # floating-island fix); 1e-6 V leaves room for platform rounding
     r = p.simulate(_bridge(np.zeros(6), "conductance"), t_end=40e-3,
-                   engine="exact")
+                   engine="exact", output_rtol=0)  # release: the subject is the engine, not the default output rule's samples
     assert abs(_window_avg(r) - TRUTH) <= 1e-6
 
 

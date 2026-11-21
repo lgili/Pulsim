@@ -70,6 +70,7 @@ def _sim(b, t_end, fn=None, guard=True, **kw):
         kw["switch_fn"] = fn
     # legacy subject: "the default" here is the guarded settle (pre-release default)
     kw.setdefault("mode_selection", "legacy")
+    kw.setdefault("output_rtol", 0)  # release: the subject is the engine, not the default output rule's samples
     saved = DD.MODE_GUARD, DD.DIODE_LAW_REL
     DD.MODE_GUARD = guard
     if not guard:
@@ -339,7 +340,7 @@ def test_a_widened_pass_does_not_release_a_diode_before_its_own_turn_off(mode):
                  for dt in (5e-7, 2.5e-7))
         # None: the guarded settle (mode_selection='legacy'; 'auto' is 'lcp' since the release)
         kw = {"mode_selection": "legacy" if mode is None else mode}
-        r = p.simulate(_bridge_bank(n), t_end=t_end, engine="dsed", **kw)
+        r = p.simulate(_bridge_bank(n), t_end=t_end, engine="dsed", output_rtol=0, **kw)
     ref = [2 * y - x for x, y in zip(a, b2)]
     dev = max(np.abs(v - e).max() for v, e in zip(buses(r), ref))
     assert dev <= 1e-3, dev
@@ -380,7 +381,7 @@ def test_paralleled_bridges_run_their_cluster_modes_on_the_pade_tier(n):
         return np.interp(tg, r.times, np.asarray(r.v("p")) - np.asarray(r.v("n")))
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        r = p.simulate(_paralleled_bank(n), t_end=t_end, engine="dsed")
+        r = p.simulate(_paralleled_bank(n), t_end=t_end, engine="dsed", output_rtol=0)
         ref = p.simulate(_paralleled_bank(n), t_end=t_end, engine="pwl", dt=1e-7,
                          discontinuity_restart=True, enable_substep_state_correction=True)
     rows = r.exact["masks"]
@@ -416,7 +417,7 @@ def test_a_settle_that_hits_its_round_cap_is_decided_by_the_lcp(cap, monkeypatch
         warnings.simplefilter("ignore")
         a, b2 = (bus(p.simulate(bank(), t_end=t_end, engine="pwl", dt=dt)) for dt in (5e-7, 2.5e-7))
         # legacy subject: the settle's round cap (mode_selection='legacy'; 'auto' is 'lcp')
-        r = p.simulate(bank(), t_end=t_end, engine="dsed", mode_selection="legacy")
+        r = p.simulate(bank(), t_end=t_end, engine="dsed", mode_selection="legacy", output_rtol=0)
     assert np.abs(bus(r) - (2 * b2 - a)).max() <= 1e-3
     if cap == 1:
         assert r.diagnostics["mode_guard"]["settle_caps"] > 0

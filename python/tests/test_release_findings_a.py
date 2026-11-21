@@ -130,7 +130,7 @@ def test_f510_exact_engine_names_the_interrupted_current():
         return m
 
     with pytest.warns(UserWarning, match="largest voltage"):
-        res = p.simulate(b, t_end=3e-4, switch_fn=sf, engine="dsed")
+        res = p.simulate(b, t_end=3e-4, switch_fn=sf, engine="dsed", output_rtol=0)  # release: the subject is the engine, not the default output rule's samples
     # the closed form at the turn-off: v_sw(0+) = i_L(0-) / g_off, i_L continuous
     rl = np.asarray(res.right_limit_index)
     t = np.asarray(res.times)
