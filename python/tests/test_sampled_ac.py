@@ -94,10 +94,8 @@ def test_cost_does_not_grow_with_the_number_of_points():
     demanded `t_big < t_small * 2.0`, which measured the CI
     runner's noise rather than this code: it came back 2.2x on a
     shared macOS box and failed a PR that had not touched this
-    module. Wall clock is kept only as a coarse shape check — 40x the points
-    must not cost anything like 40x the time — with best-of-3
-    timing and a margin wide enough that only a real complexity
-    regression can trip it.
+    module. The wall clock of 10 and 400 points is printed, never
+    asserted.
     """
     b = _buck()
     of = _gate_of(b)
@@ -120,8 +118,9 @@ def test_cost_does_not_grow_with_the_number_of_points():
     # The mechanism, exactly.
     assert small.n_period_runs == big.n_period_runs
 
-    # The shape: 40x the points, nowhere near 40x the cost.
-    assert t_big < t_small * 8.0, (t_small, t_big)
+    # The shape (40x the points, nowhere near 40x the cost) is printed,
+    # never asserted: wall time depends on the machine's load.
+    print(f"frequency_response 10 / 400 points: {t_small:.3f} / {t_big:.3f} s")
 
 
 def test_reuses_a_steady_state_when_given_one():

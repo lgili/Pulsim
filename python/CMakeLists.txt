@@ -66,12 +66,34 @@ pybind11_add_module(_pulsim
     NO_EXTRAS
     bindings.cpp
     dsed_bindings.cpp
+    ir_bindings.cpp
+    sim_bindings.cpp
+    record_bindings.cpp
 )
 
 target_link_libraries(_pulsim
     PRIVATE
         pulsim::core
 )
+
+# block_laws.h as a string for pulsim.export_c: ONE law table for the
+# kernel graph and the exported C. Chunks stay below MSVC's 16 KiB
+# string-literal limit; configure_file rewrites only on change.
+set(_pulsim_laws ${PROJECT_SOURCE_DIR}/core/include/pulsim/blockchain/block_laws.h)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${_pulsim_laws})
+file(READ ${_pulsim_laws} _pulsim_laws_text)
+string(LENGTH "${_pulsim_laws_text}" _pulsim_laws_n)
+set(_pulsim_laws_inc "")
+set(_pulsim_i 0)
+while(_pulsim_i LESS _pulsim_laws_n)
+    string(SUBSTRING "${_pulsim_laws_text}" ${_pulsim_i} 4000 _pulsim_chunk)
+    string(APPEND _pulsim_laws_inc "R\"PLAWS(${_pulsim_chunk})PLAWS\"\n")
+    math(EXPR _pulsim_i "${_pulsim_i} + 4000")
+endwhile()
+file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/block_laws_source.inc.tmp "${_pulsim_laws_inc}")
+configure_file(${CMAKE_CURRENT_BINARY_DIR}/block_laws_source.inc.tmp
+               ${CMAKE_CURRENT_BINARY_DIR}/generated/block_laws_source.inc COPYONLY)
+target_include_directories(_pulsim PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
 if(APPLE)
     target_compile_options(_pulsim PRIVATE -fvisibility=hidden -fvisibility-inlines-hidden)
 endif()
@@ -138,6 +160,12 @@ endforeach()
 install(TARGETS _pulsim
     LIBRARY DESTINATION pulsim
 )
+
+# add-external-device-abi: the stable C header ships with the wheel, so a
+# model compiles against the installed package (`pulsim.get_include()`).
+# Only this header: the C++ helper (xdev/adapter.hpp) is not stable.
+install(FILES ${PROJECT_SOURCE_DIR}/core/include/pulsim/xdev/pulsim_xdev.h
+    DESTINATION pulsim/include/pulsim/xdev)
 
 # Auto-discover all top-level .py / .pyi files in pulsim/ so we don't
 # silently forget new modules (snubber.py shipped broken because it

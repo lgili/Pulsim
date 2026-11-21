@@ -231,7 +231,7 @@ def test_nonlinear_diode_builder_compiles() -> None:
     params = p.IdealDiodeParams(V_F0=0.7, R_d=0.01,
                                   G_off=1e-9, kappa=20.0)
     b.add_voltage_source("Vin", "n0", "gnd", 2.0)
-    b.add_nonlinear_diode("D1", "n0", "n1", params)
+    b.add_nonlinear_diode("D1", "n0", "n1", params, allow_non_passive=True)
     b.add_resistor("R_L", "n1", "gnd", 1000.0)
     assert b.num_branches == 3
 

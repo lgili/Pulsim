@@ -1,0 +1,28 @@
+* add-power-mosfet-datasheet-device task 7.3 -- VDMOS double pulse
+* The same card is imported by pulsim.spice_to_builder (K = KP/2,
+* C_gs = CGS, vdmos_cgd(CGDMAX, CGDMIN, A)); the fixture is the one of
+* pulsim.double_pulse_test: 400 V, 10 A, R_g_ext = 10 ohm, 0 -> 12 V
+* gate with 5 ns edges at 100 ns, 700 ns pulse, 500 uH load, Shockley
+* freewheel (IS=1e-12 N=1), 1 mohm sense resistor. The run starts from
+* the freewheeling state (.ic + uic), as double_pulse_test seeds initial_state.
+* Every VDMOS charge parameter is set explicitly: ngspice 45.2's VDMOS
+* defaults are NOT zero (CGDMAX 2n, CGDMIN 20p, CGS 1.4n, CJO 0.5n).
+* KSUBTHRES is left at ngspice's default (0.1); Pulsim has no
+* subthreshold law (its Level-1 sigmoid kappa = 15 1/V instead).
+.model MV VDMOS(VTO=3 KP=2.86 LAMBDA=0 CGDMAX=1n CGDMIN=50p A=0.5 CGS=1n CJO=0 RG=0 RD=0 RS=0 IS=1e-14 N=1 TT=0)
+.model DF D(IS=1e-12 N=1)
+.temp 26.85
+.options TNOM=26.85 RELTOL=1e-5 ABSTOL=1e-9 VNTOL=1e-7
+Vdc vdc 0 DC 400
+L1 vdc sw 500u IC=10
+D1 sw vdc DF
+Rsense sw d 1m
+M1 d g 0 MV
+Vg drv 0 PULSE(0 12 100n 5n 5n 700n 10u)
+Rg drv g 10
+.ic v(vdc)=400 v(sw)=400.773 v(d)=400.773 v(g)=0 v(drv)=0
+.control
+tran 0.05n 1.5u 0 0.05n uic
+wrdata pm_vdmos_double_pulse.out v(d) v(sw) v(g)
+.endc
+.end

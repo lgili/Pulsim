@@ -48,6 +48,8 @@
 // is unchanged; only the history term moves.
 
 #include "pulsim/models/igbt_level1.hpp"
+#include "pulsim/device/device.hpp"
+#include "pulsim/device/device_state.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/pwl/trbdf2_stage.hpp"
@@ -124,6 +126,12 @@ public:
                 const Real den = k.c1 / h + Real{1} / e.params.tau_tail;
                 e.k1 = e.params.k_tail / den;
                 e.k0 = -(k.c2 * e.q_gamma + k.c3 * e.q_prev) / h / den;
+            } else if (stage == TrBdf2Stage::BackwardEuler) {
+                // Q(1 + h/tau) = Q_n + h k i_ss: the trapezoidal pair
+                // at 2h without the stored derivative f_n.
+                const Real den = Real{1} + h / e.params.tau_tail;
+                e.k1 = (h * e.params.k_tail) / den;
+                e.k0 = e.q_prev / den;
             } else {
                 const Real den =
                     Real{1} + h / (Real{2} * e.params.tau_tail);
@@ -170,6 +178,24 @@ public:
         }
     }
 
+    /// SDIRK restart: pseudo previous Q from the stage-1 solve, by
+    /// the affine relation stage 1 solved with.
+    void extrapolate_previous(const Vector& x1, Real c) {
+        for (auto& e : entries_) {
+            const Real q = e.k0 + e.k1 * steady_state_at(e, x1);
+            e.q_prev += c * (q - e.q_prev);
+        }
+    }
+
+    /// TR-BDF2 post-event refresh: dQ/dt from the law at the probe's
+    /// terminal voltages and the stored charge; Q is not touched.
+    void refresh_derivatives(const Vector& x_probe) {
+        for (auto& e : entries_) {
+            e.f_prev = e.params.k_tail * steady_state_at(e, x_probe)
+                       - e.q_prev / e.params.tau_tail;
+        }
+    }
+
     /// Seed from a DC operating point: charge in equilibrium,
     /// Q = k·i_ss·tau, where the split adds back to i_ss exactly.
     void seed_from_dc_op(const Vector& x) {
@@ -192,11 +218,62 @@ public:
             v, e.params);
     }
 
-    [[nodiscard]] std::vector<Entry> snapshot() const {
+    // ---- device::StatefulKind (device/kind.hpp) ----
+    static constexpr device::StateBlock kBlock = device::StateBlock::IgbtTail;
+    static constexpr DevicePool::StoredKind kStoredKind =
+        DevicePool::StoredKind::IgbtLevel1;
+    static constexpr Size kFlatPerDevice = 2;
+    /// Every real an entry carries from step to step, the snapshot's
+    /// (`to_flat` order) first, then the stage scratch: the in-run
+    /// rollback copies exactly these.
+    template <class E, class F> static void for_each_state(E& e, F&& f) {
+        f(e.q_prev);
+        f(e.f_prev);
+        f(e.q_gamma);
+        f(e.k0);
+        f(e.k1);
+    }
+    [[nodiscard]] std::vector<Entry>& mutable_entries() noexcept {
         return entries_;
     }
-    void restore(const std::vector<Entry>& snap) {
-        entries_ = snap;
+    void commit(const Vector& x, Real h, TrBdf2Stage stage) {
+        update_from_state(x, h, stage);
+    }
+    /// The slot refresh reads the law, not the probe step.
+    void refresh_derivatives(const Vector& x_probe, Real /*h*/) {
+        refresh_derivatives(x_probe);
+    }
+
+    // ---- the stage form (βh, ψ) of integrator='esdirk43' ----
+    // One q row per device: q = Q, q̇ = f. A stage is backward Euler of βh
+    // from the base q_prev = ψ; after its solve Q = K0 + K1·i_ss(x) under
+    // that stage's K0/K1 (set by every stamp).
+    [[nodiscard]] Size stage_rows() const noexcept { return entries_.size(); }
+    void stage_start(Real hh, Real* q0, Real* hqd0) const {
+        for (const auto& e : entries_) {
+            *q0++ = e.q_prev;
+            *hqd0++ = hh * e.f_prev;
+        }
+    }
+    void stage_base(const Real* psi, const Real* /*dpsi*/) {
+        for (auto& e : entries_) e.q_prev = *psi++;
+    }
+    void stage_increment(const Vector& x, const Real* psi, Real* d) const {
+        for (const auto& e : entries_) *d++ = e.k0 + e.k1 * steady_state_at(e, x) - *psi++;
+    }
+    void stage_clear() noexcept {}
+    // ---- TR-BDF2's q rows (the error estimate) ----
+    /// Q − Q_n at γ (the stage-1 capture) and at the step end (the BDF2
+    /// stage's K0/K1, as `commit` computes it).
+    void trbdf2_increments(const Vector& x1, Real* dqg, Real* dq1) const {
+        for (const auto& e : entries_) {
+            *dq1++ = e.k0 + e.k1 * steady_state_at(e, x1) - e.q_prev;
+            *dqg++ = e.q_gamma - e.q_prev;
+        }
+    }
+    /// atol_q / atol per row: Q = k·τ·i_ss in equilibrium.
+    void q_scales(Real* s) const {
+        for (const auto& e : entries_) *s++ = e.params.k_tail * e.params.tau_tail;
     }
 
     /// Flat (Q, f) pairs, for `SolverSnapshot`.
@@ -222,6 +299,12 @@ public:
             entries_[k].f_prev = flat[2 * k + 1];
         }
     }
+
+    /// The step of the last interface-path stamp (pwl/interface_stamps.hpp):
+    /// `iface::capture_gamma` solves the local charge row at the stage point
+    /// under it, as the hand path reads K0/K1 from the last `begin_step`.
+    /// Set before every interface solve; not state (never rolled back).
+    device::StepCtx iface_ctx{};
 
 private:
     std::vector<Entry> entries_;

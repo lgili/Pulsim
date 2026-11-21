@@ -27,6 +27,7 @@
 // half-wave rectifier test (sinusoidal source via b_extra).
 
 #include "pulsim/models/pwm_voltage_source.hpp"
+#include "pulsim/sources/source_jumps.hpp"
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/device_pool.hpp"
@@ -51,7 +52,10 @@ inline void compute_pwm_b_extra(
     const pwl::DevicePool& pool,
     const topology::Graph& graph,
     Real t,
-    Vector& out) {
+    Vector& out,
+    // > 0: a source that jumps exactly at t reads its LEFT limit,
+    // value_at(t - left_by) (discontinuity_restart; 0 = right value).
+    Real left_by = Real{0}) {
     const Size state_size = pool.state_size(graph);
     if (out.size() != static_cast<Index>(state_size)) {
         out = Vector::Zero(static_cast<Index>(state_size));
@@ -78,7 +82,10 @@ inline void compute_pwm_b_extra(
         const Index src_var =
             pool.branch_var_id_for_source(branch.id, graph);
         const Real v_pwm =
-            models::PWMVoltageSource::value_at(p, t);
+            models::PWMVoltageSource::value_at(
+                p, left_by > Real{0} &&
+                        source_jumps_at(pool, branch.id, t)
+                    ? t - left_by : t);
         out[src_var] += -v_pwm;
     }
 }

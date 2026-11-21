@@ -9,6 +9,7 @@ The schema-side support keeps user YAMLs forward-compatible today.
 """
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
 pulsim = pytest.importorskip("pulsim")
@@ -136,3 +137,107 @@ def test_yaml_integrator_flow_into_simulate():
             atol=o.atol,
             dt_init=o.dt_init,
         )
+
+
+# ---------------------------------------------------------------------------
+# add-ai-usage-guide 12.15: simulate(LoadedCircuit) forwards every
+# `simulation:` key, not only the run window.
+# ---------------------------------------------------------------------------
+_RC_TRBDF2_YAML = """
+circuit:
+  devices:
+    - {type: voltage_source, name: V1, from: a, to: gnd, V: 1.0}
+    - {type: resistor,       name: R1, from: a, to: b,   R: 1.0e3}
+    - {type: capacitor,      name: C1, from: b, to: gnd, C: 1.0e-6}
+simulation:
+  t_end: 5.0e-3
+  dt: 5.0e-4
+  rtol: %s
+  atol: 1.0e-10
+"""
+
+
+def test_yaml_simulation_keys_are_listed_in_file_order():
+    loaded = pulsim.load_yaml_string(_RC_YAML)
+    assert list(loaded.simulation_keys) == [
+        "t_end", "dt", "integrator", "rtol", "atol", "dt_init"]
+
+
+def test_simulate_loaded_circuit_forwards_the_integrator():
+    """The YAML's `integrator: radau` reached no engine before: the run
+    went through on the kernel integrator. On the engine that takes an
+    integrator it is now the keyword's own refusal."""
+    with pytest.raises(ValueError, match="integrator='radau'"):
+        pulsim.simulate(pulsim.load_yaml_string(_RC_YAML), engine="exact")
+
+
+def test_keys_the_landing_engine_cannot_honour_warn_and_run():
+    """The same file on its dt (the fixed step): integrator, rtol, atol and
+    dt_init mean nothing there. It ran before 12.15 and still runs, now
+    with one RuntimeWarning naming the unused keys, byte-equal to the run
+    without them."""
+    loaded = pulsim.load_yaml_string(_RC_YAML)
+    with pytest.warns(RuntimeWarning, match="integrator='radau'.*dt_init"):
+        r = pulsim.simulate(loaded)
+    ref = pulsim.simulate(loaded.builder, 1e-3, dt=1e-5)
+    assert r.engine_used == "pwl"
+    np.testing.assert_array_equal(np.asarray(r.states), np.asarray(ref.states))
+
+
+_DOC_BLOCK_YAML = _RC_YAML.replace("""  integrator: radau
+  rtol: 1.5e-6
+  atol: 2.5e-9
+  dt_init: 1.0e-7
+""", """  enable_newton_line_search: false
+  max_event_iterations: 16
+  max_newton_iterations: 50
+  tol_newton_dx: 1.0e-9
+  integrator: kernel
+  dt_init: 0.0
+""")
+
+
+@pytest.mark.parametrize("engine", ["auto", "pwl", "trbdf2", "exact"])
+def test_the_documented_simulation_block_runs_on_every_engine(engine):
+    """docs/yaml-chain.md's block: the loader's placeholders (`integrator:
+    kernel`, `dt_init: 0`) and kernel-default Newton values ask nothing,
+    so no engine refuses or warns."""
+    import warnings
+    with warnings.catch_warnings():
+        warnings.filterwarnings("error", message=".*YAML simulation")
+        r = pulsim.simulate(pulsim.load_yaml_string(_DOC_BLOCK_YAML),
+                            engine=engine)
+    assert len(r.times) > 10
+
+
+def test_simulate_loaded_circuit_forwards_tolerances():
+    """rtol/atol from the YAML give the run of the same keywords, and
+    the error against the RC closed form follows the YAML's rtol."""
+    import numpy as np
+
+    def err(r):
+        t = np.asarray(r.times)
+        return float(np.max(np.abs(r.v("b") - (1.0 - np.exp(-t / 1e-3)))))
+
+    loose = pulsim.load_yaml_string(_RC_TRBDF2_YAML % "1.0e-2")
+    r = pulsim.simulate(loose, engine="trbdf2")
+    kw = pulsim.simulate(loose.builder, 5e-3, dt=5e-4, engine="trbdf2",
+                         rtol=1e-2, atol=1e-10)
+    np.testing.assert_array_equal(np.asarray(r.times), np.asarray(kw.times))
+    np.testing.assert_array_equal(r.v("b"), kw.v("b"))
+    tight = pulsim.simulate(
+        pulsim.load_yaml_string(_RC_TRBDF2_YAML % "1.0e-7"), engine="trbdf2")
+    assert len(tight.times) > 3 * len(r.times)
+    assert err(tight) < 1e-5 < err(r)
+    # a keyword still wins over the file
+    k2 = pulsim.simulate(loose, engine="trbdf2", rtol=1e-7)
+    np.testing.assert_array_equal(np.asarray(k2.times),
+                                  np.asarray(tight.times))
+
+
+def test_a_changed_options_field_without_a_yaml_key_is_refused():
+    loaded = pulsim.load_yaml_string(_RC_TRBDF2_YAML % "1.0e-3")
+    loaded.options.split_snap = 0.5
+    with pytest.raises(pulsim.OptionsError, match="split_snap") as e:
+        pulsim.simulate(loaded)
+    assert e.value.option == "split_snap"

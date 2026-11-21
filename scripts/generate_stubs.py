@@ -78,6 +78,7 @@ STUBGEN_FLAGS = [
     # where the enum class lives so it prints ``DCStrategy.Auto``.
     "--enum-class-locations", "DCStrategy:pulsim._pulsim",
     "--enum-class-locations", "ParametricRefactorMode:pulsim._pulsim",
+    "--enum-class-locations", "DevicePath:pulsim._pulsim",
     # Print the expressions matched by KNOWN_INVALID_EXPRESSIONS as-is
     # so the rules below can rewrite them deterministically (stubgen
     # would otherwise replace the TYPE with ``...``, losing it).
@@ -160,6 +161,9 @@ def run_stubgen(pythonpath: list[str]) -> str:
             pythonpath + [p for p in [env.get("PYTHONPATH", "")] if p])
     # Plotting/backends must not open windows while pulsim imports.
     env.setdefault("MPLBACKEND", "Agg")
+    # The add_* Parameter wrappers forward to the native methods: stub
+    # the native signatures (pulsim/_circuit_ir.py install()).
+    env["PULSIM_STUBGEN_NATIVE"] = "1"
     with tempfile.TemporaryDirectory() as tmp:
         cmd = [
             sys.executable, "-m", "pybind11_stubgen", MODULE,

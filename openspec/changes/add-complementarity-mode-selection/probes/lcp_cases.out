@@ -1,0 +1,40 @@
+====================================================================================================
+(i) at rest, V_f = 0 (the V_th = 0 diode of dsed's 'did not settle after 64 rounds')
+   buck at rest, gate off, 1 us : events=0 LCPs=1 pivots/event max=2 mean=2.00 hist={2: 1} (with tie re-solves max=2 mean=2.00) ties=0 widened=0 wrong=0 immediate=0 rcp=0 impulses=0 | final mode ((False,), (False,)) state [0. 0.]
+   gate held off to 2 us, then 40 T of PWM: v_C = 13.316240022 V; events=100 LCPs=101 pivots/event max=2 mean=0.40 hist={0: 81, 2: 20} (with tie re-solves max=2 mean=0.40) ties=0 widened=0 wrong=0 immediate=0 rcp=0 impulses=0
+====================================================================================================
+(ii) single-phase full bridge, ideal diodes, C filter (100 V 50 Hz, 1000 uF || 100 ohm), 10 cycles
+   reference (mpmath): conduction from 66.672808323 deg to 91.797645707 deg of each half cycle
+   V_f = 0.7: events=40 LCPs=41 pivots/event max=6 mean=3.61 hist={0: 1, 2: 10, 3: 10, 4: 6, 5: 10, 6: 4} (with tie re-solves max=15 mean=7.07) ties=15 widened=42 wrong=0 immediate=0 rcp=0 impulses=1  [0.0 s]
+      impulses (t, J): [(4.4564839939724776e-05, '3.5e-23')]
+      max |t_event - t_ref| over 39 events after the first turn-off: 1.10e-14 s; modes seen [(False, False, False, False), (False, True, True, False), (True, False, False, True)]
+   V_f = 0.0: events=39 LCPs=40 pivots/event max=6 mean=3.90 hist={2: 10, 3: 10, 4: 2, 5: 10, 6: 8} (with tie re-solves max=15 mean=7.90) ties=20 widened=40 wrong=0 immediate=0 rcp=0 impulses=0  [0.0 s]
+====================================================================================================
+(iii) DCM buck (24 V, 100 uH, 47 uF, 50 ohm, D = 0.3, 100 kHz), ideal S and D, V_f = 0, 4000 periods from rest
+   events=11979 LCPs=11980 pivots/event max=2 mean=0.66 hist={0: 8001, 2: 3979} (with tie re-solves max=2 mean=0.66) ties=0 widened=0 wrong=0 immediate=0 rcp=0 impulses=0  [3.3 s]
+   v_C at the rising edge of period 3999: 8.9963970815522 V  (40-digit orbit 8.9963970815477; error +4.5e-12)
+   diode turn-off tau/T: 0.79983739563749 (orbit 0.79983739563545; error +2.0e-12)
+   idle-interval inductor current at the end: -7.2e-18 A; masks visited: [((False,), (False,)), ((False,), (True,)), ((True,), (False,))]
+   L*(1 +- d), 40 periods each (dsed aborted 'is chattering' for three of these six with V_th = 1e-6):
+      d = +1e-05: v_C(40T) = 13.316241754008 V  wrong=0 immediate=0 max pivots=2
+      d = -1e-05: v_C(40T) = 13.316238290067 V  wrong=0 immediate=0 max pivots=2
+      d = +1e-04: v_C(40T) = 13.316257302842 V  wrong=0 immediate=0 max pivots=2
+      d = -1e-04: v_C(40T) = 13.316222663422 V  wrong=0 immediate=0 max pivots=2
+      d = +1e-02: v_C(40T) = 13.317584498861 V  wrong=0 immediate=0 max pivots=2
+      d = -1e-02: v_C(40T) = 13.314109459148 V  wrong=0 immediate=0 max pivots=2
+      central difference d v_C(40T) / dL at d = 1e-5: 1731.970476 V/H
+====================================================================================================
+(iv) boost (12 V, 100 uH, 47 uF, D = 0.5, 100 kHz), ideal S (sw-gnd) and D (sw-out)
+   R = 50 ohm: events=40179 LCPs=40180 pivots/event max=2 mean=0.01 hist={0: 40000, 2: 180} (with tie re-solves max=2 mean=0.01) ties=1 widened=2 wrong=0 immediate=0 rcp=0 impulses=0 diode-located events=179  [10.1 s]
+      state at the rising edge of period 19999: v_C = 24.020197562848 V, i_L = 0.659680517442 A
+      CCM orbit (mpmath): v_C = 24.02019756285 V, i_L = 0.6596805174426 A; errors -2.5e-12 V, -6.2e-13 A
+   R = 500 ohm: events=11958 LCPs=11959 pivots/event max=2 mean=0.66 hist={0: 8001, 2: 3958} (with tie re-solves max=2 mean=0.66) ties=1 widened=2 wrong=0 immediate=0 rcp=0 impulses=0 diode-located events=3958  [3.5 s]
+      state at the rising edge of period 3999: v_C = 36.812082336732 V, i_L = 0.000000000000 A
+====================================================================================================
+(v-a) three-phase diode bridge, L_s = 1 mH per phase, ideal DC current load 10 A, V_f = 0 (commutation overlap)
+   events=36 LCPs=37 pivots/event max=4 mean=2.84 hist={2: 12, 3: 19, 4: 6} (with tie re-solves max=8 mean=4.14) ties=0 widened=18 wrong=0 immediate=0 rcp=0 impulses=0  [0.0 s]; overlap angle mu = 15.479928 deg (1 - cos mu = 2 w L_s I_d / (sqrt3 Vm))
+   diode events by number of conducting diodes after the event {3: 18, 2: 18}; max |t_event - t_ref| = 3.95e-15 s over 36 events
+(v-b) three-phase diode bridge, no L_s, C filter (1000 uF || 20 ohm), V_f = 0.7, C starts at 0 V
+   events=60 LCPs=61 pivots/event max=5 mean=3.03 hist={0: 7, 2: 10, 3: 17, 4: 21, 5: 6} (with tie re-solves max=15 mean=5.90) ties=18 widened=60 wrong=0 immediate=0 rcp=0 impulses=1  [0.1 s]
+   impulse at t = 0 (capacitor loop closed by the diodes on an uncharged C): [(0.0, np.float64(14.758493))] J
+   reference: conduction from 66.350991 to 98.970270 deg of the line voltage; max |t_event - t_ref| = 8.08e-15 s over 56 events; ON-sets seen [0, 2]

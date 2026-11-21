@@ -181,9 +181,11 @@ struct ShockleyDiode {
 
     /// Junction voltage at which the tangent continuation starts,
     /// i.e. where the exponential reaches `i_lim`.
-    [[nodiscard]] static Real v_lim(const Params& p) noexcept {
-        const Real vte = p.n * p.V_T;
-        return vte * std::log(p.i_lim / p.I_S + Real{1});
+    template <class P = Params>
+    [[nodiscard]] static auto v_lim(const P& p) noexcept {
+        using std::log;
+        const auto vte = p.n * p.V_T;
+        return vte * log(p.i_lim / p.I_S + Real{1});
     }
 
     /// The forward voltage that carries `i` amps — the closed-form
@@ -198,8 +200,10 @@ struct ShockleyDiode {
     ///
     /// Templated on `numeric::FloatingPoint S`; instantiates for
     /// `Real` (forward) and `ADRealN<2>` (Newton Jacobian).
-    template <numeric::FloatingPoint S>
-    [[nodiscard]] static S current(const S* v, const Params& p)
+    // `P`: the parameter struct, or a law's `Params<S>` with the same
+    // member names (device/laws.hpp), so ∂i/∂p comes from this body too.
+    template <numeric::FloatingPoint S, class P = Params>
+    [[nodiscard]] static S current(const S* v, const P& p)
         noexcept {
         const S vd = v[0] - v[1];
         S i = limited_exp_branch_(vd, p);
@@ -217,17 +221,17 @@ struct ShockleyDiode {
 private:
     /// I_S·(exp(u/vte) − 1), continued by its tangent above
     /// `v_lim` so it is finite for every u.
-    template <numeric::FloatingPoint S>
+    template <numeric::FloatingPoint S, class P>
     [[nodiscard]] static S limited_exp_branch_(const S& u,
-                                                const Params& p)
+                                                const P& p)
         noexcept {
         using std::exp;
-        const Real vte = p.n * p.V_T;
-        const Real vl  = v_lim(p);
+        const auto vte = p.n * p.V_T;
+        const auto vl  = v_lim(p);
         if (u > S{vl}) {
-            const Real e_l = std::exp(vl / vte);
-            const Real i_l = p.I_S * (e_l - Real{1});
-            const Real g_l = p.I_S * e_l / vte;
+            const auto e_l = exp(vl / vte);
+            const auto i_l = p.I_S * (e_l - Real{1});
+            const auto g_l = p.I_S * e_l / vte;
             return S{i_l} + S{g_l} * (u - S{vl});
         }
         return p.I_S * (exp(u / S{vte}) - S{1});

@@ -1,0 +1,32 @@
+family             form        rule     events ties wrong immed maxpiv pins unfx fail  ON-set sizes
+buck_rest          ideal       off          21    0     0     0      2    0    0    0  []  [0.0 s]
+buck_rest          ideal       slice2       21    0     0     0      2    0    0    0  []  [0.0 s]
+buck_rest          conductance off          21    0     0     0      2    0    0    0  []  [0.0 s]
+buck_rest          conductance slice2       21    0     0     0      2    0    0    0  []  [0.0 s]
+dcm_buck           ideal       off          99    0     0     0      2    0    0    0  [0]  [0.0 s]
+dcm_buck           ideal       slice2       99    0     0     0      2    0    0    0  [0]  [0.0 s]
+dcm_buck           conductance off          99    0     0     0      2    0    0    0  [0]  [0.0 s]
+dcm_buck           conductance slice2       99    0     0     0      2    0    0    0  [0]  [0.0 s]
+boost_50           ideal       off          80    1     0     0      2    0    0    0  []  [0.0 s]
+boost_50           ideal       slice2       80    1     0     0      2    0    0    0  []  [0.0 s]
+boost_50           conductance off          80    0     0     0      2    0    0    0  []  [0.0 s]
+boost_50           conductance slice2       80    0     0     0      2    0    0    0  []  [0.0 s]
+boost_500          ideal       off          80    1     0     0      0    0    0    0  []  [0.0 s]
+boost_500          ideal       slice2       80    1     0     0      0    0    0    0  []  [0.0 s]
+boost_500          conductance off          80    0     0     0      2    0    0    0  []  [0.0 s]
+boost_500          conductance slice2       80    0     0     0      2    0    0    0  []  [0.0 s]
+bridge1_vf07       ideal       off           8    5     0     0      5    0    0    0  [0, 2]  [0.0 s]
+bridge1_vf07       ideal       slice2        8    7     0     0      5    0    0    2  [0, 2]  [0.0 s]
+bridge1_vf07       conductance off           8    2     0     0      5    0    0    0  [0, 2]  [0.0 s]
+bridge1_vf07       conductance slice2        8    3     0     0      5    0    1    0  [0, 2]  [0.0 s]
+bridge1_vf0        ideal       off           7    3     0     0      6    0    0    0  [0, 2]  [0.0 s]
+bridge1_vf0        ideal       slice2        7    6     0     0      6    0    2    2  [0, 2]  [0.0 s]
+bridge1_vf0        conductance off           7    1     0     0      5    0    0    0  [0, 2]  [0.0 s]
+bridge1_vf0        conductance slice2        7    4     0     0      5    0    4    0  [0, 2]  [0.0 s]
+bridge3_overlap    ideal       off          24    0     0     0      4    0    0    0  [2, 3]  [0.0 s]
+bridge3_overlap    ideal       slice2       24    0     0     0      4    0    0    0  [2, 3]  [0.0 s]
+# Run stopped here after 38 min inside the conductance-form bridge3_overlap run (the prototype's
+# 1e-9 h_e free run is slow). Measured separately in the same session, slice2 rule:
+# bridge3_cfilter conductance slice2: 24 events, 0 wrong, 0 immediate, 12 pins; under "off" the
+# same run fails with a zero-time loop at 5.0035e-4 s (the slice-1 defect). Engine side for both
+# three-phase families: probes/shadow_survey.out and probes/guard_survey.out (0 disagreements).

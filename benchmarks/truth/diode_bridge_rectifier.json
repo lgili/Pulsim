@@ -1,0 +1,209 @@
+{
+ "circuit": "circuits/diodes/diode_bridge_rectifier.yaml",
+ "form": "conductance",
+ "supported": true,
+ "observables": [
+  "V(out)"
+ ],
+ "dps": [
+  30,
+  60
+ ],
+ "wall_s": 2.2,
+ "events": [
+  {
+   "t": "0.002558578560468121624257494",
+   "change": "D1- D4-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.006829304309934926563653132",
+   "change": "D2+ D3+",
+   "cause": "D2 root",
+   "strict": 1,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.007558578560468121624257494",
+   "change": "D2- D3-",
+   "cause": "D2 root",
+   "strict": 1,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.01182930430993492656365313",
+   "change": "D1+ D4+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.01255857856046812162425749",
+   "change": "D1- D4-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.01682930430993492656365313",
+   "change": "D2+ D3+",
+   "cause": "D2 root",
+   "strict": 1,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.01755857856046812162425749",
+   "change": "D2- D3-",
+   "cause": "D2 root",
+   "strict": 1,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.02182930430993492656365313",
+   "change": "D1+ D4+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.02255857856046812162425749",
+   "change": "D1- D4-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.02682930430993492656365313",
+   "change": "D2+ D3+",
+   "cause": "D2 root",
+   "strict": 1,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.02755857856046812162425749",
+   "change": "D2- D3-",
+   "cause": "D2 root",
+   "strict": 1,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.03182930430993492656365313",
+   "change": "D1+ D4+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.03255857856046812162425749",
+   "change": "D1- D4-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.03682930430993492656365313",
+   "change": "D2+ D3+",
+   "cause": "D2 root",
+   "strict": 1,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.03755857856046812162425749",
+   "change": "D2- D3-",
+   "cause": "D2 root",
+   "strict": 1,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.04182930430993492656365313",
+   "change": "D1+ D4+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.04255857856046812162425749",
+   "change": "D1- D4-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.04682930430993492656365313",
+   "change": "D2+ D3+",
+   "cause": "D2 root",
+   "strict": 1,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.04755857856046812162425749",
+   "change": "D2- D3-",
+   "cause": "D2 root",
+   "strict": 1,
+   "candidates": 4,
+   "consistent": 1
+  }
+ ],
+ "n_commutations": 19,
+ "n_events": 19,
+ "ambiguous": [],
+ "weak_only": 0,
+ "start_mode": "D1+ D2- D3- D4+",
+ "dc_start_modes": null,
+ "notes": [],
+ "jumps": [],
+ "impulsive_loss_J": "0.0",
+ "max_dae_residual": "1.33e-61",
+ "max_eigvec_cond": "4.8e+3",
+ "windows": {
+  "full": {
+   "V(out)": {
+    "mean": "22.6183631294953529285882",
+    "rms": "22.75012067642597238015728",
+    "d_prec": "4.52e-31"
+   }
+  },
+  "last20": {
+   "V(out)": {
+    "mean": "22.9860578952090886255391",
+    "rms": "22.99452758033832478806266",
+    "d_prec": "4.31e-30"
+   }
+  }
+ },
+ "energy_J": {
+  "Rload": "0.258783995395972",
+  "D1": "0.000385171250323976",
+  "D2": "6.97914066008783e-5",
+  "D3": "6.97914066008783e-5",
+  "D4": "0.000385171250323976",
+  "src:Vac": "0.381530696498"
+ },
+ "energy_balance_rel": "2.65e-58",
+ "precision_doubling_rel": "7.96e-31",
+ "event_time_diff_s": "1.44e-21",
+ "u_stored_trace": 2.7321294572000557e-06,
+ "uniform_dt_floor": 0.00016431745567682104,
+ "dt": 5e-05,
+ "stored_dt": 6.25e-06
+}

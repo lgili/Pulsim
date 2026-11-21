@@ -17,13 +17,12 @@ Status
   :func:`test_mras_normalised_eps_converges_from_cold_start` in the
   pytest suite: with synthetic excitation at ω_e = 200 rad/s the
   observer locks within 500 ms to < 5 % error.
-* **IM-driven case is harder** — the additional dynamics of the
-  full IM plant (transient currents, motor acceleration, rotor flux
-  build-up) interact with the adaptive flux equation in ways the
-  synthetic test doesn't exercise. With the feedforward bootstrap
-  (force ω̂ = 2π·f_source during 0 → 500 ms) the lock is partial:
-  ω̂ tracks the trend but with a steady-state error that exceeds the
-  5 % target of the synthetic case.
+* **IM-driven case** — with the feedforward bootstrap (force
+  ω̂ = 2π·f_source during 0 → 500 ms) ω̂ locks to the true ω_e within
+  1 % (measured −0.85 % over the last 200 ms at 50 Hz). An earlier
+  revision injected the NEGATED source voltage (b_extra sign) while
+  feeding the observer the commanded one, which read as a −128 %
+  "partial lock".
 
 For closed-loop sensorless control you would typically:
 
@@ -203,9 +202,12 @@ def main():
         out = list(im_b_extra(t))
         v_amp_now, f_now = vf(t)
         omega = 2.0 * math.pi * f_now
-        out[src_a_idx] += v_amp_now * math.sin(omega * t)
-        out[src_b_idx] += v_amp_now * math.sin(omega * t - 2.0 * math.pi / 3.0)
-        out[src_c_idx] += v_amp_now * math.sin(omega * t + 2.0 * math.pi / 3.0)
+        # A voltage source's b_extra row carries -V (the convention of
+        # builder.compute_time_varying_b_extra). `+=` applied the
+        # NEGATED voltage while the MRAS was fed the commanded one.
+        out[src_a_idx] -= v_amp_now * math.sin(omega * t)
+        out[src_b_idx] -= v_amp_now * math.sin(omega * t - 2.0 * math.pi / 3.0)
+        out[src_c_idx] -= v_amp_now * math.sin(omega * t + 2.0 * math.pi / 3.0)
         return out
 
     print("  IM Flux-MRAS sensorless — normalised-eps bootstrap")

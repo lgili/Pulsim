@@ -35,7 +35,7 @@ def _one_of_everything():
     b.add_inductor("L1", "b", "c", 1e-3)
     b.add_diode("D1", "c", "gnd", 1e3, 1e-9, 0.7)
     b.add_nonlinear_diode("D2", "c", "d",
-                           p.IdealDiodeParams())
+                           p.IdealDiodeParams(), allow_non_passive=True)
     b.add_current_source("I1", "d", "gnd", 1.0)
     b.add_pwm_voltage_source("VP", "e", "gnd", 10.0, 0.0,
                               1e5, 0.5)
@@ -52,6 +52,10 @@ def _one_of_everything():
     b.add_lauritzen_diode("D4", "o", "gnd")
     b.add_pmsm_mna("M2", "p1", "p2", "p3", "nn2", "w2", "th2",
                    0.5, 1e-3, 3e-3, 0.05, 4, 1e-3)
+    b.add_winding("W1", "q", "gnd", "mq", "gnd", 1.0)
+    b.add_excess_loss("X1", "mq", "gnd", 0.01, 0.01)
+    b.add_transmission_line("T1", "r", "gnd", "r2", "gnd", Z0=50.0, delay=1e-6,
+                            model="bergeron")
     return b
 
 
@@ -75,3 +79,6 @@ def test_the_new_level_two_devices_are_named():
     assert kind("D3") == "StoredKind.ShockleyDiode"
     assert kind("D4") == "StoredKind.LauritzenDiode"
     assert kind("M2_a") == "StoredKind.PmsmMna"
+    assert kind("X1") == "StoredKind.ExcessLoss"
+    assert kind("T1") == "StoredKind.TransmissionLine"
+    assert kind("T1.b") == "StoredKind.TransmissionLine"

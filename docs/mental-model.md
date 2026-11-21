@@ -31,6 +31,38 @@ Pulsim has **four** big pieces. Once you understand what they do, the rest of th
                                         device is present.
 ```
 
+## 0. Builder → Circuit → lowered form
+
+`CircuitBuilder` is the authoring API and stays mutable. `builder.build()`
+returns a `pulsim.Circuit`: an immutable snapshot, cheap to copy (one
+shared pointer) and safe to share between threads. Its *lowered form* is
+exactly the builder's `Graph` + `DevicePool` at the time of `build()`, in
+insertion order, so unknown indices, switch order and results are the
+builder's own.
+
+```python
+c = b.build()                      # snapshot; b can keep being edited
+c.devices()                        # [{name, kind, pins, fields}, ...] per branch
+c.components()                     # same as b.components()
+res = pulsim.simulate(c, 1e-3, dt=1e-7)   # same result as simulate(b, ...)
+```
+
+`simulate()` never runs on the circuit's shared data: it runs on a
+private clone (`c.to_builder()`). Nor does it change your builder: the
+topology preflight's ties (1 GΩ per floating subnet) go on the run's
+own circuit, `res.circuit`, and are listed in `res.plan.ties`;
+`c.with_preflight(opts)` returns `(circuit, report, ties)` without a
+run. Values change by derivation too: `c.with_value("RL.R", 8.0)` and
+`c.with_params(Lbase=2e-3)` return new circuits
+([Parameters and value updates](parameters.md)).
+
+A circuit carries everything the builder recorded: initial conditions
+per device (`c.initial_conditions()`: a capacitor's voltage across it,
+an inductor's current through it; a loop of capacitor ICs that breaks
+KVL is refused when the state is synthesised, naming the capacitor),
+aliases (`c.aliases()`), and control declarations (`c.controls()`: C
+blocks and control-graph-driven sources, which `simulate(c)` runs).
+
 ## 1. Graph + DevicePool — the circuit description
 
 The `Graph` stores topology: each branch has a `from` node id, a `to` node id, and a `kind` enum:
@@ -77,7 +109,7 @@ For these devices, each time step runs a Newton loop:
 x_k+1 = x_k - (J_linear + J_nonlinear(x_k))⁻¹ · (f_linear(x_k) + f_nonlinear(x_k))
 ```
 
-The "linear" Jacobian is the cached PWL one; the nonlinear refresh function (`refresh_smooth_diodes`, `refresh_mosfets_level1`, etc.) only rebuilds the contributions from the nonlinear branches each iteration. The combined nonlinear refresh is what `simulate(...)` auto-enables when `pool.has_nonlinear_devices()` returns True.
+The "linear" Jacobian is the cached PWL one; the nonlinear refresh function (`refresh_smooth_diodes`, `refresh_mosfets_level1`, etc.) only rebuilds the contributions from the nonlinear branches each iteration. The transient kernels build the combined nonlinear refresh themselves when `pool.requires_static_refresh()` is true and the caller passed none; the stateful devices (junction capacitor, Lauritzen diode, IGBT tail, PMSM, saturable inductor) bring their own wrappers.
 
 The Newton loop is hardened with:
 - **Line search globalization** (V4)
@@ -101,6 +133,19 @@ pwm = p.make_pwm_switch_fn(100e3, 0.5, loaded.builder.switch_index_of("Q1"),
                            loaded.builder.graph.num_switches)
 res = p.simulate(loaded, switch_fn=pwm)     # t_end / dt from the file
 ```
+
+A built circuit also writes itself out: `circuit.to_yaml()` emits the
+lowered form (`pulsim_circuit: 1`, `nodes`, then one `devices` entry per
+registry kind instance with its pins and every stored field that differs
+from the kind's default, then `couplings`, `branch_form`, `parameters`,
+`bindings`, `initial_conditions`, `aliases`, `power_mosfets` and
+`controls`), and `pulsim.Circuit.from_yaml(text)` reads it back with the
+same `structure_hash` / `value_hash`; the result simulates bit for bit
+like the original. Fields are the stored members (a resistor's `G`, not
+`R`), so nothing is divided on the way back. Pickle goes through this
+text, which is how `sweep(circuit, backend="process")` ships a circuit
+to its workers. A C block (a Python callable) is refused by name. This
+is not the authoring format below: `load_yaml_*` reads that one.
 
 The YAML loader builds a `LoadedCircuit` with two attributes: `.builder` (the populated `CircuitBuilder`) and `.options` (the top-level `simulation:` block — `t_end`, `dt`, ...), plus read-only shortcuts (`t_end`, `dt`, `switch_names`, `node_names`, `source`). `simulate(loaded)` reads `t_end` / `dt` from it. The YAML does not carry the gate drive: build the `switch_fn` from the loaded builder, asking it for the switch's bit by name.
 

@@ -13,7 +13,8 @@ switches at indices 0..5 (per the YAML insertion order). Body diodes
 (idx 6..11) are auto-commutated by the diode-event system.
 
 Expected: phase currents are sinusoidal at 50 Hz with 120° between
-phases, ~30 A peak.
+phases, peak m·(V_bus/2)/|R + jωL| = 127.5 V / 5.24 Ω ≈ 24.3 A (the
+star point floats; a 1 mΩ neutral tie used to add a 30 A DC offset).
 """
 
 from __future__ import annotations
@@ -61,7 +62,7 @@ def build_from_python() -> tuple[p.CircuitBuilder, float, float, float]:
     for phase in ("a", "b", "c"):
         b.add_resistor(f"R_{phase}", f"mid_{phase}", f"r{phase}_lend", 5.0)
         b.add_inductor(f"L_{phase}", f"r{phase}_lend", "n", 5.0e-3)
-    b.add_resistor("R_neutral", "n", "gnd", 1.0e-3)
+    b.add_resistor("R_neutral", "n", "gnd", 1.0e6)   # loose reference (trap 7)
     return b, 0.0, 3.0e-2, 2.0e-7
 
 
@@ -102,6 +103,15 @@ def main() -> None:
 
     # Line-to-line.
     v_ab = v_a - v_b
+
+    # Phase-current peak over the last fundamental cycle vs the
+    # averaged-model phasor m·(V_bus/2)/|R + jωL|.
+    i_a = res.i("L_a")
+    last = np.asarray(res.times) >= t_end - 20e-3
+    i_ref = 0.85 * 150.0 / abs(5.0 + 2j * np.pi * 50.0 * 5e-3)
+    print(f"  i_a peak (last cycle): {np.abs(i_a[last]).max():.2f} A "
+          f"(m·V_bus/2/|Z| = {i_ref:.2f} A, plus switching ripple); "
+          f"mean {p.time_average(res.times, i_a, t_from=t_end - 20e-3):+.2f} A")
 
     try:
         import matplotlib.pyplot as plt

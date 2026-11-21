@@ -225,3 +225,10 @@ def test_a_name_that_is_both_node_and_branch_is_refused():
         pytest.approx(1.0)
     assert p.steady_state_stats(res, "x", t_from=5e-6, kind="v").mean == \
         pytest.approx(1.0)
+
+
+def test_a_window_a_few_ulps_wide_is_the_line_there():
+    # the recorder snaps edges within 4 ulps together; the helpers do not
+    b = float(np.nextafter(0.5, 1.0))
+    assert p.time_average([0.0, 1.0], [5.0, 5.0], 0.5, b) == pytest.approx(5.0)
+    assert p.time_rms([0.0, 1.0], [0.0, 2.0], 0.5, b) == pytest.approx(1.0)

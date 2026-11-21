@@ -1,0 +1,205 @@
+{
+ "circuit": "circuits/stress/periodic_rc_pwm.yaml",
+ "form": "conductance",
+ "supported": true,
+ "observables": [
+  "V(out)"
+ ],
+ "dps": [
+  30,
+  60
+ ],
+ "wall_s": 0.0,
+ "events": [
+  {
+   "t": "0.000009800000000000000624034244",
+   "change": "-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.00002000000000000000163606108",
+   "change": "-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.00002980000000000000226009532",
+   "change": "-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.00004000000000000000327212216",
+   "change": "-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0000498000000000000038961564",
+   "change": "-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.00006000000000000000490818323",
+   "change": "-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.00006980000000000000553221748",
+   "change": "-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.00008000000000000000654424431",
+   "change": "-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.00008980000000000000716827856",
+   "change": "-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0001000000000000000081803054",
+   "change": "-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0001098000000000000088043396",
+   "change": "-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0001200000000000000098163665",
+   "change": "-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0001298000000000000104404007",
+   "change": "-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0001400000000000000114524275",
+   "change": "-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0001498000000000000120764618",
+   "change": "-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0001600000000000000130884886",
+   "change": "-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0001698000000000000137125229",
+   "change": "-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0001800000000000000147245497",
+   "change": "-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0001898000000000000153485839",
+   "change": "-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  }
+ ],
+ "n_commutations": 0,
+ "n_events": 19,
+ "ambiguous": [],
+ "weak_only": 0,
+ "start_mode": "",
+ "dc_start_modes": null,
+ "notes": [],
+ "jumps": [],
+ "impulsive_loss_J": "0.0",
+ "max_dae_residual": "0.0",
+ "max_eigvec_cond": "12.0",
+ "windows": {
+  "full": {
+   "V(out)": {
+    "mean": "1.444724725170186852481925",
+    "rms": "1.551969042291317447769071",
+    "d_prec": "6.86e-31"
+   }
+  },
+  "last20": {
+   "V(out)": {
+    "mean": "2.06307335509843955948413",
+    "rms": "2.064799532904170736232086",
+    "d_prec": "1.81e-30"
+   }
+  }
+ },
+ "energy_J": {
+  "R1": "1.56404706708021e-5",
+  "src:Vpwm": "1.76616274271704e-5"
+ },
+ "energy_balance_rel": "2.35e-61",
+ "precision_doubling_rel": "9.73e-31",
+ "event_time_diff_s": "0",
+ "u_stored_trace": 4.469122927883115e-08,
+ "uniform_dt_floor": 0.00024963215760021967,
+ "dt": 5e-07,
+ "stored_dt": 6.25e-08
+}

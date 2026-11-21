@@ -137,6 +137,26 @@ def _check_finite(y: np.ndarray, what: str) -> None:
                          f"the window")
 
 
+def _window_stats(tw: np.ndarray, yw: np.ndarray) -> dict:
+    # add-probes-and-recorders 4.2: ONE implementation of the time-weighted
+    # window statistics, the kernel recorder's (record/recorder.hpp), fed
+    # the clipped trace with the window it covers exactly
+    from . import _pulsim
+    a, b = float(tw[0]), float(tw[-1])
+    if b - a <= 8 * np.finfo(float).eps * max(abs(a), abs(b)):
+        # the recorder snaps edges within 4 ulps together: a window that
+        # narrow is one line, its mean / mean square in closed form
+        y0, y1 = float(yw[0]), float(yw[-1])
+        return {"avg": np.array([[0.5 * (y0 + y1)]]),
+                "rms": np.array([[np.sqrt(max((y0 * y0 + y0 * y1 + y1 * y1) / 3.0, 0.0))]])}
+    d = _pulsim._record_pass(
+        ["v(y)"], "none", 1, [(a, b)], 0.0, 0.0, ["v(y)"],
+        np.ascontiguousarray(tw, dtype=float),
+        np.ascontiguousarray(yw, dtype=float).reshape(-1, 1),
+        [], np.zeros((0, 1)))
+    return d["windows"]
+
+
 def time_average(
     t,
     y,
@@ -168,8 +188,7 @@ def time_average(
     """
     tw, yw = time_window(t, y, t_from, t_to)
     _check_finite(yw, "time_average")
-    span = float(tw[-1] - tw[0])
-    return float(np.sum(0.5 * (yw[1:] + yw[:-1]) * np.diff(tw)) / span)
+    return float(_window_stats(tw, yw)["avg"][0, 0])
 
 
 def time_rms(
@@ -191,10 +210,7 @@ def time_rms(
     """
     tw, yw = time_window(t, y, t_from, t_to)
     _check_finite(yw, "time_rms")
-    y0, y1 = yw[:-1], yw[1:]
-    span = float(tw[-1] - tw[0])
-    ms = np.sum((y0 * y0 + y0 * y1 + y1 * y1) * np.diff(tw)) / (3.0 * span)
-    return float(np.sqrt(max(float(ms), 0.0)))
+    return float(_window_stats(tw, yw)["rms"][0, 0])
 
 
 @dataclass(frozen=True)
@@ -298,6 +314,11 @@ def steady_state_stats(
     KeyError
         If a name is neither a node nor a branch.
     """
+    if isinstance(what, str):
+        # a named trace: both limits of every event (a jump integrated as
+        # a jump; pulsim.with_event_limits)
+        from ._result_views import with_event_limits
+        result = with_event_limits(result)
     t = np.asarray(result.times, dtype=float)
     if t.size < 2:
         raise ValueError(

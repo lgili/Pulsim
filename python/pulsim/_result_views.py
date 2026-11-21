@@ -117,6 +117,36 @@ def recorded_switch_states(result, builder=None):
     return arr, ""
 
 
+def _reinit_step_starts(result, states: np.ndarray, masks):
+    """Rows ``k - 1`` of the pulse steps replaced by their end rows ``k``
+    (see :func:`step_start_states`); the inputs unchanged (no copy) when
+    the result has no re-initialisation record."""
+    recs = getattr(result, "reinit_records", None) or []
+    # dsed records (dicts) come with the run's own right limits
+    if not recs or states.ndim != 2 or isinstance(recs[0], dict):
+        return states, masks
+    t = np.asarray(result.times, dtype=float)
+    if t.shape[0] != states.shape[0]:
+        return states, masks
+    ks = set()
+    for rec in recs:
+        # only when the stored interval (t[k-1], t[k]] is the pulse step itself:
+        # under store_every > 1 it spans several steps (the earlier ones
+        # conducted from the pre-jump state), and sample < 0 is no row at all
+        k = int(getattr(rec, "sample", -1))
+        if 0 < k < t.shape[0] and abs(t[k - 1] - float(rec.t)) <= 1e-6 * (t[k] - t[k - 1]):
+            ks.add(k)
+    if not ks:
+        return states, masks
+    st = np.array(states, dtype=float, copy=True)
+    mk = None if masks is None else np.array(masks, copy=True)
+    for k in sorted(ks):
+        st[k - 1] = states[k]
+        if mk is not None and mk.shape[0] == st.shape[0]:
+            mk[k - 1] = masks[k]
+    return st, mk
+
+
 def step_start_states(result, states: np.ndarray,
                       masks: "np.ndarray | None" = None):
     """``(states_start, masks_start)``: per sample ``k``, the state and
@@ -136,7 +166,17 @@ def step_start_states(result, states: np.ndarray,
     ``k`` itself and the inputs are returned unchanged (no copy).
 
     A time integral over step ``(t[k-1], t[k]]`` runs from
-    ``states_start[k-1]`` to ``states[k]``; see :func:`pl_integral`."""
+    ``states_start[k-1]`` to ``states[k]``; see :func:`pl_integral`.
+
+    A re-initialisation (``result.reinit_records``, pwl / trbdf2) jumps the
+    state at the START of the step that carries it: the record's ``dW`` is
+    the energy of that jump, and the step runs under the new mode from the
+    projected state. That step starts from its own end sample (the stored
+    pulse step holds the post-jump state: the conduction over it is the
+    end power times h), so the jump and the conduction integral partition
+    the step instead of a line from the pre-jump sample counting part of
+    ``dW`` twice (add-branch-form-ideal-switch DECISIONS #42)."""
+    states, masks = _reinit_step_starts(result, states, masks)
     idx = getattr(result, "right_limit_index", None)
     rl_st = getattr(result, "right_limit_states", None)
     if idx is None or rl_st is None:
@@ -158,6 +198,172 @@ def step_start_states(result, states: np.ndarray,
             mk = np.array(masks, dtype=bool, copy=True)
             mk[idx] = rl_sw
     return st, mk
+
+
+class _ResultView:
+    """``result`` with some attributes replaced on the view: everything
+    else is read from ``result``, and the result type's Python methods
+    (``v``, ``i``, ...) run against the view, so they see the replaced
+    per-sample arrays. (A kernel result's arrays are read-only
+    properties: it cannot be copied and patched.)"""
+
+    def __init__(self, result):
+        object.__setattr__(self, "_result", result)
+
+    def __getattr__(self, name):
+        import types
+        base = self._result
+        while isinstance(base, _ResultView):   # a view of a view
+            base = object.__getattribute__(base, "_result")
+        attr = getattr(type(base), name, None)
+        if isinstance(attr, types.FunctionType):
+            return attr.__get__(self)
+        return getattr(self._result, name)
+
+    def num_steps(self) -> int:
+        return len(self.times)
+
+    def empty(self) -> bool:
+        return len(self.times) == 0
+
+
+def with_right_limits(result):
+    """A shallow copy of ``result`` whose trace shows each jump on both
+    sides: after every sample in ``result.right_limit_index`` a sample
+    at the next representable time, ``nextafter(t[k], +inf)``, holding
+    the right limit (state and switch row). The original result is
+    returned unchanged when it carries no right limits (pwl, trbdf2).
+
+    Why: a stored sample at an event is the LEFT limit, so linear
+    interpolation spread every jump as a ramp over the following step.
+    The added sample is not a made-up time: it is the exact trajectory
+    one ulp after the event, where the next step starts. Times stay
+    strictly increasing, so consumers that difference them keep
+    working. This is how the reference harness compares a jump side
+    for side (a variable-step reference stores the left limit at t and
+    the right limit one tiny step later)."""
+    idx = getattr(result, "right_limit_index", None)
+    rl = getattr(result, "right_limit_states", None)
+    if idx is None or rl is None or len(idx) == 0:
+        return result
+    idx = np.asarray(idx, dtype=np.int64)
+    t = np.asarray(result.times, dtype=float)
+    pos = idx + 1
+    out = _ResultView(result)
+    out.times = np.insert(t, pos, np.nextafter(t[idx], np.inf))
+    out.states = np.insert(np.asarray(result.states), pos,
+                           np.asarray(rl, dtype=float), axis=0)
+    sw = getattr(result, "switch_states", None)
+    rl_sw = getattr(result, "right_limit_switch_states", None)
+    if sw is not None and rl_sw is not None:
+        out.switch_states = np.insert(np.asarray(sw), pos,
+                                      np.asarray(rl_sw), axis=0)
+        unsolved = getattr(result, "switch_states_unsolved", None)
+        if unsolved is not None:
+            out.switch_states_unsolved = np.insert(
+                np.asarray(unsolved), pos, False)
+    out.right_limit_index = np.zeros(0, dtype=np.int64)
+    out.right_limit_states = np.zeros((0, out.states.shape[1]))
+    out.right_limit_switch_states = None if rl_sw is None else np.zeros(
+        (0, np.asarray(rl_sw).shape[1]), dtype=bool)
+    return out
+
+
+def with_inner_events(result):
+    """``result`` with the events INSIDE its stored steps as rows (the
+    fixed engine's event split under the restart rule,
+    ``result.inner_events``): at each, a row at the event's time holding
+    its left limit (the sub-step that ended there, under its mask), and
+    its right limit added to the view's ``right_limit_*``. Every index
+    the view carries (right limits, ``reinit_records[].sample``) is
+    renumbered; ``view._inner_keep`` marks the original samples. The
+    result itself when it has none."""
+    ev = getattr(result, "inner_events", None)
+    if ev is None or len(ev["times"]) == 0:
+        return result
+    import types
+    t = np.asarray(result.times, dtype=float)
+    n = t.size
+    after = np.asarray(ev["after"], dtype=np.int64)
+    pos = after + 1
+    m = after.size
+    new_of = np.arange(n) + np.searchsorted(after, np.arange(n), side="left")
+    new_inner = pos + np.arange(m)
+    out = _ResultView(result)
+    out.times = np.insert(t, pos, np.asarray(ev["times"], dtype=float))
+    out.states = np.insert(states_as_array(result), pos,
+                           np.asarray(ev["left_states"], dtype=float), axis=0)
+    keep = np.ones(n + m, dtype=bool)
+    keep[new_inner] = False
+    out._inner_keep = keep
+    out.inner_events = None   # inserted as rows; a view would hand its base's on again
+    sw = getattr(result, "switch_states", None)
+    if sw is not None:
+        out.switch_states = np.insert(np.asarray(sw, dtype=bool), pos,
+                                      np.asarray(ev["left_switch_states"]), axis=0)
+    uns = getattr(result, "switch_states_unsolved", None)
+    if uns is not None:
+        out.switch_states_unsolved = np.insert(np.asarray(uns, dtype=bool), pos, False)
+    gs = getattr(result, "gate_states", None)
+    if gs is not None:
+        gs = np.asarray(gs, dtype=bool)
+        out.gate_states = np.insert(gs, pos, gs[after], axis=0)   # the gate before the edge
+    # right limits: the samples' (renumbered) and the inner events'
+    rl_i = getattr(result, "right_limit_index", None)
+    rl_s = getattr(result, "right_limit_states", None)
+    rl_m = getattr(result, "right_limit_switch_states", None)
+    w = out.states.shape[1]
+    idx = [] if rl_i is None else [new_of[np.asarray(rl_i, dtype=np.int64)]]
+    st = [] if rl_s is None else [np.asarray(rl_s, dtype=float).reshape(-1, w)]
+    mk = [] if rl_m is None else [np.asarray(rl_m, dtype=bool)]
+    right = np.asarray(ev["right_states"], dtype=float)
+    ok = np.all(np.isfinite(right), axis=1)
+    idx.append(new_inner[ok])
+    st.append(right[ok])
+    mk.append(np.asarray(ev["right_switch_states"], dtype=bool)[ok])
+    idx = np.concatenate(idx)
+    order = np.argsort(idx, kind="stable")
+    out.right_limit_index = idx[order]
+    out.right_limit_states = np.concatenate(st)[order]
+    out.right_limit_switch_states = (np.concatenate(mk)[order]
+                                     if len(mk) == len(st) else None)
+    recs = getattr(result, "reinit_records", None) or []
+    if recs and not isinstance(recs[0], dict):
+        moved = []
+        for r in recs:
+            k = int(getattr(r, "sample", -1))
+            d = {a: getattr(r, a) for a in dir(r) if not a.startswith("_")
+                 and not callable(getattr(r, a))}
+            d["sample"] = int(new_of[k]) if 0 <= k < n else k
+            moved.append(types.SimpleNamespace(**d))
+        out.reinit_records = moved
+    return out
+
+
+def with_event_limits(result):
+    """The result's trace with BOTH limits of every event (public
+    accessor, ``pulsim.with_event_limits``).
+
+    Storage convention (every engine): ``result.times`` holds one row
+    per stored sample, and a sample at an event instant is the LEFT
+    limit there (the state the step that ended at it produced). Where a
+    quantity jumps at an event (a diode's turn-on through V_th, a switch
+    current at a gate edge) its RIGHT limit, where the next step starts,
+    is kept beside the samples (``result.right_limit_index`` /
+    ``right_limit_states`` / ``right_limit_switch_states``). ``res.v()``
+    / ``res.i()`` and ``np.interp`` over ``result.times`` therefore see
+    the left limits only, and a trapezoid over them spreads each jump
+    as a ramp over the following step.
+
+    The view returned here inserts each right limit as its own row one
+    ulp after the event (``nextafter(t, +inf)``), so ``view.times`` is
+    strictly increasing and ``view.v()`` / ``view.i()`` /
+    ``pulsim.time_average(view.times, view.i(name))`` integrate every
+    jump as a jump. An event INSIDE a stored step (the fixed engine's
+    event split) is inserted as its own rows, left limit at its time and
+    right limit one ulp later. A result without event limits is returned
+    as it is."""
+    return with_right_limits(with_inner_events(result))
 
 
 def pl_integral(times: np.ndarray, y: np.ndarray,
@@ -705,7 +911,8 @@ class TimeWindow:
         self._beta = 0.0 if self._b_on else (b - t[j - 1]) / (t[j] - t[j - 1])
         self._lo = i - 1 if self._a_on else i
         self._hi = j if self._b_on else j - 1
-        self.times = self.cont(t)[0]
+        # A copy: `t` may be the result's read-only `times` view.
+        self.times = np.array(self.cont(t)[0], dtype=float)
         self.times[0], self.times[-1] = a, b
 
     @property

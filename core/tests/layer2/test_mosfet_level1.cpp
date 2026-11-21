@@ -142,6 +142,50 @@ TEST_CASE("MosfetLevel1 — Jacobian via AD returns finite partials",
     REQUIRE(partials[1] < 0);
 }
 
+TEST_CASE("MosfetLevel1 — continuous and C1 across V_DS = 0 at every gate drive",
+          "[v2][layer2_v13][mosfet_level1][unit]") {
+    // The β blend leaks forward(V_OV, 0) = α(1−β)·K·V_OV² at V_DS = 0;
+    // the plain terminal-swap mirror jumped by twice that (5.2 mA at
+    // V_GS = 3.2 V for these parameters) and both engines aborted at the
+    // zero crossing of a current through a partly-on channel
+    // (openspec/changes/add-power-mosfet-datasheet-device/probes/
+    // vds_zero_jump.py). Value and the three AD partials must now match
+    // on both sides of V_DS = 0, and the current at V_DS = 0 is zero
+    // (passive; DECISIONS #44 of add-unified-device-interface).
+    MosfetLevel1::Params p{.K = 1.43, .V_T = 3.0, .lambda = 0.02, .kappa = 15.0};
+    for (int k = 0; k <= 120; ++k) {
+        const Real vgs = 1.0 + 0.05 * k;               // 1 .. 7 V
+        const Real e = 1e-9;
+        // C¹, not C²: the second derivative may differ on the two sides.
+        // So the step across 0 (−e → +e) is bounded by 2e × the larger
+        // one-sided slope (from ±e → ±3e), with margin. The old jump was 2L
+        // in the value and ~2κL in the partials, far above these bounds.
+        auto at = [&](Real x) {
+            return evaluate_current_and_jacobian<MosfetLevel1>(
+                ModelInputs<MosfetLevel1>{x, 0.0, vgs}, p);
+        };
+        const auto [i_m3, d_m3] = at(-3.0 * e);
+        const auto [i_lo, d_lo] = at(-e);
+        const auto [i_hi, d_hi] = at(e);
+        const auto [i_p3, d_p3] = at(3.0 * e);
+        INFO("V_GS = " << vgs << " i(-e) = " << i_lo << " i(+e) = " << i_hi);
+        REQUIRE(iD(p, vgs, 0.0) == 0.0);
+        const Real slope = std::max(std::abs(i_p3 - i_hi), std::abs(i_lo - i_m3));
+        REQUIRE(std::abs(i_hi - i_lo) <= 1.5 * slope + 1e-15);
+        for (int j = 0; j < 3; ++j) {
+            INFO("partial " << j << ": " << d_lo[j] << " vs " << d_hi[j]);
+            const Real curv = std::max(std::abs(d_p3[j] - d_hi[j]),
+                                       std::abs(d_lo[j] - d_m3[j]));
+            REQUIRE(std::abs(d_hi[j] - d_lo[j])
+                    <= 1.5 * curv + 1e-4 * std::abs(d_hi[j]) + 1e-14);   // AD rounding ~1e-6 rel
+        }
+    }
+    // Fully on, both quadrants are the raw forward law to the last bit (the
+    // subtracted leak is below half an ulp) and the third is its mirror.
+    REQUIRE(iD(p, 12.0, -0.5) == -iD(p, 12.5, 0.5));
+    REQUIRE(iD(p, 12.0, 0.01) == MosfetLevel1::forward_current_<Real>(9.0, 0.01, p));
+}
+
 TEST_CASE("MosfetLevel1 — V_GS sweep: monotonic I_D in saturation",
           "[v2][layer2_v13][mosfet_level1][unit]") {
     MosfetLevel1::Params p{
@@ -313,4 +357,67 @@ TEST_CASE("add_mosfet_level1 with_body_diode=false is the bare device",
     REQUIRE(b.num_branches() == 1);
     REQUIRE(b.pool().kind_of(0) ==
               DevicePool::StoredKind::MosfetLevel1);
+}
+
+namespace {
+// The law as 4aa3b15e wrote it (DECISIONS #44), with no shared or skipped
+// work: the reference the #47 restructuring must reproduce.
+template <class S, class P>
+S c1_reference(const S& a, const S& d, const P& p) {
+    using std::exp; using std::expm1;
+    using M = pulsim::models::MosfetLevel1;
+    const S f = M::forward_current_<S>(a, d, p);
+    const S kd = p.kappa * d;
+    const S leak = M::forward_current_<S>(a, S{0}, p) * exp(S(-kd));
+    if (leak <= pulsim::Real{0x1p-54} * f && -leak <= pulsim::Real{0x1p-54} * f) return f;
+    if (kd > pulsim::Real{1}) return f - leak;
+    const S u = a - d;
+    const S alpha = pulsim::numeric::logistic(S(p.kappa * a));
+    const S one_minus_alpha = pulsim::numeric::logistic(S(-(p.kappa * a)));
+    const S beta_u = pulsim::numeric::logistic(S(p.kappa * u));
+    const S one_minus_beta_u = pulsim::numeric::logistic(S(-(p.kappa * u)));
+    const S E = -expm1(S(-kd));
+    const S bracket = p.lambda * d * (a * a - beta_u * u * u)
+                      + a * a * one_minus_alpha * E
+                      + alpha * d * (pulsim::Real{2} * a - d)
+                      + u * u * alpha * one_minus_beta_u * E;
+    return alpha * p.K * bracket;
+}
+}  // namespace
+
+TEST_CASE("MosfetLevel1 — shared exponentials and early exits keep the "
+          "law's values (unified-device-interface #47)",
+          "[v2][layer2][mosfet_level1]") {
+    // The model now shares σ(z)/σ(−z) exponentials, decides the leak exits
+    // on values and skips work the exits make dead; the arithmetic of each
+    // result is unchanged. Bit-identity is checked on the development
+    // machine (.scratch/mos_pretest_sweep.cpp, 1.66e8 points); here a few
+    // ulp, across both pre-test thresholds and every branch.
+    using M = pulsim::models::MosfetLevel1;
+    using AD = pulsim::ad::ADRealN<3>;
+    const auto close = [](double u, double v) {
+        return std::abs(u - v) <= 4e-16 * std::abs(v) + 1e-300;
+    };
+    for (const M::Params p : {M::Params{1.43, 3.0, 0.01, 15.0}, M::Params{0.5, 3.0, 0.0, 4.0},
+                              M::Params{50.0, 3.0, 0.02, 15.0}}) {
+        for (int i = -100; i <= 300; i += 3) {
+            const double vgs = p.V_T + i * 0.1 / p.kappa;
+            for (int j = -150; j <= 150; ++j) {
+                const double vds = j * std::abs(j) * 1e-4;   // dense near 0, up to ±2.25 V
+                double v[3] = {vds, 0.0, vgs};
+                const double a = vgs - p.V_T;
+                const double ref = vds < 0 ? -c1_reference<double>(a - vds, -vds, p)
+                                           : c1_reference<double>(a, vds, p);
+                INFO("vgs " << vgs << " vds " << vds);
+                CHECK(close(M::current<double>(v, p), ref));
+                AD w[3] = {AD(vds, {1, 0, 0}), AD(0.0, {0, 1, 0}), AD(vgs, {0, 0, 1})};
+                const AD V_OV = (w[2] - w[1]) - p.V_T, V_DS = w[0] - w[1];
+                const AD r = V_DS < AD{0} ? -c1_reference<AD>(V_OV - V_DS, -V_DS, p)
+                                          : c1_reference<AD>(V_OV, V_DS, p);
+                const AD q = M::current<AD>(w, p);
+                CHECK(close(q.value(), r.value()));
+                for (int k = 0; k < 3; ++k) CHECK(close(q.deriv(k), r.deriv(k)));
+            }
+        }
+    }
 }

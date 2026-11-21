@@ -182,7 +182,7 @@ def test_preflight_warns_once_and_is_greppable():
     # Names the node, the fix, and the way to opt out.
     assert "s1" in msg
     assert "auto_regularize=False" in msg
-    assert "result._preflight" in msg
+    assert "result.plan.ties" in msg
 
 
 def test_auto_tie_matches_the_hand_written_one():
@@ -222,8 +222,10 @@ def test_well_posed_circuit_is_untouched_and_unwarned():
 
 
 def test_preflight_also_runs_for_the_dsed_engine():
-    """The pass mutates the BUILDER before the engine dispatch, so it
-    is not a PWL-only feature that DSED silently ignores."""
+    """The pass regularises the RUN's circuit before the engine
+    dispatch, so it is not a PWL-only feature that DSED silently
+    ignores (and, since add-immutable-circuit-ir, the caller's builder
+    is left as written)."""
     pytest.importorskip("scipy")
     b = p.CircuitBuilder()
     b.add_voltage_source("Vin", "vin", "gnd", 5.0)
@@ -235,9 +237,13 @@ def test_preflight_also_runs_for_the_dsed_engine():
         warnings.simplefilter("ignore")
         res = p.simulate(b, t_end=1e-4, engine="dsed")
     assert res.num_steps() > 0
-    # The tie really was inserted into the builder both engines share.
-    assert any(b.graph.branch_name(i).startswith("R_auto_iso_")
-               for i in range(b.graph.num_branches))
+    # The tie really was inserted into the circuit the engine ran...
+    assert [t.name for t in res.plan.ties] == ["R_auto_iso_iso1"]
+    assert any(d["name"].startswith("R_auto_iso_")
+               for d in res.circuit.devices())
+    # ...and not into the caller's builder.
+    assert not any(b.graph.branch_name(i).startswith("R_auto_iso_")
+                   for i in range(b.graph.num_branches))
     # ...and the report reaches the DSED result too. It used to not:
     # that branch returns ~400 lines before the PWL tail that attaches
     # it, so `result._preflight` — which the warning tells every user
@@ -290,7 +296,7 @@ def test_node_behind_a_nonlinear_device_is_not_mistaken_for_grounded():
     b = p.CircuitBuilder()
     b.add_voltage_source("Vin", "vin", "gnd", 12.0)
     b.add_nonlinear_diode("D1", "vin", "out",
-                          p.IdealDiodeParams())
+                          p.IdealDiodeParams(), allow_non_passive=True)
     b.add_capacitor("Cout", "out", "gnd", 10e-6)
 
     report = b.run_preflight()
@@ -341,7 +347,7 @@ def blocking_diode_chain(n=20, g_off=1e-9):
         q = p.IdealDiodeParams()
         q.G_off = g_off
         anode = "gnd" if i == n - 1 else f"n{i+1}"
-        b.add_nonlinear_diode(f"D{i}", anode, f"n{i}", q)
+        b.add_nonlinear_diode(f"D{i}", anode, f"n{i}", q, allow_non_passive=True)
     return b
 
 
@@ -355,7 +361,7 @@ def mains_rectifier(vpk=400.0, kappa=100.0):
     b.add_sine_voltage_source("Vac", "ac", "gnd", 0.0, vpk, 60.0)
     q = p.IdealDiodeParams()
     q.kappa = kappa
-    b.add_nonlinear_diode("D", "ac", "vout", q)
+    b.add_nonlinear_diode("D", "ac", "vout", q, allow_non_passive=True)
     b.add_resistor("R", "vout", "gnd", 50.0)
     b.add_capacitor("C", "vout", "gnd", 100e-6)
     return b

@@ -24,11 +24,13 @@
 // Gate 4.B/4.C wiring task once the Pulsim cache C++ surface is
 // thread-safe-enough for the PED outer loop.)
 //
-// Bootstrap (first step, no history): Crank-Nicolson (trapezoidal
-// rule, order-2 A-stable) — matches BDF2's order so the startup
-// error doesn't contaminate global accuracy:
+// Bootstrap (first step, no history): backward Euler, L-stable.
+// One first-order step leaves the global error second order:
 //
-//   (I - (h/2) A) y_1 = (I + (h/2) A) y_0 + h · b(t_0 + h/2)
+//   (I - h A) y_1 = y_0 + h · b(t_0 + h)
+//
+// (Crank-Nicolson, used before, is not L-stable: at h/tau = 100 it
+// overshot a 100 V target to 196 V; fix-dsed-auto-integrator-selection.)
 //
 // Validated against an explicit DOPRI5 ground truth on the
 // stiff RLC scenario (`prototype/dsed/run_stiff_rlc_validation.py`):
@@ -73,7 +75,7 @@ struct BDF2State {
 /// Take one BDF2 step on the LTI system y' = A·y + b(t).
 ///
 /// On the first call (no history): falls back to a single
-/// Crank-Nicolson step to obtain y_1; the next call is then full
+/// backward-Euler step to obtain y_1; the next call is then full
 /// BDF2 with (y_{n-1} = y_0, y_n = y_1).
 ///
 /// Returns {y_new, err} where err is the embedded order-2 error
@@ -99,16 +101,16 @@ template <class BFn>
     const Vector b_new = b_fn(t + h);
 
     if (!state.has_history()) {
-        // Bootstrap: Crank-Nicolson (trapezoidal, order-2 A-stable)
-        // (I - (h/2) A) y_1 = (I + (h/2) A) y_0 + h · b(t + h/2)
-        const Vector b_old = b_fn(t);
-        const Vector b_mid = Real{0.5} * (b_old + b_new);
-        DenseMatrix J_CN = DenseMatrix::Identity(A.rows(), A.cols())
-                          - Real{0.5} * h * A;
-        DenseMatrix K_CN = DenseMatrix::Identity(A.rows(), A.cols())
-                          + Real{0.5} * h * A;
-        Eigen::FullPivLU<DenseMatrix> lu_CN(J_CN);
-        Vector y_new = lu_CN.solve(K_CN * y + h * b_mid);
+        // Bootstrap: backward Euler, (I - h A) y_1 = y_0 + h · b(t + h).
+        // L-stable: a mode with h/tau = 100 is damped by 1/(1 + 100),
+        // where the Crank-Nicolson start used before amplified it by
+        // (1 - 50)/(1 + 50) = -0.96 (a 1 nF node charged from 100 V
+        // read 196 V). First order for one step only; the global error
+        // of the BDF2 recurrence that follows stays second order.
+        DenseMatrix J_BE = DenseMatrix::Identity(A.rows(), A.cols())
+                          - h * A;
+        Eigen::FullPivLU<DenseMatrix> lu_BE(J_BE);
+        Vector y_new = lu_BE.solve(y + h * b_new);
         // No embedded error from bootstrap → return zeros
         Vector err = Vector::Zero(y.size());
         state.y_prev = y;

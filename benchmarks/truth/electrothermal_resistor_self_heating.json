@@ -1,0 +1,52 @@
+{
+ "circuit": "circuits/thermal/electrothermal_resistor_self_heating.yaml",
+ "form": "conductance",
+ "supported": true,
+ "observables": [
+  "V(vin)"
+ ],
+ "dps": [
+  30,
+  60
+ ],
+ "wall_s": 0.0,
+ "events": [],
+ "n_commutations": 0,
+ "n_events": 0,
+ "ambiguous": [],
+ "weak_only": 0,
+ "start_mode": "",
+ "dc_start_modes": null,
+ "notes": [],
+ "jumps": [],
+ "impulsive_loss_J": "0.0",
+ "max_dae_residual": "0.0",
+ "max_eigvec_cond": "1.0",
+ "windows": {
+  "full": {
+   "V(vin)": {
+    "mean": "5.0",
+    "rms": "5.0",
+    "d_prec": "0.0"
+   }
+  },
+  "last20": {
+   "V(vin)": {
+    "mean": "5.0",
+    "rms": "5.0",
+    "d_prec": "0.0"
+   }
+  }
+ },
+ "energy_J": {
+  "R_diss": "50.0",
+  "src:Vdc": "50.0"
+ },
+ "energy_balance_rel": "0.0",
+ "precision_doubling_rel": "0.0",
+ "event_time_diff_s": "0",
+ "u_stored_trace": 0.0,
+ "uniform_dt_floor": 0.0,
+ "dt": 0.005,
+ "stored_dt": 0.000625
+}

@@ -56,6 +56,8 @@ from typing import Optional
 
 import numpy as np
 
+from . import _run_options as _ro
+
 
 __all__ = [
     "DCStrategy",
@@ -189,6 +191,7 @@ def compute_dc_op(builder,
                     verbose: bool = False,
                     report: Optional[list] = None,
                     should_continue=None,
+                    device_path: str = "legacy",
                     ) -> np.ndarray:
     """Compute the DC operating point of a circuit.
 
@@ -231,6 +234,18 @@ def compute_dc_op(builder,
     report
         If a list is passed, the kernel's ``DCSolveReport`` is
         appended to it, so you can see which rung answered.
+    should_continue
+        ``() -> bool``, polled at entry and between the kernel's
+        strategy rungs (inside the transient for ``"settle"``).
+        ``False`` raises :class:`pulsim.Cancelled`
+        (``.where == "compute_dc_op"``); no operating point is returned.
+        A callback that raises propagates. For a GUI Cancel button:
+        ``cancel = threading.Event()``,
+        ``should_continue=lambda: not cancel.is_set()``.
+    device_path
+        ``"legacy"`` (default): the hand-written Newton stamps;
+        ``"interface"``: every Newton kind's law on the device interface
+        (same answer to rounding; for the release that makes it default).
 
     Returns
     -------
@@ -281,19 +296,35 @@ def compute_dc_op(builder,
     # to recognise from a singular-matrix message. Running it here
     # too keeps the two entry points from disagreeing about what
     # "floating" means.
+    #
+    # The ties go on this call's own copy of the circuit
+    # (add-immutable-circuit-ir): the caller's builder is not changed.
+    from . import Circuit as _Circuit, CircuitBuilder as _CB
+    if isinstance(builder, (_Circuit, _CB)):
+        # the snapshot carries the C blocks (ControlDecls)
+        circuit = builder if isinstance(builder, _Circuit) else builder._snapshot()
+    else:  # a builder stand-in
+        circuit = None
     if auto_regularize is None:
         auto_regularize = True
     if auto_regularize:
         from . import PreflightOptions as _PfOpts
-        pf = builder.run_preflight(_PfOpts(auto_regularize=True))
+        if circuit is not None:
+            circuit, pf, _ = circuit.with_preflight(
+                _PfOpts(auto_regularize=True))
+        else:
+            pf = builder.run_preflight(_PfOpts(auto_regularize=True))
         if not pf.empty():
             import warnings
             warnings.warn(
                 "compute_dc_op(): " + pf.summary() +
                 "\n  Pass auto_regularize=False to get the original "
-                "singular-matrix error instead. The ties persist on "
-                "the builder.",
+                "singular-matrix error instead. The ties were added to "
+                "this call's own copy of the circuit; your builder is "
+                "unchanged.",
                 stacklevel=2)
+    if circuit is not None:
+        builder = circuit.to_builder()
 
     if strategy == "settle":
         # "settle" is a transient, not a solve: it has no rung, no
@@ -328,6 +359,11 @@ def compute_dc_op(builder,
 
     from . import _pulsim as _k  # type: ignore[import-not-found]
 
+    if device_path not in ("legacy", "interface"):
+        from . import _options_error
+        raise _options_error("device_path",
+                             f"compute_dc_op(device_path={device_path!r}): "
+                             "expected 'legacy' or 'interface'")
     if mask is None:
         mask = _k.SwitchStateMask(builder.graph.num_switches)
 
@@ -342,12 +378,14 @@ def compute_dc_op(builder,
             strategy=getattr(_k.DCStrategy,
                               _KERNEL_STRATEGIES[strategy]),
             enable_cascade=(strategy == "auto"),
-            max_event_iterations=(16 if max_event_iterations is None
-                                   else int(max_event_iterations)),
+            max_event_iterations=(_ro.DEFAULTS["max_event_iterations"]
+                                  if max_event_iterations is None
+                                  else int(max_event_iterations)),
             ss_n_steps=int(source_step.n_steps),
             t_eval=float(t_eval),
             enable_nonlinear_refresh=enable_nonlinear_refresh,
             should_continue=should_continue,
+            device_path=getattr(_k.DevicePath, device_path.capitalize()),
             **({} if gmin is None else {"gmin": float(gmin)}))
     except Exception as exc:
         if _is_kernel_cancellation(exc):
@@ -379,13 +417,18 @@ def _dc_settle(builder,
     import pulsim as _v2
     n_check_samples = max(1, int(round(cfg.t_check / cfg.dt)))
 
+    from ._builder_ergonomics import CancelProbe
+    cont = (None if should_continue is None
+            else CancelProbe(should_continue, "compute_dc_op"))
     res = _v2.simulate(builder,
                          t_end=cfg.t_settle,
                          dt=cfg.dt,
                          t_start=0.0,
                          start_from_dc_op=False,
                          max_event_iterations=8,
-                         should_continue=should_continue)
+                         should_continue=cont)
+    if cont is not None:   # a cut-short settle is no operating point
+        cont.raise_if_fired(0)
     # Steady-state check: look at the last 2 sampling windows of size
     # t_check and confirm the state barely moves between them.
     states = np.asarray(res.states)

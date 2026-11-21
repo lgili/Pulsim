@@ -51,7 +51,7 @@ def build_from_python() -> tuple[p.CircuitBuilder, float, float, float]:
                        V_T=5.0, kappa=15.0)
     b.add_capacitor  ("C_out",   "vout", "gnd", 100e-6)
     b.add_resistor   ("R_load",  "vout", "gnd", 20.0)
-    return b, 0.0, 5e-3, 1e-7
+    return b, 0.0, 20e-3, 1e-7
 
 
 def main() -> None:
@@ -77,7 +77,12 @@ def main() -> None:
     # the variable-step one simulate() uses when no dt is given -- a plain
     # mean over the samples is not.
     v_mean = p.steady_state_stats(res, v_out, last=0.3 * (t_end - t_start)).mean
-    print(f"  V_out DC ≈ {v_mean:.2f} V  (lower than the linear-L boost)")
+    print(f"  V_out DC ≈ {v_mean:.2f} V  (same as the linear-L boost, "
+          f"19.62 V: CCM V_out is set by volt-second balance)")
+    ss_il = p.steady_state_stats(res, res.i("L_boost"),
+                                 last=0.3 * (t_end - t_start))
+    print(f"  i_L: {ss_il.min:.2f} … {ss_il.max:.2f} A  "
+          f"(linear 100 µH: 1.46 … 1.90 A; saturation widens the ripple)")
 
     try:
         import matplotlib.pyplot as plt

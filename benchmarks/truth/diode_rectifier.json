@@ -1,0 +1,1646 @@
+{
+ "circuit": "circuits/diodes/diode_rectifier.yaml",
+ "form": "conductance",
+ "supported": true,
+ "observables": [
+  "V(out)"
+ ],
+ "dps": [
+  30,
+  60
+ ],
+ "wall_s": 6.1,
+ "events": [
+  {
+   "t": "0.000005020131951248001360013138",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.00002437542305967218733551517",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.00002502013195124800136001314",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.00004437542305967218733551517",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.00004502013195124800136001314",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.00006437542305967218733551517",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.00006502013195124800136001314",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.00008437542305967218733551517",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.00008502013195124800136001314",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0001043754230596721873355152",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0001050201319512480013600131",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0001243754230596721873355152",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0001250201319512480013600131",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0001443754230596721873355152",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0001450201319512480013600131",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0001643754230596721873355152",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0001650201319512480013600131",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0001843754230596721873355152",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0001850201319512480013600131",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0002043754230596721873355152",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0002050201319512480013600131",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0002243754230596721873355152",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0002250201319512480013600131",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0002443754230596721873355152",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0002450201319512480013600131",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0002643754230596721873355152",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0002650201319512480013600131",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0002843754230596721873355152",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0002850201319512480013600131",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0003043754230596721873355152",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0003050201319512480013600131",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0003243754230596721873355152",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0003250201319512480013600131",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0003443754230596721873355152",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0003450201319512480013600131",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0003643754230596721873355152",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0003650201319512480013600131",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0003843754230596721873355152",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0003850201319512480013600131",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0004043754230596721873355152",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0004050201319512480013600131",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0004243754230596721873355152",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0004250201319512480013600131",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0004443754230596721873355152",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0004450201319512480013600131",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0004643754230596721873355152",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0004650201319512480013600131",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0004843754230596721873355152",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0004850201319512480013600131",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0005043754230596721873355152",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0005050201319512480013600131",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0005243754230596721873355152",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0005250201319512480013600131",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0005443754230596721873355152",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0005450201319512480013600131",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0005643754230596721873355152",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0005650201319512480013600131",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0005843754230596721873355152",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0005850201319512480013600131",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0006043754230596721873355152",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0006050201319512480013600131",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0006243754230596721873355152",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0006250201319512480013600131",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0006443754230596721873355152",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0006450201319512480013600131",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0006643754230596721873355152",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0006650201319512480013600131",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0006843754230596721873355152",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0006850201319512480013600131",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0007043754230596721873355152",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0007050201319512480013600131",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0007243754230596721873355152",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0007250201319512480013600131",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0007443754230596721873355152",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0007450201319512480013600131",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0007643754230596721873355152",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0007650201319512480013600131",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0007843754230596721873355152",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0007850201319512480013600131",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0008043754230596721873355152",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0008050201319512480013600131",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0008243754230596721873355152",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0008250201319512480013600131",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0008443754230596721873355152",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0008450201319512480013600131",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0008643754230596721873355152",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0008650201319512480013600131",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0008843754230596721873355152",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0008850201319512480013600131",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0009043754230596721873355152",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0009050201319512480013600131",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0009243754230596721873355152",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0009250201319512480013600131",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0009443754230596721873355152",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0009450201319512480013600131",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0009643754230596721873355152",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0009650201319512480013600131",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0009843754230596721873355152",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0009850201319512480013600131",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001004375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001005020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001024375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001025020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001044375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001045020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001064375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001065020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001084375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001085020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001104375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001105020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001124375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001125020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001144375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001145020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001164375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001165020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001184375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001185020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001204375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001205020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001224375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001225020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001244375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001245020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001264375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001265020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001284375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001285020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001304375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001305020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001324375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001325020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001344375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001345020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001364375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001365020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001384375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001385020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001404375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001405020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001424375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001425020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001444375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001445020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001464375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001465020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001484375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001485020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001504375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001505020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001524375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001525020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001544375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001545020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001564375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001565020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001584375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001585020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001604375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001605020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001624375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001625020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001644375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001645020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001664375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001665020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001684375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001685020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001704375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001705020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001724375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001725020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001744375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001745020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001764375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001765020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001784375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001785020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001804375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001805020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001824375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001825020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001844375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001845020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001864375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001865020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001884375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001885020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001904375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001905020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001924375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001925020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001944375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001945020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001964375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001965020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001984375423059672187335515",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.001985020131951248001360013",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  }
+ ],
+ "n_commutations": 199,
+ "n_events": 199,
+ "ambiguous": [],
+ "weak_only": 0,
+ "start_mode": "D1+",
+ "dc_start_modes": null,
+ "notes": [],
+ "jumps": [],
+ "impulsive_loss_J": "0.0",
+ "max_dae_residual": "1.46e-66",
+ "max_eigvec_cond": "2.0e+4",
+ "windows": {
+  "full": {
+   "V(out)": {
+    "mean": "9.895912760401461845975382",
+    "rms": "9.898867369801664021013396",
+    "d_prec": "1.45e-29"
+   }
+  },
+  "last20": {
+   "V(out)": {
+    "mean": "9.904653649208211245952535",
+    "rms": "9.904810435742754264252971",
+    "d_prec": "3.03e-29"
+   }
+  }
+ },
+ "energy_J": {
+  "Rload": "0.00195975150409848",
+  "D1": "3.26896104192527e-6",
+  "src:Vac": "0.00244824335755287"
+ },
+ "energy_balance_rel": "3.31e-58",
+ "precision_doubling_rel": "6.0e-31",
+ "event_time_diff_s": "3.9e-24",
+ "u_stored_trace": 2.7029382203934393e-05,
+ "uniform_dt_floor": 0.0011970977418858456,
+ "dt": 1e-06,
+ "stored_dt": 1.25e-07
+}

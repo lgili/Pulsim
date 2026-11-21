@@ -119,54 +119,62 @@ TEST_CASE("solve_at reuses ONE event solver per mask across dt changes",
     REQUIRE(f.cache->metrics().event_builds == 2);  // no new builds
 }
 
-TEST_CASE("solve_at event entries are LRU-bounded at kMaxEventEntries",
+TEST_CASE("solve_at event entries are bounded by the byte budget",
           "[v2][layer4_v7][multi_dt]") {
-    // 3-switch chopper variant → 8 masks; visit all of them plus
-    // wrap-around: the table must never exceed kMaxEventEntries and
-    // evicted masks must rebuild correctly on re-visit.
-    Graph g;
-    DevicePool pool;
-    g.add_node("vin");
-    g.add_node("vout");
-    g.add_branch(0, g.ground(), BranchKind::Source);
-    pool.add_voltage_source(0, {.V = 12.0});
-    for (int i = 0; i < 4; ++i) {
-        g.add_branch(0, 1, BranchKind::Switch);
-        pool.add_switch(1 + i, /*g_on=*/1e3, /*g_off=*/1e-9);
-    }
-    g.add_branch(1, g.ground(), BranchKind::PassiveLinear);
-    pool.add_resistor(5, {.G = 0.1});
-    PwlStateSpaceCache cache{g, pool};
-    cache.build_lazy(Real{0});
-
-    Vector b_extra = Vector::Zero(3);
-    Vector x;
-    // 16 distinct masks through the 8-entry table.
-    for (int m = 0; m < 16; ++m) {
+    // update-trbdf2-factor-reuse part 1: the event table is bounded by
+    // the segment byte budget (accounted on its own), not by a count.
+    // 4 switches → 16 masks; a budget of about two entries forces LRU
+    // evictions, and evicted masks must rebuild with the same answer.
+    auto make = [](Graph& g, DevicePool& pool) {
+        g.add_node("vin");
+        g.add_node("vout");
+        g.add_branch(0, g.ground(), BranchKind::Source);
+        pool.add_voltage_source(0, {.V = 12.0});
+        for (int i = 0; i < 4; ++i) {
+            g.add_branch(0, 1, BranchKind::Switch);
+            pool.add_switch(1 + i, /*g_on=*/1e3, /*g_off=*/1e-9);
+        }
+        g.add_branch(1, g.ground(), BranchKind::PassiveLinear);
+        pool.add_resistor(5, {.G = 0.1});
+    };
+    auto mask_of = [](int m) {
         SwitchStateMask mask(4);
         for (int bit = 0; bit < 4; ++bit) {
             mask.set(static_cast<Size>(bit), ((m >> bit) & 1) != 0);
         }
-        cache.solve_at(mask, 1e-6, b_extra, x);
-        REQUIRE(cache.num_event_entries() <=
-                PwlStateSpaceCache::kMaxEventEntries);
+        return mask;
+    };
+    Graph g, g_ref;
+    DevicePool pool, pool_ref;
+    make(g, pool);
+    make(g_ref, pool_ref);
+    PwlStateSpaceCache cache{g, pool};
+    PwlStateSpaceCache unlimited{g_ref, pool_ref};
+    cache.build_lazy(Real{0});
+    unlimited.build_lazy(Real{0});
+    unlimited.set_segment_budget_bytes(0);
+
+    Vector b_extra = Vector::Zero(3);
+    Vector x, x_ref;
+    // Size one entry, then allow about two.
+    cache.solve_at(mask_of(0), 1e-6, b_extra, x);
+    REQUIRE(cache.num_event_entries() == 1);
+    cache.set_segment_budget_bytes(2 * 1024);
+    for (int round = 0; round < 2; ++round) {
+        for (int m = 0; m < 16; ++m) {
+            cache.solve_at(mask_of(m), 1e-6, b_extra, x);
+            unlimited.solve_at(mask_of(m), 1e-6, b_extra, x_ref);
+            REQUIRE(x.size() == x_ref.size());
+            for (Eigen::Index i = 0; i < x.size(); ++i) {
+                REQUIRE(x[i] == x_ref[i]);   // residency never changes a result
+            }
+        }
     }
-    // Re-visit an evicted mask (mask 0 was LRU'd out) — must
-    // rebuild and produce the all-open answer: v_out ≈ 12 V is
-    // WRONG here (switches to node 1 with only leakage → v_out
-    // pulled to vin through g_off? No: all open → v_out floats via
-    // g_off to vin and 0.1 S to gnd → ≈ 0 V). Just check finite +
-    // consistent with a fresh cache.
-    SwitchStateMask m0(4);
-    cache.solve_at(m0, 1e-6, b_extra, x);
-    PwlStateSpaceCache fresh{g, pool};
-    fresh.build_lazy(Real{0});
-    Vector x_fresh;
-    fresh.solve_at(m0, 1e-6, b_extra, x_fresh);
-    REQUIRE(x.size() == x_fresh.size());
-    for (Eigen::Index i = 0; i < x.size(); ++i) {
-        REQUIRE(x[i] == Approx(x_fresh[i]).margin(1e-12));
-    }
+    REQUIRE(cache.metrics().event_evictions > 0);
+    REQUIRE(cache.num_event_entries() < 16);
+    REQUIRE(unlimited.metrics().event_evictions == 0);
+    REQUIRE(unlimited.num_event_entries() == 16);
+    REQUIRE(unlimited.metrics().event_builds == 16);
 }
 
 TEST_CASE("solve_at dt-refactor matches a fresh factorization (RLC)",

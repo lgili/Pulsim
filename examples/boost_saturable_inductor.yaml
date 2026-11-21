@@ -20,10 +20,12 @@
 #   I_sat   = 1.5 A   (knee — below operating-point I_L ≈ 1.7 A)
 #   L_residual = 1 µH (deep-saturation floor)
 #
-# Expected: V_out is LOWER than the linear-L case because the
-# inductor saturates above I_sat ≈ 1.5 A and effectively
-# behaves like a smaller L during peaks — less energy storage,
-# less boost. This is exactly the engineering warning.
+# Expected: the SAME V_out as the linear-L case (19.62 V
+# settled, both): in CCM the volt-second balance sets V_out,
+# not L. Saturation shows up in the inductor CURRENT: above
+# I_sat ≈ 1.5 A the incremental L drops, so the ripple grows
+# (i_L 1.23–2.23 A vs 1.46–1.90 A with a linear 100 µH) —
+# the peak-current stress engineers must design around.
 
 circuit:
   devices:
@@ -86,5 +88,5 @@ circuit:
 
 simulation:
   t_start: 0.0
-  t_end:   5.0e-3
+  t_end:   20.0e-3      # the output rings down with τ = 2·R·C = 4 ms
   dt:      1.0e-7

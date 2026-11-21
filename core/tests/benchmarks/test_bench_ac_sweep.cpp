@@ -323,8 +323,8 @@ TEST_CASE("Bench: AC sweep complex sparse LU — Pulsim vs Eigen (v1.4.0)",
         // for the fact that COLAMD vs RCM pick different column orderings
         // (different round-off pattern, same answer up to tolerance).
         REQUIRE(r.max_solve_diff < 1e-10);
-        REQUIRE(r.wall_eigen_ms  > 0.0);
-        REQUIRE(r.wall_pulsim_ms > 0.0);
+        // wall time / speed-up: printed above, never asserted (machine load)
+        // wall time / speed-up: printed above, never asserted (machine load)
     }
 
     write_csv(rows);

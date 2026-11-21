@@ -30,12 +30,20 @@
 // high-fidelity run no longer has to hold every sample.
 
 #include "pulsim/numeric/dense.hpp"
+#include "pulsim/sim/error.hpp"
+#include "pulsim/device/device_state.hpp"
 #include "pulsim/numeric/types.hpp"
+#include "pulsim/record/grid.hpp"
 #include "pulsim/solver/state_trajectory.hpp"
+#include "pulsim/solver/step/controllers.hpp"
+#include "pulsim/thermal/device_losses.hpp"
 #include "pulsim/topology/switch_state.hpp"
 
+#include <limits>
 #include <algorithm>
 #include <cstdint>
+#include <functional>
+#include <memory>
 #include <string>
 #include <stdexcept>
 #include <vector>
@@ -46,9 +54,86 @@ namespace pulsim::solver {
 /// `t_estimated` is the linear-interpolated zero crossing of the
 /// watched signal (v_diode − turn_on_voltage for both directions on
 /// the pwl engine, see run_transient's interp_commutation_time)
-/// between two grid points. The state vectors
+/// between two grid points; with the fixed-step event split on it is
+/// the located crossing the step was split at (not a grid index). The
+/// state vectors
 /// themselves remain at the dt grid; only the COMMUTATION
 /// timestamp is sub-step accurate.
+/// add-branch-form-ideal-switch D4: one impulsive re-initialisation. The
+/// mode entered at `t` makes `states` dependent (sum_j s_j x_j = d); the
+/// states jump by the projection x+ = x- - M^-1 K^T lambda with M = L (a
+/// cut-set: lambda is the flux in V*s) or C (a capacitor loop: the charge
+/// in C), and `dW = lambda * (K x- - d) / 2` J leaves the circuit.
+struct ReinitRecord {
+    Real t = 0;                      ///< start of the step that carried it
+    std::string kind;                ///< "cut_set" | "capacitor_loop"
+    std::vector<std::string> devices;  ///< the ideal elements involved
+    std::vector<std::string> states;   ///< the inductors / capacitors
+    Real lambda = 0;                 ///< V*s (cut-set) or C (loop), signed
+    Real dW = 0;                     ///< energy removed [J], >= 0
+    Real projection_gap = 0;         ///< max |x_proj - x(t+h)| over states
+    long sample = -1;                ///< stored sample of the pulse, or -1
+    /// The switch the impulsive energy is booked to (task 6.4): the gated
+    /// element of the structure whose state changed on the step, else any
+    /// gated element that changed (a gate forcing a diode into the mode),
+    /// else the structure's first element. Empty: not attributed.
+    std::string cause;
+};
+
+/// add-complementarity-mode-selection on pwl: one decision site where the
+/// settle and the LCP chose different diode modes ('shadow').
+struct ModeDisagreement {
+    Real t = 0;                    ///< end of the site's step
+    std::string site;              ///< "step" | "restart" | "substep" | "static"
+    std::string settle_mode;       ///< diode bits in diode order, '1' = ON
+    std::string lcp_mode;
+    std::string previous_mode;     ///< the bits the site started from
+    Size settle_rounds = 0;
+    int pivots = 0;
+    std::string status;
+    int settle_consistent = -1;    ///< the engine's own law on the site's solve (1 / 0)
+    int lcp_consistent = -1;
+    Real settle_violation = 0;     ///< worst violation (V; ON: -i/g_on)
+    Real lcp_violation = 0;
+};
+
+/// Counters of the LCP posed at pwl decision sites (task 8.1 names).
+struct ModeReport {
+    int mode = 0;                  ///< 0 settle, 1 'shadow', 2 'lcp'
+    Size sites_step = 0, sites_restart = 0, sites_substep = 0, sites_static = 0;
+    Size lcp_events = 0, lcps = 0, pivots_total = 0;
+    int max_pivots_per_event = 0;
+    Size ties = 0, widenings = 0, leak_pins = 0, pin_judgements = 0;
+    Size capped = 0;               ///< tie passes shortened to the mode's next event (#24)
+    Size unfixed = 0, enumerations = 0, nonunique_modes = 0, released = 0;
+    Size shorted_held = 0, shorted_released = 0;   ///< ideal ports shorted by a loop (#34)
+    Size settle_rounds_total = 0;  ///< 'lcp': 0 (the settle never runs)
+    Size mask_cycles = 0;          ///< 'lcp': 0
+    Size inconsistent = 0;         ///< 'lcp': selected modes the site's solve violates (D6 step 4)
+    Size port_solves = 0;
+    Size port_matrices = 0;        ///< port matrices Z built (one per (mask, dt); reused after)
+    Size quiet_sites = 0;          ///< 'lcp': sites whose start mode was kept (its solve reused)
+    Size cached_sites = 0;         ///< 'lcp': sites decided by the LCP's last answer from that start mask
+    Size errors = 0;
+    std::string last_error;
+    std::string passivity, passivity_device, passivity_kind;
+    std::vector<ModeDisagreement> disagreements;
+};
+
+/// The default-mode guard on pwl (task 4b.3).
+struct ModeGuardReport {
+    bool enabled = false;
+    Size checks = 0;               ///< settles judged
+    Size repairs = 0;              ///< settled mode inconsistent, LCP mode applied
+    Size confirmed = 0;            ///< inconsistent, the LCP returned the same mode
+    Size failed = 0;               ///< no consistent LCP mode: the breach is kept
+    Size settle_caps = 0;          ///< settles judged: round budget hit or mask cycle (dsed: #25)
+    std::vector<Real> repair_times;
+    std::vector<std::string> repair_diodes;
+    std::vector<Real> repair_violations;
+    ModeReport lcp;                ///< the repairs' LCP counters
+};
+
 struct CommutationEvent {
     Real  t_estimated;
     Index branch_id;
@@ -128,14 +213,48 @@ struct InductorGuardAction {
 /// segment restarts from h_init.
 struct SolverSnapshot {
     Real t = Real{0};
+    /// Per control-tick source of the run, in registration order: its
+    /// grid's origin and the index of its next instant (add-unified-
+    /// event-queue). A resume passes the origins back, so the ticks stay
+    /// on the run's grid. Empty: no ticks, or a snapshot older than pickle
+    /// version 4.
+    std::vector<Real> tick_origin;
+    std::vector<std::uint64_t> tick_next_k;
+    /// add-in-kernel-event-losses: the loss tracker's run state
+    /// (LossTracker::save): pending heat, ledgers, events. Empty: no loss
+    /// port, or a snapshot without the field (pickle field 17).
+    std::vector<Real> loss_state;
+    /// add-probes-and-recorders 0b.7: the in-loop recorders' run state
+    /// (record::LoopFeed::save) and the signature of the recorders that
+    /// wrote it. Empty: no recorder fed in the loop, or a snapshot without
+    /// the field (pickle field 18).
+    std::vector<Real> recorder_state;
+    std::string recorder_spec;
+    /// add-realistic-passives D18: the transmission lines' committed past
+    /// (pwl::LineHistory::save). Empty: no line (pickle field 19, written
+    /// only when non-empty, so a snapshot without a line pickles as before).
+    std::vector<Real> line_state;
     /// MNA unknowns at `t`.
     Vector x;
-    /// Trapezoidal companion history: 2 reals (v_prev, i_prev)
-    /// per dynamic device, in HistoryState::entries() order.
-    std::vector<Real> history;
-    /// Which switched diodes were conducting. Solver-owned bits
-    /// that a mask alone cannot reconstruct.
-    std::vector<bool> diode_on;
+    /// Every device state the run carries (add-unified-device-interface
+    /// step 3): one flat vector in the blocks of
+    /// `device::kStateBlocks` — the linear companion history, then the
+    /// five stateful-device histories, each in its own to_flat() layout.
+    /// Before the stateful histories were carried, a resume restored x
+    /// and the linear companions while every stateful device restarted
+    /// from its init value — measured: a saturable inductor lost 8 mWb of
+    /// flux at the seam, a Coss went from 109.85 V to 0.28 V, an IGBT
+    /// tail of 17.7 A vanished. No error was raised.
+    std::vector<Real> dev_state;
+    /// Instance count per block of `dev_state` (empty: the snapshot is a
+    /// legacy payload, see `legacy`).
+    std::vector<std::uint32_t> dev_layout;
+    /// `device::DeviceStateLayout::signature()` of `dev_layout`.
+    std::uint64_t layout_signature = 0;
+    /// The solver-owned mode bits the next step starts from (which
+    /// switched diodes conduct): bits that `switch_fn(t)` cannot
+    /// reconstruct. Formerly `diode_on`.
+    std::vector<bool> mask;
     /// The switch / diode mask STAMPED for the solve that produced
     /// `x` — one bit per switch-kind branch, in SwitchStateMask
     /// order: the record's last row
@@ -150,33 +269,105 @@ struct SolverSnapshot {
     /// (a hand-built or older snapshot), and that row is then flagged
     /// unsolved.
     std::vector<bool> stamped_mask;
-    /// The five stateful-device histories, each in its own
-    /// to_flat() layout; empty when the circuit has none. Before
-    /// they were carried, a resume restored x and the linear
-    /// companions while every stateful device restarted from its
-    /// init value and the first Newton step reconciled the two by
-    /// jumping — measured: a saturable inductor lost 8 mWb of flux
-    /// at the seam (171.85 A continuous vs 27.14 A resumed), a Coss
-    /// went from 109.85 V to 0.28 V on the first resumed step, an
-    /// IGBT tail of 17.7 A vanished. No error was raised. Each
-    /// history's from_flat() refuses a size mismatch by name.
-    ///
-    /// 7 per device: lambda_old, i_L_old, V_L_old, then the JA
-    /// hysteresis state H, M, branch direction, sub-step count
-    /// (zeros for the stateless laws). Covers the saturable,
-    /// gapped-core and hysteretic-core inductors and the saturable
-    /// transformer's magnetising branch — they share one history.
-    std::vector<Real> saturable_history;
-    /// 3 per device: v_prev, q_prev, i_prev (charge-based Coss).
-    std::vector<Real> coss_history;
-    /// 2 per device: q_M_prev, f_prev (Lauritzen stored charge).
-    std::vector<Real> lauritzen_history;
-    /// 2 per device: q_prev, f_prev (IGBT turn-off tail charge).
-    std::vector<Real> igbt_tail_history;
-    /// 9 per machine: lambda_abc, i_abc, v_abc (MNA PMSM).
-    std::vector<Real> pmsm_history;
+    /// The named per-history fields of Pulsim 2.0 (`history`,
+    /// `saturable_history`, …), used only when `dev_layout` is empty: a
+    /// snapshot unpickled from 2.0, built by hand, or one whose named view
+    /// was written. A resume converts them field by field, each history
+    /// refusing a size mismatch by name. Removed with the views.
+    struct LegacyPayload {
+        std::vector<Real> history, saturable_history, coss_history,
+            lauritzen_history, igbt_tail_history, pmsm_history;
+    } legacy;
+
+    [[nodiscard]] bool is_legacy() const noexcept { return dev_layout.empty(); }
+    [[nodiscard]] device::DeviceStateLayout layout() const {
+        device::DeviceStateLayout l;
+        for (std::size_t b = 0; b < device::kNumStateBlocks && b < dev_layout.size(); ++b) {
+            l.count[b] = dev_layout[b];
+        }
+        return l;
+    }
+    /// One block, as the 2.0 named field held it.
+    [[nodiscard]] std::vector<Real> view(device::StateBlock blk) const {
+        if (is_legacy()) return legacy_field(blk);
+        const auto l = layout();
+        const auto off = static_cast<std::ptrdiff_t>(l.offset(blk));
+        const auto n = static_cast<std::ptrdiff_t>(l.block_size(blk));
+        if (static_cast<std::ptrdiff_t>(dev_state.size()) < off + n) return {};
+        return {dev_state.begin() + off, dev_state.begin() + off + n};
+    }
+    /// Write one block through its 2.0 name: the snapshot becomes a
+    /// legacy payload holding every block's current value.
+    void set_view(device::StateBlock blk, std::vector<Real> v) {
+        if (!is_legacy()) {
+            for (std::size_t b = 0; b < device::kNumStateBlocks; ++b) {
+                const auto k = static_cast<device::StateBlock>(b);
+                legacy_field_ref(k) = view(k);
+            }
+            dev_state.clear();
+            dev_layout.clear();
+            layout_signature = 0;
+        }
+        legacy_field_ref(blk) = std::move(v);
+    }
+
+private:
+    std::vector<Real> legacy_external_;
+    [[nodiscard]] const std::vector<Real>& legacy_field(device::StateBlock b) const {
+        return const_cast<SolverSnapshot*>(this)->legacy_field_ref(b);
+    }
+    std::vector<Real>& legacy_field_ref(device::StateBlock b) {
+        switch (b) {
+        case device::StateBlock::LinearCompanion: return legacy.history;
+        case device::StateBlock::SaturableInductor: return legacy.saturable_history;
+        case device::StateBlock::NonlinearCapacitor: return legacy.coss_history;
+        case device::StateBlock::LauritzenDiode: return legacy.lauritzen_history;
+        case device::StateBlock::IgbtTail: return legacy.igbt_tail_history;
+        case device::StateBlock::PmsmMna: return legacy.pmsm_history;
+        // add-external-device-abi: no 2.0 field; held here, not pickled in
+        // the legacy payload (a legacy-converted external state then fails
+        // the device's own size check on resume, by name)
+        case device::StateBlock::ExternalDevice: return legacy_external_;
+        }
+        // A block appended after 2.0 has no named field: never alias one.
+        throw std::logic_error(
+            "SolverSnapshot: this device-state block has no 2.0 named field");
+    }
+
+public:
+    /// The fixed-step grid `t` sits on, t == grid_origin + grid_step ·
+    /// grid_dt to rounding (NaN: none — a variable-step or hand-built
+    /// snapshot). A fixed-step resume with the same dt continues it, so
+    /// the resumed trace is the continuous run's bit for bit.
+    Real grid_origin = std::numeric_limits<Real>::quiet_NaN();
+    Size grid_step = 0;
+    Real grid_dt = std::numeric_limits<Real>::quiet_NaN();
+    /// Set by the variable-step engine when the run ended exactly on a
+    /// gate edge after replacing the device derivative slots: `x` is the
+    /// pre-edge solve, the slots the post-edge ones. The fixed engine
+    /// refuses to resume from it (it rings and fails at the next edge).
+    bool post_edge_derivatives = false;
+    /// Restart steps still owed (discontinuity_restart): the rule takes
+    /// the step of a discontinuity and the next two as SDIRK(2,2)
+    /// steps, so a run stopped inside that window resumes it. 0 = none.
+    Size restart_steps_left = 0;
+    /// The step-size controller's state at `t`
+    /// (refactor-unified-transient-stepper task 12): the variable-step
+    /// engine's step memory. Empty (`Kind::None`) from the fixed engine,
+    /// an older snapshot or a pickle older than version 5 (or than the
+    /// device interface's 15-field version 4): the resumed controller starts
+    /// from its initial step (exact in state, to tolerance in trajectory).
+    step::ControllerState controller;
+    /// The controllers' state at `t` (control graphs, C blocks), owned
+    /// by the language binding that ran them; the solver never reads it
+    /// and a copy of the snapshot shares it.
+    std::shared_ptr<void> control_state;
     /// True once populated by a run.
     bool valid = false;
+    /// Why a run left its snapshot invalid, when it knows (a route that keeps
+    /// no snapshot): a resume from it is refused with this cause. Not pickled
+    /// (an unpickled invalid snapshot is refused with the generic causes).
+    std::string invalid_reason;
 };
 
 /// `m` as one bool per bit (SolverSnapshot::stamped_mask).
@@ -205,8 +396,42 @@ struct SolverSnapshot {
     return true;
 }
 
+/// Newton linear-algebra counters of one run
+/// (update-newton-persistent-solver). Zero on a run without Newton.
+struct NewtonCounters {
+    std::uint64_t solves            = 0;  ///< Newton calls
+    std::uint64_t iterations        = 0;  ///< Newton iterations
+    std::uint64_t analyses          = 0;  ///< symbolic analyses
+    std::uint64_t factorizations    = 0;  ///< full numeric factorisations
+    std::uint64_t partial_refactors = 0;  ///< low-rank refactors (stage B)
+    std::uint64_t lm_attempts       = 0;  ///< LM factorisation attempts
+    /// Iterations of each Newton call, in call order (saturates at 65535).
+    std::vector<std::uint16_t> iterations_per_solve;
+};
+
+/// add-parameter-sensitivities group 5: the run's sensitivities, sampled at the start and at every accepted step
+/// (the engine's own step times).
+struct SensitivityTrace {
+    std::vector<std::string> params;
+    std::vector<Real> times;
+    /// times.size() × params.size() × n_state, parameter-major per sample.
+    std::vector<Real> states;
+    Size n_state = 0;
+    std::uint64_t n_sens_solves = 0;       ///< first back-substitutions
+    std::uint64_t n_sens_iterations = 0;   ///< refinement back-substitutions
+    /// back-substitutions (first + refinement) of attempts that were rejected
+    std::uint64_t n_sens_discarded = 0;
+};
+
 struct SimulationResult {
     std::vector<Real> times;
+
+    /// Newton counters of the run (update-newton-persistent-solver).
+    NewtonCounters newton;
+
+    /// Forward parameter sensitivities (`sensitivities=` on pwl / trbdf2);
+    /// empty `params` when none were requested.
+    SensitivityTrace sensitivity;
 
     /// v2.0 Phase 4 — the run's final state, complete enough to
     /// resume from exactly (`simulate(resume_from=...)`).
@@ -219,6 +444,91 @@ struct SimulationResult {
     /// v2.0 Phase 2 — steps re-taken at a reduced dt. Empty on a run
     /// that never needed one.
     std::vector<DtRetry> dt_retries;
+
+    /// Steps taken as SDIRK(2,2) restart steps
+    /// (SimulationOptions::discontinuity_restart). 0 with the rule off.
+    Size n_restart_steps = 0;
+    /// Factorisations made for the restart stages (one per mask at
+    /// 2γ·dt, more only if the segment byte budget evicts). 0 off.
+    Size n_restart_factorizations = 0;
+    /// Steps split at an event inside them
+    /// (SimulationOptions::enable_substep_state_correction). 0 off.
+    Size n_split_steps = 0;
+    /// update-fixed-step-loop-bookkeeping loop counters (`res.counters`):
+    /// `switch_fn` evaluations in the step loop, segment lookups the
+    /// last-segment memo did not absorb, and rollback snapshots taken.
+    /// add-fixed-step-resolution-diagnostics (`pwl` dynamic path).
+    struct RingingRecord {
+        Index var = kInvalidIndex;   ///< state-vector entry
+        Real t_start = 0;            ///< end of the run's first alternating step
+        Size length = 0;             ///< alternating steps in the run
+        Real max_delta = 0;          ///< largest |x_k − x_{k−1}| in the run
+    };
+    struct Resolution {
+        bool enabled = false;
+        /// Per stored sample: max over the steps since the previous one
+        /// of max_i (h/12)|f_{k+1} − 2f_k + f_{k−1}| / running peak |y_i|
+        /// (f = dy/dt of capacitor voltage / inductor current). 0 where
+        /// the stencil is invalid (mask change, restart, split, retry,
+        /// source jump, first two steps).
+        std::vector<Real> lte;
+        Real lte_max = 0;
+        Index lte_branch = kInvalidIndex;
+        Real lte_time = 0;
+        Size n_branches_covered = 0;
+        /// Fraction of the steps with no estimate (stencil invalid): an
+        /// unestimable run is not a resolved one.
+        Real unestimated_fraction = 0;
+        std::vector<RingingRecord> ringing;
+    };
+    Resolution resolution;
+    Size switch_fn_calls = 0;
+    Size segment_searches = 0;
+    Size rollback_snapshots = 0;
+    // Restart stage-2 fallback: backward-Euler re-tries, and those kept.
+    Size stage2_retries = 0;
+    Size stage2_be_kept = 0;
+    Size stage2_retry_failures = 0;
+    // Event splitting: steps whose gate changed with no edge oracle to
+    // locate it (taken at the next grid point), and steps whose event
+    // list overflowed (kMaxStepEvents or the per-step search cap).
+    Size unlocated_gate_steps = 0;
+    Size split_event_overflows = 0;
+    // Event splitting with an edge oracle (tasks 5.3/5.5): the declared
+    // gate edges the steps met (a no-op edge inside a step is not one; an
+    // edge within snap of a grid point is counted unread), and the step
+    // events of any kind (gate edges, source and b_extra jumps) merged into
+    // an earlier one closer than snap, so not landed at their own instant
+    // (a gate pulse narrower than snap is lost; overflow has its own
+    // counter). 0 without splitting.
+    Size n_gate_events = 0;
+    Size n_gate_events_unresolved = 0;
+    // add-unified-event-queue group 5: the fixed engine's control ticks
+    // (one count per TickPlan source) and the largest lateness of a tick
+    // on the grid (step time minus scheduled instant).
+    std::vector<std::uint64_t> control_tick_counts;
+    Real control_tick_jitter_max = Real{0};
+    // add-branch-form-ideal-switch D3: structural passes run (one per
+    // distinct mode of a circuit with an ideal branch-form element).
+    Size mode_structure_checks = 0;
+    /// Ideal diodes turned OFF because they closed a loop of sources and
+    /// closed ideal elements (add-branch-form-ideal-switch D3).
+    Size ideal_loop_releases = 0;
+    /// add-branch-form-ideal-switch D4: impulsive re-initialisations.
+    std::vector<ReinitRecord> reinit_records;
+    /// add-complementarity-mode-selection on pwl.
+    ModeReport mode_report;
+    ModeGuardReport mode_guard;
+
+    /// add-in-kernel-event-losses: one record per device with a loss
+    /// port (events, energy totals), in set_device_losses order. Empty
+    /// for a circuit without one.
+    std::vector<thermal::DeviceLossRecord> device_losses;
+    /// Heat (J) the run deposited into thermal nodes, and heat recorded
+    /// in its last step that the next step would have deposited.
+    /// injected + pending = every event plus every conduction energy.
+    Real heat_injected = 0;
+    Real heat_pending = 0;
 
     /// v2.0 Phase 2 — inductors whose current a post-solve guard
     /// overwrote. Empty unless `inductor_freeze_di_max` or
@@ -302,6 +612,55 @@ struct SimulationResult {
     Size num_switch_bits = 0;
     std::vector<Size> switch_state_unsolved;
     bool has_switch_states = false;
+    /// Release group B (event samples): the RIGHT limits of the run, kept
+    /// beside the samples (a stored sample at an event is its LEFT limit).
+    /// `right_limit_index[j]` is the sample the j-th right limit belongs to
+    /// (increasing), its state row `right_limit_states[j*w .. (j+1)*w)` (w =
+    /// `event_limit_width`) and its mask `right_limit_switch_bits[j*nb ..]`
+    /// (one byte 0/1 per switch bit, nb = `event_limit_switches`). The fixed
+    /// engine under the restart rule records, at the start sample of each
+    /// SDIRK restart step, the start of the line whose trapezoid is the
+    /// step's own quadrature (StepLines in loss_tracker.hpp): the right
+    /// limit to second order (first order after a kept backward-Euler stage
+    /// 2), exact for the step's integral of any quantity
+    /// linear in the state. `inner_event_*`: an event INSIDE a fixed step
+    /// (the event split): after sample `inner_event_after[j]`, at
+    /// `inner_event_times[j]`, the left limit (the sub-step that ended
+    /// there, under its mask) and the right limit as above (a NaN row:
+    /// none). `has_event_limits` false: no record (Python reads None).
+    bool has_event_limits = false;
+    Size event_limit_width = 0;
+    Size event_limit_switches = 0;
+    std::vector<Size> right_limit_index;
+    std::vector<Real> right_limit_states;
+    std::vector<std::uint8_t> right_limit_switch_bits;
+    std::vector<Size> inner_event_after;
+    std::vector<Real> inner_event_times;
+    std::vector<Real> inner_event_left, inner_event_right;
+    std::vector<std::uint8_t> inner_event_left_bits, inner_event_right_bits;
+
+    /// add-pwl-igbt-and-thyristor 2.2: per sample, the gate bit `g` each
+    /// gated device was decided under (the COMMANDED state; the stamped
+    /// conduction state is `switch_state_bits`), same layout: a gated
+    /// device's bit at its switch index, every other bit 0. Empty in a
+    /// circuit without a gated device.
+    std::vector<std::uint8_t> gate_state_bits;
+    /// Set by an engine for the duration of its run only (it reads the
+    /// engine's diode state); `record_switch_state` appends its mask.
+    std::function<topology::SwitchStateMask()> gate_mask_fn;
+
+    /// Transient Newton solves that ended at the iteration budget and
+    /// were accepted at roundoff level (add-newton-roundoff-acceptance:
+    /// stagnated ||dx|| below 1e-6·|x|, row-wise backward error at most
+    /// 8 eps), the largest backward error among them, and its MNA row.
+    Size newton_roundoff_accepts = 0;
+    Real newton_roundoff_omega_max = 0;
+    Index newton_roundoff_row = kInvalidIndex;
+
+    /// add-probes-and-recorders D3: the grid the rows sit on and the run's
+    /// engine-independent counters (set by the engine adapter).
+    record::GridKind grid = record::GridKind::Uniform;
+    record::RunStats stats;
 
     /// Start the record for a circuit with `num_switches` mask bits.
     /// Call once, before the first sample is stored.
@@ -309,6 +668,7 @@ struct SimulationResult {
         num_switch_bits = num_switches;
         switch_state_stride = (num_switches + 7) / 8;
         switch_state_bits.clear();
+        gate_state_bits.clear();
         switch_state_unsolved.clear();
         if (n_reserve > 0 && switch_state_stride > 0) {
             switch_state_bits.reserve(n_reserve * switch_state_stride);
@@ -324,17 +684,23 @@ struct SimulationResult {
         if (!has_switch_states) {
             return;
         }
-        const Size nw = m.num_words();
-        for (Size b = 0; b < switch_state_stride; ++b) {
-            const Size w = b / 8;
-            const std::uint64_t word = w < nw ? m.word(w) : 0ULL;
-            switch_state_bits.push_back(static_cast<std::uint8_t>(
-                (word >> (8 * (b % 8))) & 0xFFULL));
-        }
+        pack_mask_(m, switch_state_bits);
+        if (gate_mask_fn) pack_mask_(gate_mask_fn(), gate_state_bits);
         if (!solved && !times.empty()) {
             // Index of the sample just recorded (call this right
             // after pushing onto `times`).
             switch_state_unsolved.push_back(times.size() - 1);
+        }
+    }
+
+    void pack_mask_(const topology::SwitchStateMask& m,
+                    std::vector<std::uint8_t>& out) const {
+        const Size nw = m.num_words();
+        for (Size b = 0; b < switch_state_stride; ++b) {
+            const Size w = b / 8;
+            const std::uint64_t word = w < nw ? m.word(w) : 0ULL;
+            out.push_back(static_cast<std::uint8_t>(
+                (word >> (8 * (b % 8))) & 0xFFULL));
         }
     }
 
@@ -392,7 +758,8 @@ struct SimulationResult {
         return states.bytes() +
                times.size() * sizeof(Real) +
                event_iteration_count.size() * sizeof(Size) +
-               switch_state_bits.size() +
+               switch_state_bits.size() + gate_state_bits.size() +
+               newton.iterations_per_solve.size() * sizeof(std::uint16_t) +
                switch_state_unsolved.size() * sizeof(Size) +
                commutation_events.size() * sizeof(CommutationEvent) +
                event_iteration_breaches.size() *
@@ -426,14 +793,19 @@ struct SimulationResult {
 /// truncated result as if it were a whole one is exactly the silent
 /// wrong answer this project keeps removing; a caller who wants the
 /// partial trace has to ask for it by catching this type.
-class SimulationAborted : public std::runtime_error {
+class SimulationAborted : public std::runtime_error, public PulsimError {
 public:
     SimulationAborted(const std::string& what,
                        SimulationResult partial,
-                       Real t_failed)
+                       Real t_failed,
+                       bool roundoff_budget = false)
         : std::runtime_error(what),
           partial_(std::move(partial)),
-          t_failed_(t_failed) {}
+          t_failed_(t_failed),
+          roundoff_budget_(roundoff_budget) {
+        // it captured the aborted engine's frame, which is unwinding
+        partial_.gate_mask_fn = nullptr;
+    }
 
     /// Everything that WAS computed, up to but not including the
     /// step that failed.
@@ -444,9 +816,17 @@ public:
     /// The step time the solver could not reach.
     [[nodiscard]] Real t_failed() const noexcept { return t_failed_; }
 
+    /// The run's Newton roundoff-acceptance budget was exhausted
+    /// (pwl::NewtonRoundoffBudgetExceeded); Python raises
+    /// `pulsim.NewtonRoundoffBudgetExceeded`, a SimulationAborted.
+    [[nodiscard]] bool roundoff_budget() const noexcept {
+        return roundoff_budget_;
+    }
+
 private:
     SimulationResult partial_;
     Real t_failed_;
+    bool roundoff_budget_ = false;
 };
 
 }  // namespace pulsim::solver

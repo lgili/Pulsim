@@ -69,10 +69,12 @@ make_combined_switch_fn(
     auto shared = std::make_shared<
         const std::vector<solver::SwitchScheduleFn>>(std::move(fns));
     bool all_known = true;
+    bool follows = false;
     for (const auto& fn : *shared) {
         if (!fn) continue;
         const auto* sched = as_schedule(fn);
         if (sched == nullptr || !sched->has_edges()) all_known = false;
+        if (sched != nullptr && sched->follows_controller) follows = true;
     }
     std::function<Real(Real)> next_edge;
     if (all_known) {
@@ -85,7 +87,7 @@ make_combined_switch_fn(
             return best;
         };
     }
-    return SwitchSchedule{
+    SwitchSchedule out{
         [num_switches, shared](Real t) {
             topology::SwitchStateMask result{num_switches};
             for (const auto& fn : *shared) {
@@ -100,6 +102,8 @@ make_combined_switch_fn(
             return result;
         },
         std::move(next_edge)};
+    out.follows_controller = follows;
+    return out;
 }
 
 }  // namespace pulsim::sources

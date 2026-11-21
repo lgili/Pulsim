@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
 """Saturable reactor inrush — Jiles-Atherton hysteresis demo.
 
-Demonstrates Phase-2.2 in-loop hysteresis: a 50 Hz mains transformer
-is energised at the **worst-case zero crossing** of the source
-voltage. Because the JA model carries a non-zero residual flux
-state ``M`` from a hypothetical previous shutdown, the actual
-flux density spikes far past saturation on the first half-cycle
-— producing the textbook inrush current that's 5-10× rated.
+Demonstrates Phase-2.2 in-loop hysteresis: a 50 Hz mains reactor
+is energised at the voltage PEAK (PHASE = 90°, v = V·cos ωt), with
+a residual magnetisation ``M0`` from a hypothetical previous
+shutdown. The flux swings symmetrically about that remanence, which
+alone drives the core far into saturation on the first cycle and
+produces the inrush. (Energising at the voltage zero crossing,
+PHASE = 0, adds a full DC flux offset: the true worst case.)
 
-What you should see at the end
-------------------------------
-* Inrush current peak in the first 20 ms is several times the
-  steady-state peak.
-* The B-H trajectory in the ``trace.csv`` traces an asymmetric
-  loop on the first cycle that gradually centres into the
-  symmetric major loop over 5–10 cycles.
-* The reported "inrush ratio" (first-cycle peak / steady-state
-  peak) is typically 3–7× depending on the residual-flux
-  initial condition.
+What you should see at the end (measured)
+-----------------------------------------
+* First-cycle peak ≈ 37 A, limited mainly by R_series = 5 Ω
+  (325 V / 5 Ω = 65 A bound).
+* The offset decays slowly: per-cycle peaks 37 → 5.3 → 3.4 → 1.9
+  (cycle 5) → 1.1 (cycle 12) → 0.74 A (cycle 24), still asymmetric
+  (−0.27 A) after 25 cycles. The "last 100 ms" peak (0.82 A) is NOT
+  the steady state, so the printed ratio (~46×) is first-cycle peak
+  over a still-decaying peak, not over the magnetising current.
 
 Circuit
 -------
@@ -47,8 +47,8 @@ import pulsim as p
 
 V_AMP    = 230.0 * math.sqrt(2.0)   # 230 V RMS mains
 F_LINE   = 50.0                    # Hz
-PHASE    = math.pi / 2.0           # worst-case: starts at voltage zero
-                                     # crossing (peak flux build-up)
+PHASE    = math.pi / 2.0           # sin(ωt + 90°): starts at the voltage
+                                     # PEAK (0 would be the zero crossing)
 
 # ---------- Series resistance + reactor -----------------------------------
 #
@@ -56,7 +56,7 @@ PHASE    = math.pi / 2.0           # worst-case: starts at voltage zero
 # (un-saturated) regime of the chosen material. For annealed iron
 # with Ms = 1.7e6 A/m we need H_peak well below Ms in steady state.
 #   H_peak = N · i_peak / l_m, so for N=600 + l_m=300mm
-#   H_peak ≈ 2000·i_peak. Steady-state i ≈ 5 A → H ≈ 10kA/m ≪ Ms.
+#   H_peak ≈ 2000·i_peak. The magnetising current is < 1 A → H ≪ Ms.
 
 R_SERIES = 5.0                     # source + winding resistance [Ω]
 N_TURNS  = 600                     # primary turns
@@ -110,7 +110,7 @@ def main():
     print(f"    L_0 = {hyst.L_0*1e6:.3f} µH (air-core floor)")
     print(f"    R_series = {R_SERIES} Ω")
     print(f"    Source: {V_AMP/math.sqrt(2):.1f} V RMS / {F_LINE} Hz "
-          f"@ phase {math.degrees(PHASE):.0f}° (worst-case)")
+          f"@ phase {math.degrees(PHASE):.0f}° (sin; starts at the voltage peak)")
 
     print(f"\n  Running {T_END} s sim @ dt = {DT*1e6:.0f} µs "
           f"= {int(T_END/DT):,} steps")
@@ -134,8 +134,9 @@ def main():
 
     print("\n  Inrush result:")
     print(f"    Peak current (first cycle)  = {i_inrush:.2f} A")
-    print(f"    Peak current (steady state) = {i_steady:.2f} A")
-    print(f"    Inrush ratio                = {ratio:.1f} ×")
+    print(f"    Peak current (last 100 ms)  = {i_steady:.2f} A "
+          f"(still decaying: not steady state)")
+    print(f"    Ratio first / last 100 ms   = {ratio:.1f} ×")
     print(f"    Final M (after 25 cycles)   = {float(loop.M[-1]):.3e} A/m")
     print(f"    Final B                     = {float(loop.B[-1]):.4f} T")
     print(f"    Last-cycle loop loss        = {loop.avg_power_W:.3f} W")

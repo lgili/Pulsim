@@ -1,0 +1,52 @@
+Status (closeout 2026-11-19): open boxes — section 5 only (the Bergeron line, 5.1–5.10): NOT DONE, needs a contract extension of the stateful-kind interface (5.1, D17). Everything else is done.
+Status (2026-11-19, feat/core-p5-line-and-excess): section 5 is DESIGNED, not implemented — the five design questions (fixed-step lookup and its error, the variable-step bound / estimator / commit rule, the exact engine, the snapshot block, the AC two-port and the DC point) are answered with derivations in DECISIONS D18; no line code is on the branch and `model="bergeron"` still refuses by name.
+
+## 1. ESR, ESL, parallel capacitance
+- [x] 1.1 `CircuitBuilder::add_capacitor(..., esr, esl)` and `add_inductor(..., esr, c_par)`: composite expansion with internal nodes only for non-zero values; sub-element names `{name}.esr`, `{name}.esl`, `{name}.cpar`; validation by name (finite, ≥ 0) — Python wrappers installed on `CircuitBuilder` (`python/pulsim/passives.py`, DECISIONS D1)
+- [x] 1.2 Identity test: every existing `add_capacitor` / `add_inductor` call (all parameters zero) is bit-identical (states, node count, benchmark hashes) — states and node count bit-identical (zero parameters call the native method); benchmark hashes not run
+- [x] 1.3 AC test: 100 µF, 10 mΩ, 10 nH → minimum `|Z|` = 10 mΩ at 159.15 kHz (1e-9); `|Z(f)|` equals `sqrt(esr² + (2πf·esl − 1/(2πf·C))²)` at 10 frequencies (1e-9) — kernel complex MNA sweep
+- [x] 1.4 Transient test: sine drive at 20, 159.15 and 800 kHz against the phasor solution (1e-3); `c0` is the ideal capacitor's voltage — measured 5.5e-5, 3.3e-9, 7.1e-5
+- [x] 1.5 Ripple test: ±1 A square current (pulse current source of `add-controlled-source-set`, or a pulse voltage source behind 1 kΩ) into 50 mΩ + 100 µF → 100 mV step at each edge (1e-6) — ±1000 V pulse behind 1 kΩ (DECISIONS D11)
+- [x] 1.6 Inductor test: 100 µH with `c_par` = 10 pF → impedance peak at 5.033 MHz (1e-6 in frequency) — 1e-3 on the rounded 5.033 MHz, 1e-6 against 1/(2π√(LC)) (D11)
+- [x] 1.7 `components()` reports the parameters; `device_loss_summary` reports `i²·esr` under the component: 1 A rms through 50 mΩ → 50.0 mW (1e-9) — loss as row `{name}.esr` (D3), 1e-6; `components()` lists the sub-elements, not a parameter on the capacitor
+- [x] 1.8 Bindings, stubs; YAML keys `esr`, `esl`, `c_par` (strict) — Python kwargs, stubs, YAML keys (negative/non-finite refused by name; D2)
+
+## 2. π-section line
+- [x] 2.1 `add_transmission_line(..., model="pi", sections=N)` from `(Z0, delay)` or `(L_per_m, C_per_m, length)`; series `R` distributed; validation by name (`Z0 > 0`, `delay > 0`, `sections ≥ 1`) — Python, installed on `CircuitBuilder`; `model="bergeron"` refused by name
+- [x] 2.2 AC test: 50 Ω, 100 ns, 50 sections, open end → `Z_in` = −j91.52 Ω at `ωτ = 0.5` (1e-3) — measured −j91.525 Ω (ideal −j91.524)
+- [x] 2.3 Regression on the probe: ideal step, 50 sections → far-end peak 1.271 V and 50 % crossing at 1.015·τ (1 %); the docstring states the artefact — measured 1.2713 V, 1.0152·τ
+- [x] 2.4 `recommend_line_sections(delay, t_rise)` = `ceil(11·delay/t_rise)`; test: 20 ns edge on the 100 ns line with the recommended 55 sections overshoots less than 6 % — measured peak 1.046 V
+
+## 3. AC-resistance ladder
+- [x] 3.1 `python/pulsim/passives.py`: `RacLadder` (cells, `R_dc`, `L_hf`, band, residual, source) and `fit_rac_ladder(f, R_ac, *, L, R_dc=None, n_cells=4, tol=0.05)` (log-spaced corners, non-negative least squares); refusals (`L_hf ≤ 0`, residual above `tol`) naming the component
+- [x] 3.2 `add_inductor(..., rac=ladder)` composite; YAML `rac:` (cells or a `(f, R_ac)` table to fit at load) — `rac=` done; YAML `rac: {R_dc, L_hf, R: [...], L: [...]}` read by the C++ loader into the same elements (`components()` equal); an `(f, R_ac)` table is refused by name (fitting needs Python's least squares; D13)
+- [x] 3.3 Identity test: `R_dc` = 10 mΩ, one cell 90 mΩ / 143.24 nH → `R_ac` = 10.009, 55.00, 99.11 mΩ at 1 kHz, 100 kHz, 1 MHz (AC, 1e-9); two-tone loss (1 A peak at 1 kHz and at 100 kHz) = 32.50 mW (1e-3) — AC 1e-9 against the analytic ladder; the rounded design values to 2e-4; loss 1e-3
+- [x] 3.4 Fit tests: round trip on ladder-generated data (1e-6); the round-wire skin-effect curve over two decades — record the cell count needed for 5 % and set the default from it — round trip 1e-6; skin curve: 2 cells 1.75 %, 4 cells 0.60 %; default kept at 4 (D10)
+- [x] 3.5 The fitted points are reported as fitted; no agreement with them is reported as validation — docstrings, CHANGELOG and limitation pages say so
+
+## 4. Capacitance against DC bias (after the charge-law variant)
+- [x] 4.1 Odd charge table for `NonlinearCapacitor` (knots for `v ≥ 0`, odd extension, linear tail); `Q(v)` strictly increasing at 1 pV spacing around 0 and around the knee — `pulsim.passives.odd_charge_table` mirrors the knots into a `ChargeTable` for `ChargeLaw.table` (D9); odd / even to 1e-14 relative (each Hermite segment is evaluated from its left knot)
+- [x] 4.2 `fit_mlcc_dc_bias(v_bias, c_ratio, C_nominal)` returning the table and its residual — `pulsim.passives.fit_mlcc_dc_bias` (`fit_charge_table` on v ≥ 0, mirrored odd); returns `ChargeTableFit`
+- [x] 4.3 Test: `C0/(1 + (v/V1)²)`, `C0` = 10 µF, `V1` = 10 V, 64 knots → `Q(20 V)` = 110.71 µC (1e-4), `C(20 V)` = 2.000 µF (1e-3), stored energy 0.8047 mJ (1e-4) — 64 knots on 0..40 V
+- [x] 4.4 Test: small-signal ripple on a 20 V bias corresponds to 2.000 µF (1e-3); charge conserved over a ±20 V cycle (1e-9); `pwl` against `trbdf2` (1e-6) — measured: slope 1.9999996 µF; charge balance 1.6e-15 (pwl) / 2.5e-15 (trbdf2) of Q(20 V) with a series linear charge meter (D14); pwl vs trbdf2 1.6e-6 V on 20 V (8e-8 of the swing)
+- [x] 4.5 YAML: `nonlinear_capacitor` with `table:` or `dc_bias:` curve — `law:` (the power-MOSFET charge-law map, `law: table` included) or `dc_bias: {v, C}` (mirrored odd, knots as given; no residual check — use `fit_mlcc_dc_bias` for one)
+
+## 5. Bergeron line
+- [x] 5.1 `models/transmission_line.hpp` (params, validation) and `pwl/transmission_line_history.hpp` (committed samples of both ends, lookup by time with snap-or-linear interpolation, bounded, snapshot) — D18 implemented: the past is a per-run `LineHistory` owned by the engine, not a variable-length stateful block (D18 "Implemented"); `R ≪ Z0` is the refusal of R > Z0
+- [x] 5.2 Stamp — Thevenin per port (`v − Z0·i = E`, −Z0 in the cached matrix, E into b), `R/4`, `R/2`, `R/4` composite in the builder (`python/tests/test_transmission_line.py::test_lossy_line_dc_attenuation`)
+- [x] 5.3 `pwl`: `dt > τ` refused by name (feature `dt`, device); matched step: 0 V before τ, 1 V after to 1e-12, no overshoot (`python/tests/test_transmission_line.py::test_matched_step_arrives_after_exactly_tau`, `test_refusals_by_name`)
+- [x] 5.4 Lattice 5/3, 5/9, 35/27 V to 1e-12 relative (measured 0, 2.2e-16, 0), shorted staircase 100/3, 500/9, 1900/27 mA, energy in = energy in flight (1e-12) (`python/tests/test_transmission_line.py`)
+- [x] 5.5 τ/dt = 100.5: plateaus exact (not 2 %: a constant interpolates exactly), the sine's error second order (1.97, 1.99); `docs/transmission-line.md` recommends τ a multiple of dt (`python/tests/test_transmission_line.py`)
+- [x] 5.6 `trbdf2`: h ≤ τ_min (`n_line_bound_steps`), landings at a source corner + τ (restarted) and at t_k + τ of every slope change of a recorded wave (D18 corrected), esdirk43 refused by name; lattice exact at rtol 1e-4 and 1e-8, rejects as the circuit without the line, far end converging with rtol (worst of nine points 9.4e-5 → 1.1e-6) (`python/tests/test_transmission_line.py`; trbdf2 section). The line's interpolation error is not estimated: documented limit
+- [x] 5.7 DC: lossless line a wire (lossy: its resistors); history from the DC point; far end constant to 1e-9 (`python/tests/test_transmission_line.py::test_a_lossless_line_is_a_wire_at_dc_and_starts_without_a_wave`); ideal loop through the line refused by name
+- [x] 5.8 Lossy, R = 1 Ω, matched: 50/101 V to 1e-6 (measured rel 2.7e-14) (`python/tests/test_transmission_line.py`)
+- [x] 5.9 Refusals by name: exact/dsed and bdf1 (the capability table; conformance cell `TransmissionLine`, `test_transmission_line.py`, `core/tests/layer4/test_engine_capabilities.cpp`), esdirk43, periodic-steady-state, trbdf2 h_min > τ. AC is supported (the exact two-port, not refused): quarter wave Z0²/R_L to 1e-9
+- [x] 5.10 Binding `add_transmission_line(name, a, a_ref, b, b_ref, Z0, delay, R)`, stubs, YAML type `transmission_line` (user loader and IR round trip), `components()`, device reference, snapshot field 19 (`python/tests/test_transmission_line.py`)
+
+## 6. Conformance and documentation
+- [x] 6.1 Rows in the matrix of `add-engine-conformance-matrix`: `capacitor[esr/esl]`, `inductor[esr/c_par/rac]`, `nonlinear_capacitor[odd table]`, `transmission_line[pi]`, `transmission_line[bergeron]` × {pwl, trbdf2, dsed, DC, AC} — `test_engine_conformance.py::PASSIVE_CELLS` × {pwl, trbdf2, dsed, bdf1} plus the AC sweep (composites run and agree with pwl; the odd table is refused by name on dsed, bdf1 and AC). DC: the composites are their R, L, C. `bergeron`: the kind cell `CELLS['TransmissionLine']` (pwl, trbdf2 agree; dsed and bdf1 refuse by name) and the AC tests of `test_transmission_line.py` (section 5, D18)
+- [x] 6.2 `AI_GUIDE.md` (which datasheet number goes where; the step needed for an ESL resonance; π versus Bergeron), `docs/losses-and-thermal.md` (ESR and ladder loss rows), `docs/known-limitations.md` and `KNOWN_LIMITATIONS.md` (single-pair line, no coupled cable, one ESR value, large-signal ceramic behaviour), `CHANGELOG.md` — AI_GUIDE (signatures; closeout: datasheet ESR / ESL / C_par, the fixed step `dt <= 1/(20·f_res)` for an ESL resonance, `model='pi'` only with `recommend_line_sections`), losses-and-thermal, both limitation pages, CHANGELOG
+
+## 7. Verification
+- [x] 7.1 `ruff check`, `pytest`, `ctest`, `openspec validate --all --strict`, stub check
+  - 2026-11-18, after merging integration batch 12 (7ff35556): ctest 920/920; pytest 4976 passed, 107 skipped, 6 xfailed; reference 361 passed; ruff clean; openspec 78/78; stubs up to date. Ticked for this session's work; sections 5 and the AI_GUIDE part of 6.2 stay open (D12, D15).

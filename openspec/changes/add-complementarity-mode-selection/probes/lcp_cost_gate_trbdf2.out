@@ -1,0 +1,40 @@
+pulsim from /Users/lgili/pulsim_wt/p2-trbdf2/python/pulsim/__init__.py; load average 12.3 14.7 14.2
+circuit                                              config       default ms    lcp ms  ratio  quiet+cached/sites same
+closed_loop/cl_boost_pi.yaml                         trbdf2            52.12     53.02  1.017   6514+0/6545   
+closed_loop/cl_buck_aggressive_pi.yaml               trbdf2             7.93      8.75  1.104    597+0/597    
+closed_loop/cl_buck_pi.yaml                          trbdf2            20.81     19.59  0.942   1493+0/1493   
+diodes/back_to_back_diodes_sine.yaml                 trbdf2             0.35      0.40  1.125      0+0/9      
+diodes/diode_bridge_rectifier.yaml                   trbdf2             0.61      0.69  1.136      9+0/24     
+diodes/diode_clamp_overvoltage.yaml                  trbdf2             0.88      0.90  1.031      2+0/3      
+diodes/diode_half_wave_rl_load.yaml                  trbdf2             0.65      0.61  0.945      3+0/9      
+diodes/diode_rectifier.yaml                          trbdf2             1.85      3.33  1.798     99+0/388    
+diodes/half_wave_rectifier_sine.yaml                 trbdf2             0.58      0.48  0.821      4+0/10     
+diodes/voltage_doubler.yaml                          trbdf2             0.55      0.62  1.137      9+0/20     
+magnetics/half_bridge_transformer_dc.yaml            trbdf2            22.50     27.20  1.209    299+0/377    
+switching/basic/chopper_with_rc_snubber.yaml         trbdf2             2.06      2.73  1.324     16+0/23     
+switching/boost/boost_classic.yaml                   trbdf2             1.73      1.70  0.980    192+0/196    
+switching/boost/boost_pfc_open_loop.yaml             trbdf2            60.52     71.57  1.183   2741+0/4190   
+switching/boost/boost_switching_complex.yaml         trbdf2             1.95      1.97  1.008    141+0/141    
+switching/boost/cascaded_boost_buck.yaml             trbdf2             9.61     10.16  1.058    479+0/483    
+switching/boost/ll07_boost_vcswitch.yaml             trbdf2             2.22      2.43  1.092    401+0/401    
+switching/boost/textbook_erickson_boost_ccm.yaml     trbdf2             1.89      2.74  1.447    192+0/196    
+switching/boost/two_phase_interleaved_boost.yaml     trbdf2             5.38      7.03  1.306    491+0/496    
+switching/buck/buck_dcm.yaml                         trbdf2             1.49      1.35  0.909    115+0/115    
+switching/buck/buck_hard_switching_reference.yaml    trbdf2             0.85      0.85  1.000     66+0/66     
+switching/buck/buck_mosfet_nonlinear.yaml            trbdf2       refused/error: UnsupportedError: engine 'trbdf2': mode_selection='lcp' with a Newton device in the circuit: the diode port model is lin
+switching/buck/buck_switching.yaml                   trbdf2             0.69      0.72  1.043     43+0/43     
+switching/buck/ll06_buck_vcswitch.yaml               trbdf2             5.71      6.59  1.154    288+0/288    
+switching/buck/ll08_buck_mosfet.yaml                 trbdf2       refused/error: UnsupportedError: engine 'trbdf2': mode_selection='lcp' with a Newton device in the circuit: the diode port model is lin
+switching/buck/textbook_erickson_buck_ccm.yaml       trbdf2             9.69      9.37  0.967    741+0/741    
+switching/buck_boost/buck_boost.yaml                 trbdf2             2.68      2.36  0.881    195+0/195    
+switching/buck_boost/cuk_converter.yaml              trbdf2             4.60      3.76  0.818    288+0/288    
+switching/buck_boost/sepic.yaml                      trbdf2             6.03      4.88  0.808    292+0/292    
+switching/isolated/active_clamp_forward.yaml         trbdf2            62.16     62.50  1.006    489+0/924    
+switching/isolated/flyback_converter.yaml            trbdf2            26.48     31.68  1.196    300+0/400    
+switching/isolated/forward_converter.yaml            trbdf2            32.47     37.62  1.159    218+0/506    
+switching/isolated/full_bridge_dc.yaml               trbdf2             2.57      4.53  1.764     51+0/100    
+switching/multilevel/npc_three_level_halfbridge.yaml trbdf2             2.24      2.72  1.214     30+0/61     
+three_phase/interleaved_buck_3ph.yaml                trbdf2             2.12      2.04  0.965    271+0/275    
+three_phase/three_phase_diode_rectifier.yaml         trbdf2             1.29      1.51  1.165     49+0/121    
+trbdf2: 34 circuits, ratio median 1.075, max 1.798, over 1.2: 7
+load average at the end 12.7 14.7 14.2

@@ -1,0 +1,71 @@
+Status (closeout 2026-11-19): open boxes — 4.6 OWNER (which real parts; data list under 4.6); 5.1, 5.2 NOT DONE (5.2's composite retirement RELEASE); 5.3 BLOCKED BY 5.2 (its AC part met by add-unified-device-interface 10.2).
+
+## 1. Charge laws
+- [x] 1.1 `models/charge_table.hpp`: `ChargeTable` from triples `(v, Q, C)` and from pairs `(v, C)`; Hermite `charge(v)`, exact `capacitance(v)`, linear tails, Fritsch–Carlson check and clamp; refusals by name (fewer than 3 knots, no `v = 0` knot, `v` not increasing, `C ≤ 0`)
+- [x] 1.2 C++ test: junction law C0 = 2 nF, V0 = 25 V, m = 0.5 at 64 knots with exact slopes → Q(400 V) = 312.31 nC within 1e-4, C(400 V) = 485.07 pF within 1e-3; `C(v)` equals the finite difference of `Q(v)` within 1e-7
+- [x] 1.3 C++ test: `Q(v)` strictly increasing at 1 pV spacing around 0 V, 1 V and 400 V
+- [x] 1.4 `vdmos_cgd` closed form with the stable `ln cosh`; C++ test against the ten ngspice points of `probes/cgd.cir` (1e-6) and `C = dQ/dv` (1e-9)
+- [x] 1.5 `NonlinearCapacitor::Params` law variant (`junction | table | vdmos_cgd`); history and refresh call `charge` / `capacitance` through it; every existing `NonlinearCapacitor` test bit-identical
+- [x] 1.6 Charge-conservation test: 0 → 400 V → 0 ramp through 1 kΩ, ∮ i dt = 0 within 1e-9 relative on `pwl` and `trbdf2`, for each law
+  - 2026-11-18 (DECISIONS.md 20): `test_charge_is_conserved_to_1e9_under_the_engines_own_rule` measures the charge with a series linear capacitor (the engine's own quadrature) and counts the 1e-12 S placeholder that `pwl/assemble.hpp` puts on every NonlinearCapacitor node — that leak, not the corner steps, was the 2.2e-8. Measured pwl 7e-14..4e-12, trbdf2 8.7e-11..5.6e-10; bounds 1e-9 / 2e-9. The placeholder leak is recorded, not removed.
+
+## 2. Composite device
+- [x] 2.1 `CircuitBuilder::add_power_mosfet` (internal nodes only when the element is non-zero; validation by name: `R_d ≥ 0`, `R_g ≥ 0`, `L_s ≥ 0`, `C_gs > 0`, the temperature factor `r(T) > 0`)
+  - `C_gs ≥ 0` instead of `> 0`, with a "no charge" refusal when R_g > 0 and both gate capacitances are 0 (DECISIONS.md 5).
+- [x] 2.2 `components()` reports one `power_mosfet` entry with its parameters and sub-element names
+- [x] 2.3 Binding, `ChargeTable` binding, stubs; YAML type `power_mosfet` (strict keys)
+- [x] 2.4 Python test: the composite with linear `C_gs = 1 nF`, `C_gd = 100 pF`, `R_g = 10 Ω` reproduces `p4_dpt.py` row 3 (E_on 136.14 µJ, E_off 158.96 µJ, plateau 64.8 ns) within 1e-9
+- [x] 2.5 `pulsim.double_pulse_test`; integrals with `np.trapezoid` on the result's own grid; test: plateau within 10 % of `Q_gd / I_g` at R_g = 10 Ω and 47 Ω (62.9 ns and the 47 Ω hand value)
+  - Measured (trbdf2, seeded off-state start, DECISIONS.md 16): 64.57 ns vs 62.94 ns at 10 Ω, 300.56 ns vs 295.80 ns at 47 Ω.
+- [x] 2.6 Engine agreement: `pwl` against `trbdf2` within 0.5 % in E_on and E_off, with and without the Lauritzen body diode
+  - Measured 0.058 % / 0.079 % (E_on / E_off), same with the Lauritzen body diode; pinned 0.2 %.
+- [x] 2.7 Third-quadrant test: 10 A reverse with the gate on gives `v_DS = −I·R_DS(on)`; with the gate off the body diode carries it
+- [x] 2.8 `T_j` test: at 0.1 A and the datasheet V_GS, `v_DS(125 °C) / v_DS(25 °C)` equals `r(125 °C)` = 1.700 (`tc1 = 5e-3`, `tc2 = 2e-5`) within 1e-3
+- [x] 2.9 Conformance rows (`add-engine-conformance-matrix`): `power_mosfet` × {pwl ok, trbdf2 ok, dsed refused, DC ok, AC refused}; `nonlinear_capacitor[table]`, `nonlinear_capacitor[vdmos_cgd]` likewise
+  - Closed at integration: no new `kKindCaps` row (the laws are the NonlinearCapacitor kind; the composite is made of existing kinds). `test_engine_conformance.py::VARIANT_CELLS` runs each on pwl / trbdf2 (agrees with the pwl reference, presence control) and expects `UnsupportedError` naming the device on dsed and bdf1 (the 2.0 behaviour there was a silent drop of the nonlinear capacitor) and from the kernel AC sweep; `docs/known-limitations.md` states it under the matrix. DC: `compute_dc_op` treats the capacitors as open, as before.
+
+## 3. VDMOS import
+- [x] 3.1 `_vdmos` builds `add_power_mosfet` when the card carries any of CGS, CGDMAX, CGDMIN, A, CJO, TT, RG; mapping table in the docstring
+- [x] 3.2 `charge="drop"` restores the Level-1 device; the summary warning lists what was kept and what is still dropped (subthreshold)
+- [x] 3.3 Test: a card with CGS = 1 nF, CGDMAX = 1 nF, CGDMIN = 50 pF, A = 0.5, RG = 3 Ω imports with those values in `components()`; an existing capacitance-free card imports bit-identically
+- [x] 3.4 Fix the `T_M / TT` ratio: sweep it against ngspice Q_rr on a diode-recovery deck, record the measured ratio and error in the importer docstring
+  - `T_M = 0.01·TT`: against `pm_diode_recovery.cir` I_rrm −0.09 %, Q_rr +0.11 % (DECISIONS.md 15).
+
+## 4. Fitters and parts
+- [x] 4.1 `python/pulsim/datasheet.py`: `fit_charge_table`, `fit_mosfet_channel`, `fit_rdson_temperature`, `fit_body_diode_recovery`, `power_mosfet_from_datasheet`; each returns its residual and refuses on a residual above its documented limit
+- [x] 4.2 Round-trip tests: curves generated from known parameters are recovered (K, V_T within 1e-6; `tc1`, `tc2` within 1e-9; table within `tol`)
+- [x] 4.3 Part schema `power_mosfet` block; loader refuses intersecting `fitted_on` / `validated_on`, a missing datasheet reference, and a `validated` flag without a `double_pulse` block
+- [x] 4.4 `pulsim.lib.power_mosfet(number)` and `Part.add_to(builder, name, drain, source, gate, T_j=)`
+- [x] 4.5 PLECS "table and formula": import-time evaluation with a whitelisted expression grammar (no `eval`), `variables=` argument, provenance note; formulas using `lookup(...)` stay refused
+- [ ] 4.6 First real parts (owner decision on which and where they live); CI acceptance: double pulse at the datasheet condition within the declared tolerance
+  - OWNER: which real parts ship and whether digitised curves may be redistributed (DECISIONS 1). No part without datasheet provenance ships (owner note *shipped-parts-are-synthetic*); synthetic parts are refused by part number unless `allow_synthetic=True` (`lib/parts.py`). In place and exercised: the fitters (4.1, round trips 4.2), the part schema and its refusals (4.3), `pulsim.lib.power_mosfet` / `Part.add_to` (4.4), `Part.acceptance_check` and the CI loop over `validated` parts (runs empty), the ngspice double-pulse deck (7.3, skips cleanly without ngspice). Data that closes it, per part: the datasheet PDF reference and revision; output characteristics I_D(V_DS) at ≥ 3 V_GS values at 25 °C and 125 °C (or 150 °C); the transfer curve I_D(V_GS) at the same temperatures; C_iss / C_oss / C_rss against V_DS; R_DS(on) against T_j; the gate-charge curve (Q_gs, Q_gd plateau); the body-diode forward curve and Q_rr / t_rr at the stated di/dt; the datasheet switching condition (V_DD, I_D, R_g, L, T_j) with E_on / E_off. For `validated`: one measured double-pulse waveform at that condition (not used by the fitters), held out of the fit as `validated_on`.
+
+## 5. Table channel and single device (after `add-unified-device-interface`)
+- [ ] 5.1 `ChannelTable` with monotonicity checks and the terminal-swap third quadrant; C¹ test at `V_DS = 0`
+- [ ] 5.2 The power MOSFET as one f/q device; composite retired behind the same API; results within 1e-9 of step 2
+- [ ] 5.3 Generic outputs: `res.i`, loss rows; AC from f and q
+  - 5.1 NOT DONE: the device interface has landed (no longer blocked); the table channel law and its C¹ test were not attempted in the closeout session. Its only consumer is 5.2.
+  - 5.2 NOT DONE (a new multi-terminal stateful f/q kind: channel + charges + body diode on the device interface), and its second half is RELEASE: retiring the composite behind the same API changes `add_power_mosfet`'s numbers (within 1e-9, not bit-identical), so the swap waits for the number-changing release; the single device itself can land behind an option first.
+  - 5.3 Partly met elsewhere: the AC sweep linearises every kind of the composite from its f and q (`add-unified-device-interface` 10.2; `test_charge_law_and_power_mosfet_on_the_ac_sweep`). `res.i` / loss rows of the composite are BLOCKED BY 5.2 (generic outputs of the single device) — the composite's drain current would need `res.i` of a NonlinearCapacitor, which raises (its current needs the stored charge); `res.i` raises with the 1 mΩ series-resistor recipe.
+
+## 6. Documentation
+- [x] 6.1 `AI_GUIDE.md` (device choice table, the time-step trap), `docs/losses-and-thermal.md`, `docs/known-limitations.md` and `KNOWN_LIMITATIONS.md` (non-goals), `CHANGELOG.md` (BREAKING importer default)
+- [x] 6.2 Tutorial: datasheet → fitters → double pulse
+  - `docs/tutorials/10-power-mosfet-datasheet.md` (synthetic curves, labelled so; executed by `test_doc_snippets.py`).
+
+## 7. ngspice cross-validation
+- [x] 7.1 Decks in `benchmarks/spice/ngspice`: Level-1 output and transfer curves, Shockley curve; tolerance stated per region (the sigmoid blend differs from SPICE's hard region boundaries within a few `1/kappa`)
+- [x] 7.2 Deck: Coss junction law and `vdmos_cgd` capacitance sweeps (1e-6)
+- [x] 7.3 Deck: VDMOS double pulse, same card on both sides; record measured differences and set the gate from them
+  - Measured (trbdf2): E_on +0.15 %, E_off +0.07 %, plateau +0.35 %, dv/dt_on −0.08 %, I_rr −0.01 %; di/dt −0.6 % / +1.2 %. Gates: 0.5 % energies, 1 % plateau and I_rr, 5 % di/dt. The design's 5 %/5 %/3 % targets were not used for tuning.
+- [x] 7.4 Wire into the nightly job of `restore-reference-benchmark-harness`
+  - `.github/workflows/nightly-reference.yml` step "Power MOSFET ngspice decks" (pytest on `test_power_mosfet_ngspice.py`, which re-runs the decks when ngspice is on PATH; a failure opens / updates the nightly issue). Run locally with ngspice 45 (see 8.2); the nightly run itself not observed.
+
+## 8. Verification
+- [x] 8.1 `ruff check`, `pytest`, `ctest`, `openspec validate --all --strict`, stub check
+  - 2026-11-13: ctest 757/757; pytest 2064 passed, 4 skipped, 8 xfailed; ruff clean; openspec 76/76; stubs up to date.
+- [x] 8.2 Re-verified 2026-11-18 after merging integration batch 12 (7ff35556): ctest 920/920; pytest 4976 passed, 107 skipped, 6 xfailed; `pytest -m reference` 361 passed; ruff clean; openspec 78/78; stubs up to date; `test_power_mosfet_ngspice.py` 10 passed against ngspice 45.2 locally; byte compare against a 7ff35556 build: every case identical except `mosl1_trbdf2` (aborted before, runs now; DECISIONS 19); the new C++ tests also built and passed against Eigen 3.4.0
+
+## 9. Session 2026-11-18
+- [x] 9.1 Order across a gate-driven threshold crossing measured against an independent Radau solution (`probes/threshold_order.py`): second order on pwl and trbdf2 for linear and VDMOS C_gd; no engine change (DECISIONS.md 18); pinned by `test_gate_driven_threshold_crossing_is_second_order`
+- [x] 9.2 The Level-1 law's jump at V_DS = 0 (2·α(1−β)K·V_OV², 5.2 mA at V_GS = 3.2 V) removed in the third-quadrant branch; continuity and C¹ pinned in C++; both engines now run `probes/vds_zero_jump.py` and `test_current_through_a_partly_on_channel_crosses_zero` (DECISIONS.md 19)

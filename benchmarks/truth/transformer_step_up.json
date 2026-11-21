@@ -1,0 +1,53 @@
+{
+ "circuit": "circuits/magnetics/transformer_step_up.yaml",
+ "form": "conductance",
+ "supported": true,
+ "observables": [
+  "V(sec)"
+ ],
+ "dps": [
+  30,
+  60
+ ],
+ "wall_s": 0.0,
+ "events": [],
+ "n_commutations": 0,
+ "n_events": 0,
+ "ambiguous": [],
+ "weak_only": 0,
+ "start_mode": "",
+ "dc_start_modes": null,
+ "notes": [],
+ "jumps": [],
+ "impulsive_loss_J": "0.0",
+ "max_dae_residual": "4.88e-63",
+ "max_eigvec_cond": "2.0",
+ "windows": {
+  "full": {
+   "V(sec)": {
+    "mean": "5.42374365353982586443673e-32",
+    "rms": "14.08579245391528918291618",
+    "d_prec": "5.37e-47"
+   }
+  },
+  "last20": {
+   "V(sec)": {
+    "mean": "-14.33834645378567113676426",
+    "rms": "15.36066279625737968090365",
+    "d_prec": "4.77e-31"
+   }
+  }
+ },
+ "energy_J": {
+  "Rsrc": "1.58727639243822e-6",
+  "Rload": "0.000396819098109554",
+  "src:Vac": "0.000398406374501992"
+ },
+ "energy_balance_rel": "-1.91e-61",
+ "precision_doubling_rel": "8.93e-31",
+ "event_time_diff_s": "0",
+ "u_stored_trace": 1.987045537660671e-08,
+ "uniform_dt_floor": 1.2744773966795347e-06,
+ "dt": 1e-06,
+ "stored_dt": 1.25e-07
+}

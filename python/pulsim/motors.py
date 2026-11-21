@@ -41,7 +41,9 @@ finer pace.
 
 from __future__ import annotations
 
+import cmath
 import math
+import warnings
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
@@ -253,6 +255,39 @@ class Mechanical:
 # 1. DC motor
 # =============================================================================
 
+_DC_OBSERVER_DEPRECATION = (
+    "{fn} is deprecated: the DC motor observer advances the speed by "
+    "forward Euler from the previous step (first order, 13.6 % speed "
+    "error at dt = 100 us on the add-mna-native-machines probe; pwl "
+    "only). Use CircuitBuilder.add_dc_machine, which solves the "
+    "machine inside the matrix (second order, pwl, trbdf2 and the DC "
+    "operating point). The observer is kept until a later release.")
+
+
+# add-mna-native-machines task 5.1: each observer names its native
+# replacement and its measured first-order error.
+_OBSERVER_DEPRECATION = {
+    "pmsm": ("the PMSM observer injects the back-EMF of the previous step "
+             "and carries one average inductance (settled-speed error "
+             "-0.37 % at dt = 50 us, -1.98 % at 200 us; no saliency in the "
+             "electrical dynamics). Use CircuitBuilder.add_pmsm_mna"),
+    "bldc": ("the BLDC observer injects the trapezoidal back-EMF of the "
+             "previous step (first order, as the PMSM observer: -0.37 % "
+             "settled speed at dt = 50 us). Use CircuitBuilder.add_bldc_mna"),
+    "im": ("the induction-motor observer integrates the rotor flux and the "
+           "speed outside the matrix (free-acceleration speed error 0.71 % "
+           "of synchronous at dt = 50 us, 2.9 % at 200 us). Use "
+           "CircuitBuilder.add_induction_machine_mna"),
+}
+
+
+def _warn_observer(fn: str, kind: str) -> None:
+    warnings.warn(f"{fn} is deprecated: {_OBSERVER_DEPRECATION[kind]}, which "
+                  "solves the machine inside the matrix (second order, pwl "
+                  "and trbdf2). The observer is kept until a later release.",
+                  DeprecationWarning, stacklevel=3)
+
+
 @dataclass
 class DcMotor:
     """A DC motor instance. Holds parameters + a `Mechanical` block.
@@ -289,6 +324,10 @@ def add_dc_motor(builder,
                     ) -> DcMotor:
     """Add a DC motor to the builder.
 
+    .. deprecated:: forward-Euler observer, first order and ``pwl``
+       only. Use :meth:`CircuitBuilder.add_dc_machine` (MNA-native,
+       second order, every engine). Emits a ``DeprecationWarning``.
+
     Topology added (between `armature_pos` and `armature_neg`):
 
         armature_pos ── R_a ── L_a ── (V_bemf=0) ── armature_neg
@@ -319,6 +358,8 @@ def add_dc_motor(builder,
         Constant load torque (Nm). For variable loads, pass
         `T_load_fn(t, omega) -> Nm`.
     """
+    warnings.warn(_DC_OBSERVER_DEPRECATION.format(fn="add_dc_motor"),
+                  DeprecationWarning, stacklevel=2)
     if Kt is None:
         Kt = Ke
     mech = Mechanical(J_kgm2=J, B_Nms_per_rad=B,
@@ -384,6 +425,9 @@ def make_dc_motor_observer(builder, motor: DcMotor, *, dt: float,
     name
         Trace prefix for :meth:`MotorObserverBundle.attach_to_result`.
     """
+    warnings.warn(
+        _DC_OBSERVER_DEPRECATION.format(fn="make_dc_motor_observer"),
+        DeprecationWarning, stacklevel=2)
     state_size = builder.pool.state_size(builder.graph)
     i_idx = builder.pool.branch_var_id_for_inductor(
         motor.inductor_branch_id, builder.graph)
@@ -562,6 +606,7 @@ def add_pmsm(builder,
         observer's ``mech.theta_rad`` is initialised to this value
         so ``θ_e(t=0) = pp · theta_init``.
     """
+    _warn_observer("add_pmsm", "pmsm")
     if len(phase_nodes) != 3:
         raise ValueError("phase_nodes must have 3 entries")
 
@@ -807,6 +852,7 @@ def make_pmsm_observer(builder, motor: PMSM, *, dt: float,
         default device name; override when running multiple motors
         in the same circuit.
     """
+    _warn_observer("make_pmsm_observer", "pmsm")
     return _make_3phase_motor_observer(builder, motor, dt=dt,
                                             waveform="sinusoidal",
                                             name=name)
@@ -839,12 +885,15 @@ def add_bldc(builder,
                 ) -> BLDC:
     """Add a 3-phase BLDC motor. Same topology as PMSM but the
     observer drives the back-EMF with a trapezoidal shape."""
-    pmsm = add_pmsm(builder, name=name,
-                       phase_nodes=phase_nodes,
-                       neutral_node=neutral_node,
-                       R_s=R_s, L_s=L_s, psi_pm=psi_pm,
-                       pole_pairs=pole_pairs,
-                       J=J, B=B, T_load=T_load, T_load_fn=T_load_fn)
+    _warn_observer("add_bldc", "bldc")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        pmsm = add_pmsm(builder, name=name,
+                        phase_nodes=phase_nodes,
+                        neutral_node=neutral_node,
+                        R_s=R_s, L_s=L_s, psi_pm=psi_pm,
+                        pole_pairs=pole_pairs,
+                        J=J, B=B, T_load=T_load, T_load_fn=T_load_fn)
     # Upgrade the PMSM dataclass to a BLDC (same fields).
     return BLDC(
         R_s_ohm=pmsm.R_s_ohm, L_s_H=pmsm.L_s_H,
@@ -860,6 +909,7 @@ def make_bldc_observer(builder, motor: BLDC, *, dt: float,
                           name: str = "M1") -> "MotorObserverBundle":
     """Build a :class:`MotorObserverBundle` for a BLDC with trapezoidal
     back-EMF. See :func:`make_pmsm_observer` for the bundle API."""
+    _warn_observer("make_bldc_observer", "bldc")
     return _make_3phase_motor_observer(builder, motor, dt=dt,
                                             waveform="trapezoidal",
                                             name=name)
@@ -998,6 +1048,7 @@ def add_induction_motor(builder,
       conditions or a brief startup excitation) for steady-state
       operation tests.
     """
+    _warn_observer("add_induction_motor", "im")
     if len(phase_nodes) != 3:
         raise ValueError("phase_nodes must have 3 entries")
     if L_m * L_m >= L_s * L_r:
@@ -1044,11 +1095,12 @@ def make_induction_motor_observer(builder,
     """Build a (step_observer, b_extra_fn) pair for an induction motor.
 
     The observer maintains the rotor flux (ψ_rα, ψ_rβ) as internal
-    state and updates the mechanical (ω_m, θ_m) by forward-Euler each
-    simulation step.  The induced stator EMF is computed from the
+    state, integrated exactly over each step with the stator current
+    held, and updates the mechanical (ω_m, θ_m) by forward Euler.  The induced stator EMF is computed from the
     instantaneous rotor-flux derivative and injected into each phase's
     dummy voltage source via ``b_extra``.
     """
+    _warn_observer("make_induction_motor_observer", "im")
     state_size = builder.pool.state_size(builder.graph)
     phase_idx = tuple(
         builder.pool.branch_var_id_for_inductor(bid, builder.graph)
@@ -1086,15 +1138,23 @@ def make_induction_motor_observer(builder,
         psi_ra = state["psi_r_alpha"]
         psi_rb = state["psi_r_beta"]
 
-        # Rotor flux dynamics in the STATIONARY αβ frame:
-        # dψ_rα/dt = −ψ_rα/Tr + (Lm/Tr)·i_sα − ω_e·ψ_rβ
-        # dψ_rβ/dt = −ψ_rβ/Tr + (Lm/Tr)·i_sβ + ω_e·ψ_rα
-        dpsi_ra = (-inv_Tr * psi_ra
-                       + (motor.L_m_H * inv_Tr) * i_alpha
-                       - omega_e * psi_rb)
-        dpsi_rb = (-inv_Tr * psi_rb
-                       + (motor.L_m_H * inv_Tr) * i_beta
-                       + omega_e * psi_ra)
+        # Rotor flux dynamics in the STATIONARY αβ frame, as one
+        # complex ODE ψ = ψ_rα + jψ_rβ, i = i_sα + j·i_sβ:
+        #     dψ/dt = a·ψ + (Lm/Tr)·i,   a = −1/Tr + jω_e
+        # integrated EXACTLY over the step with i held. Forward Euler
+        # (used until 2026-11) multiplies |ψ| by |1 + a·dt| > 1 every
+        # step: |ψ_r| read 0.9432 / 0.9290 / 0.9220 Wb at dt = 50 / 25
+        # / 12.5 µs on a 4 kW machine at 50 Hz.
+        psi = complex(psi_ra, psi_rb)
+        a = complex(-inv_Tr, omega_e)
+        ead = cmath.exp(a * dt)
+        phi1 = (ead - 1.0) / a if abs(a * dt) > 1e-12 else complex(dt)
+        psi_next = ead * psi + phi1 * (motor.L_m_H * inv_Tr) * complex(
+            i_alpha, i_beta)
+        # The EMF applied over the coming step is the MEAN dψ/dt over
+        # it, so the electrical and flux sides exchange the same energy.
+        dpsi = (psi_next - psi) / dt
+        dpsi_ra, dpsi_rb = dpsi.real, dpsi.imag
 
         # Induced stator EMF reflected from rotor: e = (Lm/Lr)·dψ_r/dt.
         # This is the "back-EMF" the observer feeds to the dummy
@@ -1107,9 +1167,8 @@ def make_induction_motor_observer(builder,
         T_em = (1.5 * pp * Lm_over_Lr
                   * (i_beta * psi_ra - i_alpha * psi_rb))
 
-        # Forward-Euler update of internal observer states.
-        state["psi_r_alpha"] = psi_ra + dpsi_ra * dt
-        state["psi_r_beta"]  = psi_rb + dpsi_rb * dt
+        state["psi_r_alpha"] = psi_next.real
+        state["psi_r_beta"]  = psi_next.imag
         state["e_alpha"]      = e_alpha
         state["e_beta"]       = e_beta
 
@@ -1200,7 +1259,9 @@ def im_parameters_from_nameplate(*,
         Kwargs: ``R_s``, ``L_s``, ``R_r``, ``L_r``, ``L_m``,
         ``pole_pairs``, ``J``. Plus ``_diagnostics`` carrying the
         derived intermediate quantities (rated current, rated
-        torque, synchronous speed).
+        torque, synchronous speed) and ``status = "estimated"``: the
+        values are a rule-of-thumb split, not a measurement, and must
+        not be reported as the machine's parameters.
 
     Examples
     --------
@@ -1243,6 +1304,7 @@ def im_parameters_from_nameplate(*,
         "pole_pairs": pole_pairs,
         "J": J,
         "_diagnostics": {
+            "status": "estimated",
             "I_rated_A": I_rated,
             "T_rated_Nm": T_rated,
             "omega_sync_rad_s": omega_s,

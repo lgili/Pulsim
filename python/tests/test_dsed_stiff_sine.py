@@ -65,10 +65,11 @@ def test_stiff_sine_rectifier_is_fast_and_matches_pwl(Rs, Cs):
         t0 = time.perf_counter()
         rd = p.simulate(rect_snub(Rs, Cs), t_end=5e-2,
                          engine="dsed")
-        elapsed = time.perf_counter() - t0
+        print(f"dsed stiff rectifier: {time.perf_counter() - t0:.3f} s")  # printed, never asserted
         rp = p.simulate(rect_snub(Rs, Cs), t_end=5e-2, dt=1e-8)
 
-    assert elapsed < 5.0, elapsed
+    # was 157k / 1.9M steps: the step count is the structural check (~50.1k measured)
+    assert rd.n_accept < 100_000, rd.n_accept
     # State order [v_Cs, v_C]: compare the output cap's time average
     # against the pwl engine at a dt fine enough to be converged
     # (dt = 1e-7 is 3.2% off — the fixture that exposed it).

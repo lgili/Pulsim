@@ -29,11 +29,14 @@
 // all route through `compute_dc_operating_point`.
 
 #include "pulsim/analysis/cancellation.hpp"
+#include "pulsim/events/mode_set.hpp"
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/dc_strategy.hpp"
 #include "pulsim/pwl/device_pool.hpp"
+#include "pulsim/solver/unsupported.hpp"
 #include "pulsim/pwl/diode_event_state.hpp"
+#include "pulsim/pwl/external_device_history.hpp"
 #include "pulsim/pwl/gmin.hpp"
 #include "pulsim/pwl/nonlinear_solve.hpp"
 #include "pulsim/topology/graph.hpp"
@@ -116,16 +119,41 @@ struct DCOperatingPoint {
     const topology::Graph& graph,
     const DevicePool& pool,
     const topology::SwitchStateMask& user_mask,
-    const NonlinearRefreshFn& refresh = {},
+    const NonlinearRefreshFn& refresh_in = {},
     const DCOperatingPointOptions& opts = {},
     DiodeEventState* diodes = nullptr,
-    const char* who = "compute_dc_operating_point") {
+    const char* who = "compute_dc_operating_point",
+    const char* engine = "dc") {
+    // Before the direct solve: its failure handler walks the cascade and
+    // re-wraps every error as "no DC operating point".
+    require_no_dc_voltage_loop(graph, pool, opts.t_eval, engine, &user_mask);
+    // add-external-device-abi: an external device's DC law is its f(x) and
+    // ∂f/∂x with the storage terms dropped (q̇ = 0), stamped after the static
+    // chain through the same Newton and cascade. Its model state is the one
+    // init(x = 0) gives (the transient's zero start); the transient re-seeds
+    // it at the DC point. A model whose DC Jacobian is singular there fails
+    // through the DC solver's own diagnosis.
+    NonlinearRefreshFn refresh = refresh_in;
+    if (!pool.external_device_branches().empty()) {
+        auto xh = std::make_shared<ExternalDeviceHistory>();
+        xh->set_start_time(opts.t_eval);
+        xh->init(graph, pool);
+        refresh = [base = refresh_in, xh, t = opts.t_eval](
+                      const Vector& x, sparse::Matrix& J_nl, Vector& f_nl,
+                      const topology::Graph& g, const DevicePool& p) -> Real {
+            Real m = Real{0};
+            if (base) {
+                m = base(x, J_nl, f_nl, g, p);
+            } else {
+                sparse::zero_keep_pattern(J_nl);
+                f_nl.setZero();
+            }
+            return std::max(m, xh->stamp_dc(x, J_nl, f_nl, t));
+        };
+    }
 
     const bool has_diodes =
         diodes != nullptr && diodes->num_diodes() > 0;
-    const topology::SwitchStateMask diode_owned =
-        has_diodes ? diodes->diode_owned_bits()
-                    : topology::SwitchStateMask(0);
 
     DCOperatingPoint out;
     out.mask = user_mask;
@@ -150,13 +178,12 @@ struct DCOperatingPoint {
     const bool may_fall_through =
         opts.strategy == DCStrategy::Auto && opts.enable_cascade;
 
-    do {
+    (void)events::settle(max_rounds, [&](Size) {
         analysis::check_cancellation(opts.should_continue, who,
                                       static_cast<long>(iters));
         topology::SwitchStateMask mask = user_mask;
         if (has_diodes) {
-            mask = mask.overlay(diodes->current_diode_mask(),
-                                 diode_owned);
+            mask = diodes->combine(mask);
         }
         out.mask = mask;
 
@@ -224,9 +251,11 @@ struct DCOperatingPoint {
 
         flipped = has_diodes && diodes->update_from_state(out.x);
         ++iters;
-    } while (flipped && iters < max_rounds);
+        return flipped ? events::Round::Flipped : events::Round::Settled;
+    });
 
     out.event_iterations = iters;
+    require_sane_dc_state(graph, pool, out.x, opts.t_eval, who);
     if (flipped) {
         throw std::runtime_error(std::format(
             "{}: the PWL diode states never settled — {} rounds of "

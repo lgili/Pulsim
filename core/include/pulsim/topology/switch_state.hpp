@@ -65,7 +65,19 @@ public:
     SwitchStateMask() = default;
     SwitchStateMask(const SwitchStateMask&)            = default;
     SwitchStateMask(SwitchStateMask&&) noexcept        = default;
-    SwitchStateMask& operator=(const SwitchStateMask&) = default;
+    // Inline when neither side holds the heap words: the defaulted form
+    // calls vector::assign out of line on every copy, and a step loop
+    // that reuses a mask (copy-assign instead of copy-construct) pays
+    // it per step (refactor-unified-transient-stepper DECISIONS 14).
+    SwitchStateMask& operator=(const SwitchStateMask& o) {
+        size_      = o.size_;
+        nwords_    = o.nwords_;
+        inline_[0] = o.inline_[0];
+        inline_[1] = o.inline_[1];
+        static_assert(kInlineWords == 2, "copy every inline word");
+        if (!ext_.empty() || !o.ext_.empty()) ext_ = o.ext_;
+        return *this;
+    }
     SwitchStateMask& operator=(SwitchStateMask&&) noexcept = default;
 
     // -------------------------------------------------------------------------
@@ -261,6 +273,21 @@ private:
     std::uint64_t inline_[kInlineWords] = {0ULL, 0ULL};
     std::vector<std::uint64_t> ext_;   // engaged only above kInlineBits
 };
+
+/// Refuse a caller's mask whose width is not the circuit's switch
+/// count. A narrower mask used to drop the missing bits silently (the
+/// overlay takes the user mask's width), a wider one carried bits
+/// nothing reads. `who` names the entry point in the message.
+inline void require_mask_width(const SwitchStateMask& m, Size expected,
+                               const char* who = "switch_fn") {
+    if (m.size() == expected) return;
+    throw std::invalid_argument(
+        std::string(who) + " returned a SwitchStateMask of width " +
+        std::to_string(m.size()) + "; this circuit has " +
+        std::to_string(expected) +
+        " switch bits (graph.num_switches): build masks as "
+        "SwitchStateMask(graph.num_switches) and .set(i, True)");
+}
 
 }  // namespace pulsim::topology
 

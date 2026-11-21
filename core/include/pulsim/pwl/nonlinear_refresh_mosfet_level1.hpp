@@ -26,6 +26,7 @@
 #include "pulsim/models/device_model.hpp"
 #include "pulsim/models/ideal_diode.hpp"
 #include "pulsim/models/igbt_level1.hpp"
+#include "pulsim/models/magnetic_loss.hpp"
 #include "pulsim/models/mosfet_level1.hpp"
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
@@ -65,7 +66,7 @@ inline Real refresh_mosfets_level1(
     Vector& f_nl,
     const topology::Graph& graph,
     const DevicePool& pool) {
-    if (J_nl.rows() > 0) J_nl.setZero();
+    if (J_nl.rows() > 0) sparse::zero_keep_pattern(J_nl);
     if (f_nl.size() > 0) f_nl.setZero();
     return stamp_nonlinear_branches<models::MosfetLevel1>(
         x, J_nl, f_nl, graph, pool,
@@ -84,7 +85,7 @@ inline Real refresh_igbts_level1(
     Vector& f_nl,
     const topology::Graph& graph,
     const DevicePool& pool) {
-    if (J_nl.rows() > 0) J_nl.setZero();
+    if (J_nl.rows() > 0) sparse::zero_keep_pattern(J_nl);
     if (f_nl.size() > 0) f_nl.setZero();
     return stamp_nonlinear_branches<models::IgbtLevel1>(
         x, J_nl, f_nl, graph, pool,
@@ -105,7 +106,7 @@ inline Real refresh_igbts_level1(
 make_combined_diode_mosfet_refresh() {
     return [](const Vector& x, sparse::Matrix& J_nl, Vector& f_nl,
               const topology::Graph& graph, const DevicePool& pool) -> Real {
-        if (J_nl.rows() > 0) J_nl.setZero();
+        if (J_nl.rows() > 0) sparse::zero_keep_pattern(J_nl);
         if (f_nl.size() > 0) f_nl.setZero();
 
         const Real i_diode = stamp_nonlinear_branches<models::IdealDiode>(
@@ -146,7 +147,20 @@ make_combined_diode_mosfet_refresh() {
             },
             detail::mosfet_level1_terminals);
 
-        return std::max({i_diode, i_shockley, i_igbt, i_mosfet});
+        // add-permeance-magnetic-domain 4.2: the excess-loss conductance
+        // (its pass is skipped where the kind is absent: no branch walk)
+        const Real i_excess = pool.num_excess_loss() == 0 ? Real{0}
+            : stamp_nonlinear_branches<models::ExcessLoss>(
+                x, J_nl, f_nl, graph, pool,
+                DevicePool::StoredKind::ExcessLoss,
+                [](const DevicePool& p, Index b) {
+                    return p.excess_loss_params(b);
+                },
+                [](const DevicePool&, const auto& branch) {
+                    return std::array<Index, 2>{branch.from, branch.to};
+                });
+
+        return std::max({i_diode, i_shockley, i_igbt, i_mosfet, i_excess});
     };
 }
 

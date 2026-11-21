@@ -269,6 +269,9 @@ def signature_problems(stub_src: str) -> list[str]:
                 stub_defs: list[ast.FunctionDef] | None) -> None:
         if isinstance(obj, staticmethod):
             obj = obj.__func__
+        # A Python wrapper that forwards to a binding (the add_* Parameter
+        # wrappers, the deprecated update_*): check the binding it calls.
+        obj = getattr(obj, "_native", obj)
         if isinstance(obj, types.FunctionType):
             if not stub_defs:
                 return  # coverage_problems reports the absence

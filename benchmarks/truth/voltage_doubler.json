@@ -1,0 +1,207 @@
+{
+ "circuit": "circuits/diodes/voltage_doubler.yaml",
+ "form": "conductance",
+ "supported": true,
+ "observables": [
+  "V(out)"
+ ],
+ "dps": [
+  30,
+  60
+ ],
+ "wall_s": 1.5,
+ "events": [
+  {
+   "t": "0.002501350722752747911362675",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.003455730179779712325883532",
+   "change": "D2+",
+   "cause": "D2 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.007500495615400959056933657",
+   "change": "D2-",
+   "cause": "D2 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.008449509438530731903912678",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.01250304490486777297721394",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.0141496790199487126571461",
+   "change": "D2+",
+   "cause": "D2 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.01750048769980845690873786",
+   "change": "D2-",
+   "cause": "D2 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.01913691553415260433665526",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.02250441431006049221621533",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.02459139209702000756350556",
+   "change": "D2+",
+   "cause": "D2 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.02750048130160574316038988",
+   "change": "D2-",
+   "cause": "D2 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.02957301960673420035971593",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.03250552097905832274272316",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.03492418968217653901054425",
+   "change": "D2+",
+   "cause": "D2 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.03750047613095036536409846",
+   "change": "D2-",
+   "cause": "D2 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.03990046593955301147014849",
+   "change": "D1+",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.04250641519714982287999646",
+   "change": "D1-",
+   "cause": "D1 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.04518998659240788071842098",
+   "change": "D2+",
+   "cause": "D2 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  },
+  {
+   "t": "0.04750047195291057366777627",
+   "change": "D2-",
+   "cause": "D2 root",
+   "strict": 1,
+   "candidates": 2,
+   "consistent": 1
+  }
+ ],
+ "n_commutations": 19,
+ "n_events": 19,
+ "ambiguous": [],
+ "weak_only": 0,
+ "start_mode": "D2- D1+",
+ "dc_start_modes": null,
+ "notes": [],
+ "jumps": [],
+ "impulsive_loss_J": "0.0",
+ "max_dae_residual": "4.64e-57",
+ "max_eigvec_cond": "4.12e+5",
+ "windows": {
+  "full": {
+   "V(out)": {
+    "mean": "8.159481549876247784382244",
+    "rms": "9.079858969997941415819018",
+    "d_prec": "1.45e-22"
+   }
+  },
+  "last20": {
+   "V(out)": {
+    "mean": "13.16508214595122035646731",
+    "rms": "13.17181140177140470551454",
+    "d_prec": "2.33e-22"
+   }
+  }
+ },
+ "energy_J": {
+  "Rload": "0.0041221919457526",
+  "D2": "2.57672579963892e-5",
+  "D1": "1.87140404616225e-5",
+  "src:Vac": "0.0524157055156929"
+ },
+ "energy_balance_rel": "8.25e-54",
+ "precision_doubling_rel": "1.84e-23",
+ "event_time_diff_s": "2.33e-21",
+ "u_stored_trace": 2.4189540630184445e-07,
+ "uniform_dt_floor": 2.688954706867411e-05,
+ "dt": 5e-05,
+ "stored_dt": 6.25e-06
+}

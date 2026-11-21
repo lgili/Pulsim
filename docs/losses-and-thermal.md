@@ -80,7 +80,11 @@ state is `V_f + i/g_on`, so a diode carrying 48 A at `g_on = 1e3`
 sits at `V_f` + 48 mV — inside `V_f < v_D < V_th`, where the voltage
 alone cannot say whether it conducts. Its loss is `V_f·i + i²/g_on`, so
 `P_avg` already contains the drop: a `conduction_specs` `V_f0` for the
-same diode is a separate estimate, not an addition. `switch_fn=` is only needed for a result built
+same diode is a separate estimate, not an addition. The gated PWL
+devices (`add_igbt(reverse_blocking=True)`, `add_gto`, `add_thyristor`,
+`add_triac`) are diode rows with the same law: an IGBT's conduction loss
+is `V_ce0·I_avg + R_on·I_rms²` (10 A DC at `V_ce0 = 0.9 V`,
+`R_on = 10 mΩ`: 10.0 W; the bidirectional switch read 1.0 W). `switch_fn=` is only needed for a result built
 without the record (it is then re-evaluated, with a warning). Duties are
 time-weighted per step, so a variable-step grid does not bias them.
 
@@ -145,6 +149,18 @@ res = p.simulate(b, t_end=1e-3, dt=1e-5)
 loss = p.device_loss_summary(b, res)
 print(next(e for e in loss if e["name"] == "R_load")["P_avg"])
 ```
+
+## Capacitor ESR, inductor DCR and AC-resistance ladder
+
+`b.add_capacitor(..., esr=)` and `b.add_inductor(..., esr=)` add a series
+resistor named `{name}.esr`; its row in `device_loss_summary` is the
+`i²·esr` loss (1 A rms through 50 mΩ: 50.000 mW). An inductor built with
+`rac=p.passives.fit_rac_ladder(f, R_ac, L=...)` dissipates in `{name}.esr`
+(`R_dc`) and the cell resistors `{name}.rac_r{k}`, so every harmonic of
+the current is charged at its own `R_ac`: 1 A peak at 1 kHz plus 1 A
+peak at 100 kHz through `R_dc` = 10 mΩ and one 90 mΩ ∥ 143.24 nH cell
+dissipates 32.50 mW. ESR is one number: read it at the switching
+frequency.
 
 ## Switch — PSIM-style E_on / E_off
 
@@ -304,6 +320,33 @@ Inline `{"K": ..., "alpha": ..., "beta": ...}` is accepted in place of
 `material`. Non-positive `N_turns` / `A_core` / `V_core` → `ValueError`
 (no silent zeros).
 
+### In-loop core loss in a magnetic network
+
+The Steinmetz / iGSE estimate above runs after the transient: it reads
+`B(t)` from the trace and never changes the circuit. In a magnetic
+network (tutorial 09), `b.add_magnetic_resistance(name, a, b, R_m)`
+between two magnetic nodes dissipates `R_m·(dΦ/dt)²` inside the solve,
+so the loss damps the circuit. It is classical eddy loss
+(`P ∝ f²·B²`); `device_loss_summary` lists it with
+`kind="magnetic_resistance"`, `category="core_loss"` and its `R_m`.
+`b.add_excess_loss(name, a, b, c, eps)` adds Bertotti's excess loss,
+`F = c·u/(u² + eps²)^¼` for the flux rate `u` (`P ∝ (f·B)^1.5`); it is
+listed with `kind="excess_loss"`, `category="core_loss"`, `c` and `eps`.
+Under a sine flux rate of amplitude `Û` its loss is
+`c·Û^1.5·0.556418` (the mean of `|cos|^1.5`) less `(3/4)·(eps/Û)²` of
+it: `eps ≤ 1.15e-3·Û` keeps it within 1e-6. It does not feed a thermal
+node: the kernel's loss port belongs to switching devices (a junction);
+a core temperature is not modelled.
+
+| | Steinmetz / iGSE (post-hoc) | magnetic elements (in loop) |
+|---|---|---|
+| frequency law | `f^α·B^β`, fitted | eddy `f²·B²`, excess `(f·B)^1.5`, JA loop |
+| changes the waveform | no | yes |
+| hysteresis, excess loss | inside the fit | `add_hysteretic_permeance`, `add_excess_loss` |
+
+`R_m` is fitted to a loss figure, not predicted; neither model is
+validated against measurement here.
+
 ## Junction temperature — `device_thermal_summary`
 
 Same kwargs as `device_loss_summary`, plus per-device Foster networks:
@@ -348,6 +391,155 @@ The switching-loss and core-loss contributions are layered on the
 conduction trace as a **constant offset** (thermal time constants ≫
 nanosecond switching transitions, so the impulse energy is smeared
 across the cycle — standard PSIM convention).
+
+## Event losses and T_j on the periodic orbit (design evaluator)
+
+On the exact steady-state route (`pulsim.design.Evaluator`,
+`steady=SteadySpec(method="pss")`, engine `dsed`) the loss tables are
+read at every commutation of the steady period, from the period map's
+left and right limits at the event, by one rule:
+
+| Event | Blocking voltage | Current | Temperature |
+|---|---|---|---|
+| turn-on | `|v(x⁻)|`, before | `|i(x⁺)|`, after | `T_j` |
+| turn-off | `|v(x⁺)|`, after | `|i(x⁻)|`, before | `T_j` |
+
+* Switches: `switch_specs={"Q1": {"E_on_table": LossTable, "E_off_table":
+  LossTable, "Tj": 125}}`. On a three-phase SPWM inverter (10 kHz, 1 µs
+  dead time, 600 V, 200 edges each way per 20 ms period) the kernel's
+  `E_on` / `E_off` equal `device_loss_summary`'s on a settled `dsed`
+  period within 1.8e-13 (test, tolerance 1e-9).
+* Diodes: `switch_specs={"D1": {"E_off_table": LossTable, "Tj": 125}}`
+  is the recovery energy, read at each turn-off by the turn-off row
+  (`v` after, `i` before); it is the record's `recovery` loss. Its count
+  equals the diode's turn-off count in the period. This is the exact
+  route only: `device_loss_summary` refuses a diode in `switch_specs` by
+  name (it used to ignore it) and takes recovery through `diode_specs`.
+* The junction: `ThermalSpec(r_th={"Q1": 2.5}, t_amb=40)` on this
+  route defaults to `mode="kernel"`: the orbit is fixed, `P(T_j)` is the
+  device's fixed loss plus its table energies over the period, and
+  `T_j = t_amb + r_th P(T_j)` is solved in C++ segment by segment
+  between the tables' `T_j` knots (exact where the tables are linear;
+  residual below 1e-9 K, `counters["thermal_residual"]`). It is the
+  smallest root above `t_amb`, where the physical iteration settles; no
+  root (`r_th dP/dT_j >= 1`) is `infeasible` / `thermal_runaway`, with
+  the slope in the reason. `mode="fixed_point"` keeps the damped loop
+  (and `loss_at=`, `temperature_dependent=`); on the buck example's best
+  design (SYN-B, 60.5 kHz, r_th 3 K/W) `T_j(Q1)` is 43.27175 °C against
+  43.27162 °C, 1.3e-4 K apart (test: 0.1 K).
+* Conduction: by default the circuit's own dissipation (the closed-form
+  period integrals). `ThermalSpec(conduction={"Q1": {"i": [...], "tj":
+  [...], "v_on": [[...]]}})` heats the junction with `V_on(|i|, T_j)·|i|`
+  over the on-state current instead, in closed form when the table is
+  linear in `i` (one or two current knots; more knots, a current that
+  changes sign, or a table clamped at 0 in range are refused by name).
+  It is reported as `p_cond_table.<device>`; the record's `conduction`
+  loss stays the circuit's, so the energy balance still closes.
+
+The tables in the tests and the examples are SYNTHETIC, as are the parts
+Pulsim ships (`allow_synthetic=True`); they illustrate the reading, not
+a device. Not covered: the event energy is not drawn from the circuit
+(the PWL switch is ideal, as in PLECS), and `T_j` does not feed back
+into the electrical solution in kernel mode.
+
+## Event losses inside the transient (`set_device_losses`)
+
+The summaries above are post-hoc: the run ends, then the tables are
+read. `CircuitBuilder.set_device_losses` reads them inside the time loop
+of `engine="pwl"` and deposits the heat into a node of a thermal network
+built in the same circuit (°C is a node voltage, W a current):
+
+```python
+b.add_voltage_source("Vamb", "amb", "gnd", 40.0)      # ambient, °C
+b.add_resistor("Rth", "tj", "amb", 1.0)               # K/W
+b.add_capacitor("Cth", "tj", "amb", 0.01)             # J/K
+b.set_device_losses("Q1", junction="tj",              # closed loop
+                    E_on=LossTable(...), E_off=LossTable(...),
+                    V_on=ConductionTable(...), conduction="table")
+res = p.simulate(b, 0.1, dt=1e-6, switch_fn=pwm)
+res.v("tj")                    # junction temperature, °C
+res.loss_events("Q1")          # t, kind, v, i, Tj, E (structured array)
+res.device_energy("Q1")        # E_on, E_off, E_cond_electrical, E_cond_table, n_on, n_off
+```
+
+* Temperature: `junction="tj"` reads the tables at the junction node's
+  temperature before each event and heats that node (closed loop);
+  `Tj=125` reads at a fixed temperature, and with `heat_node="tj"` still
+  heats that node (open loop), without it only records.
+* Reading rule: the table on the left of "Event losses on the periodic
+  orbit" below, the same function (`thermal::commutation_point`) on both
+  routes. On `pwl`, `x⁻` / `x⁺` are the samples before and after the
+  step that changed the mask, the samples `device_loss_summary` reads:
+  on a three-phase VSI at `Tj = 125` the kernel's `E_on` / `E_off` per
+  switch equal `device_loss_summary(switch_specs=...)` within 1e-9.
+  A diode's `E_off` is its recovery, read at each natural turn-off.
+* Deposition: the heat of a step is a rectangular power over the next
+  step; the trapezoid rule's capacitor history passes half of it on, so
+  the network receives it over two steps (h/2 + h/2), exactly in sum
+  while every step is trapezoidal (the default). A backward-Euler /
+  SDIRK step (`discontinuity_restart=True`, a commutation split) keeps no
+  capacitor current, so at each switch between step kinds up to half a
+  step's heat can be lost or delivered twice while `heat_injected`
+  counts the full amount. Measured on the 10 kHz chopper of the tests
+  (20 ms, 1200 restart steps): the network's energy matches
+  `heat_injected` within 4e-10 (2.7e-13 without restarts).
+  Ten 1 mJ events into 0.01 J/K with no leak raise the junction
+  1.000 K (1e-6). `res.heat_injected + res.heat_pending` equals the
+  recorded event and conduction energy within 1e-12 (the last step's
+  heat is still pending when the run ends).
+* Conduction: `conduction="electrical"` (default) heats with the device's
+  own electrical dissipation per step, as `device_loss_summary` reads it
+  (energy balance closes); `"table"` with `V_on(|i|, T_j)·|i|` over the
+  on-state ends of the step, trapezoidal. Both are reported.
+* `engine="trbdf2"` runs the same tracker: conduction with the
+  integrator's stage quadrature (TR-BDF2 weights `(w, w, d)` at
+  `(0, γh, h)`, SDIRK `(1-γs, γs)`, trapezoid on landings and probes), a
+  commutation from the engine's left and right limits at the landed
+  instant (the same reading rule and table call as `pwl`), and the heat as
+  a power over the next step, consumed in proportion to the committed
+  length (a landing keeps the rest owed).
+* Impulsive re-initialisation (an ideal switch closing a capacitor loop,
+  opening a cut-set): the record's `dW` is booked to the device it names
+  (`cause`) as `device_energy(...)["E_impulse"]` and heats its junction;
+  that step's conduction is its end power only, as `device_loss_summary`
+  reads the pulse step.
+* A resumed run (`resume_from=`) continues the tracker: the heat in flight,
+  the ledgers and the events travel in the snapshot (pickle field 17).
+* Refusals by name (`UnsupportedError` / `ValueError`, naming the
+  device): `dsed` / `exact`, `bdf1`, and `auto` when it resolves to
+  `dsed`, refuse a circuit with a loss port; an unknown device, a device that is not a PWL switch or
+  diode, both or neither of `junction` / `Tj`, `conduction="table"`
+  without `V_on`, and a deposit node without a capacitor on it.
+* YAML: a `losses:` block on a `switch`, `diode`, `mosfet`,
+  `mosfet_with_body_diode` or `igbt` (`junction`, `Tj`, `heat_node`,
+  `e_on`, `e_off`, `v_on`, `conduction`; unknown keys refused).
+* Parts: `part.attach_losses(b, "Q1", T_amb=40)` builds the part's
+  Foster or Cauer chain from a node `Tj_Q1` and hands its tables over
+  unreduced (a PLECS XML part through `lib.import_plecs_xml`); a
+  synthetic part needs `allow_synthetic=True`.
+
+Not covered: the event energy is not drawn from the circuit (the PWL
+switch is ideal); `T_j` does not change `V_f` or `g_on`; a device that
+flips twice inside one outer step (a commutation split) records no
+event, since only the step's end masks are compared; a thermal
+capacitor to ground starts at 0 °C from a zero initial state, and the
+first events read that (tie the capacitors to the ambient node, as
+above, or start from a DC operating point).
+
+## Device-level switching energy — `add_power_mosfet`
+
+To simulate the switching transient itself instead of annotating it,
+build the device with `CircuitBuilder.add_power_mosfet` (channel, C_gs,
+C_gd(v), C_ds(v), R_g, body diode) and measure it with
+`p.double_pulse_test(device_kwargs, V_dd=, I_load=, R_g_ext=, V_drive=,
+L_load=)`, which returns E_on, E_off, the Miller plateau, dv/dt, di/dt
+and I_rr as time-weighted integrals, starting from the off-state bias
+(an all-zero start turns the device on through C_gd before the gate
+command). Use `engine="trbdf2"`; on `pwl`
+the step must resolve the gate transient (0.2 ns for a 60 ns plateau).
+The datasheet fitters are in `pulsim.datasheet`. Losses of the
+composite are not in `device_loss_summary` yet (unified device
+interface).
 
 ## What's *not* covered
 

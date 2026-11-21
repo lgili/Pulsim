@@ -91,6 +91,10 @@ class DiodeStateTrace:
     v_start: Optional[np.ndarray] = field(default=None, repr=False)
     closed_start: Optional[np.ndarray] = field(default=None, repr=False)
     V_f: float = 0.0
+    # An ideal branch-form diode (R_on = 0) solves its current as an
+    # unknown: that column, and its step-start values, replace the law.
+    i_branch: Optional[np.ndarray] = field(default=None, repr=False)
+    i_branch_start: Optional[np.ndarray] = field(default=None, repr=False)
     _messages: List[str] = field(default_factory=list, repr=False)
 
     def __post_init__(self) -> None:
@@ -119,6 +123,8 @@ class DiodeStateTrace:
 
     @property
     def current(self) -> np.ndarray:
+        if self.i_branch is not None:
+            return self.i_branch
         if not self.V_f:  # legacy expression: bit-identical at V_f = 0
             return self.v * self.g
         return self.g * (self.v - self.v_off)
@@ -126,6 +132,9 @@ class DiodeStateTrace:
     @property
     def current_start(self) -> np.ndarray:
         """Branch current at the start of the step after each sample."""
+        if self.i_branch is not None:
+            return (self.i_branch_start if self.i_branch_start is not None
+                    else self.i_branch)
         if not self.V_f:
             return self.v_start * self.g_start
         return self.g_start * (self.v_start - self.v_off_start)
@@ -162,12 +171,18 @@ class DiodeStateTrace:
             return closed.copy()
         i_pk = float(np.max(np.abs(self.current)))
         thr = max(1e-12, 1e-6 * i_pk)
-        i_fwd = self.g_on * (np.asarray(self.v, dtype=float) - self.V_f)
+        if self.i_branch is not None:
+            # ideal (R_on = 0) branch form: g_on = inf, v = V_f when ON
+            # (inf·0 = NaN); the solved current is the forward current.
+            i_fwd = np.asarray(self.current, dtype=float)
+            fwd_start = np.asarray(self.current_start, dtype=float) > thr
+        else:
+            i_fwd = self.g_on * (np.asarray(self.v, dtype=float) - self.V_f)
+            # A step's start is the right limit of the sample before it
+            # (v_start; the sample itself except at a DSED event).
+            fwd_start = self.g_on * (np.asarray(self.v_start, dtype=float)
+                                     - self.V_f) > thr
         fwd = i_fwd > thr
-        # A step's start is the right limit of the sample before it
-        # (v_start; the sample itself except at a DSED event).
-        fwd_start = self.g_on * (np.asarray(self.v_start, dtype=float)
-                                 - self.V_f) > thr
         either = fwd.copy()
         either[1:] |= fwd_start[:-1]
         stamp = closed.copy()
@@ -303,6 +318,13 @@ def _build(builder, result, states, times) -> Dict[int, DiodeStateTrace]:
     node_v = _views.node_voltage_trace
     rec, why = _views.recorded_switch_states(result, builder)
     bits = _views.switch_bits_by_branch(builder) if rec is not None else {}
+    # The commanded gate per sample (add-pwl-igbt-and-thyristor 2.2): the
+    # missed-turn-on check of a gated device reads it.
+    gates = getattr(result, "gate_states", None) if rec is not None else None
+    if gates is not None:
+        gates = np.asarray(gates, dtype=bool)
+        if gates.shape != np.shape(rec):
+            gates = None
     states_s, rec_s = _views.step_start_states(result, states, rec)
     unsolved = _views.recorded_unsolved(result, n) if rec is not None \
         else np.zeros(n, dtype=bool)
@@ -347,9 +369,22 @@ def _build(builder, result, states, times) -> Dict[int, DiodeStateTrace]:
                                  g_off=g_off, V_th=V_th, v=v,
                                  closed=closed, recorded=True,
                                  v_start=v_s, closed_start=c_s, V_f=V_f)
+            if prm.get("branch_form") and not np.isfinite(g_on):
+                col = int(builder.pool.branch_var_id_for_switch(bid, builder.graph))
+                tr.i_branch = np.asarray(states[:, col], dtype=float)
+                if states_s is not states:
+                    tr.i_branch_start = np.asarray(states_s[:, col], dtype=float)
         else:
             reason = why if rec is None else (
                 "its mask bit could not be resolved from the builder")
+            if "gate" in prm:
+                # The replay knows no gate: a gated-off IGBT blocking
+                # 400 V would read as conducting kiloamperes.
+                raise ValueError(
+                    f"{name!r} is a gated PWL device and the result carries "
+                    f"no record of the stamped mask ({reason}); its "
+                    "conduction state cannot be replayed from voltages. "
+                    + _views.record_advice(result))
             closed = _replay_kernel_rule(v, V_th, V_f)
             tr = DiodeStateTrace(branch_id=bid, name=name, g_on=g_on,
                                  g_off=g_off, V_th=V_th, v=v,
@@ -379,7 +414,17 @@ def _build(builder, result, states, times) -> Dict[int, DiodeStateTrace]:
             i_env = float(i_abs[rest].max()) if rest.any() else 0.0
             exempt = unsolved | (landing & np.where(closed, i_abs <= i_env,
                                                     v <= v_env))
+            # A gated device (IGBT, GTO, thyristor) blocks forward
+            # voltage while its gate is off: OFF under forward bias is
+            # its law, not a missed turn-on. With its gate ON it is a
+            # missed turn-on like a diode's; without a gate record, not
+            # judged.
             off_fwd = ~exempt & ~closed & (v - V_on > 1e-3) & (v > 1e-3)
+            if "gate" in prm:
+                if gates is not None and bit is not None:
+                    off_fwd &= gates[:, bit]
+                else:
+                    off_fwd[:] = False
             on_rev = ~exempt & closed & (v - V_f < -1e-3)
             viol = off_fwd | on_rev
             if viol.any():

@@ -1,0 +1,14 @@
+* add-power-mosfet-datasheet-device task 7.1 -- Shockley diode curve
+* IS = 1e-12, N = 1 at 300 K (V_T = 0.025852 V, Pulsim's default);
+* ngspice adds GMIN = 1e-12 S across the junction, as Pulsim's G_min.
+.model DS D(IS=1e-12 N=1)
+.temp 26.85
+.options TNOM=26.85
+D1 a 0 DS
+Va a 0 DC 0
+.control
+set numdgt=12
+dc Va -1 0.8 0.05
+wrdata pm_shockley.out -i(Va)
+.endc
+.end

@@ -67,7 +67,7 @@
 
 - [x] 5.1 New page `docs/v2/motors-induction.md` covering model equations, parameter identification recipe, IFOC tuning.
   (Reconciled 2026-11: docs/motors-induction.md.)
-- [ ] 5.2 Link from the motors index page; cross-reference PMSM page.
+- [x] 5.2 Link from the motors index page; cross-reference PMSM page. (There is no motors index or PMSM page: `docs/motors-induction.md` and `docs/motors-sensorless.md` "See also" name the MNA-native PMSM / BLDC / induction machines and their YAML types.)
 
 ## 6. Validation + release
 

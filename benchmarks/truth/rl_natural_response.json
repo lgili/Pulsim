@@ -1,0 +1,51 @@
+{
+ "circuit": "circuits/linear/rl_natural_response.yaml",
+ "form": "conductance",
+ "supported": true,
+ "observables": [
+  "V(node)"
+ ],
+ "dps": [
+  30,
+  60
+ ],
+ "wall_s": 0.0,
+ "events": [],
+ "n_commutations": 0,
+ "n_events": 0,
+ "ambiguous": [],
+ "weak_only": 0,
+ "start_mode": "",
+ "dc_start_modes": null,
+ "notes": [],
+ "jumps": [],
+ "impulsive_loss_J": "0.0",
+ "max_dae_residual": "0.0",
+ "max_eigvec_cond": "1.0",
+ "windows": {
+  "full": {
+   "V(node)": {
+    "mean": "-0.9999546000702375706476447",
+    "rms": "2.236067975195349990153396",
+    "d_prec": "2.02e-33"
+   }
+  },
+  "last20": {
+   "V(node)": {
+    "mean": "-0.001450313490700135249012515",
+    "rms": "0.001661881622565372458746163",
+    "d_prec": "1.74e-35"
+   }
+  }
+ },
+ "energy_J": {
+  "R1": "4.99999998969423e-5"
+ },
+ "energy_balance_rel": "0.0",
+ "precision_doubling_rel": "9.48e-32",
+ "event_time_diff_s": "0",
+ "u_stored_trace": 7.960844466935114e-07,
+ "uniform_dt_floor": 5.128329346726825e-05,
+ "dt": 5e-06,
+ "stored_dt": 6.25e-07
+}
