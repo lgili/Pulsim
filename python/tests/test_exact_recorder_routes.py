@@ -138,6 +138,9 @@ def test_series_lc_on_a_sine_on_the_default_route(detune):
     A_, B_ = 0.1234e-3, 1.8765e-3
     with warnings.catch_warnings():
         warnings.simplefilter("error", RuntimeWarning)
+        # release: the default output rule warns about steps of a defective mode it cannot
+        # bound; that is not the recorder's line fallback this test forbids
+        warnings.filterwarnings("ignore", message=".*output grid.*", category=RuntimeWarning)
         res = p.simulate(b, 2e-3, engine="exact", allow_implicit_segments=False,
                          recorders=[p.Recorder("r", list(truths), keep="none",
                                                windows=[(A_, B_)])])
@@ -175,12 +178,14 @@ def _halfwave():
 
 
 ROUTES = {   # name: (circuit, options, expected recorder path, the binding that runs)
-    "auto (diode-free)": (_sync_buck, {}, "closed", "auto"),
+    # release: the default output rule runs on the event scheduler (the "output_rtol" row);
+    # the diode-free scheduler is reached with the rule off
+    "auto (diode-free)": (_sync_buck, {"output_rtol": 0}, "closed", "auto"),
     "rk45": (_sync_buck, {"integrator": "rk45"}, "closed", "ped"),
     "auto -> rk45 (diode)": (_halfwave, {}, "closed", "ped"),
     "output_rtol": (_sync_buck, {"output_rtol": 1e-6}, "closed", "ped"),
     "bdf2": (_sync_buck, {"engine": "dsed", "integrator": "bdf2"}, "stored", "bdf2"),
-    "t_start": (_sync_buck, {"t_start": 1e-5}, "stored", "auto"),
+    "t_start": (_sync_buck, {"t_start": 1e-5, "output_rtol": 0}, "stored", "auto"),
 }
 
 

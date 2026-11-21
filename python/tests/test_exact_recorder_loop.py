@@ -42,6 +42,9 @@ T_UNIT = 1e-6
 
 def _run(make, t_end, recs, **kw):
     b, fn = make()
+    # release: these tests compare with the stored-array pass over a run that stores every
+    # accepted step — the output rule off (its grid keeps only what the tolerance needs)
+    kw.setdefault("output_rtol", 0)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         return p.simulate(b, t_end, switch_fn=fn, engine="exact", recorders=recs, **kw)
