@@ -409,6 +409,14 @@
   "n": 14,
   "sha": "da54414adba13ef1"
  },
+ "benchmarks/circuits/switching/isolated/llc_half_bridge_zvs.yaml": {
+  "n": 13,
+  "sha": "f5516a2a286f088b"
+ },
+ "benchmarks/circuits/switching/isolated/psfb_full_bridge_zvs.yaml": {
+  "n": 26,
+  "sha": "d84100243a986d9e"
+ },
  "benchmarks/circuits/switching/isolated/synchronous_flyback.yaml": {
   "n": 9,
   "sha": "3419efb20b8f424c"

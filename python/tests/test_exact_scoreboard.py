@@ -26,24 +26,29 @@ import exact_truth as et  # noqa: E402
 import v1_reader  # noqa: E402
 
 SPLIT = dict(discontinuity_restart=True, enable_substep_state_correction=True)
+OFF = dict(discontinuity_restart=False)   # the pre-release fixed engine
 
 # circuit -> label -> (engine, simulate() keywords, floor, ceiling, part that sets it)
 CELLS = {
     "circuits/diodes/diode_rectifier.yaml": {
         # plain pwl's error on the conduction intervals: its left values at D1's events
         # (limits 0.020) and the same error in RMS (smooth 0.010)
-        "pwl": ("pwl", {}, 0.0, 0.06, "limits"),
+        "pwl rule off": ("pwl", OFF, 0.0, 0.06, "limits"),   # 0.0204
+        "pwl": ("pwl", {}, 0.0, 0.05, "limits"),            # release default: 0.0161
         "trbdf2": ("trbdf2", {}, 0.0, 1e-5, "limits"),      # 2.6e-7
     },
     "circuits/switching/isolated/flyback_converter.yaml": {
         # a real engine error of plain pwl (smooth 0.95 alone), not the measure
-        "pwl": ("pwl", {}, 0.3, 10.0, "limits"),
+        "pwl rule off": ("pwl", OFF, 0.3, 10.0, "limits"),   # 2.21
+        "pwl": ("pwl", {}, 0.0, 4e-3, "limits"),            # release default: 1.27e-4
         "dsed": ("dsed", {}, 0.0, 1e-4, "limits"),         # 2.2e-6
     },
     "circuits/switching/basic/vcswitch_resistor.yaml": {
         # finding F-SB-2: the split rule applies the gate edge from the start of its step,
         # delta = -0.005 h: instants sqrt(jump^2 |delta| / T) / span = 0.0032
-        "pwl+split F-SB-2": ("pwl", SPLIT, 1e-3, 1e-2, "instants"),
+        # (the PR line's 0.0032). Under the release default control_tick='state' the edge is
+        # placed exactly: 2.0e-9
+        "pwl+split": ("pwl", SPLIT, 0.0, 1e-7, "instants"),
     },
     "circuits/diodes/diode_half_wave_rl_load.yaml": {
         # finding F-SB-3: the right limit of V(out) at D1's turn-off is the projected value
