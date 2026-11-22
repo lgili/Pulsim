@@ -386,11 +386,16 @@ def test_a_plecs_part_reaches_the_kernel_uncollapsed(tmp_path, current, t_amb):
     assert junction == "Tj_D1"
     res = p.simulate(b, 0.02, dt=1e-5)
     e = res.device_energy("D1")
-    t = np.asarray(res.times)
-    on = np.asarray(res.switch_states)[:, b.switch_index_of("D1")]
-    i = np.abs(np.where(on, 20.0 * (res.v("a") - 0.7), 1e-9 * res.v("a")))
+    # release: under the restart rule the start is a jump (0 -> the source's current at
+    # t = 0+); the kernel integrates from its right limit, so the samples are read with
+    # their right-limit rows (the raw trapezoid starts the first step from 0: 2.5e-4 low)
+    from pulsim._result_views import with_inner_events, with_right_limits
+    rr = with_right_limits(with_inner_events(res))
+    t = np.asarray(rr.times)
+    on = np.asarray(rr.switch_states)[:, b.switch_index_of("D1")]
+    i = np.abs(np.where(on, 20.0 * (rr.v("a") - 0.7), 1e-9 * rr.v("a")))
     i_ax, tj_ax, v = part.conduction["v_on"]
-    p_tab = np.where(on, _bilinear(i_ax, tj_ax, v, i, res.v(junction)) * i, 0.0)
+    p_tab = np.where(on, _bilinear(i_ax, tj_ax, v, i, rr.v(junction)) * i, 0.0)
     want = math.fsum(np.diff(t) * 0.5 * (p_tab[:-1] + p_tab[1:]))
     assert e["E_cond_table"] == pytest.approx(want, rel=1e-9)
     # the junction really heats: the chain carries the table power

@@ -82,7 +82,11 @@ SW = {"Q1": {"E_on_ref": 20e-6, "E_off_ref": 30e-6, "V_ref": 24.0,
 # ---------------------------------------------------------------------
 # A1: the window
 # ---------------------------------------------------------------------
-@pytest.mark.parametrize("engine", ["pwl", pytest.param("auto", marks=pytest.mark.xfail(
+@pytest.mark.parametrize("engine", [pytest.param("pwl", marks=pytest.mark.xfail(
+    strict=True, reason="release finding F-6-2 on the fixed engine too (since the restart rule "
+    "stores a jump's right limit and the split's located events beside the samples): "
+    "time_average(res.i) over 80-100 ms is 0.161315 A against 0.161026 A from the summary "
+    "(pwl dt=1e-7: 0.161005)")), pytest.param("auto", marks=pytest.mark.xfail(
     strict=True, reason="release finding F-6-2: the exact engine stores one sample at a "
     "diode turn-on, the pre-event value, so res.i misses the 13.6 A jump's right limit; "
     "time_average(res.i) over 80-100 ms is 0.160684 A against 0.161027 A from the summary "
@@ -105,6 +109,21 @@ def test_window_leaves_the_start_up_out(engine):
     assert win["t_window_end"] == pytest.approx(0.1, abs=1e-15)
     assert win["i_avg"] == pytest.approx(
         p.time_average(t, i, t_from=0.08), rel=1e-9, abs=1e-12)
+
+
+@pytest.mark.parametrize("engine", ["pwl", "auto"])
+def test_window_average_of_the_stored_trace_is_the_summary(engine):
+    """The same window read on the trace as the engine took it — the events
+    located inside a step and each jump's right limit, which the result
+    stores beside the samples (F-6-2 is the raw samples missing them): the
+    time average of that trace is the summary's i_avg (measured 0.161026332649
+    on both for pwl)."""
+    from pulsim._result_views import with_inner_events, with_right_limits
+    b, res = _run_bridge(engine)
+    win = _rows(b, res, conduction_specs=COND, t_from=0.08)["BR__D1"]
+    rr = with_right_limits(with_inner_events(res))
+    t, i = np.asarray(rr.times), np.asarray(rr.i("BR__D1"))
+    assert win["i_avg"] == pytest.approx(p.time_average(t, i, t_from=0.08), rel=1e-9, abs=1e-12)
 
 
 @pytest.mark.parametrize("engine", ["pwl", "auto"])
