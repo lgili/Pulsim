@@ -65,4 +65,4 @@ Reference values (all from `probes/lcp_cases.out` unless stated).
 
 ## 10. Docs and verification
 - [ ] 10.1 Device guide: the diode law, what `V_th` means now, the gauge convention; AI_GUIDE trap list (bands are no longer needed)
-- [ ] 10.2 ruff, pytest, ctest (`-j2`), `openspec validate --all --strict`
+- [x] 10.2 ruff, pytest, ctest (`-j2`), `openspec validate --all --strict` — CLOSED: seen on the PR head a90d84b8 (2026-11-22): ruff clean, ctest 1091/1091 (Eigen 5; 17 targets on Eigen 3.4.0), pytest 7079 passed with the one failure re-pinned and its files re-run, `openspec validate --all --strict` 79 passed, stubs `--check` up to date
