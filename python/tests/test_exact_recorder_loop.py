@@ -146,8 +146,10 @@ def test_in_loop_recorders_match_the_stored_pass_on_the_same_run(name):
              else record_result(res, recs)["r"])
     mm = 1e-9 if closed else 1e-11
     # the closed forms' rounding adds up over the fine grid's pieces: worst
-    # v(vout)*i(L)'s rms on buck_dcm, 1.7e-11 at dt = 1e-7 (3021 steps)
-    ia = 1e-10 if closed else 1e-11
+    # v(vout)*i(L)'s rms on buck_dcm, 1.7e-11 at dt = 1e-7 (3021 steps) on macOS;
+    # the bridge's 2e4 pieces read 1.46e-10 on the Windows runners (another C
+    # runtime). 1e-9 still tells a closed form from a chord (1e-5 and worse)
+    ia = 1e-9 if closed else 1e-11
     loop = res.recorded["r"]
     stored = record_result(res, recs)["r"]
     _same(loop.times, stored.times)

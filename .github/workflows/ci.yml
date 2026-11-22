@@ -374,8 +374,16 @@ jobs:
 
       - name: Upload to Codecov
         uses: codecov/codecov-action@v4
+        # the report above (lcov --list) is the job's result; the upload is a
+        # courtesy that needs a token this repository does not set
+        continue-on-error: true
+        timeout-minutes: 5
         with:
           files: coverage.info
+          # only the file named: without this the uploader searches build-cov and
+          # runs gcov over its 339 .gcno files until the runner is shut down
+          disable_search: true
+          plugin: noop
           flags: cpp-unittests
           name: pulsim-cpp-coverage
           fail_ci_if_error: false
