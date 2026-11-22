@@ -86,9 +86,6 @@ def test_orbit_is_a_fixed_point_and_stays_one():
     assert np.abs(h_far - r.history).max() < 1e-10
 
 
-@pytest.mark.xfail(strict=True, reason="release finding F-6-1: steady_state's default "
-                   "probe_scale=1e-4 sits in the restart engine's per-period round-off "
-                   "(residual 1.9e-8, was 1.8e-10; probe_scale=0.1 gives 2.0e-11)")
 def test_the_default_probe_finds_the_orbit_to_1e_8():
     b = _buck()
     r = p.steady_state(b, period=T, dt=DT, switch_fn=_grid_gate(b))

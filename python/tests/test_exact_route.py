@@ -236,9 +236,6 @@ def test_a_b_extra_fn_segment_is_refused_by_rule_unless_allowed(engine):
     assert np.asarray(r.v("o"))[-1] == pytest.approx(5.0 * (1 - np.exp(-1.0)), rel=1e-5)
 
 
-@pytest.mark.xfail(strict=True, reason="release finding F-6-6: under the output rule (default "
-                   "output_rtol=1e-5) a numeric (tier-3) segment's steps are counted nowhere: "
-                   "n_rk45_steps = n_bdf2_steps = 0 with n_accept = 1005 (output_rtol=0: 1005)")
 def test_a_numeric_segment_counts_its_integrator_steps():
     b, fn = _rc_with_b_extra()
     with warnings.catch_warnings():

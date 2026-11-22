@@ -37,9 +37,7 @@ def _p_sw(d, phase):
 
 
 @pytest.mark.parametrize("d", [
-    pytest.param(1e-7, marks=pytest.mark.xfail(
-        strict=True, reason="release finding F-5-3: mode_selection='auto' (LCP) on dsed drops a 1 ps "
-        "gate pulse: buck v_out 2.4e-8 V (leakage only) vs 2.37e-6 V = 0.987 D Vin (settle)")),
+    1e-7,
     1 - 1e-7])
 def test_a_short_pulse_counts_wherever_it_sits_in_the_period(d):
     # the same periodic waveform, sectioned at two phases: the same commutations

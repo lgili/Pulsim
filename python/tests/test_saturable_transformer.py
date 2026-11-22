@@ -76,10 +76,6 @@ def test_below_the_knee_the_two_models_agree():
     assert abs(v_sat - v_lin) < 0.05 * v_lin, (v_sat, v_lin)
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "release finding F-3-3: the default fixed step (restart rule) turns the linear flyback's "
-    "MOSFET off into its body diode: i_p 14.83 -> -20.92 A, i_D1 68.7 A (exact engine: "
-    "i_p -> 0, peak 16.38 A), so the linear reference's peak reads 20.92 A"))
 def test_past_the_knee_the_core_runs_away_and_the_output_collapses():
     """Overload. The linear model's current grows with the load like a
     resistor's; the core's magnetising current runs away and the
@@ -153,10 +149,6 @@ def test_inrush_when_energised_at_the_voltage_zero_crossing():
     assert first_sat > 3.0 * first_lin, (first_sat, first_lin)
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "release finding F-3-4: trbdf2 aborts (Newton failed at h_min, t = 0.41 ms) when the "
-    "switch AND the diode are in the default branch form; either one in the conductance "
-    "form runs (15.3104 V against pwl 15.3095 V)"))
 def test_engines_agree_below_saturation():
     """On the variable-step engine, with the RC snubber the parity
     test in test_engine_auto.py uses: an ideal switch interrupting the

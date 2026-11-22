@@ -129,10 +129,6 @@ def _run(primary, dt, rectifier="pwl"):
     return float(np.asarray(res.v("vout"))[-1])
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "release finding F-3-7: under the restart rule (the release default) the saturable-primary "
-    "PSFB aborts at dt = 50 ns (Newton fails at t = 61.55 us even at dt/64, the diode-mask "
-    "chatter); restart-less it runs (6.913 V; linear 6.857 V, exact engine 6.8577 V)"))
 def test_at_a_moderate_step_every_primary_agrees():
     """The control: at 50 ns all three run and land together, so the
     Newton devices are not the problem per se."""
@@ -141,14 +137,17 @@ def test_at_a_moderate_step_every_primary_agrees():
     assert v["hysteretic"] == pytest.approx(v["linear"], rel=0.05), v
 
 
-@pytest.mark.xfail(strict=True,
+_STALL = pytest.mark.xfail(strict=True,
                    reason="the PWL diode mask is re-decided inside the Newton "
                           "loop once a Newton device is present, and at 10 ns "
                           "no single mask is self-consistent: the iterate "
                           "bounces by 0.76 V at node vout while the residual "
                           "sits at 5.4e-10. See the module docstring; the "
                           "smooth-diode control below is the proof.")
-@pytest.mark.parametrize("primary", ["saturable", "hysteretic"])
+
+
+# release: the saturable primary survives the step now (the mark stays on the hysteretic one)
+@pytest.mark.parametrize("primary", ["saturable", pytest.param("hysteretic", marks=_STALL)])
 def test_a_newton_device_survives_a_stiff_step(primary):
     v = _run(primary, 10e-9)
     assert v == pytest.approx(_run("linear", 10e-9), rel=0.02), v

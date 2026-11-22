@@ -93,7 +93,7 @@ F_SB_2 = pytest.mark.xfail(strict=True, reason=(
     "(+0.995 h); control_tick='state' with the split rule places it exactly"))
 
 
-@F_SB_2
+# release: placed exactly under the default control_tick='state' (F-SB-2 stays the PR line's)
 @pytest.mark.parametrize("kw", [SPLIT, RESTART], ids=["split", "restart"])
 def test_a_scheduled_switch_edge_is_placed_at_the_edge(kw):
     edge, h = 20.0005e-6, 1e-7                      # vcswitch_resistor: 1 ns ramp, threshold at its middle

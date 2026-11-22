@@ -113,7 +113,7 @@ def test_kcl_holds_at_every_recorded_sample(circ, eng):
 @pytest.mark.parametrize("eng", sorted(_RUNS_C))
 @pytest.mark.parametrize("circ", ["rc", "buck", "rectifier"])
 def test_capacitor_charge_over_mid_step_windows(circ, eng, request):
-    if eng == "pwl" and circ in ("buck", "rectifier"):
+    if eng == "pwl" and circ == "buck":
         request.applymarker(F_4_4)
     _, _, t_end, _, caps = _CIRCUITS[circ]()
     (cap, (nodes, c)), = caps.items()
@@ -141,8 +141,6 @@ _BUCK_P = ["p(V)", "p(S1)", "p(D1)", "p(R)", "p(L)", "p(C)"]
 
 @pytest.mark.parametrize("eng", ["pwl", "trbdf2", "exact"])
 def test_energy_balance_from_recorder_outputs(eng, request):
-    if eng == "pwl":
-        request.applymarker(F_4_4)
     # the exact engine is read from its stored samples (linear between
     # them): sampled every 1 us, as the pwl grid
     run = dict(_RUNS.get(eng, {"engine": "exact", "dt": 1e-6}))

@@ -1236,8 +1236,6 @@ def test_switched_branch_charge_closes_in_steady_state(engine, R_load, request):
     jump over the next 1 µs step: D1 i_avg read 0.02343 A against
     0.05345 A in DCM (-56 %) and -2.5 % in CCM, with no warning. All
     engines now agree to 1e-4."""
-    if engine == "pwl":
-        _finding(request, F22)
     b, r = _boost_run(0.7, R_load, engine)
     w = _Window(r, 2e-3)
     s, _, msgs = _report(b, w, [])
@@ -1271,8 +1269,6 @@ def test_conduction_loss_agrees_across_engines_in_steady_state(R_load, request):
     Measured now, t >= 2 ms, D1 P_avg: DCM 2.2797e-5 / 2.2766e-5 /
     2.2785e-5 W (pwl T/1000, auto, dsed), CCM 3.0867e-3 / 3.0860e-3 /
     3.0859e-3 W."""
-    if R_load == 500.0:   # the pwl reference reads D1 -0.8 % (truth: auto/dsed agree)
-        _finding(request, F22)
     ref = {}
     for engine in ("pwl", "auto", "dsed"):
         b, r = _boost_run(0.7, R_load, engine)
@@ -1760,7 +1756,6 @@ def test_dsed_trace_without_a_step_start_jump_is_on_result_times():
 
 
 @pytest.mark.parametrize("R_load", (500.0, 20.0))
-@pytest.mark.xfail(strict=True, reason=F24)
 def test_dsed_junction_temperature_follows_the_step_start_power(R_load):
     """T_j was built from the stored DSED samples, the left limits,
     while P_cond_avg integrates each step from its right limit: on the

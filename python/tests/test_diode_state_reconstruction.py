@@ -174,8 +174,6 @@ def test_bridge_v_th_does_not_change_the_reported_charge(engine, request):
     collapses the diode voltage from 0.7 V to i/g_on into a ~3 mΩ loop,
     a ~345 A spike the V_th = 0 circuit does not have (the source-state
     test above shows it is in the simulation, not the reporting)."""
-    if engine == "pwl":
-        _finding(request, F4)   # D2 i_avg 0.1706 A at V_th = 0.7 (exact engine 0.1611)
     _, r7, s7, _, _ = _run_bridge(0.7, engine)
     _, r0, s0, _, _ = _run_bridge(0.0, engine)
     for name in DIODES:
@@ -510,10 +508,6 @@ def _run_boost(R_load: float, V_th: float, engine: str):
     return b, pwm, r, _entry(s, "D1"), msgs
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "release finding F-5-8: on the release route (auto -> exact) the step after a diode "
-    "turn-off is longer than t_rr = 100 ns, device_loss_summary warns, and CCM E_sw reads "
-    "6.775e-4 J vs 6.950e-4 J (pwl dt = 10 ns); the warning's dt_max has no keyword there"))
 @pytest.mark.parametrize("V_th", VTHS)
 @pytest.mark.parametrize("R_load", (20.0, 500.0))
 def test_boost_recovery_energy_agrees_across_engines(R_load, V_th):
@@ -560,10 +554,6 @@ def test_boost_duty_agrees_across_engines(R_load, V_th, request):
     current-zero landing stored at v_D ≈ −4e-9 V: DCM duty 0.1679
     (auto) vs 0.2219 (pwl) at V_th = 0. Measured after the fix:
     0.2218 vs 0.2219 (DCM), 0.4678 vs 0.4681 (CCM)."""
-    if R_load > 100:
-        _finding(request, "release finding F-5-7: with the restart a commutation inside a "
-                 "step is credited to neither side (right-hold over grid samples): DCM D1 "
-                 "duty 0.2171 at dt = T/100 vs exact 0.2218 (restart-less 0.2203), first order")
     *_, d_pwl, _ = _run_boost(R_load, V_th, "pwl")
     *_, d_auto, _ = _run_boost(R_load, V_th, "auto")
     assert abs(d_pwl["duty_conducting"] - d_auto["duty_conducting"]) \

@@ -329,10 +329,6 @@ def test_windows_cut_inside_flip_steps_add_up(engine):
             whole[dev]["i_avg"] * (cuts[-1] - cuts[0]), rel=1e-12)
 
 
-@pytest.mark.xfail(strict=True, reason="release finding F-6-3: device_thermal_summary "
-                   "ignores conduction_specs for a branch-form diode (the default since "
-                   "the release): D1 P_cond_avg 0.0172 W against the loss summary's "
-                   "2.375 W conduction model (the conductance form gives 2.375 W in both)")
 def test_thermal_conduction_cuts_a_flip_step_like_the_loss_summary():
     """device_thermal_summary's P_cond_avg used the same voltage-times-
     g_on pairing at a flip-step bound."""

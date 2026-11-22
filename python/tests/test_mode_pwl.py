@@ -127,10 +127,7 @@ def _perturbed(fam, k):
 
 
 @pytest.mark.parametrize("mode", [None, "lcp"], ids=["default", "lcp"])
-@pytest.mark.parametrize("fam", ["bridge1_vf0", pytest.param("bridge1_vf07", marks=pytest.mark.xfail(
-    strict=True, reason="release finding F-3-1: the event split's located diode turn-on moves "
-    "3.1e-4 V under a 1-ulp change of C or R (2.3e-11 without the restart rule)")),
-    "bridge3_cfilter"])
+@pytest.mark.parametrize("fam", ["bridge1_vf0", "bridge1_vf07", "bridge3_cfilter"])
 def test_rounding_fuzz_gives_one_mode_sequence(fam, mode):
     """20 last-bit perturbations of the circuit (C and R +-1..10 ulp) give one waveform and one
     diode mode sequence, up to ties: on the single-phase bridges a few samples (<= 6 of 4001, from

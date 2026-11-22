@@ -25,9 +25,7 @@ def _mask(*bits):
 
 @pytest.mark.parametrize("mode", [
     "legacy",
-    pytest.param("auto", marks=pytest.mark.xfail(strict=True, reason=(
-        "release finding F-3-2: under mode_selection='lcp' (the release default here) the "
-        "refusal's .device is the label 'D (branch #1)', not the device name 'D'"))),
+    "auto",
 ])
 def test_h1_forward_biased_ideal_diode_across_a_source_is_refused(mode):
     # Before: released OFF, re-solved, cycle-detected as a breach on 100 of

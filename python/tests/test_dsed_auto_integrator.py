@@ -76,10 +76,7 @@ def test_bdf2_starts_each_segment_with_backward_euler():
 
 @pytest.mark.parametrize("rule", [
     {"output_rtol": 0},
-    pytest.param({}, marks=pytest.mark.xfail(strict=True, reason=(
-        "release finding F-3-6: under the default output_rtol=1e-5 the documented step "
-        "counters n_exact/n_rk45/n_bdf2_steps all read 0 on numerically integrated segments "
-        "(2022 RK45 steps with output_rtol=0; same samples)"))),
+    {},
 ], ids=["grid_off", "default"])
 def test_a_mode_without_an_exact_stepper_still_runs_on_auto(rule):
     # A user b_extra_fn has no closed-form propagator (sine, pulse and PWM

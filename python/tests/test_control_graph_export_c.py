@@ -256,10 +256,6 @@ def test_pi_limiter_pwm_export_runs_as_a_c_block_bit_for_bit(tmp_path):
     assert 3.0 < x1[-1, b1.node_id_of("out")] < 5.0      # the loop regulates
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "release finding F-4-7: control_tick='state' (the release default) does not fire the tick "
-    "at t_end - dt, so the last step runs on a stale hold (n steps -> n - 1 fires; "
-    "control_tick='label' fires n)"))
 def test_the_c_block_fires_on_every_tick_before_t_end(tmp_path):
     # Ticks at k*dt < t_end, k = 0..9: ten fires for ten steps.
     dt = 1e-6

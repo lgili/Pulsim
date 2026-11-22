@@ -355,10 +355,6 @@ def test_periodic_table_must_close():
 
 # ---- res.i ------------------------------------------------------------------
 
-@pytest.mark.xfail(strict=True, reason="release finding F-6-5: under the restart rule "
-                   "(default) the pwl row at a pulse current source's edge is solved with "
-                   "the pre-edge value (Rsq carries 1.0 A at t = 3e-4) while res.i('Ip') "
-                   "evaluates the waveform there (0.0 A); restart-less both read 1.0 A")
 def test_res_i_matches_a_series_milliohm():
     b = p.CircuitBuilder()
     b.add_sine_voltage_source("Vs", "a", "gnd", 1.0, 2.0, 1e3)

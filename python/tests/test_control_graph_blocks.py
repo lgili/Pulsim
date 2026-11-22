@@ -487,9 +487,7 @@ def test_a_reused_observer_restarts_its_tick_grid():
 
 @pytest.mark.parametrize("tick", [
     "label",
-    pytest.param(None, marks=pytest.mark.xfail(strict=True, reason=(
-        "release finding F-3-5: under the default control_tick='state' the build refusal "
-        "reaches the caller as SimulationAborted, not ControlGraphBuildError (same message)"))),
+    None,
 ], ids=["label", "default"])
 def test_a_rate_period_below_the_fixed_step_is_refused(tick):
     b = _rc()

@@ -58,8 +58,6 @@ def test_conduction_specs_unknown_device_raises() -> None:
             b, res, conduction_specs={"NOPE": {"V_f0": 0.7}})
 
 
-@pytest.mark.xfail(strict=True, reason="release finding F-2-1: device_thermal_summary drops "
-                   "conduction_specs on a branch-form diode (0.0998 W, truth 7.991 W)")
 def test_thermal_summary_uses_conduction_model() -> None:
     """A device opted into the offset+slope model runs hotter than the
     pure-resistive reconstruction, because its conduction loss is real."""
