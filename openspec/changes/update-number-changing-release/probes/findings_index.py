@@ -208,6 +208,9 @@ FIXED = {
              "unchanged and the mark is removed: `test_res_i_matches_a_series_milliohm`",
     "F-6-6": "merge of the PR line 03c8b67c / a90d84b8 (R3, 9e051abe .. 9f1f0747): its parked test(s) pass "
              "unchanged and the mark is removed: `test_a_numeric_segment_counts_its_integrator_steps`",
+    "F-X-1": "merge of the PR line (R3): ten paralleled bridges run on the exact engine under the default output rule on "
+             "both selections; `test_ten_paralleled_bridges_agree_with_pwl` holds the rule-off run to 1e-3 V of pwl + split "
+             "and the default run to that plus the rule's promise (measured 2.6e-3 V); mark removed",
 }
 
 PAT = re.compile(r"release finding (F-[0-9X]+-[0-9]+)")

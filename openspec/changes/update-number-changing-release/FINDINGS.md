@@ -12,8 +12,8 @@ Severity: **W** wrong answer silently; **R** refusal / abort of something that u
 | B event samples and result integrals | 5 | 0 | 1 | 6 |
 | C the new mode selection (`mode_selection='auto'`) | 2 | 1 | 1 | 4 |
 | D trbdf2 | 1 | 0 | 0 | 1 |
-| F the exact route / output rule | 2 | 2 | 1 | 5 |
-| all | 12 | 3 | 3 | 18 |
+| F the exact route / output rule | 2 | 1 | 1 | 4 |
+| all | 12 | 2 | 3 | 17 |
 
 Bucket-0 items (fixed by the integrator, not findings): `oracles/lcp_pulsim_bridge.py` builds `form='conductance'` (keyword `form=`); `next_defaults.legacy()` reads `dt` from the third positional argument; the branch-form refusal names `V_f` for `add_diode`.
 
@@ -139,14 +139,6 @@ Bucket-0 items (fixed by the integrator, not findings): `oracles/lcp_pulsim_brid
 - new: 6.6e-8 off (default rule, before the cost fix 1e2b90ff); 2.1e-6 at output_rtol=1e-8. After the merge of the cost fix the default run is within the test's 1e-8 bound (the test passes, so it stays unparked); the dependence on the grid at output_rtol=1e-8 was NOT re-measured
 - parked: none parked
 
-### F-X-1 [R] ten paralleled bridges refused at 19.969 ms under the full profile
-
-- call: `simulate(_paralleled_bridges(10), t_end=0.02, engine='exact')` (test_exact_route)
-- truth: runs (agrees with pwl dt 1e-7)
-- old: runs (output_rtol=0)
-- new: DiodeModeInconsistentError at 19.969 ms (Db8b OFF forward-biased 0.73 V; reproduced on the merged release tip with the cost fix, both selections)
-- parked: none parked
-
 ### F-X-3 [R] the output rule's chord bound does not finish a 500-state RC ladder (counters.py's 88-minute case)
 
 - call: `benchmarks/tools/counters.py` `ladder500_rc` on `engine='dsed', integrator='rk45'` without dt (t_end 2e-5)
@@ -194,5 +186,6 @@ Bucket-0 items (fixed by the integrator, not findings): `oracles/lcp_pulsim_brid
 - F-6-4 [B/W] loss port's integral of v*i over restart SDIRK steps first order, 10x constant: merge of the PR line 03c8b67c / a90d84b8 (R3, 9e051abe .. 9f1f0747): its parked test(s) pass unchanged and the mark is removed: `test_event_and_conduction_energy_converge_to_the_closed_form_truth[pwl-kw0-0.0015-0.0015]`; parked: none parked
 - F-6-5 [B/W] restart edge row solved with the pre-edge source value; res.i(source) evaluates at t: merge of the PR line 03c8b67c / a90d84b8 (R3, 9e051abe .. 9f1f0747): its parked test(s) pass unchanged and the mark is removed: `test_res_i_matches_a_series_milliohm`; parked: none parked
 - F-6-6 [F/C] = F-3-6 (numeric segments' counters 0 under the output rule): merge of the PR line 03c8b67c / a90d84b8 (R3, 9e051abe .. 9f1f0747): its parked test(s) pass unchanged and the mark is removed: `test_a_numeric_segment_counts_its_integrator_steps`; parked: none parked
+- F-X-1 [F/R] ten paralleled bridges refused at 19.969 ms under the full profile: merge of the PR line (R3): ten paralleled bridges run on the exact engine under the default output rule on both selections; `test_ten_paralleled_bridges_agree_with_pwl` holds the rule-off run to 1e-3 V of pwl + split and the default run to that plus the rule's promise (measured 2.6e-3 V); mark removed; parked: none parked
 - F-X-2 [H/C] the `auto` routing costs 4745 bytecodes per call: group H, `release/h-call-overhead` 26d059b0 (merged 1b3f7ecc): no-dt call on the exact route 5609 -> 3634 bytecodes (ceiling 3760); gate case `[exact]` added; parked: none parked
 

@@ -259,9 +259,6 @@ def _paralleled_bridges(n):
     return b
 
 
-@pytest.mark.xfail(strict=True, raises=p._pulsim.DiodeModeInconsistentError, reason="release finding F-X-1: "
-                   "under the release defaults (output_rtol=1e-5) the exact engine refuses ten paralleled "
-                   "bridges at 19.969 ms (Db8b OFF forward-biased 0.73 V); output_rtol=0 runs it")
 @pytest.mark.parametrize("mode", [None, "lcp"])
 def test_ten_paralleled_bridges_agree_with_pwl(mode):
     """Ten three-phase bridges paralleled on one bus, the bus held to ground by 1 Mohm. Slice 7
@@ -283,8 +280,13 @@ def test_ten_paralleled_bridges_agree_with_pwl(mode):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         r = p.simulate(_paralleled_bridges(10), t_end=t_end, engine="exact", **kw)
+        r0 = p.simulate(_paralleled_bridges(10), t_end=t_end, engine="exact", output_rtol=0, **kw)
         ref = _ten_bridges_pwl()
-    assert np.abs(bus(r) - np.interp(tg, *ref)).max() <= 1e-3
+    want = np.interp(tg, *ref)
+    assert np.abs(bus(r0) - want).max() <= 1e-3
+    # release: the default run (output rule 1e-5; F-X-1 refused it at 19.969 ms) runs, and its
+    # stored chords are within the rule's promise of the same answer (measured 2.6e-3 V)
+    assert np.abs(bus(r) - want).max() <= 1e-3 + 1e-5 * (want.max() - want.min())
 
 
 @functools.cache
