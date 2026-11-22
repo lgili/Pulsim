@@ -168,6 +168,46 @@ FIXED = {
              "(ceiling 2890); `test_simulate_overhead.py` no longer xfail",
     "F-X-2": "group H, `release/h-call-overhead` 26d059b0 (merged 1b3f7ecc): no-dt call on the exact route "
              "5609 -> 3634 bytecodes (ceiling 3760); gate case `[exact]` added",
+    "F-2-1": "merge of the PR line 03c8b67c / a90d84b8 (R3, 9e051abe .. 9f1f0747): its parked test(s) pass "
+             "unchanged and the mark is removed: `test_thermal_summary_uses_conduction_model`",
+    "F-2-4": "merge of the PR line 03c8b67c / a90d84b8 (R3, 9e051abe .. 9f1f0747): its parked test(s) pass "
+             "unchanged and the mark is removed: `test_dsed_junction_temperature_follows_the_step_start_power[500.0]`; `test_dsed_junction_temperature_follows_the_step_start_power[20.0]`",
+    "F-3-1": "merge of the PR line 03c8b67c / a90d84b8 (R3, 9e051abe .. 9f1f0747): its parked test(s) pass "
+             "unchanged and the mark is removed: `test_rounding_fuzz_gives_one_mode_sequence[bridge1_vf07-default]`; `test_rounding_fuzz_gives_one_mode_sequence[bridge1_vf07-lcp]`",
+    "F-3-2": "merge of the PR line 03c8b67c / a90d84b8 (R3, 9e051abe .. 9f1f0747): its parked test(s) pass "
+             "unchanged and the mark is removed: `test_h1_forward_biased_ideal_diode_across_a_source_is_refused[auto]`",
+    "F-3-3": "merge of the PR line 03c8b67c / a90d84b8 (R3, 9e051abe .. 9f1f0747): its parked test(s) pass "
+             "unchanged and the mark is removed: `test_past_the_knee_the_core_runs_away_and_the_output_collapses`",
+    "F-3-4": "merge of the PR line 03c8b67c / a90d84b8 (R3, 9e051abe .. 9f1f0747): its parked test(s) pass "
+             "unchanged and the mark is removed: `test_engines_agree_below_saturation`",
+    "F-3-5": "merge of the PR line 03c8b67c / a90d84b8 (R3, 9e051abe .. 9f1f0747): its parked test(s) pass "
+             "unchanged and the mark is removed: `test_a_rate_period_below_the_fixed_step_is_refused[default]`",
+    "F-3-6": "merge of the PR line 03c8b67c / a90d84b8 (R3, 9e051abe .. 9f1f0747): its parked test(s) pass "
+             "unchanged and the mark is removed: `test_a_mode_without_an_exact_stepper_still_runs_on_auto[default]`",
+    "F-3-7": "merge of the PR line 03c8b67c / a90d84b8 (R3, 9e051abe .. 9f1f0747): its parked test(s) pass "
+             "unchanged and the mark is removed: `test_at_a_moderate_step_every_primary_agrees`",
+    "F-4-3": "merge of the PR line 03c8b67c / a90d84b8 (R3, 9e051abe .. 9f1f0747): its parked test(s) pass "
+             "unchanged and the mark is removed: `test_an_ideal_body_diode_across_its_closed_switch_does_not_chatter`",
+    "F-4-7": "merge of the PR line 03c8b67c / a90d84b8 (R3, 9e051abe .. 9f1f0747): its parked test(s) pass "
+             "unchanged and the mark is removed: `test_the_c_block_fires_on_every_tick_before_t_end`",
+    "F-5-2": "merge of the PR line 03c8b67c / a90d84b8 (R3, 9e051abe .. 9f1f0747): its parked test(s) pass "
+             "unchanged and the mark is removed: `test_a_polled_dsed_schedule_is_counted_and_its_kpis_are_unaffected`",
+    "F-5-3": "merge of the PR line 03c8b67c / a90d84b8 (R3, 9e051abe .. 9f1f0747): its parked test(s) pass "
+             "unchanged and the mark is removed: `test_a_short_pulse_counts_wherever_it_sits_in_the_period[1e-07]`",
+    "F-5-7": "merge of the PR line 03c8b67c / a90d84b8 (R3, 9e051abe .. 9f1f0747): its parked test(s) pass "
+             "unchanged and the mark is removed: `test_boost_duty_agrees_across_engines[500.0-0.7]`; `test_boost_duty_agrees_across_engines[500.0-0.0]`",
+    "F-5-8": "merge of the PR line 03c8b67c / a90d84b8 (R3, 9e051abe .. 9f1f0747): its parked test(s) pass "
+             "unchanged and the mark is removed: `test_boost_recovery_energy_agrees_across_engines[20.0-0.7]`; `test_boost_recovery_energy_agrees_across_engines[20.0-0.0]`; `test_boost_recovery_energy_agrees_across_engines[500.0-0.7]`; `test_boost_recovery_energy_agrees_across_engines[500.0-0.0]`",
+    "F-6-1": "merge of the PR line 03c8b67c / a90d84b8 (R3, 9e051abe .. 9f1f0747): its parked test(s) pass "
+             "unchanged and the mark is removed: `test_the_default_probe_finds_the_orbit_to_1e_8`",
+    "F-6-3": "merge of the PR line 03c8b67c / a90d84b8 (R3, 9e051abe .. 9f1f0747): its parked test(s) pass "
+             "unchanged and the mark is removed: `test_thermal_conduction_cuts_a_flip_step_like_the_loss_summary`",
+    "F-6-4": "merge of the PR line 03c8b67c / a90d84b8 (R3, 9e051abe .. 9f1f0747): its parked test(s) pass "
+             "unchanged and the mark is removed: `test_event_and_conduction_energy_converge_to_the_closed_form_truth[pwl-kw0-0.0015-0.0015]`",
+    "F-6-5": "merge of the PR line 03c8b67c / a90d84b8 (R3, 9e051abe .. 9f1f0747): its parked test(s) pass "
+             "unchanged and the mark is removed: `test_res_i_matches_a_series_milliohm`",
+    "F-6-6": "merge of the PR line 03c8b67c / a90d84b8 (R3, 9e051abe .. 9f1f0747): its parked test(s) pass "
+             "unchanged and the mark is removed: `test_a_numeric_segment_counts_its_integrator_steps`",
 }
 
 PAT = re.compile(r"release finding (F-[0-9X]+-[0-9]+)")
