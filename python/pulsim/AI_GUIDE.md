@@ -240,8 +240,8 @@ print(f"Q1: P = {P:.2f} W, T_j peak = {th[0]['T_j_peak']:.1f} C at 5 ms; "
 ```
 
 ```text
-run: Q1 cond 0.907 W, sw 5.035 W; D1 cond 2.451 W
-3-5 ms: Q1 cond 0.880 W, sw 4.992 W; D1 cond 2.420 W
+run: Q1 cond 0.905 W, sw 5.031 W; D1 cond 2.456 W
+3-5 ms: Q1 cond 0.878 W, sw 4.988 W; D1 cond 2.425 W
 Q1: P = 5.87 W, T_j peak = 44.2 C at 5 ms; settles near 40 + 1.5 K/W * P = 48.8 C
 ```
 
@@ -459,7 +459,7 @@ Measured on this version; the last column is the fix.
 | # | Wrong assumption | What actually happens | Do this instead |
 |---|---|---|---|
 | 1 | `V_th` of `add_diode` / `add_bridge_rectifier` is a forward drop | It is the turn-on threshold. On-state is `V_f + I/g_on`: 10 A into `g_on = 20 S` gives 0.500 V for `V_th = 0` and `0.7` alike, 1.200 V with `V_f = 0.7`. `add_three_phase_vsi(V_f=)` and the MOSFET/IGBT diode `V_F` ARE drops | Pass `V_f` (losses include `V_f*I`), or `b.add_shockley_diode`. Never also a `conduction_specs` `V_f0` |
-| 2 | `v.mean()` over a result is the average | No-`dt` grids cluster at events. Rectifier of 6.2: `.mean()` 6.234 V vs 6.330 V | `p.steady_state_stats`, `p.time_average`, `p.time_rms`, `np.trapezoid(y, t) / (t[-1] - t[0])` |
+| 2 | `v.mean()` over a result is the average | No-`dt` grids cluster at events. Rectifier of 6.2: `.mean()` 6.029 V vs 6.330 V | `p.steady_state_stats`, `p.time_average`, `p.time_rms`, `np.trapezoid(y, t) / (t[-1] - t[0])` |
 | 3 | `p.SwitchStateMask(1)` sets bit 0 | It is a mask of SIZE 1, all OFF | `m = p.SwitchStateMask(b.graph.num_switches); m.set(i, True)` |
 | 4 | MOSFET k is switch bit k | `add_mosfet` adds `<name>_body`, so bits interleave with diodes (below) | `b.switch_index_of(name)` |
 | 5 | Loosening `tol_newton_dx` / `tol_newton_res` fixes a Newton abort | Both are absolute on purpose. Snubbed flyback, `tol_newton_dx=1e-5, tol_newton_res=1e-4`: `auto` 3.53 V, fixed engine 15.31 V, silently | Keep the defaults; read the abort; run `engine='pwl'` with `dt`; fix gate edges, body diodes, initial state |
@@ -581,7 +581,7 @@ for r in (fixed, var):
 
 ```text
 pwl    time-weighted 6.330 V, sample mean 6.329 V
-dsed   time-weighted 6.330 V, sample mean 6.234 V
+dsed   time-weighted 6.330 V, sample mean 6.029 V
 ```
 
 The engines agree; the sample mean on the variable grid does not.
