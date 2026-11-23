@@ -95,6 +95,9 @@ struct ExactLTI {
     mutable std::vector<Eigen::Index> chord_order;
     mutable Vector chord_s;
     mutable Real chord_rho = Real{0};   // max |λ_k|
+    // The event scan's certificate (PEDSimulator::locate_event_exact_): per armed
+    // predicate (index), its modal row q_k = c·V_k, built on first use (empty: not yet).
+    mutable std::vector<Eigen::VectorXcd> scan_q;
 };
 
 /// The output rule's work arrays (exact_chord_step, the adapter's

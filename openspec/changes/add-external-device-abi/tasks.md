@@ -49,4 +49,4 @@ Slice 1 notes (DECISIONS.md): 1.1 header is `core/include/pulsim/xdev/pulsim_xde
 - [~] 6.1 (all done except `AI_GUIDE.md`, which got only the two YAML signatures: it is at its 32 KiB cap; slice 5 added the `pulsim.xdev` section, the free function and a CHANGELOG entry) `docs/external-devices.md` (the row convention, purity of `eval`, the 1e-12 smoothness requirement, trust boundary), `docs/c-block.md` (cache location; C block versus external device), `AI_GUIDE.md`, `docs/known-limitations.md` and `KNOWN_LIMITATIONS.md` (no sandbox, no external PWL devices, OSDI coverage), `CHANGELOG.md` (cache move)
 
 ## 7. Verification
-- [ ] 7.1 `ruff check`, `pytest`, `ctest`, `openspec validate --all --strict`, stub check
+- [x] 7.1 `ruff check`, `pytest`, `ctest`, `openspec validate --all --strict`, stub check — CLOSED: seen on the PR head a90d84b8 (2026-11-22): ruff clean, ctest 1091/1091 (Eigen 5; 17 targets on Eigen 3.4.0), pytest 7079 passed with the one failure re-pinned and its files re-run, `openspec validate --all --strict` 79 passed, stubs `--check` up to date

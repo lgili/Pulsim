@@ -416,8 +416,9 @@ r.feeding, res.recorder_feed                       # 'in-loop' | 'stored-arrays'
   `time_average` of the product trace is. EXCEPT in the exact engine's
   loop: there each step's integral and RMS are the closed form of its mode
   (exact for the trajectory, the same at any `dt` / `output_rtol`; a probe
-  that is a polynomial of degree ≤ 2 in its readings). A piece with no
-  closed form (another probe, time-varying sources) is the line and warns;
+  that is a polynomial of degree ≤ 2 in its readings; sine, pulse, PWM and
+  table sources included: they are states of the mode). A piece with no
+  closed form (another probe, a user `b_extra_fn`) is the line and warns;
   `res.recorder_feed["closed_form"]` counts both. min / max are the values
   at the samples and window edges.
 - `res.avg` / `res.rms` / `res.integral` and the stored-array pass are the

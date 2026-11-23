@@ -101,11 +101,20 @@ def test_capacitor_loop_jump_and_conduction_partition_the_pulse_step_at_any_dt(h
     b, r = _caploop_closing(h)
     (rec,) = r.reinit_records
     s = {e["name"]: e for e in device_loss_summary(b, r)}
+    t = np.asarray(r.times)
     v1, v2 = r.v("x"), r.v("y")
     W = 0.5 * C1 * np.asarray(v1) ** 2 + 0.5 * C2 * np.asarray(v2) ** 2
-    dW = 0.5 * C1 * V1**2 + 0.5 * C2 * V2**2 - W[-1]
+    # the stored-energy change over the loss window itself: it starts at the first
+    # solved sample (t_window_start = h), so the leak over (0, h] is in neither side
+    k0 = int(np.searchsorted(t, s["S"]["t_window_start"]))
+    dW = W[k0] - W[-1]
     assert s["S"]["E_impulse_total"] == pytest.approx(rec.dW, rel=1e-15)
-    assert s["S"]["E_impulse_total"] + s["S"]["E_total"] == pytest.approx(dW, rel=1e-12)
+    # rel 1e-13 of dW ~ 2.4e-18 J, no abs floor: the head closes to <= 4e-19 J; the
+    # b9e46778 ledger (half the pulse step's pre-jump power on top of the impulse)
+    # was 3.2e-16 J off at h = 1e-8 and 3.2e-13 J at 1e-5
+    assert s["S"]["E_impulse_total"] + s["S"]["E_total"] == pytest.approx(dW, rel=1e-13, abs=0)
+    # the regular part: g_off x (10 V - 2 V)^2 over the ten steps (h, 11h] before the edge is seen
+    assert s["S"]["E_total"] == pytest.approx(10 * 1e-9 * 64 * h, rel=1e-6)
 
 
 def test_the_pulse_step_conducts_its_end_power_only():

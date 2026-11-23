@@ -278,6 +278,34 @@ inline void modal_basis(PeriodMode& e) {
     }
 }
 
+/// e.C (observable rows over x̄, from e.Rx / e.rc and the mask) and e.Rm.
+template <class MaskT>
+inline void observable_rows(PeriodMode& e, const std::vector<PeriodObservable>& obs,
+                            const MaskT& mask) {
+    const Index n = e.n;
+    const Index n1 = n + 1;
+    const auto n_obs = static_cast<Index>(obs.size());
+    e.C = DenseMatrix::Zero(n_obs, n1);
+    for (Index j = 0; j < n_obs; ++j) {
+        const auto& o = obs[static_cast<std::size_t>(j)];
+        for (const auto& [idx, coef] : o.w) {
+            e.C.row(j).head(n) += coef * e.Rx.row(idx);
+            e.C(j, n) += coef * e.rc[idx];
+        }
+        if (o.bit >= 0) {
+            const bool on = mask.get(static_cast<Size>(o.bit));
+            const Real g = on ? o.g_on : o.g_off;
+            e.C.row(j) *= g;
+            if (on) {
+                e.C(j, n) -= g * o.v_on;
+            }
+        }
+    }
+    if (e.modal && n_obs > 0) {
+        e.Rm = (e.C * e.d.cwiseInverse().asDiagonal()).cast<Cplx>() * e.V;
+    }
+}
+
 template <class AdapterT, class MaskT>
 [[nodiscard]] PeriodMode make_period_mode(
     AdapterT& ad, const MaskT& mask,
@@ -315,27 +343,7 @@ template <class AdapterT, class MaskT>
     e.As.topRightCorner(n, 1) = e.d.head(n).cwiseProduct(e.b);
 
     modal_basis(e);
-
-    const auto n_obs = static_cast<Index>(obs.size());
-    e.C = DenseMatrix::Zero(n_obs, n1);
-    for (Index j = 0; j < n_obs; ++j) {
-        const auto& o = obs[static_cast<std::size_t>(j)];
-        for (const auto& [idx, coef] : o.w) {
-            e.C.row(j).head(n) += coef * e.Rx.row(idx);
-            e.C(j, n) += coef * e.rc[idx];
-        }
-        if (o.bit >= 0) {
-            const bool on = mask.get(static_cast<Size>(o.bit));
-            const Real g = on ? o.g_on : o.g_off;
-            e.C.row(j) *= g;
-            if (on) {
-                e.C(j, n) -= g * o.v_on;
-            }
-        }
-    }
-    if (e.modal && n_obs > 0) {
-        e.Rm = (e.C * di.asDiagonal()).cast<Cplx>() * e.V;
-    }
+    observable_rows(e, obs, mask);
     return e;
 }
 

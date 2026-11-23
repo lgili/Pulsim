@@ -42,7 +42,7 @@
 ## 8. Verification
 - [x] 8.1 `ruff check` (including `benchmarks/tools`) — the new tools are clean; `benchmark_runner.py` keeps its 4 pre-existing E741, as at HEAD
 - [x] 8.2 `pytest python/tests` — 2352 passed, 4 skipped, 8 xfailed
-- [ ] 8.3 `ctest -j2` — not run: this change touches no C++ (the close-out neither)
+- [x] 8.3 `ctest -j2` — not run: this change touches no C++ (the close-out neither) — CLOSED: seen on the PR head a90d84b8 (2026-11-22): ruff clean, ctest 1091/1091 (Eigen 5; 17 targets on Eigen 3.4.0), pytest 7079 passed with the one failure re-pinned and its files re-run, `openspec validate --all --strict` 79 passed, stubs `--check` up to date
 - [x] 8.4 `openspec validate --all --strict`
 - [x] 8.5 Stub check
 - [ ] 8.6 One manual nightly run through `workflow_dispatch`; attach its summary table to the PR — OPEN. ORCHESTRATOR: `gh workflow run nightly-reference.yml --ref <PR head>`; read the uploaded artifact's summary table (per circuit × engine outcome, ngspice version) and the issue it opens/comments on any outcome change; attach the table to PR #147

@@ -3485,6 +3485,345 @@ inline SimulationResult run_transient(
             }
         };  // step_begin
 
+        // run_restart and restart_lined are built once per run, not per step:
+        // step_take passes its run_event_iteration (as consistent_start takes it).
+        // One Alexander SDIRK(2,2) step of h from t_from (γ = 1 −
+        // 1/√2, L-stable, order 2). Both stages are backward-Euler-
+        // like solves of size γh — conductance C/(γh), i.e. the
+        // trapezoidal factor at 2γh — the second from the pseudo
+        // previous state x0* = x0 + ((1 − γ)/γ)(x1 − x0). EACH stage
+        // has its own diode event iteration (not atomic: a gate that
+        // opens an inductor's path is damped in stage 1 before any
+        // diode is asked to conduct). Stage times t_from + γh and
+        // t_from + h, the sources read once at each. The commit after
+        // stage 2 is the caller's (deferred past the freeze guard):
+        // commit_backward_euler(γh) from x0* refreshes the derivative
+        // slots with stage 2's own (x2 − x0*)/(γh).
+        //
+        // Stage-2 fallback: x0* carries stage 1's slope, which belongs
+        // to stage 1's diode mode. If stage 2's event iteration changes
+        // the mode, the new mode's solve starts from that slope: a
+        // rectifier at dt/τ = 10 then turns its diode off on stage 2's
+        // overshoot (25 V for a 20.7 V phase) and the OFF solve returns
+        // x0* itself, 37.2 V on a 24 V source. Such a stage 2 is re-tried
+        // as a backward-Euler step of (1 − γ)h from x1, the last
+        // physical state. If backward Euler keeps stage 1's mode, the
+        // flip was the SDIRK overshoot and the BE step is kept
+        // (`be_commit_h` tells the commit which step that was); else
+        // the mode change is real and the SDIRK stage 2 is restored bit
+        // for bit (a BE remainder there cost DCM buck 8× in accuracy).
+        //
+        // loc: δt_loc of the event at t_from (consistent_start)
+        auto run_restart = [&](auto& run_event_iteration, Real t_from, Real h, Real loc, bool ev) {
+            const Real h_s = kGamma * h;
+            const Real dt_eq = Real{2} * h_s;
+            be_commit_h = h_s;
+            ln_pre = false;
+            accumulate_b_extra(t_from + h_s, dt_eq, true);
+            if (has_diodes) diodes.snapshot_on_bits_into(rs_bits0);
+            const Size edge_flips = loc < h_s ? decide_edge_mode(t_from + h_s, dt_eq) : 0;
+            run_event_iteration(t_from + h_s, dt_eq, true);
+            Size iters_1 = iters;
+            if (edge_flips > 0) {
+                // the decision's flips are the stage's own (the impulse probe's
+                // widening, the window), unless the settle ended on the entry
+                // bits: a linearization's flip the converged state undid
+                diodes.snapshot_on_bits_into(edge_bits);
+                iters_1 = !flipped && edge_bits == rs_bits0 ? Size{1} : iters_1 + edge_flips;
+            }
+            bool breach_1 = flipped;
+            if (breach_1 && has_diodes && !last_solved_bits.empty()) {
+                diodes.restore_on_bits(last_solved_bits);
+            }
+            const bool impulsive =
+                consistent_start(run_event_iteration, t_from, h_s, dt_eq, loc, iters_1, breach_1);
+            if (L) {                // stage 1, for the step's lines
+                // an impulsive start moved the histories to x0+: the lines
+                // start there (a window integral is the regular part; the
+                // jump is the reinit record's)
+                if (impulsive && L->v0.size() == history.entries().size()) {
+                    const auto& es = history.entries();
+                    for (Size k = 0; k < es.size(); ++k) L->v0[k] = es[k].v_prev;
+                }
+                if (ln_pre && L->v0.size() == ln_v0.size()) L->v0 = ln_v0;
+                L->x1 = ln_pre ? ln_x1 : x;
+                L->m1 = stamped_mask;
+                L->be_kept = false;
+                // F-SB-1: the right limit, only where something happens
+                // (the caller's event, a probed jump)
+                const int rl = event_right_limit(run_event_iteration, t_from, h_s, loc,
+                                                 ev, L->rl_x, L->rl_m);
+                L->rl_ok = rl != 0;
+                L->rl_left = rl == 2;
+            }
+            if (has_diodes) {
+                rs_x1 = x;
+                diodes.snapshot_on_bits_into(rs_bits);
+                if (!rs_first_valid) {   // the attempt's first stage: from t_prev
+                    rs_bits_first.assign(rs_bits.begin(), rs_bits.end());
+                    rs_first_valid = true;
+                }
+                history.snapshot_into(rs_hist);
+                hs.snapshot_into(rs_hs);   // keeps the capacity
+            }
+            const bool cycle_1 = mask_cycle;
+            constexpr Real c = (Real{1} - kGamma) / kGamma;
+            history.extrapolate_previous(x, c);
+            hs.extrapolate_previous(x, c);
+            accumulate_b_extra(t_from + h, dt_eq, true);
+            run_event_iteration(t_from + h, dt_eq, true);
+            const Size iters_2 = iters;
+            // A diode stage 1 conducts and stage 2 turns off, with no
+            // diode turning on: the overshoot mechanism (`on_to_off`
+            // also covers the undo below). A
+            // turn-on in stage 2 (e.g. round-off at a zero start,
+            // buck CCM at t = 0) keeps the SDIRK stage, unless it
+            // undoes stage 1's turn-off of a diode that conducted at
+            // the interval start: R(z) < 0 for z < -1/(1-2γ) flips the
+            // sign of a stiff residual (a transformer cut by its
+            // switch, g_off) and the flip forward-biases the diode
+            // again. Kept, the flyback trapped 0.04-0.12 A in its
+            // secondary at every switch-off (exact error 0.11, not
+            // converging with dt).
+            bool on_to_off = false;
+            if (has_diodes && iters_2 > 1) {
+                diodes.snapshot_on_bits_into(rs_bits2);
+                for (Size q = 0; q < rs_bits.size(); ++q) {
+                    if (!rs_bits[q] && rs_bits2[q] && !rs_bits0[q]) {
+                        on_to_off = false;
+                        break;
+                    }
+                    on_to_off = on_to_off || (rs_bits[q] != rs_bits2[q]);
+                }
+            }
+            if (on_to_off) {
+                // Stage 2 changed the mode. Re-take it as backward
+                // Euler from x1 under stage 1's bits; if that keeps
+                // stage 1's mode, the change was SDIRK's own overshoot
+                // (R(z) < 0 for h ≫ τ) and the backward-Euler step is
+                // kept. If backward Euler changes the mode too, the
+                // event is real and the SDIRK stage 2 stands: its
+                // x0* is accurate when the slopes are continuous
+                // (DCM turn-off: −2.4e-4 V at T/50 with backward
+                // Euler kept, +2.9e-5 V without).
+                ++result.stage2_retries;
+                rs_x2 = x;
+                const bool flipped_2 = flipped;
+                const bool cycle_2 = mask_cycle;
+                const auto stamped_2 = stamped_mask;
+                rs_solved2 = last_solved_bits;
+                auto histories_at_x0 = [&] {
+                    history.restore(rs_hist);
+                    hs.restore(rs_hs);
+                };
+                x = rs_x1;
+                diodes.restore_on_bits(rs_bits);
+                histories_at_x0();
+                mask_cycle = cycle_1;
+                const Real h_b = h - h_s;
+                // A re-try that fails (Newton, a singular factor at
+                // the new dt) falls back to the SDIRK stage 2, which
+                // had already succeeded.
+                bool keep_be = false;
+                try {
+                    commit_backward_euler(h_s);      // stage 1, as taken
+                    accumulate_b_extra(t_from + h, Real{2} * h_b, true);
+                    run_event_iteration(t_from + h, Real{2} * h_b, true);
+                    diodes.snapshot_on_bits_into(rs_bits_be);
+                    keep_be = rs_bits_be == rs_bits;
+                } catch (const pwl::NewtonRoundoffBudgetExceeded&) {
+                    throw;   // a run budget: never swallowed by a retry
+                } catch (const std::runtime_error&) {
+                    ++result.stage2_retry_failures;
+                }
+                if (keep_be) {
+                    ++result.stage2_be_kept;
+                    if (L) L->be_kept = true;
+                    be_commit_h = h_b;
+                } else {
+                    // Back to the SDIRK stage 2, bit for bit: the
+                    // histories at x0*, recomputed from x0 and x1.
+                    histories_at_x0();
+                    x = rs_x1;
+                    history.extrapolate_previous(x, c);
+                    hs.extrapolate_previous(x, c);
+                    x = rs_x2;
+                    diodes.restore_on_bits(rs_bits2);
+                    stamped_mask = stamped_2;
+                    last_solved_bits = rs_solved2;
+                    iters = iters_2;
+                    flipped = flipped_2;
+                    mask_cycle = cycle_2;
+                }
+                if (keep_be) iters += iters_2 - 1;
+            }
+            // A diode flip inside the step is a discontinuity of its
+            // own: the window covers this step and the next two.
+            if (iters_1 > 1 || iters_2 > 1) {
+                restart_left = std::max(restart_left, kRestartSteps - 1);
+            }
+            iters += iters_1 - 1;
+            flipped = flipped || breach_1;
+        };
+        // run_restart, and the step's line for it (StepLines): at the
+        // step start, its right limit; inside the step, the event's left
+        // limit (the sub-step that ended at a) and its right limit. The
+        // start of the line is 2·w1·X1 + (1 − 2·w1)·X2, w1 the stage-1
+        // weight (SDIRK 1 − γ; the backward-Euler re-take γ). A stage 2
+        // in another mode than stage 1 (F-4-4) is the same quadrature as
+        // two held pieces, each a solved state in its own mode: X1 over
+        // w1·h, then X2 (an extra row at a + w1·h, not an event).
+        // ev: the (sub)step starts at an event (a trigger at the step
+        // start, a scheduled or located split event): its right limit is
+        // recorded (F-SB-1); a window step's only after a probed jump.
+        auto restart_lined = [&](auto& run_event_iteration, Real a, Real h, Real loc, bool ev) {
+            const bool inner = a != t_prev_step;
+            StepLines& lines = *L;   // restart steps exist under the rule only
+            if (lines.owner != t_step) {   // the step's first: no per-step reset
+                lines.clear();
+                lines.ok = true;
+                lines.owner = t_step;
+            }
+            const Size j = lines.n;
+            // F-4-4: the capacitor currents at the line points, for an
+            // in-loop recorder only (StepLines::c_*)
+            const auto& es = history.entries();
+            const bool caps = hook_step && !es.empty();
+            auto v_cap = [](const Vector& xv, const pwl::HistoryEntry& e) {
+                return stamping::read_node_voltage(xv, e.from) -
+                       stamping::read_node_voltage(xv, e.to);
+            };
+            if (inner) {
+                if (j < StepLines::kMax) {
+                    lines.t[j] = a;
+                    lines.left[j] = x;
+                    lines.m_left[j] = stamped_mask;
+                    lines.right_ok[j] = false;
+                    lines.n = j + 1;
+                    if (caps) {   // the sub-step that ended at a, committed
+                        lines.c_left[j].resize(es.size());
+                        for (Size k = 0; k < es.size(); ++k) {
+                            lines.c_left[j][k] = lines.end_own ? lines.c_end[k] : es[k].i_prev;
+                        }
+                    }
+                } else {
+                    lines.ok = false;
+                }
+            }
+            if (caps) {
+                lines.v0.resize(es.size());
+                for (Size k = 0; k < es.size(); ++k) lines.v0[k] = es[k].v_prev;
+            }
+            lines.m_a = stamped_mask;   // the mode the (sub)step starts in
+            lines.end_own = false;
+            run_restart(run_event_iteration, a, h, loc, ev);
+            if (inner && j >= StepLines::kMax) return;
+            if (inner) {   // the event's right limit (state value)
+                lines.held[j] = false;
+                lines.rl_right_ok[j] = lines.rl_ok;
+                if (lines.rl_ok) {
+                    if (lines.rl_left) {   // a continuity point: the left
+                        lines.rl_right[j] = lines.left[j];
+                    } else {
+                        std::swap(lines.rl_right[j], lines.rl_x);
+                    }
+                    lines.rl_m_right[j] = lines.rl_m;
+                }
+            } else {
+                lines.rl_start_ok = lines.rl_ok;
+                lines.rl_start_left = lines.rl_left;
+                if (lines.rl_ok) {
+                    std::swap(lines.rl_start, lines.rl_x);
+                    lines.rl_m_start = lines.rl_m;
+                }
+            }
+            // shortcut: after a kept backward-Euler stage 2 (w1 = γ) the
+            // start lies between the stages: the quadrature's value, not
+            // a state value (the result's right limit is rl_*, F-SB-1)
+            const Real w1 = lines.be_kept ? kGamma : Real{1} - kGamma;
+            const bool mixed = !(lines.m1 == stamped_mask);
+            const Real t_m = a + w1 * h;
+            // held pieces only when no device's stage-1 state is neither
+            // side's (off -> on -> off would read as an on/off pair the
+            // loss tracker never books)
+            bool one_way = mixed;
+            for (Size bit = 0; one_way && bit < lines.m1.size(); ++bit) {
+                const bool s1 = lines.m1.get(bit);
+                one_way = s1 == lines.m_a.get(bit) || s1 == stamped_mask.get(bit);
+            }
+            if (mixed && (!one_way || lines.n >= StepLines::kMax ||
+                          !(t_m > a && t_m < a + h))) {
+                // shortcut: after an ideal element's jump (ln_pre) these
+                // ends read the run's i_prev, which folds the jump in
+                // (needs a mixed stage 2 too); upgrade with F-W-1's
+                // lines-only stage 2
+                return;   // the step's ends
+            }
+            Vector& dst = inner ? lines.right[j] : lines.x_start;
+            if (mixed) {
+                dst = lines.x1;
+            } else {
+                dst = (Real{2} * w1) * lines.x1 + (Real{1} - Real{2} * w1) * x;
+            }
+            const auto& m_dst = mixed ? lines.m1 : stamped_mask;
+            if (inner) {
+                lines.m_right[j] = m_dst;
+                lines.right_ok[j] = true;
+            } else {
+                lines.m_start = m_dst;
+                lines.start = true;
+            }
+            const Size q = lines.n;   // the held pieces' row
+            if (mixed) {
+                lines.t[q] = t_m;
+                lines.left[q] = lines.x1;
+                lines.m_left[q] = lines.m1;
+                lines.right[q] = x;
+                lines.m_right[q] = stamped_mask;
+                lines.right_ok[q] = true;
+                lines.held[q] = true;   // quadrature only: no inner event
+                lines.n = q + 1;
+            }
+            if (caps) {
+                // the stage currents as the solves enforced them: stage 1
+                // backward Euler of γh from v0, stage 2 the commit's
+                // (x2 − x0*)/(γh), or (x2 − x1)/h_b after a kept BE re-take
+                // (the histories hold x0* / x1 until the commit)
+                constexpr Real kC2 = (Real{1} - kGamma) / kGamma;
+                std::vector<Real>& c = inner ? lines.c_right[j] : lines.c_start;
+                c.resize(es.size());
+                if (ln_pre) {   // the (sub)step's end: the lines' stage 2, not i_prev
+                    lines.c_end.resize(es.size());
+                    for (Size k = 0; k < es.size(); ++k) lines.c_end[k] = es[k].i_prev;
+                    lines.end_own = true;
+                }
+                if (mixed) {
+                    lines.c_left[q].resize(es.size());
+                    lines.c_right[q].resize(es.size());
+                }
+                for (Size k = 0; k < es.size(); ++k) {
+                    const auto& e = es[k];
+                    if (e.kind != pwl::DevicePool::StoredKind::Capacitor) continue;
+                    const models::Capacitor::Params cp{e.C_or_L};
+                    const Real i1 = models::Capacitor::g_eq(Real{2} * (kGamma * h), cp) *
+                                    (v_cap(lines.x1, e) - lines.v0[k]);
+                    // ln_pre: stage 2's start from the lines' stage 1 (x0+*)
+                    const Real vb = !ln_pre ? e.v_prev
+                        : lines.be_kept ? v_cap(lines.x1, e)
+                        : lines.v0[k] + kC2 * (v_cap(lines.x1, e) - lines.v0[k]);
+                    const Real i2 = models::Capacitor::g_eq(Real{2} * be_commit_h, cp) *
+                                    (v_cap(x, e) - vb);
+                    if (ln_pre) lines.c_end[k] = i2;
+                    if (mixed) {
+                        c[k] = lines.c_left[q][k] = i1;
+                        lines.c_right[q][k] = i2;
+                    } else {
+                        c[k] = (Real{2} * w1) * i1 + (Real{1} - Real{2} * w1) * i2;
+                    }
+                }
+            }
+        };
+
         auto step_take = [&]() PULSIM_STEP_PHASE {
             const Real t = t_step;
             const Real t_prev = t_prev_step;
@@ -3846,543 +4185,6 @@ inline SimulationResult run_transient(
             // deferred commit below is a backward-Euler one (at γh).
             committed_be = false;
             be_commit_h = kGamma * opts.dt;   // set by run_restart
-            // One Alexander SDIRK(2,2) step of h from t_from (γ = 1 −
-            // 1/√2, L-stable, order 2). Both stages are backward-Euler-
-            // like solves of size γh — conductance C/(γh), i.e. the
-            // trapezoidal factor at 2γh — the second from the pseudo
-            // previous state x0* = x0 + ((1 − γ)/γ)(x1 − x0). EACH stage
-            // has its own diode event iteration (not atomic: a gate that
-            // opens an inductor's path is damped in stage 1 before any
-            // diode is asked to conduct). Stage times t_from + γh and
-            // t_from + h, the sources read once at each. The commit after
-            // stage 2 is the caller's (deferred past the freeze guard):
-            // commit_backward_euler(γh) from x0* refreshes the derivative
-            // slots with stage 2's own (x2 − x0*)/(γh).
-            //
-            // Stage-2 fallback: x0* carries stage 1's slope, which belongs
-            // to stage 1's diode mode. If stage 2's event iteration changes
-            // the mode, the new mode's solve starts from that slope: a
-            // rectifier at dt/τ = 10 then turns its diode off on stage 2's
-            // overshoot (25 V for a 20.7 V phase) and the OFF solve returns
-            // x0* itself, 37.2 V on a 24 V source. Such a stage 2 is re-tried
-            // as a backward-Euler step of (1 − γ)h from x1, the last
-            // physical state. If backward Euler keeps stage 1's mode, the
-            // flip was the SDIRK overshoot and the BE step is kept
-            // (`be_commit_h` tells the commit which step that was); else
-            // the mode change is real and the SDIRK stage 2 is restored bit
-            // for bit (a BE remainder there cost DCM buck 8× in accuracy).
-            //
-            // loc: δt_loc of the event at t_from (consistent_start)
-            auto run_restart = [&](Real t_from, Real h, Real loc, bool ev) {
-                const Real h_s = kGamma * h;
-                const Real dt_eq = Real{2} * h_s;
-                be_commit_h = h_s;
-                ln_pre = false;
-                accumulate_b_extra(t_from + h_s, dt_eq, true);
-                if (has_diodes) diodes.snapshot_on_bits_into(rs_bits0);
-                const Size edge_flips = loc < h_s ? decide_edge_mode(t_from + h_s, dt_eq) : 0;
-                run_event_iteration(t_from + h_s, dt_eq, true);
-                Size iters_1 = iters;
-                if (edge_flips > 0) {
-                    // the decision's flips are the stage's own (the impulse probe's
-                    // widening, the window), unless the settle ended on the entry
-                    // bits: a linearization's flip the converged state undid
-                    diodes.snapshot_on_bits_into(edge_bits);
-                    iters_1 = !flipped && edge_bits == rs_bits0 ? Size{1} : iters_1 + edge_flips;
-                }
-                bool breach_1 = flipped;
-                if (breach_1 && has_diodes && !last_solved_bits.empty()) {
-                    diodes.restore_on_bits(last_solved_bits);
-                }
-                const bool impulsive =
-                    consistent_start(run_event_iteration, t_from, h_s, dt_eq, loc, iters_1, breach_1);
-                if (L) {                // stage 1, for the step's lines
-                    // an impulsive start moved the histories to x0+: the lines
-                    // start there (a window integral is the regular part; the
-                    // jump is the reinit record's)
-                    if (impulsive && L->v0.size() == history.entries().size()) {
-                        const auto& es = history.entries();
-                        for (Size k = 0; k < es.size(); ++k) L->v0[k] = es[k].v_prev;
-                    }
-                    if (ln_pre && L->v0.size() == ln_v0.size()) L->v0 = ln_v0;
-                    L->x1 = ln_pre ? ln_x1 : x;
-                    L->m1 = stamped_mask;
-                    L->be_kept = false;
-                    // F-SB-1: the right limit, only where something happens
-                    // (the caller's event, a probed jump)
-                    const int rl = event_right_limit(run_event_iteration, t_from, h_s, loc,
-                                                     ev, L->rl_x, L->rl_m);
-                    L->rl_ok = rl != 0;
-                    L->rl_left = rl == 2;
-                }
-                if (has_diodes) {
-                    rs_x1 = x;
-                    diodes.snapshot_on_bits_into(rs_bits);
-                    if (!rs_first_valid) {   // the attempt's first stage: from t_prev
-                        rs_bits_first.assign(rs_bits.begin(), rs_bits.end());
-                        rs_first_valid = true;
-                    }
-                    history.snapshot_into(rs_hist);
-                    hs.snapshot_into(rs_hs);   // keeps the capacity
-                }
-                const bool cycle_1 = mask_cycle;
-                constexpr Real c = (Real{1} - kGamma) / kGamma;
-                history.extrapolate_previous(x, c);
-                hs.extrapolate_previous(x, c);
-                accumulate_b_extra(t_from + h, dt_eq, true);
-                run_event_iteration(t_from + h, dt_eq, true);
-                const Size iters_2 = iters;
-                // A diode stage 1 conducts and stage 2 turns off, with no
-                // diode turning on: the overshoot mechanism (`on_to_off`
-                // also covers the undo below). A
-                // turn-on in stage 2 (e.g. round-off at a zero start,
-                // buck CCM at t = 0) keeps the SDIRK stage, unless it
-                // undoes stage 1's turn-off of a diode that conducted at
-                // the interval start: R(z) < 0 for z < -1/(1-2γ) flips the
-                // sign of a stiff residual (a transformer cut by its
-                // switch, g_off) and the flip forward-biases the diode
-                // again. Kept, the flyback trapped 0.04-0.12 A in its
-                // secondary at every switch-off (exact error 0.11, not
-                // converging with dt).
-                bool on_to_off = false;
-                if (has_diodes && iters_2 > 1) {
-                    diodes.snapshot_on_bits_into(rs_bits2);
-                    for (Size q = 0; q < rs_bits.size(); ++q) {
-                        if (!rs_bits[q] && rs_bits2[q] && !rs_bits0[q]) {
-                            on_to_off = false;
-                            break;
-                        }
-                        on_to_off = on_to_off || (rs_bits[q] != rs_bits2[q]);
-                    }
-                }
-                if (on_to_off) {
-                    // Stage 2 changed the mode. Re-take it as backward
-                    // Euler from x1 under stage 1's bits; if that keeps
-                    // stage 1's mode, the change was SDIRK's own overshoot
-                    // (R(z) < 0 for h ≫ τ) and the backward-Euler step is
-                    // kept. If backward Euler changes the mode too, the
-                    // event is real and the SDIRK stage 2 stands: its
-                    // x0* is accurate when the slopes are continuous
-                    // (DCM turn-off: −2.4e-4 V at T/50 with backward
-                    // Euler kept, +2.9e-5 V without).
-                    ++result.stage2_retries;
-                    rs_x2 = x;
-                    const bool flipped_2 = flipped;
-                    const bool cycle_2 = mask_cycle;
-                    const auto stamped_2 = stamped_mask;
-                    rs_solved2 = last_solved_bits;
-                    auto histories_at_x0 = [&] {
-                        history.restore(rs_hist);
-                        hs.restore(rs_hs);
-                    };
-                    x = rs_x1;
-                    diodes.restore_on_bits(rs_bits);
-                    histories_at_x0();
-                    mask_cycle = cycle_1;
-                    const Real h_b = h - h_s;
-                    // A re-try that fails (Newton, a singular factor at
-                    // the new dt) falls back to the SDIRK stage 2, which
-                    // had already succeeded.
-                    bool keep_be = false;
-                    try {
-                        commit_backward_euler(h_s);      // stage 1, as taken
-                        accumulate_b_extra(t_from + h, Real{2} * h_b, true);
-                        run_event_iteration(t_from + h, Real{2} * h_b, true);
-                        diodes.snapshot_on_bits_into(rs_bits_be);
-                        keep_be = rs_bits_be == rs_bits;
-                    } catch (const pwl::NewtonRoundoffBudgetExceeded&) {
-                        throw;   // a run budget: never swallowed by a retry
-                    } catch (const std::runtime_error&) {
-                        ++result.stage2_retry_failures;
-                    }
-                    if (keep_be) {
-                        ++result.stage2_be_kept;
-                        if (L) L->be_kept = true;
-                        be_commit_h = h_b;
-                    } else {
-                        // Back to the SDIRK stage 2, bit for bit: the
-                        // histories at x0*, recomputed from x0 and x1.
-                        histories_at_x0();
-                        x = rs_x1;
-                        history.extrapolate_previous(x, c);
-                        hs.extrapolate_previous(x, c);
-                        x = rs_x2;
-                        diodes.restore_on_bits(rs_bits2);
-                        stamped_mask = stamped_2;
-                        last_solved_bits = rs_solved2;
-                        iters = iters_2;
-                        flipped = flipped_2;
-                        mask_cycle = cycle_2;
-                    }
-                    if (keep_be) iters += iters_2 - 1;
-                }
-                // A diode flip inside the step is a discontinuity of its
-                // own: the window covers this step and the next two.
-                if (iters_1 > 1 || iters_2 > 1) {
-                    restart_left = std::max(restart_left, kRestartSteps - 1);
-                }
-                iters += iters_1 - 1;
-                flipped = flipped || breach_1;
-            };
-            // run_restart, and the step's line for it (StepLines): at the
-            // step start, its right limit; inside the step, the event's left
-            // limit (the sub-step that ended at a) and its right limit. The
-            // start of the line is 2·w1·X1 + (1 − 2·w1)·X2, w1 the stage-1
-            // weight (SDIRK 1 − γ; the backward-Euler re-take γ). A stage 2
-            // in another mode than stage 1 (F-4-4) is the same quadrature as
-            // two held pieces, each a solved state in its own mode: X1 over
-            // w1·h, then X2 (an extra row at a + w1·h, not an event).
-            // ev: the (sub)step starts at an event (a trigger at the step
-            // start, a scheduled or located split event): its right limit is
-            // recorded (F-SB-1); a window step's only after a probed jump.
-            auto restart_lined = [&](Real a, Real h, Real loc, bool ev) {
-                const bool inner = a != t_prev_step;
-                StepLines& lines = *L;   // restart steps exist under the rule only
-                if (lines.owner != t_step) {   // the step's first: no per-step reset
-                    lines.clear();
-                    lines.ok = true;
-                    lines.owner = t_step;
-                }
-                const Size j = lines.n;
-                // F-4-4: the capacitor currents at the line points, for an
-                // in-loop recorder only (StepLines::c_*)
-                const auto& es = history.entries();
-                const bool caps = hook_step && !es.empty();
-                auto v_cap = [](const Vector& xv, const pwl::HistoryEntry& e) {
-                    return stamping::read_node_voltage(xv, e.from) -
-                           stamping::read_node_voltage(xv, e.to);
-                };
-                if (inner) {
-                    if (j < StepLines::kMax) {
-                        lines.t[j] = a;
-                        lines.left[j] = x;
-                        lines.m_left[j] = stamped_mask;
-                        lines.right_ok[j] = false;
-                        lines.n = j + 1;
-                        if (caps) {   // the sub-step that ended at a, committed
-                            lines.c_left[j].resize(es.size());
-                            for (Size k = 0; k < es.size(); ++k) {
-                                lines.c_left[j][k] = lines.end_own ? lines.c_end[k] : es[k].i_prev;
-                            }
-                        }
-                    } else {
-                        lines.ok = false;
-                    }
-                }
-                if (caps) {
-                    lines.v0.resize(es.size());
-                    for (Size k = 0; k < es.size(); ++k) lines.v0[k] = es[k].v_prev;
-                }
-                lines.m_a = stamped_mask;   // the mode the (sub)step starts in
-                lines.end_own = false;
-                run_restart(a, h, loc, ev);
-                if (inner && j >= StepLines::kMax) return;
-                if (inner) {   // the event's right limit (state value)
-                    lines.held[j] = false;
-                    lines.rl_right_ok[j] = lines.rl_ok;
-                    if (lines.rl_ok) {
-                        if (lines.rl_left) {   // a continuity point: the left
-                            lines.rl_right[j] = lines.left[j];
-                        } else {
-                            std::swap(lines.rl_right[j], lines.rl_x);
-                        }
-                        lines.rl_m_right[j] = lines.rl_m;
-                    }
-                } else {
-                    lines.rl_start_ok = lines.rl_ok;
-                    lines.rl_start_left = lines.rl_left;
-                    if (lines.rl_ok) {
-                        std::swap(lines.rl_start, lines.rl_x);
-                        lines.rl_m_start = lines.rl_m;
-                    }
-                }
-                // shortcut: after a kept backward-Euler stage 2 (w1 = γ) the
-                // start lies between the stages: the quadrature's value, not
-                // a state value (the result's right limit is rl_*, F-SB-1)
-                const Real w1 = lines.be_kept ? kGamma : Real{1} - kGamma;
-                const bool mixed = !(lines.m1 == stamped_mask);
-                const Real t_m = a + w1 * h;
-                // held pieces only when no device's stage-1 state is neither
-                // side's (off -> on -> off would read as an on/off pair the
-                // loss tracker never books)
-                bool one_way = mixed;
-                for (Size bit = 0; one_way && bit < lines.m1.size(); ++bit) {
-                    const bool s1 = lines.m1.get(bit);
-                    one_way = s1 == lines.m_a.get(bit) || s1 == stamped_mask.get(bit);
-                }
-                if (mixed && (!one_way || lines.n >= StepLines::kMax ||
-                              !(t_m > a && t_m < a + h))) {
-                    // shortcut: after an ideal element's jump (ln_pre) these
-                    // ends read the run's i_prev, which folds the jump in
-                    // (needs a mixed stage 2 too); upgrade with F-W-1's
-                    // lines-only stage 2
-                    return;   // the step's ends
-                }
-                Vector& dst = inner ? lines.right[j] : lines.x_start;
-                if (mixed) {
-                    dst = lines.x1;
-                } else {
-                    dst = (Real{2} * w1) * lines.x1 + (Real{1} - Real{2} * w1) * x;
-                }
-                const auto& m_dst = mixed ? lines.m1 : stamped_mask;
-                if (inner) {
-                    lines.m_right[j] = m_dst;
-                    lines.right_ok[j] = true;
-                } else {
-                    lines.m_start = m_dst;
-                    lines.start = true;
-                }
-                const Size q = lines.n;   // the held pieces' row
-                if (mixed) {
-                    lines.t[q] = t_m;
-                    lines.left[q] = lines.x1;
-                    lines.m_left[q] = lines.m1;
-                    lines.right[q] = x;
-                    lines.m_right[q] = stamped_mask;
-                    lines.right_ok[q] = true;
-                    lines.held[q] = true;   // quadrature only: no inner event
-                    lines.n = q + 1;
-                }
-                if (caps) {
-                    // the stage currents as the solves enforced them: stage 1
-                    // backward Euler of γh from v0, stage 2 the commit's
-                    // (x2 − x0*)/(γh), or (x2 − x1)/h_b after a kept BE re-take
-                    // (the histories hold x0* / x1 until the commit)
-                    constexpr Real kC2 = (Real{1} - kGamma) / kGamma;
-                    std::vector<Real>& c = inner ? lines.c_right[j] : lines.c_start;
-                    c.resize(es.size());
-                    if (ln_pre) {   // the (sub)step's end: the lines' stage 2, not i_prev
-                        lines.c_end.resize(es.size());
-                        for (Size k = 0; k < es.size(); ++k) lines.c_end[k] = es[k].i_prev;
-                        lines.end_own = true;
-                    }
-                    if (mixed) {
-                        lines.c_left[q].resize(es.size());
-                        lines.c_right[q].resize(es.size());
-                    }
-                    for (Size k = 0; k < es.size(); ++k) {
-                        const auto& e = es[k];
-                        if (e.kind != pwl::DevicePool::StoredKind::Capacitor) continue;
-                        const models::Capacitor::Params cp{e.C_or_L};
-                        const Real i1 = models::Capacitor::g_eq(Real{2} * (kGamma * h), cp) *
-                                        (v_cap(lines.x1, e) - lines.v0[k]);
-                        // ln_pre: stage 2's start from the lines' stage 1 (x0+*)
-                        const Real vb = !ln_pre ? e.v_prev
-                            : lines.be_kept ? v_cap(lines.x1, e)
-                            : lines.v0[k] + kC2 * (v_cap(lines.x1, e) - lines.v0[k]);
-                        const Real i2 = models::Capacitor::g_eq(Real{2} * be_commit_h, cp) *
-                                        (v_cap(x, e) - vb);
-                        if (ln_pre) lines.c_end[k] = i2;
-                        if (mixed) {
-                            c[k] = lines.c_left[q][k] = i1;
-                            lines.c_right[q][k] = i2;
-                        } else {
-                            c[k] = (Real{2} * w1) * i1 + (Real{1} - Real{2} * w1) * i2;
-                        }
-                    }
-                }
-            };
-
-            // ---- add-fixed-step-event-splitting (design D1, D3, D4) ----
-            // The step as sub-intervals between the located events: the
-            // first one trapezoidal (or an SDIRK step when the step
-            // restarts), every later one an SDIRK step from its event. A
-            // diode crossing inside the first, trapezoidal interval is
-            // located from its first solve (pre-event bits) and split at
-            // too. Intermediate commits are inline; the last is the
-            // caller's (deferred past the freeze guard). Any split arms
-            // the window for the next two grid steps explicitly: their
-            // masks equal the post-event one, so no trigger would.
-            auto commit_trap = [&](Real h) {
-                history.update_from_state(x, h);
-                hs.commit(x, h, pwl::TrBdf2Stage::Trapezoidal);
-            };
-            auto split_step = [&]() {
-                split_events.clear();
-                bool any_split = false;
-                bool breach = false;
-                Real a = t_prev;
-                for (Size i = 0; i <= n_ev; ++i) {
-                    const bool last = i == n_ev;
-                    const Real b = last ? t : ev_t[i];
-                    // The whole step keeps opts.dt exactly (t - t_prev
-                    // is not, in floating point): the nominal factor.
-                    Real h = (i == 0 && last) ? opts.dt : b - a;
-                    bool be = i == 0 ? restart : true;
-                    if (i > 0) {
-                        gate_t = ev_s[i - 1];   // post side of the cluster's last edge
-                        any_split = true;
-                    }
-                    if (be) {
-                        // a scheduled event (merged within snap) or the step's
-                        // trigger: time events; a window step: not located
-                        restart_lined(a, h,
-                                    i > 0 ? ev_s[i - 1] - ev_t[i - 1]
-                                    : rs_trig_t == t_prev ? rs_trig_loc
-                                                          : kGamma * h,
-                                    i > 0 || (rs_trig_t == t_prev && rs_trig_ev));
-                    } else {
-                        if (i > 0 || h != opts.dt) {
-                            accumulate_b_extra(b, h);
-                        }   // else: accumulated at (t, dt) above
-                        capture_first = has_diodes;
-                        run_event_iteration(b, h);
-                        capture_first = false;
-                        if (iters > 1) {
-                            // D1: the crossing from x_prev and the first
-                            // solve, both under the step's start bits
-                            // (only interval 0 is trapezoidal: a == t_prev).
-                            Real t_d = b;
-                            const auto ents = diodes.entries();
-                            cross_scratch.assign(ents.size(), b + h);
-                            for (Size j = 0; j < ents.size(); ++j) {
-                                const auto& e = ents[j];
-                                const bool on = diodes_snap[j];
-                                const Real v1 = e.law_voltage(x_first, on);
-                                if (models::SwitchedDiode::decide(
-                                        on, v1, e.params()) == on) {
-                                    continue;
-                                }
-                                const Real v0 = e.law_voltage(x_prev, on);
-                                // Already on the far side at the start:
-                                // the crossing is at a (the rule alone).
-                                cross_scratch[j] =
-                                    models::SwitchedDiode::decide(
-                                        on, v0, e.params()) != on
-                                    ? a
-                                    : interp_commutation_time(
-                                          a, b,
-                                          models::SwitchedDiode::crossing_signal(
-                                              on, v0, e.params()),
-                                          models::SwitchedDiode::crossing_signal(
-                                              on, v1, e.params()));
-                                t_d = std::min(t_d, cross_scratch[j]);
-                            }
-                            // F-3-1: the event is the commutation of the
-                            // DECIDED post-event mode (the event iteration's
-                            // final bits). Diodes it flips that touch the same
-                            // FLOATING island — a node set joined by every
-                            // branch but the OFF diodes, with no path to
-                            // ground — share one signal, the sum of theirs:
-                            // the island's common-mode potential is set by the
-                            // OFF diodes' leakage alone, so each one's voltage
-                            // is a leakage ratio (one ulp of C moved the first
-                            // single crossing of a floating bridge by 1e-7 s)
-                            // while the sum around the conducting path is the
-                            // circuit's. Every other diode keeps its own
-                            // crossing.
-                            locate_islands(run_event_iteration, a, b, h, t_d);
-                            // Back to the step start, then: the crossing
-                            // at a (an SDIRK step, as the rule alone), at
-                            // b (keep the pre-event solve, flip there) or
-                            // inside (split).
-                            x = x_prev;
-                            history.restore(history_snap);
-                            hs.restore(hs_snap);
-                            diodes.restore_on_bits(diodes_snap);
-                            mask_cycle = false;
-                            // Post-event bits: the diodes that cross
-                            // within snap of the first one flip.
-                            post_event_bits = diodes_snap;
-                            for (Size j = 0; j < ents.size(); ++j) {
-                                if (cross_scratch[j] <= b &&
-                                    cross_scratch[j] - t_d < snap) {
-                                    post_event_bits[j] = !diodes_snap[j];
-                                    split_events.push_back(CommutationEvent{
-                                        .t_estimated = cross_scratch[j],
-                                        .branch_id = ents[j].branch_id,
-                                        .new_state = post_event_bits[j]});
-                                }
-                            }
-                            // F-SB-1: a located crossing, for its right limit
-                            // (not one that lands on a scheduled event: !last).
-                            // A continuity point when only V_f = 0 diodes flip
-                            // (their ON and OFF laws meet at i = 0, v = 0) and
-                            // no trigger coincides: within snap of a, only at
-                            // the step start without a trigger there; at b,
-                            // checked by the next step (event_right_limit)
-                            {
-                                auto& lc = rl_loc;
-                                lc.vf0 = true;
-                                lc.off = false;
-                                for (Size j = 0; j < ents.size(); ++j) {
-                                    // a turn-on at v_D = V_th > 0 jumps by
-                                    // (g_on − g_off)·V_th: not a meeting point
-                                    if (post_event_bits[j] != diodes_snap[j] && !post_event_bits[j]) {
-                                        lc.off = true;
-                                    }
-                                    // a gated latching device (H2/H3): its turn-off at
-                                    // I_H and a gate-fired turn-on are no meeting point
-                                    if (post_event_bits[j] != diodes_snap[j] &&
-                                        (ents[j].V_f != Real{0} ||
-                                         ents[j].gate != models::SwitchedDiode::Gate::None ||
-                                         (post_event_bits[j] && ents[j].V_th != Real{0}))) {
-                                        lc.vf0 = false;
-                                    }
-                                }
-                                lc.bits = post_event_bits;
-                                lc.at_b = t_d - a >= snap && b - t_d < snap;
-                                lc.t = t_d - a < snap ? a
-                                       : !lc.at_b ? t_d
-                                       : last ? b
-                                              : std::numeric_limits<Real>::quiet_NaN();
-                                lc.pure = lc.vf0 &&
-                                          (t_d - a >= snap ||
-                                           (a == t_prev && !(rs_trig_t == t_prev && rs_trig_ev)));
-                            }
-                            if (t_d - a < snap) {
-                                split_events.clear();
-                                restart = true;
-                                be = true;
-                                restart_left = std::max(restart_left,
-                                                        kRestartSteps - 1);
-                                restart_lined(a, h, snap, true);   // crossing within snap of a
-                            } else if (b - t_d < snap) {
-                                x = x_first;
-                                stamped_mask = mask_first;
-                                stamped_known = true;
-                                diodes.restore_on_bits(post_event_bits);
-                                iters = 1;
-                                flipped = false;
-                                // The flip is at b: the window starts at
-                                // the next interval (this step's, or the
-                                // next grid step when b = t).
-                                restart_left = std::max(
-                                    restart_left,
-                                    last ? kRestartSteps : kRestartSteps - 1);
-                            } else {
-                                const Real h1 = t_d - a;
-                                accumulate_b_extra(t_d, h1);
-                                run_event_iteration(t_d, h1, false, true);
-                                commit_trap(h1);
-                                diodes.restore_on_bits(post_event_bits);
-                                h = b - t_d;
-                                restart_lined(t_d, h, snap, true);   // located to snap
-                                be = true;
-                                any_split = true;
-                            }
-                        }
-                    }
-                    breach = breach || flipped;
-                    if (!last) {
-                        if (be) {
-                            commit_backward_euler(be_commit_h);
-                        } else {
-                            commit_trap(h);
-                        }
-                    } else {
-                        committed_dt = h;
-                        committed_be = be;
-                    }
-                    a = b;
-                }
-                if (any_split) {
-                    ++result.n_split_steps;
-                    // The event's step and the next two (the rule's window).
-                    restart_left = std::max(restart_left, kRestartSteps - 1);
-                }
-                flipped = breach || ev_overflow;
-            };
             // (A split step accumulates per sub-interval: no discarded
             // b_extra_fn call at (t, dt).)
             if (!restart && n_ev == 0) {
@@ -4390,6 +4192,206 @@ inline SimulationResult run_transient(
             }
             try {
                 if (split) {
+                    // ---- add-fixed-step-event-splitting (design D1, D3, D4) ----
+                    // The step as sub-intervals between the located events: the
+                    // first one trapezoidal (or an SDIRK step when the step
+                    // restarts), every later one an SDIRK step from its event. A
+                    // diode crossing inside the first, trapezoidal interval is
+                    // located from its first solve (pre-event bits) and split at
+                    // too. Intermediate commits are inline; the last is the
+                    // caller's (deferred past the freeze guard). Any split arms
+                    // the window for the next two grid steps explicitly: their
+                    // masks equal the post-event one, so no trigger would.
+                    auto commit_trap = [&](Real h) {
+                        history.update_from_state(x, h);
+                        hs.commit(x, h, pwl::TrBdf2Stage::Trapezoidal);
+                    };
+                    auto split_step = [&]() {
+                        split_events.clear();
+                        bool any_split = false;
+                        bool breach = false;
+                        Real a = t_prev;
+                        for (Size i = 0; i <= n_ev; ++i) {
+                            const bool last = i == n_ev;
+                            const Real b = last ? t : ev_t[i];
+                            // The whole step keeps opts.dt exactly (t - t_prev
+                            // is not, in floating point): the nominal factor.
+                            Real h = (i == 0 && last) ? opts.dt : b - a;
+                            bool be = i == 0 ? restart : true;
+                            if (i > 0) {
+                                gate_t = ev_s[i - 1];   // post side of the cluster's last edge
+                                any_split = true;
+                            }
+                            if (be) {
+                                // a scheduled event (merged within snap) or the step's
+                                // trigger: time events; a window step: not located
+                                restart_lined(run_event_iteration, a, h,
+                                            i > 0 ? ev_s[i - 1] - ev_t[i - 1]
+                                            : rs_trig_t == t_prev ? rs_trig_loc
+                                                                  : kGamma * h,
+                                            i > 0 || (rs_trig_t == t_prev && rs_trig_ev));
+                            } else {
+                                if (i > 0 || h != opts.dt) {
+                                    accumulate_b_extra(b, h);
+                                }   // else: accumulated at (t, dt) above
+                                capture_first = has_diodes;
+                                run_event_iteration(b, h);
+                                capture_first = false;
+                                if (iters > 1) {
+                                    // D1: the crossing from x_prev and the first
+                                    // solve, both under the step's start bits
+                                    // (only interval 0 is trapezoidal: a == t_prev).
+                                    Real t_d = b;
+                                    const auto ents = diodes.entries();
+                                    cross_scratch.assign(ents.size(), b + h);
+                                    for (Size j = 0; j < ents.size(); ++j) {
+                                        const auto& e = ents[j];
+                                        const bool on = diodes_snap[j];
+                                        const Real v1 = e.law_voltage(x_first, on);
+                                        if (models::SwitchedDiode::decide(
+                                                on, v1, e.params()) == on) {
+                                            continue;
+                                        }
+                                        const Real v0 = e.law_voltage(x_prev, on);
+                                        // Already on the far side at the start:
+                                        // the crossing is at a (the rule alone).
+                                        cross_scratch[j] =
+                                            models::SwitchedDiode::decide(
+                                                on, v0, e.params()) != on
+                                            ? a
+                                            : interp_commutation_time(
+                                                  a, b,
+                                                  models::SwitchedDiode::crossing_signal(
+                                                      on, v0, e.params()),
+                                                  models::SwitchedDiode::crossing_signal(
+                                                      on, v1, e.params()));
+                                        t_d = std::min(t_d, cross_scratch[j]);
+                                    }
+                                    // F-3-1: the event is the commutation of the
+                                    // DECIDED post-event mode (the event iteration's
+                                    // final bits). Diodes it flips that touch the same
+                                    // FLOATING island — a node set joined by every
+                                    // branch but the OFF diodes, with no path to
+                                    // ground — share one signal, the sum of theirs:
+                                    // the island's common-mode potential is set by the
+                                    // OFF diodes' leakage alone, so each one's voltage
+                                    // is a leakage ratio (one ulp of C moved the first
+                                    // single crossing of a floating bridge by 1e-7 s)
+                                    // while the sum around the conducting path is the
+                                    // circuit's. Every other diode keeps its own
+                                    // crossing.
+                                    locate_islands(run_event_iteration, a, b, h, t_d);
+                                    // Back to the step start, then: the crossing
+                                    // at a (an SDIRK step, as the rule alone), at
+                                    // b (keep the pre-event solve, flip there) or
+                                    // inside (split).
+                                    x = x_prev;
+                                    history.restore(history_snap);
+                                    hs.restore(hs_snap);
+                                    diodes.restore_on_bits(diodes_snap);
+                                    mask_cycle = false;
+                                    // Post-event bits: the diodes that cross
+                                    // within snap of the first one flip.
+                                    post_event_bits = diodes_snap;
+                                    for (Size j = 0; j < ents.size(); ++j) {
+                                        if (cross_scratch[j] <= b &&
+                                            cross_scratch[j] - t_d < snap) {
+                                            post_event_bits[j] = !diodes_snap[j];
+                                            split_events.push_back(CommutationEvent{
+                                                .t_estimated = cross_scratch[j],
+                                                .branch_id = ents[j].branch_id,
+                                                .new_state = post_event_bits[j]});
+                                        }
+                                    }
+                                    // F-SB-1: a located crossing, for its right limit
+                                    // (not one that lands on a scheduled event: !last).
+                                    // A continuity point when only V_f = 0 diodes flip
+                                    // (their ON and OFF laws meet at i = 0, v = 0) and
+                                    // no trigger coincides: within snap of a, only at
+                                    // the step start without a trigger there; at b,
+                                    // checked by the next step (event_right_limit)
+                                    {
+                                        auto& lc = rl_loc;
+                                        lc.vf0 = true;
+                                        lc.off = false;
+                                        for (Size j = 0; j < ents.size(); ++j) {
+                                            // a turn-on at v_D = V_th > 0 jumps by
+                                            // (g_on − g_off)·V_th: not a meeting point
+                                            if (post_event_bits[j] != diodes_snap[j] && !post_event_bits[j]) {
+                                                lc.off = true;
+                                            }
+                                            // a gated latching device (H2/H3): its turn-off at
+                                            // I_H and a gate-fired turn-on are no meeting point
+                                            if (post_event_bits[j] != diodes_snap[j] &&
+                                                (ents[j].V_f != Real{0} ||
+                                                 ents[j].gate != models::SwitchedDiode::Gate::None ||
+                                                 (post_event_bits[j] && ents[j].V_th != Real{0}))) {
+                                                lc.vf0 = false;
+                                            }
+                                        }
+                                        lc.bits = post_event_bits;
+                                        lc.at_b = t_d - a >= snap && b - t_d < snap;
+                                        lc.t = t_d - a < snap ? a
+                                               : !lc.at_b ? t_d
+                                               : last ? b
+                                                      : std::numeric_limits<Real>::quiet_NaN();
+                                        lc.pure = lc.vf0 &&
+                                                  (t_d - a >= snap ||
+                                                   (a == t_prev && !(rs_trig_t == t_prev && rs_trig_ev)));
+                                    }
+                                    if (t_d - a < snap) {
+                                        split_events.clear();
+                                        restart = true;
+                                        be = true;
+                                        restart_left = std::max(restart_left,
+                                                                kRestartSteps - 1);
+                                        restart_lined(run_event_iteration, a, h, snap, true);   // crossing within snap of a
+                                    } else if (b - t_d < snap) {
+                                        x = x_first;
+                                        stamped_mask = mask_first;
+                                        stamped_known = true;
+                                        diodes.restore_on_bits(post_event_bits);
+                                        iters = 1;
+                                        flipped = false;
+                                        // The flip is at b: the window starts at
+                                        // the next interval (this step's, or the
+                                        // next grid step when b = t).
+                                        restart_left = std::max(
+                                            restart_left,
+                                            last ? kRestartSteps : kRestartSteps - 1);
+                                    } else {
+                                        const Real h1 = t_d - a;
+                                        accumulate_b_extra(t_d, h1);
+                                        run_event_iteration(t_d, h1, false, true);
+                                        commit_trap(h1);
+                                        diodes.restore_on_bits(post_event_bits);
+                                        h = b - t_d;
+                                        restart_lined(run_event_iteration, t_d, h, snap, true);   // located to snap
+                                        be = true;
+                                        any_split = true;
+                                    }
+                                }
+                            }
+                            breach = breach || flipped;
+                            if (!last) {
+                                if (be) {
+                                    commit_backward_euler(be_commit_h);
+                                } else {
+                                    commit_trap(h);
+                                }
+                            } else {
+                                committed_dt = h;
+                                committed_be = be;
+                            }
+                            a = b;
+                        }
+                        if (any_split) {
+                            ++result.n_split_steps;
+                            // The event's step and the next two (the rule's window).
+                            restart_left = std::max(restart_left, kRestartSteps - 1);
+                        }
+                        flipped = breach || ev_overflow;
+                    };
                     split_step();
                 } else {
                 if (!restart) {
@@ -4411,7 +4413,7 @@ inline SimulationResult run_transient(
                     }
                 }
                 if (restart) {
-                    restart_lined(t_prev, opts.dt,
+                    restart_lined(run_event_iteration, t_prev, opts.dt,
                                 rs_trig_t == t_prev ? rs_trig_loc : kGamma * opts.dt,
                                 rs_trig_t == t_prev && rs_trig_ev);
                     committed_be = true;
@@ -4494,7 +4496,7 @@ inline SimulationResult run_transient(
                         }
                         try {
                             if (sub_restart) {
-                                run_restart(t_sub - sub_dt, sub_dt,
+                                run_restart(run_event_iteration, t_sub - sub_dt, sub_dt,
                                             j == 0 && rs_trig_t == t_prev
                                                 ? std::min(rs_trig_loc, kGamma * sub_dt)
                                                 : kGamma * sub_dt,

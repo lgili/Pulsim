@@ -123,10 +123,13 @@ def test_in_loop_recorders_match_the_stored_pass_on_the_same_run(name):
     """Kept rows and event rows against the stored-array pass over the same
     run's stored samples (store_every=1: every accepted step is stored), at
     1e-12. Window and period statistics are the stored pass's line only where
-    the loop had no closed form (time-varying sources: pulse_corners,
-    rectifier, bridge). Where every piece is closed (F-B2-1) the integrals
-    (avg, rms) are the trajectory's, checked against a run on a finer grid
-    (dt = 1e-7) instead; min / max are still the samples', but a window or period
+    the loop had no closed form (none here: since the time-varying sources'
+    closed forms, pulse_corners, rectifier and bridge are closed too). Where
+    every piece is closed (F-B2-1) the integrals (avg, rms) are the
+    trajectory's, checked against a run on a finer grid (dt = 1e-7, or
+    t_end / 2e4 on the 40 ms runs: at dt = 1e-7 the bridge's 3.5e7 pieces
+    add up 1.4e-10 of rounding, its bus average 1.9e-12 off the mpmath truth
+    against 6.6e-14 on the default grid) instead; min / max are still the samples', but a window or period
     edge inside a step takes the closed form's value there, not the chord's
     (measured <= 4.4e-11 of the scale here, so 1e-9)."""
     make, t_end, rec = CASES[name]
@@ -136,12 +139,14 @@ def test_in_loop_recorders_match_the_stored_pass_on_the_same_run(name):
     cf = res.recorder_feed["closed_form"]
     assert cf["n_closed"] == 0 or cf["n_line"] == 0, cf
     closed = cf["n_closed"] > 0
-    other = (_run(make, t_end, rec(t_end), dt=1e-7).recorded["r"] if closed
+    other = (_run(make, t_end, rec(t_end), dt=max(1e-7, t_end / 2e4)).recorded["r"] if closed
              else record_result(res, recs)["r"])
     mm = 1e-9 if closed else 1e-11
     # the closed forms' rounding adds up over the fine grid's pieces: worst
-    # v(vout)*i(L)'s rms on buck_dcm, 1.7e-11 at dt = 1e-7 (3021 steps)
-    ia = 1e-10 if closed else 1e-11
+    # v(vout)*i(L)'s rms on buck_dcm, 1.7e-11 at dt = 1e-7 (3021 steps) on macOS;
+    # the bridge's 2e4 pieces read 1.46e-10 on the Windows runners (another C
+    # runtime). 1e-9 still tells a closed form from a chord (1e-5 and worse)
+    ia = 1e-9 if closed else 1e-11
     loop = res.recorded["r"]
     stored = record_result(res, recs)["r"]
     _same(loop.times, stored.times)

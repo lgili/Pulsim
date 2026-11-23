@@ -33,8 +33,8 @@
 - [x] 6.3 `solver/options.hpp` comments on `tol_newton_dx`: add the roundoff bound and this acceptance
 
 ## 7. Verification
-- [ ] 7.1 `ruff check`, `pytest` (throttled), `ctest`, stub check
-- [ ] 7.2 `openspec validate add-newton-roundoff-acceptance --strict` and `openspec validate --all --strict`
+- [x] 7.1 `ruff check`, `pytest` (throttled), `ctest`, stub check — CLOSED: seen on the PR head a90d84b8 (2026-11-22): ruff clean, ctest 1091/1091 (Eigen 5; 17 targets on Eigen 3.4.0), pytest 7079 passed with the one failure re-pinned and its files re-run, `openspec validate --all --strict` 79 passed, stubs `--check` up to date
+- [x] 7.2 `openspec validate add-newton-roundoff-acceptance --strict` and `openspec validate --all --strict` — CLOSED: seen on the PR head a90d84b8 (2026-11-22): ruff clean, ctest 1091/1091 (Eigen 5; 17 targets on Eigen 3.4.0), pytest 7079 passed with the one failure re-pinned and its files re-run, `openspec validate --all --strict` 79 passed, stubs `--check` up to date
 
 ## 8. Follow-up: honest acceptance (DECISIONS.md 10)
 - [x] 8.1 Scale and dx cap from the call's start state and sources

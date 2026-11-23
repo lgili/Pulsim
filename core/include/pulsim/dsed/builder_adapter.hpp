@@ -458,12 +458,196 @@ public:
         return c;
     }
 
+    // ----- the inputs as an exosystem (recorders' closed forms) ---------
+    // fixes/exact-buck-integrals.md, "Time-varying sources". Within a step
+    // every source this adapter propagates exactly is the state of an
+    // autonomous u' = S·u: per distinct sine frequency ω (the engine's
+    // oscillator pair) u = (sin ωt, cos ωt); per piecewise-linear source its
+    // level v (PWM, pulse, table) and, under `ramp`, its slope σ (v' = σ,
+    // σ' = 0: degree 1, the level + ramp the engine steps with). Then
+    // ẋ = A·x + Bx·u + b_dc and x_full = Rx·x + Ru·u + rc: no quadrature.
+
+    /// A user b_extra_fn: a source with no closed form.
+    [[nodiscard]] bool has_user_source_fn() const noexcept {
+        return static_cast<bool>(b_extra_fn_);
+    }
+    /// The exosystem's size under `ramp`.
+    [[nodiscard]] Index exo_size(bool ramp) const {
+        Index ramps = 0;
+        for (const auto& ps : pwl_sources_) ramps += ramp && ps.kind != PwlSource::PwmV ? 1 : 0;
+        return 2 * static_cast<Index>(sine_inputs_().omegas.size())
+               + static_cast<Index>(pwl_sources_.size()) + ramps;
+    }
+    /// u at t (a step from t: the levels and slopes just after t, as
+    /// exact_advance_state_into reads them); `ramp` is set when some slope
+    /// is not 0 and then u holds the slopes too.
+    void exo_state(Real t, Vector& u, bool& ramp) const {
+        const auto& si = sine_inputs_();
+        const auto k = static_cast<Index>(si.omegas.size());
+        const auto m = static_cast<Index>(pwl_sources_.size());
+        ramp = false;
+        Vector v(m), s(m);
+        for (Index j = 0; j < m; ++j) {
+            const auto [vj, sj] = pwl_value_slope_(pwl_sources_[static_cast<Size>(j)], t);
+            v[j] = vj;
+            s[j] = sj;
+            ramp = ramp || sj != Real{0};
+        }
+        u.resize(exo_size(ramp));
+        for (Index j = 0; j < k; ++j) {
+            const Real w = si.omegas[static_cast<Size>(j)];
+            u[2 * j] = std::sin(w * t);
+            u[2 * j + 1] = std::cos(w * t);
+        }
+        u.segment(2 * k, m) = v;
+        Index r = 2 * k + m;
+        for (Index j = 0; j < m && ramp; ++j) {
+            if (pwl_sources_[static_cast<Size>(j)].kind != PwlSource::PwmV) u[r++] = s[j];
+        }
+    }
+    /// u at the end t1 = t0 + L of a step that started from u0 (exo_state at
+    /// t0): the oscillators at t1, the levels v + σ·L (a corner's left
+    /// limit), the slopes kept.
+    void exo_advance(Real t1, Real L, bool ramp, const Vector& u0, Vector& u1) const {
+        const auto& si = sine_inputs_();
+        const auto k = static_cast<Index>(si.omegas.size());
+        const auto m = static_cast<Index>(pwl_sources_.size());
+        u1 = u0;
+        for (Index j = 0; j < k; ++j) {
+            const Real w = si.omegas[static_cast<Size>(j)];
+            u1[2 * j] = std::sin(w * t1);
+            u1[2 * j + 1] = std::cos(w * t1);
+        }
+        Index r = 2 * k + m;
+        for (Index j = 0; j < m && ramp; ++j) {
+            if (pwl_sources_[static_cast<Size>(j)].kind != PwlSource::PwmV) {
+                u1[2 * k + j] += u0[r++] * L;
+            }
+        }
+    }
+    /// The current mask's coupling: S (q×q), Bx (n×q), b_dc (n), Ru
+    /// (n_mna×q), rc (n_mna).
+    struct ExoInputs {
+        DenseMatrix S, Bx, Ru;
+        Vector b_dc, rc;
+    };
+    [[nodiscard]] ExoInputs exo_inputs(bool ramp) const {
+        ensure_current_resolved_();
+        const LTIEntry& e = *current_entry_;
+        const auto& si = sine_inputs_();
+        const auto k = static_cast<Index>(si.omegas.size());
+        const auto m = static_cast<Index>(pwl_sources_.size());
+        const Index q = exo_size(ramp);
+        DenseMatrix G = DenseMatrix::Zero(e.b_projection.cols(), q);   // u -> b_extra
+        DenseMatrix S = DenseMatrix::Zero(q, q);
+        for (Index j = 0; j < k; ++j) {
+            G.col(2 * j) = si.g_sin.col(j);
+            G.col(2 * j + 1) = si.g_cos.col(j);
+            S(2 * j, 2 * j + 1) = si.omegas[static_cast<Size>(j)];
+            S(2 * j + 1, 2 * j) = -si.omegas[static_cast<Size>(j)];
+        }
+        Index r = 2 * k + m;
+        for (Index j = 0; j < m; ++j) {
+            G.col(2 * k + j) = pwl_stamp_(pwl_sources_[static_cast<Size>(j)]);
+            if (ramp && pwl_sources_[static_cast<Size>(j)].kind != PwlSource::PwmV) {
+                S(2 * k + j, r++) = Real{1};
+            }
+        }
+        ExoInputs out;
+        out.S = std::move(S);
+        out.Bx = e.b_projection * G;
+        out.Ru = e.recover_from_b * G;
+        out.b_dc = e.b_constant + e.b_projection * si.dc;
+        out.rc = e.recover_const + e.recover_from_b * si.dc;
+        return out;
+    }
+    /// A waveform current source's value over (u, 1) (size q + 1); empty
+    /// when `branch` is none of them.
+    [[nodiscard]] Vector exo_current_row(Index branch, bool ramp) const {
+        using K = pwl::DevicePool::StoredKind;
+        const auto& si = sine_inputs_();
+        const auto k = static_cast<Index>(si.omegas.size());
+        Vector row = Vector::Zero(exo_size(ramp) + 1);
+        if (!pool_.is_registered(branch)) return {};
+        if (pool_.kind_of(branch) == K::SineCurrentSource) {
+            const auto& p = pool_.sine_current_source_params(branch).w;
+            row[row.size() - 1] = p.v_dc;
+            if (p.frequency > Real{0}) {
+                const Real w = Real{2} * std::numbers::pi_v<Real> * p.frequency;
+                for (Index j = 0; j < k; ++j) {
+                    if (si.omegas[static_cast<Size>(j)] != w) continue;
+                    row[2 * j] = p.v_amplitude * std::cos(p.phase);
+                    row[2 * j + 1] = p.v_amplitude * std::sin(p.phase);
+                }
+            }
+            return row;
+        }
+        for (Size j = 0; j < pwl_sources_.size(); ++j) {
+            if (pwl_sources_[j].branch == branch && pwl_sources_[j].src_var == kInvalidIndex) {
+                row[2 * k + static_cast<Index>(j)] = Real{1};
+                return row;
+            }
+        }
+        return {};
+    }
+
     /// Event-scan step of the current mode (exact_scan_step).
     [[nodiscard]] Real exact_scan_step() const {
         ensure_current_resolved_();
         ensure_exact_built_(*current_entry_);
         return pulsim::dsed::exact_scan_step(current_entry_->exact);
     }
+
+    /// The event scan's no-crossing certificate data (F-X-5): the current mode's
+    /// tier-1 propagator and z̈(0) = Λ(Λz + w + V⁻¹c0) + V⁻¹c1 at (t, x), z = V⁻¹x
+    /// (exact_chord_step's modal second derivative; c0 / c1 the piecewise-linear
+    /// sources' level and slope at t). nullptr when the mode has no tier-1 basis or
+    /// sine sources (augmented state: the predicate's own source term is not affine).
+    [[nodiscard]] const ExactLTI* exact_scan_modes(Real t, const Vector& x, Eigen::VectorXcd& z,
+                                                   Eigen::VectorXcd& zdd) const {
+        ensure_current_resolved_();
+        ensure_exact_built_(*current_entry_);
+        const LTIEntry& le = *current_entry_;
+        const ExactLTI& e = le.exact;
+        const auto n = x.size();
+        if (!e.valid || e.tier != 1 || !le.aug_omegas.empty() || e.V_re.rows() != n) return nullptr;
+        e.z_re.noalias() = e.Vinv_re * x;
+        e.z_im.noalias() = e.Vinv_im * x;
+        z.resize(n);
+        zdd.resize(n);
+        for (Index k = 0; k < n; ++k) {
+            z[k] = std::complex<Real>{e.z_re[k], e.z_im[k]};
+            zdd[k] = e.lambda[k] * z[k] + e.w[k];
+        }
+        if (!pwl_sources_.empty()) {
+            const auto m = static_cast<Index>(pwl_sources_.size());
+            Vector& v = scan_v_;
+            Vector& s = scan_s_;
+            v.resize(m);
+            s.resize(m);
+            for (Index j = 0; j < m; ++j) {
+                const auto [vj, sj] = pwl_value_slope_(pwl_sources_[static_cast<Size>(j)], t);
+                v[j] = vj;
+                s[j] = sj;
+            }
+            scan_c0_.noalias() = le.pwl_cols * v;
+            scan_c1_.noalias() = le.pwl_cols * s;
+            const Vector& c0 = scan_c0_;
+            const Vector& c1 = scan_c1_;
+            e.z_re.noalias() = e.Vinv_re * c0;
+            e.z_im.noalias() = e.Vinv_im * c0;
+            for (Index k = 0; k < n; ++k) zdd[k] += std::complex<Real>{e.z_re[k], e.z_im[k]};
+            for (Index k = 0; k < n; ++k) zdd[k] *= e.lambda[k];
+            e.z_re.noalias() = e.Vinv_re * c1;
+            e.z_im.noalias() = e.Vinv_im * c1;
+            for (Index k = 0; k < n; ++k) zdd[k] += std::complex<Real>{e.z_re[k], e.z_im[k]};
+            return &e;
+        }
+        for (Index k = 0; k < n; ++k) zdd[k] *= e.lambda[k];
+        return &e;
+    }
+
+    mutable Vector scan_v_, scan_s_, scan_c0_, scan_c1_;   // exact_scan_modes' work
 
     /// Output instants resolving the current mode's fast transient after
     /// an event at t_e (exact_fast_samples).
@@ -645,6 +829,51 @@ public:
             rec.projection_gap = gap;
             reinit_log_.push_back(std::move(rec));
         }
+    }
+
+    /// The start's projection, reported (F-S-4's leftover): a given state x0 that
+    /// the start mode's settle / projection moved to x is a state jump at t like
+    /// any other, so it gets a record (kind "start_projection", the moved states,
+    /// dW = ½ΔᵀWΔ with Δ = x0 − x: the energy-weighted distance of the jump, which
+    /// in the ideal limit is the energy the jump dissipates INCLUDING the sources'
+    /// impulsive work, as for the dependent-state records above: an ideal 10 V
+    /// closing onto 1 µF at 0 V loses ½CV²). Significant: a move above 1e-6 of
+    /// max(|x0_i|, the circuit's scale of its kind, port_scale_state) -- not the
+    /// dependent-state records' 1e-9: a start from rest that the projection only
+    /// gives its g_off leakage (10 V · 1 nS = 1e-8 A in a 1 A circuit) needs no
+    /// report, and writes none. Not written when the
+    /// start already wrote dependent-state records (`mark`: the jump is reported).
+    /// W: the mode's energy weight when it has one, else diag(C, L) (shortcut: a
+    /// coupled winding's mutual term is left out of dW there; upgrade when the
+    /// extraction gives every mode its weight).
+    void record_start_projection(Real t, const Vector& x0, const Vector& x, std::size_t mark) {
+        if (reinit_log_.size() > mark || x0.size() != x.size()) return;
+        ensure_current_resolved_();
+        const LTIEntry& e = *current_entry_;
+        const auto n = x.size();
+        const auto sc = port_scale_state(x0);
+        const Vector d = x0 - x;
+        ReinitRecord rec;
+        rec.t = t;
+        rec.kind = "start_projection";
+        for (Index i = 0; i < n; ++i) {
+            const bool cap = static_cast<Size>(i) < e.state_is_cap.size() && e.state_is_cap[static_cast<Size>(i)];
+            const Real xs = std::max(std::abs(x0[i]), cap ? sc.vscale : sc.iscale);
+            if (!(std::abs(d[i]) > Real{1e-6} * xs)) continue;
+            if (static_cast<Size>(i) < e.state_labels.size())
+                rec.states.push_back(e.state_labels[static_cast<Size>(i)]);
+            else
+                rec.states.push_back("x" + std::to_string(i));
+        }
+        if (rec.states.empty()) return;
+        if (e.energy_weight.rows() == n && e.energy_weight.cols() == n) {
+            rec.dW = Real{0.5} * d.dot(e.energy_weight * d);
+        } else {
+            for (Index i = 0; i < n && static_cast<Size>(i) < e.state_mass.size(); ++i)
+                rec.dW += Real{0.5} * e.state_mass[static_cast<Size>(i)] * d[i] * d[i];
+        }
+        rec.projection_gap = d.cwiseAbs().maxCoeff();
+        reinit_log_.push_back(std::move(rec));
     }
 
     /// Records so far, and dropping those of a projection the scheduler
@@ -1007,6 +1236,63 @@ private:
         return st;
     }
 
+    /// The sine sources in b_extra (MNA) terms, mask-independent: per
+    /// distinct ω the stamps times amp·cos φ (sin column) and amp·sin φ (cos
+    /// column), and every v_dc (build_augmented_exact_'s folding).
+    struct SineInputs {
+        std::vector<Real> omegas;
+        DenseMatrix g_sin, g_cos;   // n_mna × k
+        Vector dc;                  // n_mna
+    };
+    [[nodiscard]] const SineInputs& sine_inputs_() const {
+        if (sine_inputs_built_) return sine_inputs_cache_;
+        using K = pwl::DevicePool::StoredKind;
+        auto& si = sine_inputs_cache_;
+        const auto n_mna = static_cast<Index>(pool_.state_size(graph_));
+        si.dc = Vector::Zero(n_mna);
+        std::vector<Vector> gs, gc;
+        const auto add = [&](const Vector& stamp, Real f, Real amp, Real ph, Real dc) {
+            si.dc += stamp * dc;
+            if (f <= Real{0}) return;
+            const Real w = Real{2} * std::numbers::pi_v<Real> * f;
+            Size j = 0;
+            while (j < si.omegas.size() && si.omegas[j] != w) ++j;
+            if (j == si.omegas.size()) {
+                si.omegas.push_back(w);
+                gs.push_back(Vector::Zero(n_mna));
+                gc.push_back(Vector::Zero(n_mna));
+            }
+            gs[j] += stamp * (amp * std::cos(ph));
+            gc[j] += stamp * (amp * std::sin(ph));
+        };
+        for (Index b_id = 0; b_id < graph_.num_branches(); ++b_id) {
+            if (graph_.branch(b_id).kind != topology::BranchKind::Source
+                || !pool_.is_registered(b_id) || pool_.kind_of(b_id) != K::SineVoltageSource) {
+                continue;
+            }
+            const auto& p = pool_.sine_voltage_source_params(b_id);
+            Vector st = Vector::Zero(n_mna);
+            st[pool_.branch_var_id_for_source(b_id, graph_)] = Real{-1};
+            add(st, p.frequency, p.v_amplitude, p.phase, p.v_dc);
+        }
+        for (Index b_id = 0; b_id < graph_.num_branches(); ++b_id) {
+            if (!pool_.is_registered(b_id) || pool_.kind_of(b_id) != K::SineCurrentSource) continue;
+            const auto& p = pool_.sine_current_source_params(b_id).w;
+            add(current_stamp_(b_id), p.frequency, p.v_amplitude, p.phase, p.v_dc);
+        }
+        const auto k = static_cast<Index>(si.omegas.size());
+        si.g_sin = DenseMatrix::Zero(n_mna, k);
+        si.g_cos = DenseMatrix::Zero(n_mna, k);
+        for (Index j = 0; j < k; ++j) {
+            si.g_sin.col(j) = gs[static_cast<Size>(j)];
+            si.g_cos.col(j) = gc[static_cast<Size>(j)];
+        }
+        sine_inputs_built_ = true;
+        return si;
+    }
+    mutable SineInputs sine_inputs_cache_;
+    mutable bool sine_inputs_built_ = false;
+
     /// A piecewise-linear source: PWM (levels), pulse (levels and
     /// ramps) voltage source by its MNA source row; pulse or table
     /// current source by its stamp (current_stamp_).
@@ -1016,6 +1302,17 @@ private:
         Index src_var;
         Kind kind;
     };
+
+    /// b_extra of a piecewise-linear source per unit of its value (the
+    /// stamp behind pwl_cols).
+    [[nodiscard]] Vector pwl_stamp_(const PwlSource& ps) const {
+        if (ps.kind == PwlSource::PwmV || ps.kind == PwlSource::PulseV) {
+            Vector st = Vector::Zero(static_cast<Index>(pool_.state_size(graph_)));
+            st[ps.src_var] = Real{-1};
+            return st;
+        }
+        return current_stamp_(ps.branch);
+    }
 
     void collect_pwl_sources_() {
         using K = pwl::DevicePool::StoredKind;

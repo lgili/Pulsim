@@ -12,7 +12,7 @@ Rehearsal at fe75ee01 (the regenerated report's header names the runs its sectio
 - [x] 1.7 bdf1 and `ac_sweep` cannot simulate a branch-form switch / diode (3 tests). Done (DECISIONS 1.4): `ac_sweep` stamps branch form (RC closed form, twin rtol 1e-7); bdf1 refuses by name, saying it is retired and naming pwl / trbdf2; conformance table updated
 - [x] 1.8 `enable_substep_state_correction`'s default must follow `discontinuity_restart`: a caller that sets the rule off is refused once the split defaults on (1 test, `test_device_losses_kernel.py`). Done (DECISIONS 1.2): the split's default follows the rule's resolved value
 - [x] 1.10 The output rule's cost: ten paralleled bridges ran > 8 min under `output_rtol=1e-5` (`test_exact_route.py::test_ten_paralleled_bridges_agree_with_pwl`). Done (DECISIONS 5): a projected parasitic mode's rounding x lambda^2 set a constant step; each mode's chord contribution now saturates at its amplitude, per-mode data cached, no per-step allocation, a per-run sample budget (`output_budget_t`)
-- [ ] 1.9 Re-run `next_defaults_rehearsal.py run` and the pytest blast radius on the release candidate; no cell left in the first three worse classes, no refusal group in section 1b
+- [ ] 1.9 Re-run `next_defaults_rehearsal.py run` and the pytest blast radius on the release candidate; no cell left in the first three worse classes, no refusal group in section 1b; a cell under the exact engine's output rule is judged by DECISIONS 6 (no class change, `rule_ratio` <= 1), not by the 2x rules
 
 ## 2. Owner decisions before the flip
 - [x] 2.1 One undriven-switch policy (`add-kernel-simulation-object` DECISIONS 23 item 1, task 11.3 there): today pwl and dsed run all CLOSED with a warning, trbdf2 refuses, `auto` without dt refuses; under the release route `auto` would run it on the exact engine, CLOSED
@@ -37,6 +37,7 @@ Rehearsal at fe75ee01 (the regenerated report's header names the runs its sectio
 - [ ] 4.1 Goldens, `pwl_identity` / `trbdf2_identity` baselines
 - [ ] 4.2 `benchmarks/REFERENCE_STATUS.md` and the triage freezes (`known:` / `known_err:`) per configuration
 - [ ] 4.3 `benchmarks/EXACT_SCOREBOARD.md` and `exact_scoreboard.json`
+  - Note (2026-11-20, `feat/core-scoreboard-measure`): the scoreboard's `exact` is now the three-part measure with rule (1) (DECISIONS 7); the evidence was regenerated under it on the pre-flip defaults. At the re-baseline it is regenerated again on the flipped defaults; the rehearsal's stored cells (`NEXT_DEFAULTS_REHEARSAL.md`) still hold the old definition until the rehearsal is re-run. Open findings it pins: F-SB-1..4 (`test_restart_scoreboard_findings.py`).
 - [ ] 4.4 Tests that pin old numbers (the rehearsal's pytest blast radius, by file), each re-pinned against a reference or truth, never loosened
 - [ ] 4.5 Docs and examples that print numbers; `python/pulsim/AI_GUIDE.md`
 

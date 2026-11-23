@@ -251,14 +251,18 @@ inline void solve_with_newton_in_place(
         roundoff->accepted = false;
     }
     // Roundoff acceptance state: whether f(x_k), x_k were recorded this
-    // call (in the workspace: no allocation per call) and the last three
-    // ||dx||.
+    // call (in the workspace: no allocation per call) and the last
+    // 2·kRoWindow ||dx||.
     bool ro_set = false;
     bool ro_scaled = false;
-    // ||dx|| of the last six iterations, newest first.
-    Real ro_dx[6];
-    std::fill(std::begin(ro_dx), std::end(ro_dx),
-              std::numeric_limits<Real>::infinity());
+    // ||dx|| of the last 2·kRoWindow iterations and how many were recorded.
+    constexpr int kRoWindow = 16;
+    constexpr int kRoMinSplit = 8;   // shortest window compared (DECISIONS 11)
+    // A ring (newest at ro_n - 1): one store per iteration, no shift and no
+    // fill per call; unrolled into newest-first order only when the budget
+    // is exhausted (the fixed engine paid 1.9 % per step for the shift).
+    Real ro_ring[2 * kRoWindow];
+    int ro_n = 0;
     if (static_cast<Size>(x.size()) != n) {
         x = Vector::Zero(static_cast<Index>(n));
     }
@@ -647,8 +651,10 @@ inline void solve_with_newton_in_place(
             ? kInvalidIndex : static_cast<Index>(dx_at);
         worst_res_row = f_combined.size() == 0
             ? kInvalidIndex : static_cast<Index>(res_at);
-        for (int k = 5; k > 0; --k) ro_dx[k] = ro_dx[k - 1];
-        ro_dx[0] = last_dx_norm;
+        if (ro_on) {
+            ro_ring[ro_n & (2 * kRoWindow - 1)] = last_dx_norm;
+            ++ro_n;
+        }
         if (last_dx_norm < tol_dx && last_res_norm < tol_res) {
             if (roundoff != nullptr) roundoff->consecutive = 0;
             return;
@@ -710,8 +716,8 @@ inline void solve_with_newton_in_place(
 
     // Budget exhausted. Transient callers may accept x_k (the iterate
     // whose residual is checked, not x_k + dx_k) when ||dx|| neither
-    // contracted by 4 over the last two steps nor grew over the last
-    // three (a two-sided stagnation test), ||dx_k|| <= 1e-6 of the START
+    // improved by 4 nor grew by 2 between two windows of iterations (a
+    // two-sided stagnation test), ||dx_k|| <= 1e-6 of the START
     // state, and every row's residual at x_k is within omega_max of the
     // magnitudes that row sums at the START state (Oettli-Prager backward
     // error against the call's own scale). Nothing taken from the iterate
@@ -720,20 +726,46 @@ inline void solve_with_newton_in_place(
     std::string ro_note;
     if (ro_on && ro_set && ro_scaled) {
         const Vector& ro_f = w.ro_f;
-        // No NET contraction over two steps. "Each step at least half
-        // the previous" read a roundoff limit cycle (||dx|| 3.2e-7,
-        // 5.0e-7, 1.9e-7) as converging. Quadratic convergence, or
-        // linear at a rate below 1/2, cuts ||dx|| by more than 4 in two
-        // steps; a slower rate counts as stagnated and the tests below
-        // decide.
-        const bool no_contraction = ro_dx[0] >= Real{0.25} * ro_dx[2];
-        // ...and no growth: the largest of the last three is at most
-        // twice the largest of the three before (a limit cycle repeats
-        // its maxima; a diverging iterate does not).
-        const Real m_new = std::max({ro_dx[0], ro_dx[1], ro_dx[2]});
-        const Real m_old = std::max({ro_dx[3], ro_dx[4], ro_dx[5]});
-        const bool growing = !(m_new <= Real{2} * m_old);
-        const bool stagnated = no_contraction && !growing;
+        // No improvement, judged over two WINDOWS of k steps (DECISIONS
+        // 11): the smallest ||dx|| of the newer window (the last k) is not
+        // 4x below the smallest of the older one (the k before), and its
+        // largest is not over twice the older's (a limit cycle repeats its
+        // maxima; a diverging iterate does not). A roundoff limit cycle of
+        // period <= k repeats its minimum in both windows; convergence at
+        // any rate r < 4^(-1/k) cuts it by 4. Stagnated if that holds for
+        // SOME split k from min(8, kw) to kw = min(16, iterations/2): one
+        // fixed k = kw read a solve that converged and then sat at the floor
+        // for 15 iterations as "still contracting" (its older window held
+        // the convergence), and a single low ||dx|| inside a cycle likewise
+        // (ll13_active_clamp_forward, DECISIONS 11 amendment). Every k >= 8
+        // still declines a monotone rate r < 4^(-1/8) = 0.84.
+        Real ro_dx[2 * kRoWindow];   // newest first
+        for (int k = 0; k < 2 * kRoWindow; ++k) {
+            ro_dx[k] = k < ro_n ? ro_ring[(ro_n - 1 - k) & (2 * kRoWindow - 1)]
+                                : std::numeric_limits<Real>::infinity();
+        }
+        const int kw = std::min(kRoWindow, ro_n / 2);
+        Real b_new = std::numeric_limits<Real>::infinity(), b_old = b_new;
+        Real m_new = 0, m_old = 0;
+        bool stagnated = false;
+        for (int kk = kw; kk >= std::max(2, std::min(kRoMinSplit, kw)); --kk) {
+            Real bn = std::numeric_limits<Real>::infinity(), bo = bn;
+            Real mn = 0, mo = 0;
+            for (int k = 0; k < kk; ++k) {
+                bn = std::min(bn, ro_dx[k]);
+                mn = std::max(mn, ro_dx[k]);
+                bo = std::min(bo, ro_dx[kk + k]);
+                mo = std::max(mo, ro_dx[kk + k]);
+            }
+            if (kk == kw) {   // the full windows, for the decline message
+                b_new = bn; b_old = bo; m_new = mn; m_old = mo;
+            }
+            if (bn >= Real{0.25} * bo && mn <= Real{2} * mo) {
+                stagnated = true;
+                break;
+            }
+        }
+        const bool growing = kw >= 2 && !(m_new <= Real{2} * m_old);
         const Real dx_cap = roundoff->dx_rel_max
             * std::max(Real{1}, w.ro_x0_inf);
         const Vector& scale = w.ro_scale;
@@ -777,17 +809,28 @@ inline void solve_with_newton_in_place(
                                          roundoff->consecutive);
             return;
         }
-        ro_note = std::format(
-            " Roundoff acceptance declined: row backward error {:.2g} eps "
-            "at {} (limit {:.2g} eps), ||dx|| {} 1e-6·|x_0|, last steps "
-            "{} (||dx|| {:.3e}, {:.3e}, {:.3e}).",
-            omega / std::numeric_limits<Real>::epsilon(),
-            row_equation_label(graph, pool, row),
-            roundoff->omega_max / std::numeric_limits<Real>::epsilon(),
-            ro_dx[0] <= dx_cap ? "within" : "above",
-            growing ? "growing" : (no_contraction ? "stagnated"
-                                                  : "still contracting"),
-            ro_dx[2], ro_dx[1], ro_dx[0]);
+        ro_note = kw < 2
+            ? std::format(
+                " Roundoff acceptance declined: row backward error {:.2g} eps "
+                "at {} (limit {:.2g} eps), ||dx|| {} 1e-6·|x_0|, {} "
+                "iterations: too few for two windows.",
+                omega / std::numeric_limits<Real>::epsilon(),
+                row_equation_label(graph, pool, row),
+                roundoff->omega_max / std::numeric_limits<Real>::epsilon(),
+                ro_dx[0] <= dx_cap ? "within" : "above", ro_n)
+            : std::format(
+                " Roundoff acceptance declined: row backward error {:.2g} eps "
+                "at {} (limit {:.2g} eps), ||dx|| {} 1e-6·|x_0|, {} over "
+                "windows of {} to {} iterations (last {}: ||dx|| min {:.3e} "
+                "max {:.3e}; the {} before: min {:.3e} max {:.3e}).",
+                omega / std::numeric_limits<Real>::epsilon(),
+                row_equation_label(graph, pool, row),
+                roundoff->omega_max / std::numeric_limits<Real>::epsilon(),
+                ro_dx[0] <= dx_cap ? "within" : "above",
+                stagnated ? "stagnated"
+                          : (growing ? "growing" : "still contracting"),
+                std::min(kRoMinSplit, kw), kw, kw, b_new, m_new, kw, b_old,
+                m_old);
     }
 
     // Report the norms RELATIVE to the circuit's own scale as well as

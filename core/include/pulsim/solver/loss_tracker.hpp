@@ -328,7 +328,30 @@ private:
             d.last = {h, e_el, d.spec.v_on ? d.e_tab_last_ : Real{0}, false};
             // the booking of accept() (soft edges, deferred impulsive re-booking)
             if (d.dfr.valid) heat += book_deferred_(d, v1, i1);
-            if (on1 != d.on) heat += book_(d, t0, on1, d.v, d.i, v1, i1, tj0);
+            if (on1 != d.on) {
+                // the commutation's two sides as the stored result shows them
+                // (device_loss_summary reads the right-limit rows): an edge the
+                // restart took at the step's start has its post-edge side at that
+                // right limit; one at an event inside the step, its pre-edge side
+                // at the event's left limit and its post-edge side at its right
+                // limit; else the step's ends
+                Real vb = d.v, ib = d.i, vp = v1, ip = i1;
+                const auto bit = static_cast<Size>(d.law.bit);
+                if (L.start && L.m_start.get(bit) == on1) {
+                    vp = v_of_(d, L.x_start);
+                    ip = i_of_(d, L.x_start, on1);
+                } else {
+                    for (Size j = 0; j < L.n; ++j) {
+                        if (!L.right_ok[j] || L.m_right[j].get(bit) != on1) continue;
+                        vb = v_of_(d, L.left[j]);
+                        ib = i_of_(d, L.left[j], L.m_left[j].get(bit));
+                        vp = v_of_(d, L.right[j]);
+                        ip = i_of_(d, L.right[j], on1);
+                        break;
+                    }
+                }
+                heat += book_(d, t0, on1, vb, ib, vp, ip, tj0);
+            }
             if (d.node >= 0) add_(queue_, d.node, heat);
             d.on = on1;
             d.v = v1;

@@ -2610,7 +2610,9 @@ def simulate(
         omitted → variable-step TR-BDF2 (non-uniform ``result.times``),
         or a ``ValueError`` naming what keeps the circuit off it. ``engine='pwl'``: the fixed step, required.
         ``engine='trbdf2'`` / ``'dsed'``: the step CEILING (``dsed``
-        defaults to 10 µs); the grid is variable either way.
+        defaults to 10 µs, and steps every ``dt_max / 10`` = 1 µs when the
+        gate names no edge: no ``switch_fn``, or a plain callable without
+        ``next_edge_after``); the grid is variable either way.
     engine
         ``'auto'`` (default), ``'trbdf2'``, ``'pwl'`` or ``'exact'`` —
         see above. ``'exact'`` is the canonical name of the event-driven
@@ -2643,7 +2645,11 @@ def simulate(
         Fixed step for BDF2 segments under ``integrator='bdf2'`` or
         ``'auto'`` (default 1e-6).
     t_start, default 0.0
-        Start time, in seconds.
+        Start time, in seconds: an ABSOLUTE label. Gates, sources,
+        ``b_extra_fn`` and recorder windows are read at absolute ``t`` on
+        every engine, so the run equals the tail of a run from 0 started
+        from the same state. On the exact engine a fresh ``t_start`` run
+        refuses the circuit's time-varying sources and controllers by name.
     switch_fn
         Callable ``t -> SwitchStateMask`` controlling the
         switch state at each sample.  Defaults to all-closed.
@@ -2786,7 +2792,8 @@ def simulate(
 
     output_rtol
         ``engine='exact'`` only, default ``None`` (today's samples: one per
-        10 us step cap without ``dt``). Without ``dt``, ``store_every`` or
+        step — the 10 us step cap without ``dt``, or its 1 us gate poll
+        (``dt_max / 10``) when the gate names no edge). Without ``dt``, ``store_every`` or
         recorders, the exact engine returns every event instant (both
         limits where the state jumps) and between events samples spaced so
         that, between events, linear interpolation of the returned samples
@@ -4123,70 +4130,80 @@ def _run_dsed(plan):
     mode_selection = plan.events.mode_selection
     _mode_auto = plan.events.mode_auto
     _dsed = _dsed_dispatch_module
+    if t_start and i.resume_from is None:
+        # t_start is an absolute label (docs/internals/run-planning.md): the
+        # engine's clock runs from 0, so the drive is shifted onto it here
+        switch_fn, b_extra_fn = _dsed.on_absolute_clock(
+            builder, float(t_start), switch_fn, b_extra_fn)
     # The DSED branch returns here, ~400 lines before the PWL
     # tail that attaches `_builder` / `_preflight`. Attach the
     # preflight report on the way out, so `result._preflight` —
     # which the warning tells every user to read — is not a
     # PWL-only attribute.
-    if sensitivities is not None:
-        if s.output_rtol is not None:
-            raise _unsupported(
-                "dsed", "output_rtol",
-                "simulate(engine='exact', sensitivities=..., output_rtol=...): the "
-                "sensitivity run keeps its own grid. Drop output_rtol, or pass dt.")
-        from .sensitivity import simulate_sensitivities
-        if switch_fn is None and plan.undriven is not None:
-            from .sensitivity import _ConstSchedule  # an edge oracle (inf)
-            switch_fn = _ConstSchedule(builder.graph.num_switches,
-                                       plan.undriven[0] == "closed")
-        _dsed_res = simulate_sensitivities(
-            builder, t_end, sensitivities=sensitivities, dt=dt,
-            t_start=t_start, switch_fn=switch_fn,
-            initial_state=None if _ic_from_builder else initial_state,
-            ic_from_builder=_ic_from_builder, dt_init=dt_init,
-            b_extra_fn=b_extra_fn, integrator=integrator,
-            ticks=[(f, p, o) for (f, p), o in zip(
-                _plan.ticks, _plan.tick_offsets or [0.0] * len(_plan.ticks))])
-        if _mode_auto is not None:
-            _diag = getattr(_dsed_res, "diagnostics", None)
-            if isinstance(_diag, dict):
-                _diag["mode_selection_auto"] = _mode_auto
-            else:
-                try:
-                    _dsed_res.diagnostics = {"mode_selection_auto": _mode_auto}
-                except AttributeError:
-                    pass  # a result without diagnostics: the record has nowhere to go
-    else:
-        _dsed_res = _dsed.run_dsed_from_builder(
-            builder=builder,
-            t_end=t_end,
-            dt=dt,
-            rtol=rtol,
-            atol=atol,
-            dt_init=dt_init,
-            integrator=integrator,
-            stiffness_threshold=stiffness_threshold,
-            h_bdf2=h_bdf2,
-            t_start=t_start,
-            switch_fn=switch_fn,
-            b_extra_fn=b_extra_fn,
-            # Builder ICs (c0= / i0=) are a full-MNA vector: the
-            # dispatcher maps them per device onto the reduced state.
-            initial_state=None if _ic_from_builder else initial_state,
-            builder_initial_state=initial_state if _ic_from_builder else None,
-            progress=progress,
-            mode_selection=mode_selection,
-            allow_implicit_segments=bool(allow_implicit_segments),
-            output_rtol=s.output_rtol,
-            ticks=[(f, p, o) for (f, p), o in zip(
-                _plan.ticks, _plan.tick_offsets or [0.0] * len(_plan.ticks))],
-            resume_from=i.resume_from,
-            tick_origins=_resume_tick_origins(i.resume_from, len(_plan.ticks)),
-            tick_next_k=_resume_tick_next_k(i.resume_from, len(_plan.ticks)),
-            undriven=plan.undriven[0] if plan.undriven is not None else None,
-            mode_auto=_mode_auto,
-        )
-        _save_control_state(_plan.graphs, _dsed_res)   # the snapshot's controllers
+    try:
+        if sensitivities is not None:
+            if s.output_rtol is not None:
+                raise _unsupported(
+                    "dsed", "output_rtol",
+                    "simulate(engine='exact', sensitivities=..., output_rtol=...): the "
+                    "sensitivity run keeps its own grid. Drop output_rtol, or pass dt.")
+            from .sensitivity import simulate_sensitivities
+            if switch_fn is None and plan.undriven is not None:
+                from .sensitivity import _ConstSchedule  # an edge oracle (inf)
+                switch_fn = _ConstSchedule(builder.graph.num_switches,
+                                           plan.undriven[0] == "closed")
+            _dsed_res = simulate_sensitivities(
+                builder, t_end, sensitivities=sensitivities, dt=dt,
+                t_start=t_start, switch_fn=switch_fn,
+                initial_state=None if _ic_from_builder else initial_state,
+                ic_from_builder=_ic_from_builder, dt_init=dt_init,
+                b_extra_fn=b_extra_fn, integrator=integrator,
+                ticks=[(f, p, o) for (f, p), o in zip(
+                    _plan.ticks, _plan.tick_offsets or [0.0] * len(_plan.ticks))])
+            if _mode_auto is not None:
+                _diag = getattr(_dsed_res, "diagnostics", None)
+                if isinstance(_diag, dict):
+                    _diag["mode_selection_auto"] = _mode_auto
+                else:
+                    try:
+                        _dsed_res.diagnostics = {"mode_selection_auto": _mode_auto}
+                    except AttributeError:
+                        pass  # a result without diagnostics: the record has nowhere to go
+        else:
+            _dsed_res = _dsed.run_dsed_from_builder(
+                builder=builder,
+                t_end=t_end,
+                dt=dt,
+                rtol=rtol,
+                atol=atol,
+                dt_init=dt_init,
+                integrator=integrator,
+                stiffness_threshold=stiffness_threshold,
+                h_bdf2=h_bdf2,
+                t_start=t_start,
+                switch_fn=switch_fn,
+                b_extra_fn=b_extra_fn,
+                # Builder ICs (c0= / i0=) are a full-MNA vector: the
+                # dispatcher maps them per device onto the reduced state.
+                initial_state=None if _ic_from_builder else initial_state,
+                builder_initial_state=initial_state if _ic_from_builder else None,
+                progress=progress,
+                mode_selection=mode_selection,
+                allow_implicit_segments=bool(allow_implicit_segments),
+                output_rtol=s.output_rtol,
+                ticks=[(f, p, o) for (f, p), o in zip(
+                    _plan.ticks, _plan.tick_offsets or [0.0] * len(_plan.ticks))],
+                resume_from=i.resume_from,
+                tick_origins=_resume_tick_origins(i.resume_from, len(_plan.ticks)),
+                tick_next_k=_resume_tick_next_k(i.resume_from, len(_plan.ticks)),
+                undriven=plan.undriven[0] if plan.undriven is not None else None,
+                mode_auto=_mode_auto,
+            )
+            _save_control_state(_plan.graphs, _dsed_res)   # the snapshot's controllers
+    except (PulsimError, RuntimeError) as e:   # typed give-ups (DiodeModeInconsistentError is a RuntimeError)
+        if t_start and i.resume_from is None:   # the engine's clock: relabel
+            _dsed.relabel_failure(e, float(t_start))
+        raise
     return _planning.new(_planning.RunOutcome, (
         _dsed_res, builder, switch_fn, b_extra_fn, None, None, None, None,
         None))
@@ -4639,6 +4656,13 @@ def _finalize(out, plan):
         # recorded after the run): 'error' refuses the run as pwl's kernel
         # does at the event, 'warn' warns.
         _recs = list(getattr(res, "reinit_records", None) or ())
+        if _recs and on_impulse == "error" and _recs[0].kind == "start_projection":
+            r0 = _recs[0]
+            raise _unsupported(
+                "dsed", "impulse",
+                f"on_impulse='error': the given initial state is not a state of the start "
+                f"mode: projecting it moves {', '.join(r0.states)} by up to "
+                f"{r0.projection_gap:.6g} at t = {r0.t:g} and removes {r0.dW:.6g} J.")
         if _recs and on_impulse == "error":
             r0 = _recs[0]
             cut = r0.kind == "cut_set"

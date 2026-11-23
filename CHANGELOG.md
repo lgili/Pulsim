@@ -6,6 +6,32 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Evidence: the exact scoreboard's measure, in three parts
+
+* **Changed (evidence, no library change)** the `exact` measure of
+  `benchmarks/EXACT_SCOREBOARD.md` / `ACCURACY_SUMMARY.md`
+  (`benchmarks/tools/metrics.exact_parts`, the one implementation every
+  tool that grades against the mpmath truth uses) is now the largest of
+  three parts, each a fraction of the truth's span: the smooth error of the
+  engine's stored rows (leaving out only the rows inside a matched event's
+  displacement, the initial instant and the 0+ row), the L2 cost of its
+  event instants against the truth's (sqrt(Σ jump²·|δ| / T); a missing
+  event charged as displaced), and its recorded one-sided limits against
+  the truth's. The previous definition graded the right limit at t = 0+
+  (99 % of `three_phase_diode_rectifier` pwl+restart's 0.0127) and charged
+  an event displaced beyond its 1e-3 dt snap window at its row's weight
+  instead of jump²·δ (`vcswitch_resistor` pwl+split, 0.005 dt early:
+  0.0316, now 0.0032). It is kept as `exact_old` (json and table) for this
+  release.
+* **Added (evidence)** rule (1), a projected transient: where an engine
+  reports a projection at an event (`reinit_records`) and the truth itself
+  settles to the engine's recorded right value within the engine's declared
+  parasitic window (dt/100 for the exact engine, h for pwl), that value is
+  priced as a transient collapsed in time (instants, its true L2 cost), not as
+  a wrong limit; the cell counts it (`n_projected`). No engine writes such a
+  record at the events it was made for yet (the exact engine's slow-manifold
+  projection writes none: finding F-SB-3), so no cell moved.
+
 ### Thermal summary: one conduction reading; refusals where there was silence
 
 * **Fixed** `device_thermal_summary` on a branch-form device (`form='branch'`,
