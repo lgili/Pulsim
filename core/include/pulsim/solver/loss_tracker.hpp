@@ -130,11 +130,17 @@ struct StepLines {
     std::array<Vector, kMax> rl_right;
     std::array<topology::SwitchStateMask, kMax> rl_m_right;
     std::array<bool, kMax> rl_right_ok{}, held{};
+    // the event at the row carries a recorded jump: the row is x(t_e+) BEFORE
+    // the collapse the record reports; the regular part (the loss tracker's
+    // edge reading) starts after it, at the lines' start
+    bool rl_start_jump = false;
+    std::array<bool, kMax> rl_right_jump{};
     void clear() noexcept {
         start = false;
         n = 0;
         end_own = false;
         rl_start_ok = false;
+        rl_start_jump = false;
     }
     [[nodiscard]] bool empty() const noexcept { return !start && n == 0; }
 };
@@ -339,8 +345,11 @@ private:
                 const auto bit = static_cast<Size>(d.law.bit);
                 // ONE definition: the stored rows are the state values x(t_e+)
                 // (rl_*, F-SB-1), not the lines' quadrature starts; a
-                // continuity point's row is the stored left (d.v, d.i)
-                if (L.rl_start_ok && L.rl_m_start.get(bit) == on1) {
+                // continuity point's row is the stored left (d.v, d.i). At a
+                // recorded jump the regular part starts after the collapse: the
+                // lines' start (the row there holds the pre-collapse state: a
+                // clamp diode read 1e-8 A for the 0.167 A it picks up — review)
+                if (L.rl_start_ok && !L.rl_start_jump && L.rl_m_start.get(bit) == on1) {
                     if (!L.rl_start_left) {
                         vp = v_of_(d, L.rl_start);
                         ip = i_of_(d, L.rl_start, on1);
@@ -353,7 +362,7 @@ private:
                     ip = i_of_(d, L.x_start, on1);
                 } else {
                     for (Size j = 0; j < L.n; ++j) {
-                        const bool rl = !L.held[j] && L.rl_right_ok[j];
+                        const bool rl = !L.held[j] && L.rl_right_ok[j] && !L.rl_right_jump[j];
                         const auto& mr = rl ? L.rl_m_right[j] : L.m_right[j];
                         if (!(rl || L.right_ok[j]) || mr.get(bit) != on1) continue;
                         const Vector& xr = rl ? L.rl_right[j] : L.right[j];

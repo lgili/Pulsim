@@ -2657,10 +2657,12 @@ inline SimulationResult run_transient(
                 }
                 ip_nc[3 * k] = vp;
                 nc_jumped = true;
-                if (ip_nc[3 * k + 2] >= Real{2}) continue;   // a move / carried: no loss
+                if (ip_nc[3 * k + 2] == Real{2}) continue;   // a move: no loss
+                // (flag 3, carried by the series: part of J like an unflagged
+                // linear state — its energy is the record's too)
                 const Real ek = models::NonlinearCapacitor::jump_energy(e.params, e.v_prev, vp);
                 e_jump += ek;
-                if (ek > dom_e) {
+                if (ip_nc[3 * k + 2] == Real{1} && ek > dom_e) {
                     dom_e = ek;
                     dom = ne + k;   // ≥ ne: a nonlinear capacitor
                 }
@@ -2681,10 +2683,12 @@ inline SimulationResult run_transient(
                 }
                 ip_sl[3 * k] = ip;
                 sl_jumped = true;
-                if (ip_sl[3 * k + 2] >= Real{2}) continue;   // a move / carried: no loss
+                if (ip_sl[3 * k + 2] == Real{2}) continue;   // a move: no loss
+                // (flag 3: in saturation a flux move under the allowance is a
+                // large current move — 49 % of a clamp's loss was missing, review)
                 const Real ek = models::SaturableInductor::jump_energy(e.params, e.i_L_old, ip);
                 e_jump += ek;
-                if (ek > dom_e) {
+                if (ip_sl[3 * k + 2] == Real{1} && ek > dom_e) {
                     dom_e = ek;
                     dom = ne + nn + k;   // ≥ ne + nn: a saturable core
                 }
@@ -3848,6 +3852,7 @@ inline SimulationResult run_transient(
             if (inner && j >= StepLines::kMax) return;
             if (inner) {   // the event's right limit (state value)
                 lines.held[j] = false;
+                lines.rl_right_jump[j] = ip_jump;
                 lines.rl_right_ok[j] = lines.rl_ok;
                 if (lines.rl_ok) {
                     if (lines.rl_left) {   // a continuity point: the left
@@ -3859,6 +3864,7 @@ inline SimulationResult run_transient(
                 }
             } else {
                 lines.rl_start_ok = lines.rl_ok;
+                lines.rl_start_jump = ip_jump;
                 lines.rl_start_left = lines.rl_left;
                 if (lines.rl_ok) {
                     std::swap(lines.rl_start, lines.rl_x);

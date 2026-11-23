@@ -139,3 +139,67 @@ def test_a_hysteretic_core_cut_by_its_switch_is_refused_by_name():
     with pytest.raises(p.UnsupportedError, match="saturable_inductor 'Lh'.*hysteretic") as ei:
         _run(b, 1e-5, False, switch="S")
     assert ei.value.device == "Lh" and ei.value.feature == "impulse"
+
+
+def _clamp(l1, l2, v, losses=False):
+    """V -S- a ; L1 a-gnd (a core: (L_0, I_sat, L_r); a float: linear) ; clamp gnd -D-> b -L2- a."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "in", "gnd", v)
+    b.add_switch("S", "in", "a", 1e3, 1e-9)
+    if isinstance(l1, tuple):
+        b.add_saturable_inductor("L1", "a", "gnd", *l1)
+    else:
+        b.add_inductor("L1", "a", "gnd", l1)
+    b.add_diode("D", "gnd", "b", 1e3, 1e-9)
+    b.add_inductor("L2", "b", "a", l2)
+    if losses:
+        tab = p.LossTable(v_axis=[0.0, 1e3], i_axis=[0.0, 20.0], tj_axis=[25.0, 150.0],
+                          energy=np.array([[[0.0, 0.0], [20.0, 20.0]], [[0.0, 0.0], [20.0, 20.0]]]))
+        b.set_device_losses("D", Tj=100.0, E_on=tab)
+    return b
+
+
+@pytest.mark.parametrize("split", [False, True])
+@pytest.mark.parametrize("l2", [2e-7, 5e-7])
+def test_a_core_the_series_carries_without_the_flag_keeps_its_share_of_the_record(l2, split):
+    """A saturated core (1 mH, 2 mA, 0.5 uH; 0.73 A) clamped through D and L2 when S opens.
+    The clamp turns on inside stage 1, so the core's flux move L2 * i+ is under the
+    allowance and the vector series carries it unflagged; in saturation that small flux
+    is half the current. Truth (flux conservation from the run's own left value,
+    bisection): dW = W(i0) - W(i+) - 1/2 L2 i+^2. The record held L2's share only: 49 %
+    missing at L2 = 0.5 uH, 28 % at 0.2 uH (fresh review after item N)."""
+    core, dt = (1e-3, 0.002, 5e-7), 7e-7
+    b = _clamp(core, l2, 1.0)
+    n, k = b.graph.num_switches, b.switch_index_of("S")
+
+    def fn(t):
+        m = p.SwitchStateMask(n)
+        m.set(k, t < 5 * dt)
+        return m
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(b, t_end=9 * dt, dt=dt, engine="pwl", switch_fn=fn, discontinuity_restart=True,
+                       enable_substep_state_correction=split)
+    t, i = np.asarray(r.times), np.asarray(r.i("L1"))
+    i0 = i[np.searchsorted(t, 5.5 * dt) - 1]
+    ic = _inv(lambda u: _lam(u, *core) + l2 * u, _lam(i0, *core))
+    truth = _stored(i0, *core) - _stored(ic, *core) - 0.5 * l2 * ic * ic
+    (rec,) = r.reinit_records
+    assert rec.dW == pytest.approx(truth, rel=2e-3)
+
+
+@pytest.mark.parametrize("split", [False, True])
+@pytest.mark.parametrize("l1", [1e-3, 3e-4, 1e-4])
+def test_the_kernel_reads_a_clamp_turn_on_after_the_recorded_collapse(l1, split):
+    """Linear twin, L2 = 200 uH: at the opening L1's current i0 is shared, i+ = L1 i0 /
+    (L1 + L2) (flux conservation, closed form) — the current the clamp diode picks up
+    (E_on linear in i books the current). The right-limit row holds the state BEFORE the
+    recorded collapse (L2 at the leakage); the kernel's edge must read the regular part's
+    start: at L1 = 0.1 mH (D not named in the record) it read 1e-8 A (fresh review)."""
+    b = _clamp(l1, 2e-4, 10.0, losses=True)
+    r = _run(b, 8e-6, split, switch="S")
+    t = np.asarray(r.times)
+    i0 = np.asarray(r.i("L1"))[np.searchsorted(t, T_E + DT / 2) - 1]
+    k = r.device_energy("D")
+    assert k["n_on"] == 1
+    assert k["E_on"] == pytest.approx(l1 * i0 / (l1 + 2e-4), rel=2e-3)
