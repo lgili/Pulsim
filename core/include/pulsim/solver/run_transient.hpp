@@ -1929,7 +1929,10 @@ inline SimulationResult run_transient(
         auto sens_open = [&]() {
             if (sens_inline) return;
             sens_inline = true;
-            sens_gate_event(t_prev_step, gate_t0, split && !ev_overflow);
+            // located only by the schedule's oracle: an opaque switch_fn's
+            // edge is sampled at a grid point (a staircase in a duty)
+            sens_gate_event(t_prev_step, gate_t0,
+                            split && !ev_overflow && static_cast<bool>(next_edge_fn));
         };
         auto sens_begin = [&](Real t_from, const Vector& x0) {
             sens_open();

@@ -707,3 +707,73 @@ ESDIRK / Newton refusals beyond the tests.
 - NOT RUN: full ctest, Eigen 3.4.0, g++-15, a fresh-context review of
   0d518f42's fix. Still open as before: 6.3 at rtol 1e-9 (strict xfail),
   4.4 saturable inductor.
+
+### On the PR line (2026-11-23): merge onto 7188a9e1, branch feat/core-sensitivity-events-pr
+
+The PR line had rebuilt the restart region under this branch (run_restart /
+restart_lined built once per run, `consistent_start` with the jump's vector
+series, `decide_edge_mode`, `locate_islands`). `run_transient.hpp` is the PR
+head's file with the calls into the recurrence re-applied by meaning
+(`.scratch/sev/apply.py`); `trbdf2_transient.hpp` merged textually (one
+hunk: `edge_past_end` in the no-final-sliver arm, next to the line rule).
+
+- Hooks (`sens_stage`, `sens_gate_event`, `sens_open`, `sens_begin`,
+  `sens_diode_events`, the one-reference struct `sx`): defined ONCE per run,
+  before `decide_edge_mode` / `consistent_start` / `run_restart`.
+- `run_restart`: `sx.begin` at entry; stage 1 fed right after its
+  `run_event_iteration` — after `decide_edge_mode` chose the mode, BEFORE
+  `consistent_start` (the probe's solves replace a Newton stage's factor;
+  every false return of the probe restores x, histories, bits, mask); stage
+  2 as the branch had it (SDIRK psi, the kept backward-Euler re-take, a
+  mode-changing stage 2 refused).
+- NEW REFUSAL: `consistent_start` returning true (the histories restart
+  from x0 + J and stage 1 is solved again) → `refuse_step(t, "restarted
+  from a state its event moved (an impulsive event …)")`. dJ/dp is not
+  carried: J is the Krylov series of the probe's second differences (tried
+  whenever the circuit has ≥ 2 C / L states), and without it the recurrence
+  integrates the fast component of dq/dp by the SDIRK stages (relative
+  error R(z), the error the series removed from the state). Tests:
+  `test_sensitivity_restart_jump.py` (two capacitors closed on each other:
+  refused, with the reinit record as the control; the same circuit before
+  the closing: 1e-6 of central differences).
+- CONSEQUENCE, a cell LOST: the DCM buck on pwl + split (dt = T/1000, 40 T)
+  was within 1e-5 of the table on the branch's base; on the PR line the
+  turn-off at 29.524 T is recorded as a cut-set jump of L (1.73e-10 V·s,
+  1.5e-16 J: the located crossing's residual current) and the run is
+  refused. `test_dcm_buck_transient_against_the_table[pwl]` is a strict
+  xfail. NEXT STEP: carry dJ/dp — replay the probe's stages as
+  backward-Euler stages of the recurrence (same factor, one back-substitution
+  per parameter and stage), then the tangent of the series (a pure function
+  of the stage readings: differentiate it with the fit's order held), and
+  add C/2·dJ/dp to the re-solved stage 1's ψ.
+- `split_step` (inside `if (split)`), the closing block and the end-of-run
+  `edge_past_end`: the branch's lines at the same places. `locate_islands`
+  needs nothing: a group of ≥ 2 diodes located on a summed signal registers
+  ≥ 2 state events at one instant, which `state_event` refuses as a tie.
+- Review (fresh context, fable, read-only): no path found where a step is
+  accepted with a state the fed stages do not produce. Fixed from it:
+  `sens_open` passed `located = split && !ev_overflow` with an opaque
+  `switch_fn` (edges sampled, not located) — now also requires
+  `next_edge_fn` (Python already refuses a duty without the PWM helper, so
+  no Python test reaches it). Recorded, not fixed: a sensitivity solve that
+  does not converge inside a restart / split step throws runtime_error,
+  which the dt-retry ladder catches — the run is still refused, as "retried
+  at a smaller dt"; the inductor freeze guard's snap-back is refused one
+  step late by the contiguity check; `mode_guard_site` / `mode_lcp_site`
+  not opened by the reviewer.
+- Release finding F-Y-1 (pwl sensitivities refused at the first split
+  step): on this tip they run with the restart rule and the split ON
+  (`test_sensitivity_release_defaults.py`): RC vs central differences
+  1.9e-10 / 3.4e-11, vs the closed form 1.7e-7 (plain pwl 1e-3); Shockley
+  rectifier worst 1.3e-8; MOSFET K, V_T within 1e-6; states and
+  factorizations identical with and without sensitivities.
+- Verification seen (logs `.scratch/sev/`): sensitivities OFF vs the PR
+  head (so_4367f887 + python at 7188a9e1): goldens 21/21, stateful 41,
+  engines 35, steps 28, pwl_identity 396/396, trbdf2_identity 376/377 (the
+  one difference is a file path inside a YAML loader message), AC 59/59,
+  res.i 212 keys, recorder 12/12, dsed bit-identity 36/36 (+ shadow), loss
+  dump 81 calls, sensitivity / PSS dump 836 calls, exact dump 441 calls —
+  identical. Cost (instructions per accepted step, min of six, LTO off on
+  both sides, measured before the `located` fix, which is inside a
+  sens-only lambda): buck_pwl +0.10 %, vsi_pwl +0.04 %, buck_trbdf2
+  +0.01 %, bridge_trbdf2 +0.02 %.
