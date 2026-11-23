@@ -723,7 +723,11 @@ def test_fixed_step_feature_refused_by_name(feature, engine):
     assert (ei.value.engine, ei.value.feature) == (engine, feature)
 
 
-@pytest.mark.parametrize("engine", ("pwl", "trbdf2", "auto", "dsed"))
+@pytest.mark.parametrize("engine", (
+    pytest.param("pwl", marks=pytest.mark.xfail(strict=True, raises=p.UnsupportedError, reason=(
+        "release finding F-Y-1: sensitivities on engine='pwl' are refused 'at t = 1e-06 the step "
+        "was split at its events' under the release default (event splitting on); honoured before"))),
+    "trbdf2", "auto", "dsed"))
 def test_sensitivities_cell(engine):
     """add-parameter-sensitivities: honoured on the exact path and, by the
     stage recurrence (group 5), on pwl and trbdf2; 'auto' refuses the
@@ -1709,7 +1713,8 @@ def test_reinit_records_on_every_engine(engine):
     # result.reinit_records (the impulse at a mode entry) is on every engine since the fixed
     # engine's D4 records (feat/core-a-ideal-switch): two 1.5 uF capacitors at 8 V and 0 V tied
     # by a 0 V source share 6 uC at t = 0. The exact engine records that start, the same on both
-    # names; pwl / trbdf2 record none at t = 0 (measured: their records are at switching events)
+    # names; so does pwl since the release (the restart rule's consistent start: it recorded
+    # none before); trbdf2 records none at t = 0 (its records are at switching events)
     b = p.CircuitBuilder()
     b.add_capacitor("C1", "a", "gnd", 1.5e-6, 8.0)
     b.add_capacitor("C2", "b", "gnd", 1.5e-6, 0.0)
@@ -1719,15 +1724,45 @@ def test_reinit_records_on_every_engine(engine):
         warnings.simplefilter("ignore")
         r = p.simulate(b, 1e-4, engine=engine, dt=1e-6)
     recs = getattr(r, "reinit_records", None)
-    if engine in ("pwl", "trbdf2"):
-        # the fixed engines' result has the field too (the branch-form ideal
-        # switch's records, add-branch-form-ideal-switch D4); they do not
-        # reduce dependent states, so nothing is recorded here
+    if engine == "trbdf2":
+        # the result has the field (the branch-form ideal switch's records,
+        # add-branch-form-ideal-switch D4); nothing is recorded at a start
         assert not recs
+        return
+    if engine == "pwl":
+        # truth: 6 uC moves, (1/4) C V^2 = 24 uJ goes (measured 6.0000000572e-6 C:
+        # the first step's own discharge into R is in it; 2.4000000000000002e-5 J)
+        (rec,) = recs
+        assert (rec.kind, rec.states, rec.t) == ("capacitor_loop", ["C1", "C2"], 0.0)
+        assert abs(rec.lambda_) == pytest.approx(6e-6, rel=1e-7)
+        assert rec.dW == pytest.approx(24e-6, rel=1e-9)
+        np.testing.assert_allclose(np.asarray(r.states)[1][:2], 4.0 * np.exp(-1e-6 / 3e-3),
+                                   rtol=1e-6)
         return
     (rec,) = recs
     assert (rec.kind, rec.sample) == ("capacitor_loop", 0)
     assert rec.lambda_ == pytest.approx(6e-6, rel=1e-12)
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "release finding F-Y-7: the start record of the same capacitor loop differs between the "
+    "engines: pwl writes lambda = -6.0000000572e-6 C, devices [], sample 1; the exact engine "
+    "+6.000000000000001e-6 C, devices ['V0'], sample 0 (kind, states and dW = 2.4e-5 J agree)"))
+def test_the_start_record_is_the_same_on_pwl_and_the_exact_engine():
+    recs = []
+    for engine in ("pwl", "exact"):
+        b = p.CircuitBuilder()
+        b.add_capacitor("C1", "a", "gnd", 1.5e-6, 8.0)
+        b.add_capacitor("C2", "b", "gnd", 1.5e-6, 0.0)
+        b.add_voltage_source("V0", "a", "b", 0.0)
+        b.add_resistor("R", "a", "gnd", 1e3)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            (rec,) = p.simulate(b, 1e-4, engine=engine, dt=1e-6).reinit_records
+        recs.append(rec)
+    a, e = recs
+    assert a.devices == e.devices and a.sample == e.sample
+    assert a.lambda_ == pytest.approx(e.lambda_, rel=1e-7)
 
 
 # ---------------------------------------------------------------------

@@ -112,7 +112,8 @@ other engine (`engine='pwl'` with an explicit `dt`). On the fixed
 engine, do NOT reach for a smaller `dt`: a Newton abort there with PWL
 diodes next to a Newton device is the known diode-mask chatter, which
 gets worse as `dt` shrinks (the PSFB reproducer aborts at 10 ns and
-runs at 50 ns). Use a coarser `dt`, or smooth Shockley junctions
+runs at 50 ns; with the restart rule, the default of the
+number-changing release, it runs at 10, 5 and 2 ns). Use a coarser `dt`, or smooth Shockley junctions
 (`add_shockley_diode`) for those diodes.
 
 ### Symptom: residual oscillates but doesn't shrink

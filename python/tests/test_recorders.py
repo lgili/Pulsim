@@ -353,21 +353,26 @@ _TRUTH_STATES = [
 ]
 
 
-@pytest.mark.parametrize("eng", ["pwl", "trbdf2", "exact"])
+@pytest.mark.parametrize("eng", ["pwl", "pwl-unsplit", "trbdf2", "exact"])
 def test_event_rows_against_the_bridge_truth(eng):
     """Both limits where the engine has them, flagged: 'exact' (the exact
     engine's right limits), 'settled' (trbdf2's post-event state at the
-    instant), 'within_dt' (a bracket: the left limit at event_t, the end of
-    the first step under the new mode at event_t_right; pwl always, trbdf2
-    where its settle did not report). Never a fabricated right limit."""
+    instant; pwl's located event under event splitting, the release default),
+    'within_dt' (a bracket: the left limit at event_t, the end of the first
+    step under the new mode at event_t_right; pwl without the restart rule,
+    trbdf2 where its settle did not report). Never a fabricated right limit."""
     from .test_bridge_ground_truth import EVENTS
-    kw = dict(_LOOP_RUNS, exact=dict(engine="exact"))[eng]
+    kw = dict(_LOOP_RUNS, exact=dict(engine="exact"))[eng.partition("-")[0]]
+    if eng == "pwl-unsplit":   # release: the restart-less step, whose events are brackets
+        kw = dict(kw, discontinuity_restart=False)
     rec = p.Recorder("e", ["i(Ls)", "v(dp,dn)"], keep="none")
     res = p.simulate(_bridge(np.zeros(6), "conductance"), t_end=40e-3,
                      recorders=[rec], **kw)
     r = res.recorded["e"]
     res_set = set(r.event_resolution.tolist())
-    assert res_set <= {"exact": {"exact"}, "pwl": {"within_dt"},
+    # release: pwl locates every commutation now ('settled': 36 events, each
+    # within 4.6e-10 s of the truth; it was a 1 us bracket, 'within_dt')
+    assert res_set <= {"exact": {"exact"}, "pwl": {"settled"}, "pwl-unsplit": {"within_dt"},
                        "trbdf2": {"settled", "within_dt"}}[eng], res_set
     assert np.all(r.event_t_right >= r.event_t)
     sett = r.event_resolution != "within_dt"
@@ -382,6 +387,14 @@ def test_event_rows_against_the_bridge_truth(eng):
             assert abs(r.event_left["i(Ls)"][k] - iL) <= 1e-9
             found += 1
         elif eng == "pwl":
+            # located: measured 4.6e-10 s, 2.9e-5 V, 3.2e-6 A from the truth
+            k = int(np.argmin(np.abs(r.event_t - t)))
+            assert abs(r.event_t[k] - t) <= 5e-9, (t, r.event_t[k])
+            for side in (r.event_left, r.event_right):
+                assert abs(side["v(dp,dn)"][k] - vC) <= 2e-4
+            assert abs(r.event_left["i(Ls)"][k] - iL) <= 2e-5
+            found += 1
+        elif eng == "pwl-unsplit":
             # a bracket holds the truth (the stored engine's grid is 1 us)
             hit = (r.event_t <= t + 1e-9) & (t <= r.event_t_right + 1e-9)
             assert hit.any(), t

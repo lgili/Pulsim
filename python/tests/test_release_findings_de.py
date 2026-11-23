@@ -254,7 +254,9 @@ def test_the_default_probe_finds_the_orbit_to_1e_8_on_the_restart_engine():
 def test_the_default_probe_on_the_legacy_engine_reaches_the_floor():
     import test_steady_state as S
     b = S._buck()
-    r = p.steady_state(b, period=S.T, dt=S.DT, switch_fn=S._grid_gate(b))
+    # release: "the legacy engine" is the restart-less step, named explicitly
+    r = p.steady_state(b, period=S.T, dt=S.DT, switch_fn=S._grid_gate(b),
+                       discontinuity_restart=False)
     assert r.residual < 1e-12 and r.drift < 1e-12   # was 7.6e-10 / 7.2e-10
     assert r.n_period_runs == 4 + 2 + 2 + 8        # + the chord's one run
 

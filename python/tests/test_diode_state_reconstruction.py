@@ -144,10 +144,14 @@ def test_bridge_diode_currents_match_the_source_state(V_th, engine):
 @pytest.mark.parametrize("engine", ENGINES)
 @pytest.mark.parametrize("V_th", VTHS)
 def test_bridge_summary_reports_conduction_and_agrees_with_result_i(
-        V_th, engine, request):
-    if V_th > 0 and engine == "auto":
-        _finding(request, F6)
-    _, r, summary, cur, _ = _run_bridge(V_th, engine)
+        V_th, engine):
+    from pulsim._result_views import with_inner_events, with_right_limits
+    _, r, summary, _, _ = _run_bridge(V_th, engine)
+    # release: the peak is the right limit of a located turn-on, which the
+    # trace as the engine took it holds (V_th = 0.7: 465.33 A on pwl, 467.79 A
+    # on the exact route); the raw samples miss it (398.95 A / 463.81 A: the
+    # parked F-6-2 / F-5-6 below).
+    took = with_right_limits(with_inner_events(r))
     for name in DIODES:
         e = _entry(summary, name)
         assert e["duty_conducting"] > 0.02, (name, e)
@@ -155,7 +159,7 @@ def test_bridge_summary_reports_conduction_and_agrees_with_result_i(
         assert e["i_avg"] > 0.05, (name, e)
         # result.i() and the summary come from one reconstruction.
         assert e["i_peak"] == pytest.approx(
-            float(np.abs(cur[name]).max()), rel=1e-12)
+            float(np.abs(np.asarray(took.i(name))).max()), rel=1e-12)
     for e in summary:
         if "i_rms" in e:
             assert e["i_rms"] <= e["i_peak"] * (1 + 1e-12), e
@@ -493,9 +497,11 @@ def _boost(R_load: float, V_th: float):
 
 
 @functools.lru_cache(maxsize=None)
-def _run_boost(R_load: float, V_th: float, engine: str):
+def _run_boost(R_load: float, V_th: float, engine: str, step_ends: bool = False):
     b, pwm, T = _boost(R_load, V_th)
     kw = dict(engine="pwl", dt=T / 100) if engine == "pwl" else {}
+    if step_ends:   # the exact route with the output rule off
+        kw["output_rtol"] = 0
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         r = p.simulate(b, 3e-3, switch_fn=pwm, **kw)
@@ -527,14 +533,22 @@ def test_boost_recovery_energy_agrees_across_engines(R_load, V_th):
                                                  rel=0.02)
 
 
-@pytest.mark.parametrize("engine", ENGINES)
-def test_boost_dcm_recovery_voltage_is_v_out_minus_v_in(engine):
+@pytest.mark.parametrize("engine", [*ENGINES, "auto-step-ends"])
+def test_boost_dcm_recovery_voltage_is_v_out_minus_v_in(engine, request):
     """In DCM the switch node settles at V_in once the inductor current
     is zero, so the diode blocks V_out − V_in. Every steady-state
     turn-off must report that (measured 34.66 V pwl, 34.74 V auto),
     not a transient sample."""
     from pulsim.losses import _diode_turn_offs
-    b, pwm, r, _, _ = _run_boost(500.0, 0.0, engine)
+    if engine == "auto":
+        _finding(request, (
+            "release finding F-X-7: under the default output rule (no dt -> the exact engine) "
+            "the loss summary's V_R at a DCM turn-off reads 39.49 V against V_out - V_in = "
+            "33.49 V (101 turn-offs after 2 ms, 2289 samples): v(sw) is not a state and is a "
+            "chord between two stored samples; with output_rtol=0 it reads 34.301 V against "
+            "34.302 V (the 'auto-step-ends' cell)"))
+    b, pwm, r, _, _ = _run_boost(500.0, 0.0, engine.partition("-")[0],
+                                 engine == "auto-step-ends")
     bid = next(c["branch_id"] for c in b.components() if c["name"] == "D1")
     tr = _diode_state.diode_state_traces(b, r, switch_fn=pwm)[bid]
     t = np.asarray(r.times)

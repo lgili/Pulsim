@@ -128,10 +128,18 @@ def test_event_and_conduction_energy_converge_to_the_closed_form_truth(engine, k
         assert e_cond == pytest.approx(cond[n], rel=tol_cond), n
 
 
-def test_pwl_event_energy_is_first_order_in_dt():
+@pytest.mark.parametrize("kw,lo,hi", [
+    # the restart-less step reads an edge's two sides one dt apart: first order
+    # (1.89e-7 J -> 4.70e-8 J of 1.4639e-3 J for dt / 4: ratio 4.03)
+    (dict(discontinuity_restart=False), 2.5, 6.0),
+    # release: the restart rule reads the edge at its limits: second order
+    # (2.96e-10 J -> 1.85e-11 J: ratio 15.98)
+    ({}, 12.0, 20.0),
+], ids=["restart-less", "default"])
+def test_pwl_event_energy_order_in_dt(kw, lo, hi):
     ev, _ = _truth()
-    err = [abs(_kernel(_run("pwl", dt=dt), "S1")[0] - ev["S1"]) for dt in (1e-7, 2.5e-8)]
-    assert 2.5 < err[0] / err[1] < 6.0
+    err = [abs(_kernel(_run("pwl", dt=dt, **kw), "S1")[0] - ev["S1"]) for dt in (1e-7, 2.5e-8)]
+    assert lo < err[0] / err[1] < hi
 
 
 @pytest.mark.parametrize("integ", [None, "esdirk43"])

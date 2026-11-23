@@ -4,7 +4,8 @@
 > It lists the limitations re-verified on 2.0, each with its measured
 > effect and a workaround. This file is the 1.3 catalogue. Its sections
 > were not re-verified for 2.0, except two. The "Transient engines
-> (2.0)" defects still reproduce; the chatter circuit aborts at 20, 10,
+> (2.0)" defects still reproduce on 2.0 (the chatter one no longer with
+> the Unreleased defaults: see its section); the chatter circuit aborts at 20, 10,
 > 5 and 2 ns and runs at 50 ns, 2.4 % low. Its Shockley workaround is a
 > model change: the output falls by 16.6 %. Two entries are out of date: `.subckt`
 > is now flattened, and since 1.4.0 the AC sweep has factorised with
@@ -609,6 +610,13 @@ stamps nothing on a call keeps the explicit zeros of earlier calls in
 workspace) still use `Eigen::SparseLU`.
 
 ### Fixed engine: diode-mask chatter inside Newton at a small `dt`
+
+**Not with the defaults of the number-changing release (Unreleased).**
+With the restart rule on (the default there) the PSFB reproducer runs at
+`dt` = 10, 5 and 2 ns: last `v(vout)` 6.868 / 6.864 / 6.849 V with the
+saturable primary, 6.694 / 6.688 / 6.729 V with the hysteretic one,
+6.858 V with the linear one. What follows is the behaviour with
+`discontinuity_restart=False` (and of 2.0).
 
 With PWL diodes (`add_diode`) in the same circuit as a Newton device
 (saturable or hysteretic magnetics, a smooth junction),

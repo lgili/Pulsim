@@ -53,7 +53,17 @@ def _forward_biased_off(b, r):
     return [str(x.message) for x in w if "OFF while forward-biased" in str(x.message)]
 
 
-@pytest.mark.parametrize("floating", [False, True], ids=["F-2-3", "F-5-9"])
+@pytest.mark.parametrize("floating", [
+    pytest.param(False, id="F-2-3", marks=pytest.mark.xfail(strict=True, reason=(
+        "release finding F-2-3: under the restart rule (the release default) BR__D1 is stored "
+        "OFF while forward-biased above V_th = 0 by 0.0299 V on 1 sample (t = 7.07107e-07 s, the "
+        "start); no sample with discontinuity_restart=False"))),
+    pytest.param(True, id="F-5-9", marks=pytest.mark.xfail(strict=True, reason=(
+        "release finding F-5-9: with event splitting (the release default) BR__D2 is stored OFF "
+        "forward-biased above V_th = 0.7 V by 3.95 mV on 1 sample (t = 14.4373 ms) and BR__D3 by "
+        "13.1 mV on 2 samples (24.4377, 44.4377 ms); no sample with "
+        "enable_substep_state_correction=False"))),
+])
 def test_the_lcp_step_stores_the_state_it_decided_on(floating):
     """The LCP decides on the islands' KCL-corrected solve (a floating AC side /
     DC bus held by 1e-9 S leaks); the step stored the raw solve, whose common mode

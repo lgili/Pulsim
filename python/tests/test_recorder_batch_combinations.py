@@ -88,6 +88,11 @@ def test_rows_across_batch_boundaries_with_events(eng):
     np.testing.assert_array_equal(np.asarray(r1.states), np.asarray(r0.states))
     a = r1.recorded["r"]
     assert np.all(np.diff(a.times) > 0)
-    np.testing.assert_array_equal(a.times, t)
-    np.testing.assert_array_equal(a["v(out)"], np.asarray(r1.v("out")))
-    np.testing.assert_array_equal(a["v(sw)"], np.asarray(r1.v("sw")))
+    # release: the rows are the steps as the engine took them, a located
+    # event inside a split step included (pwl: 502 rows for 501 samples, the
+    # extra one at 1.4779e-4 s); without inner events the two are the same
+    from pulsim._result_views import with_inner_events
+    took = with_inner_events(r1)
+    np.testing.assert_array_equal(a.times, np.asarray(took.times))
+    np.testing.assert_array_equal(a["v(out)"], np.asarray(took.v("out")))
+    np.testing.assert_array_equal(a["v(sw)"], np.asarray(took.v("sw")))

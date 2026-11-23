@@ -74,10 +74,16 @@ self-consistent.
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 import numpy as np
 import pytest
 
 import pulsim as p
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "benchmarks" / "tools"))
+import next_defaults  # noqa: E402
 
 V_BUS, F_PWM, PHASE = 100.0, 100e3, 1.0
 N_PRIMARY, L_M_PATH, A_CORE, L_GAP = 12, 0.10, 3.5e-4, 1.5e-3
@@ -146,11 +152,23 @@ _STALL = pytest.mark.xfail(strict=True,
                           "smooth-diode control below is the proof.")
 
 
-# release: the saturable primary survives the step now (the mark stays on the hysteretic one)
-@pytest.mark.parametrize("primary", ["saturable", pytest.param("hysteretic", marks=_STALL)])
-def test_a_newton_device_survives_a_stiff_step(primary):
+# release: both primaries survive the step under the release defaults (it
+# aborted near t = 1.5 us at 10, 5 and 2 ns: the legacy cell below).
+# Saturable: 6.8685 / 6.8642 / 6.8492 V at 10 / 5 / 2 ns; hysteretic 6.6939 /
+# 6.6878 / 6.7289 V; linear 6.8577 V. The hysteretic core's loop loss lowers
+# the output, here as at 50 ns (6.6980 V): the control's bound, 5 %.
+@pytest.mark.parametrize("primary,rel", [("saturable", 0.02), ("hysteretic", 0.05)])
+def test_a_newton_device_survives_a_stiff_step(primary, rel):
     v = _run(primary, 10e-9)
-    assert v == pytest.approx(_run("linear", 10e-9), rel=0.02), v
+    assert v == pytest.approx(_run("linear", 10e-9), rel=rel), v
+
+
+@pytest.mark.parametrize("primary", ["saturable", "hysteretic"])
+@_STALL
+def test_a_newton_device_survives_a_stiff_step_on_the_legacy_defaults(primary):
+    with next_defaults.legacy():
+        v = _run(primary, 10e-9)
+        assert v == pytest.approx(_run("linear", 10e-9), rel=0.05), v
 
 
 def test_the_control_smooth_diodes_make_the_same_circuit_converge():
@@ -225,8 +243,10 @@ def test_the_fixed_engine_abort_does_not_send_the_user_to_a_smaller_dt():
     """DEFECT 2's abort on the fixed engine. A smaller dt makes the
     mask chatter worse (it aborts at 10, 5 and 2 ns and runs at 50 ns,
     the control above), so the message must not suggest one, and it
-    must name the known limitation and the measured workarounds."""
-    with pytest.raises(p.SimulationAborted) as exc:
+    must name the known limitation and the measured workarounds.
+    release: the abort is the pre-release defaults' (next_defaults.legacy();
+    under the release defaults the circuit runs at 10, 5 and 2 ns)."""
+    with pytest.raises(p.SimulationAborted) as exc, next_defaults.legacy():
         _run("saturable", 10e-9)
     msg = str(exc.value)
     assert "solve_with_newton" in msg, msg

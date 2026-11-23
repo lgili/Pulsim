@@ -70,8 +70,12 @@ def test_measures_equal_time_average_on_the_same_samples(eng):
     assert res.avg("v(dp,dn)") == pytest.approx(
         p.time_average(t, v), rel=1e-12)
     traw = np.asarray(res.times)
-    k = traw.size // 2
-    if eng != "exact":   # (the exact engine's sample k may be an event row)
+    # release: a sample that is not an event row (an event row reads its right
+    # limit: the middle sample of the pwl run is the commutation at 20 ms)
+    idx = getattr(res, "right_limit_index", None)   # (None on trbdf2)
+    ev = set(np.asarray(() if idx is None else idx, dtype=int).tolist())
+    k = next(j for j in range(traw.size // 2, traw.size - 1) if not {j, j + 1} & ev)
+    if eng != "exact":   # (the exact engine stores its event rows as samples)
         assert res.at("v(dp)", traw[k]) == pytest.approx(
             float(np.asarray(res.v("dp"))[k]), rel=1e-15, abs=1e-300)
     tm = 0.5 * (traw[k] + traw[k + 1])

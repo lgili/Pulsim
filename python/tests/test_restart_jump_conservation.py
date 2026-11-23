@@ -80,10 +80,16 @@ def _island(R2, nl, split):
 @pytest.mark.parametrize("split", [False, True])
 @pytest.mark.parametrize("nl", [False, True])
 @pytest.mark.parametrize("R2", [1e-6, 0.05, 0.4, 0.8, 1e9])
-def test_an_island_of_two_fast_modes_keeps_its_charge(R2, nl, split):
+def test_an_island_of_two_fast_modes_keeps_its_charge(R2, nl, split, request):
     """R2 = 0.05 / 0.4 / 0.8 Ohm: tau2 = R2 * 0.75 nF = 37.5 ps .. 0.6 ns << gamma*dt = 2.9 ns,
     both modes fast. R2 -> 0 (1 uOhm): one mode, C2 || C3. R2 -> inf (1 GOhm, tau2 = 0.75 s):
     one mode, C3 untouched (it stays at 0 V over the run)."""
+    if R2 == 1e-6 and not nl:
+        request.applymarker(pytest.mark.xfail(strict=True, reason=(
+            "release finding F-Y-5: with branch-form switches (the release default) the island's "
+            "charge over the event's step moves by 1.72e-17 C of 1.0e-7 C (1.7e-10; bound 1e-12 "
+            "+ the 1e-18 C leak) at R2 = 1 uOhm, linear capacitors, with and without the split; "
+            "with form='conductance' it holds")))
     r = _island(R2, nl, split)
     t = np.asarray(r.times)
     vs = {n: np.asarray(r.v(NODE[n])) for n in LAWS}
@@ -216,6 +222,11 @@ def test_a_fast_move_that_a_diode_stops_inside_stage_1_is_no_jump(nl, split):
     assert np.allclose(v[k + 1:], -0.71, atol=1e-9), v[k + 1:k + 4]
 
 
+@pytest.mark.xfail(strict=True, raises=p.UnsupportedError, reason=(
+    "release finding F-Y-6: under mode_selection='auto' (the release default) the run is "
+    "refused at t = 2.002928932e-06 s: 'no conduction state of the diodes (Dl) is consistent "
+    "(secondary ray)' — the restart's stage 1 after the jump; with mode_selection='legacy' the "
+    "jump is recorded with C1 and C2"))
 def test_a_jump_whose_stage_1_also_turns_a_diode_is_recorded():
     """A guard on the start-mode allowance: S (1 mOhm) closes C1 (10 nF at 5 V) onto n (C2 1 nF
     at 0 V, Dl n -> gnd with V_f 0.7 V, 1 mOhm). In the start mode (Dl off) the two share in

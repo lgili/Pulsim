@@ -188,7 +188,11 @@ def test_steady_state_stats_window_and_lookup(rectifier_runs):
     assert by_last.mean == pytest.approx(by_from.mean, rel=1e-12)
     # A branch name resolves to its current; an array is taken as is.
     i_l = p.steady_state_stats(fixed, "Lc", t_from=2e-3)
-    i_l2 = p.steady_state_stats(fixed, fixed.i("Lc"), t_from=2e-3)
+    # release: a name is read on the trace with its event limits (the restart
+    # rule stores them: mean 3.1650590851 A; the raw samples' trapezoid reads
+    # 3.1650593505 A), so the array is taken from that trace
+    took = p.with_event_limits(fixed)
+    i_l2 = p.steady_state_stats(took, took.i("Lc"), t_from=2e-3)
     assert i_l.mean == i_l2.mean
     # In steady state the capacitor carries no DC, so the inductor's
     # average current is the load's: V_avg / R.

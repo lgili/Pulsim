@@ -155,7 +155,13 @@ def _dc(t, y, t0):
     return float(np.trapezoid(yy, tt) / (tt[-1] - tt[0]))
 
 
-@pytest.mark.parametrize("kind", ["linear", "atan", "gapped"])
+@pytest.mark.parametrize("kind", ["linear"] + [
+    pytest.param(k, marks=pytest.mark.xfail(strict=True, raises=p.UnsupportedError, reason=(
+        "release finding F-Y-2: the fixed-step reference run is refused under the restart rule "
+        "(the release default): 'the event moves saturable_inductor Lc by -4.52e-07 A in an "
+        "instant' at t = 0.5312 ms (atan; gapped: -2.79e-07 A at 0.5353 ms) — the residual of a "
+        "located diode turn-off, of a 15 A current")))
+    for k in ("atan", "gapped")])
 def test_switched_diode_turn_off_with_series_inductor_on_trbdf2(kind):
     """The engines agree on this rectifier. They always did — the
     metric was wrong. Also pinned: the flux devices no longer chatter

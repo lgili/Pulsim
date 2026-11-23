@@ -154,8 +154,13 @@ def test_stateless_leg_loss_port_matches_the_closed_form(engine):
     # +-p_on dt / 2 per edge (a turn-off loses it, a turn-on gains it).
     p_on = want["E_cond_per_s_on"]
     miss = want["E_cond"] - got["E_cond"]
-    edges = (want["n_off"] - want["n_on"]) / 2 if engine == "pwl" else 0.0
-    assert 0.0 <= miss <= p_on * got["h1"] * (1 + edges) * (1 + 1e-9), (miss, got["h1"])
+    if engine == "pwl":
+        # release: the restart rule starts consistently and reads each edge at
+        # its limits: the closed form to rounding (measured -2.6e-16 J of
+        # 1.8e-3 J; it missed 4.2e-7 J, within p_on dt (1 + 1/2), without it)
+        assert abs(miss) <= 1e-9 * want["E_cond"], miss
+        return
+    assert 0.0 <= miss <= p_on * got["h1"] * (1 + 1e-9), (miss, got["h1"])
 
 
 @pytest.mark.parametrize("case", ["port", "diode+port", "port+rec", "load+rec",

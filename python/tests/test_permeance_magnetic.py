@@ -682,7 +682,11 @@ def _buck(magnetic):
 
 @pytest.mark.filterwarnings("ignore:simulate\\(engine='trbdf2'\\)")
 @pytest.mark.parametrize("engine,kw,tol", [
-    ("pwl", dict(dt=1e-7), 1e-9),
+    # release: "the same grid" is the unsplit step (no located event)
+    ("pwl", dict(dt=1e-7, enable_substep_state_correction=False), 1e-9),
+    # the release default locates each commutation in its step: the two
+    # formulations place it to the locator's residual (measured 2.6e-9)
+    pytest.param("pwl", dict(dt=1e-7), 2e-8, id="pwl-default"),
     ("trbdf2", dict(rtol=1e-8, atol=1e-10), 1e-4),
 ])
 def test_gapped_core_in_a_switching_buck_equals_its_inductor(engine, kw, tol):

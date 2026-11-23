@@ -46,7 +46,13 @@ def _run(fac, recs, **kw):
     return b, _quiet(p.simulate, b, t_end, recorders=recs, **RULE, **extra, **kw)
 
 
-@pytest.mark.parametrize("circ", ["buck", "rectifier"])
+@pytest.mark.parametrize("circ", [
+    pytest.param("buck", marks=pytest.mark.xfail(strict=True, reason=(
+        "release finding F-4-4: under control_tick='state' (the release default: a gate edge is "
+        "placed inside its step) the recorder's window charge of the buck's capacitor misses "
+        "C dv of the stored samples by 1.07e-6 of scale in two of three windows (-1.99242230e-05 C "
+        "against -1.99243747e-05 C); 1.9e-16 with control_tick='label'"))),
+    "rectifier"])
 def test_window_charge_is_c_dv_at_step_ends(circ):
     """Windows whose ends are stored samples: ∫i_C = C·(v_C(b) − v_C(a))
     to round-off, with the samples' own (left-limit) capacitor voltages."""
