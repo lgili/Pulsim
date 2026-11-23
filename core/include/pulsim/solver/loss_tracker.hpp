@@ -337,16 +337,30 @@ private:
                 // limit; else the step's ends
                 Real vb = d.v, ib = d.i, vp = v1, ip = i1;
                 const auto bit = static_cast<Size>(d.law.bit);
-                if (L.start && L.m_start.get(bit) == on1) {
+                // ONE definition: the stored rows are the state values x(t_e+)
+                // (rl_*, F-SB-1), not the lines' quadrature starts; a
+                // continuity point's row is the stored left (d.v, d.i)
+                if (L.rl_start_ok && L.rl_m_start.get(bit) == on1) {
+                    if (!L.rl_start_left) {
+                        vp = v_of_(d, L.rl_start);
+                        ip = i_of_(d, L.rl_start, on1);
+                    } else {
+                        vp = d.v;
+                        ip = d.i;
+                    }
+                } else if (L.start && L.m_start.get(bit) == on1) {
                     vp = v_of_(d, L.x_start);
                     ip = i_of_(d, L.x_start, on1);
                 } else {
                     for (Size j = 0; j < L.n; ++j) {
-                        if (!L.right_ok[j] || L.m_right[j].get(bit) != on1) continue;
+                        const bool rl = !L.held[j] && L.rl_right_ok[j];
+                        const auto& mr = rl ? L.rl_m_right[j] : L.m_right[j];
+                        if (!(rl || L.right_ok[j]) || mr.get(bit) != on1) continue;
+                        const Vector& xr = rl ? L.rl_right[j] : L.right[j];
                         vb = v_of_(d, L.left[j]);
                         ib = i_of_(d, L.left[j], L.m_left[j].get(bit));
-                        vp = v_of_(d, L.right[j]);
-                        ip = i_of_(d, L.right[j], on1);
+                        vp = v_of_(d, xr);
+                        ip = i_of_(d, xr, on1);
                         break;
                     }
                 }
