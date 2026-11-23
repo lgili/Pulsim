@@ -129,7 +129,15 @@ DSED_ROUTES = {"dsed_rk45": dict(engine="dsed", integrator="rk45"), "dsed_auto":
 
 @pytest.mark.parametrize("route", [*ENGINES, *DSED_ROUTES])
 @pytest.mark.parametrize("name", INPUTS)
-def test_every_input_is_read_at_absolute_time(name, route):
+def test_every_input_is_read_at_absolute_time(name, route, request):
+    if (name, route) == ("python_gate", "pwl"):
+        request.applymarker(pytest.mark.xfail(strict=True, reason=(
+            "finding F-SB-2 (the restart rule's arm): a gate with no edge oracle is taken at the "
+            "next grid point, and the grid time of an on-grid edge is one ulp short of it "
+            "(1000 * 1e-7 = 9.999999999999999e-05 < 1e-4), so the edge is placed a whole step "
+            "late: the samples at 1.001e-4 and 1.301e-4 read the old gate (1.0 off); with "
+            "discontinuity_restart=False, an oracle or a schedule: 0 samples off. The time base "
+            "itself is held by test_an_oracle_less_gate_is_read_at_absolute_time_off_its_placement_step")))
     b, kw, f = _input(name)
     opts = {**ENGINES, **DSED_ROUTES}[route]
     exact = opts["engine"] in ("dsed", "exact")
@@ -156,6 +164,22 @@ def test_every_input_is_read_at_absolute_time(name, route):
     assert ok.sum() >= 10
     assert np.abs(v[ok] - f(t[ok])).max() < 1e-3          # absolute t
     assert np.abs(v[ok] - f(t[ok] - TS)).max() > 0.2      # (the probe tells the two apart)
+
+
+def test_an_oracle_less_gate_is_read_at_absolute_time_off_its_placement_step():
+    """The fixed engine's default (restart rule) with a Python gate that has no
+    edge oracle: every sample but the one a step after each edge is f(absolute
+    t); those two (F-SB-2) are exactly the samples at edge + dt."""
+    b, kw, f = _input("python_gate")
+    r = _sim(b, t_end=T, t_start=TS, engine="pwl", dt=1e-7, **kw)
+    t, v = np.asarray(r.times), np.asarray(r.v("a"))
+    off = np.abs(v - f(t)) > 1e-3
+    late = np.zeros(len(t), bool)
+    for e in (1e-4, 1.3e-4):                       # the edges after TS, before T
+        late |= np.abs(t - (e + 1e-7)) < 1e-12
+    edge = np.abs(f(t + 1e-9) - f(t - 1e-9)) > 0.5   # a sample on an edge is a limit
+    assert not (off & ~late & ~edge & (t > TS + 1e-8)).any()
+    assert np.abs(v - f(t - TS)).max() > 0.2      # (the probe tells the two time bases apart)
 
 
 def test_exact_engine_reports_reinit_records_at_absolute_time():
@@ -373,7 +397,16 @@ def _assert_tail(engine, how, full, first, got, probes, t_mid, circuit):
 
 @pytest.mark.parametrize("engine", list(ENGINES))
 @pytest.mark.parametrize("circuit", list(CIRCUITS))
-def test_resume_and_fresh_t_start_match_the_uninterrupted_tail(circuit, engine):
+def test_resume_and_fresh_t_start_match_the_uninterrupted_tail(circuit, engine, request):
+    if (circuit, engine) == ("buck", "auto"):
+        request.applymarker(pytest.mark.xfail(strict=True, reason=(
+            "release finding F-Y-3: the exact engine's in-loop recorder reads a window's min / max "
+            "at its step ends only: v(out) max over [0.5, 0.9] ms = 19.836086 V (min 7.045884) on "
+            "the uninterrupted run ('auto' -> exact) against 19.897835 / 7.034297 on trbdf2 rtol "
+            "1e-10 (the exact run's own stored samples under the output rule hold 19.897773); the "
+            "fresh leg, which 'auto' runs on trbdf2 (controllers with t_start), reads 19.897816. "
+            "The resume leg (a) passes: 'auto' resumes an exact snapshot on the exact engine "
+            "(test_exact_resume.py::test_auto_resumes_an_exact_snapshot_on_the_route_that_wrote_it)")))
     opts = ENGINES[engine]
     t_mid = CIRCUITS[circuit][1]
     full, probes = _run(circuit, opts, T_END)

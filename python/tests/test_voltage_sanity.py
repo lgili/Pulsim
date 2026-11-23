@@ -43,11 +43,17 @@ def _sw(t, T=1e-4):
     return m
 
 
-def test_the_megavolt_is_named():
+# release: the stored megavolt is the rule-off engine's; under the default
+# restart rule the cut is an impulse record and the trace stays at 48 V.
+STORED = dict(discontinuity_restart=False)
+
+
+@pytest.mark.parametrize("kw", [STORED, {}], ids=["stored", "impulse"])
+def test_the_megavolt_is_named(kw):
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         res = p.simulate(opening_inductor(), t_end=1e-3, dt=1e-8,
-                          switch_fn=_sw)
+                          switch_fn=_sw, **kw)
     hits = [w for w in caught if "largest voltage any source" in
             str(w.message)]
     assert len(hits) == 1
@@ -57,8 +63,34 @@ def test_the_megavolt_is_named():
     assert "snubber" in msg               # and what to do about it
 
     v = np.asarray(res.v("sw"))
-    assert np.abs(v).max() > 1e5          # the premise really holds
+    if kw:
+        assert np.abs(v).max() > 1e5      # the premise really holds
+    else:
+        # the premise under the restart rule: no sample holds the spike, the
+        # cut is ten impulse records of L*i = 2.4e-3 V*s; the warning names
+        # who cut whom and reads the impulse over one step (2.4e5 V)
+        assert np.abs(v).max() <= 48.0 * (1 + 1e-9)
+        cuts = [r for r in res.reinit_records if r.kind == "cut_set"]
+        assert len(cuts) == 10 and cuts[0].states == ["L"] and cuts[0].devices == ["S"]
+        assert abs(cuts[0].lambda_) == pytest.approx(2.4e-3, rel=1e-3)
+        assert "'S' cut the current of 'L'" in msg and "reinit_records" in msg
+        assert res._implausible_voltage.peak == pytest.approx(2.4e5, rel=1e-3)
+        assert res._implausible_voltage.source_scale == pytest.approx(48.0)
     assert res._implausible_voltage.node >= 0
+
+
+def test_an_impulse_below_the_factor_says_nothing():
+    """The impulse is judged as the stored spike was (|lambda| / dt against
+    factor x the source scale): 2.4e5 V is 5000 x 48 V; a factor above that
+    reports nothing, and the records stay."""
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        res = p.simulate(opening_inductor(), t_end=1e-3, dt=1e-8,
+                          switch_fn=_sw, voltage_sanity_factor=6000.0)
+    assert [w for w in caught
+            if "largest voltage any source" in str(w.message)] == []
+    assert getattr(res, "_implausible_voltage", None) is None
+    assert len(res.reinit_records) == 10
 
 
 def test_an_ordinary_converter_says_nothing():
@@ -93,7 +125,7 @@ def test_the_scan_is_read_only_and_reports_the_worst_node():
     b = opening_inductor()
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        res = p.simulate(b, t_end=1e-3, dt=1e-8, switch_fn=_sw)
+        res = p.simulate(b, t_end=1e-3, dt=1e-8, switch_fn=_sw, **STORED)
     before = np.array(res.states, copy=True)
 
     f = k.find_implausible_voltage(b.graph, b.pool, res)
@@ -113,6 +145,7 @@ def test_a_generous_factor_can_be_asked_for():
     b = opening_inductor()
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        res = p.simulate(b, t_end=1e-3, dt=1e-8, switch_fn=_sw)
+        res = p.simulate(b, t_end=1e-3, dt=1e-8, switch_fn=_sw, **STORED)
+    assert k.find_implausible_voltage(b.graph, b.pool, res).node >= 0
     assert k.find_implausible_voltage(b.graph, b.pool, res,
                                        factor=1e9).node == -1

@@ -319,3 +319,25 @@ def test_what_depends_on_the_runs_end_time_today(make):
     assert len(ih) > 0.9 * len(th)
     xu, xh = np.asarray(u.states), np.asarray(h.states)
     np.testing.assert_allclose(xh[ih], xu[iu], rtol=0, atol=1e-12 * np.abs(xu).max())
+
+
+def test_auto_resumes_an_exact_snapshot_on_the_route_that_wrote_it():
+    """release: engine='auto' without dt runs the exact engine, so the resume
+    leg of the same call takes the route that wrote the snapshot (it was
+    refused by name while 'auto' never routed there). A call that leaves the
+    exact route (a dt: the fixed step) is still refused by name."""
+    def leg(t_end, **kw):
+        b, fn = _ccm()
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            return p.simulate(b, t_end, switch_fn=fn, **kw)
+    a = leg(100e-6)
+    assert a.engine_used == "dsed"
+    r = leg(200e-6, resume_from=pickle.loads(pickle.dumps(a.final_snapshot)))
+    u = leg(200e-6)
+    assert r.engine_used == "dsed" and np.asarray(r.times)[0] == a.final_snapshot.t
+    xr, xu = np.asarray(r.final_snapshot.x), np.asarray(u.final_snapshot.x)
+    assert np.max(np.abs(xr - xu)) <= 1e-9 * np.max(np.abs(xu))
+    with pytest.raises(p.UnsupportedError, match="written by the exact engine") as ei:
+        leg(200e-6, dt=1e-8, resume_from=a.final_snapshot)
+    assert ei.value.feature == "resume_from"

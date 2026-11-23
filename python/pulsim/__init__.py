@@ -2906,23 +2906,30 @@ def simulate(
 _AUTO_EXACT_OFF = contextvars.ContextVar("pulsim_auto_exact_off", default=False)
 
 
-def _auto_exact_fallback(builder, plan, err):
-    """engine='auto' routed a run to the exact engine and it refused by name:
-    the same call again with the exact route off (trbdf2, or the 'auto'
-    rule's own refusal), the refusal kept as the first route reason. A
-    refusal raised mid-run has already called the run's callbacks once.
-    Any other run's refusal is re-raised unchanged."""
-    if plan.engine_asked != "auto" or plan.engine != "dsed":
-        raise err
+def _auto_exact_replan(builder, args, err):
+    """The plan of the same call with the exact route off (trbdf2, or the
+    'auto' rule's own refusal), the exact engine's refusal kept as the first
+    route reason."""
     tok = _AUTO_EXACT_OFF.set(True)
     try:
-        plan2 = _plan_run(builder, *plan.resolved_from._args)
+        plan2 = _plan_run(builder, *args)
     finally:
         _AUTO_EXACT_OFF.reset(tok)
     why = (f"engine='auto': the exact engine refused the run "
            f"({getattr(err, 'feature', '') or type(err).__name__}: "
            f"{str(err).splitlines()[0][:160]})")
-    plan2 = plan2._replace(route_reasons=(why, *plan2.route_reasons))
+    return plan2._replace(route_reasons=(why, *plan2.route_reasons))
+
+
+def _auto_exact_fallback(builder, plan, err):
+    """engine='auto' routed a run to the exact engine and it refused by name:
+    the same call again with the exact route off. A refusal raised mid-run
+    has already called the run's callbacks once. (A refusal of the exact
+    route's PLAN is re-planned in _plan_run.) Any other run's refusal is
+    re-raised unchanged."""
+    if plan.engine_asked != "auto" or plan.engine != "dsed":
+        raise err
+    plan2 = _auto_exact_replan(builder, plan.resolved_from._args, err)
     return _finalize(_ENGINES[plan2.engine](plan2), plan2)
 
 
@@ -3242,6 +3249,18 @@ def _dsed_refused(builder, _opt_values, device_path, enable_nonlinear_refresh,
         "should_continue": should_continue})
 
 
+_EXACT_SNAPSHOT_WHY = (
+    "the snapshot was written by the exact engine, whose state has no companion "
+    "history (the trapezoidal i_C / v_L this engine's step needs), so it does "
+    "not map one to one onto this engine's state. Resume with engine='dsed'.")
+
+
+def _exact_snapshot(resume_from):
+    """True for a snapshot the exact engine wrote (controller-state kind 3)."""
+    cs = getattr(resume_from, "controller_state", None)
+    return cs is not None and cs[0] == 3
+
+
 def _route(
     engine, builder, _dsed, _plan, _opt_values, dt, t_start, resume_from,
     step_observer, closed_loops, controller_period, live_stream, progress,
@@ -3288,6 +3307,13 @@ def _route(
             engine = "dsed"
             _auto_exact = ["engine='auto' without dt: every device has an exact "
                            "segment, so the exact engine runs it"]
+    if engine == "auto" and _exact_snapshot(resume_from):
+        raise _unsupported(
+            "auto", "resume_from",
+            "simulate(engine='auto', resume_from=...): " + _EXACT_SNAPSHOT_WHY
+            + " (This call does not take the exact route: it passes dt or a "
+            "keyword the exact engine refuses. Resume with the options of the "
+            "run that wrote the snapshot.)")
     if engine == "dsed":
         # Hard-fail on kwargs the DSED path cannot honor. Silently
         # dropping these is the worst failure mode a simulator can
@@ -3858,15 +3884,12 @@ def _plan_run(
                 "'bdf2' or a fresh t_start, whose cause an unpickled "
                 "snapshot no longer carries). Resuming from it would start "
                 "from zero without saying so.")
-        _cs = resume_from.controller_state
-        if engine != "dsed" and _cs is not None and _cs[0] == 3:
+        # ('auto' is decided in _route: the resume leg takes the route that
+        # wrote the snapshot, or is refused there)
+        if engine not in ("dsed", "auto") and _exact_snapshot(resume_from):
             raise _unsupported(
                 engine, "resume_from",
-                f"simulate(engine={engine!r}, resume_from=...): the snapshot was "
-                "written by the exact engine, whose state has no companion "
-                "history (the trapezoidal i_C / v_L this engine's step needs), so "
-                "it does not map one to one onto this engine's state. Resume with "
-                "engine='dsed'.")
+                f"simulate(engine={engine!r}, resume_from=...): " + _EXACT_SNAPSHOT_WHY)
     _ic_from_builder = False
     # A snapshot IS the state: builder ICs (i0=/c0=) must not be
     # synthesised alongside it, or the engines re-seed the stateful
@@ -3922,7 +3945,8 @@ def _plan_run(
             "derivative here. Drop mode_selection.")
 
     # (engine 'dsed' resumes on its own absolute clock: t_end is absolute there)
-    if engine != "dsed" and resume_from is not None and t_start == 0.0:
+    if engine != "dsed" and resume_from is not None and t_start == 0.0 \
+            and not _exact_snapshot(resume_from):   # (that one resumes on the exact engine)
         # Resuming means TIME continues too: a sine source
         # restarted from phase zero makes the second segment see a
         # different waveform than the run it claims to continue
@@ -3969,12 +3993,19 @@ def _plan_run(
         # ---- engine='pwl' from here on ----
         # mypy/pyright: narrow Optional[float] → float.
         assert dt is not None and dt > 0
-    (_plan, switch_fn, step_observer, _step_observer_user, _b_extra_fn_user,
-     _closed_loops_user) = _compose_for(
-        engine, _plan, t_start=t_start, t_end=t_end, dt=dt,
-        sensitivities=sensitivities, switch_fn=switch_fn,
-        step_observer=step_observer, b_extra_fn=b_extra_fn,
-        closed_loops=closed_loops, resume_from=resume_from)
+    try:
+        (_plan, switch_fn, step_observer, _step_observer_user, _b_extra_fn_user,
+         _closed_loops_user) = _compose_for(
+            engine, _plan, t_start=t_start, t_end=t_end, dt=dt,
+            sensitivities=sensitivities, switch_fn=switch_fn,
+            step_observer=step_observer, b_extra_fn=b_extra_fn,
+            closed_loops=closed_loops, resume_from=resume_from)
+    except UnsupportedError as _e:
+        # 'auto' took the exact route and its PLAN refuses by name (controllers
+        # with t_start, ...): the variable step, as for a refusal in the run
+        if _engine_asked != "auto" or engine != "dsed":
+            raise
+        return _auto_exact_replan(_caller_builder, _resolved._args, _e)
     if engine == "dsed":
         # ---- engine='dsed': the exact step (run by _run_dsed). ----
         # For engine='dsed', `integrator` ∈ {'auto', 'rk45', 'bdf2', None}.
@@ -4920,7 +4951,7 @@ def _finalize(out, plan):
     # the trbdf2 / exact sections above, at the same frame depth, so the
     # warning names the same caller line. (Its try covers ONLY the kernel
     # call: under `-W error` the warning must still raise.)
-    _auto_check_voltage_sanity(res, builder, voltage_sanity_factor)
+    _auto_check_voltage_sanity(res, builder, voltage_sanity_factor, dt)
 
     # A retried step integrated its interval more finely than the
     # caller asked for. That is a change in ACCURACY, and the record
@@ -5413,7 +5444,7 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
     return why
 
 
-def _auto_check_voltage_sanity(res, builder, factor):
+def _auto_check_voltage_sanity(res, builder, factor, dt=None):
     """Run the implausible-voltage detector on any result: the ONE check,
     called from `_finalize` for pwl, trbdf2 and the exact engine
     (add-kernel-simulation-object task 6.2). The try covers ONLY the
@@ -5442,6 +5473,8 @@ def _auto_check_voltage_sanity(res, builder, factor):
                 _np.asarray(res.states, dtype=float), f)
     except Exception:  # pragma: no cover — never break a good run
         return
+    if dt and volt is not None and volt.node < 0 and res.reinit_records:
+        return _warn_impulse_voltage(res, builder, f, dt)
     if volt is not None and volt.node >= 0:
         import warnings
         res._implausible_voltage = volt
@@ -5449,6 +5482,42 @@ def _auto_check_voltage_sanity(res, builder, factor):
             "simulate(): " + _k.describe_implausible_voltage(
                 builder.graph, builder.pool, volt),
             stacklevel=4)
+
+
+def _warn_impulse_voltage(res, builder, f, dt):
+    """Under the restart rule an inductor current cut in an instant is an
+    impulse RECORD (``res.reinit_records``), not a stored megavolt: the
+    largest record is judged as the spike one step would have held,
+    |lambda| / dt across the device that cut the current (at the node it
+    shares with the inductor) — by the same detector, so the factor, the
+    source scale and its refusals to judge are the stored trace's."""
+    import numpy as _np
+    import warnings
+    _k = _pulsim_module
+    cuts = [r for r in res.reinit_records if r.kind == "cut_set" and r.devices]
+    if not cuts:
+        return
+    r = max(cuts, key=lambda q: abs(q.lambda_))
+    try:
+        ends = [{br["from_"], br["to"]} - {-1} for br in (
+            builder.graph.branches[builder.branch_id_of(n)]
+            for n in (r.devices[0], *r.states[:1]))]
+    except IndexError:  # the record names a node, not a device
+        return
+    row = _np.zeros((1, len(builder.graph.nodes)))
+    row[0, sorted(ends[0] & ends[-1] or ends[0])] = abs(r.lambda_) / float(dt)
+    volt = _k.find_implausible_voltage(builder.graph, builder.pool, [float(r.t)], row, f)
+    if volt.node < 0:
+        return
+    res._implausible_voltage = volt
+    warnings.warn(
+        f"simulate(): '{r.devices[0]}' cut the current of "
+        f"{', '.join(repr(n) for n in r.states)} in an instant ({len(cuts)} time(s); "
+        f"largest at t = {r.t:.6g} s: an impulse of {abs(r.lambda_):.4g} V*s, "
+        f"{r.dW:.4g} J removed, see res.reinit_records). Over one step of "
+        f"{float(dt):g} s that is: "
+        + _k.describe_implausible_voltage(builder.graph, builder.pool, volt),
+        stacklevel=5)
 
 
 def _check_right_limit_voltage(res, builder, factor):

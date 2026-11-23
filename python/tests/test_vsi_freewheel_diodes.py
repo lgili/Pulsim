@@ -14,7 +14,10 @@ by default and `with_freewheel_diodes=False` is the opt-out.
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
+import pytest
 
 import pulsim as p
 
@@ -92,7 +95,9 @@ def test_without_them_the_answer_is_silently_absurd():
     run with an impossible answer in it.
     """
     b, vsi = _bridge(False)
-    r = p.simulate(b, t_end=4e-3, dt=2e-6,
+    # release: the stored 42 kV is the rule-off engine's answer (the premise
+    # of this test); the default's is the next test
+    r = p.simulate(b, t_end=4e-3, dt=2e-6, discontinuity_restart=False,
                    switch_fn=_chop(vsi, b.graph.num_switches), engine="pwl")
     t = np.asarray(r.times)
     m = t >= 2e-3
@@ -106,6 +111,31 @@ def test_without_them_the_answer_is_silently_absurd():
     t2 = np.asarray(r2.times)
     v2 = np.abs(np.asarray(r2.v("ua"))[t2 >= 2e-3])
     assert float(v2.max()) < 400.0, float(v2.max())
+
+
+def test_without_them_the_default_engine_records_every_cut():
+    """The same diode-less bridge under the release default (restart rule):
+    the leg voltage stays on the rail (299.985 V) and the load current is cut
+    from 13.49 A to the leakage at each turn-off — an impulse per turn-off,
+    recorded by name: 20 cut-set records of 'Lload' by the leg's switches,
+    0.0270 V*s and 0.182 J each at most (L*i and L*i^2/2), 3.50 J in all."""
+    b, vsi = _bridge(False)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(b, t_end=4e-3, dt=2e-6,
+                       switch_fn=_chop(vsi, b.graph.num_switches), engine="pwl")
+    t = np.asarray(r.times)
+    assert float(np.abs(np.asarray(r.v("ua"))[t >= 2e-3]).max()) < 300.0
+    recs = list(r.reinit_records)
+    assert len(recs) == 20
+    assert all(x.kind == "cut_set" and x.states == ["Lload"]
+               and x.devices == ["INV__HSa", "INV__LSa"] for x in recs)
+    i_cut = float(np.asarray(r.i("Lload")).max())
+    assert i_cut == pytest.approx(13.4886, rel=1e-4)
+    worst = max(recs, key=lambda x: abs(x.lambda_))
+    assert abs(worst.lambda_) == pytest.approx(2e-3 * i_cut, rel=1e-3)
+    assert worst.dW == pytest.approx(0.5 * 2e-3 * i_cut ** 2, rel=2e-3)
+    assert sum(x.dW for x in recs) == pytest.approx(3.4964, rel=1e-3)
 
 
 def test_floating_neutral_vsi_runs_on_the_exact_engine():
