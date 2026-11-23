@@ -314,6 +314,11 @@ def steady_state_stats(
     KeyError
         If a name is neither a node nor a branch.
     """
+    if isinstance(what, str):
+        # a named trace: both limits of every event (a jump integrated as
+        # a jump; pulsim.with_event_limits)
+        from ._result_views import with_event_limits
+        result = with_event_limits(result)
     t = np.asarray(result.times, dtype=float)
     if t.size < 2:
         raise ValueError(

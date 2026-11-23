@@ -6,6 +6,119 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Evidence: the exact scoreboard's measure, in three parts
+
+* **Changed (evidence, no library change)** the `exact` measure of
+  `benchmarks/EXACT_SCOREBOARD.md` / `ACCURACY_SUMMARY.md`
+  (`benchmarks/tools/metrics.exact_parts`, the one implementation every
+  tool that grades against the mpmath truth uses) is now the largest of
+  three parts, each a fraction of the truth's span: the smooth error of the
+  engine's stored rows (leaving out only the rows inside a matched event's
+  displacement, the initial instant and the 0+ row), the L2 cost of its
+  event instants against the truth's (sqrt(Σ jump²·|δ| / T); a missing
+  event charged as displaced), and its recorded one-sided limits against
+  the truth's. The previous definition graded the right limit at t = 0+
+  (99 % of `three_phase_diode_rectifier` pwl+restart's 0.0127) and charged
+  an event displaced beyond its 1e-3 dt snap window at its row's weight
+  instead of jump²·δ (`vcswitch_resistor` pwl+split, 0.005 dt early:
+  0.0316, now 0.0032). It is kept as `exact_old` (json and table) for this
+  release.
+* **Added (evidence)** rule (1), a projected transient: where an engine
+  reports a projection at an event (`reinit_records`) and the truth itself
+  settles to the engine's recorded right value within the engine's declared
+  parasitic window (dt/100 for the exact engine, h for pwl), that value is
+  priced as a transient collapsed in time (instants, its true L2 cost), not as
+  a wrong limit; the cell counts it (`n_projected`). No engine writes such a
+  record at the events it was made for yet (the exact engine's slow-manifold
+  projection writes none: finding F-SB-3), so no cell moved.
+
+### Thermal summary: one conduction reading; refusals where there was silence
+
+* **Fixed** `device_thermal_summary` on a branch-form device (`form='branch'`,
+  `R_on > 0`) with `conduction_specs`: its `P_cond_avg` and its junction
+  trace ignored the conduction model and read the solved `v·i` (a DC diode,
+  `V_f0 = 0.7`, `r_on = 0.02`, 10 A: 0.0998 W where `V_f0·I + r_on·I²` and
+  `device_loss_summary` give 8.98901 W; a buck's diode 0.0203 W against
+  2.576 W). Both summaries now read a device's conduction power through one
+  function, `pulsim.losses.conduction_power_avg` (the device's loss-summary
+  entry), and the junction trace follows the same model. The conductance
+  form (the default) is unchanged.
+* **Changed (a refusal where there was silence; today's defaults)**
+  `device_thermal_summary` refuses by name (`OptionsError`, option
+  `thermal_specs`) a device in `thermal_specs` whose kind it has no loss
+  model for — a source, a capacitor, a Lauritzen diode, a saturable
+  inductor, a machine, `excess_loss` (its core loss is in
+  `device_loss_summary`'s `core_loss`, not in a junction model). It used to
+  return no row for that device.
+* **Changed** `device_loss_summary` warns by name where it leaves a device
+  out (a level-1 IGBT with a tail; a switch with neither a recorded mask nor
+  `switch_fn=`), and `device_thermal_summary` warns for a supported device
+  the loss summary left out. Both used to skip it silently.
+* **Fixed** `control_tick='state'`: a control graph whose rate does not fit
+  the fixed step is refused before the run as `ControlGraphBuildError`, as
+  under `control_tick='label'` (it arrived as `SimulationAborted` from
+  inside the run).
+
+### Bergeron transmission line
+
+* **Added** `add_transmission_line(..., model="bergeron")`: the exact
+  lossless travelling-wave line (`Z0`, `delay`) as the new kind
+  `StoredKind.TransmissionLine`, with the optional series `R` as
+  `R/4 + half line + R/2 + half line + R/4`. Ports `name` and `name.b`
+  (`res.i` is the current into each port). On pwl, `dt > delay` is refused
+  by name. With the delay a multiple of `dt` the line is exact to rounding
+  (lattice 5/3, 5/9, 35/27 V to 2.2e-16); otherwise it is second order.
+  On trbdf2 the step is capped at the delay (`n_line_bound_steps`), and a
+  kink in a recorded wave is landed a delay later at the other end. The AC sweep stamps the
+  exact two-port; the DC point treats the line as a wire. Refused by name:
+  esdirk43, exact/dsed, bdf1 and `periodic_steady_state`. YAML type
+  `transmission_line` (user and IR); the snapshot carries the line's past
+  (`line_state`, pickle field 19, written only when a line exists).
+  Docs: `docs/transmission-line.md`.
+### Bindings close-out (add-ai-usage-guide, add-python-builder-ergonomics)
+
+* **Fixed** a leg with no dead time charged its switching loss twice
+  (add-ai-usage-guide 12.8): the complementary switch's soft edge was read
+  at the full bus. `thermal::commutation_point`, the one rule of the
+  in-kernel loss port (`pwl`, `trbdf2`, `dsed`), the period path, the
+  design batch and `device_loss_summary`'s `switch_specs`, now records a
+  switch's edge whose open-side `v` and closed-side `i` have opposite
+  signs as soft: `v = 0`, 0 J (`res.loss_events` keeps it; the event
+  counts are unchanged). Diodes are never soft. **Behaviour change:** loss
+  outputs of circuits with a zero-dead-time leg move: the guide 3.7 VSI's
+  `INV__HSa` 22.64 → 11.61 W (closed form for the leg 22.65 W, measured
+  22.60 W); the buck_pareto example's synchronous switch loses its soft
+  `E_on`. Dead-time results and every electrical result are unchanged.
+  The reverse current must be a conducted one: within `(g_off + eps
+  g_on)|v|` (the open switch's own leakage, the closed law's rounding) its
+  sign is not resolved and the edge is hard, so a DCM turn-on keeps a
+  table's `E(v, 0)` intercept. An edge with an impulse of that switch at
+  its instant (a capacitor loop closed) is never soft: the pre-jump `v`,
+  the regular current after the jump (it was soft on `trbdf2`, read at the
+  jump's -8397 A). A non-finite reading is refused by name.
+
+* **Fixed** `simulate(LoadedCircuit)` forwarded only `t_start`, `t_end`,
+  `dt` and `store_every`: the YAML's `integrator`, `rtol` / `atol`,
+  `dt_init`, Newton tolerances and iteration caps were dropped silently.
+  Every `simulation:` key the file sets (`loaded.simulation_keys`) is now
+  the keyword of the same name; a keyword you pass, then `solver=`, wins.
+  A `loaded.options` field changed in Python that is no `simulation:` key
+  is refused by name (`OptionsError`). **Behaviour change:** a YAML run
+  on an engine that honours these keys (`trbdf2`, `exact`) now uses them,
+  so its trace can move. A key the landing engine cannot honour (e.g.
+  `rtol` on the fixed step) is not used and raises one `RuntimeWarning`
+  naming it, so a file that ran still runs; the loader's placeholders
+  (`integrator: kernel`, `dt_init: 0`) and kernel-default values ask
+  nothing and pass without a word.
+* **Changed (BREAKING)** the channel arguments after the defaulted gains of
+  `CxxBlockChain.add_sum`, `add_inverse_clarke`, `add_flux_mras_observer`
+  and `add_sliding_mode_observer` are keyword-only (`py::kw_only()`), as
+  the stub already declared; no caller in the repository was positional.
+* **Changed** binding signatures name Python types (`builder.graph -> Graph`,
+  `final_snapshot -> SolverSnapshot`, ...) and every `= None` default reads
+  `... | None`; defaults print as `PreflightOptions()` /
+  `CxxInputRef.const_value(0.0)`.
+
 ### Excess core loss in the permeance network
 
 * **Added** `CircuitBuilder.add_excess_loss(name, m_a, m_b, c, eps)`:
@@ -21,6 +134,55 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 * **Fixed** `fit_core_loss_elements`'s excess coefficient: the mean of
   `|cos|^1.5` is `Γ(5/4)/(√π·Γ(7/4)) = 0.5564179`, not 0.5563852 (the
   fitted `c` was 5.9e-5 high).
+
+### Event samples keep both limits; result integrals across events
+
+* **Added** results with event limits (the exact engine; the fixed engine
+  with `discontinuity_restart=True`) keep the right limit beside the stored
+  sample: `res.right_limit_index`, `res.right_limit_states`,
+  `res.right_limit_switch_states` (a stored sample at an event is its LEFT
+  limit; the next step starts from the right one). Events inside a fixed
+  step are in `res.inner_events`. `res.times` is unchanged; `None` where a
+  result keeps no limits (every default run).
+* **Added** `pulsim.with_event_limits(res)`: the trace with the inner events
+  inserted and each right limit one ulp after its left. Use it (or
+  `np.trapezoid` on it) for integrals and peaks across events; `np.interp`
+  on the raw arrays still reads only the left limits.
+* **Fixed** on those results the loss and thermal summaries, `time_average`
+  / `steady_state_stats`, `design` settle checks and `res.i` of waveform
+  current sources read both limits: averages, charges and peaks across a
+  switching event agree with KCL and the summaries (diode average 0.160684
+  -> 0.161027, a pwl bridge charge error 4.9e-3 -> 1e-9, a DCM duty 0.2180
+  -> within 2e-3 of the exact 0.2210, conduction loss second order in `dt`).
+  `design` traces of a rule run use its stored right limits and inner
+  events instead of extrapolating them from the gate schedule. Recorders
+  fed from the stored arrays see the right limits but not yet the inner
+  events. pwl without the rule and trbdf2 are byte-identical; exact-engine
+  results change in these summaries (its junction temperature is the exact
+  Foster response to the piecewise-linear power, no resample).
+
+### The variable-step engine's error estimate sees the stateful devices
+
+* **Fixed (changes results)** `engine='trbdf2'` (the default variable-step
+  engine) had no error estimate for the internal state of a stateful
+  device: the Lauritzen diode's stored charge, the IGBT tail charge, a
+  nonlinear capacitor's charge, a saturable inductor's flux, a PMSM's or an
+  induction machine's flux linkages, an external device's charge rows. A
+  circuit whose dynamics live there ran at its step ceiling whatever
+  `rtol` asked for: a Lauritzen reverse recovery was 20 % off its closed
+  form at every `rtol`, an IGBT tail 0.5 %. Each such state now has a row
+  in the estimate, weighted by `atol·s + rtol·|q|` with `s` the device's
+  own capacitance / inductance / time constant, and the error now falls as
+  `rtol^(2/3)` (the recovery: 2.3e-4 at rtol 1e-4, 2e-6 at 1e-7). **Every
+  run with one of these devices on `engine='trbdf2'` gives different (more
+  accurate) results and usually takes more steps** (a saturable boost at
+  the default rtol: 20.6 k to 32.8 k steps); runs without one are
+  bit-identical. `integrator='esdirk43'` uses the same rows (its floor at
+  1e-3 of the largest |q| is gone: a nonlinear capacitor started from zero
+  no longer aborts at t = 0), so its stateful runs move too.
+* **Added** `run_transient_trbdf2(..., trace_forced=True)` (low-level):
+  `stats['forced_trace']` lists each forced accept with the unknown that
+  forced it.
 
 ### Thermal networks on the variable-step engine; the exact engine's output grid
 

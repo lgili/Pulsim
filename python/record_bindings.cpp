@@ -12,6 +12,7 @@
 #include "pulsim/solver/result.hpp"
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -128,11 +129,11 @@ void init_module(py::module_& m) {
              Real offset, const std::vector<std::string>& reading_names, const F64& t,
              const F64& readings, const std::vector<Size>& event_rows, const F64& right,
              const std::vector<Real>& sample_times,
-             std::shared_ptr<pulsim::streaming::LiveRing> ring) {
+             const std::optional<std::shared_ptr<pulsim::streaming::LiveRing>>& ring) {
               rec::Recorder r = make_recorder(probe_texts, keep, every_n, windows, period,
                                               offset, sample_times);
               r.bind(reading_names);
-              r.stream_to(ring.get());
+              r.stream_to(ring ? ring->get() : nullptr);
               const Size m_r = reading_names.size();
               {
                   py::gil_scoped_release nogil;
@@ -145,7 +146,7 @@ void init_module(py::module_& m) {
           py::arg("probes"), py::arg("keep"), py::arg("every_n"), py::arg("windows"),
           py::arg("period"), py::arg("offset"), py::arg("reading_names"), py::arg("t"),
           py::arg("readings"), py::arg("event_rows"), py::arg("right"),
-          py::arg("sample_times") = std::vector<Real>{}, py::arg("ring") = nullptr,
+          py::arg("sample_times") = std::vector<Real>{}, py::arg("ring") = py::none(),
           "Kernel recorder pass over stored arrays (add-probes-and-recorders); "
           "use pulsim.simulate(..., recorders=[...]).");
 

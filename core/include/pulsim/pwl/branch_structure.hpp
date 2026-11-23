@@ -174,6 +174,8 @@ private:
             return Role::Isrc;
         case K::VCCS: case K::CCCS: case K::Gyrator:
             return Role::Open;
+        case K::TransmissionLine:
+            return !dynamic && pool_.is_line_port_b(b) ? Role::ZeroImp : Role::Conduct;
         case K::Switch: case K::Diode: {
             if (!pool_.is_branch_form(b)) return Role::Conduct;
             const Real g_off = k == K::Diode ? pool_.diode_params(b).g_off

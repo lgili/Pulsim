@@ -21,6 +21,7 @@
 #include "pulsim/models/inductor.hpp"
 #include "pulsim/models/mosfet_level1.hpp"
 #include "pulsim/models/ideal_transformer.hpp"
+#include "pulsim/models/transmission_line.hpp"
 #include "pulsim/models/multi_winding_transformer.hpp"
 #include "pulsim/models/nonlinear_capacitor.hpp"
 #include "pulsim/models/lauritzen_diode.hpp"
@@ -79,11 +80,15 @@ inline constexpr std::uint8_t kNewtonEngines =
     engine_bit(Engine::FixedTrap) | engine_bit(Engine::TrBdf2);
 
 /// How a device kind enters the solve.
+/// `LinearDelay` (add-realistic-passives D18): a linear stamp in the cached
+/// matrix plus a source term that reads the device's committed past (the
+/// Bergeron line); not Newton, so the circuit stays on the cached LU.
 enum class SolveClass : std::uint8_t {
-    Linear, Source, Switch, PwlDiode, NewtonStatic, NewtonStateful };
-inline constexpr std::array<std::string_view, 6> kSolveClassNames{
+    Linear, Source, Switch, PwlDiode, NewtonStatic, NewtonStateful,
+    LinearDelay };
+inline constexpr std::array<std::string_view, 7> kSolveClassNames{
     "Linear", "Source", "Switch", "PwlDiode", "NewtonStatic",
-    "NewtonStateful"};
+    "NewtonStateful", "LinearDelay"};
 
 /// One row of `kKindCaps` (defined after `DevicePool`).
 struct KindCaps {
@@ -140,6 +145,15 @@ public:
         // add-permeance-magnetic-domain 4.2: the excess-loss law seen
         // through a unit winding (i = c·v/(v²+ε²)^¼, models/magnetic_loss.hpp)
         ExcessLoss         = 29,
+        // add-realistic-passives section 5 (D18): one port of a lossless
+        // Bergeron line; the line is two such branches (models/transmission_line.hpp)
+        TransmissionLine   = 30,
+    };
+
+    /// The two port branches of one transmission line (port a, port b).
+    struct LinePair {
+        Index a;
+        Index b;
     };
 
     /// One external device (add-external-device-abi): the checked model
@@ -244,6 +258,39 @@ public:
         entries_[branch_id] = Entry{p};
         ++num_excess_loss_;
     }
+    /// Register a lossless transmission line (add-realistic-passives
+    /// D18): `branch_a` / `branch_b` are its two ports, both
+    /// `BranchKind::Source`, each with its own current unknown.
+    void add_transmission_line(Index branch_a, Index branch_b,
+                               models::TransmissionLine::Params p) {
+        models::TransmissionLine::validate(p);
+        for (const Index b : {branch_a, branch_b}) {
+            entries_[b] = Entry{p};
+            source_branch_var_id_[b] = static_cast<Index>(num_sources_++);
+        }
+        line_pairs_.push_back({branch_a, branch_b});
+    }
+    [[nodiscard]] std::span<const LinePair> line_pairs() const noexcept {
+        return line_pairs_;
+    }
+    /// The other port of the line `branch_id` belongs to.
+    [[nodiscard]] Index line_partner(Index branch_id) const {
+        for (const auto& lp : line_pairs_) {
+            if (lp.a == branch_id) return lp.b;
+            if (lp.b == branch_id) return lp.a;
+        }
+        throw std::out_of_range(std::format(
+            "DevicePool::line_partner: branch {} is not a TransmissionLine port",
+            branch_id));
+    }
+    /// True for port b (the second branch of its line).
+    [[nodiscard]] bool is_line_port_b(Index branch_id) const noexcept {
+        for (const auto& lp : line_pairs_) {
+            if (lp.b == branch_id) return true;
+        }
+        return false;
+    }
+
     /// How many excess-loss branches were added: the hand stamp skips its
     /// pass on 0 (no per-iteration branch walk where the kind is absent).
     [[nodiscard]] Size num_excess_loss() const noexcept { return num_excess_loss_; }
@@ -958,6 +1005,12 @@ public:
             branch_id, "excess_loss_params", "an ExcessLoss");
     }
 
+    [[nodiscard]] const models::TransmissionLine::Params&
+    transmission_line_params(Index branch_id) const {
+        return require_params_<models::TransmissionLine::Params>(
+            branch_id, "transmission_line_params", "a TransmissionLine");
+    }
+
     /// Iterate diode branch ids in insertion (= branch) order.
     [[nodiscard]] std::span<const Index> diode_branches() const noexcept {
         return std::span<const Index>{diode_branches_.data(),
@@ -1337,7 +1390,8 @@ private:
                                 models::PwlCurrentSource::Params,
                                 models::InductionMachineMna::Params,
                                 ExternalDeviceParams,
-                                models::ExcessLoss::Params>;
+                                models::ExcessLoss::Params,
+                                models::TransmissionLine::Params>;
 
 public:
     /// Number of device kinds; `kKindCaps` must have this many rows.
@@ -1379,6 +1433,9 @@ public:
                 for (const Index b : mach.branch_id) entries_[b] = Entry{p};
             }
         }
+        if (const auto* tl = std::get_if<models::TransmissionLine::Params>(&e)) {
+            entries_[line_partner(branch_id)] = Entry{*tl};   // one line, two ports
+        }
         if (const auto* ind = std::get_if<models::Inductor::Params>(&e)) {
             for (auto& c : transformer_couplings_) {
                 if (c.primary_branch_id == branch_id) c.params.L_p = ind->L;
@@ -1398,8 +1455,8 @@ private:
     static constexpr bool kind_maps_to_ = std::is_same_v<
         std::variant_alternative_t<static_cast<std::size_t>(K), Entry>, P>;
 
-    static_assert(std::variant_size_v<Entry> == 30,
-        "StoredKind has 30 values; Entry must list 30 alternatives in the "
+    static_assert(std::variant_size_v<Entry> == 31,
+        "StoredKind has 31 values; Entry must list 31 alternatives in the "
         "same order — update both together.");
     static_assert(kind_maps_to_<StoredKind::Resistor,           models::Resistor::Params>);
     static_assert(kind_maps_to_<StoredKind::VoltageSource,      models::VoltageSource::Params>);
@@ -1431,6 +1488,7 @@ private:
     static_assert(kind_maps_to_<StoredKind::InductionMachineMna, models::InductionMachineMna::Params>);
     static_assert(kind_maps_to_<StoredKind::ExternalDevice,     ExternalDeviceParams>);
     static_assert(kind_maps_to_<StoredKind::ExcessLoss,         models::ExcessLoss::Params>);
+    static_assert(kind_maps_to_<StoredKind::TransmissionLine,   models::TransmissionLine::Params>);
 
     [[nodiscard]] const Entry& entry_at(Index branch_id) const {
         const auto it = entries_.find(branch_id);
@@ -1542,6 +1600,7 @@ private:
     std::vector<InductionMachine> induction_machines_;
     std::vector<Index> igbt_level1_branches_;
     Size num_excess_loss_ = 0;
+    std::vector<LinePair> line_pairs_;
 
     // Layer 2 V2: transformer coupling registry. Each entry
     // pairs two already-added inductor branches with the
@@ -1613,6 +1672,14 @@ inline constexpr auto kKindCaps = std::to_array<KindCaps>({
     // AC sweep linearises it at the DC point (at zero flux rate: the
     // regularised core, a magnetic resistance c/√ε).
     {"ExcessLoss",         SolveClass::NewtonStatic,   kNewtonAc},
+    // add-realistic-passives D18: the Bergeron line. pwl / trbdf2 (h <= tau;
+    // integrator='esdirk43' refuses it by name in slice 1); the exact
+    // engine refuses it (a delay is not a finite LTI state); bdf1 refuses
+    // it; the AC sweep stamps the exact two-port (cos / sin of omega*tau).
+    {"TransmissionLine",   SolveClass::LinearDelay,
+     static_cast<std::uint8_t>(engine_bit(Engine::FixedTrap) |
+                               engine_bit(Engine::TrBdf2) |
+                               engine_bit(Engine::AcSweep))},
 });
 /// add-branch-form-ideal-switch D7 / task 4.3: the BRANCH form of the
 /// Switch and Diode kinds (a form, not a kind: one row each, by the

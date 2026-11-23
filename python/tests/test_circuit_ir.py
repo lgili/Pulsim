@@ -33,7 +33,7 @@ def test_every_circuit_is_recorded():
     # Task 0.2's record: a circuit added to examples/ or benchmarks/ must
     # be added to the record (re-run `sweep_probe.py components`).
     assert {cid for cid, _ in CIRCUITS} == set(RECORD)
-    assert sum(not isinstance(b, Exception) for _, b in CIRCUITS) == 136
+    assert sum(not isinstance(b, Exception) for _, b in CIRCUITS) == 138
 
 
 def _switch_names(b):

@@ -1865,6 +1865,27 @@ public:
         e.solver->solve_neg_sum(e.b_constant, b_extra, x);
     }
 
+    /// The resident factor `solve_at(mask, dt, …)` just used, read-only: no
+    /// build, no refactor, no LRU touch (add-parameter-sensitivities 5.5:
+    /// the sensitivity solve adds no factorization and moves no eviction).
+    /// Throws std::logic_error when none is resident at that dt.
+    [[nodiscard]] const sparse::DirectSolver& resident_factor(
+        const topology::SwitchStateMask& mask, Real dt) const {
+        if (dt == dt_) {
+            const auto it = segments_.find(mask);
+            if (it != segments_.end() && it->second.solver) return *it->second.solver;
+        } else {
+            const auto it = event_entries_.find(mask);
+            if (it != event_entries_.end() && it->second.current_dt == dt
+                && it->second.solver) {
+                return *it->second.solver;
+            }
+        }
+        throw std::logic_error(std::format(
+            "PwlStateSpaceCache::resident_factor: no factor resident for mask "
+            "{} at dt = {}", mask.to_string(), dt));
+    }
+
     /// Number of event-solver entries currently resident (bounded by
     /// the byte budget, see `set_segment_budget_bytes`). Same sampling
     /// caveat as

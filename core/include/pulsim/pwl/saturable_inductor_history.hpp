@@ -109,9 +109,9 @@ public:
     // ---- the stage form (βh, ψ) of integrator='esdirk43' ----
     // One q row per device: q = λ, q̇ = V_L. A stage is backward Euler of
     // βh from the base λ_old = ψ; the increment form reads λ(i) − ψ as
-    // Δλ(i, i_L_old) − (ψ − λ_old) with that offset carried exactly. Not the
-    // hysteretic law (refused upstream: its law is first order in the step
-    // on both integrators, DECISIONS 17).
+    // Δλ(i, i_L_old) − (ψ − λ_old) with that offset carried exactly. The
+    // hysteretic law takes only TR-BDF2's SDIRK restart step (esdirk43
+    // refuses it: first order in the step on both integrators, DECISIONS 17).
     [[nodiscard]] std::size_t stage_rows() const noexcept { return entries_.size(); }
     void stage_start(Real hh, Real* q0, Real* hqd0) const {
         for (const auto& e : entries_) {
@@ -128,7 +128,11 @@ public:
     void stage_increment(const Vector& x, const Real* psi, Real* d) const {
         for (const auto& e : entries_) {
             const Real i = x[e.branch_var_id];
-            *d++ = e.params.table
+            // the hysteretic law from the committed (H_n, M_n): both SDIRK
+            // restart stages integrate from it (see extrapolate_previous)
+            *d++ = e.params.ja
+                ? models::JilesAthertonCore::evaluate(*e.params.ja, e.ja_state, i).lambda - *psi
+                : e.params.table
                 ? models::SaturableInductor::flux(i, e.params) - *psi
                 : models::SaturableInductor::flux_increment(i, e.i_L_old, e.params)
                       - e.lambda_offset;
@@ -137,6 +141,30 @@ public:
     }
     void stage_clear() noexcept {
         for (auto& e : entries_) e.lambda_offset = Real{0};
+    }
+    // ---- TR-BDF2's q rows (the error estimate) ----
+    /// λ − λ_n at γ and at the step end, by the law `commit` uses (the
+    /// hysteretic law from the stage-1 base (H_γ, M_γ)); the stateless
+    /// laws in increment form (no eps·|λ| cancellation).
+    void trbdf2_increments(const Vector& x1, Real* dqg, Real* dq1) const {
+        for (const auto& e : entries_) {
+            const Real i = x1[e.branch_var_id];
+            if (e.params.ja) {
+                *dq1++ = models::JilesAthertonCore::evaluate(*e.params.ja, e.ja_gamma, i).lambda
+                         - e.lambda_old;
+                *dqg++ = e.lambda_gamma - e.lambda_old;
+            } else if (e.params.table) {
+                *dq1++ = models::SaturableInductor::flux(i, e.params) - e.lambda_old;
+                *dqg++ = e.lambda_gamma - e.lambda_old;
+            } else {
+                *dq1++ = models::SaturableInductor::flux_increment(i, e.i_L_old, e.params);
+                *dqg++ = models::SaturableInductor::flux_increment(e.i_gamma, e.i_L_old, e.params);
+            }
+        }
+    }
+    /// atol_q / atol per row: the inductance at zero current (λ = L·i).
+    void q_scales(Real* s) const {
+        for (const auto& e : entries_) *s++ = std::abs(flux_and_inductance(e, Real{0}).second);
     }
     /// The JA base state for a stage. The trapezoidal stage — and
     /// every fixed-engine solve, probe, landing and seed — integrates

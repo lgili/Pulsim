@@ -222,6 +222,7 @@ from .periodic import (
 )
 from .stats import TimeStats, time_window, time_average, time_rms, steady_state_stats
 from ._recorders import Recorder, Recording
+from ._result_views import with_event_limits
 from .kpi import (
     KpiGate,
     KpiReport,
@@ -689,6 +690,7 @@ __all__ = [
     "Recording",
     "time_rms",
     "steady_state_stats",
+    "with_event_limits",
     # KPI gates + baselines (Phase E.5).
     "KpiGate",
     "KpiReport",
@@ -1413,8 +1415,32 @@ def _result_i(self, name: str, t=None, *, port=None):
     if kind in ("sine_current_source", "pulse_current_source",
                 "pwl_current_source"):
         val = builder.pool.current_waveform_value
-        return _finalize(_np.array([val(b_id, float(tt))
-                                    for tt in _ta(self)], dtype=float))
+        tt_all = _np.asarray(_ta(self), dtype=float)
+        out = _np.array([val(b_id, float(tt)) for tt in tt_all], dtype=float)
+        if getattr(self, "right_limit_index", None) is not None and out.size > 1:
+            # A result that keeps event limits stores the LEFT limit at an
+            # event (the restart rule and the exact engine solve the row at
+            # a source jump with the pre-jump value): read a jump's left
+            # side there too (release finding F-6-5). Rows 1..: row 0 is
+            # the run's start.
+            # the engine's left read, value_at(t - dt*1e-3); a jump is where
+            # the step to it dwarfs the next step further left (a slope or
+            # a corner moves both alike; a jump only the first)
+            # (the step before the row: an exact-engine event row one ulp
+            # after a grid sample reads the spacing before that sample)
+            g = _np.diff(tt_all)
+            real = g > 1e-12 * max(float(_np.max(_np.abs(tt_all))), 1e-300)
+            lb = 1e-3 * g[_np.maximum.accumulate(
+                _np.where(real, _np.arange(g.size), 0))]
+            left = _np.array([val(b_id, float(tt - d))
+                              for tt, d in zip(tt_all[1:], lb)], dtype=float)
+            left2 = _np.array([val(b_id, float(tt - 2 * d))
+                               for tt, d in zip(tt_all[1:], lb)], dtype=float)
+            dl = _np.abs(left - out[1:])
+            jump = (dl > 1e3 * _np.abs(left2 - left)
+                    + 1e-12 * (_np.abs(left) + _np.abs(out[1:])))
+            out[1:] = _np.where(jump, left, out[1:])
+        return _finalize(out)
     if kind == "vccs":
         v_c = (_node_v(states, int(params["in_pos"]))
                - _node_v(states, int(params["in_neg"])))
@@ -2219,6 +2245,85 @@ def _resolve_loaded_circuit(lc, t_end, dt, t_start, store_every):
     return lc.builder, t_end, dt, t_start, store_every
 
 
+# The `simulation:` keys of a LoadedCircuit that are not its run window:
+# simulate() keywords of the same name (add-ai-usage-guide 12.15).
+_YAML_RUN_KW = ("enable_newton_line_search", "enable_newton_lm",
+                "enable_substep_state_correction", "max_event_iterations",
+                "max_newton_iterations", "tol_newton_dx", "tol_newton_res",
+                "integrator", "rtol", "atol", "dt_init")
+_YAML_WINDOW_KW = ("t_start", "t_end", "dt", "store_every")
+
+
+def _loaded_run_options(lc) -> dict:
+    """The run options a :class:`LoadedCircuit` carries besides its window:
+    every key its YAML sets, and every field of ``lc.options`` changed
+    from the default since. A changed field simulate() has no keyword for
+    is refused by name, never dropped."""
+    opts, base = lc.options, SimulationOptions()
+    keys = set(getattr(lc, "simulation_keys", ()))
+    out = {}
+    for name in dir(base):
+        if name.startswith("_") or name in _YAML_WINDOW_KW:
+            continue
+        val = getattr(opts, name)
+        if callable(val):
+            continue
+        if name not in keys and val == getattr(base, name):
+            continue
+        if name not in _YAML_RUN_KW:
+            raise _options_error(name,
+                f"simulate(): {lc.source!r}'s loaded.options.{name} = {val!r} "
+                "is not its default, and simulate() reads only the YAML "
+                f"simulation: keys from a LoadedCircuit; pass it as a keyword "
+                "(see help(pulsim.simulate)) or leave loaded.options.{name} "
+                "at its default.")
+        out[name] = val
+    return out
+
+
+_YAML_PLACEHOLDER = {"integrator": ("kernel", "default"), "dt_init": (0.0,)}
+
+
+def _yaml_keys_not_honoured(filled, engine, dt, source) -> "list[str]":
+    """The YAML run keys of `filled` (name -> value, each filling a keyword
+    left unset) to drop: those an engine the run can land on cannot
+    honour. Before 12.15 simulate() never read them, so a file that ran
+    keeps running: they are dropped with one RuntimeWarning, never raised
+    on and never dropped silently. A value that asks nothing is dropped
+    without a word: the loader's placeholders (`integrator: kernel` /
+    `default`, `dt_init: 0`) and a value equal to the kernel default."""
+    eng = {"exact": "dsed"}.get(engine, engine)
+    # 'auto': an explicit dt requests the fixed step; without one the
+    # run may land on either MNA engine (a blocker routes it to pwl).
+    landing = (eng,) if eng in ("pwl", "trbdf2", "dsed") else (
+        ("pwl",) if dt is not None else ("pwl", "trbdf2"))
+    drop, loud = [], []
+    for k, v in filled.items():
+        if (v in _YAML_PLACEHOLDER.get(k, ())
+                or (_ro.DEFAULTS.get(k) is not None and v == _ro.DEFAULTS[k])):
+            drop.append(k)
+            continue
+        if k == "integrator":
+            ok = all(e == "dsed" or (e == "trbdf2" and v == "esdirk43")
+                     for e in landing)
+        else:
+            ok = all(_ro.honoured(k, e) or not _ro.is_requested(k, v, e)
+                     for e in landing)
+        if not ok:
+            drop.append(k)
+            loud.append(f"{k}={v!r}")
+    if loud:
+        import warnings
+        warnings.warn(
+            f"simulate({source!r}): the YAML simulation: key(s) "
+            f"{', '.join(loud)} are not used: this run can land on "
+            f"engine={'/'.join(landing)!r}, which cannot honour them "
+            "(pulsim.option_capabilities()). Pass engine= to choose the "
+            "engine that does, or remove the key(s).",
+            RuntimeWarning, stacklevel=3)
+    return drop
+
+
 # Stage A's plan.resolved_from: where each simulate() keyword's value came
 # from. 'explicit' = not the signature's default (an explicit default reads
 # 'default'); 'yaml' / 'solver' = filled from a LoadedCircuit / SolverOptions.
@@ -2487,8 +2592,11 @@ def simulate(
         ``LoadedCircuit`` the run takes ``t_end``, ``dt`` (when the YAML
         sets one), ``t_start`` (when ``t_start`` is left at 0.0) and
         ``store_every`` (when not passed) from its ``simulation:``
-        block; a keyword you pass wins. The other ``simulation:``
-        fields stay on ``loaded.options`` — forward them yourself. A
+        block, and every other key that block sets (Newton tolerances,
+        ``integrator``, ``rtol`` / ``atol``, ...: ``loaded.simulation_keys``)
+        as the keyword of the same name; a keyword you pass, then
+        ``solver=``, wins. A ``loaded.options`` field changed in Python
+        that is not a ``simulation:`` key is refused by name. A
         ``LoadedCircuit`` whose ``t_end`` is not after ``t_start`` (no
         top-level ``simulation:`` block, or no ``t_end`` in it) is
         refused with a ``ValueError`` naming the YAML file.
@@ -2535,7 +2643,11 @@ def simulate(
         Fixed step for BDF2 segments under ``integrator='bdf2'`` or
         ``'auto'`` (default 1e-6).
     t_start, default 0.0
-        Start time, in seconds.
+        Start time, in seconds: an ABSOLUTE label. Gates, sources,
+        ``b_extra_fn`` and recorder windows are read at absolute ``t`` on
+        every engine, so the run equals the tail of a run from 0 started
+        from the same state. On the exact engine a fresh ``t_start`` run
+        refuses the circuit's time-varying sources and controllers by name.
     switch_fn
         Callable ``t -> SwitchStateMask`` controlling the
         switch state at each sample.  Defaults to all-closed.
@@ -2548,6 +2660,15 @@ def simulate(
     start_from_dc_op
         PWL-only: If ``True``, seed the initial state from
         :func:`compute_dc_op` instead of zero.
+    should_continue
+        ``() -> bool`` polled once per step. ``False`` stops the run and
+        returns the trace up to there: ``result.times[-1] < t_end``, no
+        exception (a live scope keeps what it drew). A callback that
+        raises propagates. The analyses raise :class:`Cancelled` instead
+        (``compute_dc_op``, ``run_ac_sweep``, ``run_mna_sweep``,
+        ``compute_temperature``). GUI Cancel button:
+        ``should_continue=lambda: not cancel.is_set()`` with
+        ``cancel = threading.Event()``.
     enable_nonlinear_refresh
         ``None`` (default): the kernel stamps the Newton devices when
         the circuit has any. ``True`` forces the static chain.
@@ -2660,8 +2781,12 @@ def simulate(
         (:class:`pulsim.Recording`). Fed in the loop where the engine
         allows it, otherwise by a kernel-side pass over the stored arrays
         (``res.recorder_feed["why"]``; ``store_every > 1`` is refused by
-        name there). ``resume_from`` continues the record from the
-        snapshot's recorder state. Without it nothing changes.
+        name there). In the loop of ``engine='exact'`` each step's integral
+        and RMS are the closed form of its mode (independent of the output
+        grid); a piece without one (``res.recorder_feed["closed_form"]``)
+        is the line between samples and warns. ``resume_from`` continues
+        the record from the snapshot's recorder state. Without it nothing
+        changes.
 
     output_rtol
         ``engine='exact'`` only, default ``None`` (today's samples: one per
@@ -2695,8 +2820,10 @@ def simulate(
         grid); both warn. ``output_budget_t`` is the time the run's sample
         budget (2e6 cut steps, ``pulsim._dsed_dispatch.OUTPUT_BUDGET``) ran
         out, from where the step cap's grid holds (warns; ``None`` when it
-        did not). Ignored with ``dt`` / ``store_every`` /
-        recorders; refused by name on the other engines, with
+        did not). Ignored with ``dt`` / ``store_every``; with recorders the
+        run is the one without them (the rule also sets how events are
+        located and projected), and their statistics stay closed forms
+        (see ``recorders``); refused by name on the other engines, with
         ``integrator='bdf2'``, sensitivities, and the non-native fallback.
 
     Returns
@@ -2734,8 +2861,9 @@ def simulate(
     # add-probes-and-recorders: above every engine dispatch, so every
     # engine's result goes through the same kernel recorder pass.
     if recorders:
-        # a recorder samples on its own grid: the output-grid rule stays off
-        _kw = {k: v for k, v in locals().items() if k not in ("recorders", "output_rtol")}
+        # F-B2-1: in-loop recorders on the exact engine integrate each step in
+        # closed form, so output_rtol is kept: the run is the one without them
+        _kw = {k: v for k, v in locals().items() if k != "recorders"}
         from ._recorders import simulate_with_recorders as _with_rec
         return _with_rec(simulate, _kw, recorders)
     # add-kernel-simulation-object Stage A: plan -> engine table -> finalize.
@@ -2759,7 +2887,47 @@ def simulate(
         should_continue, closed_loops, live_stream, mmc_arms, on_cache,
         controller_period, resume_from, control_tick, solver, sensitivities,
         mode_selection, allow_implicit_segments, undriven, recorders, output_rtol)))
+    if sensitivities is not None:
+        return _step_sensitivities(plan, sensitivities)
     return _finalize(_ENGINES[plan.engine](plan), plan)
+
+
+def _step_sensitivities(plan, names):
+    """simulate(sensitivities=[...]) on 'pwl' / 'trbdf2': the kernel's
+    stage recurrence (add-parameter-sensitivities group 5) carried by the
+    run itself; ``res.sensitivity`` / ``res.sens`` as on the exact path."""
+    from .sensitivity import StepSensitivityResult, _step_names
+    engine = plan.engine
+    if engine == "dsed":   # the exact path's post-pass, planned in _plan_run
+        return _finalize(_ENGINES[engine](plan), plan)
+    names = _step_names(names, engine)
+    d = plan.drive
+    ctl = d.control
+    if (d.user_b_extra_fn is not None or d.user_step_observer is not None
+            or d.user_closed_loops or (ctl is not None and ctl.ticks)
+            or d.mmc_arms or d.on_cache is not None):
+        raise _unsupported(
+            engine, "sensitivities",
+            f"simulate(engine={engine!r}, sensitivities=...): a b_extra_fn, "
+            "step_observer, closed loop, control tick, mmc_arms or on_cache "
+            "hook feeds the circuit values the sensitivity recurrence cannot "
+            "differentiate. Use engine='dsed' for a closed loop.")
+    via = (plan.step.via_simulation if engine == "pwl"
+           else plan.circuit is not None and plan.kernel_run is None)
+    if not via:
+        raise _unsupported(
+            engine, "sensitivities",
+            f"simulate(engine={engine!r}, sensitivities=...): this run takes "
+            "the driver outside the kernel Simulation object (a sweep "
+            "replay or a control_tick='state' graph), which carries no "
+            "sensitivities.")
+    plan.step.run_options.sensitivities = names
+    res = _finalize(_ENGINES[engine](plan), plan)
+    sr = StepSensitivityResult.from_trace(
+        res.sensitivity_trace, plan.builder, engine)
+    res.sensitivity = sr
+    res.sens = sr.sens
+    return res
 
 
 # Stage A's plan.resolved_from compares each keyword with these: taken from
@@ -3288,7 +3456,10 @@ def _plan_run(
     # `simulation:` block) used to reach the engines as t_end = dt = 0
     # and died on an engine-specific message about the step ceiling;
     # refuse it here and name the file.
+    _yaml_run = None
     if isinstance(builder, LoadedCircuit):
+        _yaml_run = _loaded_run_options(builder)
+        _yaml_src = builder.source
         _was = (t_end, dt, t_start, store_every)
         builder, t_end, dt, t_start, store_every = _resolve_loaded_circuit(
             builder, t_end, dt, t_start, store_every)
@@ -3397,6 +3568,39 @@ def _plan_run(
             discontinuity_restart, resolution_diagnostics,
             inductor_freeze_di_max, inductor_abs_clamp, integrator, rtol,
             atol, dt_init))
+
+    # The YAML's own run keys fill what neither a keyword nor solver= set.
+    if _yaml_run:
+        _ykw = {"enable_newton_line_search": enable_newton_line_search,
+                "enable_newton_lm": enable_newton_lm,
+                "enable_substep_state_correction":
+                    enable_substep_state_correction,
+                "max_event_iterations": max_event_iterations,
+                "max_newton_iterations": max_newton_iterations,
+                "tol_newton_dx": tol_newton_dx, "tol_newton_res": tol_newton_res,
+                "integrator": integrator, "rtol": rtol, "atol": atol,
+                "dt_init": dt_init}
+        _now = {k: (_yaml_run[k] if v is None and k in _yaml_run else v)
+                for k, v in _ykw.items()}
+        _drop = _yaml_keys_not_honoured(
+            {k: _now[k] for k in _YAML_RUN_KW
+             if _ykw[k] is None and k in _yaml_run},
+            engine, dt, _yaml_src)
+        for k in _drop:
+            _now[k] = None
+        _mark_resolved(_resolved, "yaml", _YAML_RUN_KW,
+                       tuple(_ykw[k] for k in _YAML_RUN_KW),
+                       tuple(_now[k] for k in _YAML_RUN_KW))
+        enable_newton_line_search = _now["enable_newton_line_search"]
+        enable_newton_lm = _now["enable_newton_lm"]
+        enable_substep_state_correction = _now[
+            "enable_substep_state_correction"]
+        max_event_iterations = _now["max_event_iterations"]
+        max_newton_iterations = _now["max_newton_iterations"]
+        tol_newton_dx, tol_newton_res = (_now["tol_newton_dx"],
+                                         _now["tol_newton_res"])
+        integrator, rtol, atol, dt_init = (_now["integrator"], _now["rtol"],
+                                           _now["atol"], _now["dt_init"])
 
     if enable_nonlinear_refresh is not None:
         import warnings
@@ -3619,18 +3823,18 @@ def _plan_run(
         _undriven_plan = _undriven_policy(
             builder, undriven or _planning.DEFAULT_UNDRIVEN, engine)
 
-    # ---- Parameter sensitivities: the exact path only. Above the
-    # dispatch (planned for every engine), so every engine refuses or
-    # honours it.
-    if sensitivities is not None and engine != "dsed":
+    # ---- Parameter sensitivities: the exact path, and the stage
+    # recurrence of the time-stepping engines (add-parameter-sensitivities
+    # group 5: pwl / trbdf2, no events). Above the dispatch (planned for
+    # every engine), so every engine refuses or honours it.
+    if sensitivities is not None and engine not in ("dsed", "pwl", "trbdf2"):
         raise _unsupported(
             engine, "sensitivities",
             f"simulate(engine={engine!r}, sensitivities=...): forward "
-            "sensitivities are computed on the exact path only "
-            "(engine='dsed'); on this engine a gradient would be a "
-            "finite difference of runs whose events sit on the step grid "
-            "(off by a factor of ten on the DCM buck). Pass "
-            "engine='dsed'.")
+            "sensitivities are computed by the engine named: pass "
+            "engine='dsed' (the exact path, events included), or "
+            "engine='pwl' / 'trbdf2' (the derivative of the discrete step; "
+            "a run that meets an event is refused there).")
     if sensitivities is not None and mode_selection in ("shadow", "lcp"):
         raise _unsupported(
             engine, "sensitivities",
@@ -3693,12 +3897,13 @@ def _plan_run(
         # adaptive-RK selector below is PWL-specific and must NOT apply
         # to DSED integrator names.
         # update-number-changing-release: the output-grid rule acts only where
-        # the engine picks the samples (no dt, no store_every, no recorders);
-        # anything explicit keeps today's samples exactly.
+        # the engine picks the samples (no dt, no store_every); anything
+        # explicit keeps today's samples exactly. With recorders it acts as
+        # without them (their statistics are closed forms: F-B2-1).
         if output_rtol is not None:
             if isinstance(output_rtol, bool) or not 0.0 < output_rtol < float("inf"):
                 raise ValueError(f"simulate(output_rtol={output_rtol!r}): must be > 0 (None = off)")
-            if dt is not None or recorders or (store_every or 1) != 1:
+            if dt is not None or (store_every or 1) != 1:
                 output_rtol = None
         step = _planning.new(_planning.ExactStep, (
             dt, rtol, atol, dt_init, integrator, stiffness_threshold, h_bdf2,
@@ -3930,70 +4135,80 @@ def _run_dsed(plan):
     mode_selection = plan.events.mode_selection
     _mode_auto = plan.events.mode_auto
     _dsed = _dsed_dispatch_module
+    if t_start and i.resume_from is None:
+        # t_start is an absolute label (docs/internals/run-planning.md): the
+        # engine's clock runs from 0, so the drive is shifted onto it here
+        switch_fn, b_extra_fn = _dsed.on_absolute_clock(
+            builder, float(t_start), switch_fn, b_extra_fn)
     # The DSED branch returns here, ~400 lines before the PWL
     # tail that attaches `_builder` / `_preflight`. Attach the
     # preflight report on the way out, so `result._preflight` —
     # which the warning tells every user to read — is not a
     # PWL-only attribute.
-    if sensitivities is not None:
-        if s.output_rtol is not None:
-            raise _unsupported(
-                "dsed", "output_rtol",
-                "simulate(engine='exact', sensitivities=..., output_rtol=...): the "
-                "sensitivity run keeps its own grid. Drop output_rtol, or pass dt.")
-        from .sensitivity import simulate_sensitivities
-        if switch_fn is None and plan.undriven is not None:
-            from .sensitivity import _ConstSchedule  # an edge oracle (inf)
-            switch_fn = _ConstSchedule(builder.graph.num_switches,
-                                       plan.undriven[0] == "closed")
-        _dsed_res = simulate_sensitivities(
-            builder, t_end, sensitivities=sensitivities, dt=dt,
-            t_start=t_start, switch_fn=switch_fn,
-            initial_state=None if _ic_from_builder else initial_state,
-            ic_from_builder=_ic_from_builder, dt_init=dt_init,
-            b_extra_fn=b_extra_fn, integrator=integrator,
-            ticks=[(f, p, o) for (f, p), o in zip(
-                _plan.ticks, _plan.tick_offsets or [0.0] * len(_plan.ticks))])
-        if _mode_auto is not None:
-            _diag = getattr(_dsed_res, "diagnostics", None)
-            if isinstance(_diag, dict):
-                _diag["mode_selection_auto"] = _mode_auto
-            else:
-                try:
-                    _dsed_res.diagnostics = {"mode_selection_auto": _mode_auto}
-                except AttributeError:
-                    pass  # a result without diagnostics: the record has nowhere to go
-    else:
-        _dsed_res = _dsed.run_dsed_from_builder(
-            builder=builder,
-            t_end=t_end,
-            dt=dt,
-            rtol=rtol,
-            atol=atol,
-            dt_init=dt_init,
-            integrator=integrator,
-            stiffness_threshold=stiffness_threshold,
-            h_bdf2=h_bdf2,
-            t_start=t_start,
-            switch_fn=switch_fn,
-            b_extra_fn=b_extra_fn,
-            # Builder ICs (c0= / i0=) are a full-MNA vector: the
-            # dispatcher maps them per device onto the reduced state.
-            initial_state=None if _ic_from_builder else initial_state,
-            builder_initial_state=initial_state if _ic_from_builder else None,
-            progress=progress,
-            mode_selection=mode_selection,
-            allow_implicit_segments=bool(allow_implicit_segments),
-            output_rtol=s.output_rtol,
-            ticks=[(f, p, o) for (f, p), o in zip(
-                _plan.ticks, _plan.tick_offsets or [0.0] * len(_plan.ticks))],
-            resume_from=i.resume_from,
-            tick_origins=_resume_tick_origins(i.resume_from, len(_plan.ticks)),
-            tick_next_k=_resume_tick_next_k(i.resume_from, len(_plan.ticks)),
-            undriven=plan.undriven[0] if plan.undriven is not None else None,
-            mode_auto=_mode_auto,
-        )
-        _save_control_state(_plan.graphs, _dsed_res)   # the snapshot's controllers
+    try:
+        if sensitivities is not None:
+            if s.output_rtol is not None:
+                raise _unsupported(
+                    "dsed", "output_rtol",
+                    "simulate(engine='exact', sensitivities=..., output_rtol=...): the "
+                    "sensitivity run keeps its own grid. Drop output_rtol, or pass dt.")
+            from .sensitivity import simulate_sensitivities
+            if switch_fn is None and plan.undriven is not None:
+                from .sensitivity import _ConstSchedule  # an edge oracle (inf)
+                switch_fn = _ConstSchedule(builder.graph.num_switches,
+                                           plan.undriven[0] == "closed")
+            _dsed_res = simulate_sensitivities(
+                builder, t_end, sensitivities=sensitivities, dt=dt,
+                t_start=t_start, switch_fn=switch_fn,
+                initial_state=None if _ic_from_builder else initial_state,
+                ic_from_builder=_ic_from_builder, dt_init=dt_init,
+                b_extra_fn=b_extra_fn, integrator=integrator,
+                ticks=[(f, p, o) for (f, p), o in zip(
+                    _plan.ticks, _plan.tick_offsets or [0.0] * len(_plan.ticks))])
+            if _mode_auto is not None:
+                _diag = getattr(_dsed_res, "diagnostics", None)
+                if isinstance(_diag, dict):
+                    _diag["mode_selection_auto"] = _mode_auto
+                else:
+                    try:
+                        _dsed_res.diagnostics = {"mode_selection_auto": _mode_auto}
+                    except AttributeError:
+                        pass  # a result without diagnostics: the record has nowhere to go
+        else:
+            _dsed_res = _dsed.run_dsed_from_builder(
+                builder=builder,
+                t_end=t_end,
+                dt=dt,
+                rtol=rtol,
+                atol=atol,
+                dt_init=dt_init,
+                integrator=integrator,
+                stiffness_threshold=stiffness_threshold,
+                h_bdf2=h_bdf2,
+                t_start=t_start,
+                switch_fn=switch_fn,
+                b_extra_fn=b_extra_fn,
+                # Builder ICs (c0= / i0=) are a full-MNA vector: the
+                # dispatcher maps them per device onto the reduced state.
+                initial_state=None if _ic_from_builder else initial_state,
+                builder_initial_state=initial_state if _ic_from_builder else None,
+                progress=progress,
+                mode_selection=mode_selection,
+                allow_implicit_segments=bool(allow_implicit_segments),
+                output_rtol=s.output_rtol,
+                ticks=[(f, p, o) for (f, p), o in zip(
+                    _plan.ticks, _plan.tick_offsets or [0.0] * len(_plan.ticks))],
+                resume_from=i.resume_from,
+                tick_origins=_resume_tick_origins(i.resume_from, len(_plan.ticks)),
+                tick_next_k=_resume_tick_next_k(i.resume_from, len(_plan.ticks)),
+                undriven=plan.undriven[0] if plan.undriven is not None else None,
+                mode_auto=_mode_auto,
+            )
+            _save_control_state(_plan.graphs, _dsed_res)   # the snapshot's controllers
+    except (PulsimError, RuntimeError) as e:   # typed give-ups (DiodeModeInconsistentError is a RuntimeError)
+        if t_start and i.resume_from is None:   # the engine's clock: relabel
+            _dsed.relabel_failure(e, float(t_start))
+        raise
     return _planning.new(_planning.RunOutcome, (
         _dsed_res, builder, switch_fn, b_extra_fn, None, None, None, None,
         None))
@@ -4441,6 +4656,7 @@ def _finalize(out, plan):
             pass
         _auto_check_voltage_sanity(res, builder,
                                     voltage_sanity_factor)
+        _check_right_limit_voltage(res, builder, voltage_sanity_factor)
         # on_impulse on the exact engine (its dependent-state projections,
         # recorded after the run): 'error' refuses the run as pwl's kernel
         # does at the event, 'warn' warns.
@@ -5127,6 +5343,34 @@ def _auto_check_voltage_sanity(res, builder, factor):
                 builder.graph, builder.pool,
                 list(_np.asarray(res.times, dtype=float)),
                 _np.asarray(res.states, dtype=float), f)
+    except Exception:  # pragma: no cover — never break a good run
+        return
+    if volt is not None and volt.node >= 0:
+        import warnings
+        res._implausible_voltage = volt
+        warnings.warn(
+            "simulate(): " + _k.describe_implausible_voltage(
+                builder.graph, builder.pool, volt),
+            stacklevel=4)
+
+
+def _check_right_limit_voltage(res, builder, factor):
+    """The exact engine's right limits at its events, stored apart from the
+    samples: an inductor current cut into g_off is a spike there and nowhere
+    else (release finding F-5-10: v_sw = i_L / g_off = 2.4e9 V at the right
+    limit, 48 V sampled). Same detector and warning as the samples' check."""
+    rl = getattr(res, "right_limit_index", None)
+    if getattr(res, "_implausible_voltage", None) is not None or rl is None or not len(rl):
+        return
+    try:
+        import numpy as _np
+        _k = _pulsim_module
+        f = (_ro.DEFAULTS["voltage_sanity_factor"] if factor is None
+             else float(factor))
+        volt = _k.find_implausible_voltage(
+            builder.graph, builder.pool,
+            list(_np.asarray(res.times, dtype=float)[_np.asarray(rl, dtype=int)]),
+            _np.asarray(res.right_limit_states, dtype=float), f)
     except Exception:  # pragma: no cover — never break a good run
         return
     if volt is not None and volt.node >= 0:

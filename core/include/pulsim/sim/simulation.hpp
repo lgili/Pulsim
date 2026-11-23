@@ -144,6 +144,14 @@ public:
                 std::format("Simulation(engine='{}'): {} cannot be honoured "
                             "here{}.", pwl::engine_name(e), names, why));
         }
+        // the exact engine's sensitivities are simulate()'s post-pass, not
+        // this kernel run's: refused here rather than silently dropped
+        if (!opts_.sensitivities.empty() && e == Engine::Dsed) {
+            throw UnsupportedError("dsed", "sensitivities", "", "",
+                "Simulation(engine='dsed'): sensitivities on the exact engine "
+                "are computed by pulsim.simulate(); this run computes them on "
+                "'pwl' and 'trbdf2'.");
+        }
         if (const auto b = find_unsupported(graph(), pool(), e)) {
             throw unsupported_device(graph(), pool(), e, *b, std::format(
                 "Simulation: engine '{}' cannot simulate '{}' ({})",

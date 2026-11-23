@@ -38,6 +38,7 @@
 #include "pulsim/topology/graph.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <stdexcept>
 #include <string>
@@ -227,6 +228,33 @@ public:
             }
         });
     }
+    /// TR-BDF2's error estimate, between the BDF2 solve and the commit:
+    /// per q row, q − q_n at the γ point (the stage-1 capture) and at the
+    /// step end (the BDF2 stage's own law, as `commit` will compute it).
+    void trbdf2_increments(const Vector& x1, Real* dqg, Real* dq1) const {
+        for_each([&](const auto& k) {
+            if (k.stage_rows() == 0) return;
+            k.trbdf2_increments(x1, dqg, dq1);
+            dqg += k.stage_rows();
+            dq1 += k.stage_rows();
+        });
+    }
+    /// Per q row: atol_q / atol, the device's own conversion from the
+    /// electrical unknown its charge or flux follows (a capacitance, an
+    /// inductance, a time constant); 1 where a law gives none.
+    void q_scales(Real* s) const {
+        for_each([&](const auto& k) {
+            const std::size_t n = k.stage_rows();
+            if (n == 0) return;
+            k.q_scales(s);
+            for (std::size_t r = 0; r < n; ++r) {
+                if (s[r] < Real{0}) continue;   // no q entry: skipped by the estimate
+                if (!(s[r] > Real{0}) || !std::isfinite(s[r])) s[r] = Real{1};
+            }
+            s += n;
+        });
+    }
+
     /// After the stages: every scratch of the stage form back to rest.
     void stage_clear() {
         for_each([](auto& k) { k.stage_clear(); });

@@ -74,7 +74,7 @@ circuit of `numerics/p2_buck.py`: 24 V, 100 µH, 47 µF, `g_on = 1e3`,
 - [ ] 12.1 Deprecate `integrator='rk45'|'bdf2'` on `engine='dsed'` (owner decision); remove after one release
 - [ ] 12.2 Measure the dense / sparse crossover on the RLC ladder (n = 5 … 482) with the counter harness and replace the `n_state ≤ 64` placeholder
 - [ ] 12.3 Docs: engine guide ("when the exact strategy is selected, when it is refused"), `docs/dsed.md`, AI_GUIDE, CHANGELOG with the 1e-10 result movement — partial: dsed chapters 11 and 15, `docs/known-limitations.md`, `docs/internals/layer5-v2-ideal-diode.md`, KNOWN_LIMITATIONS.md, CHANGELOG; `docs/dsed.md` does not exist; AI_GUIDE untouched (at its 32 KiB limit, nothing in it went stale)
-- [ ] 12.4 ruff, pytest, ctest (`-j2`), `openspec validate --all --strict`, stub check
+- [x] 12.4 ruff, pytest, ctest (`-j2`), `openspec validate --all --strict`, stub check — CLOSED: seen on the PR head a90d84b8 (2026-11-22): ruff clean, ctest 1091/1091 (Eigen 5; 17 targets on Eigen 3.4.0), pytest 7079 passed with the one failure re-pinned and its files re-run, `openspec validate --all --strict` 79 passed, stubs `--check` up to date
 
 <!-- Re-centred scope, 2026-11-13: groups 13–19 are appended; groups 1–12 are unchanged. -->
 

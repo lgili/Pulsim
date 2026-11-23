@@ -298,7 +298,8 @@ def circuit_worker(unit, names, emit):
         if kind == "ran" and sol is not None and g:
             try:
                 rec["exact"] = sb.grade(sol, dr.traces(res, cols), g, sp, case.dt, tol,
-                                        self_score=False)["exact"]
+                                        self_score=False,
+                                        parasitic=sb.PARASITIC.get(eng, 0.0) * case.dt)["exact"]
             except Exception as ex:  # noqa: BLE001 - the measure failed, said so
                 rec["exact_error"] = f"{type(ex).__name__}: {ex}"[:200]
         rec.pop("worst", None)

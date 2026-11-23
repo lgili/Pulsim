@@ -172,10 +172,11 @@ def test_what_the_exact_port_cannot_honour_is_refused_by_name(what):
 
 
 def test_a_fresh_t_start_run_books_the_zero_start_ledgers_relabelled():
-    """A fresh exact run with t_start is the run from 0 relabelled by t_start
-    (the engine's clock runs from 0; its times are shifted): its loss ledgers
-    are the zero-start run's and its loss events sit t_start later (session
-    26; it was refused by name before)."""
+    """A fresh exact run with t_start reads the gate at absolute t (the engine's
+    clock runs from 0; simulate() shifts the drive onto it and relabels the
+    times: test_tstart_time_base.py). t0 is one whole gate period, so its loss
+    ledgers are the zero-start run's and its loss events sit t_start later
+    (session 26; it was refused by name before)."""
     t0 = 1e-5
     runs = []
     for kw in ({}, {"t_start": t0}):

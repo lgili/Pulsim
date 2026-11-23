@@ -301,15 +301,17 @@ def _build(comps: List[dict], notes: List[str]):
                 raise Unmapped("p-channel mosfet (no 2.0 Level-1 PMOS)")
             if "loss" in c or "thermal" in c:
                 raise Unmapped("mosfet loss/thermal block")
+            # shortcut: K = kp, but v1's law is id = kp/2 vov^2 (DECISIONS 14 R1, xfail in
+            # test_v1_reader.py); every file sets kp, vth, lambda, so the defaults are v1's
             d, s = nodes[1], nodes[2]
-            b.add_mosfet_level1(name, d, s, nodes[0], K=value(c.get("kp", 1.0)),
-                                V_T=value(c.get("vth", 2.0)), lambda_=value(c.get("lambda", 0.0)),
+            b.add_mosfet_level1(name, d, s, nodes[0], K=value(c.get("kp", 0.1)),
+                                V_T=value(c.get("vth", 2.0)), lambda_=value(c.get("lambda", 0.01)),
                                 with_body_diode=False)
             newton = True
         elif t == "igbt":
             b.add_igbt_level1(name, nodes[1], nodes[2], nodes[0],
                               V_CE_sat=value(c.get("v_ce_sat", 1.5)),
-                              R_CE_sat=1.0 / value(g_on if g_on is not None else 1e3),
+                              R_CE_sat=1.0 / value(g_on if g_on is not None else 1e4),
                               V_T=value(c.get("vth", 5.0)))
             newton = True
         elif t == "transformer":

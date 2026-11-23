@@ -222,6 +222,24 @@ public:
         }
     }
     void stage_clear() noexcept {}
+    // ---- TR-BDF2's q rows (the error estimate) ----
+    /// Q − Q_n at γ (the stage-1 capture) and at the step end (Q(v), as
+    /// `commit_bdf2_stage2` computes it).
+    void trbdf2_increments(const Vector& x1, Real* dqg, Real* dq1) const {
+        Size qi = 0;
+        for (const auto& e : entries_) {
+            const Real v = stamping::read_node_voltage(x1, e.from)
+                         - stamping::read_node_voltage(x1, e.to);
+            *dq1++ = models::NonlinearCapacitor::charge(e.params, v) - e.q_prev;
+            *dqg++ = q_gamma_[qi++] - e.q_prev;
+        }
+    }
+    /// atol_q / atol per row: the zero-bias capacitance dQ/dv(0).
+    void q_scales(Real* s) const {
+        for (const auto& e : entries_) {
+            *s++ = std::abs(models::NonlinearCapacitor::capacitance(e.params, Real{0}));
+        }
+    }
 
     /// Commit under the rule the solve stamped (BDF2 stage: the stage
     /// commit; backward Euler: the restart rule).

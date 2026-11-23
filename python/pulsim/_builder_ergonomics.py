@@ -19,16 +19,11 @@ Initial conditions (``set_initial``, ``c0=`` / ``i0=``) and aliases
 removed the Python side tables). This module keeps the alias resolver
 the result accessors consult and the retired-device guard.
 
-Cancellation: the existing ``simulate(should_continue=…)`` already
-preempts the transient solver. The other top-level analyses
-(``compute_dc_op``, ``run_ac_sweep``, ``compute_temperature``) gain
-the kwarg here as Python-side wrappers that check the callback
-between calls but cannot interrupt mid-call (preemption requires
-C++ kernel changes, captured in the proposal's tasks 3.1-3.4 for a
-follow-up). The wrapper still raises :class:`pulsim.Cancelled` when
-the caller signalled cancellation before the call started — useful
-for "user clicked Cancel between Bode sweep points" scenarios where
-the next call shouldn't fire.
+Cancellation: ``simulate(should_continue=…)`` stops the transient and
+returns the trace up to the cancel; ``compute_dc_op``,
+``compute_temperature``, ``run_mna_sweep`` and ``run_ac_sweep`` raise
+:class:`pulsim.Cancelled` (the sweeps through :class:`CancelProbe`, so
+a point a cancelled solve left short is never kept).
 """
 from __future__ import annotations
 
@@ -87,37 +82,32 @@ class Cancelled(RuntimeError, PulsimError):
 # ---------------------------------------------------------------------------
 # Cancellation wrapper for analyses
 # ---------------------------------------------------------------------------
-def wrap_with_cancellation(fn, *, where: str):
-    """Wrap a long-running analysis ``fn`` so its existing
-    ``should_continue`` semantics propagate through a typed
-    :class:`Cancelled` exception.
+class CancelProbe:
+    """A sweep's ``should_continue``: :meth:`check` before each point
+    raises :class:`Cancelled`, and :meth:`__call__` is what each solve
+    inside the point polls -- it remembers a ``False`` so the point the
+    solve stopped in is raised by :meth:`raise_if_fired` instead of being
+    kept as if complete (``simulate`` returns the trace up to the cancel).
+    A callback that raises propagates."""
 
-    Most pulsim analyses ignore the kwarg today; the wrapper at
-    least preempts re-entry — if a sweep is in a Python-level loop
-    over `fn`, callers can pass ``should_continue`` and the next
-    iteration won't fire after the user clicked Cancel.
+    __slots__ = ("fn", "where", "fired")
 
-    Note: this is a *partial* implementation of the spec. Mid-call
-    preemption requires C++ kernel changes, captured in the
-    proposal's tasks 3.1-3.4. We ship this hook so PulsimGUI can
-    wire its cancel button today.
-    """
-    def _wrapped(*args, should_continue=None, **kwargs):
-        if should_continue is not None and not should_continue():
-            raise Cancelled(where)
-        # Forward should_continue to the underlying analysis when it
-        # accepts the kwarg (introspect the signature once, cache).
-        try:
-            import inspect
-            params = inspect.signature(fn).parameters
-            if "should_continue" in params and should_continue is not None:
-                kwargs["should_continue"] = should_continue
-        except (TypeError, ValueError):  # pragma: no cover — defensive
-            pass
-        return fn(*args, **kwargs)
-    _wrapped.__name__ = getattr(fn, "__name__", "_wrapped")
-    _wrapped.__doc__ = getattr(fn, "__doc__", None)
-    return _wrapped
+    def __init__(self, fn, where: str) -> None:
+        self.fn, self.where, self.fired = fn, where, False
+
+    def __call__(self) -> bool:
+        if self.fn():
+            return True
+        self.fired = True
+        return False
+
+    def check(self, point_index: int) -> None:
+        if not self():
+            raise Cancelled(self.where, point_index)
+
+    def raise_if_fired(self, point_index: int) -> None:
+        if self.fired:
+            raise Cancelled(self.where, point_index)
 
 
 # ---------------------------------------------------------------------------
@@ -212,7 +202,7 @@ def _resolve_alias_native(self, name: str):
 
 
 __all__ = [
+    "CancelProbe",
     "Cancelled",
     "install",
-    "wrap_with_cancellation",
 ]

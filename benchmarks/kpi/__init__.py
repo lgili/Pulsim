@@ -396,27 +396,50 @@ def compute_switching_loss_per_event(
     v_ds_samples: Sequence[float],
     i_d_samples: Sequence[float],
     times: Sequence[float],
+    window_s: float,
 ) -> Dict[str, float]:
-    """Average switching loss in W. At each switch state transition, treats
-    the local V·I product as the switching loss of one event:
-    E_event = ½ · V_DS · I_D (the pre-transition sample). Energy summed
-    over all events ÷ total simulated time = average loss in W.
+    """Switching energy E = int v_DS * i_D dt over window_s after each
+    state transition (trapezoidal over the samples, the window end
+    interpolated), summed and divided by the span: the average switching
+    loss in W.
+
+    The window must cover the transition and stop before the next one; it
+    includes the conduction of that window. An edge the solver does not
+    resolve (a capacitor collapsing through milliohms inside one step) is
+    not in the samples, so it is not in this integral either: book it from
+    the stored-energy change instead.
+
+    (Before 2026-11 this returned sum(0.5*|v*i|) / span over the
+    pre-transition samples: watts divided by seconds, not an energy.)
     """
+    if not window_s > 0:
+        raise ValueError(f"window_s must be > 0 s, got {window_s!r}")
     n = min(len(switch_states), len(v_ds_samples), len(i_d_samples), len(times))
     if n < 2:
-        return {"switching_loss_w_avg": 0.0, "switching_event_count": 0.0}
+        return {"switching_loss_w_avg": 0.0, "switching_event_count": 0.0,
+                "switching_energy_j": 0.0}
     total_time = max(1e-18, times[n - 1] - times[0])
+    p = [v_ds_samples[k] * i_d_samples[k] for k in range(n)]
     energy = 0.0
     events = 0
     for k in range(1, n):
-        if switch_states[k] != switch_states[k - 1]:
-            v = v_ds_samples[k - 1]
-            i = i_d_samples[k - 1]
-            energy += 0.5 * abs(v * i)
-            events += 1
+        if switch_states[k] == switch_states[k - 1]:
+            continue
+        events += 1
+        t0 = times[k - 1]
+        t1 = t0 + window_s
+        j = k - 1
+        while j + 1 < n and times[j + 1] <= t1:
+            energy += 0.5 * (p[j] + p[j + 1]) * (times[j + 1] - times[j])
+            j += 1
+        if j + 1 < n and times[j + 1] > times[j] and t1 > times[j]:
+            f = (t1 - times[j]) / (times[j + 1] - times[j])
+            p1 = p[j] + f * (p[j + 1] - p[j])
+            energy += 0.5 * (p[j] + p1) * (t1 - times[j])
     return {
         "switching_loss_w_avg": energy / total_time,
         "switching_event_count": float(events),
+        "switching_energy_j": energy,
     }
 
 
@@ -536,6 +559,54 @@ def compute_junction_temperature(
     }
 
 
+def compute_drift(
+    times: Sequence[float],
+    samples: Sequence[float],
+    t_from: Optional[float] = None,
+    t_to: Optional[float] = None,
+) -> float:
+    """Least-squares slope (units per second) of ``samples`` over
+    ``[t_from, t_to]`` (add-long-simulation-stress). A settled waveform's
+    slope is its secular drift; feed it per-period averages, not raw
+    switching samples, or the ripple's phase leaks into the slope."""
+    pts = [(t, y) for t, y in zip(times, samples)
+           if (t_from is None or t >= t_from) and (t_to is None or t <= t_to)]
+    if len(pts) < 2:
+        raise ValueError("compute_drift needs at least two samples in the window")
+    n = len(pts)
+    tm = sum(t for t, _ in pts) / n
+    ym = sum(y for _, y in pts) / n
+    stt = sum((t - tm) ** 2 for t, _ in pts)
+    if stt == 0.0:
+        raise ValueError("compute_drift: all samples share one instant")
+    return sum((t - tm) * (y - ym) for t, y in pts) / stt
+
+
+def compute_conservation_drift(
+    p_in_samples: Sequence[float],
+    p_out_samples: Sequence[float],
+    e_stored_initial: float,
+    e_stored_final: float,
+    time: Sequence[float],
+) -> float:
+    """Relative energy residual ``(∫(p_in − p_out) dt − ΔE_stored) / ∫p_in dt``
+    (add-long-simulation-stress). ``p_out`` is everything that leaves the
+    stored energy (load plus losses); the integrals are trapezoidal over the
+    sample instants ``time``, exact for the piecewise-linear waveform through
+    the samples. Signed: positive means energy went in and is unaccounted."""
+    n = len(time)
+    if n < 2 or len(p_in_samples) != n or len(p_out_samples) != n:
+        raise ValueError("compute_conservation_drift: p_in, p_out and time need one sample per instant (>= 2)")
+    w_in = w_out = 0.0
+    for k in range(1, n):
+        h = time[k] - time[k - 1]
+        w_in += 0.5 * h * (p_in_samples[k] + p_in_samples[k - 1])
+        w_out += 0.5 * h * (p_out_samples[k] + p_out_samples[k - 1])
+    if w_in == 0.0:
+        raise ValueError("compute_conservation_drift: no input energy")
+    return (w_in - w_out - (e_stored_final - e_stored_initial)) / w_in
+
+
 __all__ = [
     "compute_thd",
     "compute_power_factor",
@@ -550,4 +621,6 @@ __all__ = [
     "compute_inductor_flux_density",
     "compute_power_dissipation_resistor",
     "compute_junction_temperature",
+    "compute_drift",
+    "compute_conservation_drift",
 ]

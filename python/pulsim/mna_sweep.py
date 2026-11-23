@@ -91,6 +91,7 @@ def run_mna_sweep(builder,
                     use_kernel: bool = True,
                     mask=None,
                     verbose: bool = False,
+                    should_continue=None,
                     ) -> MnaSweepResult:
     """Fast frequency sweep via impulse response + FFT.
 
@@ -150,6 +151,13 @@ def run_mna_sweep(builder,
         operating-point state, for the kernel path. Required when the
         circuit has any; the kernel path refuses rather than assume them
         all open.
+    should_continue
+        ``() -> bool``: the kernel path polls it between frequencies, the
+        impulse-FFT path inside its transient. ``False`` raises
+        :class:`pulsim.Cancelled` (``.where == "run_mna_sweep"``) and no
+        partial result is returned; a callback that raises propagates.
+        For a GUI Cancel button: ``cancel = threading.Event()``,
+        ``should_continue=lambda: not cancel.is_set()``.
 
     Returns
     -------
@@ -158,6 +166,9 @@ def run_mna_sweep(builder,
     """
     # Lazy-import to avoid circular dependency at module load time.
     import pulsim as _v2
+    from ._builder_ergonomics import CancelProbe
+    cont = (None if should_continue is None
+            else CancelProbe(should_continue, "run_mna_sweep"))
 
     # ---------------------------------------------------------------
     # Fast path: direct C++ kernel MNA sweep.
@@ -179,10 +190,16 @@ def run_mna_sweep(builder,
         src_idx = builder.pool.branch_var_id_for_source(
             v_in_branch_id, builder.graph)
         freqs_arr = np.asarray(freqs, dtype=float)
-        res = _k.run_mna_sweep_kernel(
-            builder.graph, builder.pool, mask,
-            list(map(float, freqs_arr)),
-            int(src_idx), int(output_idx))
+        try:
+            res = _k.run_mna_sweep_kernel(
+                builder.graph, builder.pool, mask,
+                list(map(float, freqs_arr)),
+                int(src_idx), int(output_idx), should_continue=cont)
+        except RuntimeError as exc:   # the kernel's _CxxCancelled
+            from .dc_strategy import _is_kernel_cancellation, _reraise_as_cancelled
+            if _is_kernel_cancellation(exc):
+                _reraise_as_cancelled(exc, "run_mna_sweep")
+            raise
         H = np.asarray(res.H, dtype=complex)
         mag_dB = 20.0 * np.log10(np.maximum(np.abs(H), 1e-300))
         phase_deg = _wrap_phase_deg(np.degrees(np.angle(H)))
@@ -246,8 +263,10 @@ def run_mna_sweep(builder,
         switch_fn=switch_fn,
         start_from_dc_op=start_from_dc_op,
         enable_nonlinear_refresh=enable_nonlinear_refresh,
-        max_event_iterations=8,
+        max_event_iterations=8, should_continue=cont,
     )
+    if cont is not None:
+        cont.raise_if_fired(0)
 
     times = np.asarray(res.times)
     states = np.asarray(res.states)

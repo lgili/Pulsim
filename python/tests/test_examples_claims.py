@@ -70,6 +70,13 @@ SCRIPTS = {
         (r"raw Langevin non-monotone intervals: (\d+)", above(0.5)),
         (r"all within \|u\| < " + F, below(1e-6)),
     ],
+    # Bergeron line (docstring): lattice 5/3, 5/9, 35/27 V; quarter wave Z0^2/R_L || Rp
+    "run_transmission_line.py": [
+        (r"lattice plateau 0: " + F, near(5 / 3, 1e-9)),
+        (r"lattice plateau 1: " + F, near(5 / 9, 1e-9)),
+        (r"lattice plateau 2: " + F, near(35 / 27, 1e-9)),
+        (r"quarter-wave input amplitude: " + F, near(0.249938, 5e-5)),
+    ],
     "run_buck_closed_loop.py": [
         (r"pre-step .*?mean=" + F, near(12.0, 0.05)),
         (r"post-step .*?mean=" + F, near(14.0, 0.05)),

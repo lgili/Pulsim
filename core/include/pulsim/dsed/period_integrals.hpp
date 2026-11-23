@@ -218,6 +218,7 @@ struct PeriodMode {
     DenseMatrix Rx;      // x_full = Rx·x + rc
     Vector rc;
     bool modal = false;
+    Real kappa = std::numeric_limits<Real>::infinity();   // κ₂(V)
     std::string reason;  // why no modal form
     Eigen::VectorXcd mu;
     Eigen::MatrixXcd V, Vi;
@@ -229,6 +230,80 @@ inline std::string fmt(Real v) {
     char buf[32];
     std::snprintf(buf, sizeof buf, "%.6g", v);
     return buf;
+}
+
+/// The modal basis of `e.As` (n + 1 square): V, V⁻¹, μ and `modal` when
+/// u·κ₂(V) is within the propagator's bar, else `reason`. Shared by the
+/// period map, the loss port and the recorders' closed forms.
+inline void modal_basis(PeriodMode& e) {
+    const Index n1 = e.As.rows();
+    // Graded order, largest rows first (sensitivity.py _Mode): with a
+    // 5e12 1/s idle-mode row last, QR put a -425 1/s eigenvalue 2.7e-4
+    // off (u·||A||).
+    std::vector<Index> ord(static_cast<std::size_t>(n1));
+    std::iota(ord.begin(), ord.end(), Index{0});
+    const Vector rows = e.As.cwiseAbs().rowwise().sum();
+    std::stable_sort(ord.begin(), ord.end(),
+                     [&](Index a, Index c) { return rows[a] > rows[c]; });
+    DenseMatrix Ap(n1, n1);
+    for (Index i = 0; i < n1; ++i) {
+        for (Index j = 0; j < n1; ++j) {
+            Ap(i, j) = e.As(ord[static_cast<std::size_t>(i)],
+                            ord[static_cast<std::size_t>(j)]);
+        }
+    }
+    Eigen::EigenSolver<DenseMatrix> es(Ap);
+    if (es.info() == Eigen::Success) {
+        const Eigen::MatrixXcd Vp = es.eigenvectors();
+        e.V.resize(n1, n1);
+        for (Index i = 0; i < n1; ++i) {
+            e.V.row(ord[static_cast<std::size_t>(i)]) = Vp.row(i);
+        }
+        e.mu = es.eigenvalues();
+        Eigen::JacobiSVD<Eigen::MatrixXcd> svd(e.V);
+        const auto& sv = svd.singularValues();
+        const Real kappa = sv(n1 - 1) > Real{0}
+            ? sv(0) / sv(n1 - 1) : std::numeric_limits<Real>::infinity();
+        e.kappa = kappa;
+        if (kExactRoundoff * kappa <= kExactTierBound) {
+            e.Vi = e.V.fullPivLu().inverse();
+            e.modal = true;
+        } else {
+            e.reason = "kappa2(V) = " + fmt(kappa)
+                       + " > 1e-10/u (near-defective eigenbasis, e.g. "
+                         "critical damping or a singular A)";
+        }
+    } else {
+        e.reason = "eigensolver failed";
+    }
+}
+
+/// e.C (observable rows over x̄, from e.Rx / e.rc and the mask) and e.Rm.
+template <class MaskT>
+inline void observable_rows(PeriodMode& e, const std::vector<PeriodObservable>& obs,
+                            const MaskT& mask) {
+    const Index n = e.n;
+    const Index n1 = n + 1;
+    const auto n_obs = static_cast<Index>(obs.size());
+    e.C = DenseMatrix::Zero(n_obs, n1);
+    for (Index j = 0; j < n_obs; ++j) {
+        const auto& o = obs[static_cast<std::size_t>(j)];
+        for (const auto& [idx, coef] : o.w) {
+            e.C.row(j).head(n) += coef * e.Rx.row(idx);
+            e.C(j, n) += coef * e.rc[idx];
+        }
+        if (o.bit >= 0) {
+            const bool on = mask.get(static_cast<Size>(o.bit));
+            const Real g = on ? o.g_on : o.g_off;
+            e.C.row(j) *= g;
+            if (on) {
+                e.C(j, n) -= g * o.v_on;
+            }
+        }
+    }
+    if (e.modal && n_obs > 0) {
+        e.Rm = (e.C * e.d.cwiseInverse().asDiagonal()).cast<Cplx>() * e.V;
+    }
 }
 
 template <class AdapterT, class MaskT>
@@ -267,65 +342,8 @@ template <class AdapterT, class MaskT>
         e.d.head(n).asDiagonal() * e.A * di.head(n).asDiagonal();
     e.As.topRightCorner(n, 1) = e.d.head(n).cwiseProduct(e.b);
 
-    // Graded order, largest rows first (sensitivity.py _Mode): with a
-    // 5e12 1/s idle-mode row last, QR put a -425 1/s eigenvalue 2.7e-4
-    // off (u·||A||).
-    std::vector<Index> ord(static_cast<std::size_t>(n1));
-    std::iota(ord.begin(), ord.end(), Index{0});
-    const Vector rows = e.As.cwiseAbs().rowwise().sum();
-    std::stable_sort(ord.begin(), ord.end(),
-                     [&](Index a, Index c) { return rows[a] > rows[c]; });
-    DenseMatrix Ap(n1, n1);
-    for (Index i = 0; i < n1; ++i) {
-        for (Index j = 0; j < n1; ++j) {
-            Ap(i, j) = e.As(ord[static_cast<std::size_t>(i)],
-                            ord[static_cast<std::size_t>(j)]);
-        }
-    }
-    Eigen::EigenSolver<DenseMatrix> es(Ap);
-    if (es.info() == Eigen::Success) {
-        const Eigen::MatrixXcd Vp = es.eigenvectors();
-        e.V.resize(n1, n1);
-        for (Index i = 0; i < n1; ++i) {
-            e.V.row(ord[static_cast<std::size_t>(i)]) = Vp.row(i);
-        }
-        e.mu = es.eigenvalues();
-        Eigen::JacobiSVD<Eigen::MatrixXcd> svd(e.V);
-        const auto& sv = svd.singularValues();
-        const Real kappa = sv(n1 - 1) > Real{0}
-            ? sv(0) / sv(n1 - 1) : std::numeric_limits<Real>::infinity();
-        if (kExactRoundoff * kappa <= kExactTierBound) {
-            e.Vi = e.V.fullPivLu().inverse();
-            e.modal = true;
-        } else {
-            e.reason = "kappa2(V) = " + fmt(kappa)
-                       + " > 1e-10/u (near-defective eigenbasis, e.g. "
-                         "critical damping or a singular A)";
-        }
-    } else {
-        e.reason = "eigensolver failed";
-    }
-
-    const auto n_obs = static_cast<Index>(obs.size());
-    e.C = DenseMatrix::Zero(n_obs, n1);
-    for (Index j = 0; j < n_obs; ++j) {
-        const auto& o = obs[static_cast<std::size_t>(j)];
-        for (const auto& [idx, coef] : o.w) {
-            e.C.row(j).head(n) += coef * e.Rx.row(idx);
-            e.C(j, n) += coef * e.rc[idx];
-        }
-        if (o.bit >= 0) {
-            const bool on = mask.get(static_cast<Size>(o.bit));
-            const Real g = on ? o.g_on : o.g_off;
-            e.C.row(j) *= g;
-            if (on) {
-                e.C(j, n) -= g * o.v_on;
-            }
-        }
-    }
-    if (e.modal && n_obs > 0) {
-        e.Rm = (e.C * di.asDiagonal()).cast<Cplx>() * e.V;
-    }
+    modal_basis(e);
+    observable_rows(e, obs, mask);
     return e;
 }
 
@@ -393,6 +411,28 @@ inline std::vector<Real> extrema_grid(Real h, long long K, Real re_max) {
     std::sort(g.begin(), g.end());
     g.erase(std::unique(g.begin(), g.end()), g.end());
     return g;
+}
+
+/// THE segment-integral kernel of the exact engine (the loss port, the period
+/// statistics and the recorders' closed forms all take it from here):
+/// p_i = ∫₀ᴸ e^{μ_i s} ds = L·φ₁(μ_i L), in the φ form, so μ → 0 loses no
+/// digits (φ₁ has relative error near u at every argument).
+inline void phi1_kernel(const Eigen::VectorXcd& mu, Real L, Eigen::VectorXcd& p1) {
+    const Index n = mu.size();
+    p1.resize(n);
+    for (Index i = 0; i < n; ++i) {
+        p1[i] = L * phi1(mu[i] * L);
+    }
+}
+/// P_ij = ∫₀ᴸ e^{(μ_i + μ_j) s} ds = L·φ₁((μ_i + μ_j) L) (symmetric).
+inline void phi1_pair_kernel(const Eigen::VectorXcd& mu, Real L, Eigen::MatrixXcd& P2) {
+    const Index n = mu.size();
+    P2.resize(n, n);
+    for (Index i = 0; i < n; ++i) {
+        for (Index j = i; j < n; ++j) {
+            P2(i, j) = P2(j, i) = L * phi1((mu[i] + mu[j]) * L);
+        }
+    }
 }
 
 inline Vector augment(const Vector& x) {
@@ -596,16 +636,10 @@ template <class AdapterT, class MaskT>
             }
         }
         const Index n1 = n + 1;
-        Eigen::VectorXcd p1(n1);
-        for (Index i = 0; i < n1; ++i) {
-            p1[i] = h * phi1(e.mu[i] * h);
-        }
-        Eigen::MatrixXcd P2(n1, n1);
-        for (Index i = 0; i < n1; ++i) {
-            for (Index j = i; j < n1; ++j) {
-                P2(i, j) = P2(j, i) = h * phi1((e.mu[i] + e.mu[j]) * h);
-            }
-        }
+        Eigen::VectorXcd p1;
+        detail::phi1_kernel(e.mu, h, p1);
+        Eigen::MatrixXcd P2;
+        detail::phi1_pair_kernel(e.mu, h, P2);
         Eigen::MatrixXcd alpha(n1, n_obs);
         for (Index j = 0; j < n_obs; ++j) {
             alpha.col(j) = e.Rm.row(j).transpose().cwiseProduct(z);

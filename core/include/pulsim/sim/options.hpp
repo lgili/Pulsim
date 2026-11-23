@@ -158,8 +158,9 @@ inline constexpr std::array<OptionSpec, 52> kRunOptionTable{{
     {"controller_period", kEvery, Unset::Always, "None", ""},
     {"resume_from", kEvery, Unset::Always, "None", ""},
     {"solver", kEvery, Unset::Always, "None", ""},
-    {"sensitivities", kExact, Unset::None, "None",
-     "sensitivities are computed on the exact path only"},
+    // pwl / trbdf2: the stage recurrence (add-parameter-sensitivities
+    // group 5), a run that meets an event refused by name there
+    {"sensitivities", kEvery, Unset::None, "None", ""},
     {"mode_selection", kEvery, Unset::Legacy, "None ('legacy')", ""},
     {"allow_implicit_segments", kExact, Unset::None, "None",
      "allow_implicit_segments governs the exact engine's numeric segments"},
@@ -249,6 +250,10 @@ struct RunOptions {
     // Every engine.
     bool auto_regularize = true;
     std::optional<Real> voltage_sanity_factor;
+
+    /// add-parameter-sensitivities group 5: names on pwl / trbdf2 (the
+    /// exact engine's run is composed in Python).
+    std::vector<std::string> sensitivities;
 };
 
 /// A run option that is invalid whatever the engine.
@@ -361,6 +366,7 @@ to_simulation_options(const RunOptions& o) {
     s.mode_selection = static_cast<int>(o.mode_selection);
     s.mode_guard = o.mode_guard;
     s.device_path = o.device_path;
+    s.sensitivities = o.sensitivities;
     if (o.resolution_diagnostics) {
         s.resolution_diagnostics = *o.resolution_diagnostics;
     }
@@ -418,6 +424,7 @@ to_trbdf2_options(const RunOptions& o) {
     s.device_path = o.device_path;
     s.mode_selection = static_cast<int>(o.mode_selection);
     s.integrator = o.integrator_esdirk43 ? 1 : 0;
+    s.sensitivities = o.sensitivities;
     return s;
 }
 

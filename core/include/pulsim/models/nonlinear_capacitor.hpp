@@ -39,8 +39,10 @@
 #include "pulsim/models/charge_table.hpp"
 #include "pulsim/numeric/types.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <format>
+#include <limits>
 #include <memory>
 #include <numbers>
 #include <stdexcept>
@@ -272,7 +274,12 @@ struct NonlinearCapacitor {
 
     /// Stored charge Q(v) = ∫₀ᵛ C dv' [C], in closed form:
     ///   Q = C0·V0/(1−m)·[(1+v/V0)^(1−m) − 1]
-    /// The m → 0 case reduces to C0·v, exactly.
+    /// evaluated as expm1((1−m)·log1p(u)): relative to Q to a few ulp at
+    /// every bias. pow(1+u, 1−m) − 1 cancels near 0 V and held Q only to
+    /// C0·V0·eps absolute (5.5e-24 C at 1 nF, 25 V), which a companion
+    /// over a femtosecond step turns into a Newton residual floor of
+    /// 1e-8 A: a capacitor charged from 0 V aborted at h_min (F-S-5).
+    /// The m → 0 case reduces to C0·v (to an ulp).
     [[nodiscard]] static Real charge(const Params& p, Real v)
         noexcept {
         if (p.law == ChargeLawKind::Table) return p.table->charge(v);
@@ -282,8 +289,68 @@ struct NonlinearCapacitor {
         }
         const Real u = u_of(p, v);
         const Real e = Real{1} - p.m;
-        return p.C0 * p.V0 / e
-               * (std::pow(Real{1} + u, e) - Real{1});
+        return p.C0 * p.V0 / e * std::expm1(e * std::log1p(u));
+    }
+
+    /// The voltage at charge q (Q is non-decreasing in v): bracketed
+    /// Newton from v_guess. NaN when no voltage reaches q (below a
+    /// clamped floor, where Q is flat).
+    [[nodiscard]] static Real voltage_of_charge(const Params& p, Real q,
+                                                Real v_guess) noexcept {
+        const Real step0 = Real{1e-3} * std::max(std::abs(v_guess), std::abs(p.V0));
+        Real lo = v_guess, hi = v_guess, step = step0;
+        for (int k = 0; charge(p, lo) > q; ++k, step *= 2) {
+            if (k == 200) return std::numeric_limits<Real>::quiet_NaN();
+            lo -= step;
+        }
+        step = step0;
+        for (int k = 0; charge(p, hi) < q; ++k, step *= 2) {
+            if (k == 200) return std::numeric_limits<Real>::quiet_NaN();
+            hi += step;
+        }
+        Real v = std::clamp(v_guess, lo, hi);
+        for (int k = 0; k < 100; ++k) {
+            const Real f = charge(p, v) - q;
+            if (f == Real{0}) return v;
+            (f > Real{0} ? hi : lo) = v;
+            Real vn = v - f / capacitance(p, v);
+            if (!(vn > lo && vn < hi)) vn = Real{0.5} * (lo + hi);
+            if (std::abs(vn - v) <= Real{1e-15} * (Real{1} + std::abs(v))) return vn;
+            v = vn;
+        }
+        return v;
+    }
+
+    /// The energy a charge-conserving jump a → b dissipates in the path
+    /// that carries it: ∫ₐᵇ (b − v)·C(v) dv = ∫ₐᵇ (Q(v) − Q(a)) dv
+    /// (½·C·(b − a)² for a linear law). Closed form for the junction law,
+    /// Gauss–Legendre (5 points × 32 panels) for the others.
+    [[nodiscard]] static Real jump_energy(const Params& p, Real a, Real b) noexcept {
+        const Real qa = charge(p, a);
+        if (p.law == ChargeLawKind::Junction &&   // (m < 1: validate)
+            u_of(p, a) == a / p.V0 && u_of(p, b) == b / p.V0) {
+            const Real e = Real{1} - p.m, e2 = Real{2} - p.m;
+            auto F = [&](Real v) {   // ∫Q dv
+                return p.C0 * p.V0 / e *
+                       (p.V0 * std::pow(Real{1} + v / p.V0, e2) / e2 - v);
+            };
+            return F(b) - F(a) - qa * (b - a);
+        }
+        // shortcut: fixed quadrature, no error estimate (smooth laws: ~1e-12
+        // relative; a table's kinks less); upgrade to adaptive if a table needs it.
+        constexpr Real xg[5] = {0.0, -0.5384693101056831, 0.5384693101056831,
+                                -0.9061798459386640, 0.9061798459386640};
+        constexpr Real wg[5] = {0.5688888888888889, 0.4786286704993665,
+                                0.4786286704993665, 0.2369268850561891,
+                                0.2369268850561891};
+        constexpr int n = 32;
+        const Real hp = (b - a) / n;
+        Real s = 0;
+        for (int j = 0; j < n; ++j) {
+            const Real c = a + (j + Real{0.5}) * hp;
+            for (int g = 0; g < 5; ++g) s += wg[g] * (charge(p, c + Real{0.5} * hp * xg[g]) - qa);
+        }
+        return Real{0.5} * hp * s;
     }
 
     /// The CHARGE-EQUIVALENT capacitance over [0, V]: Q(V)/V. This

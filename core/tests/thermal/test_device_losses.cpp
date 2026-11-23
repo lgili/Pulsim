@@ -14,6 +14,7 @@
 #include "pulsim/thermal/device_losses.hpp"
 
 #include <cmath>
+#include <limits>
 #include <memory>
 
 using namespace pulsim;
@@ -59,14 +60,98 @@ Index node_of(const builder::CircuitBuilder& b, std::string_view n) {
 
 }  // namespace
 
+namespace {
+// the 12.8 leg's switch (1 mOhm on, 1 nS off) and a diode
+constexpr thermal::EdgeLaw kSw{true, 1e3, 1e-9};
+constexpr thermal::EdgeLaw kDiode{false, 1e3, 1e-9};
+}  // namespace
+
 TEST_CASE("reading rule: turn-on v before / i after, turn-off the reverse",
           "[thermal][device_losses]") {
-    const auto on = thermal::commutation_point(true, -600.0, 0.1, 1.0, -40.0);
+    const auto on = thermal::commutation_point(true, -600.0, 0.1, 1.0, -40.0, kSw, false);
     CHECK(on.v == 600.0);
     CHECK(on.i == 40.0);
-    const auto off = thermal::commutation_point(false, 1.0, -40.0, -600.0, 0.1);
+    CHECK_FALSE(on.soft);
+    const auto off = thermal::commutation_point(false, 1.0, -40.0, -600.0, 0.1, kSw, false);
     CHECK(off.v == 600.0);
     CHECK(off.i == 40.0);
+    CHECK_FALSE(off.soft);
+}
+
+TEST_CASE("reading rule: a switch's edge with opposite-sign readings is soft",
+          "[thermal][device_losses]") {
+    // the low switch of a zero-dead-time leg: blocking +600 V, then
+    // carrying the load current in reverse (its diode direction)
+    const auto on = thermal::commutation_point(true, 600.0, 1e-7, -1e-3, -40.0, kSw, false);
+    CHECK(on.soft);
+    CHECK(on.v == 0.0);
+    CHECK(on.i == 40.0);
+    const auto off = thermal::commutation_point(false, -1e-3, -40.0, 600.0, 1e-7, kSw, false);
+    CHECK(off.soft);
+    CHECK(off.v == 0.0);
+    // with a dead time its diode clamps it at -V_f: signs agree, charged
+    const auto dt = thermal::commutation_point(true, -0.8, -1e-9, -1e-3, -40.0, kSw, false);
+    CHECK_FALSE(dt.soft);
+    CHECK(dt.v == 0.8);
+    // a diode's recovery (forward i, then reverse v) is never soft
+    const auto rr = thermal::commutation_point(false, 0.7, 40.0, -600.0, -1e-7, kDiode, false);
+    CHECK_FALSE(rr.soft);
+    CHECK(rr.v == 600.0);
+    CHECK(rr.i == 40.0);
+}
+
+TEST_CASE("reading rule: a reverse current within the device's leakage is not resolved",
+          "[thermal][device_losses]") {
+    // g_off |v| = 6e-7 A at 600 V; eps g_on |v| = 1.3e-10 A
+    const double floor = (1e-9 + std::numeric_limits<double>::epsilon() * 1e3) * 600.0;
+    CHECK_FALSE(thermal::commutation_point(true, 600.0, 6e-7, 0.0, -floor, kSw, false).soft);
+    CHECK(thermal::commutation_point(true, 600.0, 6e-7, 0.0, -2.0 * floor, kSw, false).soft);
+    CHECK_FALSE(thermal::commutation_point(true, 600.0, 6e-7, 0.0, -1e-15, kSw, false).soft);
+    CHECK(thermal::commutation_point(true, 600.0, 6e-7, 0.0, -1e-15, kSw, false).v == 600.0);
+    // g_off = 0: the rounding of the closed law alone
+    constexpr thermal::EdgeLaw ideal{true, 1e3, 0.0};
+    CHECK_FALSE(thermal::commutation_point(true, 600.0, 0.0, 0.0, -1e-10, ideal, false).soft);
+    CHECK(thermal::commutation_point(true, 600.0, 0.0, 0.0, -1e-9, ideal, false).soft);
+    // a branch-form switch (g_on = inf) reads its current as an unknown
+    constexpr thermal::EdgeLaw branch{true, std::numeric_limits<double>::infinity(), 1e-9};
+    CHECK(thermal::commutation_point(true, 600.0, 0.0, 0.0, -1e-6, branch, false).soft);
+    CHECK_FALSE(thermal::commutation_point(true, 600.0, 0.0, 0.0, -5e-7, branch, false).soft);
+}
+
+TEST_CASE("reading rule: an impulsive edge and a non-finite reading are never soft",
+          "[thermal][device_losses]") {
+    // a switch closing a capacitor loop: 8 V before, the jump's -8397 A after
+    const auto imp = thermal::commutation_point(true, 8.0, 0.0, 0.0, -8397.0, kSw, true);
+    CHECK_FALSE(imp.soft);
+    CHECK(imp.v == 8.0);
+    const double inf = std::numeric_limits<double>::infinity();
+    const auto a = thermal::commutation_point(true, inf, 0.0, 0.0, -40.0, kSw, false);
+    CHECK_FALSE(a.soft);
+    CHECK(std::isinf(a.v));
+    const auto b = thermal::commutation_point(false, 0.0, 40.0, std::nan(""), 0.0, kSw, false);
+    CHECK_FALSE(b.soft);
+    CHECK(std::isnan(b.v));
+}
+
+TEST_CASE("a non-finite reading at an edge is refused by the device's name",
+          "[thermal][device_losses]") {
+    auto b = chopper();
+    thermal::DeviceLossSpec s;
+    s.device = "S1";
+    s.tj = 25.0;
+    s.e_on = constant(1e-3);
+    b.set_device_losses(s);
+    solver::LossTracker lt(b.graph(), b.pool(), "dsed");
+    const Vector x_l = Vector::Zero(b.graph().num_nodes() + 4);
+    Vector x_r = x_l;
+    x_r[node_of(b, "o")] = std::numeric_limits<Real>::infinity();
+    topology::SwitchStateMask m_l(1), m_r(1);
+    m_r.set(0, true);
+    lt.begin(x_l, m_l);
+    // the closed side reads -inf against the 0 V it blocked: never soft
+    CHECK_THROWS_WITH(lt.event(1e-6, x_l, m_l, x_r, m_r),
+                      Catch::Matchers::ContainsSubstring("'S1'")
+                          && Catch::Matchers::ContainsSubstring("non-finite"));
 }
 
 TEST_CASE("adiabatic junction: ten 1 mJ events raise it 1.000 K",

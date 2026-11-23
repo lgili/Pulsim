@@ -33,5 +33,12 @@
 - [x] 6.2 `docs/solvers.md`, `AI_GUIDE.md` §2 ("omit dt") and trap 13: what the ceiling is and when to pass `dt`; docstring of `simulate` for `rtol` / `atol`
 
 ## 7. Verification
-- [ ] 7.1 `ruff check`, `pytest` (throttled), `ctest`, stub check
-- [ ] 7.2 `openspec validate update-trbdf2-error-control --strict` and `openspec validate --all --strict`
+- [x] 7.1 `ruff check`, `pytest` (throttled), `ctest`, stub check — CLOSED: seen on the PR head a90d84b8 (2026-11-22): ruff clean, ctest 1091/1091 (Eigen 5; 17 targets on Eigen 3.4.0), pytest 7079 passed with the one failure re-pinned and its files re-run, `openspec validate --all --strict` 79 passed, stubs `--check` up to date
+- [x] 7.2 `openspec validate update-trbdf2-error-control --strict` and `openspec validate --all --strict` — CLOSED: seen on the PR head a90d84b8 (2026-11-22): ruff clean, ctest 1091/1091 (Eigen 5; 17 targets on Eigen 3.4.0), pytest 7079 passed with the one failure re-pinned and its files re-run, `openspec validate --all --strict` 79 passed, stubs `--check` up to date
+
+## 8. Stateful kinds in the estimate (DECISIONS 10)
+- [x] 8.1 Per kind: `trbdf2_increments` (q − q_n at γ and at the step end, by the kind's own law) and `q_scales` (atol_q / atol from the device's parameters); folds in `StatefulHistories`
+- [x] 8.2 One q block in the shared error phase for both integrators (TR-BDF2: Bank's estimate on the stage-implied derivatives; esdirk43: the embedded difference); the esdirk43 floor `1e-3·max|q|` and `ed_sqmax` removed; joined to the entries by max of the two RMS; TR-BDF2 rows from the first committed step
+- [x] 8.3 Proof per kind against its truth over rtol 1e-4 … 1e-10 (`probes/q_rows_order.py`); `test_trbdf2_stateful_error_norm.py`
+- [x] 8.4 An idle stateful device takes the same steps (both integrators)
+- [ ] 8.5 Every moved case listed with its truth; circuits without a stateful kind byte-identical; cost within 0.5 %

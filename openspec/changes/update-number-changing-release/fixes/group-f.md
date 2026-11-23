@@ -947,3 +947,171 @@ F7's background chain (PID 43140 + its pytest 48697) stopped by PID before the r
   instants within 1e-12 s of an event are skipped).
 * On the clamp: unfixed engine 9.666 (`S7_referee_clamp_unfixed.jsonl`), fixed 3.6e-7
   (`S7_referee_clamp_fixed.jsonl`). Test `test_f8_the_referee_fails_a_line_it_cannot_read`.
+
+## Session 5 — branch `fix/core-release-f5-settle-decisions` (from 6cb51c00): two settle decisions
+
+Base for every "before": the extension built at 6cb51c00 (`.scratch/f5/base_py`). Truth: the
+circuits' own state equations solved per mode in mpmath (augmented [x; u; u'] matrix exponential,
+40 digits; `python/tests/test_exact_settle_decisions.py`), cross-checked on the pulse circuits
+against `exact_truth.py` (fa4b5c71, in `.scratch/f5/`, not committed): turn-off 59.2793718175008149 µs
+(v0 = 0) and 58.9377110436850184 µs (v0 = −1), the two agree to 1e-24 s; V(o)(100 µs) 5.92758587765985 /
+5.91795535047949 V. Circuit: pulse v0 → 10 V (5 µs, rise 1 µs, width 50 µs, fall 30 µs) → D1 (g_on 1e3,
+g_off 1e-9) → 100 Ω → 0.1 µF ∥ 1 kΩ.
+
+### (a) A source corner on an exact zero — FIXED
+
+Cause (code read + the run): `fire_event_` dropped a same-mask gate edge before any decision
+("Drop spurious same-mask gate edges silently"); a source corner is fired as one. The scan of the
+next step (`locate_event_exact_`, `dio && ga == 0` branch) ladders the exact-zero start, finds it
+leaving on its event side (sg = +1 for an OFF diode's DiodeOn) and `continue`s — "the mode
+decision's case" — which no one runs. D1 OFF under 10 V; `DiodeModeInconsistentError` at 6 µs.
+
+Rule: at a time event that keeps the mask, `undecided_at_time_event_` runs the settle cascade's own
+first-round test per diode (in band → `zero_band_on_`, the sign of the first non-vanishing
+derivative after t on the OFF-mode trajectory; past the threshold beyond the band → the value law
+confirmed by `zero_band_on_`); if a diode would flip, the event runs the full decision
+(`decide_modes_`, all three selectors). Which instants: the four callers that fire a time event
+say what changed (`corner_event_`: 2 a source corner, 1 a tick, 0 neither). A corner checks every
+diode; a tick (a new level) only diodes past their threshold beyond the band; a poll landing nothing
+(it changes no input, and the scan located every crossing up to it; bridge3 lands one per step,
+100k in 0.1 s, and the check there cost +1.8 % instructions). A first version re-decided in-band diodes
+at every same-mask time event, and a poll landing in `bridge1_vf07` (bit-identity set) turned OFF
+a leakage-level ON diode (D1 carrying D4's g_off current, 7e-10 A) 1 µs after its located partner's
+turn-off; the mpmath truth (`exact_truth.py` patched for V_f in `.scratch/f5/exact_truth_vf.py`) keeps
+one of the pair ON until 5.3663208617 ms (base 5.3660157816 ms, that version 5.10287 ms). Nothing
+changes a rate at a poll, so continuity keeps the mode there.
+
+Numbers: v0 = 0, all selectors, both forms: D1 ON at 5 µs exactly (truth 5 µs), turn-off
+59.27937181726 µs (truth 59.2793718175008, 2.4e-16 s), V(o)(100 µs) 5.92758588 (truth
+5.9275858777); before: `DiodeModeInconsistentError` on all three selectors and both forms.
+Variants (all in the test file, against the truth): one ulp of 0 and of 10 V below the zero (ON at the
+corner) and above it (the start decides ON, the corner is no event; base: the turn-off defect
+below); a corner with ġ = 0 too (an RC prefilter: g = ġ = 0, g̈ > 0) — DECIDED by the next
+derivative (the ladder's first significant rung), ON at 5 µs on all selectors (base: error); the
+same drive from a PWL table current source into 1 Ω (base: error; tip: turn-off within 4e-17 s);
+a ramp ending on a zero (resistive diode path; base: error; tip: OFF at 86 µs, current 0 after);
+a sine's zero crossings on the diode's zeros (passed on base too, kept as a guard); a pulse whose
+rise starts at t = 0 (start decision: ON from 0, turn-off 54.2793718 µs; checked, not a test).
+
+### (b) A located turn-off kept ON — FIXED
+
+Cause (trace of the earlier session + this one): at the located root the ON signal is zero only to
+its significance bound B (~1e-15 V); the post-event decision's ladder (`zero_band_on_` → `ladder_sign_`)
+already discounted the root's error, but only as a STATE error over t_tol (`loc_dx_`); the OFF
+mode reads B amplified by 1 + R·g_on = 1e5 (+1.35e-10 V), which is a TIME error of the root times the
+OFF signal's own rate (the source ramp, −2.77e5 V/s), and kept D1 ON.
+
+Rule: `root_time_error_` — the root is known to t_tol + B/|ġ|, B = `signal_bound_` of the crossing
+signal at the root, ġ its slope along the pre-event mode (the secant to the ladder's first
+significant rung); `ladder_sign_(…, dt0)` treats the post-mode signal's own movement over that
+window (sources included) as noise, max with the state term. No tuned constant: B, t_tol and the
+ladder are the existing ones. It is read only where a decision in `zero_band_on_` would put the
+FIRED diode back in its pre-event state (the crossing is the decision unless the contrary signal
+is significant beyond the root's error), once per event, from the root state and pre-event mask
+kept at the event (`loc_root_x_`, `loc_root_mask_`). Computed at every located event it cost
++1.9 % (bridge3) and +6.7 % (active_clamp_forward) instructions; an agreeing decision needs no
+more noise. Trace on the pulse: t_tol 1e-18 s, B/|ġ| 2.5e-15 s, the OFF signal
+then decides −1 at the 1e-15 s rung.
+
+Numbers: v0 = −1, conductance form, all selectors: turn-on 5.090909086439 µs (truth
+5.0909090864381347, < 1e-15 s), turn-off 58.93771104320 µs (truth 58.9377110436850, 4.9e-16 s),
+V(o)(100 µs) 5.91795535 (truth 5.9179553505); before: `DiodeModeInconsistentError` (ON carrying
+−2.64e-3 A) on all three selectors. Branch form was NOT affected (it passed on base): its ON signal
+is the current itself, no 1e5 gain.
+
+Selectors: (a) legacy, lcp, auto, both forms; (b) legacy, lcp, auto, conductance form only.
+
+### Still open (found here, not fixed)
+
+* t_end 1–4 ulps past a source corner (reviewer): the corner snaps onto t_end and never fires;
+  the end sample reads 8.5e-15 V of forward bias as a law break. Same on base.
+* The numeric path (`allow_implicit_segments`, `b_extra_fn`): `zero_band_on_` has no exact OFF-mode
+  ladder and falls back to OFF in the band, so (a) is not decided there. Same on base.
+* bridge1_vf07: the all-OFF recovery of a series pair splits 1.4 V with a 3.4e-8 V asymmetry
+  (rounding of a g_off = 1e-9 / 0.01 S solve, above `signal_bound_`), so the wrong diode of the pair
+  (D1, truth D4) keeps the leakage; the pair's turn-off is 3e-7 s early (5.3660157816 vs
+  5.3663208617 ms). Pre-existing; unchanged here.
+* Cost of (a) in the worst case: a diode resting at an exact zero at every corner runs the full ladder
+  (~14 propagations) per corner (reviewer: 6 idle diodes × 800 corners, +35 % on that synthetic run).
+
+### Must-not-move (final C++, `.scratch/f5/tip_py` vs `.scratch/f5/base_py` built at 6cb51c00)
+
+* Goldens (golden_baseline compare): ALL IDENTICAL. dsed bit-identity 36/36 default and 36/36 shadow
+  (the first, eager version moved `bridge1_vf07` dsed t/x: the poll re-decision above; reverted by
+  scoping).
+* Exact scoreboard cells (`.scratch/f5/dsedall.py`: 81 circuits × dsed / dsed+next / no-dt rule
+  off, hashes of times, states, events, reinit records): 243 same, 0 moved — the exact-engine row
+  stays 81 / 77 / 70.
+* Event times and the states at events bit-equal across output_rtol 1e-4 / 1e-5 / 1e-6
+  (`.scratch/f5/rtolinv.py`, no dt): 111 circuits invariant, 0 differ, 15 not loadable by v1_reader
+  (base: the same 111 / 0 / 15).
+* Moved vs base, rule ON only: boost_pfc_open_loop (all three output_rtol, invariant among
+  themselves). Base fired a DiodeOff twice at 10.282917789558 ms; the re-decision changed the
+  trajectory at rounding level onward. Truth (`grade.py`, scoreboard `exact`, rule 1e-5, no dt):
+  7.36e-10 → 2.95e-12 (better). Its dsed / dsed+next / no-dt rule-off cells are identical
+  (2.565e-7 / 2.195e-7 / 2.565e-7).
+* Cost (instructions per run minus an import-only run, 10 runs per process, min of 6
+  interleaved, same flags, `.scratch/f5/cost10.sh`), rule off: buck_ccm 0.998, bridge3 1.000,
+  active_clamp_forward 0.992, forward_converter 0.974 (base spread), boost_pfc_open_loop 0.998.
+* Loss port: no separate number compared; the full pytest (below) carries its tests.
+
+### (c) The mode guard read the mode's next event as a violation — OPEN (fix tried, reverted; strict xfail)
+
+Circuit: three-phase bridge, 325 V 50 Hz, 0.5 mH lines, D1..D6 (1e3 / 1e-9), 220 µF ∥ 40 Ω, 1 MΩ tie
+(`_bridge_3ph`). Truth (`exact_truth.py`, 40 digits, 0..6 ms): D1 OFF 0.37193567186 ms, D5 OFF
+1.49025821867 ms, D2 ON 5.00000025091293 ms with D6 still ON, D6 OFF 5.00135094309083 ms;
+V(dp,dn)(6 ms) 624.647465499693 V.
+
+Cause (coordinator's trace, confirmed): the settle at D2's turn-on keeps D6 ON; `guard_check_` →
+`judge_` advances the mode 1e2 and 1e4 h_e (capped only by the next TIME event) and reads D6's own
+turn-off 1.35 µs later as a violation (0.12 V); the LCP repair turns D6 OFF at once: 3 events.
+
+Rule (`leaves_later_`, in `judge_`): a law broken at the horizon by a diode that is consistent once
+the mode's parasitic transient is over (t + `exact_settle_length`, what the guard exists to see past)
+and first moves INTO its admissible side from there (`ladder_sign_`, the decision's own lexicographic
+test) is the mode's next event, which the scan locates; not a violation. Used by the guard, the
+selector's pin arbitration and `pose_or_open_loops_` (all through `judge_`).
+
+Numbers, legacy: 4 events; D2 ON 5.000000250912887 ms (truth …935, 4.8e-17 s), D6 OFF
+5.001350943055478 ms (3.5e-14 s), D5 OFF 1.4902582186960 ms (2.7e-14 s); before: D6 merged into D2.
+OPEN on the same circuit, base and tip alike: D1's turn-off 0.37193547048 ms is 2.0e-10 s early,
+so V(dp,dn)(6 ms) is 4.8e-8 V off (624.6474655478).
+lcp / auto: still merged (strict xfail): the LCP solve itself returns D6 OFF at D2's instant, no
+ties (trace: `lcp_apply_` bits before `resettle_projected_`). With every upper diode OFF, D6
+carries leakage-level current only; the selection does not resolve it. Needs: the LCP's
+classification of a leakage-level port current (the tie band) read against the root's error, not
+this guard.
+
+Moved on the DEFAULT path by (c) (bit-identity set, dsed, default options): `bridge1_vf07` t/x
+(34/36 arrays identical, default and shadow). Events 12 → 16; truth (`exact_truth_vf.py`, V_f
+0.7) has 16: each conduction start is TWO turn-ons 2.2e-17..2.3e-12 s apart (e.g. 13.704043490641626
+and …679 ms). Base merged them into one at 13.704043488297 ms (the guard's repair); tip has
+13.704043488297 and 13.704043490643 ms (the second within 1.3e-15 s of the truth's). End states
+identical to print precision. Goldens identical; the 243 scoreboard default cells identical (the
+exact-engine row stays 81 / 77 / 70); rtol invariance 111 / 0 / 15 kept.
+C++ `pulsim_core_dsed_tests` (Eigen 5) on the final header: 41265 assertions / 142 cases pass.
+
+Rule-ON cells moved by the final tip (no dt, output_rtol 1e-4/1e-5/1e-6, each still invariant across
+the three), scoreboard `exact` vs the mpmath truth at 1e-5, base → tip: forward_converter 1.02e-9 →
+5.6e-12, boost_pfc_open_loop 7.36e-10 → 2.95e-12, flyback_converter 7.265e-7 → 7.262e-7. Their
+dsed / dsed+next / no-dt rule-off cells are identical to base. Cost was measured before (c) (the
+guard's extra ladder runs only on a judged violation); not re-measured on the final tip.
+
+**(c) REVERTED (commit after 2bdc6598).** The exact-engine test files on the (c) tip: 4 failed —
+`test_exact_guard_transient::test_the_forward_converter_rectifier_follows_the_transformer`
+(0.6923 vs 0.7733), `test_exact_route::test_ten_paralleled_bridges_agree_with_pwl[None]` and
+`test_release_findings_f::test_fx1_ten_branch_form_bridges_run_under_the_rule[constant|python]`
+(`DiodeModeInconsistentError`, Db5a ON carrying −1.08e-6 A at 13.265 ms). `exact_settle_length`
+is shorter than the transients the guard exists to see (the forward converter's rectifier is
+consistent past it and still wrong), so "consistent past the parasitic transient, then admissible
+first" excuses real violations. The bridge1_vf07 / rule-on improvements listed above came with
+(c) and are reverted with it. What a fix needs: the guard's look-ahead bounded by the mode's next
+LOCATED crossing (run the scan of the settled mode from the event up to 1e4·h_e and judge only up to
+its first root), not by a transient length; and for lcp/auto the LCP's leakage-level port current
+classification. Strict xfail `test_the_overlap_of_d2_and_d6_is_kept[legacy|lcp|auto]`.
+The final tip's must-not-move numbers are those measured BEFORE (c) (the compares on 5613abbe, the
+poll scoping): goldens identical, bit-identity 36/36 + 36/36, 243 cells identical, rtol 111/0/15,
+rule-on boost_pfc 7.36e-10 → 2.95e-12; this revert restores that C++ exactly.
+Verified on 738acf8f: full pytest 6246 passed / 110 skipped / 12 xfailed; `-m reference` 383 passed;
+C++ dsed tests (Eigen 5) green; ruff check clean. Not run: Eigen 3.4.0, g++, full ctest, a second
+reviewer on 79330ab7..5613abbe (scoping + lazy root error came after the review).

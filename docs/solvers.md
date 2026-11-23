@@ -38,6 +38,10 @@ Pulsim's transient kernel supports two **fixed-step** integrators
   event, then the SDIRK window from it. Edges off the grid become
   second order (buck D = 0.4567, `v_C` at T/50: 8.08e-2 V snapped,
   1.07e-6 V split); `res.n_split_steps` counts the split steps.
+  A jump the restart finds (or an ideal element's) is reported by
+  `res.reinit_records`; an in-loop recorder's lines start from the
+  post-jump state, so a window integral is the regular part, as on
+  `engine='dsed'`.
 - **Resolution diagnostics** (on by default, read-only): the trapezoid's
   local error `(h/12)|f_{k+1} − 2f_k + f_{k−1}|` per linear C/L
   (`f = i/C`, `v/L` from the companion), over the variable's running

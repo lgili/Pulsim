@@ -1,8 +1,6 @@
 # Pulsim 2.x usage guide (for AI coding assistants)
 
-`python -m pulsim.guide` prints it with the installed version on the
-first line; `pulsim.ai_guide()` returns it. The guide beats
-your memory: Pulsim 2 changed behaviour but kept most 1.x names. Every
+`pulsim.ai_guide()` returns this text. It beats your memory: Pulsim 2 changed behaviour but kept most 1.x names. Every
 `python` block runs in the test suite; printed numbers are its output.
 
 Short version:
@@ -28,7 +26,7 @@ Short version:
 
 - `python -m pulsim.guide` (this text) and `python -m pulsim.guide --path`.
 - Native classes are pybind11 builtins (`inspect.signature` fails): read
-  the first `__doc__` line or the type stubs (`pulsim/_pulsim.pyi`).
+  `__doc__` or the stubs (`pulsim/_pulsim.pyi`).
 - `p.catalog()` lists every builder method and helper by category;
   `p.example("buck")` prints a runnable snippet (`"rc"`, `"boost"`,
   `"yaml"`, `"bode"`, ...).
@@ -160,11 +158,10 @@ on-steps per period: [50]
 For a half bridge, `p.make_dead_time_pwm_pair_fn` drives the high- and
 low-side bits with a dead time; for a three-phase bridge see 3.7.
 Helpers name their edges (`pwm.next_edge_after(t)`); variable-step
-engines land on them. A plain callable has no edges: `trbdf2` can step
-over a short pulse or dead time silently (D = 0.03: 0.17 V vs 1.20 V);
-`dsed` bisects only changes seen at its `dt_max / 10` polls (and
-warns). Use a helper or pass `dt`. Both call it out of time order:
-keep it a pure function of `t`.
+engines land on them. A plain callable has none: `trbdf2` samples it
+(trap 13); `dsed` bisects only changes seen at its `dt_max / 10` polls
+(and warns). Use a helper or pass `dt`. Both call it out of time
+order: keep it a pure function of `t`.
 
 ### 3.3 Bridge rectifier from `pulsim.topology`
 
@@ -378,8 +375,9 @@ The dead time costs `4/pi * V_dc * t_d * f_sw * sqrt(3/2)` = 9.4 V of
 dead time the freewheel diode carries the current (drop `V_f + i / g_on`);
 once `HSa` is on, the switch takes it all and the diode never shares
 (printed above). `switch_specs` on `HSa` (4 / 3.5 mJ at 600 V, 50 A)
-give 11.3 W with the dead time (soft edges cost about 0 J) and 22.6 W
-without (every edge hard). Model the dead time.
+give 11.3 W with the dead time and 11.6 W without: an edge whose `v` and
+`i` readings have opposite signs is soft (0 J), the complementary edge
+is hard.
 
 ## 4. Exact signatures of the most used calls
 
@@ -447,31 +445,32 @@ are time shifts in SECONDS (`t - phase`); `modulation_phase` and the
 `phase` of `add_sine_voltage_source` are radians.
 `add_capacitor(c0=, esr=, esl=)` / `add_inductor(i0=, esr=, c_par=, rac=)`:
 datasheet ESR, ESL, C_par; fixed step `dt <= 1/(20*f_res)`. MLCC bias:
-`passives.fit_mlcc_dc_bias`. Lines: `model='pi'` only (no Bergeron), with
-`passives.recommend_line_sections(delay, t_rise)` sections.
+`passives.fit_mlcc_dc_bias`. Lines: `model='bergeron'` is exact;
+`model='pi'` needs `recommend_line_sections`.
 Other `simulate` keywords: `switch_fn`, `t_start`, `store_every`,
-`auto_regularize`, `progress`.
+`auto_regularize`, `progress`. Measure cost by counts, not time:
+`res.stats.n_factorizations` etc. (0 if unreported), `res.counters` (pwl).
 
 ## 5. Traps
 
-Each row was measured on this version. The fix column is what to write.
+Measured on this version; the last column is the fix.
 
 | # | Wrong assumption | What actually happens | Do this instead |
 |---|---|---|---|
 | 1 | `V_th` of `add_diode` / `add_bridge_rectifier` is a forward drop | It is the turn-on threshold. On-state is `V_f + I/g_on`: 10 A into `g_on = 20 S` gives 0.500 V for `V_th = 0` and `0.7` alike, 1.200 V with `V_f = 0.7`. `add_three_phase_vsi(V_f=)` and the MOSFET/IGBT diode `V_F` ARE drops | Pass `V_f` (losses include `V_f*I`), or `b.add_shockley_diode`. Never also a `conduction_specs` `V_f0` |
-| 2 | `v.mean()` over a result is the average | The default grid is variable-step and clusters at events. Rectifier of 6.2: `.mean()` 4.607 V vs 6.330 V (-27 %) | `p.steady_state_stats`, `p.time_average`, `p.time_rms`, `np.trapezoid(y, t) / (t[-1] - t[0])` |
+| 2 | `v.mean()` over a result is the average | The default grid is variable-step, clustered at events. Rectifier of 6.2: `.mean()` 4.607 V vs 6.330 V (-27 %) | `p.steady_state_stats`, `p.time_average`, `p.time_rms`, `np.trapezoid(y, t) / (t[-1] - t[0])`; exact engine (10 us chords): `p.Recorder(windows=)` |
 | 3 | `p.SwitchStateMask(1)` sets bit 0 | It is a mask of SIZE 1, all OFF | `m = p.SwitchStateMask(b.graph.num_switches); m.set(i, True)` |
 | 4 | MOSFET k is switch bit k | `add_mosfet` adds `<name>_body`, so bits interleave with diodes (below) | `b.switch_index_of(name)` |
 | 5 | Loosening `tol_newton_dx` / `tol_newton_res` fixes a Newton abort | Both are absolute on purpose. Snubbed flyback, `tol_newton_dx=1e-5, tol_newton_res=1e-4`: `auto` 3.53 V, fixed engine 15.31 V, silently | Keep the defaults; read the abort; run `engine='pwl'` with `dt`; fix gate edges, body diodes, initial state |
-| 6 | `p.scope` is a module | `p.scope(b, res, signals=[...])` plots (matplotlib) | `from pulsim.scope import LiveScope` (needs pyqtgraph); `import pulsim.scope as m` gives you the function |
-| 7 | Tie an isolated secondary or a floating neutral to ground with a tiny resistor | A milliohm tie is a galvanic bond. Tutorial 04's VSI: a 1 mOhm neutral-to-rail tie drove 58.8 A DC per phase | Leave it to `auto_regularize` (default on): the run's copy gets 1 GOhm per floating subnet (`res.plan.ties`), your builder none. Own tie: >= 1 MOhm |
+| 6 | `p.scope` is a module | `p.scope(b, res, signals=[...])` plots (matplotlib) | `from pulsim.scope import LiveScope` (needs pyqtgraph); `import pulsim.scope as m` gives the function |
+| 7 | Tie an isolated secondary or a floating neutral to ground with a tiny resistor | A milliohm tie is a galvanic bond. Tutorial 04's VSI: a 1 mOhm neutral-to-rail tie drove 58.8 A DC per phase | Leave it to `auto_regularize` (default on): the run's copy gets 1 GOhm per floating subnet (`res.plan.ties`). Own tie: >= 1 MOhm |
 | 8 | `res.v` of a floating DC rail is the DC voltage | It is to ground. Bridge with `ac_b="gnd"`, load across `dp`/`dn`: `v("dp")` spans -0.7..325.0 V, `v("dn")` -325.0..0.7 V; `dp - dn` averages 321.85 V | `res.v("dp") - res.v("dn")`, or ground one DC rail (3.3) |
-| 9 | A fixed-step run is second order | By default each gate edge, source jump and start (ICs too) leaves a stale history: first order, ringing. RL decay, `i0=1`: 1.85e-3 at `dt=1e-5`, 0.92e-3 at `5e-6` | `discontinuity_restart=True` (6.3): gate read at step start; jumping `b_extra_fn` needs `.next_jump_after`. Sample 0 reads 0 V |
+| 9 | A fixed-step run is second order | A gate edge, source jump or IC start leaves stale history: 1st order, ringing. RL i0=1: 1.85e-3 at dt=1e-5, 0.92e-3 at 5e-6 | `discontinuity_restart=True` (6.3): gate read at step start; jumping `b_extra_fn` needs `.next_jump_after`; jumps: `reinit_records`, not in windows. Sample 0 reads 0 V |
 | 10 | Any `dt` works with PWM | Gate edges land on the `dt` grid unless split. Buck D = 0.25, 100 kHz, `make_pwm_switch_fn`: 6.24 V at `dt=2e-7` (12.5 steps run as 13), 6.00 V at `1e-7` | Whole-step `D/f_sw` (3.2), or 6.3 + `enable_substep_state_correction=True`: helper edges are split, order 2 |
-| 11 | Omitting `switch_fn` leaves switches open | With `dt`, undriven controlled switches are ALL CLOSED and `simulate` only warns: the buck of 3.2 runs at D = 1 and settles at 24.0 V, not 12 V; without `dt`, `auto` refuses | Always pass `switch_fn` when the circuit has controlled switches |
+| 11 | Omitting `switch_fn` leaves switches open | With `dt`, undriven controlled switches are ALL CLOSED, `simulate` only warns: the buck of 3.2 runs at D = 1, settles at 24.0 V, not 12 V; without `dt`, `auto` refuses | Always pass `switch_fn` with controlled switches |
 | 12 | `except Exception:` around `simulate` keeps a script robust | A broad except turns a refusal into a silent wrong answer | Let it raise, or catch `p.PulsimError` (`.engine`, `.feature`) |
 | 13 | A warning from a run without `dt` is noise | It names what TR-BDF2 could not guarantee (a diode on its conduction boundary, a pulse narrower than its sampling). Silence is no proof: a one-shot pulse under a quarter of the step ceiling (`dt`, else `t_end/1000`) can be skipped | Rerun with `dt`, compare (6.2); `dt` <= 4x the narrowest pulse |
-| 14 | `p.time_rms` (and `.rms`) of a switched current is exact on a fixed grid | Each edge is a one-step ramp: low by about `h / (3 t_on)` in `i^2`. Buck MOSFET (D = 0.25): 1.4942 / 1.4993 / 1.5019 A at `dt` = 1e-7 / 5e-8 / 2.5e-8, exact 1.5044 A. Same for `device_loss_summary`'s `i_rms`, not `P_avg` | `np.sqrt(p.time_average(t, i**2, t_from=...))`: 1.5044 A at all three |
+| 14 | `p.time_rms` (and `.rms`) of a switched current is exact on a fixed grid | Each edge is a one-step ramp: low by about `h / (3 t_on)` in `i^2`. Buck MOSFET (D = 0.25): 1.4942 / 1.4993 / 1.5019 A at `dt` = 1e-7 / 5e-8 / 2.5e-8, exact 1.5044 A. A switch or PWL diode's `i_rms` in `device_loss_summary` is exact | `np.sqrt(p.time_average(t, i**2, t_from=...))`: 1.5044 A at all three |
 | 15 | Controllers run each step, chains in insertion order | Ticks at `t_start + k*T`, `ceil(span/T)` times. A chain runs in graph order; a loop with no `DelayBlock`, an unported block, a stateful block with no `p.Rate(T)` raise `ControlGraphBuildError` | `controller_period=` or `p.Rate`; custom code: `p.PythonBlock(fn)` |
 | 16 | No `ResolutionWarning` means resolved | Opt-in (`resolution_diagnostics=True`); estimates, not bounds | Halve `dt` (6.3) |
 
