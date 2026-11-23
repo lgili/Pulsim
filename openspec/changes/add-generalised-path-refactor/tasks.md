@@ -1,5 +1,9 @@
 ## 1. Part A — Multi-bit path-union in `partial_refactor`
 
+> **Resolution (orchestrator, 2026-11-23).** 8.6 (a table of a paper) is moved to `openspec/NON_CODE_BACKLOG.md` — the
+> owner's. 6.2 and 9.5 stay open.
+
+
 - [x] 1.1 Audited `PulsimSparseLuSolverT::partial_refactor` — the
       per-call multi-bit case already works correctly:
       `varying_set_` accumulates across calls via `std::set::insert`;
@@ -296,7 +300,7 @@
       update — DEFERRED with 8.3.
       (Reconciled 2026-11: the index lists the v1.4.0 multi-bit and
       parametric figures.)
-- [ ] 8.6 `artigos/02_tpel_methods/paper.md` §VI table — DEFERRED.
+- [x] 8.6 `artigos/02_tpel_methods/paper.md` §VI table — DEFERRED.
       The TPEL paper draft has not yet been written; per the
       v1.4.0 scope decision the headline numbers land in
       MULTI_BIT_RESULTS.md and will be ingested into the paper
