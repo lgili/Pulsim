@@ -2809,6 +2809,11 @@ def simulate(
         cut the samples, and is counted
         (``diagnostics['output_grid']``: ``n_output_floored`` rule calls,
         ``output_floor_max``, ``output_floor_by_column`` per stored column).
+        The sample at an event is its left limit; after an event that
+        changed the mode or a source's piece the solution 2 ps later is a
+        sample too, so plain interpolation of ``res.times`` draws a jump of
+        a node voltage as a jump (over those 2 ps: the one line outside the
+        promise), not as a ramp to the next sample.
         The samples are read from the exact steps the run takes without the rule
         (``n_exact_steps`` counts steps, the samples are ``n_output_samples``;
         a step end that the chord from the last stored sample already covers

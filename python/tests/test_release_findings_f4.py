@@ -147,3 +147,52 @@ def test_f8_a_balanced_neutral_does_not_spend_the_budget():
     og = r.diagnostics["output_grid"]
     assert og["output_budget_t"] is None and og["n_output_capped"] == 0
     assert len(r.times) < 12_000        # 5 290 at session 7
+
+
+def test_fx7_a_jump_of_an_output_is_stored_on_both_sides():
+    """F-X-7 (release): with the rule on, the bus v(p) - v(n) of the three-phase overlap
+    bridge (branch form) read by plain interpolation of ``res.times`` at 4001 instants was
+    34.18 V off of a 173 V range at t = 0.12 ms (39.56 V on the release tip), 22.36 V with
+    output_rtol 1e-7, 0.0107 V with the rule off (truth: pwl + restart + split at dt 1e-7,
+    itself good to ~6e-3 V). Cause: the sample stored at an event is its LEFT limit; the
+    bus jumps 132.6 -> 173.1 V at the commutation and the rule's next sample was 4 us away
+    (rule off, a fast sample 1e-10 s after the event hid the ramp). Read two-sided
+    (``with_right_limits``) the same run was 0.0107 V: the chord bound held, the stored
+    trace did not show the jump. Under the rule the solution 2 ps after such an event is
+    now a stored sample."""
+    from tests.oracles import lcp_pulsim_bridge as B
+
+    def run(**kw):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            return p.simulate(B.FAMILIES["bridge3_overlap"].builder(0.0, form="branch"), t_end=0.02, **kw)
+
+    def bus(x):
+        return np.asarray(x.v("p")) - np.asarray(x.v("n"))
+    q = run(engine="pwl", dt=1e-7, discontinuity_restart=True, enable_substep_state_correction=True)
+    off = run(engine="exact")
+    tg = np.linspace(0.0, 0.02, 4001)
+    bq = np.interp(tg, q.times, bus(q))
+    assert np.abs(np.interp(tg, off.times, bus(off)) - bq).max() <= 3e-2          # 0.0107
+    t_off, ev = np.asarray(off.times), np.asarray(off.event_times)
+    # not next to a jump (the rule moves an event by picoseconds: 2.2e-12 s at 15 ms)
+    away = np.abs(t_off[:, None] - ev[None, :]).min(axis=1) > 1e-9
+    for rt in (1e-5, 1e-7):
+        r = run(engine="exact", output_rtol=rt)
+        np.testing.assert_allclose(r.event_times, ev, rtol=0, atol=1e-10)
+        # every commutation: a sample at the event and one 2 ps later
+        t = np.asarray(r.times)
+        k = np.searchsorted(t, np.asarray(r.event_times))
+        assert np.all(t[k] == r.event_times) and np.all(t[k + 1] - t[k] < 1e-11)
+        assert np.abs(np.interp(tg, t, bus(r)) - bq).max() <= 3e-2             # was 34.18 / 22.36
+        # the promise, per stored column, against the engine's own exact samples (the rule-off
+        # run's instants): worst 0.9971 of a tolerance at 1e-5, 0.44 at 1e-7. (The bus is a
+        # difference of two columns: its bound is the sum of theirs.)
+        og = r.diagnostics["output_grid"]
+        assert not og["n_output_capped"] and not og["n_output_unbounded"] and og["output_budget_t"] is None
+        X, Xo = np.asarray(r.states), np.asarray(off.states)
+        for j in range(X.shape[1]):
+            rng = max(float(np.ptp(Xo[:, j])), 1e-3 * float(np.abs(Xo[:, j]).max()))
+            tol = max(rt * rng, 1e-9, float(og["output_floor_by_column"][j]))
+            e = np.abs(np.interp(t_off[away], t, X[:, j]) - Xo[away, j])
+            assert e.max() <= 1.001 * tol, (rt, j, e.max(), tol)

@@ -527,7 +527,7 @@ public:
         output_ylo_.resize(0);
         output_count_ = output_events_ = n_output_capped_ = n_output_unbounded_ = n_output_floored_ = 0;
         output_floor_row_.resize(0);
-        output_pend_ = false;
+        output_pend_ = output_jump_ = false;
         output_total_ = 0;
         output_budget_t_ = std::numeric_limits<Real>::quiet_NaN();
         if (resume == nullptr) {
@@ -683,6 +683,25 @@ public:
                     // last stored sample covers this step too nothing is stored; else that
                     // start is stored first. out_defer: the step's end is covered (certified).
                     bool out_defer = false;
+                    // F-X-7: the sample stored at an event is its LEFT limit, so a recovered
+                    // row that jumps there (a bridge's bus, 132.6 -> 173.1 V) was drawn as a
+                    // ramp to the next stored sample, 4 us away. Under the rule the flow just
+                    // past the event (2 ps: the shortest step near_time tells apart) is a
+                    // sample too; a step too short to hold it keeps its end.
+                    bool out_keep_end = false;
+                    if (output_rtol_ > Real{0} && output_jump_) {
+                        output_jump_ = false;
+                        const Real te = t + Real{2} * std::max(Real{1e-12},
+                            Real{8} * std::numeric_limits<Real>::epsilon() * std::abs(t));
+                        const Real t1 = evt ? evt->t_event : t + h_ex;
+                        out_keep_end = !(te < t1) || near_time(te, t1);
+                        if (!out_keep_end) {
+                            advance_(t, x, te - t, output_x_);
+                            const MaskT m = system_.current_mask();
+                            ped_push_sample(result, te, output_x_, m, m, nullptr);
+                            ++result.n_output_samples;
+                        }
+                    }
                     if (output_rtol_ > Real{0} && !out_steps) {
                         const Real t1 = evt ? evt->t_event : t + h_ex;
                         if (output_pend_) {
@@ -713,6 +732,7 @@ public:
                         if (!out_defer)
                             out_defer = push_output_samples_(t, x, t1, result.n_events, t_target, result)
                                         && !evt;
+                        if (out_keep_end) out_defer = false;
                     }
                     bool out_transparent = !evt;   // the end's fire (if any) moved nothing
                     // An event at the very end of the step fires too:
@@ -779,6 +799,7 @@ public:
             }
 
             if (output_pend_) output_flush_(t, x, result);   // a numeric step stores its own ends
+            output_jump_ = false;
             // 3. Snapshot k1 BEFORE step (needed for Hermite backtrack
             // when a predicate fires inside the step).
             const bool need_pred_scan = (predictor_.size() > 0);
@@ -1692,6 +1713,7 @@ private:
     /// harness's interpolated measure read it 3 % of the span off while
     /// every sample was exact. Extra samples only; no state is touched.
     void plan_fast_samples_(Real t_e, bool changed) {
+        if (changed && output_rtol_ > Real{0}) output_jump_ = true;
         if constexpr (requires { system_.exact_fast_samples(t_e, Real{}, fast_t_); }) {
             if (!changed) return;   // a dropped same-mask edge keeps the plan
             fast_k_ = 0;
@@ -3662,6 +3684,7 @@ private:
     Vector output_x_;   // push_output_samples_: the sample being read
     bool output_certified_ = false;   // output_step_: the bound decided its step
     bool output_pend_ = false;   // the current step start is an end not stored (F-X-4)
+    bool output_jump_ = false;   // the last stored sample is an event's left limit (F-X-7)
     /// A source corner at the landing `t` (the corner the step aimed at, pending in the
     /// queue): a kink of the output, so the rule never defers it. A gate poll a few
     /// ulps short of the corner lands it with at_corner false (diode clamp, 2.52 ms:

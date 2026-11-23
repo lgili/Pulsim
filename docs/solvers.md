@@ -237,7 +237,13 @@ the sum of the magnitudes of the terms it is evaluated from): a column
 whose bound only fits through its floor is certified constant up to
 rounding at that floor and counted in `res.diagnostics['output_grid']`
 (`n_output_floored`, `output_floor_max`, `output_floor_by_column`). A
-source corner (a pulse or PWM edge) is always a stored sample. Where the
+source corner (a pulse or PWM edge) is always a stored sample. The sample
+stored at an event is its left limit (the right limit is
+`res.right_limit_states`, `pulsim.with_event_limits`); after an event
+that changed the mode or a source's piece the solution 2 ps later is a
+stored sample as well, so plain interpolation of `res.times` draws a
+jump of a node voltage as a jump (over those 2 ps, the one line the
+promise does not cover) and not as a ramp to the next sample. Where the
 4096-sample cap per interval, a mode without a diagonalising basis, or
 the run's 2e6-sample budget suspends the promise, the diagnostics say
 so and the run warns. `benchmarks/tools/output_rule_referee.py` checks

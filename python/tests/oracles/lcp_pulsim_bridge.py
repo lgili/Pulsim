@@ -54,7 +54,7 @@ class Family:
                     c.add_R(a[1], a[2], 1.0 / GOFF)
         return c
 
-    def builder(self, V_th=0.0):
+    def builder(self, V_th=0.0, form="conductance"):
         b = p.CircuitBuilder()
         def g(n):
             return "gnd" if n == "0" else n
@@ -73,9 +73,9 @@ class Family:
             elif kind == "L":
                 b.add_inductor(a[0], g(a[1]), g(a[2]), a[3])
             elif kind == "S":
-                b.add_switch(a[0], g(a[1]), g(a[2]), GON, GOFF)
+                b.add_switch(a[0], g(a[1]), g(a[2]), GON, GOFF, form=form)
             elif kind == "D":
-                b.add_diode(a[0], g(a[1]), g(a[2]), GON, GOFF, V_th, a[3])
+                b.add_diode(a[0], g(a[1]), g(a[2]), GON, GOFF, V_th, a[3], form=form)
         return b
 
 
