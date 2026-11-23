@@ -1,4 +1,4 @@
-# v2 triage of the 126 `schema: pulsim-v1` benchmark circuits.
+# v2 triage of the 128 `schema: pulsim-v1` benchmark circuits.
 # One entry per file under benchmarks/circuits (path relative to benchmarks/).
 #   runs     - benchmarks/tools/v1_reader.py maps it and engine='pwl' completes
 #   skipped  - the reader refuses it; `reason` is the text of its Unmapped error
@@ -12,10 +12,11 @@
 # error: the cell fails when it grows past 2x (differential_runner.GROWTH).
 # `reference: suspect` + `reference_reason`: the circuit's reference is itself broken, so every
 # cell on it is `unverified` (out of the agree count) until the reference is fixed.
+# `cause: [id, ...]` on every `known:` entry: ids defined in KNOWN_LIMITATIONS.md, "Triage causes".
 # test_benchmark_harness.py keeps every entry honest (a skip that starts
 # loading, or an error that starts running, fails the test).
 circuits:
-  circuits/closed_loop/cl_boost_pi.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree}, known_err: {pwl: 0.0582, pwl+restart: 0.0579}}  # G23: trbdf2 completes (the gate declares its edges; before, the first 0.28 ns pulse capped every step: max_steps at 5.59 ms) and meets the expm reference (probes/closed_loop_reference.py) within 1.1e-7 of span at every tick (rtol 1e-10); pwl without the split samples the gate on the grid (duty in steps of dt/T = 5 %) and ticks in label time: first order, max |v(kT)| / span 0.20 / 0.067 / 0.018 at dt, dt/4, dt/16
+  circuits/closed_loop/cl_boost_pi.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree}, known_err: {pwl: 0.0582, pwl+restart: 0.0579}, cause: [TC-CLOSED-LOOP]}  # G23: trbdf2 completes (the gate declares its edges; before, the first 0.28 ns pulse capped every step: max_steps at 5.59 ms) and meets the expm reference (probes/closed_loop_reference.py) within 1.1e-7 of span at every tick (rtol 1e-10); pwl without the split samples the gate on the grid (duty in steps of dt/T = 5 %) and ticks in label time: first order, max |v(kT)| / span 0.20 / 0.067 / 0.018 at dt, dt/4, dt/16
   circuits/closed_loop/cl_buck_aggressive_pi.yaml: {status: runs}  # was error (no reference: trbdf2 refused the helper's observer); agrees since task 9.1
   circuits/closed_loop/cl_buck_hysteresis.yaml: {status: skipped, reason: "component type 'hysteresis'"}
   circuits/closed_loop/cl_buck_integrator.yaml: {status: skipped, reason: "component type 'integrator'"}
@@ -26,9 +27,9 @@ circuits:
   circuits/closed_loop/cl_buck_pid.yaml: {status: skipped, reason: "component type 'pid_controller'"}
   circuits/closed_loop/cl_buck_rate_limited_ref.yaml: {status: skipped, reason: "component type 'rate_limiter'"}
   circuits/closed_loop/cl_buck_sample_hold.yaml: {status: skipped, reason: "component type 'sample_hold'"}
-  circuits/closed_loop/ll14_buck_closed_loop.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.29, pwl+restart: 0.213, pwl+split: 0.178}}  # trbdf2 agrees since TR-BDF2 track 7 (a periodic gate caps the closed-loop step at p/20: 0.00106 -> 0.00056; DECISIONS #28 of add-branch-form-ideal-switch). G23: every cell is worst on V(sw): the trbdf2 reference records no post-edge sample at the rising edges (each is a control tick; KNOWN_LIMITATIONS, probes/trbdf2_tick_edge_sample.py), so its V(sw) ramps across a step whose length follows rtol (rtol 1e-8 vs 1e-10: 0.06), and pwl records on its uniform grid. The states agree: V(vout) / I(L1) trbdf2 2.6e-5 / 3.6e-5, pwl+split 1e-4 / 1.4e-3; pwl, pwl+restart 0.013 / 0.13 (gate sampled on the grid: duty in steps of 5 %, first order). Independent reference (Radau, rtol 1e-12): trbdf2 rtol 1e-10 within 5e-8 of span at every tick
-  circuits/closed_loop/ll15_boost_closed_loop.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.3, pwl+restart: 0.0663, pwl+split: 0.0484}}  # trbdf2 agrees since TR-BDF2 track 7 (0.00123 -> 0.00026, I(L) inrush error 0.066 -> 3.5e-3 A; DECISIONS #28). G23: as ll14 (worst column V(sw), rising edges = ticks with no post-edge sample on trbdf2: rtol 1e-8 vs 1e-10 0.0104 on V(sw)); trbdf2 agreed at 3.9e-4 before only because reference and cell both sampled the edges. States: V(vout) / I(L) trbdf2 2.6e-5 / 1.8e-5, pwl+split 4.3e-5 / 4.6e-5, pwl 3.3e-3 / 6.6e-3. Independent reference (Radau): trbdf2 rtol 1e-10 within 2.9e-8 of span; the duty sits at 0.85 the whole run
-  circuits/closed_loop/ll16_flyback_closed_loop.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.261, pwl+restart: 0.251, pwl+split: 0.245}}  # trbdf2 agrees since integration batch 13 (TR-BDF2 track 7, the periodic-gate step cap: 0.0368 -> 0.000363). G31: coupled 2026-11-18 (Lm_core across an ideal 4:1 transformer, uic); before, Lsec was uncoupled (V(vout) = 0, an open loop) and every turn-off cut 604 A into roff. Independent reference (Radau, probes/closed_loop_reference.py): trbdf2 rtol 1e-10 within 9.5e-8 of span on v(out) at every tick, pwl+split 2.9e-4. Every cell is worst on V(sec) / V(drain): in the DCM idle interval the drain node is set by the residual Lm current through roff = 1e7 ohm (no drain capacitance), so it follows the solver's tolerance (trbdf2 default vs rtol 1e-8: 0.31 on V(drain), 1.7e-5 on V(vout)). States: V(vout) / I(Lm_core) trbdf2 1.7e-5 / 5.7e-5, pwl+split 8.1e-5 / 5.4e-4, pwl 0.014 / 0.045 (label time, first order)
+  circuits/closed_loop/ll14_buck_closed_loop.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.29, pwl+restart: 0.213, pwl+split: 0.178}, cause: [TC-CLOSED-LOOP]}  # trbdf2 agrees since TR-BDF2 track 7 (a periodic gate caps the closed-loop step at p/20: 0.00106 -> 0.00056; DECISIONS #28 of add-branch-form-ideal-switch). G23: every cell is worst on V(sw): the trbdf2 reference records no post-edge sample at the rising edges (each is a control tick; KNOWN_LIMITATIONS, probes/trbdf2_tick_edge_sample.py), so its V(sw) ramps across a step whose length follows rtol (rtol 1e-8 vs 1e-10: 0.06), and pwl records on its uniform grid. The states agree: V(vout) / I(L1) trbdf2 2.6e-5 / 3.6e-5, pwl+split 1e-4 / 1.4e-3; pwl, pwl+restart 0.013 / 0.13 (gate sampled on the grid: duty in steps of 5 %, first order). Independent reference (Radau, rtol 1e-12): trbdf2 rtol 1e-10 within 5e-8 of span at every tick
+  circuits/closed_loop/ll15_boost_closed_loop.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.3, pwl+restart: 0.0663, pwl+split: 0.0484}, cause: [TC-CLOSED-LOOP]}  # trbdf2 agrees since TR-BDF2 track 7 (0.00123 -> 0.00026, I(L) inrush error 0.066 -> 3.5e-3 A; DECISIONS #28). G23: as ll14 (worst column V(sw), rising edges = ticks with no post-edge sample on trbdf2: rtol 1e-8 vs 1e-10 0.0104 on V(sw)); trbdf2 agreed at 3.9e-4 before only because reference and cell both sampled the edges. States: V(vout) / I(L) trbdf2 2.6e-5 / 1.8e-5, pwl+split 4.3e-5 / 4.6e-5, pwl 3.3e-3 / 6.6e-3. Independent reference (Radau): trbdf2 rtol 1e-10 within 2.9e-8 of span; the duty sits at 0.85 the whole run
+  circuits/closed_loop/ll16_flyback_closed_loop.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.261, pwl+restart: 0.251, pwl+split: 0.245}, cause: [TC-CLOSED-LOOP]}  # trbdf2 agrees since integration batch 13 (TR-BDF2 track 7, the periodic-gate step cap: 0.0368 -> 0.000363). G31: coupled 2026-11-18 (Lm_core across an ideal 4:1 transformer, uic); before, Lsec was uncoupled (V(vout) = 0, an open loop) and every turn-off cut 604 A into roff. Independent reference (Radau, probes/closed_loop_reference.py): trbdf2 rtol 1e-10 within 9.5e-8 of span on v(out) at every tick, pwl+split 2.9e-4. Every cell is worst on V(sec) / V(drain): in the DCM idle interval the drain node is set by the residual Lm current through roff = 1e7 ohm (no drain capacitance), so it follows the solver's tolerance (trbdf2 default vs rtol 1e-8: 0.31 on V(drain), 1.7e-5 on V(vout)). States: V(vout) / I(Lm_core) trbdf2 1.7e-5 / 5.7e-5, pwl+split 8.1e-5 / 5.4e-4, pwl 0.014 / 0.045 (label time, first order)
   circuits/diodes/back_to_back_diodes_sine.yaml: {status: runs}
   circuits/diodes/diode_bridge_rectifier.yaml: {status: runs}
   circuits/diodes/diode_clamp_overvoltage.yaml: {status: runs}
@@ -44,7 +45,7 @@ circuits:
   circuits/linear/capacitor_natural_discharge.yaml: {status: runs}
   circuits/linear/current_divider_3way.yaml: {status: runs}
   circuits/linear/current_source_rc.yaml: {status: runs}
-  circuits/linear/current_source_rl_step.yaml: {status: runs, known: {pwl: disagree}, known_err: {pwl: 0.00577}}
+  circuits/linear/current_source_rl_step.yaml: {status: runs, known: {pwl: disagree}, known_err: {pwl: 0.00577}, cause: [TC-PWL-ORDER]}
   circuits/linear/lc_low_pass_sine.yaml: {status: runs}
   circuits/linear/ll01_resistive_divider_dc.yaml: {status: runs}
   circuits/linear/ll02_rc_pulse_charge.yaml: {status: runs}
@@ -52,7 +53,7 @@ circuits:
   circuits/linear/pulse_voltage_rl.yaml: {status: runs}
   circuits/linear/rc_dc.yaml: {status: runs}
   circuits/linear/rc_step.yaml: {status: runs}
-  circuits/linear/rl_natural_response.yaml: {status: runs, known: {pwl: disagree}, known_err: {pwl: 0.00577}}
+  circuits/linear/rl_natural_response.yaml: {status: runs, known: {pwl: disagree}, known_err: {pwl: 0.00577}, cause: [TC-PWL-ORDER]}
   circuits/linear/rl_step.yaml: {status: runs}
   circuits/linear/rlc_series_resonant.yaml: {status: runs}
   circuits/linear/sine_voltage_rc.yaml: {status: runs}
@@ -68,10 +69,10 @@ circuits:
   # dt/160 0.0076; V(out) 6.29 vs 6.32 V at 1.5 ms); the coupled-transformer rectifier is suspect.
   # Integration batch 10: dsed AGREES with the reference on the combined tree (cause not isolated: the exact branch was measured without this tree's capacitor-IC handling, ed85a697 and the examples audit, which set how pwl and the trbdf2 reference start these split DC links);
   # the branch's dsed freeze is dropped.
-  circuits/magnetics/half_bridge_transformer_dc.yaml: {status: runs, known: {pwl: disagree}, known_err: {pwl: 0.151}}
+  circuits/magnetics/half_bridge_transformer_dc.yaml: {status: runs, known: {pwl: disagree}, known_err: {pwl: 0.151}, cause: [TC-PWL-ORDER]}
   circuits/magnetics/inductor_chain_step.yaml: {status: runs}
   circuits/magnetics/saturating_inductor_step.yaml: {status: skipped, reason: "saturable_inductor (v1 exponent law has no 2.0 equivalent)"}
-  circuits/magnetics/transformer_leakage.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.0041, pwl+restart: 0.00409, pwl+split: 0.00409}}
+  circuits/magnetics/transformer_leakage.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.0041, pwl+restart: 0.00409, pwl+split: 0.00409}, cause: [TC-OPEN]}
   circuits/magnetics/transformer_step_up.yaml: {status: runs}
   circuits/motors/motor_dc_brush_step_load.yaml: {status: runs}
   circuits/motors/motor_induction_locked_rotor.yaml: {status: runs}
@@ -84,7 +85,7 @@ circuits:
   circuits/resonance/rlc_overdamped_step.yaml: {status: runs}
   circuits/resonance/rlc_parallel_step.yaml: {status: runs}
   circuits/resonance/rlc_step.yaml: {status: runs}
-  circuits/stress/high_q_rlc_ringdown.yaml: {status: runs, known: {pwl: disagree, trbdf2: disagree}, known_err: {pwl: 0.0229, trbdf2: 0.00566}}
+  circuits/stress/high_q_rlc_ringdown.yaml: {status: runs, known: {pwl: disagree, trbdf2: disagree}, known_err: {pwl: 0.0229, trbdf2: 0.00566}, cause: [TC-OPEN]}
   circuits/stress/periodic_rc_pwm.yaml: {status: runs}
   circuits/stress/stiff_rc_high_freq_switching.yaml: {status: runs}
   circuits/stress/stiff_rlc.yaml: {status: runs}
@@ -95,13 +96,13 @@ circuits:
   circuits/switching/basic/pwm_voltage_rc.yaml: {status: runs}
   circuits/switching/basic/pwm_voltage_rl_filter.yaml: {status: runs}
   circuits/switching/basic/snubber_rc.yaml: {status: runs}
-  circuits/switching/basic/vcswitch_resistor.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.0332, pwl+restart: 0.0682, pwl+split: 0.0332}}
+  circuits/switching/basic/vcswitch_resistor.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.0332, pwl+restart: 0.0682, pwl+split: 0.0332}, cause: [TC-EDGE-GRID]}
   circuits/switching/boost/boost_classic.yaml: {status: runs}
-  circuits/switching/boost/boost_pfc_open_loop.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree}, known_err: {pwl: 0.0304, pwl+restart: 0.0304}}
+  circuits/switching/boost/boost_pfc_open_loop.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree}, known_err: {pwl: 0.0304, pwl+restart: 0.0304}, cause: [TC-PWL-ORDER]}
   circuits/switching/boost/boost_switching_complex.yaml: {status: runs}
   circuits/switching/boost/cascaded_boost_buck.yaml: {status: runs}
-  circuits/switching/boost/ll07_boost_vcswitch.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.0984, pwl+restart: 0.0997, pwl+split: 0.0997}}
-  circuits/switching/boost/ll12_pfc_boost_continuous.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.083, pwl+restart: 0.0806, pwl+split: 0.0806}}
+  circuits/switching/boost/ll07_boost_vcswitch.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.0984, pwl+restart: 0.0997, pwl+split: 0.0997}, cause: [TC-EDGE-GRID]}
+  circuits/switching/boost/ll12_pfc_boost_continuous.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.083, pwl+restart: 0.0806, pwl+split: 0.0806}, cause: [TC-EDGE-GRID]}
   circuits/switching/boost/synchronous_boost.yaml: {status: runs}
   circuits/switching/boost/textbook_erickson_boost_ccm.yaml: {status: runs}
   circuits/switching/boost/two_phase_interleaved_boost.yaml: {status: runs}
@@ -116,8 +117,8 @@ circuits:
   circuits/switching/buck/high_freq_gan_buck.yaml: {status: runs}
   # dsed on the vcswitch circuits (ll06, ll07, ll09, ll10) agrees since the two-sided trace + fast-mode samples
   # (add-exact-propagator-strategy DECISIONS, "Samples at a discontinuity"); the 0.05-0.13 was the trace, not the engine.
-  circuits/switching/buck/ll06_buck_vcswitch.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.0781, pwl+restart: 0.118, pwl+split: 0.0704}}
-  circuits/switching/buck/ll08_buck_mosfet.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.227, pwl+restart: 0.0842, pwl+split: 0.0842}}  # was error: the roundoff acceptance lets it finish; trbdf2 agrees (1.1e-4) since the post-event sample (update-trbdf2-post-event-restart DECISIONS 13)
+  circuits/switching/buck/ll06_buck_vcswitch.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.0781, pwl+restart: 0.118, pwl+split: 0.0704}, cause: [TC-OPEN]}
+  circuits/switching/buck/ll08_buck_mosfet.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.227, pwl+restart: 0.0842, pwl+split: 0.0842}, cause: [TC-GATE-NODE, TC-PWL-ORDER]}  # was error: the roundoff acceptance lets it finish; trbdf2 agrees (1.1e-4) since the post-event sample (update-trbdf2-post-event-restart DECISIONS 13)
   circuits/switching/buck/sync_buck_500khz.yaml: {status: runs}
   circuits/switching/buck/synchronous_buck.yaml: {status: runs}
   circuits/switching/buck/textbook_erickson_buck_ccm.yaml: {status: runs}
@@ -140,39 +141,43 @@ circuits:
   circuits/switching/inverter/half_bridge_lc_filter.yaml: {status: runs}
   circuits/switching/inverter/lcc_resonant_inverter.yaml: {status: runs}
   # pwm phase read as a fraction of the period (batch 6b): trbdf2 0.00132 -> 4.3e-5, agrees.
-  circuits/switching/inverter/ll09_half_bridge_inverter_leg.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.0707, pwl+restart: 0.0587, pwl+split: 0.0587}}
+  circuits/switching/inverter/ll09_half_bridge_inverter_leg.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.0707, pwl+restart: 0.0587, pwl+split: 0.0587}, cause: [TC-EDGE-GRID]}
   # pwm phase as a fraction (batch 6b): no shoot-through, so the DC start is non-zero and dsed
   # refuses it (as every circuit without uic); its 0.201 was the shoot-through circuit.
-  circuits/switching/inverter/ll10_full_bridge_inverter_lc.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.05, pwl+restart: 0.05, pwl+split: 0.05}}
+  circuits/switching/inverter/ll10_full_bridge_inverter_lc.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.05, pwl+restart: 0.05, pwl+split: 0.05}, cause: [TC-EDGE-GRID]}
   circuits/switching/isolated/active_clamp_forward.yaml: {status: runs}
   # pwm phase as a fraction (batch 6b): pwl 3.58 -> 2.6e-4, trbdf2 0.00244 -> 3.5e-5, both agree.
   circuits/switching/isolated/dual_active_bridge.yaml: {status: runs}
-  circuits/switching/isolated/flyback_converter.yaml: {status: runs, known: {pwl: disagree}, known_err: {pwl: 0.949}}
+  circuits/switching/isolated/flyback_converter.yaml: {status: runs, known: {pwl: disagree}, known_err: {pwl: 0.949}, cause: [TC-PWL-ORDER]}
   # dsed: refused (coupled inductors) until the extractor took the inductance matrix; now a
   # disagreement of the diode settle, not of the coupling: at every gate-off the settle picks
   # (D_rect, D_fw) = (off, off) with a 1.1e5 V forward violation on D_fw at the held state, the
   # slow-manifold projection then relaxes L_o's current through g_off and the guard, judging
   # the projected trajectory, sees nothing (200 checks, 0 repairs); the shadow LCP picks D_fw ON
   # (violation 0.014 V). mode_selection='lcp' stops at 48 us on D_rect's diode law. Open.
-  circuits/switching/isolated/forward_converter.yaml: {status: runs, known: {pwl: disagree}, known_err: {pwl: 0.707}}
+  circuits/switching/isolated/forward_converter.yaml: {status: runs, known: {pwl: disagree}, known_err: {pwl: 0.707}, cause: [TC-PWL-ORDER]}
   # dsed disagree on the gate is interpolation of sparse exact samples across edges (pointwise < 5e-5
   # of span; 0.024 at dt/4 output).
-  circuits/switching/isolated/full_bridge_dc.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.0828, pwl+restart: 0.0815, pwl+split: 0.0815}}
-  circuits/switching/isolated/ll11_llc_resonant_converter.yaml: {status: runs, known: {pwl: error, pwl+restart: error, pwl+split: error, trbdf2: error}}
+  circuits/switching/isolated/full_bridge_dc.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.0828, pwl+restart: 0.0815, pwl+split: 0.0815}, cause: [TC-EDGE-GRID]}
+  circuits/switching/isolated/ll11_llc_resonant_converter.yaml: {status: runs, known: {pwl: error, pwl+restart: error, pwl+split: error, trbdf2: error}, cause: [TC-OPEN]}
   # Was status error ("no DC operating point": Vin-Lleak_prim-Lm_core is a source-inductor
   # loop). Since the DC loop refusal (2026-11-13) the v1 reader starts it from zero state, as
   # uic does, and it runs. trbdf2 1.3e-3: worst V(ctrl_main), err_max 0.99 = a PWM source
   # edge sampled between the two runs' grids (edge_rms 3.3e-5). pwl: V(clamp_node).
-  circuits/switching/isolated/ll13_active_clamp_forward.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree, trbdf2: disagree}, known_err: {pwl: 4.51, pwl+restart: 0.335, pwl+split: 0.335, trbdf2: 0.00133}}
-  circuits/switching/isolated/synchronous_flyback.yaml: {status: runs, known: {pwl: disagree}, known_err: {pwl: 0.207}}
+  circuits/switching/isolated/ll13_active_clamp_forward.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree, trbdf2: disagree}, known_err: {pwl: 4.51, pwl+restart: 0.335, pwl+split: 0.335, trbdf2: 0.00133}, cause: [TC-OPEN]}
+  circuits/switching/isolated/synchronous_flyback.yaml: {status: runs, known: {pwl: disagree}, known_err: {pwl: 0.207}, cause: [TC-PWL-ORDER]}
+  # soft-switching validation (batch 14t, M6): pwl with restart off chatters on the ZVS
+  # transition nodes (V(mid) 18.8 %, V(b) 39.2 % of steps); restart / split / trbdf2 / dsed agree.
+  circuits/switching/isolated/llc_half_bridge_zvs.yaml: {status: runs, known: {pwl: disagree}, known_err: {pwl: 0.021}, cause: [TC-PWL-ORDER]}
+  circuits/switching/isolated/psfb_full_bridge_zvs.yaml: {status: runs, known: {pwl: disagree}, known_err: {pwl: 0.0211}, cause: [TC-PWL-ORDER]}
   # pwm phase as a fraction (batch 6b): the B legs now switch half a period apart (twice the
   # edges); pwl 0.0142 -> 0.0274 on the strict gate with edge error 1.4e-8: edge timing on
   # the dt grid (the late-gate-edge class of REFERENCE_STATUS notes), not the states.
-  circuits/switching/multilevel/cascaded_h_bridge_5level.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.0274, pwl+restart: 0.0269, pwl+split: 0.0269}}
+  circuits/switching/multilevel/cascaded_h_bridge_5level.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.0274, pwl+restart: 0.0269, pwl+split: 0.0269}, cause: [TC-EDGE-GRID]}
   # dsed (runs since builder ICs are honoured): disagree on the gate as full_bridge_dc
   # (pointwise < 5e-5 of span; 0.0275 at dt/4 output).
-  circuits/switching/multilevel/flying_capacitor_3level.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.0466, pwl+restart: 0.05, pwl+split: 0.05}}
-  circuits/switching/multilevel/mmc_4cell_chain.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.0268, pwl+restart: 0.0264, pwl+split: 0.0264}}
+  circuits/switching/multilevel/flying_capacitor_3level.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.0466, pwl+restart: 0.05, pwl+split: 0.05}, cause: [TC-EDGE-GRID]}
+  circuits/switching/multilevel/mmc_4cell_chain.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.0268, pwl+restart: 0.0264, pwl+split: 0.0264}, cause: [TC-EDGE-GRID]}
   # dsed: refused (G_aa singular: the split DC-link capacitors close a loop with the source) until
   # the general reduction (dependent states). The reference does not start from the netlist: pwl and
   # trbdf2 store V(vcc) = one capacitor's ic at t = 0 and the source then splits the missing volts
@@ -188,7 +193,7 @@ circuits:
   # pwl started from dsed's consistent state converges on dsed at half order: dt/10 0.028, dt/40 0.014, dt/160 0.0071.
   # Integration batch 10: dsed AGREES with the reference on the combined tree (cause not isolated: the exact branch was measured without this tree's capacitor-IC handling, ed85a697 and the examples audit, which set how pwl and the trbdf2 reference start these split DC links);
   # the branch's dsed freeze is dropped.
-  circuits/switching/multilevel/t_type_3level_halfbridge.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.0749, pwl+restart: 0.0738, pwl+split: 0.0738}}
+  circuits/switching/multilevel/t_type_3level_halfbridge.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree}, known_err: {pwl: 0.0749, pwl+restart: 0.0738, pwl+split: 0.0738}, cause: [TC-EDGE-GRID]}
   circuits/thermal/buck_electrothermal.yaml: {status: skipped, reason: "mosfet loss/thermal block"}
   circuits/thermal/electrothermal_resistor_self_heating.yaml: {status: runs}
   circuits/thermal/long_run_drift_buck.yaml: {status: runs}
@@ -196,6 +201,6 @@ circuits:
   circuits/three_phase/interleaved_buck_3ph.yaml: {status: runs}
   circuits/three_phase/pll_grid_sync.yaml: {status: skipped, reason: "component type 'pll'"}
   circuits/three_phase/three_phase_balanced_rl_load.yaml: {status: runs}
-  circuits/three_phase/three_phase_diode_rectifier.yaml: {status: runs, known: {pwl: disagree}, known_err: {pwl: 1.51}}
+  circuits/three_phase/three_phase_diode_rectifier.yaml: {status: runs, known: {pwl: disagree}, known_err: {pwl: 1.51}, cause: [TC-PWL-ORDER]}
   circuits/three_phase/three_phase_dq_decoupling.yaml: {status: skipped, reason: "component type 'pll'"}
   circuits/three_phase/vector_control_open_loop.yaml: {status: skipped, reason: "component type 'pll'"}

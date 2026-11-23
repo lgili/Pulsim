@@ -263,6 +263,16 @@ b.aliases()                # {"vin": ("node", "net_42")}
 res.v("vin") == res.v("net_42")   # alias resolves transparently
 ```
 
+The aliases ride in the circuit, so a GUI that saves the circuit as
+YAML gets its labels back on load:
+
+```python
+text = b.build().to_yaml()   # an `aliases:` list next to the devices
+c = p.Circuit.from_yaml(text)
+c.aliases()                  # {"vin": ("node", "net_42")}
+p.simulate(c, t_end=1e-3, dt=1e-6).v("vin")
+```
+
 **Cancellation** via `should_continue=` on every long-running entry
 point:
 
@@ -280,9 +290,12 @@ x_dc = p.compute_dc_op(b,
                          should_continue=lambda: not cancel_event.is_set())
 ```
 
-All raise `pulsim.Cancelled(RuntimeError)` with a typed
-`.where` and `.point_index` attribute pinpointing where the
-cancellation fired.
+`simulate` stops and returns the trace up to the cancel
+(`res.times[-1] < t_end`). The analyses (`compute_dc_op`,
+`compute_temperature`, `run_ac_sweep`, `run_mna_sweep`) raise
+`pulsim.Cancelled(RuntimeError)` with a typed `.where` and
+`.point_index` attribute pinpointing where the cancellation fired; they
+return no partial result. A callback that raises propagates.
 
 ---
 

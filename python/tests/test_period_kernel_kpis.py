@@ -10,6 +10,7 @@ switch edge at the section is counted; 1 and 8 workers give identical
 records."""
 
 import importlib.util
+import math
 import sys
 from pathlib import Path
 
@@ -237,22 +238,27 @@ def test_the_scalar_table_switching_loss_is_the_general_one_bit_for_bit():
                 v, i = rng.normal(0, 30, 2)
                 seq.append((st, v, i))          # left limit
                 st = not st
-                v, i = rng.normal(0, 30, 2)
+                # currents down to the leakage floor (g_off + eps g_on)|v|
+                v, i = rng.normal(0, 30, 2) * 10.0 ** rng.integers(-10, 1, 2)
                 seq.append((st, v, i))          # right limit
-            fast = pk._table_switching_loss(seq, spec)
             cl = np.array([s[0] for s in seq], dtype=bool)
-            gen = _switch_switching_loss(
-                cl, np.zeros(cl.size), np.array([s[1] for s in seq]),
-                np.array([s[2] for s in seq]), spec)
-            for k, v in fast.items():
-                assert v == gen[k], (k, n_edges)
+            # random signs: soft edges too; a PWL switch, a diode, a
+            # branch-form switch (g_on = inf)
+            for law in ((True, 1e3, 1e-9), (False, 1e3, 1e-9),
+                        (True, math.inf, 1e-9), (True, 1e3, 0.0)):
+                fast = pk._table_switching_loss(seq, spec, law)
+                gen = _switch_switching_loss(
+                    cl, np.zeros(cl.size), np.array([s[1] for s in seq]),
+                    np.array([s[2] for s in seq]), spec, law=law)
+                for k, v in fast.items():
+                    assert v == gen[k], (k, n_edges, law)
     # other specs take the general path
     assert pk._table_switching_loss([(True, 1.0, 1.0)], {
-        "E_on_ref": 1e-6, "V_ref": 1, "I_ref": 1}) is None
+        "E_on_ref": 1e-6, "V_ref": 1, "I_ref": 1}, (True, 1e3, 0.0)) is None
     assert pk._table_switching_loss([(True, 1.0, 1.0)], dict(
-        spec, Tj=lambda t: 25.0)) is None
+        spec, Tj=lambda t: 25.0), (True, 1e3, 0.0)) is None
     assert pk._table_switching_loss([(False, np.nan, 1.0), (True, 1.0, 1.0)],
-                                    spec) is None
+                                    spec, (True, 1e3, 0.0)) is None
 
 
 def test_the_buck_example_records_do_not_depend_on_the_scalar_path(

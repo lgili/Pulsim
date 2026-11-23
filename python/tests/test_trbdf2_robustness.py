@@ -88,6 +88,38 @@ def test_opaque_pwm_on_a_long_run_lands_every_edge():
     assert not [m for m in msgs if "gate pulse" in m], msgs
 
 
+def test_opaque_sync_buck_lands_its_sub_step_pulses_and_dead_times():
+    """add-ai-usage-guide 12.13: a plain Python sync-buck PWM, D = 0.03
+    with 50 ns dead times, on trbdf2. It used to be stepped over (0.169 V,
+    QH on 0.3 % against 1.199 V / 2.5 % on pwl). Truth from the switch_fn
+    itself: 4 mask changes per 10 µs period (400 over 1 ms) and QH closed
+    for (D·T − t_d)/T = 2.5 % of the time."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", 48.0)
+    b.add_mosfet("QH", "vin", "sw", R_on=0.01)
+    b.add_mosfet("QL", "sw", "gnd", R_on=0.01)
+    b.add_inductor("L", "sw", "vout", 10e-6)
+    b.add_capacitor("C", "vout", "gnd", 100e-6)
+    b.add_resistor("RL", "vout", "gnd", 1.0)
+    D, td, n = 0.03, 50e-9, b.graph.num_switches
+    iH, iL = b.switch_index_of("QH"), b.switch_index_of("QL")
+
+    def sw(t):
+        m = p.SwitchStateMask(n)
+        ph = t % T_SW
+        m.set(iH, td <= ph < D * T_SW)
+        m.set(iL, D * T_SW + td <= ph < T_SW - td)
+        return m
+
+    r, msgs = _run(b, 1e-3, engine="trbdf2", switch_fn=sw)
+    assert r._trbdf2_stats["n_gate_events"] == 400
+    t = np.asarray(r.times)
+    qh = np.asarray(r.switch_states)[:, iH].astype(float)
+    on = float(np.sum(np.diff(t) * qh[1:]) / (t[-1] - t[0]))
+    assert on == pytest.approx((D * T_SW - td) / T_SW, rel=1e-6)
+    assert not [m for m in msgs if "gate pulse" in m], msgs
+
+
 def test_opaque_three_phase_spwm_matches_the_fixed_engine():
     """10 kHz SPWM with 1 µs dead time behind a Python wrapper, 20 ms:
     1600 mask changes (counted by sampling the wrapper every 10 ns; the

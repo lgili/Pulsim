@@ -86,6 +86,10 @@ struct LoadedCircuit {
     bool                       has_simulation{false};
     /// Non-fatal findings (unknown `simulation:` keys), in file order.
     std::vector<std::string>   warnings{};
+    /// The known `simulation:` keys the YAML sets, in file order:
+    /// `simulate(loaded)` forwards exactly these (a key set to its
+    /// default value still wins over an engine's own default).
+    std::vector<std::string>   simulation_keys{};
 };
 
 /// add-external-device-abi 1.7: what a netlist may load. A YAML
@@ -2038,6 +2042,13 @@ namespace detail {
         }
         detail::collect_unknown_simulation_keys(sim, loaded.warnings);
         detail::load_simulation_options(loaded.options, sim);
+        for (const auto& kv : sim) {
+            if (!kv.first.IsScalar()) continue;
+            std::string key = kv.first.as<std::string>();
+            if (detail::is_known_simulation_key(key)) {
+                loaded.simulation_keys.push_back(std::move(key));
+            }
+        }
         loaded.has_simulation = true;
     }
 

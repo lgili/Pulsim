@@ -416,8 +416,9 @@ r.feeding, res.recorder_feed                       # 'in-loop' | 'stored-arrays'
   `time_average` of the product trace is. EXCEPT in the exact engine's
   loop: there each step's integral and RMS are the closed form of its mode
   (exact for the trajectory, the same at any `dt` / `output_rtol`; a probe
-  that is a polynomial of degree ≤ 2 in its readings). A piece with no
-  closed form (another probe, time-varying sources) is the line and warns;
+  that is a polynomial of degree ≤ 2 in its readings; sine, pulse, PWM and
+  table sources included: they are states of the mode). A piece with no
+  closed form (another probe, a user `b_extra_fn`) is the line and warns;
   `res.recorder_feed["closed_form"]` counts both. min / max are the values
   at the samples and window edges.
 - `res.avg` / `res.rms` / `res.integral` and the stored-array pass are the
@@ -513,9 +514,11 @@ res = p.simulate(loaded)    # t_end / dt from the file; keywords override
 ```
 
 `simulate(loaded)` takes `t_end`, `dt` (when the file sets one),
-`t_start` and `store_every` from the `simulation:` block; any keyword
-you pass wins. The other `simulation:` fields (Newton tolerances,
-`integrator`, ...) stay on `loaded.options` for you to forward. A
+`t_start` and `store_every` from the `simulation:` block, and every
+other key the file sets (`loaded.simulation_keys`: Newton tolerances and
+caps, `integrator`, `rtol`, `atol`, `dt_init`) as the keyword of the same
+name; a keyword you pass, then `solver=`, wins. A key the engine the run
+lands on cannot honour is not used and raises one `RuntimeWarning`. A
 `LoadedCircuit` with no top-level `simulation:` block (or no `t_end` in
 it) is refused with a `ValueError` naming the file, unless you pass
 `t_end=`.

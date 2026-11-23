@@ -250,6 +250,7 @@ void init_module(py::module_& m) {
         .def_readwrite("inductor_abs_clamp", &RunOptions::inductor_abs_clamp)
         .def_readwrite("auto_regularize", &RunOptions::auto_regularize)
         .def_readwrite("voltage_sanity_factor", &RunOptions::voltage_sanity_factor)
+        .def_readwrite("sensitivities", &RunOptions::sensitivities)
         .def("requested", [](const RunOptions& o) {
                 std::vector<std::string> r;
                 for (auto n : sim::requested_options(o)) r.emplace_back(n);

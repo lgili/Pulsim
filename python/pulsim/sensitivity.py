@@ -1798,3 +1798,81 @@ def orbit_sensitivities(res, solver, names, n_steps=50):
     res.dx0 = {p.name: dx[:, j].copy() for j, p in enumerate(params)}
     res.sensitivity = sr
     return res
+
+
+# ----------------------------------------------------------------------
+# The time-stepping engines (group 5): the kernel's stage recurrence
+# ----------------------------------------------------------------------
+
+def _opt_err(message):
+    """An OptionsError (a ValueError) naming `sensitivities`."""
+    from ._pulsim import OptionsError
+    err = OptionsError(message)
+    err.option = "sensitivities"
+    return err
+
+
+def _step_names(names, engine):
+    if isinstance(names, str):
+        names = [names]
+    names = list(names)
+    if not names:
+        raise _opt_err("sensitivities: give at least one parameter name "
+                       "('<component>.<field>').")
+    if len(names) > _MAX_PARAMS:
+        raise _unsup(
+            "sensitivities", f"sensitivities: {len(names)} parameters; "
+            f"the forward method is limited to {_MAX_PARAMS} per run. Split "
+            "the request.", engine=engine)
+    for nm in names:
+        if not isinstance(nm, str) or "." not in nm:
+            raise _opt_err(
+                f"sensitivities: {nm!r} is not '<component>.<field>'.")
+    return names
+
+
+@dataclass
+class StepSensitivityResult:
+    """``dx/dp`` of a pwl / trbdf2 run: the derivative of the discrete
+    solution on the steps the run took (design D1). ``states`` is
+    ``(n_samples, n_state, n_params)`` at ``times`` (the start and every
+    accepted step: on pwl the step grid, on trbdf2 the engine's own steps);
+    ``counters`` holds ``n_sens_solves`` (one back-substitution per
+    parameter per stage) and ``n_sens_iterations`` (the refinements of a
+    Newton stage solved on its last iteration's factor), both of accepted
+    steps, and ``n_sens_discarded`` (the back-substitutions of rejected
+    attempts)."""
+
+    params: list
+    times: np.ndarray
+    states: np.ndarray
+    counters: dict
+    engine: str
+    _builder: Any = field(default=None, repr=False)
+
+    @classmethod
+    def from_trace(cls, tr, builder, engine):
+        st = np.asarray(tr["states"], dtype=float)
+        return cls(list(tr["params"]), np.asarray(tr["times"], dtype=float),
+                   np.transpose(st, (0, 2, 1)).copy(),
+                   {"n_sens_solves": int(tr["n_sens_solves"]),
+                    "n_sens_iterations": int(tr["n_sens_iterations"]),
+                    "n_sens_discarded": int(tr["n_sens_discarded"])},
+                   engine, builder)
+
+    def sens(self, signal, param):
+        """``d signal / d param`` at ``times``: ``signal`` a node name or a
+        state index."""
+        try:
+            j = self.params.index(param)
+        except ValueError:
+            raise _opt_err(f"sensitivity: {param!r} was not requested "
+                           f"(requested: {self.params}).") from None
+        if isinstance(signal, (int, np.integer)):
+            row = int(signal)
+        else:
+            row = int(self._builder.node_id_of(signal))
+            if row < 0:
+                raise _opt_err(f"sensitivity: {signal!r} is not a node "
+                               "(pass a state index for a branch current).")
+        return self.states[:, row, j].copy()

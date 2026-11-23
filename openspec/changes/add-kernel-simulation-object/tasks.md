@@ -10,7 +10,7 @@ the set of warnings (category, message) emitted by the suite is
 unchanged.
 
 ## 0. Preconditions and baseline
-- [ ] 0.1 `add-engine-conformance-matrix` merged
+- [x] 0.1 `add-engine-conformance-matrix` merged — CLOSED (2026-11-22): `add-engine-conformance-matrix` is complete and merged
 - [x] 0.2 Record: `simulate()` line count (1435) and parameter count (40); `raise ValueError` count (406), broad-handler count (68; 13 in `__init__.py`), `warnings.warn(` count (44; 14 in `__init__.py`); fixed overhead of `simulate()` (audit row 21); the suite's warning set
   - Done (2026-11-19, merged f220a1da, before Stage A): `simulate()` 1846 lines (306 of them the docstring), 50 parameters; `raise ValueError` 560 in `python/pulsim` (ratchet 562), broad handlers 90 (13 in `__init__.py`; ratchet 90), `warnings.warn(` 65 (21 in `__init__.py`). Fixed overhead, information only (never asserted): bytecodes per call (`.scratch/opcount.py`, 2-switch buck) pwl 2480, trbdf2 3317; best of 300 wall, RC, 2 steps: pwl 34.4 us, trbdf2 194 us. The suite's warning set: 414 warnings recorded per test as (test, category, message, file; line when outside pulsim) by a pytest plugin (`pytest_warning_recorded`), compared after every Stage A group.
 

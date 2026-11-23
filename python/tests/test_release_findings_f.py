@@ -190,9 +190,11 @@ def test_fx1_ten_branch_form_bridges_run_under_the_rule(gate):
     t_end and every dt_max/10 poll landing counted as the last, so t_res was the time LEFT in the
     run (31 us there) and the common mode L/R_g = 2e-10 s left the cluster near the end. A poll
     landing that changes nothing is not a time event: the rule's run takes the rule-free run's
-    events (111, one at 19.96895575516 ms, no chatter) to 1e-12 s and its end state to 1e-12 of
-    each state's peak (measured 1e-12 V on the bus). 'python': a plain Python gate (no
-    next_edge_after: its EdgeSearch answers a finite poll boundary) lands the same way."""
+    events (111, one at 19.96895575516 ms, no chatter) to 1e-12 s and its end state to 1e-9 of
+    each state's peak (measured 1e-12 V on the bus on macOS/Linux; 5.3e-9 V of 217 V = 2.4e-11
+    on one Windows runner: the two runs take different parasitic cuts, and the 1e8 spread of
+    time constants amplifies the C runtime's last-bit differences). 'python': a plain Python
+    gate (no next_edge_after: its EdgeSearch answers a finite poll boundary) lands the same way."""
     n = _branch_bridges(10).graph.num_switches
     kw = {} if gate == "constant" else {"switch_fn": lambda t: p.SwitchStateMask(n)}
     on = _run(_branch_bridges(10), 0.02, output_rtol=1e-5, **kw)
@@ -203,7 +205,7 @@ def test_fx1_ten_branch_form_bridges_run_under_the_rule(gate):
     assert len(eon) == len(eoff) == 111
     assert np.abs(eon - eoff).max() <= 1e-12
     scale = np.abs(np.asarray(off.states)).max(axis=0) + 1e-12
-    assert (np.abs(fon - foff) / scale).max() <= 1e-11
+    assert (np.abs(fon - foff) / scale).max() <= 1e-9
 
 
 def _ladder(n):

@@ -256,9 +256,12 @@ private:
         const Vector mag = (e.V.cwiseAbs() * terms.cwiseAbs()).cwiseQuotient(e.d).head(n);
         // a state that is exactly 0 (by symmetry) still carries the other
         // modes' rounding, u·‖x‖ (a VSI's phase current at rest next to a 25 V
-        // thermal state read 4e-34): that is its floor
+        // thermal state read 4e-34): that is its floor. lpNorm<Infinity> is
+        // 0 on a mode with no states (maxCoeff of an empty vector reads null).
         const Real floor = std::numeric_limits<Real>::epsilon()
-                           * (x1.cwiseAbs().maxCoeff() + mag.maxCoeff()) + Real{1e-300};
+                           * (x1.template lpNorm<Eigen::Infinity>()
+                              + mag.template lpNorm<Eigen::Infinity>())
+                           + Real{1e-300};
         for (Index i = 0; i < n; ++i) {
             const Real sc = std::abs(x0[i]) + std::abs(x1[i]) + mag[i] + floor;
             if (std::abs(xe[i] - x1[i]) > Real{1e-9} * sc) {
@@ -395,7 +398,8 @@ private:
         std::size_t k = 0;
         for (; k < pend_.size() && pend_[k].t <= t; ++k) {
             auto& e = pend_[k];
-            lt_.event(e.t, e.xl, e.ml, e.xr, e.mr);
+            lt_.event(e.t, e.xl, e.ml, e.xr, e.mr, true);
+            for (auto& im : e.imp) im.t = e.t;   // the edge it belongs to
             imp_.insert(imp_.end(), e.imp.begin(), e.imp.end());
             lt_.impulses(imp_);
             x_last_ = e.xr_red;   // the next step starts from the event's right limit
@@ -406,6 +410,7 @@ private:
     struct Impulse {
         std::string cause;
         Real dW = 0;
+        Real t = 0;
     };
 
     /// The records the event appended, each booked to its commutating

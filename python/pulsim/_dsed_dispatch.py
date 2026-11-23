@@ -36,6 +36,7 @@ reference scenarios.
 
 from __future__ import annotations
 
+import bisect as _bisect
 import re
 import warnings
 
@@ -244,7 +245,9 @@ def _resolve_dsed_options(
 
     * **dt_max**: if user passed ``dt``, use it. Otherwise default to
       10 µs (covers typical PWM up to ~10 kHz; the PI controller
-      adapts down naturally for higher f_sw).
+      adapts down naturally for higher f_sw). A gate that names no edge
+      (no ``switch_fn``, or a plain callable without ``next_edge_after``)
+      is polled every ``dt_max / 10`` = 1 µs, so such a run steps at 1 µs.
     * **h_bdf2**: default 1 µs (reasonable for stiff segments at
       typical power-electronics scales).
     * **dt_init**: default 1 ns (PI controller grows from here).
@@ -285,27 +288,16 @@ def _resolve_dsed_options(
 # =============================================================================
 
 
-# The bridge fallback message is now ONLY surfaced when the underlying
-# C++ extractor throws (e.g. a circuit with floating caps that the
-# current LTI bridge doesn't support). In that case we want a clear
-# explanation + the escape hatch.
+# Surfaced only when the C++ extractor throws: the underlying reason, the
+# engines that take the circuit, and the options this call resolved. (It
+# used to list long-fixed causes -- floating capacitors, nonlinear devices --
+# and point to a design note that ships with no wheel.)
 _BRIDGE_FALLBACK_MESSAGE = (
     "pulsim.simulate(engine='dsed', builder=...): the C++ extractor "
     "rejected this topology: {underlying}\n"
-    "Older causes of this refusal: the circuit has "
-    "**floating capacitors** (caps between two non-ground nodes; the "
-    "current LTI bridge supports caps-to-ground only — Phase 5.1b "
-    "TODO in notes/DSED_BRIDGE_DESIGN.md), or because the circuit "
-    "has **nonlinear devices** (diodes / MOSFETs / IGBTs / saturable "
-    "inductors), which the PED engine doesn't model.\n"
-    "\n"
-    "For PED today on circuits the bridge can't handle, use "
-    "`pulsim.dsed.run_user_lti(system, switch_fn, x0, t_end, ...)` "
-    "with a hand-rolled LTI system (see "
-    "`pulsim.dsed.run_user_lti.__doc__` for the 5-method system "
-    "protocol). Captured "
-    "benchmarks across 13 scenarios: ~1× on non-stiff PWM converters "
-    "(no penalty), 4-90× on stiff multi-state systems.\n"
+    "Run it with engine='pwl' (with dt) or engine='trbdf2'; "
+    "pulsim.exact_route(...) reports which segments of a run the exact "
+    "engine can take.\n"
     "\n"
     "Resolved DSED options for this call:\n"
     "  rtol = {rtol}, atol = {atol}\n"
@@ -439,8 +431,21 @@ def _exact_result(
 
 
 def _result_from_native(native_res, t_start: float):
-    """The result of a Bridge.11 run (``run_*_native_builder``)."""
+    """The result of a Bridge.11 run (``run_*_native_builder``). ``t_start``:
+    the engine ran on its own clock from 0; every time it reports is
+    relabelled here (the loss events in the binding, ``t_offset``)."""
     import numpy as np
+    if t_start:
+        for rd in native_res.get("reinit_records", ()):
+            rd["t"] += t_start
+        for key in ("mode_shadow", "mode_selection", "mode_guard"):
+            g = native_res.get(key)
+            if g is not None:
+                for s in (g, g.get("lcp", {})):
+                    for e in s.get("disagreements", ()):
+                        e["t"] += t_start
+                if "repair_times" in g:
+                    g["repair_times"] = [t + t_start for t in g["repair_times"]]
     # One array conversion, not one per sample.
     times = (np.asarray(native_res["times"], dtype=float)
              + float(t_start))
@@ -623,6 +628,122 @@ def _has_edge_oracle(sf) -> bool:
     return hasattr(sf, "next_edge_after")
 
 
+# The circuit's own time-varying sources: the native adapter evaluates them at
+# the engine's clock (C++), which no Python wrapper can move.
+_TIMED_SOURCE_KINDS = frozenset((
+    "sine_voltage_source", "sine_current_source", "pulse_voltage_source",
+    "pulse_current_source", "pwm_voltage_source", "pwl_current_source"))
+
+
+class _OnAbsoluteClock:
+    """A gate / ``b_extra_fn`` read at the absolute time ``tau + t0`` while
+    the exact engine's clock ``tau`` runs from 0."""
+
+    __slots__ = ("fn", "t0")
+
+    def __init__(self, fn, t0: float):
+        self.fn, self.t0 = fn, t0
+
+    def __call__(self, tau):
+        return self.fn(tau + self.t0)
+
+
+class _OnAbsoluteClockEdges:
+    """A gate with an edge oracle on the absolute clock. Each edge ``e`` is
+    handed to the engine as ``te = e - t0``; a read at ``tau`` keeps its order
+    with every handed-out edge (``te`` reads ``e``, a later ``tau`` reads after
+    ``e``, an earlier one before it): ``tau + t0`` alone rounds onto or across
+    ``e`` once ulp(t0) exceeds the engine's own margin past an edge (a gate
+    switching strictly after its edges ran inverted at t0 = 20 s)."""
+
+    __slots__ = ("fn", "t0", "_te", "_e")
+
+    def __init__(self, fn, t0: float):
+        self.fn, self.t0, self._te, self._e = fn, t0, [], []
+
+    def _abs(self, tau: float) -> float:
+        a = tau + self.t0
+        k = _bisect.bisect_right(self._te, tau)
+        if k:                                   # the last edge at or before tau
+            if self._te[k - 1] == tau:
+                return self._e[k - 1]
+            a = max(a, _np.nextafter(self._e[k - 1], _np.inf))
+        if k < len(self._te):                   # the first edge after tau
+            a = min(a, _np.nextafter(self._e[k], -_np.inf))
+        return a
+
+    def __call__(self, tau):
+        return self.fn(self._abs(tau))
+
+    def next_edge_after(self, tau):
+        e = float(self.fn.next_edge_after(self._abs(tau)))
+        if not (e < float("inf")):
+            return e
+        te = max(e - self.t0, _np.nextafter(tau, _np.inf))   # still after tau
+        k = _bisect.bisect_left(self._te, te)
+        if k == len(self._te) or self._te[k] != te:
+            if len(self._te) >= 4096 and k:      # keep the recent edges, in order
+                del self._te[:k // 2], self._e[:k // 2]
+                k -= k // 2
+            self._te.insert(k, te)
+            self._e.insert(k, e)
+        return te
+
+
+def relabel_failure(e: BaseException, t0: float) -> None:
+    """A typed give-up of a fresh ``t_start`` run (``ConvergenceError``,
+    ``DiodeModeInconsistentError``): its ``t_failed`` is on the engine's
+    clock; relabel it as the result's times are (the message text is the
+    kernel's and keeps the engine's clock)."""
+    t = getattr(e, "t_failed", None)
+    if isinstance(t, float):
+        e.t_failed = t + t0
+
+
+def on_absolute_clock(builder, t0: float, switch_fn, b_extra_fn):
+    """``simulate(t_start=t0)`` on the exact engine, a fresh run: the engine
+    runs on its own clock from 0 and its outputs are relabelled by ``t0``
+    (``_result_from_native``, the loss events in the binding), so every input
+    it reads a time from is shifted here, the one place (``_run_dsed``): the
+    gate and its edge oracle, ``b_extra_fn``. The circuit's own time-varying
+    sources are evaluated by the native adapter and cannot be shifted from
+    Python: refused by name. Control ticks with t_start are refused by
+    ``_compose_for``."""
+    for c in builder.components():
+        if c["kind"] in _TIMED_SOURCE_KINDS:
+            raise unsupported(
+                "dsed", "t_start", device=c["name"], message=
+                f"simulate(engine='dsed', t_start={t0!r}): the exact engine runs a "
+                f"fresh run on its own clock from 0, and the time-varying source "
+                f"{c['name']!r} ({c['kind']}) is evaluated on that clock (it would "
+                f"run {t0!r} s early). Start at t_start=0 (resume_from a snapshot "
+                "continues on the absolute clock), or use engine='pwl' / 'trbdf2'.")
+    if switch_fn is not None:
+        from .periodic_steady_state import _closed_loop_source
+        src = _closed_loop_source(switch_fn)
+        if src:   # its controller would run on the engine's clock (and the wrapper
+            # would hide it from the sensitivity path's own refusal)
+            raise unsupported(
+                "dsed", "t_start", message=
+                f"simulate(engine='dsed', t_start={t0!r}): switch_fn comes from "
+                f"{src}: the exact engine runs a fresh run on its own clock from 0, "
+                "and a gate that follows a controller is not shifted onto it. Start "
+                "at t_start=0, or use engine='pwl' / 'trbdf2'.")
+        if _has_edge_oracle(switch_fn):
+            w = _OnAbsoluteClockEdges(switch_fn, t0)
+            # t0 ON an edge: the start reads the mask after it, as the
+            # uninterrupted run reads it after its edge at t0 (a gate that
+            # switches strictly after its edges kept the old mask a period)
+            if float(switch_fn.next_edge_after(_np.nextafter(t0, -_np.inf))) == t0:
+                w._te, w._e = [0.0], [_np.nextafter(t0, _np.inf)]
+            switch_fn = w
+        else:
+            switch_fn = _OnAbsoluteClock(switch_fn, t0)
+    if b_extra_fn is not None:
+        b_extra_fn = _OnAbsoluteClock(b_extra_fn, t0)
+    return switch_fn, b_extra_fn
+
+
 # add-complementarity-mode-selection D5: the event step of the shadow LCP.
 # h_e = H_E_REL * T_ref (measured band 1e-9..1e-6, probes/h_e_band.out), T_ref the shortest declared period (sine / PWM
 # source) or the run length (see DECISIONS.md for the measured band).
@@ -803,8 +924,8 @@ def run_dsed_from_builder(
                 f"simulate(engine='dsed', integrator='bdf2'): the loss port of "
                 f"{_loss_names[0]!r} (set_device_losses) is read on the "
                 "event-driven integrator only. Drop integrator='bdf2'.")
-        # a fresh t_start run is the 0-start run relabelled by t_start (the
-        # engine's clock runs from 0): its loss events are shifted with it
+        # a fresh t_start run runs on the engine's clock from 0 (simulate()
+        # shifts the drive onto it): its loss events are relabelled by t_start
         integrator = "rk45"
     # update-number-changing-release: the output-grid rule cuts the
     # event-driven integrator's exact steps; 'auto' becomes 'rk45' as for
@@ -953,7 +1074,7 @@ def run_dsed_from_builder(
     # Eagerly resolve the initial mask so any extractor failure
     # (floating cap, nonlinear device, etc.) surfaces NOW with the
     # bridge-fallback message rather than mid-simulation.
-    initial_mask = sf(opts.t_start)
+    initial_mask = sf(0.0)   # the engine's clock (simulate() shifts the gate)
     if resume_from is not None:
         initial_mask = SwitchStateMask(builder.graph.num_switches)
         for _i, _b in enumerate(resume_from.stamped_mask):
@@ -1154,7 +1275,10 @@ def run_dsed_from_builder(
                     native_adapter, sf, x0, t_window,
                     h_fixed=opts.h_bdf2,
                     store_every=opts.store_every, event_log=False)
-            else:  # 'auto'
+            else:  # 'auto': the same in-loop feed (its hooks only observe)
+                from . import _recorders as _rec
+                feed_slot = _rec.ExactFeedSlot(builder)
+                _rec.attach_loop_feed(feed_slot, "dsed")
                 native_res = run_auto_b11(
                     native_adapter, sf, x0,
                     float(t_end) if resume_from is not None else t_window,
@@ -1163,7 +1287,10 @@ def run_dsed_from_builder(
                     h_bdf2=opts.h_bdf2,
                     stiffness_threshold=opts.stiffness_threshold,
                     store_every=opts.store_every, event_log=False,
+                    loop_feed=feed_slot.feed,
                     **({"resume": resume_from} if resume_from is not None else {}))
+                if "recorder_closed_form" in native_res:
+                    _rec.exact_closed_form(native_res["recorder_closed_form"])
             res = _result_from_native(
                 native_res, 0.0 if resume_from is not None else opts.t_start)
             if "final_snapshot" in native_res and (

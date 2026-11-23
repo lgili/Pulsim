@@ -22,6 +22,10 @@ benchmark:
   #   ΔV_C   = ΔI_L / (8 · f_sw · C)
   #          = 2.553 / (8 · 50 000 · 100 µF)
   #          ≈ 63.8 mV
+  # NOTE (2026-11, finding F-T-1): with Rload = 10 ohm this point is NOT
+  # CCM: K = 2 L f / R = 0.47 < K_crit = 1 - D = 0.5. Its steady state
+  # is DCM, V_out = 12.25 V (Erickson ch. 5), 2.1 % above D * V_in.
+  # See python/tests/test_textbook_reference_cases.py.
   # These values are surfaced as KPIs and a published-tolerance
   # check (within ±2 % each) would pass cleanly for an ideal
   # converter.  Pulsim uses non-ideal switches so the actual

@@ -234,6 +234,14 @@ def compute_dc_op(builder,
     report
         If a list is passed, the kernel's ``DCSolveReport`` is
         appended to it, so you can see which rung answered.
+    should_continue
+        ``() -> bool``, polled at entry and between the kernel's
+        strategy rungs (inside the transient for ``"settle"``).
+        ``False`` raises :class:`pulsim.Cancelled`
+        (``.where == "compute_dc_op"``); no operating point is returned.
+        A callback that raises propagates. For a GUI Cancel button:
+        ``cancel = threading.Event()``,
+        ``should_continue=lambda: not cancel.is_set()``.
     device_path
         ``"legacy"`` (default): the hand-written Newton stamps;
         ``"interface"``: every Newton kind's law on the device interface
@@ -409,13 +417,18 @@ def _dc_settle(builder,
     import pulsim as _v2
     n_check_samples = max(1, int(round(cfg.t_check / cfg.dt)))
 
+    from ._builder_ergonomics import CancelProbe
+    cont = (None if should_continue is None
+            else CancelProbe(should_continue, "compute_dc_op"))
     res = _v2.simulate(builder,
                          t_end=cfg.t_settle,
                          dt=cfg.dt,
                          t_start=0.0,
                          start_from_dc_op=False,
                          max_event_iterations=8,
-                         should_continue=should_continue)
+                         should_continue=cont)
+    if cont is not None:   # a cut-short settle is no operating point
+        cont.raise_if_fired(0)
     # Steady-state check: look at the last 2 sampling windows of size
     # t_check and confirm the state barely moves between them.
     states = np.asarray(res.states)

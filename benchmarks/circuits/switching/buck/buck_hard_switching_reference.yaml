@@ -30,6 +30,7 @@ benchmark:
       voltage_observable: V(sw)
       current_observable: I(L1)
       label: SH
+      window_s: 1.0e-6     # int v*i dt over 5 steps after each edge (F-S-2: required)
 simulation:
   tstart: 0.0
   tstop: 500e-6

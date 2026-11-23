@@ -451,3 +451,54 @@ def test_energy_balance_of_switching_heat_with_and_without_restart(
     tj = np.asarray(res.v("tj"))
     network = 0.01 * (tj[-1] - tj[1]) + np.trapezoid(tj[1:] - T_AMB, t[1:])
     assert network == pytest.approx(res.heat_injected, rel=rtol)
+
+
+# ------------------------------------------------ the edge under the restart rule
+
+class _OneEdge:
+    """Open until t_e, closed after; names its edge."""
+
+    def __init__(self, n, t_e):
+        self.n, self.t_e = n, t_e
+
+    def __call__(self, t):
+        m = p.SwitchStateMask(self.n)
+        m.set(0, t >= self.t_e)
+        return m
+
+    def next_edge_after(self, t):
+        return self.t_e if t < self.t_e else math.inf
+
+
+@pytest.mark.parametrize("split", [False, True])
+def test_a_restart_edge_is_read_at_its_right_limit(split):
+    """A freewheeling inductor (10 A at t = 0, tau = L / (R + 1/g_on)) is
+    picked up by the switch at t_e. The load current of that turn-on is the
+    inductor's at the edge, 10 exp(-t_e / tau) (closed form). After it the
+    current rises at (V - R i) / L = 2.9e4 A/s, so the end of the step reads
+    1.2e-3 high after the 0.3 us that is left of it (a located edge) and
+    2.9e-3 high after a whole one. The kernel reads the event's right limit,
+    the row device_loss_summary reads (they agreed at 1e-9 with the rule
+    off only). E_on is linear in i, so the booked energy is the current.
+    split=False: the gate is read at a step's start, so the edge acts from
+    the first step that starts after it, 34 us (measured: 7.11768 A)."""
+    g_on, R, L, V, t_e = 1e4, 10.0, 1e-3, 100.0, 33.7e-6
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "vdc", "gnd", V)
+    b.add_switch("S", "vdc", "sw", g_on, 1e-9)
+    b.add_diode("D", "gnd", "sw", g_on, 1e-9)
+    b.add_inductor("L", "sw", "out", L, i0=10.0)
+    b.add_resistor("R", "out", "gnd", R)
+    tab = p.LossTable(v_axis=[0.0, 200.0], i_axis=[0.0, 20.0], tj_axis=[25.0, 150.0],
+                      energy=np.array([[[0.0, 0.0], [20.0, 20.0]], [[0.0, 0.0], [20.0, 20.0]]]))
+    b.set_device_losses("S", Tj=100.0, E_on=tab)
+    res = p.simulate(b, 60e-6, dt=1e-6, engine="pwl", switch_fn=_OneEdge(b.graph.num_switches, t_e),
+                     discontinuity_restart=True, enable_substep_state_correction=split)
+    k = res.device_energy("S")
+    assert k["n_on"] == 1
+    t_read = t_e if split else 34e-6
+    truth = 10.0 * math.exp(-t_read * (R + 1.0 / g_on) / L)
+    assert k["E_on"] == pytest.approx(truth, rel=2e-5)        # the end of the step: 1.2e-3 / 2.9e-3 high
+    row = {r["name"]: r for r in p.device_loss_summary(
+        b, res, switch_specs={"S": {"E_on_table": tab, "Tj": 100.0}})}["S"]
+    assert k["E_on"] == pytest.approx(row["E_sw_on_total"], rel=1e-9)

@@ -413,7 +413,9 @@ needs the unified stepper (task 2.4). Sine, PWM and pulse voltage
 sources and sine / pulse / table current sources are exact (corners are
 time events); a user `b_extra_fn` makes the mask numeric, refused as
 `'source'` unless allowed. `integrator='bdf2'` is numeric throughout and
-not refused. Without `dt` the exact engine samples every 10 µs plus its
+not refused. Without `dt` the exact engine samples every 10 µs (its step ceiling
+`dt_max`; every `dt_max / 10` = 1 µs when the gate names no edge: no
+`switch_fn`, or a plain callable without `next_edge_after`) plus its
 events: exact at those instants, but a waveform interpolated between
 them is not (pass `dt` for a finer output grid). Capacitor loops (parallel
 capacitors) are refused by the extractor, so the charge-conserving
@@ -681,6 +683,42 @@ reference takes 18,192 steps with 15 forced accepts. dsed is a frozen
 
 Circuits whose v1 file has no `uic: true`
 start from the DC operating point, which `dsed` cannot take (refused).
+
+#### Triage causes (`cause:` of a `known:` entry in `v2_triage.yaml`)
+
+Every frozen `disagree` / `error` cell names one or more of these ids;
+`python/tests/test_benchmark_harness.py::test_every_known_cell_names_a_cause_that_resolves`
+keeps them resolvable. The per-circuit numbers are in the manifest's
+comments and `benchmarks/REFERENCE_STATUS.md`.
+
+- **TC-EDGE-GRID** — a gate edge between grid points on `pwl`: the stored
+  samples bracket the edge and the trace ramps over one step (timing ≤ 1-2
+  steps; the edge diagnostic is within tolerance, the states agree off the
+  edges; REFERENCE_STATUS notes "Fixed-step event splitting" and its edge
+  diagnostic table). The strict
+  gate is not changed for it, so the cells stay frozen.
+- **TC-CLOSED-LOOP** — a helper closed loop: `pwl` samples the gate on the
+  grid and ticks in label time (first order), `trbdf2` records no post-edge
+  sample at an edge that is also a tick ("Closed loops: what each engine
+  gets right", above).
+- **TC-PWL-ORDER** — `pwl` is first order after a diode / source event or
+  from an inconsistent start ("Fixed engine: first order after a
+  discontinuity", above): the `pwl` cell disagrees and the `pwl+restart` or
+  `pwl+split` cell of the same circuit agrees or is much smaller.
+  `boost_pfc_open_loop`: chatter / undersampled on `pwl`, split agrees.
+- **TC-GATE-NODE** — a Level-1 MOSFET driven through its gate node: its
+  channel crosses `V_T` between grid points, which is no event, so neither
+  the restart nor the split makes it second order (same section). The
+  reader's `K = kp` (half v1's law; restore-reference-benchmark-harness
+  DECISIONS 14 R1) is a second, open defect on these circuits.
+- **TC-OPEN** — not isolated: the cell is frozen with its measured error and
+  the manifest comment says what is known. `transformer_leakage` (linear, no
+  switching: 4.1e-3 on every `pwl` configuration), `ll06_buck_vcswitch`
+  (edge error above tolerance on `pwl` / `pwl+restart`, edges ~99 steps
+  apart), `high_q_rlc_ringdown`
+  (`pwl` 0.0229, `trbdf2` 0.00566 against rtol 1e-8), `ll11_llc_resonant_converter`
+  (`error` on every configuration), `ll13_active_clamp_forward` (`pwl` 4.51;
+  no DC operating point, started from zero state).
 
 ### TR-BDF2 on a bridge whose DC side floats on a tie resistor
 

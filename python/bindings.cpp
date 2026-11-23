@@ -118,6 +118,39 @@ void init_module(py::module_& m) {
 
     using namespace pulsim;
 
+    // add-ai-usage-guide 1.1: registered before the members that return
+    // them (builder.graph / .pool, kind_of, find_implausible_voltage,
+    // final_snapshot), so their signatures name the Python type; the
+    // methods are defined further down.
+    py::class_<topology::Graph> graph_cls(m, "Graph",
+        "Pulsim topology graph. Build via "
+        "CircuitBuilder; access via builder.graph.");
+    py::class_<pwl::DevicePool> pool_cls(m, "DevicePool",
+        "Pulsim device parameter pool. Build via "
+        "CircuitBuilder; access via builder.pool.");
+    py::enum_<pwl::DevicePool::StoredKind> stored_kind_cls(m, "StoredKind",
+        "Device kind stored in DevicePool. v1.4.0+ — exposed so "
+        "Python helpers (sweep_path_aware etc.) can auto-dispatch "
+        "update_* mutators per device type.");
+    py::class_<solver::SimulationResult> result_cls(m, "SimulationResult",
+        "Output of run_transient: parallel `times` and "
+        "`states` arrays, plus event diagnostics.",
+        py::dynamic_attr());  // allow `result._builder = b` from Python
+    py::class_<solver::SolverSnapshot> snapshot_cls(m, "SolverSnapshot",
+        "The COMPLETE state of a run at one instant.\n\n"
+        "`initial_state=` restores only the MNA vector and then "
+        "INVENTS the companion history from it (a capacitor gets "
+        "i_prev = 0, an inductor v_prev = 0), so resuming from it "
+        "does NOT reproduce the run — a continuous 2T RLC and a "
+        "T-then-resume differ by 2.3e-4 where a true resume is "
+        "~1e-15. A snapshot carries what was missing: the "
+        "trapezoidal companion history, the state of every "
+        "stateful device (saturable / gapped / hysteretic "
+        "inductors, charge-based Coss, Lauritzen diodes, IGBT "
+        "tails, MNA PMSMs) and the solver-owned diode bits. Pass "
+        "it as simulate(resume_from=...): exact on engine='pwl', "
+        "to tolerance on engine='trbdf2'. Pickles.");
+
     // add-python-builder-ergonomics (v1.5): register the C++
     // `Cancelled` exception with pybind11 so calls into the kernel
     // that throw `analysis::Cancelled` surface as a typed
@@ -624,23 +657,29 @@ void init_module(py::module_& m) {
         .def_readonly("n_on", &thermal::DeviceLossRecord::n_on)
         .def_readonly("n_off", &thermal::DeviceLossRecord::n_off);
     m.def("_commutation_points",
-        [](const std::vector<std::tuple<bool, Real, Real>>& seq) {
+        [](const std::vector<std::tuple<bool, Real, Real>>& seq, bool gated,
+           Real g_on, Real g_off) {
+            const thermal::EdgeLaw law{gated, g_on, g_off};
             // One reading rule for the transient tracker and the periodic
             // orbit (_period_kpis.commutations): thermal::commutation_point.
-            std::vector<std::pair<Real, Real>> on, off;
+            std::vector<std::tuple<Real, Real, bool>> on, off;
             for (std::size_t k = 1; k < seq.size(); ++k) {
                 const auto& [c0, v0, i0] = seq[k - 1];
                 const auto& [c1, v1, i1] = seq[k];
                 if (c0 == c1) continue;
-                const auto pt = thermal::commutation_point(c1, v0, i0, v1, i1);
-                (c1 ? on : off).emplace_back(pt.v, pt.i);
+                const auto pt = thermal::commutation_point(c1, v0, i0, v1, i1, law, false);
+                (c1 ? on : off).emplace_back(pt.v, pt.i, pt.soft);
             }
             return py::make_tuple(on, off);
         },
-        py::arg("seq"),
-        "(on, off): the (|v|, |i|) of every turn-on and turn-off of an edge "
-        "sequence [(closed, v, i), ...] by the kernel's reading rule (turn-on: "
-        "v before, i after; turn-off: the reverse).");
+        py::arg("seq"), py::arg("gated"), py::arg("g_on"), py::arg("g_off"),
+        "(on, off): the (|v|, |i|, soft) of every turn-on and turn-off of an "
+        "edge sequence [(closed, v, i), ...] by the kernel's reading rule "
+        "(turn-on: v before, i after; turn-off: the reverse). With `gated` (a "
+        "switch, not a diode) an edge whose open-side v and closed-side i "
+        "have opposite signs is soft: v = 0, no energy -- unless that current is "
+        "within (g_off + eps g_on)|v|, the open device's own leakage and the "
+        "closed law's rounding (thermal::commutation_point).");
 
     // ---- add-power-mosfet-datasheet-device: charge laws ----------------
     py::class_<models::FluxMapDQ, std::shared_ptr<models::FluxMapDQ>>(m, "FluxMapDQ",
@@ -1307,12 +1346,12 @@ void init_module(py::module_& m) {
                  Real R_s, Real L_d, Real L_q, Real psi_pm, Real pp, Real J,
                  Real B, Real T_load, Real L_0, Real omega0, Real theta0,
                  const std::vector<std::array<Real, 3>>& harmonics,
-                 std::shared_ptr<models::FluxMapDQ> flux_map)
+                 std::optional<std::shared_ptr<models::FluxMapDQ>> flux_map)
                   -> builder::CircuitBuilder& {
                   return b.add_pmsm_mna(name, pa, pb, pc, n, om, th, R_s, L_d,
                                         L_q, psi_pm, pp, J, B, T_load, L_0,
                                         omega0, theta0, harmonics,
-                                        std::move(flux_map));
+                                        flux_map.value_or(nullptr));
               },
               py::arg("name"),
               py::arg("phase_a"), py::arg("phase_b"), py::arg("phase_c"),
@@ -1461,7 +1500,7 @@ void init_module(py::module_& m) {
                   const pwl::PreflightOptions& opts) {
                   return self.run_preflight(opts);
               },
-              py::arg("options") = pwl::PreflightOptions{},
+              py::arg_v("options", pwl::PreflightOptions{}, "PreflightOptions()"),
               "Check the topology for nodes with no voltage "
               "reference and (by default) tie each offending subnet "
               "to ground through a high-value resistor. Returns a "
@@ -2522,9 +2561,7 @@ void init_module(py::module_& m) {
     // We only need lvalue refs to feed into PwlStateSpaceCache /
     // run_transient. Bind as opaque classes — users don't
     // construct them directly (they go through CircuitBuilder).
-    py::class_<topology::Graph>(m, "Graph",
-        "Pulsim topology graph. Build via "
-        "CircuitBuilder; access via builder.graph.")
+    graph_cls
         .def_property_readonly("num_nodes",
               &topology::Graph::num_nodes)
         .def_property_readonly("num_branches",
@@ -2596,9 +2633,7 @@ void init_module(py::module_& m) {
               "List of all nodes in insertion order. Each entry "
               "is a dict {id, name}.");
 
-    py::class_<pwl::DevicePool>(m, "DevicePool",
-        "Pulsim device parameter pool. Build via "
-        "CircuitBuilder; access via builder.pool.")
+    pool_cls
         .def("has_nonlinear_devices",
               &pwl::DevicePool::has_nonlinear_devices,
               "Alias of requires_newton(): True if any branch "
@@ -2744,10 +2779,7 @@ void init_module(py::module_& m) {
     // refactor here (the others are not user-facing). New variants
     // added to the kernel must be appended below to keep the Python
     // enum exhaustive.
-    py::enum_<pwl::DevicePool::StoredKind>(m, "StoredKind",
-        "Device kind stored in DevicePool. v1.4.0+ — exposed so "
-        "Python helpers (sweep_path_aware etc.) can auto-dispatch "
-        "update_* mutators per device type.")
+    stored_kind_cls
         .value("Resistor",            pwl::DevicePool::StoredKind::Resistor)
         .value("VoltageSource",       pwl::DevicePool::StoredKind::VoltageSource)
         .value("Switch",              pwl::DevicePool::StoredKind::Switch)
@@ -3355,7 +3387,9 @@ void init_module(py::module_& m) {
     py::class_<ReinitRecord>(m, "ReinitRecord",
         "One impulsive re-initialisation (add-branch-form-ideal-switch "
         "D4): kind 'cut_set' (lambda = flux, V*s) or 'capacitor_loop' "
-        "(lambda = charge, C); dW the energy removed [J]; sample the "
+        "(lambda = charge, C), or on the exact engine 'start_projection' "
+        "(a given initial state the start mode cannot keep, moved at t0; "
+        "projection_gap the largest move); dW the energy removed [J]; sample the "
         "stored sample of the step that carried the pulse (-1: not "
         "stored).")
         .def_readonly("t", &ReinitRecord::t)
@@ -3447,10 +3481,7 @@ void init_module(py::module_& m) {
         PULSIM_RUNSTAT(cpu_time_seconds)
 #undef PULSIM_RUNSTAT
     }
-    py::class_<SimulationResult>(m, "SimulationResult",
-        "Output of run_transient: parallel `times` and "
-        "`states` arrays, plus event diagnostics.",
-        py::dynamic_attr())  // allow `result._builder = b` from Python
+    result_cls
         // update-fixed-step-loop-bookkeeping: `times` is a read-only
         // zero-copy 1-D view like `states` (it was a list copied on
         // every access). `list(res.times)` restores the old type.
@@ -3639,6 +3670,33 @@ void init_module(py::module_& m) {
                        &SimulationResult::event_iteration_count)
         .def_readonly("newton", &SimulationResult::newton,
                       "Newton counters of the run (NewtonCounters).")
+        // add-parameter-sensitivities group 5: the stage recurrence's trace
+        // (pwl / trbdf2), None when no sensitivities were requested.
+        .def_property_readonly("sensitivity_trace",
+            [](const SimulationResult& r) -> py::object {
+                const auto& tr = r.sensitivity;
+                if (tr.params.empty()) return py::none();
+                const auto nt = static_cast<py::ssize_t>(tr.times.size());
+                const auto np = static_cast<py::ssize_t>(tr.params.size());
+                const auto ns = static_cast<py::ssize_t>(tr.n_state);
+                py::array_t<Real> st({nt, np, ns});
+                std::copy(tr.states.begin(), tr.states.end(), st.mutable_data());
+                py::dict d;
+                d["params"] = tr.params;
+                d["times"] = py::array_t<Real>(nt, tr.times.data());
+                d["states"] = st;   // (sample, param, state)
+                d["n_sens_solves"] = tr.n_sens_solves;
+                d["n_sens_iterations"] = tr.n_sens_iterations;
+                d["n_sens_discarded"] = tr.n_sens_discarded;
+                return d;
+            },
+            "Forward parameter sensitivities of a pwl / trbdf2 run "
+            "(add-parameter-sensitivities group 5): a dict with 'params', "
+            "'times' (the start and every accepted step), 'states' "
+            "(sample, param, state) and the counters 'n_sens_solves', "
+            "'n_sens_iterations' (of accepted steps), 'n_sens_discarded' "
+            "(back-substitutions of rejected attempts); None without "
+            "sensitivities.")
         // Per-sample record of the STAMPED switch / diode mask
         // (result.hpp, `switch_state_bits`). Unpacked here into a
         // (num_steps, num_switches) bool array; column j is bit j of
@@ -4063,8 +4121,8 @@ void init_module(py::module_& m) {
         "(`.builder`) + the `simulation:` block (`.options`).\n\n"
         "Read-only conveniences: `source`, `has_simulation`, "
         "`t_start`, `t_end`, `dt`, `switch_names`, `node_names`, "
-        "`warnings`. `pulsim.simulate(loaded, ...)` takes t_start / "
-        "t_end / dt / store_every from it.")
+        "`warnings`, `simulation_keys`. `pulsim.simulate(loaded, ...)` "
+        "takes every `simulation:` key from it; a keyword you pass wins.")
         // `builder` is move-only (Graph has deleted copy)
         // so we expose by-reference. The LoadedCircuit
         // OWNS the builder; this view stays valid as
@@ -4077,6 +4135,10 @@ void init_module(py::module_& m) {
             py::return_value_policy::reference_internal)
         .def_readwrite("options",
                         &yaml::LoadedCircuit::options)
+        .def_readonly("simulation_keys",
+                       &yaml::LoadedCircuit::simulation_keys,
+                       "The known `simulation:` keys the YAML sets, in "
+                       "file order; `simulate(loaded)` forwards these.")
         .def_property_readonly("source",
             [](const yaml::LoadedCircuit& self) { return self.source; },
             "Where the YAML came from: the path given to "
@@ -4646,20 +4708,7 @@ void init_module(py::module_& m) {
             "``(capacity, state_size)``. Zero-copy; aliases the "
             "C++ memory.");
 
-    py::class_<SolverSnapshot>(m, "SolverSnapshot",
-        "The COMPLETE state of a run at one instant.\n\n"
-        "`initial_state=` restores only the MNA vector and then "
-        "INVENTS the companion history from it (a capacitor gets "
-        "i_prev = 0, an inductor v_prev = 0), so resuming from it "
-        "does NOT reproduce the run — a continuous 2T RLC and a "
-        "T-then-resume differ by 2.3e-4 where a true resume is "
-        "~1e-15. A snapshot carries what was missing: the "
-        "trapezoidal companion history, the state of every "
-        "stateful device (saturable / gapped / hysteretic "
-        "inductors, charge-based Coss, Lauritzen diodes, IGBT "
-        "tails, MNA PMSMs) and the solver-owned diode bits. Pass "
-        "it as simulate(resume_from=...): exact on engine='pwl', "
-        "to tolerance on engine='trbdf2'. Pickles.")
+    snapshot_cls
         .def(py::init<>())
         .def_readwrite("t", &SolverSnapshot::t)
         .def_readwrite("x", &SolverSnapshot::x)
@@ -5096,8 +5145,8 @@ void init_module(py::module_& m) {
            std::optional<bool> enable_nonlinear_refresh,
            py::object step_observer_obj,
            py::object initial_state,
-           ShouldContinueFn should_continue,
-           std::shared_ptr<streaming::LiveRing> live_ring,
+           std::optional<ShouldContinueFn> should_continue_arg,
+           std::optional<std::shared_ptr<streaming::LiveRing>> live_ring_arg,
            py::object resume_from_obj,
            std::vector<Real> tick_periods,
            std::vector<py::object> tick_fn_objs,
@@ -5193,6 +5242,8 @@ void init_module(py::module_& m) {
             // (atomics only); the user-supplied callbacks still
             // re-acquire the GIL via pybind11 trampolines.
             StepObserverFn observer_eff = step_observer;
+            const ShouldContinueFn should_continue = should_continue_arg.value_or(nullptr);
+            const auto live_ring = live_ring_arg.value_or(nullptr);
             ShouldContinueFn continue_eff = should_continue;
             if (live_ring) {
                 auto ring = live_ring;  // shared_ptr copy into closure
@@ -5253,8 +5304,8 @@ void init_module(py::module_& m) {
         py::arg("enable_nonlinear_refresh") = py::none(),
         py::arg("step_observer") = py::none(),
         py::arg("initial_state") = py::none(),
-        py::arg("should_continue") = ShouldContinueFn{},
-        py::arg("live_ring") = std::shared_ptr<streaming::LiveRing>{},
+        py::arg("should_continue") = py::none(),
+        py::arg("live_ring") = py::none(),
         py::arg("resume_from") = py::none(),
         py::arg("tick_periods") = std::vector<Real>{},
         py::arg("tick_fns") = std::vector<py::object>{},
@@ -5524,7 +5575,7 @@ void init_module(py::module_& m) {
             Size pt_max_iters,
             Real pt_tol_res,
             Size ss_n_steps,
-            analysis::ShouldContinueFn should_continue,
+            std::optional<analysis::ShouldContinueFn> should_continue,
             std::optional<bool> enable_nonlinear_refresh,
             Real gmin,
             Real gmin_start,
@@ -5546,7 +5597,7 @@ void init_module(py::module_& m) {
                 resolve_refresh(pool, enable_nonlinear_refresh, device_path);
             Vector x = pwl::compute_dc_op_with_strategy(
                 graph, pool, mask, strategy, t_eval, pt, ss,
-                std::move(should_continue), refresh, g, &report);
+                should_continue.value_or(nullptr), refresh, g, &report);
             return py::make_tuple(std::move(x), report);
         },
         py::arg("graph"), py::arg("pool"), py::arg("mask"),
@@ -5557,7 +5608,7 @@ void init_module(py::module_& m) {
         py::arg("pt_max_iters") = Size{500},
         py::arg("pt_tol_res") = Real{1e-7},
         py::arg("ss_n_steps") = Size{10},
-        py::arg("should_continue") = analysis::ShouldContinueFn{},
+        py::arg("should_continue") = py::none(),
         py::arg("enable_nonlinear_refresh") = py::none(),
         py::arg("gmin") = pwl::kDefaultGmin,
         py::arg("gmin_start") = Real{1e-2},
@@ -5591,10 +5642,10 @@ void init_module(py::module_& m) {
             Size ss_n_steps,
             Real pt_tol_res,
             Size pt_max_iters,
-            analysis::ShouldContinueFn should_continue,
+            std::optional<analysis::ShouldContinueFn> should_continue,
             device::DevicePath device_path) {
             pwl::DCOperatingPointOptions o;
-            o.should_continue = std::move(should_continue);
+            o.should_continue = should_continue.value_or(nullptr);
             o.strategy = strategy;
             o.t_eval = t_eval;
             o.max_event_iterations = max_event_iterations;
@@ -5632,7 +5683,7 @@ void init_module(py::module_& m) {
         py::arg("ss_n_steps") = Size{10},
         py::arg("pt_tol_res") = Real{1e-7},
         py::arg("pt_max_iters") = Size{500},
-        py::arg("should_continue") = analysis::ShouldContinueFn{},
+        py::arg("should_continue") = py::none(),
         py::arg("device_path") = device::DevicePath::Legacy,
         "THE DC operating point: nonlinear devices stamped, PWL "
         "diode states iterated to consistency, and the DC cascade "
@@ -5683,16 +5734,16 @@ void init_module(py::module_& m) {
             const std::vector<Real>& freqs,
             Size input_state_idx,
             Size output_node_idx,
-            analysis::ShouldContinueFn should_continue) {
+            std::optional<analysis::ShouldContinueFn> should_continue) {
             return analysis::run_mna_sweep(
                 graph, pool, mask, freqs,
                 input_state_idx, output_node_idx,
-                std::move(should_continue));
+                should_continue.value_or(nullptr));
         },
         py::arg("graph"), py::arg("pool"), py::arg("mask"),
         py::arg("freqs"), py::arg("input_state_idx"),
         py::arg("output_node_idx"),
-        py::arg("should_continue") = analysis::ShouldContinueFn{},
+        py::arg("should_continue") = py::none(),
         "Direct kernel AC sweep via complex sparse LU at each "
         "frequency. Returns a MnaSweepKernelResult with parallel "
         "freqs/H arrays.\n"
@@ -6224,9 +6275,9 @@ void init_module(py::module_& m) {
                 auto p = make_sum_step(self, blk, a, b, c, out);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("w0") = 1.0, py::arg("w1") = 1.0,
-                py::arg("w2") = 0.0,
+                py::arg("w2") = 0.0, py::kw_only(),
                 py::arg("a"), py::arg("b"),
-                py::arg("c") = InputRef::from_const(0.0),
+                py::arg_v("c", InputRef::from_const(0.0), "CxxInputRef.const_value(0.0)"),
                 py::arg("output"))
         .def("add_math_block",
             [](BlockChain& self, const std::string& op,
@@ -6384,8 +6435,8 @@ void init_module(py::module_& m) {
                                                         a, b, c);
                 self.add(std::move(p.step), std::move(p.reset));
             }, py::arg("alpha"), py::arg("beta"),
-                py::arg("zero") = InputRef::from_const(0.0),
-                py::arg("output_a"), py::arg("output_b"),
+                py::arg_v("zero", InputRef::from_const(0.0), "CxxInputRef.const_value(0.0)"),
+                py::kw_only(), py::arg("output_a"), py::arg("output_b"),
                 py::arg("output_c"))
         .def("add_park",
             [](BlockChain& self, InputRef alpha, InputRef beta,
@@ -6744,6 +6795,7 @@ void init_module(py::module_& m) {
             py::arg("f_init_hz") = Real{50.0},
             py::arg("epsilon") = Real{0.5},
             py::arg("low_speed_threshold") = Real{0.05},
+            py::kw_only(),
             py::arg("v_alpha_channel"), py::arg("v_beta_channel"),
             py::arg("i_alpha_channel"), py::arg("i_beta_channel"),
             py::arg("theta_hat_channel"),
@@ -6794,6 +6846,7 @@ void init_module(py::module_& m) {
             py::arg("Ki_mras") = Real{1e3},
             py::arg("normalise_eps") = true,
             py::arg("eps_norm_floor") = Real{1e-6},
+            py::kw_only(),
             py::arg("v_alpha_channel"), py::arg("v_beta_channel"),
             py::arg("i_alpha_channel"), py::arg("i_beta_channel"),
             py::arg("omega_hat_channel"),
@@ -6913,22 +6966,22 @@ void init_module(py::module_& m) {
         [](const builder::CircuitBuilder& builder,
             const SimulationOptions& opts,
             SwitchScheduleFn switch_fn,
-            BExtraFn b_extra_fn,
+            std::optional<BExtraFn> b_extra_fn,
             bool start_from_dc_op,
-            StepObserverFn step_observer) {
+            std::optional<StepObserverFn> step_observer) {
             SimulationResult result;
             {
                 py::gil_scoped_release rel;
                 result = run_transient_bdf1(
-                    builder, opts, switch_fn, b_extra_fn,
-                    start_from_dc_op, step_observer);
+                    builder, opts, switch_fn, b_extra_fn.value_or(nullptr),
+                    start_from_dc_op, step_observer.value_or(nullptr));
             }
             return result;
         },
         py::arg("builder"), py::arg("opts"), py::arg("switch_fn"),
-        py::arg("b_extra_fn") = BExtraFn{},
+        py::arg("b_extra_fn") = py::none(),
         py::arg("start_from_dc_op") = false,
-        py::arg("step_observer") = StepObserverFn{},
+        py::arg("step_observer") = py::none(),
         "BDF1 (implicit Euler) transient simulation. Use when the "
         "trapezoidal path rings on stiff problems — BDF1 is L-stable "
         "(adds artificial damping that kills numerical oscillation). "
@@ -6955,7 +7008,7 @@ void init_module(py::module_& m) {
            py::object b_extra_obj,
            py::object initial_state,
            std::optional<Size> max_event_iterations,
-           solver::ShouldContinueFn should_continue,
+           std::optional<solver::ShouldContinueFn> should_continue,
            Real observer_period,
            py::object observer_obj,
            std::optional<bool> enable_nonlinear_refresh,
@@ -7100,7 +7153,7 @@ void init_module(py::module_& m) {
                 py::gil_scoped_release release;
                 res = solver::run_transient_trbdf2(
                     cache, graph, pool, o, switch_fn, b_extra_fn,
-                    x0, &st, next_edge_fn, should_continue,
+                    x0, &st, next_edge_fn, should_continue.value_or(nullptr),
                     observer_fn, nl_refresh, resume_ptr, tick_fn);
             }
             return py::make_tuple(std::move(res),
@@ -7114,7 +7167,7 @@ void init_module(py::module_& m) {
         py::arg("b_extra_fn") = py::none(),
         py::arg("initial_state") = py::none(),
         py::arg("max_event_iterations") = py::none(),
-        py::arg("should_continue") = solver::ShouldContinueFn{},
+        py::arg("should_continue") = py::none(),
         py::arg("observer_period") = Real{0},
         py::arg("step_observer") = py::none(),
         py::arg("enable_nonlinear_refresh") = py::none(),
@@ -7161,8 +7214,8 @@ void init_module(py::module_& m) {
            bool start_from_dc_op,
            std::optional<bool> enable_nonlinear_refresh,
            py::object initial_state,
-           ShouldContinueFn should_continue,
-           std::shared_ptr<streaming::LiveRing> live_ring,
+           std::optional<ShouldContinueFn> should_continue_arg,
+           std::optional<std::shared_ptr<streaming::LiveRing>> live_ring_arg,
            py::object resume_from) {
             const pwl::NonlinearRefreshFn nl_refresh = transient_refresh(
                 graph, pool, enable_nonlinear_refresh, "pwl");
@@ -7188,6 +7241,8 @@ void init_module(py::module_& m) {
             // Both layers are GIL-free in the hot path: chain step is
             // C++ and ``LiveRing::push`` uses only atomics + memcpy.
             StepObserverFn observer_eff = step_observer;
+            const ShouldContinueFn should_continue = should_continue_arg.value_or(nullptr);
+            const auto live_ring = live_ring_arg.value_or(nullptr);
             ShouldContinueFn continue_eff = should_continue;
             if (live_ring) {
                 auto ring = live_ring;
@@ -7244,8 +7299,8 @@ void init_module(py::module_& m) {
         py::arg("start_from_dc_op") = false,
         py::arg("enable_nonlinear_refresh") = py::none(),
         py::arg("initial_state") = py::none(),
-        py::arg("should_continue") = ShouldContinueFn{},
-        py::arg("live_ring") = std::shared_ptr<streaming::LiveRing>{},
+        py::arg("should_continue") = py::none(),
+        py::arg("live_ring") = py::none(),
         py::arg("resume_from") = py::none(),
         "Run transient with a BlockChain as the per-step observer. "
         "The chain's step is invoked directly in C++ each step — "

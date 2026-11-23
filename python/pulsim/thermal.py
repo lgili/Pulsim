@@ -240,7 +240,9 @@ def compute_temperature(t: np.ndarray,
     frequent). Returning ``False`` raises :class:`pulsim.Cancelled`
     with ``where='compute_temperature'`` so a GUI's cancel button
     can preempt a long convolution within ~1 ms on a 100 kHz / 10 s
-    trace.
+    trace. A callback that raises propagates. GUI Cancel button:
+    ``should_continue=lambda: not cancel.is_set()`` with
+    ``cancel = threading.Event()``.
 
     ``piecewise_linear=True``: no resample. Each pole is advanced over
     each step ``[t[n-1], t[n]]`` (any spacing, repeated instants

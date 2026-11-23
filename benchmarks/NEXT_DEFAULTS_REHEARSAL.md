@@ -420,7 +420,7 @@ strict err_rms more than 2x smaller (basis `reference`, no truth or truth unchan
 ## engine='auto' under the profile
 
 `auto` = today (no dt: trbdf2, or a refusal naming the blocker); `auto+next` = the
-release route (no dt). The exact engine without dt samples at its 10 us default ceiling,
+release route (no dt). The exact engine without dt samples at its 10 us default ceiling (1 us when the gate names no edge),
 so its strict cell can disagree where `dsed+next` (netlist dt as the output grid) agrees.
 
 | circuit | today: engine / outcome | next: engine / outcome | route reason |
