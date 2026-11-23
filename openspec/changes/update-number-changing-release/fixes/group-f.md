@@ -1010,6 +1010,23 @@ sides kept; the dsed headers merged without conflict), b78d5a01 (F-X-7), bdabb1e
   (6 vs 5 on the diode circuits): there only the declared observables are read (said in the row).
 * One process per unit (`.scratch/f9/ref1.sh`): a crash is a recorded failure.
 
+### The settle window — orchestrator's decision, and what is NOT done
+
+Decision: (1) the promise is stated against the flow with the parasitic cluster projected at
+the event — DONE in the option's docstring and docs/solvers.md (cut: time constants below
+`kParasiticFraction` = 1e-6 of the run's resolved time scale, `exact_settle_length`);
+(3) the referee reads the post-event window apart and reports the unprojected reading beside
+it — DONE (bdabb1e9). **(2) NOT DONE, for a successor (needs C++ + binding + rebuild):** each
+projected event writes a projection record — the instant, the largest projected amplitude per
+recorded quantity (|y(before the projection) − y(after)| on the recovered vector, new mode),
+the cluster's slowest time constant — into `diagnostics['output_grid']` (`n_projections`,
+`projection_max`, the records under a cap). Where: `settle_and_project_` in
+dsed/scheduler.hpp, rule-on path only (`output_rtol_ > 0`), next to the reinit records;
+surfaced through dsed_bindings.cpp + `_dsed_dispatch.py` like `output_floor_by_column`; stubs
+regenerated. Test to write: diode_half_wave_rl_load, the record at 10.0999172 ms carries
+V(out) amplitude 0.31384 V (= −0.31384758 − (−3.138e-6), `.scratch/f9/hw.py`) and the
+referee's `ratio_incl_settle` (2904) is explained by it. Also needed by scoreboard finding F-SB-3.
+
 
 ## Session 5 — branch `fix/core-release-f5-settle-decisions` (from 6cb51c00): two settle decisions
 

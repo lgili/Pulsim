@@ -2814,6 +2814,10 @@ def simulate(
         sample too, so plain interpolation of ``res.times`` draws a jump of
         a node voltage as a jump (over those 2 ps: the one line outside the
         promise), not as a ramp to the next sample.
+        "Exact solution" here is the flow WITH the parasitic cluster
+        projected at each event: modes whose time constant is below 1e-6 of
+        the run's resolved time scale are settled at the event instant (the
+        run without the rule lets them decay over their few time constants).
         The samples are read from the exact steps the run takes without the rule
         (``n_exact_steps`` counts steps, the samples are ``n_output_samples``;
         a step end that the chord from the last stored sample already covers

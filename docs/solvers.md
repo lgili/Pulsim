@@ -243,7 +243,12 @@ stored at an event is its left limit (the right limit is
 that changed the mode or a source's piece the solution 2 ps later is a
 stored sample as well, so plain interpolation of `res.times` draws a
 jump of a node voltage as a jump (over those 2 ps, the one line the
-promise does not cover) and not as a ramp to the next sample. Where the
+promise does not cover) and not as a ramp to the next sample. The
+"exact solution" of the promise is the flow WITH the parasitic cluster
+projected at each event: modes whose time constant is below 1e-6 of the
+run's resolved time scale are settled at the event instant (the rule-off
+run lets them decay; a diode turn-off's ~1 ns mode read 0.31 V apart for
+a few ns). Where the
 4096-sample cap per interval, a mode without a diagonalising basis, or
 the run's 2e6-sample budget suspends the promise, the diagnostics say
 so and the run warns. `benchmarks/tools/output_rule_referee.py` checks
