@@ -1747,6 +1747,7 @@ inline SimulationResult run_transient(
             sens.refuse_setup(lt != nullptr, static_cast<bool>(nl_refresh),
                               opts.enable_newton_lm);
             sens.start(opts.t_start, x);
+            if (stamped_known) sens.start_mode(stamped_mask);   // seeded: decided at step 1
         }
 
         // ---- discontinuity restart (add-discontinuity-restart-rule) --
@@ -1896,6 +1897,82 @@ inline SimulationResult run_transient(
             history.update_from_state_backward_euler(x, h_e);
             hs.commit(x, h_e, pwl::TrBdf2Stage::BackwardEuler);
         };
+        // add-parameter-sensitivities group 6: the calls into the recurrence
+        // (solver/step/sensitivity.hpp) from the event and restart paths; the
+        // jump itself lives there. `sens_inline`: this step was opened (its
+        // gate change at t_prev taken) by its first call into the recurrence;
+        // reset by the step's closing block. Nothing runs per step when the
+        // sensitivities are off.
+        bool sens_inline = false;
+        topology::SwitchStateMask sens_gate;
+        bool sens_gate_known = false;
+        auto sens_stage = [&](int s, const step::StagePsi& psi, Real at_t, Real for_dt) {
+            if (nl_refresh_effective) {
+                sens.stage(s, psi, stamped_mask, x, at_t,
+                           sens.newton_factor(newton_ws, at_t), sens_J_lin);
+            } else {
+                sens.stage(s, psi, stamped_mask, x, at_t,
+                           cache.resident_factor(stamped_mask, for_dt), nullptr);
+            }
+        };
+        auto sens_gate_event = [&](Real at, Real g_t, bool located) {
+            if (!sens_gate_known) {   // an edge inside the first step counts too
+                sens_gate = gate_at(opts.t_start);
+                sens_gate_known = true;
+            }
+            const topology::SwitchStateMask g = gate_at(g_t);
+            if (!(g == sens_gate)) sens.time_event(at, sens_gate, g, located);
+            sens_gate = g;
+        };
+        // the step's gate change at its start (gate_t0 = the gate time the
+        // step started with), before any stage of the step
+        auto sens_open = [&]() {
+            if (sens_inline) return;
+            sens_inline = true;
+            sens_gate_event(t_prev_step, gate_t0, split && !ev_overflow);
+        };
+        auto sens_begin = [&](Real t_from, const Vector& x0) {
+            sens_open();
+            sens.begin_step(t_from, x0);
+        };
+        // the located diode crossings (split_events) at tau; the pre-event
+        // mode's factor is the first solve's (mask_first at for_dt)
+        auto sens_diode_events = [&](Real tau, Real for_dt) {
+            const auto ents = diodes.entries();
+            auto src = [&](Real ts, Vector& out) {
+                add_source_rows(out, ts, ts, Real{0});
+                if (has_iwave) {
+                    sources::compute_current_waveform_b_extra(pool, graph, ts, be_iwave,
+                                                              Real{0});
+                    out += be_iwave;
+                }
+            };
+            for (const auto& ev : split_events) {
+                for (const auto& e : ents) {
+                    if (e.branch_id != ev.branch_id) continue;
+                    if (nl_refresh_effective) {
+                        sens.refuse_newton_event(tau, graph.branch_name(e.branch_id));
+                        sens.refuse_step(tau, "a diode event of a Newton solve");
+                    }
+                    sens.state_event(tau, graph.branch_name(e.branch_id), e.from, e.to,
+                                     (!ev.new_state && e.var >= 0) ? e.var : Index{-1},
+                                     mask_first, cache.resident_factor(mask_first, for_dt),
+                                     Real{2} / for_dt, src);
+                }
+            }
+        };
+        // split_step is a closure built on every split step, with the
+        // sensitivities on or off: each by-reference capture is a load and a
+        // store per step, so the event paths reach the recurrence through
+        // this ONE reference (the group-6 cost gate, DECISIONS 16).
+        const struct {
+            bool on;
+            step::StageSensitivity& s;
+            decltype(sens_begin)& begin;
+            decltype(sens_stage)& stage;
+            decltype(sens_gate_event)& gate_event;
+            decltype(sens_diode_events)& diode_events;
+        } sx{sens.on(), sens, sens_begin, sens_stage, sens_gate_event, sens_diode_events};
         // The mode of a LOCATED event (restart stage 1 at a gate edge, a
         // scheduled or located event at t_from) is decided before the
         // stage's Newton solve: the diode set consistent with the
@@ -3039,10 +3116,16 @@ inline SimulationResult run_transient(
             const Real dt_eq = Real{2} * h_s;
             be_commit_h = h_s;
             ln_pre = false;
+            if (sx.on) [[unlikely]] sx.begin(t_from, x);
             accumulate_b_extra(t_from + h_s, dt_eq, true);
             if (has_diodes) diodes.snapshot_on_bits_into(rs_bits0);
             const Size edge_flips = loc < h_s ? decide_edge_mode(t_from + h_s, dt_eq) : 0;
             run_event_iteration(t_from + h_s, dt_eq, true);
+            // stage 1 as solved (the mode decide_edge_mode and the settle left),
+            // before the probe's solves replace a Newton stage's factor
+            if (sx.on) [[unlikely]] {
+                sx.stage(0, step::psi_backward_euler_on(dt_eq), t_from + h_s, dt_eq);
+            }
             Size iters_1 = iters;
             if (edge_flips > 0) {
                 // the decision's flips are the stage's own (the impulse probe's
@@ -3057,6 +3140,15 @@ inline SimulationResult run_transient(
             }
             const bool impulsive =
                 consistent_start(run_event_iteration, t_from, h_s, dt_eq, loc, iters_1, breach_1);
+            if (impulsive && sx.on) [[unlikely]] {
+                // the histories moved to x0 + J (the jump's vector series, from
+                // the probe's stages) and stage 1 was solved again from there:
+                // dJ/dp is not carried
+                sx.s.refuse_step(t_from, "restarted from a state its event moved (an "
+                                 "impulsive event: the jump of the capacitor "
+                                 "voltages / inductor currents read from the "
+                                 "restart's probe has no derivative here)");
+            }
             if (L) {                // stage 1, for the step's lines
                 // an impulsive start moved the histories to x0+: the lines
                 // start there (a window integral is the regular part; the
@@ -3170,6 +3262,19 @@ inline SimulationResult run_transient(
                     mask_cycle = cycle_2;
                 }
                 if (keep_be) iters += iters_2 - 1;
+                if (sx.on) [[unlikely]] {
+                    if (!keep_be) {
+                        sx.s.refuse_step(t_from + h, "an SDIRK step whose second "
+                                         "stage changed the diode mode (a "
+                                         "commutation not located in time)");
+                    }
+                    // stage 2 as taken: backward Euler of h_b from stage 1
+                    step::StagePsi pb{Real{1} / h_b, Real{0}, Real{0}, 1, {}, {}};
+                    pb.c_q[0] = Real{1};
+                    sx.stage(1, pb, t_from + h, Real{2} * h_b);
+                }
+            } else if (sx.on) [[unlikely]] {
+                sx.stage(1, step::psi_sdirk_stage2(dt_eq, c), t_from + h, dt_eq);
             }
             // A diode flip inside the step is a discontinuity of its
             // own: the window covers this step and the next two.
@@ -3709,6 +3814,7 @@ inline SimulationResult run_transient(
                             if (i > 0) {
                                 gate_t = ev_s[i - 1];   // post side of the cluster's last edge
                                 any_split = true;
+                                if (sx.on) [[unlikely]] sx.gate_event(a, gate_t, !ev_overflow);
                             }
                             if (be) {
                                 // a scheduled event (merged within snap) or the step's
@@ -3721,9 +3827,13 @@ inline SimulationResult run_transient(
                                 if (i > 0 || h != opts.dt) {
                                     accumulate_b_extra(b, h);
                                 }   // else: accumulated at (t, dt) above
+                                if (sx.on) [[unlikely]] sx.begin(a, x);
                                 capture_first = has_diodes;
                                 run_event_iteration(b, h);
                                 capture_first = false;
+                                if (sx.on && iters == 1) [[unlikely]] {
+                                    sx.stage(0, step::psi_trapezoidal(h), b, h);
+                                }
                                 if (iters > 1) {
                                     // D1: the crossing from x_prev and the first
                                     // solve, both under the step's start bits
@@ -3791,6 +3901,7 @@ inline SimulationResult run_transient(
                                         }
                                     }
                                     if (t_d - a < snap) {
+                                        if (sx.on) [[unlikely]] sx.diode_events(a, h);
                                         split_events.clear();
                                         restart = true;
                                         be = true;
@@ -3801,6 +3912,10 @@ inline SimulationResult run_transient(
                                         x = x_first;
                                         stamped_mask = mask_first;
                                         stamped_known = true;
+                                        if (sx.on) [[unlikely]] {
+                                            sx.stage(0, step::psi_trapezoidal(h), b, h);
+                                            sx.diode_events(b, h);
+                                        }
                                         diodes.restore_on_bits(post_event_bits);
                                         iters = 1;
                                         flipped = false;
@@ -3814,6 +3929,11 @@ inline SimulationResult run_transient(
                                         const Real h1 = t_d - a;
                                         accumulate_b_extra(t_d, h1);
                                         run_event_iteration(t_d, h1, false, true);
+                                        if (sx.on) [[unlikely]] {
+                                            sx.stage(0, step::psi_trapezoidal(h1), t_d, h1);
+                                            sx.s.commit(t_d, false);
+                                            sx.diode_events(t_d, h1);
+                                        }
                                         commit_trap(h1);
                                         diodes.restore_on_bits(post_event_bits);
                                         h = b - t_d;
@@ -3824,6 +3944,7 @@ inline SimulationResult run_transient(
                                 }
                             }
                             breach = breach || flipped;
+                            if (!last && sx.on) [[unlikely]] sx.s.commit(b, false);
                             if (!last) {
                                 if (be) {
                                     commit_backward_euler(be_commit_h);
@@ -4049,25 +4170,21 @@ inline SimulationResult run_transient(
                 }
             }
             if (sens.on()) [[unlikely]] {
-                // one trapezoidal stage of opts.dt, or refused by name
-                if (split || restart || step_retried || n_ev > 0 || iters != 1) {
-                    sens.refuse_step(t, split ? "split at its events (substep "
-                                                "state correction)"
-                                     : restart ? "a restart (SDIRK) step"
-                                     : step_retried ? "retried at a smaller dt"
-                                     : n_ev > 0 ? "crossed by a mode event "
-                                                  "(a gate edge or a commutation)"
-                                     : "solved by the event iteration (a "
-                                       "mode change)");
+                // the event and restart paths fed their stages where they
+                // were solved (and opened the step); a plain step is one
+                // trapezoidal stage of dt, opened here
+                if (step_retried || flipped || mask_cycle || (split && ev_overflow)) {
+                    sens.refuse_step(t, step_retried ? "retried at a smaller dt"
+                                     : (split && ev_overflow) ? "split at more events "
+                                       "than it locates"
+                                     : "left with an unsettled diode mode (an "
+                                       "event-iteration breach)");
                 }
-                sens.begin_step(t_prev, x_prev);
-                if (nl_refresh_effective) {
-                    sens.stage(0, step::psi_trapezoidal(opts.dt), stamped_mask, x, t,
-                               sens.newton_factor(newton_ws, t), sens_J_lin);
-                } else {
-                    sens.stage(0, step::psi_trapezoidal(opts.dt), stamped_mask, x, t,
-                               cache.resident_factor(stamped_mask, opts.dt), nullptr);
+                if (!sens_inline) {
+                    sens_begin(t_prev, x_prev);
+                    sens_stage(0, step::psi_trapezoidal(opts.dt), t, opts.dt);
                 }
+                sens_inline = false;
             }
         };  // step_take
 
@@ -4557,7 +4674,13 @@ inline SimulationResult run_transient(
             (void)step::run<step::Trapezoidal>(clock, body);
         };
         run_twin();
-        if (sens.on()) sens.finish(t_reached, x);
+        if (sens.on()) {
+            // an edge AT the last grid point under the restart rule (gates
+            // read at t_prev): no step follows to open it (sens_open)
+            const topology::SwitchStateMask g_last = gate_at(gate_t);
+            sens.edge_past_end(t_reached, g_last, gate_at(t_reached));
+            sens.finish(t_reached, x);
+        }
         if (hook_step) hooks->flush_steps();   // the step sink's batched steps
         if (diag && rd_steps > 0) {
             rd.unestimated_fraction =

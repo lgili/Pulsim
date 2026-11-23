@@ -376,3 +376,334 @@ confirmed. Found and fixed (each with a test in
   −0.35 %, shockrect51_pwl +0.09 %, shockrect51_trbdf2 0.00 %,
   mosl1_pwl +0.04 %, mosl1_trbdf2 +0.03 %. The hooks are `[[unlikely]]`
   calls into out-of-line members.
+
+## 16. Events on the time-stepping engines (group 6, 2026-11-20)
+
+Derivation (checked here, not copied). Each mode is the index-1 DAE
+`d/dt q(x) + f(x, t) = 0` in the engines' conductance form (`f = G·x − b(t)`,
+`q = C/2·x` for the linear stamps the recurrence admits; the engine matrix is
+`M = G + a·C/2`). At an event instant τ(p) the charges and fluxes q are
+continuous (no reset: identity for a PWL diode or a switch with R_on > 0).
+For t > τ, `q(t, p) = Φ⁺(t; τ, q(τ⁻, p))`, so
+
+    dq/dp(τ⁺) = dq/dp(τ⁻) + (q̇⁻ − q̇⁺)·dτ/dp,        (Φ⁺_τ = −q̇⁺ at t → τ⁺)
+
+and from the event's condition `g(x(τ), τ, p) = 0`
+
+    dτ/dp = −(g_x·S⁻ + g_p)/(g_x·ẋ⁻ + g_t).
+
+What the recurrence carries is (dq/dp, dq̇/dp) of the step start, so the jump
+is applied to dq/dp; dq̇/dp after the event is not formed (every engine's
+first post-event stage is backward-Euler-like, ψ = q_n with no q̇_n term — a
+stage that would read it is refused); the algebraic components of S follow
+from the first post-event stage solve, as the design says.
+
+- q̇⁻ = −f⁻(x⁻, τ) exactly: the stage relation `q̇_stage = a(q(X) − ψ)` IS the
+  residual of the stage equation, so the object mirrors the engine's own
+  charge slots (a value recurrence next to the sensitivity one, no solve).
+- q̇⁺ = −f⁺(x⁺, τ) at the CONSISTENT post-event point x⁺ = x⁻ + δ, with
+  `C/2·δ = 0` and `f⁺(x⁺) ∈ range(C/2)`. With `δ = M⁺⁻¹(−f⁺(x⁻) + C/2·w)`
+  the second condition holds for every w, and the first is the small bordered
+  system `(C/2·M⁺⁻¹·C/2)·w = C/2·M⁺⁻¹·f⁺(x⁻)` on the rows C touches (dense,
+  column-pivoted QR). `f⁺(x⁻) = f⁻(x⁻) + (G⁺ − G⁻)·x⁻ − (b_c⁺ − b_c⁻)`: the
+  common time-varying sources cancel, `f⁻(x⁻) = −q̇⁻`. M⁺ is the first
+  post-event stage's own factor (any a works: the formula is exact for every
+  a). The same bordered solve gives ẋ⁻ (all components, algebraic ones
+  included): `C/2·y = q̇⁻`, `G⁻·y − ḃ ∈ range(C/2)`, on a pre-event factor;
+  ḃ(τ) by a central difference of the source rows (ε = 1e-7·τ).
+- Cost at an event with dτ/dp ≠ 0: (rows of C) + 1 back-substitutions per
+  bordered solve and one dense QR of that size; NO factorization of the
+  circuit matrix (the gate). An event with dτ/dp = 0 costs nothing.
+- Kinds: a gate edge of a fixed schedule has dτ/dp = 0 (no jump; carried
+  even without event splitting: the mask sequence does not move with p, so
+  the discrete map is smooth). `<switch>.duty` of a fixed-period
+  trailing-edge PWM (checked in Python by `_duty_period`, passed to C++ as
+  `<switch>.duty#T=<period>`): dτ/dD = T at its OFF edge, 0 at its ON edge
+  (g_x = 0). A PWL diode crossing: g = v_a − v_k − V_on (OFF) or v − V_f /
+  i_s (ON), slope 1 in the read voltage; g_p = 0 (V_th, V_f are not
+  parameters).
+- Location accuracy. pwl with event splitting locates the crossing by its
+  linear interpolation (O(h²) in τ) and steps to it; the jump is formed at
+  that τ. Without splitting an event sits on the grid: x(p) is a staircase,
+  the jump would carry an O(h) error of τ that no correction with a measured
+  sub-step fraction removes consistently (the state itself was computed as if
+  the event were at the grid point), so a mode change that was not located is
+  REFUSED naming the device. TR-BDF2 lands its steps on the located event.
+- S⁺ is re-initialised consistently too (one more bordered solve per
+  parameter on the same QR): C/2·S⁺ = dq⁺ − ∂q/∂p, G⁺S⁺ + ∂f/∂p ∈ range, and
+  dq̇/dp⁺ = −(G⁺S⁺ + ∂f/∂p), so a trapezoid after the event (trbdf2's
+  gate-edge probe) reads a consistent slot. An event with dτ/dp = 0 is NOT
+  re-initialised: the recurrence then mirrors the engine's own discrete map.
+- Measured (macOS arm64, Eigen 5), all within the tests' 1e-5 relative:
+  diode turn-on (V_th 0.7, V_f 0) vs its closed form (complex step on the
+  piecewise solution), R and C, on pwl+split (dt 1e-8) and trbdf2 (rtol
+  1e-10): pass; the dτ/dp term is > 50 % of each answer (asserted;
+  ≈ 94 % for R). One RC pulse, `S.duty`, `R.R`, `C.C` vs the closed form on
+  pwl+split (dt 1e-6) and trbdf2: pass; d v/d D is entirely the jump term.
+  DCM buck (task 6.3 table, 40 T) on pwl+split at dt = T/1000: ∂v/∂L, ∂R,
+  ∂D within 1e-5: pass. Fixed gate edges without splitting vs central
+  differences of the same scheme: 1e-6, pass.
+
+### State at hand-off (2026-11-20, context budget reached)
+
+Branch feat/core-sensitivity-events. OPEN, each a strict xfail or a
+refusal by name:
+1. trbdf2 DCM buck: its turn-off is an INTERPOLATED landing (secant between
+   two bracket states, no solve): refused by name. Next step: differentiate
+   the interpolation (S_land = S_a + θ(S_b − S_a) with S_b a trap stage on
+   the trial's factor, captured when the trial is solved) — or land with a
+   solve when sensitivities are on.
+2. ~~`test_moving_event_with_a_newton_device_is_refused` returned a
+   number~~ — CLOSED, not a hole (see "Audit" below): its Shockley diode
+   (I_S 1e-14, n = 0.05, n·V_T = 1.3 mV) clamped v_c at 36 mV, the PWL
+   diode never reached 0.7 V, no event happened, and the number was right
+   (3.4e-9 vs central differences of the same scheme). With n = 10 the
+   event happens and the refusal fires, naming D.
+3. trbdf2 crossing within the conditioning floor (probe flip at t),
+   ESDIRK landings, Newton-circuit moving events: refused by name.
+4. 4.4 saturable inductor: its flux λ(i) is a nonlinear q with its own
+   history (`sat_history`), outside the recurrence's linear q = C/2·x. It
+   needs q(X) and ∂q/∂x from the law at each stage, its history checked to
+   follow the scheme's ψ on every integrator, and ∂λ/∂(L_0, I_sat) by
+   `seed_params`; not started.
+Not run: cost gate, byte compares, full pytest, C++ targets, stubs (no
+binding signature changed), openspec validate, the fresh-context reviewer.
+
+### Audit (2026-11-20, second session): no third outcome
+
+The rule: a step with sensitivities commits only through the recurrence (+
+the jump) or a refusal. Why it holds, by construction, in
+`StageSensitivity::stage`: a stage whose mode differs from the last one
+the object saw is accepted only if an event was REGISTERED before it
+(`time_event` / `state_event`), else it is refused ("not located"); a
+registered event with dτ/dp ≠ 0 in a circuit holding any Newton kind is
+refused (`has_newton_` is the DEVICE SET — Shockley, smooth diode,
+MOSFET L1, excess loss — not the device that fired); a stateful kind is
+refused at construction; a step not started from the committed bits is
+refused (contiguity). So a hole can only be (a) a mode change that does not
+show in the stamped mask, or (b) a registered event with a wrong dτ/dp. (a):
+the admitted kinds without a mask bit are linear or the four static laws
+(smooth: no event); time-varying sources have no parameters (dτ/dp = 0).
+(b) is what the truth cells check.
+
+`python/tests/test_sensitivity_event_audit.py` enumerates 5 event kinds
+(none, PWL diode turn-on, fixed gate edge, duty edge, sine-fed turn-on AND
+turn-off) × 3 device classes (linear, + a static Newton law, + a stateful
+kind) × 5 engine configurations (pwl, pwl+restart, pwl+split, trbdf2,
+trbdf2+esdirk43) = 75 cells; each is a number within 1e-5 of central
+differences of scipy Radau (rtol 1e-12, event functions) or an
+`UnsupportedError` naming the reason, pinned per cell. Plain pwl's numbers
+are checked against central differences of the same scheme (1e-6): its
+state has its own O(dt) first-order-start error (1.3e-4 here, the same as
+its sensitivity's gap to the truth; with restart both are ≤ 1e-8).
+
+| kind | linear | Newton | stateful |
+|---|---|---|---|
+| none | number on all 5 | number on all 5 | refused (history) |
+| diode turn-on | pwl, pwl+restart: refused (not located); split, trbdf2: number; esdirk43: refused (landing) | refused (Newton device) on split / trbdf2; else as linear | refused |
+| fixed gate edge | number on all 5 | number on all 5 | refused |
+| duty edge | pwl, pwl+restart: refused (staircase); split, trbdf2, esdirk43: number | refused (Newton device) where located | refused |
+| sine on/off | split: number; trbdf2: refused (turn-off within the conditioning floor); esdirk43: refused (landing); pwl, +restart: refused | refused | refused |
+
+Worst truth gaps of the number cells: diode turn-on 1.9e-7 (split) /
+6.0e-8 (trbdf2); duty 5e-10 / 5e-9 / 4e-12 (esdirk43) — d v/d D is entirely
+the jump term, so the sign and the factor T of dτ/dD are checked there;
+sine on/off on split 8.2e-8 (two turn-ons, two turn-offs, the ḃ term).
+
+### Review (fresh-context, opus, read-only, 2026-11-20) and what changed
+
+Asked for an event configuration that returns a number without having
+differentiated the event, and for the sign and factor of dτ/dp. Found, each
+reproduced against a Radau truth and fixed:
+1. ḃ HAD THE WRONG SIGN in `state_event`'s ẋ⁻: `src` writes the engines'
+   b_extra rows, whose sign is the opposite of b in f = G·x − b (the
+   engine's rhs is −(b_const + b_extra)). Every diode crossing driven by a
+   time-varying source got a wrong dτ/dp: a sine-fed rectifier with a series
+   R2 (the turn-on's jump survives to t_end) returned 1.787e-2 vs 1.611e-2
+   (11 %), a sine current source into a diode 2.7e-6 vs 1.19e-4. The audit's
+   sine cell had passed because its turn-on jump decayed in 0.1 µs and its
+   turn-off jump is zero; the cell now has the series R2.
+2. AN EVENT INSIDE THE FIRST STEP of plain pwl returned a number (a duty
+   edge before dt: 0.0 vs 9.95; a diode turn-on: −4.5e-4 vs 1.85e-4): the
+   gate baseline was taken at the end of step 1, and the first stage adopted
+   any mode. Now the gate baseline is `gate_at(t_start)` and the engines hand
+   their start mode to `start_mode` (when it is known: a seeded start
+   decides its mode from x0 at step 1, not an event); the first stage is
+   checked like any other. Both are audit cells.
+Confirmed right by the reviewer's own derivation and runs: the sign and the
+factor T of dτ/dD (one-pulse RC, entirely the jump term: 2.5e-8 pwl+split,
+5e-9 trbdf2; with a diode cascading at the OFF edge 1e-10 / 2e-8), a
+DC-driven turn-on on an algebraic node (jump 58 % of the answer, ≤ 1e-8).
+Not probed by the reviewer: events at t_end, ties with differing dτ/dp,
+ESDIRK / Newton refusals beyond the tests.
+
+### TR-BDF2 turn-off landings (6.3, 2026-11-20)
+
+- The INTERPOLATED landing (a turn-off at its bracket floor, no solve) is
+  carried: `StageSensitivity::carry` moves dq/dp by dt_land·dq̇/dp (dt_land is
+  ps; first order, the scheme's own order there), keeps the slots, and
+  re-initialises S consistent with dq/dp at the landed x by one bordered
+  solve per parameter on ANY resident factor of the mode
+  (`PwlStateSpaceCache::any_resident_factor`: the event entry's, else the
+  segment's; read-only, no build — no factorization with or without
+  sensitivities; the off path is untouched). The event that follows uses
+  the same factor for ẋ⁻. ESDIRK interpolated landings stay refused.
+- A slot-only derivative refresh AT t_end no longer refuses (no step follows).
+- DCM buck (40 T) on TR-BDF2 vs the exact path's table: rtol 1e-10 L 5.2e-6,
+  R 2.9e-8, D 5.2e-8 (pass, test); rtol 1e-11 L 1.1e-6. At rtol 1e-9 a
+  turn-off falls within the conditioning floor of a step start (the bits are
+  flipped by probes at t, nothing landed): REFUSED by name (strict xfail).
+  Tried and reverted: carrying that flip as an event at t from the committed
+  state — 3.6e-4 off a Radau truth on the sine-fed rectifier at rtol 1e-10,
+  1.7e-4 at 1e-11, 7.6e-5 at 1e-12 (a bias that converges slowly, not traced:
+  candidates are τ = t instead of the crossing up to dt_floor later, and the
+  probe-decided cascade). NEXT STEP for 6.3 at rtol 1e-9: trace that bias on
+  the audit's sine cell (trbdf2), e.g. by forming the jump at the probe's
+  located t_star instead of t.
+- The 2 T buck of `test_sensitivity_exact.py` now runs on trbdf2 and agrees
+  with the exact engine within 1e-5 at rtol 1e-10 (it was a refusal test).
+
+### Verification at e149fc47 (2026-11-20) and the state for the next agent
+
+- Byte compares vs 41860812 (sensitivities off, base built LTO off like the
+  tip, `.scratch/g6cmp.sh`): goldens 21/21 (counters incl. cache / Newton
+  factorizations unmoved), stateful 40, engines 35, steps 28, pwl_identity
+  390/390, trbdf2_identity 371/371 — all identical.
+- States bit-identical with and without sensitivities, engine stats and
+  Newton factorizations equal, n_sens_solves within [rows, 5·rows+8] and
+  n_sens_iterations 0 (linear) / ≤ 2 per solve (Newton): asserted in every
+  number cell of the audit.
+- COST GATE (instructions per accepted step, min over 6 alternating
+  processes × 3 runs): bridge_trbdf2 −0.07 %, buck_trbdf2 0.00 %, vsi_pwl
+  −0.07 %, buck_pwl +0.59 % (min of 12: 3106.4 vs 3088.2; means +0.53 %) —
+  buck_pwl FAILS the 0.5 % gate by a hair. Not traced: the off path of the
+  pwl loop gained per-step `if (sens.on())` blocks (gate tracking, the
+  inline-stage flag) and new lambdas; candidates: hoist the step's two
+  sens blocks into one out-of-line call, check code layout.
+- Full pytest at e149fc47: 6286 passed, 110 skipped, 9 xfailed (0 failed). ruff clean; `openspec validate add-parameter-sensitivities --strict` valid.
+- NOT RUN: the C++ step-test target (pulsim_core_step_tests) — no build
+  of the test tree this session; full ctest (track agent rule).
+- NEXT: (1) buck_pwl cost; (2) 6.3 at rtol 1e-9 (the floor-path bias
+  above); (3) 4.4 saturable inductor (item 4 of the hand-off list).
+
+### Cost gate, step tests, landing review (2026-11-20, third session; WIP)
+
+- WHAT COST THE +0.59 % on buck_pwl (sensitivities off). Measured with a
+  standalone C++ driver (`.scratch/c7/rtbench.cpp`: diode buck, pwl, dt
+  1e-7, differential instructions per step (I(4 ms) − I(2 ms))/ΔN, min of 3;
+  30 s per variant against a header tree) — it reproduces the Python gate:
+  base 41860812 2845–2850 (PWM) / 2831–2833 (gate held on), tip e149fc47
+  2863–2868 / 2851 (+18). Bisection by deleting hook groups from the tip:
+  restart hooks only −0; split hooks only −3; per-step pre-block only −3;
+  pre-block+split −0…−10 (noisy); pre-block+restart −5; ALL of them
+  −18 (2844–2853 / 2833: parity). No single hook: the cost is the closures
+  `run_restart` and `split_step`, defined inside step_take and therefore
+  BUILT ON EVERY STEP (whether called or not): each by-reference capture is
+  one load + one store per step, and the hooks added 8 captures (sens,
+  sens_begin, sens_stage to run_restart; sens, sens_gate_event, sens_begin,
+  sens_stage, sens_diode_events to split_step) = 16 instructions, plus the
+  pre-step `if (sens.on())` block. Seen in the disassembly (store pairs
+  before the split_step call in the step body).
+- CHANGED (run_transient.hpp, uncommitted→this commit): (1) the pre-step
+  block is gone — the step's gate change at t_prev is taken lazily by
+  `sens_open()` at the step's first call into the recurrence (sens_begin,
+  or the closing block of a plain step; `gate_t0`, `t_prev_step`); one
+  `sens.on()` test per step, as in the base; (2) the inner closures reach
+  the recurrence through ONE reference `sx` (a const struct: cached `on`,
+  sens, the hook lambdas); (3) `split_step` is defined inside `if (split)`
+  where it runs, so a run without the split builds no closure for it.
+  Bench after: (1)+(2) alone +7…+10; with (3) 2798–2801 / 2785–2791 —
+  −1.6 % against the base, and parity (±3) against the base with the same
+  move applied (2802 / 2785): the off path costs nothing measurable beyond
+  the move's own gain. Real-extension four-case gate and byte compares:
+  PENDING (extension build started 14:19; see the next entry or the report).
+- REVIEW of e66913b3..e149fc47 (fresh-context opus, scripts in
+  `.scratch/c7/review/`): carry's sign and side correct; the bordered
+  re-init is independent of which resident factor (linear). dt_land is NOT
+  ps: 0.2–5 ns on the 40 T DCM buck at rtol 1e-10 (the floor bounds the
+  bracket width, not its distance from t) — comment fixed in
+  sensitivity.hpp. No case found where the displacement is most of the
+  answer (share ≤ 2e-3; everything coarser refuses at the floor). FINDING
+  (medium): an event within ~3e-13 s of t_end left PENDING returned the
+  left limit — duty edge on the pulse RC: dv/dD 0.000 vs truth 7.38; diode
+  turn-on: dv/dR −6.7e-4 vs +4.4e-3. FIX: `StageSensitivity::finish`
+  refuses by name when an event with dτ/dp ≠ 0 is still pending ("whose
+  jump in the derivative was not applied"). Audit cells for it: NOT YET
+  ADDED (needs the rebuilt extension to pin each engine's outcome;
+  reproducers `edge_at_tend2.py`, `diode_at_tend2.py`). Not reachable,
+  noted: `qdv_n_` is left at x_n by carry (exact only for V_f = 0).
+- pulsim_core_step_tests: NOT built this session (`.scratch/build-ctest`,
+  LTO on, has a 10:37 binary of older code).
+- NEXT: (a) when the extension is built: four-case gate (`.scratch/bl/cost.sh
+  6`), g6cmp byte compares vs 41860812 (`.scratch/g6cmp.sh compare`), the
+  reproducers → audit cells `*_at_t_end` (expected: refusal on trbdf2),
+  audit + sensitivity tests, full pytest, ruff, openspec validate; (b) build
+  and run pulsim_core_step_tests; (c) 6.3 at rtol 1e-9 unchanged.
+- GATE on the rebuilt extension at 93292618 (LTO off, `.scratch/bl/cost.sh
+  6 norec`, instructions per accepted step, min of 6 alternating processes
+  × 3 runs, sensitivities off, vs 41860812): buck_pwl 3053.4 vs 3102.5
+  (−1.58 %), vsi_pwl 4721.9 vs 4771.1 (−1.03 %), buck_trbdf2 11060.9 vs
+  11058.8 (+0.02 %), bridge_trbdf2 12836.0 vs 12829.8 (+0.05 %). All ≤ +0.1 %.
+  The pwl gain is the split_step move (both cases run without the split).
+  Cumulative vs b9e46778 NOT measured (no LTO-off build of it).
+- NOT RUN on this tip: byte compares (g6cmp), audit / sensitivity tests,
+  full pytest, ruff, openspec validate, pulsim_core_step_tests. The move
+  and the lazy gate event change code paths on the default pwl loop: the
+  byte compares are the first thing the next agent runs.
+
+### Verification of the tip (2026-11-20, fourth session): 0d518f42
+
+- BYTE COMPARES vs 41860812, sensitivities off (`.scratch/g6cmp.sh compare`
+  against `.scratch/g6base`): at 713229ce (the closure move, lazy gate
+  event, `sx`) AND again on the final extension at 0d518f42 — goldens with
+  counters, stateful, engines, steps all identical; pwl_identity 390/390,
+  trbdf2_identity 371/371. Logs `.scratch/logs/g6cmp_713229ce.txt`,
+  `g6cmp_0d518f42.txt`. The refactor is behaviour-preserving.
+- THE REVIEWER'S FINDING, re-run (`.scratch/c7/review/edge_at_tend2.py`,
+  `diode_at_tend3.py` = diode_at_tend2 catching refusals; logs
+  `.scratch/logs/repro_*`): the diode turn-on was refused at every gap
+  ≤ 2.2e-13 s and right above it (4.399967e-3, 1.8e-8). The duty edge was
+  NOT fixed by the pending-event refusal: gaps 3e-17 … 3e-14 s still read
+  dv/dD = 0.000 (truth 7.38) — the edge never became pending. Cause:
+  trbdf2/esdirk43's no-final-sliver rule (tb_clamp) leaves an edge within
+  64 h_min of t_end to the next run, and on pwl+restart / pwl+split the
+  restart rule reads the gates at t_prev, so an edge AT the last grid point
+  is opened by no step (sens_open) — on both, x(t_end) is the pre-edge
+  side. FIX (0d518f42): `StageSensitivity::edge_past_end(τ, before,
+  after)` refuses by name ("whose jump in the derivative was not applied:
+  the run ends at it") when a duty parameter's switch turns OFF there;
+  called in the no-final-sliver branch (trbdf2_transient.hpp) and after
+  the pwl driver (run_transient.hpp, gates at gate_t vs t_reached; plain
+  pwl reads the gates at t, no-op). Both sens-gated. After it every gap
+  ≤ 3e-14 s is refused, ≥ 3e-13 s right (7.380810).
+- AUDIT CELLS `test_an_event_at_t_end_is_refused_by_name_or_true` (20):
+  duty edge / diode turn-on at τ(1 + 1e-11) and 1.5 steps before t_end,
+  five engine configurations, pwl grid ending at t_end. At t_end: refused
+  by name everywhere (pwl STAIRCASE, pwl+restart/split/trbdf2/esdirk43
+  NOT_APPLIED; diode: pwl+restart NOT_LOCATED, esdirk43 LANDING), except
+  plain pwl's diode, whose own trajectory (first order from the start) has
+  not crossed yet: its number is its own map's derivative (central
+  difference h = 1e-6 R; h = 1e-4 R steps over its crossing). Before
+  t_end: numbers within 2e-8 of the closed forms on pwl+split / trbdf2 /
+  esdirk43 (duty) — the refusal hides no working case. Audit 107 passed,
+  every sensitivity file 261 passed / 1 xfailed (`.scratch/logs/
+  audit_step2.txt`, `sens_tests_step2.txt`).
+- pulsim_core_step_tests built (Eigen 5.0, /opt/homebrew/include/eigen3,
+  `.scratch/build-ctest`, LTO on as that tree's cache has it) and run:
+  811 assertions in 34 test cases pass (`.scratch/logs/
+  steptests_0d518f42.txt`). Nothing to fix.
+- FULL PYTEST at 0d518f42: 6306 passed, 110 skipped, 9 xfailed, 0 failed
+  (`.scratch/logs/pytest_full_0d518f42.log`). ruff check python/ clean;
+  `openspec validate add-parameter-sensitivities --strict` valid. Stubs
+  not run (no binding signature changed).
+- COST GATE on the final extension (LTO off, `.scratch/bl/cost.sh 6
+  norec`, min of 6, sensitivities off, vs 41860812): buck_pwl 3044.9 vs
+  3095.3 (−1.63 %), vsi_pwl 4726.9 vs 4783.6 (−1.19 %), buck_trbdf2
+  11068.9 vs 11061.7 (+0.07 %), bridge_trbdf2 12843.8 vs 12831.2
+  (+0.10 %). The pwl gain is confirmed; trbdf2 reads +0.07/+0.10 against
+  the earlier +0.02/+0.05 (one sens-gated branch added to tb_clamp's
+  no-final-sliver arm, plus run-to-run spread): all within +0.1 %.
+  Log `.scratch/logs/cost_0d518f42.txt`.
+- NOT RUN: full ctest, Eigen 3.4.0, g++-15, a fresh-context review of
+  0d518f42's fix. Still open as before: 6.3 at rtol 1e-9 (strict xfail),
+  4.4 saturable inductor.

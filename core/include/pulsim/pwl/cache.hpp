@@ -1886,6 +1886,24 @@ public:
             "{} at dt = {}", mask.to_string(), dt));
     }
 
+    /// Any factor of `mask` resident now (the event entry's, else the
+    /// segment's at the cache dt), read-only like `resident_factor`; its dt
+    /// in `dt_out`. nullptr when none is (add-parameter-sensitivities 6.3:
+    /// an interpolated landing made no solve of its own).
+    [[nodiscard]] const sparse::DirectSolver* any_resident_factor(
+        const topology::SwitchStateMask& mask, Real& dt_out) const {
+        if (const auto it = event_entries_.find(mask);
+            it != event_entries_.end() && it->second.solver) {
+            dt_out = it->second.current_dt;
+            return it->second.solver.get();
+        }
+        if (const auto it = segments_.find(mask); it != segments_.end() && it->second.solver) {
+            dt_out = dt_;
+            return it->second.solver.get();
+        }
+        return nullptr;
+    }
+
     /// Number of event-solver entries currently resident (bounded by
     /// the byte budget, see `set_segment_budget_bytes`). Same sampling
     /// caveat as
