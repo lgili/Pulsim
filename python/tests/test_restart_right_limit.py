@@ -445,10 +445,7 @@ def test_a_charge_sharing_row_shares_the_charge_once(rl, split):
     assert np.asarray(v.v("c"))[j + 1] == pytest.approx(want, rel=1e-6)
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "open (restart line STATUS, item 0 review #1): the row's eps = 1e-9*gamma*h solve is "
-    "slower than this cut's mode tau = L*g_off = 1e-18 s, so the row is not the eps -> 0 "
-    "limit (i_L 0.027 A for 1 A); it is counted, but the counter also fires on right rows"))
+# closed (item B): the pin is Anderson-accelerated, exact for a mode faster than eps
 def test_a_cut_faster_than_the_row_solve_keeps_the_current():
     """10 V -> R 10 ohm -> L 1 uH (1 A) -> S (1 uohm / 1e-12 S) opens: the
     flux is continuous at t_e+, i_L+ = i_L- (truth: the inductor's state law)."""
@@ -464,9 +461,7 @@ def test_a_cut_faster_than_the_row_solve_keeps_the_current():
     assert il[j + 1] == pytest.approx(il[j], rel=1e-6)
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "open (restart line STATUS, item 0 review #3): the stored sample after an ideal "
-    "element's jump carries a residue of the jump current: i(V) = +3.83 A for -1 A"))
+# closed (item C): stage 2 after an ideal element's jump starts from x0+
 @pytest.mark.parametrize("split", [False, True])
 def test_the_sample_after_an_ideal_jump_carries_no_jump_current(split):
     """10 V -ideal S- C2 50 nF || RL 10 ohm: after the closing v_c = 10 V,
@@ -544,11 +539,7 @@ def test_h3_a_gate_fired_turn_on_on_a_landed_crossing_is_solved():
     assert np.asarray(v.i("T"))[j + 1] == pytest.approx(10.0 / (1.0 + 1e-3), rel=1e-6)
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "open (restart line STATUS, final review): an ideal element's jump and an unresolved "
-    "fast RC at one event: the structural path pins C3 by history correction at an eps "
-    "near its tau and records the ideal share only: row v_a 9.091 V, 4.5 % of the charge "
-    "lost; C3's collapse (4.14e-6 J) reported nowhere"))
+# closed (item A, the row): the dependent states from a consistent solve, then every state pinned
 def test_an_ideal_jump_beside_a_fast_rc_keeps_the_charge_in_the_row():
     """C1 1 uF (10 V) -ideal S- node c: C2 50 nF || (R3 1 mohm - C3 100 nF at 0 V).
     At t_e+ the ideal loop shares C1, C2: v_a = v_c = 10*C1/(C1 + C2) (closed

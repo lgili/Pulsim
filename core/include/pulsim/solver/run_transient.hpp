@@ -919,6 +919,8 @@ inline SimulationResult run_transient(
     std::vector<Real> ip_hist_p, rl_hist, rl_hw, rl_hcur;
     Vector rl_x1, rl_b0, rl_b, rl_bs, rl_h, rl_xa, rl_xb;
     std::vector<Real> rl_ncq, rl_slq;
+    std::vector<Size> rl_pin;
+    std::vector<std::pair<Size, Real>> rl_dep_x;
     std::vector<Index> rl_dep;
     std::vector<bool> rl_bits, rl_lsb, rl_dec;
     // a LOCATED diode crossing (split_step): its time, the post-event bits,
@@ -2038,6 +2040,7 @@ inline SimulationResult run_transient(
             ip_jump = false;
             ip_moved = false;
             rl_nc0.clear();
+            rl_dep_x.clear();
             rl_sl0.clear();
             if (ents.empty() &&
                 hs.get<pwl::SaturableInductorHistory>().entries().empty() &&
@@ -3085,67 +3088,124 @@ inline SimulationResult run_transient(
                 auto is_dep = [&](Size k) {
                     return std::find(rl_dep.begin(), rl_dep.end(), ents[k].branch_id) != rl_dep.end();
                 };
-                // One ε solve with every state pinned to its target (an
-                // ideal element's dependent states excepted: the constraint
-                // sets them); the histories corrected each pass. Returns
-                // whether every pinned state met its target.
+                // One ε solve with every state pinned to its target (an ideal
+                // element's dependent states excepted while rl_dep names them:
+                // the constraint sets them). The pin is the history that makes
+                // the backward-Euler state land on the target — the states act
+                // as sources, the other unknowns are the consistent-
+                // initialisation solve. The history correction u ← u − r(u)
+                // (r = state − target) contracts by (ε/τ)/(1 + ε/τ) per mode:
+                // slow for a mode faster than ε (a cut into g_off = 1e-12:
+                // τ = 1e-18 s; a 1 mΩ RC), so it is Anderson-accelerated (the
+                // map is affine in a linear mode: exact after one difference
+                // per fast mode). Returns whether every pinned state met its
+                // target.
                 auto pinned = [&](Real e) -> bool {
                     rl_hw = rl_hist;
                     history.restore(rl_hw);
                     for (Size k = 0; k < n_nc; ++k) (*ncw)[k].q_prev = rl_ncq[k];
                     for (Size k = 0; k < n_sl; ++k) (*slw)[k].lambda_old = rl_slq[k];
+                    rl_pin.clear();
+                    for (Size k = 0; k < ents.size(); ++k) {
+                        if (!is_dep(k)) rl_pin.push_back(k);
+                    }
+                    const Size n_pin = rl_pin.size();
+                    const auto m = static_cast<Index>(n_pin + n_nc + n_sl);
                     Real s_c = 0, s_l = 0, s_q = 0, s_f = 0;   // the states' scale, per kind
                     for (Size k = 0; k < ents.size(); ++k) {
-                        Real& s = ents[k].kind == pwl::DevicePool::StoredKind::Capacitor ? s_c : s_l;
-                        s = std::max(s, std::abs(rl_hist[slot(k)]));
+                        Real& sk = ents[k].kind == pwl::DevicePool::StoredKind::Capacitor ? s_c : s_l;
+                        sk = std::max(sk, std::abs(rl_hist[slot(k)]));
                     }
                     for (Size k = 0; k < n_nc; ++k) s_q = std::max(s_q, std::abs(rl_ncq[k]));
                     for (Size k = 0; k < n_sl; ++k) s_f = std::max(s_f, std::abs(rl_slq[k]));
-                    bool conv = ents.empty() && n_nc == 0 && n_sl == 0;
-                    // error (e/τ)^k: 4 passes at the small ε; the ideal-element
-                    // path's 4ε can sit near a fast RC's τ (rare: its own factors)
-                    const Size kPasses = elim ? 40 : 4;
+                    constexpr Index kDepth = 6;
+                    constexpr Size kPasses = 24;
+                    Vector u(m), r(m), g(m), r0(m), g0(m), sc(m);
+                    DenseMatrix dr(m, kDepth), dg(m, kDepth);
+                    Index nh = 0;
+                    auto target = [&](Index i) -> Real {
+                        const auto q = static_cast<Size>(i);
+                        return q < n_pin ? rl_hist[slot(rl_pin[q])]
+                               : q < n_pin + n_nc ? rl_ncq[q - n_pin] : rl_slq[q - n_pin - n_nc];
+                    };
+                    for (Index i = 0; i < m; ++i) u[i] = target(i);
+                    bool conv = m == 0;
                     for (Size pass = 0; pass < kPasses; ++pass) {
                         solve_eps(e);
-                        if (conv) break;
+                        if (m == 0) break;
                         if (pass == 0) {
                             for (Size k = 0; k < ents.size(); ++k) {
-                                Real& s = ents[k].kind == pwl::DevicePool::StoredKind::Capacitor ? s_c : s_l;
-                                s = std::max(s, std::abs(state_of(k)));
+                                Real& sk = ents[k].kind == pwl::DevicePool::StoredKind::Capacitor ? s_c : s_l;
+                                sk = std::max(sk, std::abs(state_of(k)));
                             }
                             for (Size k = 0; k < n_nc; ++k) s_q = std::max(s_q, std::abs(nc_q(k)));
                             for (Size k = 0; k < n_sl; ++k) s_f = std::max(s_f, std::abs(sl_lam(k)));
+                            for (Size q = 0; q < n_pin; ++q) {
+                                sc[static_cast<Index>(q)] =
+                                    ents[rl_pin[q]].kind == pwl::DevicePool::StoredKind::Capacitor ? s_c : s_l;
+                            }
+                            for (Size k = 0; k < n_nc; ++k) sc[static_cast<Index>(n_pin + k)] = s_q;
+                            for (Size k = 0; k < n_sl; ++k) sc[static_cast<Index>(n_pin + n_nc + k)] = s_f;
+                        }
+                        for (Size q = 0; q < n_pin; ++q) {
+                            r[static_cast<Index>(q)] = state_of(rl_pin[q]) - rl_hist[slot(rl_pin[q])];
+                        }
+                        for (Size k = 0; k < n_nc; ++k) r[static_cast<Index>(n_pin + k)] = nc_q(k) - rl_ncq[k];
+                        for (Size k = 0; k < n_sl; ++k) {
+                            r[static_cast<Index>(n_pin + n_nc + k)] = sl_lam(k) - rl_slq[k];
                         }
                         conv = true;
-                        for (Size k = 0; k < ents.size(); ++k) {
-                            if (is_dep(k)) continue;
-                            const Real d = state_of(k) - rl_hist[slot(k)];
-                            const Real s = ents[k].kind == pwl::DevicePool::StoredKind::Capacitor ? s_c : s_l;
-                            conv = conv && std::abs(d) <= Real{1e-9} * s;   // NaN fails
-                            rl_hw[slot(k)] -= d;
-                        }
-                        for (Size k = 0; k < n_nc; ++k) {
-                            const Real d = nc_q(k) - rl_ncq[k];
-                            conv = conv && std::abs(d) <= Real{1e-9} * s_q;   // NaN fails
-                            (*ncw)[k].q_prev -= d;
-                        }
-                        for (Size k = 0; k < n_sl; ++k) {
-                            const Real d = sl_lam(k) - rl_slq[k];
-                            conv = conv && std::abs(d) <= Real{1e-9} * s_f;   // NaN fails
-                            (*slw)[k].lambda_old -= d;
+                        for (Index i = 0; i < m; ++i) {
+                            conv = conv && std::abs(r[i]) <= Real{1e-9} * sc[i];   // NaN fails
                         }
                         if (conv) break;
+                        g = u - r;   // the plain correction
+                        if (pass > 0) {
+                            const Index c = nh < kDepth ? nh : static_cast<Index>((pass - 1) % static_cast<Size>(kDepth));   // ring
+                            for (Index i = 0; i < m; ++i) {
+                                dr(i, c) = (r[i] - r0[i]) / (sc[i] > Real{0} ? sc[i] : Real{1});
+                            }
+                            dg.col(c) = g - g0;
+                            if (nh < kDepth) ++nh;
+                        }
+                        r0 = r;
+                        g0 = g;
+                        u = g;
+                        if (nh > 0) {
+                            Vector rs(m);
+                            for (Index i = 0; i < m; ++i) rs[i] = r[i] / (sc[i] > Real{0} ? sc[i] : Real{1});
+                            const Vector gam = dr.leftCols(nh).colPivHouseholderQr().solve(rs);
+                            const Vector ua = g - dg.leftCols(nh) * gam;
+                            if (ua.allFinite()) u = ua;
+                        }
+                        for (Size q = 0; q < n_pin; ++q) rl_hw[slot(rl_pin[q])] = u[static_cast<Index>(q)];
+                        for (Size k = 0; k < n_nc; ++k) (*ncw)[k].q_prev = u[static_cast<Index>(n_pin + k)];
+                        for (Size k = 0; k < n_sl; ++k) {
+                            (*slw)[k].lambda_old = u[static_cast<Index>(n_pin + n_nc + k)];
+                        }
                         history.restore(rl_hw);
                     }
                     return conv;
                 };
                 if (elim) {
-                    bool conv = pinned(eps);
-                    rl_xa = x;
-                    conv = pinned(Real{2} * eps) && conv;
-                    rl_xb = x;
-                    conv = pinned(Real{4} * eps) && conv;
-                    out = Real{5} * rl_xb - Real{2} * (rl_xa + x);
+                    // An ideal element's jump, in two consistent solves (the
+                    // three-ε extrapolation left O((ε/τ)²): 4.5 % of the charge
+                    // beside a 1 mΩ RC): (1) the dependent states after the
+                    // jump, from a solve at an ε below every leak (the
+                    // constraint shares the charge / flux of x0 exactly; the
+                    // other states pinned); (2) every state pinned, the
+                    // dependent ones at those values, at the regular ε: the
+                    // algebraic unknowns of t_e+ without the jump's 1/ε
+                    // current (equal corrections keep the loop's rates equal).
+                    bool conv = pinned(Real{1e-9} * h_s);
+                    for (Size k = 0; k < ents.size(); ++k) {
+                        if (!is_dep(k)) continue;
+                        rl_hist[slot(k)] = state_of(k);
+                        if (conv) rl_dep_x.emplace_back(slot(k), rl_hist[slot(k)]);   // for stage 2
+                    }
+                    rl_dep.clear();
+                    conv = pinned(Real{1e-3} * kGamma * opts.dt) && conv;
+                    out = x;
                     count = count || !conv;
                 } else {
                     const bool conv = pinned(eps);
@@ -3687,6 +3747,16 @@ inline SimulationResult run_transient(
                                                  ev, L->rl_x, L->rl_m);
                 L->rl_ok = rl != 0;
                 L->rl_left = rl == 2;
+            }
+            // Item C: an ideal element's jump is taken by stage 1 from x0 (the
+            // constraint shares the charge / flux), but stage 2's pseudo-state
+            // x0* = x0 + c·(x1 − x0) then carries c·J of it: the stored sample
+            // read a jump-current residue (i(V) = +3.83 A for −1 A). The
+            // dependent states start stage 2 from x0+ (the row's solve).
+            if (ip_struct && ip_jump && !rl_dep_x.empty()) {
+                history.snapshot_into(rl_hw);
+                for (const auto& [sl, v] : rl_dep_x) rl_hw[sl] = v;
+                history.restore(rl_hw);
             }
             if (has_diodes) {
                 rs_x1 = x;
