@@ -130,12 +130,17 @@ def test_without_them_the_default_engine_records_every_cut():
     assert len(recs) == 20
     assert all(x.kind == "cut_set" and x.states == ["Lload"]
                and x.devices == ["INV__HSa", "INV__LSa"] for x in recs)
-    i_cut = float(np.asarray(r.i("Lload")).max())
-    assert i_cut == pytest.approx(13.4886, rel=1e-4)
-    worst = max(recs, key=lambda x: abs(x.lambda_))
-    assert abs(worst.lambda_) == pytest.approx(2e-3 * i_cut, rel=1e-3)
-    assert worst.dW == pytest.approx(0.5 * 2e-3 * i_cut ** 2, rel=2e-3)
-    assert sum(x.dW for x in recs) == pytest.approx(3.4964, rel=1e-3)
+    # truth: the R-L charge from 0 through R_on + R_load + R_gnd for the on-time,
+    # i(t_on) = V/R (1 - exp(-R t_on / L)); the gate has no edge oracle, so an
+    # edge is taken at a grid point next to it (F-SB-2): each of the two edges
+    # moves t_on by at most one dt (13.022 / 13.256 / 13.488 A for -dt, 0, +dt)
+    R, L = 5.0 + 0.05 + 1e-3, 2e-3
+    lo, hi = (300.0 / R * (1.0 - np.exp(-R * t_on / L)) for t_on in (1e-4 - 2e-6, 1e-4 + 2e-6))
+    for x in recs:   # each record is L*i and L*i^2/2 of the current it cut
+        i_x = abs(x.lambda_) / L
+        assert lo * (1 - 1e-3) <= i_x <= hi * (1 + 1e-3), (i_x, lo, hi)
+        assert x.dW == pytest.approx(0.5 * L * i_x ** 2, rel=1e-6)
+    assert float(np.asarray(r.i("Lload")).max()) == pytest.approx(hi, rel=1e-3)
 
 
 def test_floating_neutral_vsi_runs_on_the_exact_engine():

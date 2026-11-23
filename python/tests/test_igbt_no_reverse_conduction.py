@@ -103,9 +103,9 @@ def test_the_fwd_carries_the_freewheeling_current():
     assert i == pytest.approx(100.0, rel=1e-3)
 
 
-@pytest.mark.xfail(strict=True, reason="release finding F-5-1: with discontinuity_restart the "
-                   "pathless inductor's 100 A becomes -141.4 A in one step (energy 5 J -> 10 J), "
-                   "no reinit record, no warning")
+# release: F-5-1 closed. Under the restart rule the cut is an impulse record
+# (0.1 V*s, 5 J = L i^2 / 2; i_L 100 A -> -3.3e-5 A, it read -141.4 A) and the
+# voltage check reads it: "'QL' cut the current of 'L' ... 1.000e+08 V".
 def test_without_the_fwd_the_solver_says_so():
     """The trade this model makes on purpose. A device that
     correctly refuses reverse current leaves an inductive load
@@ -113,4 +113,9 @@ def test_without_the_fwd_the_solver_says_so():
     2e8 V on a 15 V circuit — instead of the silent wrong answer
     the old reverse conduction gave."""
     with pytest.warns(UserWarning, match="conduction path opens"):
-        _freewheel(with_fwd=False)
+        res = _freewheel(with_fwd=False)
+    (rec,) = res.reinit_records
+    assert (rec.kind, rec.states, rec.devices) == ("cut_set", ["L"], ["QL"])
+    assert abs(rec.lambda_) == pytest.approx(0.1, rel=1e-6)      # L * i0
+    assert rec.dW == pytest.approx(5.0, rel=1e-6)                # L * i0^2 / 2
+    assert abs(float(np.asarray(res.i("L"))[-1])) < 1e-3

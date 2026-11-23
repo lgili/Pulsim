@@ -266,6 +266,10 @@ FIXED = {
              "unchanged and the mark is removed: `test_res_i_matches_a_series_milliohm`",
     "F-6-6": "merge of the PR line 03c8b67c / a90d84b8 (R3, 9e051abe .. 9f1f0747): its parked test(s) pass "
              "unchanged and the mark is removed: `test_a_numeric_segment_counts_its_integrator_steps`",
+    "F-5-1": "R4 (2026-11-23): the jump is conserved since the PR line's A6 (i_L 100 A -> -3.3e-5 A, one cut_set record of "
+             "0.1 V*s / 5 J = L i0^2 / 2; it read -141.4 A, 5 J -> 10 J, no record) and the voltage-sanity check reads the "
+             "record (7085e2c7): \"'QL' cut the current of 'L' ... 1.000e+08 V\"; "
+             "`test_without_the_fwd_the_solver_says_so` passes with the record asserted, mark removed",
     "F-X-1": "merge of the PR line (R3): ten paralleled bridges run on the exact engine under the default output rule on "
              "both selections; `test_ten_paralleled_bridges_agree_with_pwl` holds the rule-off run to 1e-3 V of pwl + split "
              "and the default run to that plus the rule's promise (measured 2.6e-3 V); mark removed",

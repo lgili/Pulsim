@@ -410,7 +410,7 @@ def test_split_locates_independent_diodes_on_their_own_signals():
     np.testing.assert_array_equal(np.asarray(both.v("o1")), np.asarray(alone.v("o1")))
 
 
-def _rectifier_and_unrelated_pulse(pulse):
+def _rectifier_and_unrelated_pulse(pulse, dt=1e-4, **kw):
     """The rectifier from rest, plus (pulse=True) a 1 V pulse into its own resistor with its
     edge at 0.4 dt: inside the probe's (t1, t2] (t1 = 0.29 dt, t2 = 0.59 dt)."""
     b = p.CircuitBuilder()
@@ -427,9 +427,9 @@ def _rectifier_and_unrelated_pulse(pulse):
         # release: the probe's reading on the unsplit step. With event splitting
         # (the default with the rule) the pulse's edge splits the step for the
         # whole circuit and the rectifier moves by its truncation (7.5e-5 V on
-        # 54 of 201 samples; still no record)
-        return p.simulate(b, t_end=0.02, dt=1e-4, enable_substep_state_correction=False,
-                          **RESTART)
+        # 54 of 201 samples; still no record: the test after this one)
+        return p.simulate(b, t_end=0.02, dt=dt, **{"enable_substep_state_correction": False,
+                                                    **RESTART, **kw})
 
 
 def test_a_source_edge_inside_the_probe_is_read_at_its_left_limit():
@@ -441,6 +441,21 @@ def test_a_source_edge_inside_the_probe_is_read_at_its_left_limit():
     assert list(with_pulse.reinit_records) == []
     np.testing.assert_allclose(np.asarray(with_pulse.v("vout")), np.asarray(alone.v("vout")),
                                rtol=0, atol=1e-9)
+
+
+def test_a_source_edge_that_splits_the_step_is_no_record_either():
+    """The release default (the rule with event splitting): the pulse's edge
+    splits its step for the whole circuit. Still no record, and the rectifier
+    moves by less than that step size's own error (7.5e-5 V against the
+    distance of the pulse-free run from a run at dt / 100)."""
+    split = dict(enable_substep_state_correction=True)
+    with_pulse = _rectifier_and_unrelated_pulse(True, **split)
+    alone = _rectifier_and_unrelated_pulse(False, **split)
+    fine = _rectifier_and_unrelated_pulse(False, dt=1e-6, **split)
+    assert list(with_pulse.reinit_records) == []
+    va, vw = np.asarray(alone.v("vout")), np.asarray(with_pulse.v("vout"))
+    vf = np.interp(np.asarray(alone.times), np.asarray(fine.times), np.asarray(fine.v("vout")))
+    assert 0 < np.max(np.abs(vw - va)) < 0.1 * np.max(np.abs(va - vf))
 
 
 def test_the_dcm_buck_has_no_impulse():
@@ -479,20 +494,20 @@ def test_a_diode_turning_an_inductor_off_at_zero_current_is_not_an_impulse(i0, s
     until it reaches 0, then 0. The stop inside stage 1 of a window step (t_c = 1.2, 1.5,
     2.2 dt) read as a jump of up to 3.1 uJ; it is the motion gamma*h*V/L of an unlocated
     crossing, not a jump."""
+    L, V, R = 1e-6, 100.0, 1e-3
+    r = _freewheel_into(i0, split)
+    t, i = np.asarray(r.times), np.asarray(r.i("L"))
+    ic = np.maximum((i0 + V / R) * np.exp(-R * t / L) - V / R, 0.0)
+    t_c = -L / R * np.log((V / R) / (i0 + V / R))
+    far = np.abs(t - t_c) > 1e-7   # the step that holds the crossing is first order
+    assert np.max(np.abs(i - ic)[far]) < 1e-6 * i0, np.max(np.abs(i - ic)[far])
     if split and i0 > 50:
         request.applymarker(pytest.mark.xfail(strict=True, reason=(
             "release finding F-Y-4: under control_tick='state' (the release default) the split "
             "step that locates the stop (t_c = 5.15 / 5.50 dt) writes a cut-set record of the "
             "location's residual: lambda = 6.3e-11 / 1.2e-10 V*s (6e-5 A of 51.5 A), dW = 2.0e-15 / "
             "7.8e-15 J of 1.3e-3 J; none with control_tick='label'")))
-    L, V, R = 1e-6, 100.0, 1e-3
-    r = _freewheel_into(i0, split)
-    assert list(r.reinit_records) == []
-    t, i = np.asarray(r.times), np.asarray(r.i("L"))
-    ic = np.maximum((i0 + V / R) * np.exp(-R * t / L) - V / R, 0.0)
-    t_c = -L / R * np.log((V / R) / (i0 + V / R))
-    far = np.abs(t - t_c) > 1e-7   # the step that holds the crossing is first order
-    assert np.max(np.abs(i - ic)[far]) < 1e-6 * i0, np.max(np.abs(i - ic)[far])
+    assert list(r.reinit_records) == []   # (last: the trace above is checked on every cell)
 
 
 @pytest.mark.xfail(strict=True, reason=(

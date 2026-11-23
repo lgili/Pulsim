@@ -45,7 +45,7 @@ Rehearsal at fe75ee01 (the regenerated report's header names the runs its sectio
 ## 5. Migration and deprecation notes
 - [x] 5.1 CHANGELOG: one BREAKING entry per flipped option with its old value and the keyword that restores it
 - [ ] 5.2 Deprecation notes: the old values stay reachable for one release; `'dsed'` as an alias of `'exact'` (roadmap decision 8)
-- [ ] 5.3 `integrator='esdirk43'` documented as opt-in (not flipped)
+- [x] 5.3 `integrator='esdirk43'` documented as opt-in (not flipped) — CHANGELOG "Unreleased — defaults changed", the "Not flipped" paragraph (seen 2026-11-23)
 - [ ] 5.4 One release AFTER this one: delete the four deprecated `update_*` bindings and the subsystem proxy's string-prefix code (`add-immutable-circuit-ir` 11.1 / 11.2; deprecated with a `DeprecationWarning` naming `with_value` / `set_value`, DECISIONS 10 there)
 
 ## 6. Verification

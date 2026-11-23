@@ -398,15 +398,6 @@ def _assert_tail(engine, how, full, first, got, probes, t_mid, circuit):
 @pytest.mark.parametrize("engine", list(ENGINES))
 @pytest.mark.parametrize("circuit", list(CIRCUITS))
 def test_resume_and_fresh_t_start_match_the_uninterrupted_tail(circuit, engine, request):
-    if (circuit, engine) == ("buck", "auto"):
-        request.applymarker(pytest.mark.xfail(strict=True, reason=(
-            "release finding F-Y-3: the exact engine's in-loop recorder reads a window's min / max "
-            "at its step ends only: v(out) max over [0.5, 0.9] ms = 19.836086 V (min 7.045884) on "
-            "the uninterrupted run ('auto' -> exact) against 19.897835 / 7.034297 on trbdf2 rtol "
-            "1e-10 (the exact run's own stored samples under the output rule hold 19.897773); the "
-            "fresh leg, which 'auto' runs on trbdf2 (controllers with t_start), reads 19.897816. "
-            "The resume leg (a) passes: 'auto' resumes an exact snapshot on the exact engine "
-            "(test_exact_resume.py::test_auto_resumes_an_exact_snapshot_on_the_route_that_wrote_it)")))
     opts = ENGINES[engine]
     t_mid = CIRCUITS[circuit][1]
     full, probes = _run(circuit, opts, T_END)
@@ -427,6 +418,16 @@ def test_resume_and_fresh_t_start_match_the_uninterrupted_tail(circuit, engine, 
             _run(circuit, opts, T_END, **fresh)
         return
     got, _ = _run(circuit, opts, T_END, **fresh)
+    # (the mark only here: the resume leg above is checked on every cell)
+    if (circuit, engine) == ("buck", "auto"):
+        request.applymarker(pytest.mark.xfail(strict=True, reason=(
+            "release finding F-Y-3: the exact engine's in-loop recorder reads a window's min / max "
+            "at its step ends only: v(out) max over [0.5, 0.9] ms = 19.836086 V (min 7.045884) on "
+            "the uninterrupted run ('auto' -> exact) against 19.897835 / 7.034297 on trbdf2 rtol "
+            "1e-10 (the exact run's own stored samples under the output rule hold 19.897773); the "
+            "fresh leg, which 'auto' runs on trbdf2 (controllers with t_start), reads 19.897816. "
+            "The resume leg (a) passes: 'auto' resumes an exact snapshot on the exact engine "
+            "(test_exact_resume.py::test_auto_resumes_an_exact_snapshot_on_the_route_that_wrote_it)")))
     _assert_tail(engine, "fresh", full, first, got, probes, t_mid, circuit)
 
 

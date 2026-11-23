@@ -84,8 +84,10 @@ def test_measures_equal_time_average_on_the_same_samples(eng):
     assert abs(vals[1] - res.at("v(dp)", tm)) == 0.0
 
 
-def test_at_an_exact_engine_event_is_the_right_limit():
-    res = p.simulate(_rectifier(), t_end=40e-3, engine="exact")
+# release: the fixed engine stores right limits too (the restart rule's events)
+@pytest.mark.parametrize("kw", [dict(engine="exact"), RUNS["pwl"]], ids=["exact", "pwl"])
+def test_at_an_event_is_the_right_limit(kw):
+    res = p.simulate(_rectifier(), t_end=40e-3, **kw)
     idx = np.asarray(res.right_limit_index)
     assert idx.size
     k = int(idx[len(idx) // 2])
