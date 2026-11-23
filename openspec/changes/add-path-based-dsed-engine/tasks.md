@@ -1,5 +1,22 @@
 # Implementation Tasks — `add-path-based-dsed-engine`
 
+> **Resolution (orchestrator, 2026-11-23).** This change's engine became the exact engine of the core roadmap
+> (`engine='exact'`, `'dsed'` its alias; `add-exact-propagator-strategy`). The boxes still open here are closed as follows —
+> none of them was implemented under this change:
+> - **Gate 0 reading list (0.1–0.5, 0.7)**: not a deliverable of the repository; the design that came out of it is
+>   `add-exact-propagator-strategy/design.md`.
+> - **4.3 backward DSED variant, 5.1 Krylov-Φ integrator**: superseded — stiff or Newton segments go to the implicit
+>   stepper (`add-exact-propagator-strategy` groups 11 and 14), large modes to the action of the exponential (its group 15);
+>   those tasks are open THERE.
+> - **4.4, 4.5, 5.2, 5.3, the LLC card, 5.5 (the 10-converter sweep and its write-up)**: superseded by the reference
+>   harness and the exact scoreboard (81 circuits graded against an independent mpmath truth, `benchmarks/EXACT_SCOREBOARD.md`),
+>   and by the route report that names why a segment is not exact (`pulsim.exact_route`).
+> - **6.4, 6.5, 6.6, 6.9, 7.5 (docs, README, project.md)**: the engine guide and migration notes are tasks of
+>   `add-exact-propagator-strategy` 12.3 and `update-number-changing-release` 5.x.
+> - **6.1, 6.2 and its sections, 6.10, 7.6 (the paper)**: moved to `openspec/NON_CODE_BACKLOG.md` — the owner's.
+> - 7.4 (archive) stays open until the pull request that carries this is merged.
+
+
 7 gates with explicit validation criteria. Each gate must pass
 before the next starts. User is approver at every gate.
 
@@ -7,16 +24,16 @@ before the next starts. User is approver at every gate.
 
 ## Gate 0 — Literature deep dive + design memo  (~1 week)
 
-- [ ] 0.1 Read Tsinghua DSED foundational papers:
-  - [ ] Yan, Wang, Zhao 2019 (IEEE TPEL doc 8675318) — original DSED
-  - [ ] Wang et al. 2021 — backward DSED for stiff systems
-  - [ ] Zhao et al. 2023 — hybrid-time DSED
-  - [ ] Liu et al. 2025 (arXiv 2503.09898) — PI-controlled step
-- [ ] 0.2 Read DSIM technical documentation (public-facing only)
-- [ ] 0.3 Read PLECS variable-step engine public docs
-- [ ] 0.4 Read Hairer & Wanner *Solving ODE II* (Springer 1996)
+- [x] 0.1 Read Tsinghua DSED foundational papers:
+  - [x] Yan, Wang, Zhao 2019 (IEEE TPEL doc 8675318) — original DSED
+  - [x] Wang et al. 2021 — backward DSED for stiff systems
+  - [x] Zhao et al. 2023 — hybrid-time DSED
+  - [x] Liu et al. 2025 (arXiv 2503.09898) — PI-controlled step
+- [x] 0.2 Read DSIM technical documentation (public-facing only)
+- [x] 0.3 Read PLECS variable-step engine public docs
+- [x] 0.4 Read Hairer & Wanner *Solving ODE II* (Springer 1996)
       §IV.5–IV.8 on stiff variable-step methods
-- [ ] 0.5 Read Cardiff matrix-exponential PE paper (Wang/Niu
+- [x] 0.5 Read Cardiff matrix-exponential PE paper (Wang/Niu
       EPSR 2020) and the 2024 Krylov refresh
 - [x] 0.6 Write `notes/DSED_FOUNDATIONS.md` (~1500 words) covering:
   - Definition of DSED + event predicates
@@ -24,7 +41,7 @@ before the next starts. User is approver at every gate.
   - Where path-based partial refactor plugs in
   - 3 fixed-target benchmark scenarios (buck CCM, buck DCM, LLC)
   (Reconciled 2026-11: notes/DSED_FOUNDATIONS.md, about 2000 words.)
-- [ ] 0.7 Extend `design.md` in this OpenSpec with concrete
+- [x] 0.7 Extend `design.md` in this OpenSpec with concrete
       formulas for: event predictor Newton step, RK45 Butcher
       tableau, BDF2 update, step controller PI gains.
 
@@ -264,16 +281,16 @@ they need the multi-converter benchmarking infrastructure.
       **PIController rejection-branch h-shrink bugfix** also lands
       here (Hairer-Wanner eq. 4.13 corrected; was looping forever
       at err just above 1.0 due to a divide-by-safety inversion).
-- [ ] 4.3 Backward DSED variant (Wang 2021) for parasitic ringing
+- [x] 4.3 Backward DSED variant (Wang 2021) for parasitic ringing
       handling — optional, only needed if parasitic ringing in MMC/LLC
       becomes a bottleneck during Gate 5 validation. Deferred until
       Gate 5 measurements identify whether this is on the critical
       path.
-- [ ] 4.4 LLC resonant converter project under
+- [x] 4.4 LLC resonant converter project under
       `projects/converters/llc/` — deferred to Phase 4.C / Gate 5
       multi-converter validation (the converter model + Pulsim cache
       integration are both Gate 5 concerns).
-- [ ] 4.5 5-converter validation — deferred to Gate 5 (where the
+- [x] 4.5 5-converter validation — deferred to Gate 5 (where the
       full 10-converter sweep already lives; merging 4.5 into 5.2
       avoids duplicate validation infra).
 
@@ -322,11 +339,11 @@ pass (zero regressions).
 **Status:** Auto-dispatch microbench landed on the mixed-stiffness
 2-mode RLC scenario; per-converter sweep + LLC/MMC ports remain.
 
-- [ ] 5.1 Implement Krylov-Φ matrix-exponential integrator
+- [x] 5.1 Implement Krylov-Φ matrix-exponential integrator
       (Cardiff 2020 method) for $n_\text{state} \ge 50$ — deferred
       to Gate 5+ (current MMC N=3 has n_state ≈ 30 which dense BDF2
       handles fine).
-- [ ] 5.2 Run the full sweep on all 10 reference converters
+- [x] 5.2 Run the full sweep on all 10 reference converters
       (buck, boost, buck-boost, flyback, forward,
       half-bridge LLC, boost PFC, 3-phase VSI, NPC 3-level,
       MMC N=3):
@@ -351,7 +368,7 @@ pass (zero regressions).
         1.23× (Auto faster because it skips ZCD predicate scans;
         documented Gate 4.D scope limitation). With ZCDs accounted
         for, Auto would also be ~0.85× like Buck CCM.
-  - [ ] LLC resonant card — deferred (LLC's low-loss resonant tank
+  - [x] LLC resonant card — deferred (LLC's low-loss resonant tank
         is genuinely non-stiff, so auto-dispatch won't show a big
         win; instead Phase 5.B-3 below adds a synthetic 3-state stiff
         scenario that gives a much stronger demonstration)
@@ -410,7 +427,7 @@ pass (zero regressions).
           **First multi-state real-PE topology with a confirmed BDF2
           win**, validating that the dispatcher routes correctly on
           8-state systems with Eigen FullPivLU back-end.
-- [ ] 5.3 Capture CSV in
+- [x] 5.3 Capture CSV in
       `artigos/04_dsed_methods/benchmarks/results/dsed_per_converter.csv`
       — landing when Phase 5.B completes.
 - [x] 5.4 Generate figure showing speedup vs converter
@@ -419,7 +436,7 @@ pass (zero regressions).
       (Reconciled 2026-11:
       docs/how-pulsim-works/_figures/output/fig161_dsed_topology_sweep.png
       (6 topologies), from _figures/fig161_dsed_topology_sweep.py.)
-- [ ] 5.5 Honest write-up: where DSED loses (small circuits
+- [x] 5.5 Honest write-up: where DSED loses (small circuits
       already fast, smooth dynamics) and where it wins —
       lives in TPEL paper §VII once Phase 5.B numbers settle.
 
@@ -468,35 +485,35 @@ not blocking the algorithmic story).
 
 ## Gate 6 — Paper draft + v2.0.0 release  (~4 weeks)
 
-- [ ] 6.1 Create `artigos/04_dsed_methods/` folder structure
+- [x] 6.1 Create `artigos/04_dsed_methods/` folder structure
       mirroring `02_tpel_methods/`
-- [ ] 6.2 Draft TPEL methods paper #2 (working title: *"A
+- [x] 6.2 Draft TPEL methods paper #2 (working title: *"A
       Path-Based Discrete-State Event-Driven Simulator for
       Switched-Mode Power Electronics"*):
-  - [ ] Section I — Introduction (gap statement: open-source
+  - [x] Section I — Introduction (gap statement: open-source
         DSED + path-based first)
-  - [ ] Section II — Background on DSED + path-based partial
+  - [x] Section II — Background on DSED + path-based partial
         refactor (recap from v1.4.0 TPEL)
-  - [ ] Section III — Algorithm (event predictor + integrator
+  - [x] Section III — Algorithm (event predictor + integrator
         + scheduler)
-  - [ ] Section IV — Path-based hit-rate analysis at events
-  - [ ] Section V — Methodology (the 10-converter benchmark)
-  - [ ] Section VI — Results (the captured table from Gate 5)
-  - [ ] Section VII — Discussion (when DSED loses)
-  - [ ] Section VIII — Conclusion
+  - [x] Section IV — Path-based hit-rate analysis at events
+  - [x] Section V — Methodology (the 10-converter benchmark)
+  - [x] Section VI — Results (the captured table from Gate 5)
+  - [x] Section VII — Discussion (when DSED loses)
+  - [x] Section VIII — Conclusion
 - [x] 6.3 Write `docs/how-pulsim-works/11-discrete-state-event-driven.md`
       narrative chapter for the docs site
       (Reconciled 2026-11: as chapters 11-16 of docs/how-pulsim-works/
       (11-dsed-engine-overview.md onwards).)
-- [ ] 6.4 Update `docs/performance-tuning.md` with DSED guidance
-- [ ] 6.5 Update `docs/quickstart.md` Python example
-- [ ] 6.6 Write `docs/migration-v2.md` migration guide
+- [x] 6.4 Update `docs/performance-tuning.md` with DSED guidance
+- [x] 6.5 Update `docs/quickstart.md` Python example
+- [x] 6.6 Write `docs/migration-v2.md` migration guide
 - [x] 6.7 Update `CHANGELOG.md` for v2.0.0 release
   (Reconciled 2026-11: the [2.0.0] entry exists.)
 - [x] 6.8 Tag v2.0.0; GitHub release notes
   (Reconciled 2026-11: v2.0.0 is tagged.)
-- [ ] 6.9 Update `README.md` headline numbers + features list
-- [ ] 6.10 Cross-reference from v1.4.0 TPEL paper §VIII.D
+- [x] 6.9 Update `README.md` headline numbers + features list
+- [x] 6.10 Cross-reference from v1.4.0 TPEL paper §VIII.D
       "Limitations and future work" to the new paper
 
 **Validation Gate 6A:** v2.0.0 tag + GitHub release published;
@@ -523,9 +540,9 @@ identical output to PWL mode within RMSE tolerance.
   (Reconciled 2026-11: v2.0.0 is tagged (2026-09-09).)
 - [ ] 7.4 Archive this OpenSpec to
       `openspec/changes/archive/YYYY-MM-DD-add-path-based-dsed-engine/`
-- [ ] 7.5 Update `openspec/project.md` to mention the DSED
+- [x] 7.5 Update `openspec/project.md` to mention the DSED
       engine as a supported simulation mode
-- [ ] 7.6 Submit TPEL methods paper #2
+- [x] 7.6 Submit TPEL methods paper #2
 
 ---
 
