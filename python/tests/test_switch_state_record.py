@@ -1251,7 +1251,7 @@ def test_switched_branch_charge_closes_in_steady_state(engine, R_load, request):
     jump over the next 1 µs step: D1 i_avg read 0.02343 A against
     0.05345 A in DCM (-56 %) and -2.5 % in CCM, with no warning. All
     engines now agree to 1e-4."""
-    b, r = _boost_run(0.7, R_load, engine, **(STEP_ENDS if engine == "dsed" else {}))
+    b, r = _boost_run(0.7, R_load, engine)
     w = _Window(r, 2e-3)
     s, _, msgs = _report(b, w, [])
     assert not msgs, msgs
@@ -1269,6 +1269,8 @@ def test_switched_branch_charge_closes_in_steady_state(engine, R_load, request):
     assert _entry(s, "Q")["i_avg"] * T == pytest.approx(
         q_q, rel=3e-3 if engine == "pwl" else 1e-4)
     if engine == "dsed":
+        # (the control: the raw step-end samples' trapezoid reads low)
+        b, r = _boost_run(0.7, R_load, engine, **STEP_ENDS)
         bad = _entry(_report(b, _Window(r, 2e-3, right_limits=False),
                              [])[0], "D1")
         assert bad["i_avg"] * T < (0.6 if R_load == 500.0 else 0.99) \

@@ -543,10 +543,10 @@ def test_boost_dcm_recovery_voltage_is_v_out_minus_v_in(engine, request):
     if engine == "auto":
         _finding(request, (
             "release finding F-X-7: under the default output rule (no dt -> the exact engine) "
-            "the loss summary's V_R at a DCM turn-off reads 39.49 V against V_out - V_in = "
-            "33.49 V (101 turn-offs after 2 ms, 2289 samples): v(sw) is not a state and is a "
-            "chord between two stored samples; with output_rtol=0 it reads 34.301 V against "
-            "34.302 V (the 'auto-step-ends' cell)"))
+            "the loss summary's V_R at a DCM turn-off reads 39.49 V; V_out - V_in is 34.302 V "
+            "(the step-end run: the 'auto-step-ends' cell reads 34.301 V; this run's own sparse "
+            "v(out) interpolates to 33.49 V there). 101 turn-offs after 2 ms, 2289 samples: "
+            "v(sw) is not a state and is a chord between two stored samples"))
     b, pwm, r, _, _ = _run_boost(500.0, 0.0, engine.partition("-")[0],
                                  engine == "auto-step-ends")
     bid = next(c["branch_id"] for c in b.components() if c["name"] == "D1")

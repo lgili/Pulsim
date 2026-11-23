@@ -340,4 +340,30 @@ def test_auto_resumes_an_exact_snapshot_on_the_route_that_wrote_it():
     assert np.max(np.abs(xr - xu)) <= 1e-9 * np.max(np.abs(xu))
     with pytest.raises(p.UnsupportedError, match="written by the exact engine") as ei:
         leg(200e-6, dt=1e-8, resume_from=a.final_snapshot)
-    assert ei.value.feature == "resume_from"
+    assert (ei.value.feature, ei.value.engine) == ("resume_from", "auto")
+    # a refusal of the exact engine on this route stands as it is (no other
+    # engine continues its snapshot): here, a resume that would relabel time
+    with pytest.raises(p.UnsupportedError) as ei:
+        leg(200e-6, resume_from=a.final_snapshot, t_start=50e-6)
+    assert (ei.value.feature, ei.value.engine) == ("resume_from", "dsed")
+    assert "written by the exact engine" not in str(ei.value)
+
+
+def test_auto_falls_back_when_the_exact_routes_plan_refuses():
+    """release: 'auto' without dt takes the exact engine; a refusal by name in
+    its PLAN (controllers with t_start) lands the run on the variable step, as
+    a refusal in the run does — the same samples as engine='trbdf2' asked by
+    name."""
+    from .test_tstart_time_base import _buck as tick_buck
+
+    def run(engine):
+        b, kw, _ = tick_buck()
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            return p.simulate(b, t_end=6e-4, t_start=4e-4, engine=engine, rtol=1e-8, **kw)
+    a, t = run("auto"), run("trbdf2")
+    assert a.engine_used == "trbdf2"
+    np.testing.assert_array_equal(np.asarray(a.times), np.asarray(t.times))
+    np.testing.assert_array_equal(np.asarray(a.states), np.asarray(t.states))
+    with pytest.raises(p.UnsupportedError, match="t_start != 0"):
+        run("exact")

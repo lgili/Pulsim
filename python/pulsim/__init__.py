@@ -2909,7 +2909,10 @@ _AUTO_EXACT_OFF = contextvars.ContextVar("pulsim_auto_exact_off", default=False)
 def _auto_exact_replan(builder, args, err):
     """The plan of the same call with the exact route off (trbdf2, or the
     'auto' rule's own refusal), the exact engine's refusal kept as the first
-    route reason."""
+    route reason. (A snapshot the exact engine wrote has no other route: its
+    refusal stands.)"""
+    if _exact_snapshot(args[list(_SIMULATE_DEFAULTS).index("resume_from")]):
+        raise err
     tok = _AUTO_EXACT_OFF.set(True)
     try:
         plan2 = _plan_run(builder, *args)
@@ -5447,7 +5450,9 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
 def _auto_check_voltage_sanity(res, builder, factor, dt=None):
     """Run the implausible-voltage detector on any result: the ONE check,
     called from `_finalize` for pwl, trbdf2 and the exact engine
-    (add-kernel-simulation-object task 6.2). The try covers ONLY the
+    (add-kernel-simulation-object task 6.2). With ``dt`` (the fixed engine,
+    whose restart rule turns the spike into an impulse record) the records
+    are read too: `_warn_impulse_voltage`. The try covers ONLY the
     kernel call: wrapping the warn() too meant that under `-W error` the
     detector produced no signal at all.
 

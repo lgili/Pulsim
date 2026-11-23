@@ -157,6 +157,61 @@ F = [
      "39.56 V at t = 0.12 ms of a 173 V range with the default rule (2713 samples); 27.9 V with output_rtol=1e-7 (24033 samples). "
      "The rule's promise covers the states only; a node voltage recovered algebraically is a chord between two stored samples. "
      "The bound on recovered rows is on fix/core-release-f4-chord-bound (not mergeable: three defects found by its verification)"),
+    # ---- R4 (2026-11-23): the triage of the 47 failures left after the merge of the PR line.
+    # Owner line in brackets at the end of each title.
+    ("F-Y-1", "B", "R", "step-engine sensitivities are refused on every pwl run [owner: feat/core-sensitivity-events]",
+     "`simulate(rc, 2e-3, dt=1e-6, engine='pwl', sensitivities=['R.R'])` (test_sensitivity_step, test_engine_conformance)",
+     "dx/dp of the discrete step (central differences / the RC closed form, as before the release)",
+     "ran (6 tests + 1 conformance cell)",
+     "UnsupportedError \"at t = 1e-06 the step was split at its events\" under the release default "
+     "(restart rule + event splitting); still refused with enable_substep_state_correction=False, runs with "
+     "discontinuity_restart=False"),
+    ("F-Y-2", "A", "R", "the restart rule refuses a saturable inductor's located-event residual as a jump [owner: restart line]",
+     "test_trbdf2_stateful_with_diodes `_run('atan', 'pwl', 3e-3)`; test_release_findings_a `_buck_freewheel(True, True, None)`",
+     "runs (the diode turns the core off at zero current: no jump)",
+     "ran (restart rule off by default)",
+     "UnsupportedError \"the event moves saturable_inductor 'Lc' by -4.52e-07 A in an instant\" (of 15 A, t = 0.5312 ms; "
+     "gapped -2.79e-07 A); 'L' by 3.09e-05 A of 20.4 A at 0.8148 us. Every saturable inductor behind a switching "
+     "event on the default fixed engine"),
+    ("F-Y-3", "F", "W", "the exact engine's in-loop recorder reads a window's min / max at its step ends only [owner: exact-engine line, dsed/segment_integrals + recorder feed]",
+     "test_tstart_time_base `_run('buck', dict(engine='auto', rtol=1e-8), T_END)`, `res.recorded['r'].windows['v(out)']`",
+     "max 19.897835 V, min 7.034297 V over [0.5, 0.9] ms (trbdf2 rtol 1e-10; pwl dt 1e-8: 19.90195 / 7.03304)",
+     "19.897778 / 7.034307 (auto -> trbdf2)",
+     "19.836086 / 7.045884 (auto -> exact; the run's own stored samples under the output rule hold 19.897773; avg agrees to 1e-6)"),
+    ("F-Y-4", "A", "C", "a located zero-current stop writes a cut-set record of the locator's residual under control_tick='state' [owner: restart line]",
+     "test_release_findings_a `_freewheel_into(51.5, True)` (V 100 V, D, L 1 uH i0 = 51.5 A, dt 1e-7, restart + split)",
+     "no record (the diode turns the inductor off at zero current)",
+     "no record (control_tick='label')",
+     "one cut_set record: lambda 6.3e-11 V*s (6e-5 A of 51.5 A), dW 2.0e-15 J of 1.3e-3 J; i0 = 55: 1.2e-10 V*s, 7.8e-15 J; "
+     "the DCM buck freewheel 3.09e-11 V*s, 4.8e-16 J (on_impulse='error' would refuse these runs)"),
+    ("F-Y-5", "A", "C", "island charge over a jump step is kept to 1.7e-10, not to rounding, with branch-form switches [owner: restart line]",
+     "test_restart_jump_conservation `_island(1e-6, False, split)`",
+     "charge of the island conserved over the event's step (1e-12 relative + the 1e-18 C leak)",
+     "holds (form='conductance')",
+     "1.72e-17 C of 1.0e-7 C"),
+    ("F-Y-6", "C", "R", "mode_selection='auto' refuses the restart's stage 1 after a jump that also turns a diode on [owner: restart line / mode selection]",
+     "test_restart_jump_conservation::test_a_jump_whose_stage_1_also_turns_a_diode_is_recorded",
+     "the jump recorded with C1 and C2, Dl clamping at 0.7 V",
+     "recorded (mode_selection='legacy')",
+     "UnsupportedError at t = 2.002928932e-06 s: 'no conduction state of the diodes (Dl) is consistent (secondary ray)'"),
+    ("F-Y-7", "A", "C", "the start record of one capacitor loop differs between pwl and the exact engine [owner: restart line]",
+     "C1 1.5 uF at 8 V, C2 1.5 uF at 0 V, tied by a 0 V source, R 1 kOhm; `simulate(b, 1e-4, engine=..., dt=1e-6).reinit_records`",
+     "6 uC moved, 24 uJ removed (closed form)",
+     "pwl wrote no record",
+     "pwl: lambda -6.0000000572e-6 C, devices [], sample 1; exact: +6.000000000000001e-6 C, devices ['V0'], sample 0 "
+     "(kind, states, dW agree)"),
+    ("F-Y-8", "A", "C", "the external Lauritzen twin and the built-in start differently under the restart rule [owner: restart line]",
+     "test_external_device `_recovery(libs, external)` on `engine='pwl', dt=2e-10`",
+     "the same trace (the twin is the built-in's equations; 1.5e-11 without the rule)",
+     "1.5e-11",
+     "8.9e-9 of scale from the first step: start jump on Lstray 2.0033612589e-10 V*s (stateful kind) against "
+     "2.0033597529e-10 V*s (internal unknown)"),
+    ("F-Y-9", "A", "W", "event splitting leaves a diode OFF while forward-biased (warned) [owner: restart line, the split]",
+     "test_switch_state_record `_snubbed_report(1000)` (snubbed DCM boost, 10 nH in series with D1, dt = T/1000)",
+     "no sample breaks the diode law",
+     "none (enable_substep_state_correction=False; none at T/200 either way)",
+     "D1 OFF above V_th = 0.7 V by up to 5.48 mV on 156 of 200001 samples (0.435 .. 1.995 ms); v(out) end 46.200553 V "
+     "against 46.200520 V unsplit"),
     ("F-X-2", "H", "C", "the `auto` routing costs 4745 bytecodes per call",
      "`test_simulate_overhead` no-dt script", "ceiling 3760 bytecodes", "3683 (trbdf2 route)", "5456 (pulsim.exact_route alone 4745)"),
 ]
@@ -185,7 +240,10 @@ FIXED = {
     "F-3-6": "merge of the PR line 03c8b67c / a90d84b8 (R3, 9e051abe .. 9f1f0747): its parked test(s) pass "
              "unchanged and the mark is removed: `test_a_mode_without_an_exact_stepper_still_runs_on_auto[default]`",
     "F-3-7": "merge of the PR line 03c8b67c / a90d84b8 (R3, 9e051abe .. 9f1f0747): its parked test(s) pass "
-             "unchanged and the mark is removed: `test_at_a_moderate_step_every_primary_agrees`",
+             "unchanged and the mark is removed: `test_at_a_moderate_step_every_primary_agrees`. R4: the saturable AND the "
+             "hysteretic primary run at 10 / 5 / 2 ns under the release defaults (6.8685 / 6.8642 / 6.8492 V; "
+             "6.6939 / 6.6878 / 6.7289 V; linear 6.8577 V); the abort is the legacy profile's "
+             "(`test_a_newton_device_survives_a_stiff_step_on_the_legacy_defaults`)",
     "F-4-3": "merge of the PR line 03c8b67c / a90d84b8 (R3, 9e051abe .. 9f1f0747): its parked test(s) pass "
              "unchanged and the mark is removed: `test_an_ideal_body_diode_across_its_closed_switch_does_not_chatter`",
     "F-4-7": "merge of the PR line 03c8b67c / a90d84b8 (R3, 9e051abe .. 9f1f0747): its parked test(s) pass "

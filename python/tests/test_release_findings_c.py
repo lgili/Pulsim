@@ -63,6 +63,9 @@ def _forward_biased_off(b, r):
         "forward-biased above V_th = 0.7 V by 3.95 mV on 1 sample (t = 14.4373 ms) and BR__D3 by "
         "13.1 mV on 2 samples (24.4377, 44.4377 ms); no sample with "
         "enable_substep_state_correction=False"))),
+    # release: the fix's guards, on the configurations the two reasons name as clean
+    pytest.param((False, dict(discontinuity_restart=False)), id="F-2-3-restart-less"),
+    pytest.param((True, dict(enable_substep_state_correction=False)), id="F-5-9-unsplit"),
 ])
 def test_the_lcp_step_stores_the_state_it_decided_on(floating):
     """The LCP decides on the islands' KCL-corrected solve (a floating AC side /
@@ -70,15 +73,18 @@ def test_the_lcp_step_stores_the_state_it_decided_on(floating):
     is the factor's rounding (1.6 mV, 13 mV): a decided-OFF diode read forward-biased.
     Truth for the all-OFF samples of the AC-floating bridge: KCL of the island
     {s, a, b} over the four equal leaks, v_a + v_b = v_p (a closed form)."""
+    floating, kw = floating if isinstance(floating, tuple) else (floating, {})
     b = _bridge(floating)
-    r = _quiet(lambda: p.simulate(b, 0.06, engine="pwl", dt=1e-6, mode_selection="auto"))
-    assert _forward_biased_off(b, r) == []
+    r = _quiet(lambda: p.simulate(b, 0.06, engine="pwl", dt=1e-6, mode_selection="auto", **kw))
+    if floating:
+        assert _forward_biased_off(b, r) == []
     if not floating:
         bits = np.asarray([list(s) for s in r.switch_states])
         off = ~bits.any(axis=1)
         va, vb, vp = (np.asarray(r.v(n))[off] for n in ("a", "b", "p"))
         assert off.sum() > 1000
         assert np.max(np.abs(va + vb - vp)) <= 1e-9 * 325.0
+        assert _forward_biased_off(b, r) == []   # (last: the parked statement of F-2-3)
 
 
 # ---------------------------------------------------------------------------

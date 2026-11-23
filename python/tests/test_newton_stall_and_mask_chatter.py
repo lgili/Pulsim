@@ -156,11 +156,13 @@ _STALL = pytest.mark.xfail(strict=True,
 # aborted near t = 1.5 us at 10, 5 and 2 ns: the legacy cell below).
 # Saturable: 6.8685 / 6.8642 / 6.8492 V at 10 / 5 / 2 ns; hysteretic 6.6939 /
 # 6.6878 / 6.7289 V; linear 6.8577 V. The hysteretic core's loop loss lowers
-# the output, here as at 50 ns (6.6980 V): the control's bound, 5 %.
-@pytest.mark.parametrize("primary,rel", [("saturable", 0.02), ("hysteretic", 0.05)])
-def test_a_newton_device_survives_a_stiff_step(primary, rel):
+# the output (2.4 % under linear, here as at 50 ns): its reference is its own
+# run at 50 ns, 6.6980 V (measured 6.1e-4 from it).
+@pytest.mark.parametrize("primary,ref,rel", [("saturable", "linear", 0.02),
+                                             ("hysteretic", "hysteretic", 5e-3)])
+def test_a_newton_device_survives_a_stiff_step(primary, ref, rel):
     v = _run(primary, 10e-9)
-    assert v == pytest.approx(_run("linear", 10e-9), rel=rel), v
+    assert v == pytest.approx(_run(ref, 10e-9 if ref == "linear" else 50e-9), rel=rel), v
 
 
 @pytest.mark.parametrize("primary", ["saturable", "hysteretic"])

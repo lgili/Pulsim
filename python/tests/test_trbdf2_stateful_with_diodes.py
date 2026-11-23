@@ -68,8 +68,8 @@ def _rectifier(kind):
     return b
 
 
-def _run(kind, engine, t_end):
-    kw = (dict(dt=2e-7) if engine == "pwl"
+def _run(kind, engine, t_end, **extra):
+    kw = (dict(dt=2e-7, **extra) if engine == "pwl"
           else dict(dt=4e-6, rtol=1e-6, atol=1e-9))
     res = p.simulate(_rectifier(kind), t_end=t_end, engine=engine, **kw)
     t = np.asarray(res.times)
@@ -155,19 +155,26 @@ def _dc(t, y, t0):
     return float(np.trapezoid(yy, tt) / (tt[-1] - tt[0]))
 
 
-@pytest.mark.parametrize("kind", ["linear"] + [
-    pytest.param(k, marks=pytest.mark.xfail(strict=True, raises=p.UnsupportedError, reason=(
-        "release finding F-Y-2: the fixed-step reference run is refused under the restart rule "
-        "(the release default): 'the event moves saturable_inductor Lc by -4.52e-07 A in an "
-        "instant' at t = 0.5312 ms (atan; gapped: -2.79e-07 A at 0.5353 ms) — the residual of a "
-        "located diode turn-off, of a 15 A current")))
-    for k in ("atan", "gapped")])
+@pytest.mark.parametrize("kind", ["atan", "gapped"])
+@pytest.mark.xfail(strict=True, raises=p.UnsupportedError, reason=(
+    "release finding F-Y-2: the fixed-step run is refused under the restart rule (the release "
+    "default): 'the event moves saturable_inductor Lc by -4.52e-07 A in an instant' at "
+    "t = 0.5312 ms (atan; gapped: -2.79e-07 A at 0.5353 ms) — the residual of a located diode "
+    "turn-off, of a 15 A current"))
+def test_the_fixed_step_default_runs_a_flux_device_behind_a_diode(kind):
+    _run(kind, "pwl", 3e-3)
+
+
+@pytest.mark.parametrize("kind", ["linear", "atan", "gapped"])
 def test_switched_diode_turn_off_with_series_inductor_on_trbdf2(kind):
     """The engines agree on this rectifier. They always did — the
     metric was wrong. Also pinned: the flux devices no longer chatter
     (this once reported 839,262 diode events for `atan` and 93,998 for
     `gapped`; it is 6 for all three now, which is 3 cycles x on+off)."""
-    t_ref, v_ref, _ = _run(kind, "pwl", 3e-3)
+    # release: the subject is trbdf2; its fixed-step reference with a flux
+    # device is the restart-less step (the default refuses it: F-Y-2 above)
+    t_ref, v_ref, _ = _run(kind, "pwl", 3e-3, **(
+        {} if kind == "linear" else {"discontinuity_restart": False}))
     t_var, v_var, _ = _run(kind, "trbdf2", 3e-3)
     dc_ref = _dc(t_ref, v_ref, 2e-3)
     dc_var = _dc(t_var, v_var, 2e-3)
