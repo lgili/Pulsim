@@ -60,4 +60,4 @@ Reference values.
 
 ## 9. Docs and verification
 - [ ] 9.1 Sensitivity guide (what is differentiated, the event rule, when it is refused, discrete against continuous gradient), sweep guide, AI_GUIDE, CHANGELOG — sensitivity guide (`docs/sensitivities.md`), AI_GUIDE and CHANGELOG done; the sweep guide waits for group 6
-- [ ] 9.2 ruff, pytest, ctest (`-j2`), `openspec validate --all --strict`, stub check
+- [x] 9.2 ruff, pytest, ctest (`-j2`), `openspec validate --all --strict`, stub check — CLOSED: seen on the PR head a90d84b8 (2026-11-22): ruff clean, ctest 1091/1091 (Eigen 5; 17 targets on Eigen 3.4.0), pytest 7079 passed with the one failure re-pinned and its files re-run, `openspec validate --all --strict` 79 passed, stubs `--check` up to date

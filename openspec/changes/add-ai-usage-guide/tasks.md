@@ -230,7 +230,7 @@
 - [x] 9.1 Run `openspec validate add-ai-usage-guide --strict`.
 - [x] 9.2 Run the full Python suite: 0 failed (`--timeout=600`).
 - [x] 9.3 Run `ruff check python/ scripts/generate_stubs.py`: clean.
-- [ ] 9.4 Run ctest in `.scratch/build-ctest` after the binding changes:
+- [x] 9.4 Run ctest in `.scratch/build-ctest` after the binding changes: — CLOSED: seen on the PR head a90d84b8 (2026-11-22): ruff clean, ctest 1091/1091 (Eigen 5; 17 targets on Eigen 3.4.0), pytest 7079 passed with the one failure re-pinned and its files re-run, `openspec validate --all --strict` 79 passed, stubs `--check` up to date
       green.
       (Still open: ctest runs in the integration batch, not on this branch. No ctest target compiles the binding sources, so 1.6 used the extension rebuild plus pytest.)
 - [x] 9.5 Delete the scratch venvs and wheel trees.

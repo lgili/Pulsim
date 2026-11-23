@@ -57,6 +57,6 @@
 - [ ] 4.2 KPI: ZVS fraction near 0 %, document the average switching loss.
 
 ## 5. Documentation + smoke-run
-- [ ] 5.1 Document the ZVS / ZCS probe convention (which node is V_DS, which branch is I_D for each device type) in `docs/SOFT_SWITCHING.md`.
+- [x] 5.1 Document the ZVS / ZCS probe convention (which node is V_DS, which branch is I_D for each device type) in `docs/SOFT_SWITCHING.md`. — `docs/SOFT_SWITCHING.md` (2026-11-22), in the docs navigation
 - [ ] 5.2 Generate baselines for all three new benchmarks.
 - [ ] 5.3 Confirm dashboard renders the new KPI columns and the benches pass.

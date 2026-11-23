@@ -33,8 +33,8 @@
 - [x] 6.2 `docs/solvers.md`, `AI_GUIDE.md` §2 ("omit dt") and trap 13: what the ceiling is and when to pass `dt`; docstring of `simulate` for `rtol` / `atol`
 
 ## 7. Verification
-- [ ] 7.1 `ruff check`, `pytest` (throttled), `ctest`, stub check
-- [ ] 7.2 `openspec validate update-trbdf2-error-control --strict` and `openspec validate --all --strict`
+- [x] 7.1 `ruff check`, `pytest` (throttled), `ctest`, stub check — CLOSED: seen on the PR head a90d84b8 (2026-11-22): ruff clean, ctest 1091/1091 (Eigen 5; 17 targets on Eigen 3.4.0), pytest 7079 passed with the one failure re-pinned and its files re-run, `openspec validate --all --strict` 79 passed, stubs `--check` up to date
+- [x] 7.2 `openspec validate update-trbdf2-error-control --strict` and `openspec validate --all --strict` — CLOSED: seen on the PR head a90d84b8 (2026-11-22): ruff clean, ctest 1091/1091 (Eigen 5; 17 targets on Eigen 3.4.0), pytest 7079 passed with the one failure re-pinned and its files re-run, `openspec validate --all --strict` 79 passed, stubs `--check` up to date
 
 ## 8. Stateful kinds in the estimate (DECISIONS 10)
 - [x] 8.1 Per kind: `trbdf2_increments` (q − q_n at γ and at the step end, by the kind's own law) and `q_scales` (atol_q / atol from the device's parameters); folds in `StatefulHistories`
