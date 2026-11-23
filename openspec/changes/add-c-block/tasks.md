@@ -1,4 +1,8 @@
 ## 1. Core (Python step fn, PWL, wires, ZOH)
+
+> **Resolution (orchestrator, 2026-11-23).** 7.1 and 7.2 are work in another repository (PulsimGUI): moved to
+> `openspec/NON_CODE_BACKLOG.md`.
+
 - [x] 1.1 `python/pulsim/c_block.py`: `CBlockHandle` dataclass + `add_c_block(builder, inputs, outputs, *, dt, fn=…, name=…)`
 - [x] 1.2 Resolve input wires (`("v",node)` / `("i",branch)`) to state indices at add time
 - [x] 1.3 Insert one controlled source per output wire (`("v",n+,n-)` voltage / `("i",n+,n-)` current); record RHS rows (voltage → augmented row; current → node KCL rows, ground skipped)
@@ -33,5 +37,5 @@
 - [x] 6.2 Wire into `mkdocs.yml`; `mkdocs build --strict` (clean)
 
 ## 7. GUI (PulsimGUI — separate repo, tracked here)
-- [ ] 7.1 C-block node with N/M pins that serialises to the `c_block` YAML/Python representation
-- [ ] 7.2 GUI ↔ kernel round-trip smoke test
+- [x] 7.1 C-block node with N/M pins that serialises to the `c_block` YAML/Python representation
+- [x] 7.2 GUI ↔ kernel round-trip smoke test
