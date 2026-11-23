@@ -296,13 +296,15 @@ def _pathless_saturable(**kw):
         return p.simulate(b, t_end=1e-5, dt=1e-7, switch_fn=fn, **kw)
 
 
-def test_a_saturable_core_cut_by_its_switch_is_refused_by_name():
-    """The consistent start moves linear C / L histories only; a saturable core's current
-    cut into g_off (5e-2 A -> leakage) is refused, naming the core, not integrated from the
-    reversed pseudo-state."""
-    with pytest.raises(p.UnsupportedError, match="saturable_inductor 'Lsat'") as ei:
-        _pathless_saturable(**RESTART)
-    assert ei.value.device == "Lsat" and ei.value.feature == "impulse"
+def test_a_saturable_core_cut_by_its_switch_is_recorded_in_flux():
+    """A saturable core's current cut into g_off (5e-2 A -> leakage): the jump is carried in
+    flux (restart line, item N; it was refused by name). I_sat = 30 A: linear here, so the
+    record is 1/2 L i^2 with i = 10 V * 5 us / 1 mH (closed form; R_on moves it by 1e-5).
+    The nonlinear cases: test_restart_saturable_flux.py."""
+    r = _pathless_saturable(**RESTART)
+    (rec,) = r.reinit_records
+    assert rec.kind == "cut_set" and list(rec.states) == ["Lsat"]
+    assert rec.dW == pytest.approx(0.5 * 1e-3 * 0.05 ** 2, rel=1e-4)
     _pathless_saturable(engine="pwl")    # restart-less: the rule is not on
 
 
