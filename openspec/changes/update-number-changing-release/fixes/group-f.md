@@ -948,6 +948,69 @@ F7's background chain (PID 43140 + its pytest 48697) stopped by PID before the r
 * On the clamp: unfixed engine 9.666 (`S7_referee_clamp_unfixed.jsonl`), fixed 3.6e-7
   (`S7_referee_clamp_fixed.jsonl`). Test `test_f8_the_referee_fails_a_line_it_cannot_read`.
 
+### Session 7, as found by session 8 (F8 stopped before writing these)
+
+* D-2 / D-3 are 6835fd6c (floor = 16·u·Σ|O||V||z|; rows certified by their floor counted):
+  ten bridges 409 600 capped samples -> 926, three_phase_balanced_rl_load 2 100 001 -> 5 290;
+  tests `test_f8_ten_bridges_rows_at_rounding_do_not_cut_the_samples`,
+  `test_f8_a_balanced_neutral_does_not_spend_the_budget`; C++ case "a variation 1.2x the
+  floor is refined, 0.25x is certified" (`S7_ctest_dsed_run_eigen5.log`: 144 cases pass).
+* F8's chain logs (`.scratch/f8/S7_*`): bit-identity 36/36 + 36/36, dsedall 243 same, events
+  gate 100 same, property 95 comparable worst 0.9976, truth 6/6, ladder500 27.8 s.
+  **`S7_referee_100.jsonl` holds 38 of 100 units** (the process died at
+  driven_lc_series_resonance, empty log) and one of them read **2904x**
+  (diode_half_wave_rl_load): see session 8.
+
+## Session 8 — F-X-7, the merge of the PR line, the referee (logs in `.scratch/f9/`, prefix `S8_`)
+
+Tips: 7fc6ed97 (merge of origin/feat/core-integration 7188a9e1: only this file conflicted, both
+sides kept; the dsed headers merged without conflict), b78d5a01 (F-X-7), bdabb1e9 (referee).
+
+### F-X-7 — NOT the recovered-row bound: a jump drawn as a ramp (FIXED, b78d5a01)
+
+* On the merged tip before the fix (`S8_fx7_merged_before.log`, bridge3_overlap branch form,
+  bus = v(p) − v(n) by `np.interp` over `res.times` at 4001 instants, truth pwl + restart +
+  split at dt 1e-7): rule off 0.010659 V; output_rtol 1e-5 **34.182 V at t = 0.12 ms**; 1e-7
+  22.36 V. So this branch's bound on recovered rows did not fix it.
+* Cause (`S8_fx7_twosided_before.log`): the sample stored at an event is its LEFT limit. The
+  bus jumps 132.6096 -> 173.063 V at the commutation at 119.3798 us; with the rule on the next
+  stored sample was 4 us later, so plain interpolation drew the jump as a 4 us ramp. With the
+  rule off a fast sample 1e-10 s after the event hid it. Read two-sided
+  (`with_right_limits`) the SAME rule-on run reads 0.010675 V (1e-5) / 0.010661 V (1e-7): the
+  chord bound held on every line.
+* Fix (rule on only, `output_jump_`): after an event that changed the mode or a source's piece
+  the exact flow 2 ps later is a stored sample (evaluated from the step's start: no state,
+  step or event moves); a step too short to hold it keeps its end. +1 sample per such event
+  (the bridge: 3352 -> 3368).
+* After (`S8_fx7_after.log`): 1e-5 **0.010674 V**, 1e-7 **0.01066 V**, rule off 0.010659 V.
+  Every stored column against the rule-off run's own exact samples (`S8_fx7_columns.log`):
+  worst 0.9971 of its tolerance at 1e-5, 0.44 at 1e-7 (floored columns 0.06). The bus is a
+  difference of two columns: its bound is the sum of theirs (it read 1.11x ONE range's
+  tolerance, which is not a violation).
+* Test `test_fx7_a_jump_of_an_output_is_stored_on_both_sides` (the 4001-instant reading
+  <= 3e-2 V at both tolerances; a sample 2 ps after every event; every stored column within
+  its promise). Docstring and docs/solvers.md state the 2 ps line.
+* The rule moves an event by picoseconds against the rule-off run (2.2e-12 s at 15 ms).
+
+### The referee (bdabb1e9)
+
+* diode_half_wave_rl_load **2904x** is not a chord: the rule's event projection settles the
+  parasitic cluster at once (V(out) −0.31385 -> −3.1e-6 V at 10.0999 ms) while the rule-off
+  reference lets that ~1 ns mode decay (−0.2994 V 47 ps after the event). Reference instants
+  within `SETTLE` = 4e-5 of the run after an event are read apart: `ratio` 0.967,
+  `ratio_incl_settle` 2904. **Open (design, not fixed): inside that window the rule-on result
+  is the settled solution, not the exact one; the option's text says "removes only the
+  parasitic cluster" but the promise's "exact solution" does not carry that exception.**
+* Denominator: the run's range (as sessions 6–7). The promise's range is "so far, through
+  the end of the exact step holding the line"; the stored trace does not show the steps, so
+  the so-far reading through each line's end sample is reported beside it
+  (`ratio_range_so_far`, stricter than the engine's: rc_step 3.51 at t = 1.4e-7 s against 0.957).
+* Every stored column is read against its own floor when the dt reference stores the same
+  columns (`ratio_stored_columns`); a dt run of several circuits stores one column fewer
+  (6 vs 5 on the diode circuits): there only the declared observables are read (said in the row).
+* One process per unit (`.scratch/f9/ref1.sh`): a crash is a recorded failure.
+
+
 ## Session 5 — branch `fix/core-release-f5-settle-decisions` (from 6cb51c00): two settle decisions
 
 Base for every "before": the extension built at 6cb51c00 (`.scratch/f5/base_py`). Truth: the
