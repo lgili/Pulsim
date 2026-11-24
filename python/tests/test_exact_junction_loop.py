@@ -137,14 +137,12 @@ def _vsi_case():
     return b, fn, names
 
 
-# The VSI's reference is NOT available: trbdf2 with these six thermal networks
-# exhausts max_steps at ~20 us (rtol 1e-10 and 1e-9; without them it runs, see
-# test_exact_loss_port). A trbdf2 defect, open (DECISIONS session 25).
+# Both buck and VSI agree with trbdf2 at rtol 1e-10 across every junction
+# (the VSI trbdf2 thermal stall was resolved in add-in-kernel-event-losses
+# DECISIONS 17 / core-p2-trbdf2-thermal).
 @pytest.mark.parametrize("make,t_end,rtol", [
     (_buck, 202.5e-6, 1e-10),
-    pytest.param(_vsi_case, 2.03e-3, 1e-9, marks=pytest.mark.xfail(
-        raises=p.SimulationAborted, strict=True,
-        reason="trbdf2 grinds on the VSI with thermal networks")),
+    (_vsi_case, 2.03e-3, 1e-10),
 ], ids=["buck", "vsi"])
 def test_junction_temperatures_agree_with_trbdf2_at_tight_tolerance(make, t_end, rtol):
     """T_j(t) of every junction against trbdf2 at rtol 1e-10, within 1e-4 of

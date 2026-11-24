@@ -836,3 +836,7 @@ Tasks: 20.1 ticked (seen passing); 20.2-20.4 and add-in-kernel-event-losses 3.3 
 
 ### The bar on b7c7858f (extension built from the tree, .so sha f3c2bb68 equal installed)
 full pytest 5873 passed / 110 skipped / 9 xfailed; `-m reference` 383; reference_status exit 0, its JSON identical to b1's; goldens ALL IDENTICAL; bit-identity 34/36 default and shadow; exact scoreboard 324 values, 0 changed vs b1; flips identical to b1 except wall times; banks 1/9/10 2.541e-5 / 5.843e-4 / 2.117e-4, 12 raises as at baseline; fuzz / truths / orbit as baseline; dsedall 340; C++ on Eigen 5 and 3.4.0: dsed 140 cases / 40927 assertions, layer4_v3 29, mode 40, thermal 9, record 17, all pass; ruff clean, openspec 78, stubs up to date. Full ctest not run.
+
+### Follow-up: VSI thermal xfail resolved (after `core-p2-trbdf2-thermal` merge)
+- After merging `core-p2-trbdf2-thermal` (`add-in-kernel-event-losses` DECISIONS 17), `trbdf2` completes cleanly on the 6-junction VSI (`_vsi_case`) at `rtol = 1e-10` and agrees with `dsed` across all 6 junctions within `6.25e-5 * rise` (well within the `1e-4 * rise` bound).
+- Removed the `xfail` on `[vsi]` in `python/tests/test_exact_junction_loop.py` and tightened its reference tolerance from `1e-9` to `1e-10` (matching `[buck]` and the test docstring). All 7 tests in `test_exact_junction_loop.py` pass with 0 xfails.
