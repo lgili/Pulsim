@@ -181,7 +181,7 @@ the rest.
 
 | Change id | Scope | Items | Capabilities | Effort | Needs | Status |
 |---|---|---|---|---|---|---|
-| `add-in-kernel-event-losses` | Loss tables in C++; energy injected into the thermal node at each commutation (the event records of the ideal switch); closed-loop T_j on every engine | M3 | `loss-thermal` (new) | M | event queue; branch-form loss records | in progress [27/31] |
+| `add-in-kernel-event-losses` | Loss tables in C++; energy injected into the thermal node at each commutation (the event records of the ideal switch); closed-loop T_j on every engine | M3 | `loss-thermal` (new) | M | event queue; branch-form loss records | in progress [28/31] |
 | `add-immutable-circuit-ir` | Immutable `Circuit` with named parameters and expressions, hierarchy kept, clone / `with_params` (re-binding without rebuild) / `to_yaml`, domain-tagged nodes | A9 | `circuit-ir` (new), `netlist-yaml` | M–L | simulation object | in progress [46/49] |
 | `add-parameter-sensitivities` | Forward sensitivities through the cached LU with event jump correction; exact-propagator form; steady-state gradients | A10 | `parameter-sweep` | L | device interface, stepper | in progress [15/30] |
 | `add-periodic-steady-state-shooting` | One Newton shooting solver on the true state with located events and saltation matrices; works in DCM; completion: every strategy, nonlinear devices, ideal-switch reset maps | P8 | `periodic-steady-state` (new) | M–L | slice 1: none; completion: event queue, device interface, CORE A | in progress [19/24] |
@@ -200,7 +200,7 @@ the rest.
 
 | Change id | Scope | Items | Capabilities | Effort | Needs | Status |
 |---|---|---|---|---|---|---|
-| `update-number-changing-release` | Coordinates Decision 3's single number-changing release flip (`simulate()` / `sim::kRunOptionTable` defaults, `form='branch'`, `engine='auto'` exact route), one re-baseline of goldens/scoreboards/tests, and migration notes (**B**) | Decision 3 | `transient-timestep`, `device-models`, `benchmark-suite` | M | Phase 2, CORE A, CORE B | in progress [9/28; blockers 1.1–1.8 closed, owner decisions 2.1–2.5 being finalized] |
+| `update-number-changing-release` | Coordinates Decision 3's single number-changing release flip (`simulate()` / `sim::kRunOptionTable` defaults, `form='branch'`, `engine='auto'` exact route), one re-baseline of goldens/scoreboards/tests, and migration notes (**B**) | Decision 3 | `transient-timestep`, `device-models`, `benchmark-suite` | M | Phase 2, CORE A, CORE B | in progress [13/28; blockers 1.1–1.8 and owner decisions 2.1–2.5 closed, ready for 1.9 rehearsal and flip] |
 | `add-adaptive-runge-kutta-solvers` | Superseded by `refactor-unified-transient-stepper` strategies (Decision 9); `core/integrators/` retires with the stepper | Decision 9 | `transient-timestep` | — | — | withdrawn/archived |
 
 ## Rules that apply to every change
@@ -297,8 +297,8 @@ scope or the claim of a change.
 - `add-mna-native-machines`: BLDC uses a PM-flux harmonic series, not a
   flux table (a trapezoidal back-EMF table is only C¹).
 - `refactor-unified-transient-stepper` retires `core/integrators/`,
-  which the open change `add-adaptive-runge-kutta-solvers` builds on
-  (see decision 9).
+  which `add-adaptive-runge-kutta-solvers` built on (withdrawn and
+  archived per decision 9).
 - `add-external-device-abi` adds requirements to `device-interface`,
   which exists only after `add-unified-device-interface` is archived.
 

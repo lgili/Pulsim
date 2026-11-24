@@ -195,3 +195,21 @@ def test_a_fresh_t_start_run_books_the_zero_start_ledgers_relabelled():
         assert len(la) == len(lc) > 0
         np.testing.assert_allclose(lc["t"], la["t"] + t0, rtol=0, atol=1e-18)
         np.testing.assert_allclose(lc["E"], la["E"], rtol=1e-12, atol=0)
+
+
+def test_zero_state_static_circuit_with_loss_port_does_not_crash():
+    """A 0-state resistive+switch circuit with set_device_losses on dsed must
+    not call maxCoeff() on an empty state vector in ExactLossPort."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "in", "gnd", 10.0)
+    b.add_switch("S1", "in", "sw", 1e3, 1e-9)
+    b.add_resistor("RL", "sw", "gnd", 10.0)
+    tab = p.LossTable([0.0, 20.0], [0.0, 2.0], [25.0, 125.0],
+                      np.full((2, 2, 2), 1e-5))
+    b.set_device_losses("S1", Tj=25.0, E_on=tab, E_off=tab)
+    fn = p.make_pwm_switch_fn(100e3, 0.5, b.switch_index_of("S1"), b.graph.num_switches)
+    res = p.simulate(b, 50e-6, switch_fn=fn, engine="dsed")
+    e = res.device_energy("S1")
+    assert e["n_on"] > 0 and e["n_off"] > 0
+    assert e["E_on"] == pytest.approx(e["n_on"] * 1e-5, rel=1e-12)
+    assert e["E_off"] == pytest.approx(e["n_off"] * 1e-5, rel=1e-12)

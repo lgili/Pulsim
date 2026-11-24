@@ -257,8 +257,10 @@ private:
         // a state that is exactly 0 (by symmetry) still carries the other
         // modes' rounding, u·‖x‖ (a VSI's phase current at rest next to a 25 V
         // thermal state read 4e-34): that is its floor
-        const Real floor = std::numeric_limits<Real>::epsilon()
-                           * (x1.cwiseAbs().maxCoeff() + mag.maxCoeff()) + Real{1e-300};
+        const Real floor = (n > 0
+                            ? std::numeric_limits<Real>::epsilon()
+                              * (x1.cwiseAbs().maxCoeff() + mag.maxCoeff())
+                            : Real{0}) + Real{1e-300};
         for (Index i = 0; i < n; ++i) {
             const Real sc = std::abs(x0[i]) + std::abs(x1[i]) + mag[i] + floor;
             if (std::abs(xe[i] - x1[i]) > Real{1e-9} * sc) {
