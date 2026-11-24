@@ -53,6 +53,8 @@
 #include <concepts>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
+#include <limits>
 #include <functional>
 #include <optional>
 #include <stdexcept>
@@ -323,6 +325,116 @@ concept HasZcdRegister = requires(SwitchFn& fn, Real t) {
     return h00 * x0 + (h10 * h) * k1 + h01 * x1 + (h11 * h) * k7;
 }
 
+/// The exact engine's state at a committed instant (snapshot / resume,
+/// add-exact-propagator-strategy session 24). The trajectory between two
+/// instants is a pure function of (t, x, mask) and the schedule, so this is
+/// everything a resumed run needs to take the same steps: the gate edges and
+/// source corners are asked of their oracles at every step (no cursor), the
+/// control ticks carry their integer index in the snapshot's tick fields, and
+/// the rest is below. `mask` (the integrated mask, SolverSnapshot::
+/// stamped_mask) and `diode_bits` (SolverSnapshot::mask) travel in the
+/// snapshot's own fields; `flatten` is the payload of the snapshot's
+/// controller block with kind Exact (pickle field 14).
+template <class MaskT>
+struct ExactResumeState {
+    static constexpr Real kVersion = Real{1};
+    Real t = Real{0};
+    Vector x;                      // the reduced state
+    MaskT mask{};                  // integrated at t (a pending gate edge not yet applied)
+    MaskT diode_bits{};            // the scheduler's diode latch
+    /// A snapshot of another engine: the modes are decided at t as at a start.
+    bool decide = false;
+    Real last_time_event_t = std::numeric_limits<Real>::quiet_NaN();
+    std::int64_t last_fired_index = -1;
+    Real last_fired_t = std::numeric_limits<Real>::quiet_NaN();
+    Real h = Real{0};              // the numeric path's next step (0: dt_init)
+    Real err_prev = Real{1};       // its PI controller's memory
+    std::uint64_t step_phase = 0;  // accepted steps mod store_every
+    std::vector<Real> fast_t;      // fast samples still ahead (plan_fast_samples_)
+    std::vector<std::uint64_t> burst_count;
+    std::vector<Real> burst_t0;
+
+    [[nodiscard]] std::vector<Real> flatten() const {
+        std::vector<Real> o{kVersion, t, static_cast<Real>(x.size())};
+        o.insert(o.end(), x.data(), x.data() + x.size());
+        o.insert(o.end(), {last_time_event_t, static_cast<Real>(last_fired_index), last_fired_t,
+                           h, err_prev, static_cast<Real>(step_phase),
+                           static_cast<Real>(fast_t.size())});
+        o.insert(o.end(), fast_t.begin(), fast_t.end());
+        o.push_back(static_cast<Real>(burst_count.size()));
+        for (std::size_t i = 0; i < burst_count.size(); ++i) {
+            o.push_back(static_cast<Real>(burst_count[i]));
+            o.push_back(burst_t0[i]);
+        }
+        return o;
+    }
+
+    /// Reads `flatten`'s layout; a truncated, padded or foreign payload is
+    /// refused by name (never a silent partial resume).
+    static ExactResumeState unflatten(const std::vector<Real>& v) {
+        std::size_t k = 0;
+        const auto next = [&]() {
+            if (k >= v.size()) {
+                throw std::invalid_argument(
+                    "dsed(resume_from=...): the snapshot's exact-engine payload is truncated");
+            }
+            return v[k++];
+        };
+        // a count or index read from the payload: an integer the payload can hold
+        // (a NaN or out-of-range value is refused, never cast)
+        const auto count = [&]() {
+            const Real c = next();
+            if (!(c >= Real{0}) || c != std::floor(c) || c > static_cast<Real>(v.size())) {
+                throw std::invalid_argument(
+                    "dsed(resume_from=...): the snapshot's exact-engine payload is corrupt");
+            }
+            return static_cast<std::size_t>(c);
+        };
+        const auto integer = [&]() {   // a non-negative counter (< 2^53)
+            const Real c = next();
+            if (!(c >= Real{0}) || c != std::floor(c) || c > Real{9007199254740992.0}) {
+                throw std::invalid_argument(
+                    "dsed(resume_from=...): the snapshot's exact-engine payload is corrupt");
+            }
+            return c;
+        };
+        ExactResumeState s;
+        if (next() != kVersion) {
+            throw std::invalid_argument(
+                "dsed(resume_from=...): the snapshot's exact-engine payload has a version "
+                "this Pulsim does not read");
+        }
+        s.t = next();
+        s.x.resize(static_cast<Index>(count()));
+        for (Index i = 0; i < s.x.size(); ++i) s.x[i] = next();
+        s.last_time_event_t = next();
+        {
+            const Real f = next();
+            if (!(f >= Real{-1}) || f != std::floor(f) || f > Real{2147483647}) {
+                throw std::invalid_argument(
+                    "dsed(resume_from=...): the snapshot's exact-engine payload is corrupt");
+            }
+            s.last_fired_index = static_cast<std::int64_t>(f);
+        }
+        s.last_fired_t = next();
+        s.h = next();
+        s.err_prev = next();
+        s.step_phase = static_cast<std::uint64_t>(integer());
+        s.fast_t.resize(count());
+        for (auto& f : s.fast_t) f = next();
+        const std::size_t nb = count();
+        for (std::size_t i = 0; i < nb; ++i) {
+            s.burst_count.push_back(static_cast<std::uint64_t>(integer()));
+            s.burst_t0.push_back(next());
+        }
+        if (k != v.size()) {
+            throw std::invalid_argument(
+                "dsed(resume_from=...): the snapshot's exact-engine payload has trailing values");
+        }
+        return s;
+    }
+};
+
 /// Path-Based Event-Driven scheduler (Gate 3 port).
 ///
 /// Templated on `System` (the ODE source — provides rhs + set_mask)
@@ -351,24 +463,47 @@ public:
           store_every_{store_every},
           state_projection_{std::move(state_projection)} {}
 
-    /// Run the simulation from ``t = 0`` to ``t = t_end``.
-    [[nodiscard]] PEDResult<MaskT> simulate(const Vector& x0, Real t_end) {
+    /// Run the simulation from ``t = 0`` to ``t = t_end``, or from the
+    /// committed instant `resume` describes (its t, state, mode and schedule
+    /// position: `x0` is then ignored). The run's end state is `final_state()`.
+    [[nodiscard]] PEDResult<MaskT> simulate(const Vector& x0, Real t_end,
+                                            const ExactResumeState<MaskT>* resume = nullptr) {
         probe_t_end_ = t_end;
         last_time_event_t_ = Real{0};   // the start samples the gates like a landed edge
         using clock = std::chrono::high_resolution_clock;
         const auto t0_wall = clock::now();
 
-        Vector x = x0;
-        Real t = Real{0};
+        Vector x = resume != nullptr ? resume->x : x0;
+        Real t = resume != nullptr ? resume->t : Real{0};
         Real h = dt_init_;
+        std::size_t step_idx = 0;
+        if (resume != nullptr) {
+            last_time_event_t_ = resume->decide ? t : resume->last_time_event_t;
+            last_fired_index_ = static_cast<int>(resume->last_fired_index);
+            last_fired_t_ = resume->last_fired_t;
+            if (resume->h > Real{0}) h = resume->h;
+            controller_.set_err_prev(resume->err_prev);
+            step_idx = static_cast<std::size_t>(resume->step_phase);
+            fast_t_ = resume->fast_t;
+            fast_k_ = 0;
+            if (resume->burst_count.size() == diode_burst_count_.size()) {
+                for (std::size_t i = 0; i < diode_burst_count_.size(); ++i) {
+                    diode_burst_count_[i] = static_cast<Size>(resume->burst_count[i]);
+                    diode_burst_t0_[i] = resume->burst_t0[i];
+                }
+            } else {
+                std::fill(diode_burst_t0_.begin(), diode_burst_t0_.end(), t);
+            }
+            if (has_diodes_) diode_bits_ = resume->diode_bits;
+        }
         if constexpr (requires { system_.set_max_step(dt_max_); }) {
             system_.set_max_step(dt_max_);
         }
         if constexpr (requires { system_.set_horizon(t_end); }) {
             system_.set_horizon(t_end);
         }
-        start_time_events_(t_end);
-        MaskT mask = effective_mask_(switch_fn_(t));
+        start_time_events_(t, t_end);
+        MaskT mask = resume != nullptr ? resume->mask : effective_mask_(switch_fn_(t));
         system_.set_mask(mask);
         // A diode may be forward-biased already at t = 0 (a
         // rectifier powered on mid-cycle). Settle before the first
@@ -382,24 +517,38 @@ public:
         loc_dx_.resize(0);
         output_lo_.resize(0);   // the output rule's state is per run
         output_count_ = output_events_ = n_output_capped_ = n_output_unbounded_ = 0;
-        {
+        if (resume == nullptr) {
             MaskT m0 = system_.current_mask();
             const MaskT prev0 = diode_bits_;
             const MaskT old0 = m0;
             decide_modes_(t, x, m0, old0, prev0, old0, result);
+            // The ticks at t = 0 run before the first sample; the gate is
+            // sampled again with what they wrote.
+            if (run_due_ticks_(t, x)) {
+                fire_event_(t, "control_tick", PredicateType::GateEdge, x, rk_state, result);
+            }
         }
-        // The ticks at t = 0 run before the first sample; the gate is
-        // sampled again with what they wrote.
-        if (run_due_ticks_(t, x)) {
-            fire_event_(t, "control_tick", PredicateType::GateEdge, x, rk_state, result);
+        // A resume's row 0 is the landing's row of the uninterrupted run: the
+        // left limit and the mask it was integrated under, then the event.
+        Vector x_left;
+        MaskT m_left = system_.current_mask();
+        bool landed = false;
+        if (resume != nullptr) {
+            // the hooks see the committed instant first: an edge the first run
+            // left at its t_end is an event of THIS run (its switching energy)
+            if constexpr (std::is_same_v<MaskT, topology::SwitchStateMask>) {
+                if (hooks_ != nullptr) hooks_->start(x, system_.current_mask());
+            }
+            x_left = x;
+            landed = resume_landing_(t, x, rk_state, result, resume->decide);
         }
         run_due_monitors_(t, x);
         if constexpr (std::is_same_v<MaskT, topology::SwitchStateMask>) {
-            if (hooks_ != nullptr) hooks_->start(x, system_.current_mask());
+            if (hooks_ != nullptr && resume == nullptr) hooks_->start(x, system_.current_mask());
         }
         ped_push_sample(result, t, x, system_.current_mask(),
-                        system_.current_mask(), nullptr);
-        std::size_t step_idx = 0;
+                        landed ? m_left : system_.current_mask(),
+                        landed ? &x_left : nullptr);
         // Stamped-mask bookkeeping for the step being taken (see
         // PEDResult::step_masks). Captured after the zero-length
         // gate-edge branch, which fires without storing a sample.
@@ -534,6 +683,7 @@ public:
                     ++result.n_accept;
                     ++result.n_exact_steps;
                     hook_accepted_(t_step0, t, step_fired ? x_pre_event : x, step_mask);
+                    if (state_kick_) state_kick_(x, step_fired ? &x_pre_event : nullptr);
                     ++step_idx;
                     if (step_idx % store_every_ == 0) {
                         ped_push_sample(result, t, x,
@@ -722,6 +872,9 @@ public:
 
             // 8. Record
             hook_accepted_(t_step0, t, step_fired ? x_pre_event : x, step_mask);
+            if (state_kick_ && state_kick_(x, step_fired ? &x_pre_event : nullptr)) {
+                rk_state.invalidate();   // FSAL's k1 was f(t, x) before the correction
+            }
             ++step_idx;
             if (step_idx % store_every_ == 0) {
                 ped_push_sample(result, t, x, system_.current_mask(),
@@ -736,6 +889,25 @@ public:
             ped_push_sample(result, t, x, system_.current_mask(),
                             step_mask,
                             step_fired ? &x_pre_event : nullptr);
+        }
+        {   // the committed end instant (snapshot / resume)
+            auto& f = final_;
+            f = ExactResumeState<MaskT>{};
+            f.t = t;
+            f.x = x;
+            f.mask = system_.current_mask();
+            f.diode_bits = diode_bits_;
+            f.last_time_event_t = last_time_event_t_;
+            f.last_fired_index = last_fired_index_;
+            f.last_fired_t = last_fired_t_;
+            f.h = h;
+            f.err_prev = controller_.err_prev();
+            f.step_phase = step_idx % store_every_;
+            if (fast_k_ < fast_t_.size()) {
+                f.fast_t.assign(fast_t_.begin() + static_cast<std::ptrdiff_t>(fast_k_), fast_t_.end());
+            }
+            f.burst_count.assign(diode_burst_count_.begin(), diode_burst_count_.end());
+            f.burst_t0 = diode_burst_t0_;
         }
         // Every run is checked (review of slice 5: gating it on the event
         // projection, off by default, skipped every plain C++ caller). A period
@@ -931,7 +1103,48 @@ private:
     }
 
     // ---- control ticks on the queue (add-unified-event-queue group 3) ----
-    void start_time_events_(Real t_end) {
+    /// Resume at a committed instant: what the uninterrupted run did at its
+    /// landing on `t` that the first run, stopping there, did not do — the
+    /// control ticks due at t, then a gate edge or source corner at t (an edge
+    /// at a run's t_end belongs to the run after it), fired from the left
+    /// limit exactly as the landing fires it (same event time, same order).
+    /// A snapshot of another engine has its modes decided at t as at a start.
+    bool resume_landing_(Real& t, Vector& x, RK45State& rk_state, PEDResult<MaskT>& result,
+                         bool decide) {
+        // the edge the first run's last step aimed at: asked of the oracles
+        // from just before t, as the landing step asked them from its start
+        Real t_gate = std::numeric_limits<Real>::infinity();
+        bool at_corner = false;
+        {
+            const Real tq = t - time_margin(t);
+            Real t_sw = std::numeric_limits<Real>::infinity();
+            const Real te = next_gate_edge_(tq, std::numeric_limits<Real>::infinity(), t_sw);
+            if (std::isfinite(te) && near_time(t, te)) {
+                t_gate = te;
+                at_corner = te < t_sw;
+            }
+        }
+        const bool on_edge = std::isfinite(t_gate);
+        if (on_edge && at_corner) t = t_gate;   // the landing lands on a corner exactly
+        const MaskT before = system_.current_mask();
+        const bool ticked = run_due_ticks_(t, x);
+        bool fired = false;
+        if (on_edge || ticked) {
+            fire_event_(on_edge ? t_gate : t, on_edge ? "gate_edge" : "control_tick",
+                        PredicateType::GateEdge, x, rk_state, result);
+            fired = !(system_.current_mask() == before);
+            plan_fast_samples_(t, (on_edge && at_corner) || fired);
+        }
+        if (decide && !fired) {
+            MaskT m0 = system_.current_mask();
+            const MaskT prev0 = diode_bits_;
+            const MaskT old0 = m0;
+            decide_modes_(t, x, m0, old0, prev0, old0, result);
+        }
+        return on_edge || ticked;
+    }
+
+    void start_time_events_(Real t0, Real t_end) {
         queue_ = events::EventQueue{};
         n_tick_src_ = static_cast<std::uint32_t>(ticks_.rates.size());
         for (std::size_t j = 0; j < ticks_.rates.size(); ++j) {   // ids 0..n-1 = j
@@ -947,7 +1160,7 @@ private:
             corner_src_ = queue_.add_function(events::Kind::SourceBreakpoint,
                 [this](Real s) { return system_.next_source_corner_after(s); });
         }
-        queue_.start(Real{0}, t_end);
+        queue_.start(t0, t_end, t0 > Real{0} ? tick_tol_(t0) : Real{0});
     }
 
     [[nodiscard]] static Real tick_tol_(Real t) noexcept {
@@ -998,6 +1211,13 @@ public:
     /// on_commutation at every change of the integrated mask. Not owned.
     void set_hooks(events::StepHooks* hooks) noexcept { hooks_ = hooks; }
 
+    /// A correction of the state at each accepted step's end, after its
+    /// hooks: `fn(x, x_left)` (x_left: the pre-event record when an event
+    /// ended the step, else null) returns whether it changed anything. The
+    /// exact loss port's junction heat (dsed/loss_port.hpp): the thermal
+    /// states respond to the step's heat; no electrical state moves.
+    void set_state_kick(std::function<bool(Vector&, Vector*)> fn) { state_kick_ = std::move(fn); }
+
     /// Control ticks scheduled by the run's event queue: `fn(j, info, t, x)`
     /// with the reduced state x at each instant of `rates[j]` before t_end;
     /// the gate is sampled again after the ticks of an instant.
@@ -1008,6 +1228,22 @@ public:
         std::vector<std::uint64_t> n;
         for (std::uint32_t j = 0; j < n_tick_src_; ++j) n.push_back(queue_.taken(j));
         return n;
+    }
+
+    /// The last run's committed end instant (snapshot / resume).
+    [[nodiscard]] const ExactResumeState<MaskT>& final_state() const noexcept { return final_; }
+    /// Per tick source: its grid's origin and the index of its next instant
+    /// (the snapshot's tick fields; a resume passes them back in the plan's
+    /// Rate::origin / Rate::k0).
+    [[nodiscard]] std::vector<Real> tick_origins() const {
+        std::vector<Real> o;
+        for (std::uint32_t j = 0; j < n_tick_src_; ++j) o.push_back(queue_.grid_origin(j));
+        return o;
+    }
+    [[nodiscard]] std::vector<std::uint64_t> tick_next_k() const {
+        std::vector<std::uint64_t> o;
+        for (std::uint32_t j = 0; j < n_tick_src_; ++j) o.push_back(queue_.next_k(j));
+        return o;
     }
 
 private:
@@ -2957,9 +3193,11 @@ private:
     std::uint32_t gate_src_ = 0;
     std::uint32_t corner_src_ = 0;
     events::StepHooks* hooks_ = nullptr;
+    std::function<bool(Vector&, Vector*)> state_kick_;
     Vector hook_x_left_;
     std::vector<Real> fast_t_;     // plan_fast_samples_
     std::size_t fast_k_ = 0;
+    ExactResumeState<MaskT> final_;   // simulate(): the committed end instant
     Real dt_init_;
     Real dt_max_;
     std::size_t store_every_;

@@ -832,6 +832,25 @@ public:
         ensure_current_resolved_();
         return energy_scale_(*current_entry_, 0);
     }
+    /// The current mask's reduced input of a unit current INTO MNA node
+    /// `node` (b_projection of the -1 stamp solver::LossTracker::inject
+    /// writes), and the largest instantaneous response of an MNA unknown to
+    /// it of a NODE voltage (recover_from_b's node rows): 0 when every node
+    /// reads it through the states. (A branch current, e.g. a source holding
+    /// the far end of a capacitor, does respond at once: C·dv/dt.)
+    [[nodiscard]] std::pair<Vector, Real> node_current_input(Index node) const {
+        ensure_current_resolved_();
+        const auto& e = *current_entry_;
+        const Index nn = static_cast<Index>(graph_.num_nodes());
+        return {-e.b_projection.col(node),
+                e.recover_from_b.col(node).head(nn).cwiseAbs().maxCoeff()};
+    }
+    /// The scale `node_current_input`'s response is judged against.
+    [[nodiscard]] Real recover_from_b_scale() const {
+        ensure_current_resolved_();
+        const auto& r = current_entry_->recover_from_b;
+        return r.size() > 0 ? r.cwiseAbs().maxCoeff() : Real{0};
+    }
 
     /// The graph / pool this adapter was built over — the diode
     /// predicate derivation (v2.0 Phase 3) runs its census on the

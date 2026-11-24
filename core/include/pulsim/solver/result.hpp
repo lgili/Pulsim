@@ -360,6 +360,10 @@ public:
     std::shared_ptr<void> control_state;
     /// True once populated by a run.
     bool valid = false;
+    /// Why a run left its snapshot invalid, when it knows (a route that keeps
+    /// no snapshot): a resume from it is refused with this cause. Not pickled
+    /// (an unpickled invalid snapshot is refused with the generic causes).
+    std::string invalid_reason;
 };
 
 /// `m` as one bool per bit (SolverSnapshot::stamped_mask).

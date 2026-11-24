@@ -3623,6 +3623,10 @@ void init_module(py::module_& m) {
              },
              py::arg("records"), py::arg("heat_injected"), py::arg("heat_pending"),
              "The exact engine's loss records (dsed loss port).")
+        .def("_set_final_snapshot",
+             [](SimulationResult& r, SolverSnapshot s) { r.final_snapshot = std::move(s); },
+             py::arg("snapshot"),
+             "The exact engine's end-of-run snapshot (dsed).")
         .def_readonly("heat_injected", &SimulationResult::heat_injected,
                        "J of heat the run deposited into thermal nodes.")
         .def_readonly("heat_pending", &SimulationResult::heat_pending,
@@ -4513,6 +4517,10 @@ void init_module(py::module_& m) {
             "Deprecated view of one block of ``dev_state`` (the 2.0 field). "
             "Writing it turns the snapshot into a 2.0-style payload.")
         .def_readwrite("valid", &SolverSnapshot::valid)
+        .def_readwrite("invalid_reason", &SolverSnapshot::invalid_reason,
+            "Why the run that produced this snapshot left it invalid, when it "
+            "knows (a route that keeps no snapshot); resume_from refuses it with "
+            "this cause. Empty for a valid snapshot. Not pickled.")
         .def_readwrite("grid_origin", &SolverSnapshot::grid_origin,
             "The fixed-step grid ``t`` sits on: t == grid_origin + "
             "grid_step * grid_dt to rounding (NaN: none). A fixed-step resume "
@@ -4537,8 +4545,10 @@ void init_module(py::module_& m) {
             "The step-size controller's state (step::ControllerState): "
             "``(kind, values)`` with kind 1 = fixed, 2 = LTE (TR-BDF2; "
             "layout [h, h_mem_gate0, h_mem_gate1, pending_gate_slot, "
-            "diode_slot, gate_parity, h_mem_diode...]), or None: the "
-            "resumed engine then restarts its controller.")
+            "diode_slot, gate_parity, h_mem_diode...]), 3 = the exact "
+            "engine's committed instant (reduced state, schedule position, "
+            "step memory; engine='dsed' resumes from it, the others refuse "
+            "it), or None: the resumed engine then restarts its controller.")
         .def_readwrite("restart_steps_left",
             &SolverSnapshot::restart_steps_left,
             "discontinuity_restart: SDIRK restart steps still owed when "
@@ -4690,11 +4700,11 @@ void init_module(py::module_& m) {
                     if (ctrl != npos && !t[ctrl].is_none()) {
                         auto C = t[ctrl].cast<py::tuple>();
                         const int kind = C.size() == 2 ? C[0].cast<int>() : -1;
-                        if (kind < 1 || kind > 2) {
+                        if (kind < 1 || kind > 3) {
                             throw std::runtime_error(
                                 "SolverSnapshot: the controller-state field "
-                                "must be (kind, values) with kind 1 (fixed) "
-                                "or 2 (LTE)");
+                                "must be (kind, values) with kind 1 (fixed), "
+                                "2 (LTE) or 3 (the exact engine)");
                         }
                         s.controller.kind =
                             static_cast<pulsim::step::ControllerState::Kind>(kind);

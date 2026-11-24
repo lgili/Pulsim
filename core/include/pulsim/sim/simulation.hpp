@@ -249,6 +249,14 @@ public:
                 "Simulation.restore: the snapshot is not valid (it came from a "
                 "run that produced none)");
         }
+        if (s.controller.kind == step::ControllerState::Kind::Exact) {
+            // the exact engine's snapshot (dsed::ExactResumeState): its state has
+            // no companion history for these engines to continue from
+            throw UnsupportedError(engine_label(opts_.engine), "resume_from", "", "",
+                "Simulation.restore: the snapshot was written by the exact engine, "
+                "whose state has no companion history (i_C, v_L) to continue a "
+                "trapezoidal step from; resume it with engine='dsed'");
+        }
         snapshot_ = s;
         t_cursor_ = at_snapshot_time ? s.t : opts_.t_start;
         // simulate(resume_from=, start_from_dc_op=True) hands the driver

@@ -156,8 +156,7 @@ inline constexpr std::array<OptionSpec, 51> kRunOptionTable{{
      "whatever it was closing (an electro-thermal loop, usually) would "
      "silently stay open"},
     {"controller_period", kEvery, Unset::Always, "None", ""},
-    {"resume_from", kPwl | kTrBdf2, Unset::None, "None",
-     "resume_from needs a snapshot the exact engine does not keep"},
+    {"resume_from", kEvery, Unset::Always, "None", ""},
     {"solver", kEvery, Unset::Always, "None", ""},
     {"sensitivities", kExact, Unset::None, "None",
      "sensitivities are computed on the exact path only"},
