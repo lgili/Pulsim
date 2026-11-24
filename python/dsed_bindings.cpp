@@ -1320,7 +1320,8 @@ void init_module(py::module_& m) {
            std::vector<Real> tick_periods,
            std::vector<Real> tick_offsets,
            std::vector<py::object> tick_fns,
-           std::vector<bool> tick_monitors) {
+           std::vector<bool> tick_monitors,
+           Real output_rtol, std::size_t output_cap) {
             PySwitchFnSSM sf(std::move(switch_fn_obj));
             // add-unified-event-queue group 3: control ticks on the
             // scheduler's queue; each gets the full MNA state.
@@ -1482,6 +1483,7 @@ void init_module(py::module_& m) {
             sim.set_event_projection(enable_event_projection);
             sim.set_settle_round_cap(settle_round_cap);
             sim.set_diode_law_check(diode_law_rel);
+            if (output_rtol > Real{0}) sim.set_output_rule(output_rtol, atol, output_cap);
             if (!tick_cbs.empty()) {
                 pulsim::events::TickPlan plan;
                 for (std::size_t j = 0; j < tick_periods.size(); ++j) {
@@ -1541,6 +1543,10 @@ void init_module(py::module_& m) {
                 d["heat_pending"] = out.heat_pending;
             }
             if (!tick_cbs.empty()) d["control_tick_counts"] = sim.tick_counts();
+            if (output_rtol > Real{0}) {
+                d["n_output_capped"] = sim.n_output_capped();
+                d["n_output_unbounded"] = sim.n_output_unbounded();
+            }
             d["exact"] = exact_report_dict(adapter, res.n_predicate_evals);
             if (mode_shadow_h_e > Real{0}) {
                 d["mode_shadow"] = mode_shadow_dict(res.mode_shadow, diode_names,
@@ -1595,6 +1601,8 @@ void init_module(py::module_& m) {
         py::arg("tick_offsets") = std::vector<Real>{},
         py::arg("tick_fns") = std::vector<py::object>{},
         py::arg("tick_monitors") = std::vector<bool>{},
+        py::arg("output_rtol") = Real{0},
+        py::arg("output_cap") = std::size_t{4096},
         "Bridge.11 — native PEDSimulator (DOPRI5) over a "
         "NativeCircuitBuilderAdapter. RHS / b_vector / A_matrix all "
         "execute in C++ without GIL roundtrips; the only Python "

@@ -153,6 +153,7 @@ class ExactStep(NamedTuple):
     h_bdf2: Optional[float]
     sensitivities: Any
     allow_implicit_segments: Optional[bool]
+    output_rtol: Optional[float]     # the output-grid rule (None: today's samples)
 
 
 class Initial(NamedTuple):

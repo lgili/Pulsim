@@ -71,6 +71,14 @@ PROFILE = {
         "mode_selection": Entry("auto", "add-complementarity-mode-selection", "DECISIONS F5",
                                 "mode_auto"),
         "control_tick": Entry("state", "add-compiled-control-graph", "DECISIONS G30", "tick_state"),
+        # without dt only (an explicit dt / store_every / recorders keep today's samples)
+        "output_rtol": Entry(
+            1e-5, "update-number-changing-release",
+            "DECISIONS 1 (auto route): without dt the exact engine returns every event "
+            "instant plus an output grid chosen by rule so that linear interpolation "
+            "is within output_rtol (orchestrator's decision; the harness gate is never "
+            "loosened); 1e-5, not 1e-4: at 1e-4 24 auto cells grew past 2x the trbdf2 "
+            "strict error while agreeing, at 1e-5 none does", "output_grid"),
         # device_path: the exact engine refuses the keyword (option table row
         # 'device_path': dsed False) and has no Newton device to stamp.
     },
