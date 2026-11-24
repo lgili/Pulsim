@@ -28,6 +28,7 @@ from __future__ import annotations
 import contextlib
 import contextvars
 import copy
+import dataclasses
 import dis
 import types
 from functools import partial
@@ -356,10 +357,18 @@ def _mutable_cell(v, seen=None) -> bool:
         return _closure_state(v, seen)
     if isinstance(v, types.MethodType):
         return _mutable_cell(v.__self__, seen)
+    if isinstance(v, (tuple, frozenset)):
+        return any(_mutable_cell(x, seen) for x in v)
     if isinstance(v, (types.ModuleType, type, types.BuiltinFunctionType)):
         return False
     if mod.startswith("pulsim._pulsim"):
         return False        # native objects (builders, masks, schedules)
+    if getattr(getattr(type(v), "__dataclass_params__", None), "frozen", False):
+        return any(
+            _mutable_cell(getattr(v, f.name), seen)
+            for f in dataclasses.fields(v)
+            if hasattr(v, f.name)
+        )
     return hasattr(v, "__dict__")
 
 

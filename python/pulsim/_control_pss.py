@@ -74,12 +74,14 @@ def _unsup_hidden(where: str, reason: str, *, analysis: str = _ANALYSIS):
 
 
 def _mutates_deref_or_global(fn: types.FunctionType) -> str:
-    """True reason string when ``fn`` executes STORE/DELETE on closure or global."""
+    """Reason string when ``fn`` mutates closure, global, or attribute state."""
     for ins in dis.get_instructions(fn):
         if ins.opname in ("STORE_DEREF", "DELETE_DEREF"):
             return f"mutates closed-over variable {ins.argval!r}"
         if ins.opname in ("STORE_GLOBAL", "DELETE_GLOBAL"):
             return f"mutates global variable {ins.argval!r}"
+        if ins.opname in ("STORE_ATTR", "DELETE_ATTR"):
+            return f"mutates attribute {ins.argval!r}"
     return ""
 
 
@@ -119,6 +121,11 @@ def _hidden_state_reason(obj: Any, seen: set | None = None) -> str:
         mut = _mutates_deref_or_global(obj)
         if mut:
             return mut
+        fn_dict = getattr(obj, "__dict__", None)
+        if fn_dict:
+            attrs = [k for k in fn_dict if not str(k).startswith("_pulsim")]
+            if attrs:
+                return f"function holds attribute state ({attrs[0]!r})"
         for cell in obj.__closure__ or ():
             if not _has(cell):
                 continue
@@ -160,7 +167,48 @@ def _hidden_state_reason(obj: Any, seen: set | None = None) -> str:
         for s in slot_names:
             if s not in ("__dict__", "__weakref__") and hasattr(obj, s):
                 return f"stateful {type(obj).__name__} instance"
+    # Slotless instance: inspect mutable class attributes across MRO & __call__
+    for cls in type(obj).__mro__:
+        if cls is object:
+            continue
+        for k, v in cls.__dict__.items():
+            if k.startswith("__") and k.endswith("__"):
+                continue
+            if isinstance(
+                v,
+                (
+                    types.FunctionType,
+                    types.BuiltinFunctionType,
+                    staticmethod,
+                    classmethod,
+                    property,
+                    types.MemberDescriptorType,
+                    types.GetSetDescriptorType,
+                ),
+            ):
+                continue
+            if _mutable_cell(v, set(seen)):
+                return (
+                    f"stateful {type(obj).__name__} class attribute "
+                    f"{k!r} ({type(v).__name__})"
+                )
+    call_fn = getattr(type(obj), "__call__", None)
+    if isinstance(call_fn, types.FunctionType):
+        r = _hidden_state_reason(call_fn, seen)
+        if r:
+            return r
     return ""
+
+
+class _ObserverLoop:
+    """Loop-compatible adapter for a resolved observer / bare chain."""
+
+    __slots__ = ("step_observer", "switch_fn", "period")
+
+    def __init__(self, step_observer, switch_fn=None, period=None):
+        self.step_observer = step_observer
+        self.switch_fn = switch_fn
+        self.period = period
 
 
 def _resolve_observer(builder, obj, *, allow_compile: bool = True):
@@ -216,15 +264,43 @@ def normalize_control_args(
     loops = list(closed_loops) if closed_loops is not None else None
     if loops is not None:
         norm_loops = []
+        bare_observers = []
         for lp in loops:
-            obs = getattr(lp, "step_observer", lp)
-            if isinstance(obs, MixedDomainBlockChain):
-                obs = _resolve_observer(builder, obs)
-                # Keep loop wrapper semantics if a chain was placed directly
-                norm_loops.append(lp)
+            if isinstance(lp, MixedDomainBlockChain):
+                bare_observers.append(_resolve_observer(builder, lp))
+            elif hasattr(lp, "step_observer") and hasattr(lp, "switch_fn"):
+                obs = lp.step_observer
+                if isinstance(obs, MixedDomainBlockChain):
+                    obs = _resolve_observer(builder, obs)
+                    norm_loops.append(
+                        _ObserverLoop(obs, lp.switch_fn, getattr(lp, "period", None))
+                    )
+                else:
+                    norm_loops.append(lp)
             else:
-                norm_loops.append(lp)
-        loops = norm_loops
+                bare_observers.append(lp)
+
+        if bare_observers:
+            if step_observer is None:
+                pick = 0
+                for idx, obs in enumerate(bare_observers):
+                    if (
+                        getattr(obs, "_b_extra_fn", None) is not None
+                        or getattr(obs, "_rate_offsets", None)
+                        or len(getattr(obs, "_rate_ticks", ())) > 1
+                    ):
+                        pick = idx
+                        break
+                step_observer = bare_observers.pop(pick)
+            for obs in bare_observers:
+                p_obs = getattr(obs, "period", None)
+                if p_obs is None and getattr(obs, "_rate_ticks", None):
+                    p_obs = float(obs._rate_ticks[0][1])
+                if p_obs is None:
+                    p_obs = controller_period
+                norm_loops.append(_ObserverLoop(obs, None, p_obs))
+
+        loops = norm_loops or None
 
     return switch_fn, loops, step_observer, controller_period
 

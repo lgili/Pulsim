@@ -381,7 +381,7 @@ a source that follows a controller (`feature='closed_loop'`).
       `SwitchSchedule`, stateless `lambda t: ...`).
     - *Measured voltage-mode buck + PI at `f_sw = 100 kHz` (`V_in = 24 V`,
       `V_ref = 12 V`, `L = 100 uH`, `C = 47 uF`, `R = 5 ohm`, `Kp = 0.03`,
-      `Ki = 100.0`; switching-rate sampled error `|v(out)[0] - V_ref|`; 4000-period
+      `Ki = 100.0`; switching-rate sampled error `|v(out)[0] - V_ref|`; 6000-period
       settled transient comparison across `[i_L, v_C, integrator_state, prev_error]`):*
       - `exact`: 4 steps, 12 runs, `|v0 - V_ref| = 4.086e-14 V`
         (`|mean - V_ref| = 5.678e-5 V` ripple offset at `C = 47 uF`, dropping to
@@ -391,5 +391,5 @@ a source that follows a controller (`feature='closed_loop'`).
         `|v0 - V_ref| = 3.375e-14 V`, `max|x0 - x_tr| = 3.523e-10`
         (`ctrl_diff = 1.270e-12`).
       - `trbdf2` (`dt = T/100`): 5 steps, 13 runs,
-        `|v0 - V_ref| = 3.197e-14 V`, `max|x0 - x_tr| = 1.342e-8`
-        (`ctrl_diff = 1.161e-8`, `< 1.2e-7` relative to the `12 V` scale).
+        `|v0 - V_ref| = 3.197e-14 V`, `max|x0 - x_tr| = 3.777e-9`
+        (`ctrl_diff = 3.777e-9`, `< 1e-8` across all states).

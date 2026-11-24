@@ -21,6 +21,7 @@ Verifies:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import warnings
 
 import numpy as np
@@ -112,7 +113,7 @@ def test_voltage_mode_buck_pi_orbit_and_long_transient(engine, kw):
         else dict(dt=T / 100, rtol=1e-10, atol=1e-13)
     )
     sim_eng = "dsed" if engine == "exact" else engine
-    n_periods = 4000
+    n_periods = 6000
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         res_tr = p.simulate(
@@ -130,7 +131,7 @@ def test_voltage_mode_buck_pi_orbit_and_long_transient(engine, kw):
 
     ctrl_tr = ControlGraphStateMapper([lp_tr.step_observer], T).read()
     x_tr = np.concatenate([circ_tr, ctrl_tr])
-    assert np.abs(r.x0 - x_tr).max() < 2e-8 if engine == "trbdf2" else np.abs(r.x0 - x_tr).max() < 1e-8
+    assert np.abs(r.x0 - x_tr).max() < 1e-8
 
 
 def test_warm_start_and_steady_state_delegation():
@@ -439,3 +440,166 @@ def test_stateless_python_lambda_keeps_existing_behavior():
     with pytest.raises(p.UnsupportedError) as ei:
         p.periodic_steady_state(b, period=T, switch_fn=stateless_gate, engine="exact")
     assert ei.value.feature == "switch_fn"
+
+
+# ---------------------------------------------------------------------------
+# 5. Adversarial regression tests (sequence control, bypasses, frozen dc,
+#    sampled_model refusal)
+# ---------------------------------------------------------------------------
+
+def test_control_sequence_with_chain_and_multiple_observers():
+    # control=[ch] with a MixedDomainBlockChain using drive_source
+    b = p.CircuitBuilder()
+    ch = p.MixedDomainBlockChain(rate=p.Rate(T))
+    ch.add(
+        "pi",
+        p.PIController(Kp=0.1, Ki=500.0, output_min=-50.0, output_max=50.0),
+        inputs=dict(setpoint=5.0, measured="out", dt="dt"),
+        output="vin_cmd",
+    )
+    ch.drive_source(b, "vin_cmd", ("v", "src", "gnd"))
+    b.add_resistor("R1", "src", "out", 10.0)
+    b.add_capacitor("C1", "out", "gnd", 10e-6)
+    b.add_resistor("RL", "out", "gnd", 100.0)
+
+    r_list = p.periodic_steady_state(b, period=T, control=[ch], engine="exact", rtol=1e-11)
+    assert r_list.stable
+    assert abs(float(r_list.x0[r_list.state_labels.index("v(out)")]) - 5.0) < 1e-9
+
+    # control=[obs1, obs2] with two compiled observers (including one Monitor)
+    b2 = _buck()
+    lp2 = _pi_loop(b2)
+    mon_ch = p.MixedDomainBlockChain(rate=p.Rate(T))
+    mon_ch.add(
+        "del",
+        p.DelayBlock(samples=1, initial_value=0.0),
+        inputs=dict(x="node:out"),
+        output="v_del",
+    )
+    obs2 = mon_ch.make_step_observer(b2)
+    r_multi = p.periodic_steady_state(
+        b2,
+        period=T,
+        switch_fn=lp2.switch_fn,
+        control=[lp2.step_observer, obs2],
+        engine="exact",
+    )
+    assert r_multi.stable
+    assert "ctrl(pi.integrator_state)" in r_multi.controller_labels
+    assert "ctrl(del.buf[0])" in r_multi.controller_labels
+    assert abs(float(r_multi.x0[r_multi.state_labels.index("v(out)")]) - V_REF) < 1e-9
+
+
+def test_hidden_state_function_attr_and_slotless_class_bypasses_refused():
+    b = _buck()
+    n, k = b.graph.num_switches, b.switch_index_of("Q")
+    pwm = p.make_pwm_switch_fn(1.0 / T, 0.5, k, n)
+
+    # Bypass A: function attribute mutation
+    def attr_sw(t):
+        attr_sw.cnt += 1
+        return pwm(t)
+
+    attr_sw.cnt = 0
+
+    with pytest.raises(p.UnsupportedError) as ei_a:
+        p.periodic_steady_state(b, period=T, switch_fn=attr_sw, engine="pwl", dt=T / 100)
+    assert ei_a.value.feature == "hidden_controller_state"
+
+    def attr_obs(t, x):
+        attr_obs.calls += 1
+
+    attr_obs.calls = 0
+
+    with pytest.raises(p.UnsupportedError) as ei_a2:
+        p.periodic_steady_state(
+            b, period=T, switch_fn=pwm, step_observer=attr_obs, engine="pwl", dt=T / 100
+        )
+    assert ei_a2.value.feature == "hidden_controller_state"
+
+    # Bypass B1: slotless callable instance with mutable class attribute
+    class _SlotlessMutableClassAttr:
+        __slots__ = ()
+        acc = [0.0]
+
+        def __call__(self, t, x):
+            self.acc[0] += float(x[0])
+
+    with pytest.raises(p.UnsupportedError) as ei_b1:
+        p.periodic_steady_state(
+            b,
+            period=T,
+            switch_fn=pwm,
+            step_observer=_SlotlessMutableClassAttr(),
+            engine="pwl",
+            dt=T / 100,
+        )
+    assert ei_b1.value.feature == "hidden_controller_state"
+
+    # Bypass B2: slotless callable instance mutating immutable class scalar
+    class _SlotlessMutatingScalarAttr:
+        __slots__ = ()
+        cnt = 0
+
+        def __call__(self, t, x):
+            type(self).cnt += 1
+
+    with pytest.raises(p.UnsupportedError) as ei_b2:
+        p.periodic_steady_state(
+            b,
+            period=T,
+            switch_fn=pwm,
+            step_observer=_SlotlessMutatingScalarAttr(),
+            engine="pwl",
+            dt=T / 100,
+        )
+    assert ei_b2.value.feature == "hidden_controller_state"
+
+
+@dataclass(frozen=True)
+class _FrozenCfg:
+    duty: float
+    period: float
+
+
+@dataclass(frozen=True)
+class _FrozenWithMutableBox:
+    duty: float
+    box: list
+
+
+_FROZEN_CFG = _FrozenCfg(duty=0.5, period=T)
+_FROZEN_MUTABLE_CFG = _FrozenWithMutableBox(duty=0.5, box=[0.0])
+
+
+def test_frozen_dataclass_global_in_stateless_lambda_allowed():
+    b = _buck()
+    n, k = b.graph.num_switches, b.switch_index_of("Q")
+
+    def frozen_cfg_gate(t):
+        m = p.SwitchStateMask(n)
+        ph = t / _FROZEN_CFG.period
+        m.set(k, bool(ph - np.floor(ph + 1e-9) < _FROZEN_CFG.duty - 1e-9))
+        return m
+
+    r = p.periodic_steady_state(b, period=T, switch_fn=frozen_cfg_gate, engine="pwl", dt=T / 100)
+    assert r.stable and r.controller_state.size == 0
+
+    # Frozen dataclass carrying a mutable field is still refused
+    def dirty_frozen_gate(t):
+        _FROZEN_MUTABLE_CFG.box[0] = t
+        return frozen_cfg_gate(t)
+
+    with pytest.raises(p.UnsupportedError) as ei:
+        p.periodic_steady_state(b, period=T, switch_fn=dirty_frozen_gate, engine="pwl", dt=T / 100)
+    assert ei.value.feature == "hidden_controller_state"
+
+
+def test_closed_loop_exact_sampled_model_is_refused_by_name():
+    b = _buck()
+    lp = _pi_loop(b)
+    r = p.periodic_steady_state(b, period=T, closed_loops=[lp], engine="exact")
+    with pytest.raises(p.UnsupportedError) as ei:
+        r.sampled_model(inputs=[("source", "Vin")], outputs=["v(out)"])
+    assert ei.value.feature == "sampled_model"
+    assert ei.value.kind == "closed_loop"

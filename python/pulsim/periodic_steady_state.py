@@ -1381,6 +1381,14 @@ class _ClosedLoopExactMap:
     def name_states(self, v, scale=None):
         return _Solver.name_states(self, v, scale)
 
+    def sampled_model(self, res, inputs, outputs):
+        raise _unsup(
+            "sampled_model",
+            "sampled_model() is not supported with closed-loop "
+            "controllers (open-loop exact shooting only).",
+            kind="closed_loop",
+        )
+
 
 def _solve_closed_loop_exact(builder, period, switch_fn, closed_loops,
                              step_observer, controller_period, start_from,
