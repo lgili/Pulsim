@@ -64,10 +64,13 @@
         `ValueError` with a message mentioning both kwarg names.
       - `bind_pi_to_switch(..., switch="Q_does_not_exist")`
         raises `KeyError` (propagated from `switch_index_of`).
-- [ ] 3.3 Benchmark: `python/benchmarks/bench_closed_loop_helper.py`
+- [x] 3.3 Benchmark: `python/benchmarks/bench_closed_loop_helper.py`
       — measure runtime of the helper-driven buck vs the
       hand-rolled version over 10 ms / 5 µs dt; assert
       ≤ 5 % regression on median wall time over 10 reps.
+      (Measured 2026-11: helper median 0.517 ms vs hand-rolled median
+      2.197 ms, ratio 0.236x; `vout_ss = 4.723509783013 V` with
+      `|delta| = 0.000e+00 V` <= 1e-12 via `--check`.)
 
 ## 4. Examples + docs
 

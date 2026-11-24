@@ -204,3 +204,50 @@ def test_im_locked_rotor_input_impedance():
         f"Z={Z_mag:.2f} Ω)")
     # Also: rotor speed barely moved.
     assert abs(motor.mech.omega_rad_s) < 0.01 * diag["omega_sync_rad_s"]
+
+
+@pytest.mark.skipif(not _HAS_IM,
+                       reason="pulsim build lacks add_induction_motor")
+def test_im_ifoc_blockchain_torque_step():
+    """IFOC MixedDomainBlockChain runner rejects a mid-run load-torque step."""
+    import importlib.util
+    from pathlib import Path
+
+    script_path = (
+        Path(__file__).resolve().parents[2]
+        / "examples"
+        / "scripts"
+        / "run_im_ifoc_closed_loop.py"
+    )
+    if not script_path.is_file():
+        pytest.skip("examples/scripts/run_im_ifoc_closed_loop.py not present")
+
+    spec = importlib.util.spec_from_file_location(
+        "run_im_ifoc_closed_loop", script_path
+    )
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    out = mod.run_ifoc_torque_step()
+    tr = out["traces"]
+    m = out["metrics"]
+
+    assert m["steps"] > 0
+    for key in ("t", "omega_m", "omega_ref", "T_em", "T_load", "psi_r", "i_d", "i_q"):
+        assert len(tr[key]) > 100
+        assert all(math.isfinite(float(v)) for v in tr[key])
+
+    # Pre-step tracking at reference speed.
+    assert abs(m["pre_step_omega_mean"] - m["omega_ref"]) < 1.0
+    # Load torque stepped cleanly mid-run.
+    assert tr["T_load"][-1] > tr["T_load"][0] + 5.0
+    # Electromagnetic torque rises to match the stepped load + friction.
+    assert m["post_step_torque_mean"] > m["pre_step_torque_mean"] + 5.0
+    assert abs(m["post_step_torque_mean"] - m["expected_post_torque"]) < 0.5
+    # Transient speed dip followed by full recovery to reference.
+    assert m["dip_min_omega"] < m["pre_step_omega_mean"]
+    assert m["recovery_error_rad_s"] < 1.0
+    # Flux and d-axis current remain field-oriented.
+    assert m["psi_r_ss"] > 0.5
+    assert abs(m["i_d_ss"] - mod.I_D_REF) < 0.2

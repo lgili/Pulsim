@@ -59,9 +59,8 @@
   (Reconciled 2026-11: shipped as examples/induction_motor_dol.yaml in
   8fb792cf; p.load_yaml_file returns a LoadedCircuit with the
   IM_Rs_a / IM_E_a branches.)
-- [ ] 4.3 `examples/scripts/run_im_ifoc_closed_loop.py` — indirect FOC with torque-step response using `MixedDomainBlockChain` (deferred for the sensorless-observer change which depends on it).
-  (Reconciled 2026-11: the script exists, but it runs at T_load = 0
-  with no torque step and does not use MixedDomainBlockChain.)
+- [x] 4.3 `examples/scripts/run_im_ifoc_closed_loop.py` — indirect FOC with torque-step response using `MixedDomainBlockChain` (deferred for the sensorless-observer change which depends on it).
+  (Completed 2026-11: upgraded with `run_ifoc_torque_step(...)` driving `InductionMotor` via `MixedDomainBlockChain` (`LookupTable1D` speed ref + `PIController` speed/dq loops + `Clarke`/`Park`/`InversePark`/`InverseClarke` + `drive_source`), pre-magnetization, and mid-run load-torque step 2.0 -> 12.0 Nm at t = 0.70 s; verified by `test_im_ifoc_blockchain_torque_step`.)
 
 ## 5. Docs — deferred to v1.5.0 final
 
