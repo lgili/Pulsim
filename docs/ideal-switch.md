@@ -37,13 +37,18 @@ In YAML netlists, add `form: branch` directly on `type: switch` or
 circuit:
   devices:
     - {type: voltage_source, name: V1, from: a, to: gnd, V: 10.0}
-    - {type: switch, name: S1, from: a, to: b, form: branch}
-    - {type: diode, name: D1, anode: b, cathode: gnd, form: branch, R_on: 0.0, g_off: 1e-9, V_f: 0.7}
+    - {type: switch, name: S1, from: a, to: sw, form: branch}
+    - {type: diode, name: D1, anode: gnd, cathode: sw, form: branch, R_on: 0.0, g_off: 1e-9, V_f: 0.7}
+    - {type: inductor, name: L1, from: sw, to: out, L: 100.0e-6}
+    - {type: capacitor, name: C1, from: out, to: gnd, C: 47.0e-6}
+    - {type: resistor, name: R1, from: out, to: gnd, R: 10.0}
 ```
 
 The branch form runs on `pwl`, `trbdf2`, `dsed` (alias `exact`), and the
-kernel AC sweep (`run_mna_sweep`); retired `bdf1` refuses it with
-`UnsupportedError(feature="branch_form")`.
+kernel AC sweep (`run_mna_sweep`); the low-level retired binding
+`pulsim._pulsim.run_transient_bdf1(...)` refuses it with
+`UnsupportedError(engine="bdf1", feature="branch_form")` (while
+`simulate(..., engine="bdf1")` rejects `"bdf1"` with `ValueError`).
 
 An ideal RL circuit reaches the exact closed-form current
 $i(t) = \frac{V}{R}(1 - e^{-t/\tau})$, and `res.i("S")` reads the solved
@@ -276,16 +281,23 @@ enumeration on non-passive circuits) so all diodes commutate consistently in
 one step:
 
 - **`mode_selection=None` / `"legacy"`** (default): traditional settle with the
-  default-mode guard (`res.diagnostics["mode_guard"]`).
+  default-mode guard where active (`dsed` populates `res.diagnostics["mode_guard"]`
+  on diode circuits; `pwl` populates `res.diagnostics["mode_guard"]` when its
+  guard is active on conductance-form diode circuits and `{}` otherwise;
+  `trbdf2` leaves `res.diagnostics` unset).
 - **`mode_selection="lcp"`**: the LCP decides diode modes (`res.diagnostics["mode_selection"]`
-  reports `lcp_count`, `lcp_pivots_total`, `max_pivots_per_event`, `ties`,
-  `widenings`, `settle_rounds_total`, `mask_cycles`, `shorted_held`, etc.).
+  always reports `lcp_count`, `lcp_pivots_total`, `max_pivots_per_event`, `ties`,
+  `widenings`, `enumerations`, `settle_rounds_total`, and `passivity`; `pwl` and
+  `trbdf2` also report `mask_cycles`, `shorted_held`, `shorted_released`, and
+  `sites`, while `dsed` reports `diodes` and `h_e`).
 - **`mode_selection="auto"`**: enables `"lcp"` wherever supported (`pwl` and
-  `dsed` on circuits with PWL diodes and no gated/Newton devices or
-  `sensitivities=`) and falls back to `"legacy"` otherwise, recording the
-  choice and reason in `res.diagnostics["mode_selection_auto"]`. (On `trbdf2`,
-  explicit `mode_selection="lcp"` runs; `mode_selection="auto"` currently logs
-  fallback to `"legacy"`.)
+  `dsed` on circuits with PWL diodes and no **gated diodes** such as
+  thyristors/TRIACs/GTOs or reverse-blocking IGBTs, no Newton devices, and no
+  `sensitivities=`—ordinary controlled switches from `add_switch` /
+  `add_ideal_switch` are supported) and falls back to `"legacy"` otherwise,
+  recording the choice and reason in `res.diagnostics["mode_selection_auto"]`.
+  (On `trbdf2`, explicit `mode_selection="lcp"` runs; `mode_selection="auto"`
+  currently logs fallback to `"legacy"`.)
 - **`mode_selection="shadow"`**: runs the legacy settle untouched and evaluates
   the LCP alongside it (`res.diagnostics["mode_shadow"]`).
 

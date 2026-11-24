@@ -6,6 +6,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Ideal-switch guide, complementarity docs, and AI assistant traps (`add-branch-form-ideal-switch`, `add-complementarity-mode-selection`)
+
+* **Docs** added [docs/ideal-switch.md](docs/ideal-switch.md) (wired into
+  `mkdocs.yml` under User Guide and executed by
+  `python/tests/test_doc_snippets.py`) covering the branch-form switch and diode
+  API (`add_ideal_switch`, `add_switch(..., form="branch")`,
+  `add_diode(..., form="branch")`, YAML `form: branch`), typed
+  `UnsupportedError` refusals (`floating_node`, `ideal_voltage_loop`,
+  `dependent_states`), impulsive state re-initialisation (`res.reinit_records`,
+  `on_impulse`, `pulsim.losses.impulse_losses` / `device_loss_summary` impulse
+  fields), the diode complementarity law (`V_th` vs `V_f`,
+  `mode_selection='lcp'` / `'auto'` / `'shadow'`), floating-island gauge
+  conventions, and PSIM / PLECS porting notes.
+* **Docs (`AI_GUIDE.md`)** updated [python/pulsim/AI_GUIDE.md](python/pulsim/AI_GUIDE.md)
+  with `b.add_ideal_switch`, Trap 17 (branch-form ideal switch refusals and
+  impulsive re-initialisation records), and Trap 18 (anti-chatter `V_th > V_f`
+  bands are no longer needed under `mode_selection='lcp'` / `'auto'`).
+
 ### Control graph guide, migration notes, and navigation (`add-compiled-control-graph`)
 
 * **Docs** updated [docs/control-graph.md](docs/control-graph.md) (and added
