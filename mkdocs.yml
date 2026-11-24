@@ -145,6 +145,7 @@ nav:
       - API Reference: api-reference.md
       - 'Result Reference': result-reference.md
       - 'Device Reference': device-reference.md
+      - 'Ideal Switch & Diode Complementarity': ideal-switch.md
       - UX Helpers (discover, plot, monitor): helpers.md
       - Gotchas: gotchas.md
       - 'Known Limitations (2.0)': known-limitations.md

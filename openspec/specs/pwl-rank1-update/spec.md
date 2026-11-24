@@ -3,61 +3,36 @@
 ## Purpose
 TBD - created by archiving change add-pwl-rank1-update. Update Purpose after archive.
 ## Requirements
-### Requirement: KLU Backend for Sparse Direct Solvers
-
-Pulsim SHALL provide a `KluSolver` implementation of the
-`pulsim::sparse::DirectSolver` interface, wrapping SuiteSparse KLU,
-available behind a CMake feature detection flag `PULSIM_HAVE_KLU`.
-When KLU is detected, `pulsim::sparse::make_default_solver(n, hint)`
-SHALL return a `KluSolver` for `Backend::KLU` or for `Backend::Auto`
-when `n >= PULSIM_KLU_AUTO_THRESHOLD` (default 100). When KLU is not
-detected, the factory SHALL return a `SparseLuSolver` for any hint
-except `Backend::KLU`, which MUST raise `std::runtime_error`.
-
-#### Scenario: KLU available, used for large circuits
-
-- **GIVEN** SuiteSparse KLU is detected at build time
-- **AND** `make_default_solver(200, Backend::Auto)` is called
-- **THEN** the returned solver is a `KluSolver` instance
-- **AND** `analyze + factorize + solve` produces results matching
-  `SparseLuSolver` within tolerance 1e-12
-
-#### Scenario: KLU unavailable, transparent Eigen fallback
-
-- **GIVEN** SuiteSparse KLU was NOT detected at build time
-- **WHEN** `make_default_solver(200, Backend::Auto)` is called
-- **THEN** the returned solver is a `SparseLuSolver` instance
-- **AND** no exception is raised
-
-#### Scenario: KLU explicitly requested but unavailable
-
-- **GIVEN** SuiteSparse KLU was NOT detected at build time
-- **WHEN** `make_default_solver(200, Backend::KLU)` is called with an
-  explicit hint
-- **THEN** `std::runtime_error` is raised with a message that names
-  the missing dependency
-
 ### Requirement: Single-Bit Gray-Code Partial Refactorization
 
-The `PwlStateSpaceCache::solve_rank1` method SHALL use path-based
-partial refactorization (Chen et al., *IEEE Trans. Power Electron.*,
-2024) to update the cached LU factor when (a) the new `mask` differs
-from the previously-solved mask by exactly one bit AND (b) the
-underlying solver returns `true` from `supports_partial_refactor()`.
+The `PwlStateSpaceCache::solve_rank1` method SHALL invoke
+`DirectSolver::partial_refactor` to update the cached LU factor when
+(a) the new `mask` differs from the previously-solved mask by
+exactly one bit AND (b) the underlying solver returns `true` from
+`supports_partial_refactor()`. The default backend
+(`PulsimSparseLuSolver`) implements `partial_refactor` via
+path-based re-elimination (Chan/Brandwajn/Tinney, *IEEE Trans.
+Power Syst.* 1, 1986; Dinkelbach et al., *Energies* 14:7989, 2021).
 The output `x` MUST match the result of the existing full `solve`
-path within tolerance 1e-12.
+path within tolerance 1e-12, and the resulting L and U factor values
+MUST match a fresh full `factorize` within tolerance 1e-14 when the
+pivot order is preserved.
 
-#### Scenario: Single-bit flip with KLU backend
+#### Scenario: Single-bit flip uses path-based partial refactor
 
-- **GIVEN** the cache was built with a `KluSolver` backend
+- **GIVEN** the cache was built with a `PulsimSparseLuSolver` backend
 - **AND** the most recent `solve_rank1` was for `mask_prev`
 - **WHEN** `solve_rank1(mask_curr, b_extra, x)` is called with
   `popcount(mask_prev XOR mask_curr) == 1`
 - **THEN** the cache invokes `partial_refactor` on the changed
-  column only
+  columns only
+- **AND** the underlying operation is the path-based re-elimination
+  (NOT a fresh full factorize)
 - **AND** the `metrics().rank1_hits` counter increments by 1
 - **AND** the output `x` matches the full-refactor result within
   tolerance 1e-12
+- **AND** the resulting L and U values match a fresh full
+  `factorize` within tolerance 1e-14 (pivot order preserved)
 
 #### Scenario: Multi-bit flip falls back to full refactor
 
@@ -79,9 +54,9 @@ path within tolerance 1e-12.
 
 ### Requirement: Transparent Fallback on Backend Without Partial Refactor
 
-The `pulsim::pwl::PwlStateSpaceCache::solve_rank1` method SHALL fall
-back to the existing full `solve` path when the underlying solver
-does not support partial refactorisation (i.e.
+The `PwlStateSpaceCache::solve_rank1` method SHALL fall back to the
+existing full `solve` path when the underlying solver does not
+support partial refactorisation (i.e.
 `DirectSolver::supports_partial_refactor()` returns `false`). The
 visible output of `solve_rank1` MUST match exactly what
 `solve(mask, b_extra, x)` would produce in the same situation.
@@ -89,18 +64,19 @@ visible output of `solve_rank1` MUST match exactly what
 #### Scenario: SparseLuSolver backend always falls back
 
 - **GIVEN** the cache was built with a `SparseLuSolver` backend
-  (KLU disabled at build OR explicitly forced via Backend::Eigen)
+  (`Backend::Eigen` explicitly forced via factory)
 - **WHEN** `solve_rank1(mask, b_extra, x)` is called for any mask
 - **THEN** the cache delegates to the existing full `solve` path
 - **AND** the `metrics().fallbacks` counter increments by 1
 - **AND** the output is bit-identical to what `solve(mask, b_extra,
   x)` would produce
 
-#### Scenario: Partial refactor reports numerical singularity
+#### Scenario: Partial refactor reports pivot fault
 
-- **GIVEN** the cache was built with a `KluSolver` backend
-- **AND** `partial_refactor` for a specific column change returns
-  `false` (numerical singularity detected mid-elimination)
+- **GIVEN** the cache was built with a `PulsimSparseLuSolver` backend
+- **AND** `partial_refactor` for a specific column change reports a
+  pivot-tolerance violation (the precomputed path's pivot order is
+  no longer valid)
 - **WHEN** the cache encounters that case during `solve_rank1`
 - **THEN** the cache silently falls back to the full `solve` path
 - **AND** the `metrics().fallbacks` counter increments by 1

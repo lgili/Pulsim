@@ -385,7 +385,7 @@ Verified locally on macOS 26.5 / AppleClang 17.0.0:
       → main from Draft to Ready for Review. (Reconciled 2026-11:
       merged as PR #34 on 2026-05-24; no KLU include or call is left
       in `core/`.)
-- [ ] 6.10 Post-merge: archive the change to
+- [x] 6.10 Post-merge: archive the change to
       `openspec/changes/archive/2026-05-24-replace-klu-with-pulsim-sparse-lu/`.
 
 ## Out of scope (future proposals)

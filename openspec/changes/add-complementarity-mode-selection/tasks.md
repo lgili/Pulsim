@@ -64,5 +64,5 @@ Reference values (all from `probes/lcp_cases.out` unless stated).
 - [ ] 9.3 One release later: delete the settle loops, caps and chatter guards; `'legacy'` refused
 
 ## 10. Docs and verification
-- [ ] 10.1 Device guide: the diode law, what `V_th` means now, the gauge convention; AI_GUIDE trap list (bands are no longer needed)
+- [x] 10.1 Device guide: the diode law, what `V_th` means now, the gauge convention; AI_GUIDE trap list (bands are no longer needed)
 - [ ] 10.2 ruff, pytest, ctest (`-j2`), `openspec validate --all --strict`

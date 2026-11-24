@@ -8,22 +8,21 @@ your memory: Pulsim 2 changed behaviour but kept most 1.x names. Every
 
 Short version:
 
-- Build with `p.CircuitBuilder()`, run with `p.simulate(b, t_end, dt=None)`,
-  read with `res.v("node")`, `res.i("branch")`, `res.times`.
-- Pass `dt` for PWM-driven converters (fixed-step `pwl`), with every
-  gate edge on the `dt` grid (3.2). Without `dt` the default
-  `engine='auto'` usually picks the variable-step TR-BDF2.
-- Never `.mean()` a waveform. Use `p.steady_state_stats`, `p.time_average`,
-  `p.time_rms` or `np.trapezoid`; pulsed-current RMS: trap 14.
-- Switch bits come from `b.switch_index_of(name)`; mask size from
-  `b.graph.num_switches`. `p.SwitchStateMask(n)` is a SIZE.
-- PWL diode `V_th` is a turn-on threshold; `V_f` is the forward drop.
-  Without `dt`, rerun with `dt` on any `simulate` warning (trap 13).
-- Loss and thermal summaries average the WHOLE run, start-up too (3.4).
-- `run_mna_sweep(freqs=)` linearises at the DC point (switches at `mask=`).
+- Build: `p.CircuitBuilder()`; run: `p.simulate(b, t_end, dt=None)`;
+  read: `res.v("node")`, `res.i("branch")`, `res.times`.
+- Pass `dt` for PWM converters (`pwl`), edges on the `dt` grid (3.2);
+  without `dt`, `engine='auto'` usually picks variable-step TR-BDF2.
+- Never `.mean()` a waveform: use `p.steady_state_stats`, `p.time_average`,
+  `p.time_rms` or `np.trapezoid`; pulsed RMS: trap 14.
+- Switch bits: `b.switch_index_of(name)`; count: `b.graph.num_switches`.
+  `p.SwitchStateMask(n)` takes a SIZE.
+- PWL diode `V_th` is turn-on threshold; `V_f` is forward drop. Without
+  `dt`, rerun with `dt` on any `simulate` warning (trap 13).
+- Loss/thermal summaries average the WHOLE run, start-up too (3.4).
+- `run_mna_sweep(freqs=)` linearises at DC OP (switches at `mask=`).
 - Check every result physically (6) before reporting it.
-- A Pulsim exception is a refusal with a reason. Read it; do not catch
-  it, and do not loosen `tol_newton_dx` / `tol_newton_res` to get past it.
+- A Pulsim exception is a refusal with a reason: read it, do not catch it
+  or loosen `tol_newton_dx` / `tol_newton_res`.
 
 ## 1. Ask the installed package first
 
@@ -54,13 +53,14 @@ That union is pybind11's `float`, as in the stub.
 - **Netlist by name.** Nodes are strings; `"gnd"`, `"GND"` and `"0"` are
   ground. Each `b.add_*` adds a branch; its first argument is the name
   `res.i(name)` takes.
-- **Piecewise-linear switching.** `add_switch`, `add_mosfet`, `add_igbt`
-  and `add_diode` are two-state branches: conductance `g_on` (or
-  `1/R_on`) on, `g_off` off; `add_diode(V_f=)` adds a series drop
-  while on. Each owns a switch-mask bit. Controlled switches follow
-  `switch_fn(t) -> SwitchStateMask`; diodes self-commutate. Smooth
+- **Piecewise-linear switching.** `add_switch`, `add_mosfet`, `add_igbt`,
+  `add_diode` are two-state branches (`g_on` or `1/R_on` on, `g_off` off;
+  `form="branch"` / `add_ideal_switch` adds a branch current unknown so
+  `R_on=0`, `g_off=0` work). `add_diode(V_f=)` adds a drop while on. Each
+  owns a switch-mask bit; controlled switches follow
+  `switch_fn(t) -> SwitchStateMask`, diodes self-commutate. Smooth
   devices (`add_shockley_diode`, `add_mosfet_level1`,
-  `add_power_mosfet`, saturable magnetics) are solved with Newton;
+  `add_power_mosfet`, saturable magnetics) use Newton;
   `add_nonlinear_diode` is retired. Gate transients:
   `p.double_pulse_test`, trbdf2 or `dt` <= 0.2 ns.
 - **Shared flux** (one path: `add_saturable_transformer`): `add_winding`
@@ -404,6 +404,7 @@ b.add_gyrator(name, p1_pos, p1_neg, p2_pos, p2_neg, g)
 b.add_diode(name, anode, cathode, g_on=None, g_off=None, V_th=0.0, V_f=0.0, ...)
 b.add_shockley_diode(name, anode, cathode, I_S=1e-12, n=1.0, V_T=0.025852, G_min=1e-12, BV=0.0)
 b.add_switch(name, n_pos, n_neg, g_on=None, g_off=None, ...)
+b.add_ideal_switch(name, n_pos, n_neg, R_on=0.0, g_off=0.0)
 b.add_mosfet(name, drain, source, R_on=0.001, R_off=1e9, body_diode=True, V_F=0.7, ...)
 b.add_igbt(name, collector, emitter, R_on=0.01, R_off=1e9, ...)
 b.add_transformer(name, p_from, p_to, s_from, s_to, L_p, L_s, k=1.0)
@@ -431,24 +432,19 @@ p.device_thermal_summary(builder, result, *, thermal_specs, T_ambient_C=25.0, sw
 p.scope(builder, result, *, signals=None, title=None, save=None, stack=True, show=False, tight_lw=False)
 ```
 
-Notes: `res.i(name)` is positive from a device's first node to its
-second, through it: `add_mosfet` drain to source, `<name>_body` source
-to drain, VSI diode `INV__Dha` from `out_a` to `vdc_pos`. So
-`res.i(<voltage source>)` is negative when it delivers power (1 V into
-1 ohm reads -1 A). `add_sine_current_source` / `add_pulse_current_source`
-take the voltage versions' arguments, `v_` renamed `i_`. Current sources
-(also pwl, `vccs`, `cccs`) drive OUT of `n_pos`; `res.i` reads that.
-`control` names an earlier branch with a current unknown.
-Gyrator: `i1 = g*v2`, `i2 = -g*v1` into `p1_pos`/`p2_pos`;
-`port=1` reads `i1`. `t` in `res.v(name, t)` is a
-sample INDEX; at a time, use `np.interp(t, res.times, res.v(name))`.
-A ground name gives zeros. `phase` of the two PWM helpers and `carrier_phase`
-are time shifts in SECONDS (`t - phase`); `modulation_phase` and the
-`phase` of `add_sine_voltage_source` are radians.
+Notes: `res.i(name)` is positive from first node to second (`add_mosfet`
+drain->source, `<name>_body` source->drain, VSI `INV__Dha` `out_a`->`vdc_pos`;
+voltage sources read negative when delivering power). `add_sine_current_source` /
+`add_pulse_current_source` rename `v_` to `i_`. Current sources (also pwl,
+`vccs`, `cccs`) drive OUT of `n_pos`. `control` names an earlier branch
+with a current unknown. Gyrator: `i1=g*v2`, `i2=-g*v1` into `p1_pos`/`p2_pos`;
+`port=1` reads `i1`. `t` in `res.v(name, t)` is a sample INDEX; use
+`np.interp(t, res.times, res.v(name))` for a time. Ground names give zeros.
+`phase` of PWM helpers and `carrier_phase` are in SECONDS (`t - phase`);
+`modulation_phase` and `add_sine_voltage_source` `phase` are radians.
 `add_capacitor(c0=, esr=, esl=)` / `add_inductor(i0=, esr=, c_par=, rac=)`
-set ICs and parasitics; MLCC bias: `passives.fit_mlcc_dc_bias`.
-Other `simulate` keywords: `switch_fn`, `t_start`, `store_every`,
-`auto_regularize`, `progress`.
+set ICs/parasitics; MLCC bias: `passives.fit_mlcc_dc_bias`. Other `simulate`
+keywords: `switch_fn`, `t_start`, `store_every`, `auto_regularize`, `progress`.
 
 ## 5. Traps
 
@@ -456,22 +452,24 @@ Each row was measured on this version. The fix column is what to write.
 
 | # | Wrong assumption | What actually happens | Do this instead |
 |---|---|---|---|
-| 1 | `V_th` of `add_diode` / `add_bridge_rectifier` is a forward drop | It is the turn-on threshold. On-state is `V_f + I/g_on`: 10 A into `g_on = 20 S` gives 0.500 V for `V_th = 0` and `0.7` alike, 1.200 V with `V_f = 0.7`. `add_three_phase_vsi(V_f=)` and the MOSFET/IGBT diode `V_F` ARE drops | Pass `V_f` (losses include `V_f*I`), or `b.add_shockley_diode`. Never also a `conduction_specs` `V_f0` |
-| 2 | `v.mean()` over a result is the average | The default grid is variable-step and clusters at events. Rectifier of 6.2: `.mean()` 4.607 V vs 6.330 V (-27 %) | `p.steady_state_stats`, `p.time_average`, `p.time_rms`, `np.trapezoid(y, t) / (t[-1] - t[0])` |
+| 1 | `V_th` of `add_diode` / `add_bridge_rectifier` is a forward drop | It is the turn-on threshold. On-state is `V_f + I/g_on` (10 A into `g_on=20`: 0.500 V for `V_th=0` or `0.7`, 1.200 V with `V_f=0.7`). VSI `V_f` and MOSFET/IGBT diode `V_F` ARE drops | Pass `V_f` (losses include `V_f*I`), or `b.add_shockley_diode`. Never also `conduction_specs` `V_f0` |
+| 2 | `v.mean()` over a result is the average | Variable-step grid clusters at events. Rectifier 6.2: `.mean()` 4.607 V vs 6.330 V (-27 %) | `p.steady_state_stats`, `p.time_average`, `p.time_rms`, `np.trapezoid(y, t) / (t[-1] - t[0])` |
 | 3 | `p.SwitchStateMask(1)` sets bit 0 | It is a mask of SIZE 1, all OFF | `m = p.SwitchStateMask(b.graph.num_switches); m.set(i, True)` |
-| 4 | MOSFET k is switch bit k | `add_mosfet` adds `<name>_body`, so bits interleave with diodes (below) | `b.switch_index_of(name)` |
-| 5 | Loosening `tol_newton_dx` / `tol_newton_res` fixes a Newton abort | Both are absolute on purpose. Snubbed flyback, `tol_newton_dx=1e-5, tol_newton_res=1e-4`: `auto` 3.53 V, fixed engine 15.31 V, silently | Keep the defaults; read the abort; run `engine='pwl'` with `dt`; fix gate edges, body diodes, initial state |
-| 6 | `p.scope` is a module | `p.scope(b, res, signals=[...])` plots (matplotlib) | `from pulsim.scope import LiveScope` (needs pyqtgraph); `import pulsim.scope as m` gives you the function |
-| 7 | Tie an isolated secondary or a floating neutral to ground with a tiny resistor | A milliohm tie is a galvanic bond. Tutorial 04's VSI: a 1 mOhm neutral-to-rail tie drove 58.8 A DC per phase | Leave it to `auto_regularize` (default on): the run's copy gets 1 GOhm per floating subnet (`res.plan.ties`), your builder none. Own tie: >= 1 MOhm |
-| 8 | `res.v` of a floating DC rail is the DC voltage | It is to ground. Bridge with `ac_b="gnd"`, load across `dp`/`dn`: `v("dp")` spans -0.7..325.0 V, `v("dn")` -325.0..0.7 V; `dp - dn` averages 321.85 V | `res.v("dp") - res.v("dn")`, or ground one DC rail (3.3) |
-| 9 | A fixed-step run is second order | By default each gate edge, source jump and start (ICs too) leaves a stale history: first order, ringing. RL decay, `i0=1`: 1.85e-3 at `dt=1e-5`, 0.92e-3 at `5e-6` | `discontinuity_restart=True` (6.3): gate read at step start; jumping `b_extra_fn` needs `.next_jump_after`. Sample 0 reads 0 V |
-| 10 | Any `dt` works with PWM | Gate edges land on the `dt` grid unless split. Buck D = 0.25, 100 kHz, `make_pwm_switch_fn`: 6.24 V at `dt=2e-7` (12.5 steps run as 13), 6.00 V at `1e-7` | Whole-step `D/f_sw` (3.2), or 6.3 + `enable_substep_state_correction=True`: helper edges are split, order 2 |
-| 11 | Omitting `switch_fn` leaves switches open | With `dt`, undriven controlled switches are ALL CLOSED and `simulate` only warns: the buck of 3.2 runs at D = 1 and settles at 24.0 V, not 12 V; without `dt`, `auto` refuses | Always pass `switch_fn` when the circuit has controlled switches |
-| 12 | `except Exception:` around `simulate` keeps a script robust | A broad except turns a refusal into a silent wrong answer | Let it raise, or catch `p.PulsimError` (`.engine`, `.feature`) |
-| 13 | A warning from a run without `dt` is noise | It names what TR-BDF2 could not guarantee (a diode on its conduction boundary, a pulse narrower than its sampling). Silence is no proof: a one-shot pulse under a quarter of the step ceiling (`dt`, else `t_end/1000`) can be skipped | Rerun with `dt`, compare (6.2); `dt` <= 4x the narrowest pulse |
-| 14 | `p.time_rms` (and `.rms`) of a switched current is exact on a fixed grid | Each edge is a one-step ramp: low by about `h / (3 t_on)` in `i^2`. Buck MOSFET (D = 0.25): 1.4942 / 1.4993 / 1.5019 A at `dt` = 1e-7 / 5e-8 / 2.5e-8, exact 1.5044 A. Same for `device_loss_summary`'s `i_rms`, not `P_avg` | `np.sqrt(p.time_average(t, i**2, t_from=...))`: 1.5044 A at all three |
-| 15 | Controllers run each step, chains in insertion order | Ticks at `t_start + k*T`, `ceil(span/T)` times. A chain runs in graph order; a loop with no `DelayBlock`, an unported block, a stateful block with no `p.Rate(T)` raise `ControlGraphBuildError` | `controller_period=` or `p.Rate`; custom code: `p.PythonBlock(fn)` |
+| 4 | MOSFET k is switch bit k | `add_mosfet` adds `<name>_body`, interleaving bits with diodes (below) | `b.switch_index_of(name)` |
+| 5 | Loosening `tol_newton_dx` / `tol_newton_res` fixes a Newton abort | Both are absolute on purpose. Snubbed flyback (`tol_newton_dx=1e-5, tol_newton_res=1e-4`): `auto` 3.53 V, fixed engine 15.31 V, silently | Keep defaults; read the abort; run `engine='pwl'` with `dt`; fix gate edges, body diodes, ICs |
+| 6 | `p.scope` is a module | `p.scope(b, res, signals=[...])` plots (matplotlib) | `from pulsim.scope import LiveScope` (pyqtgraph); `import pulsim.scope as m` for the function |
+| 7 | Tie an isolated secondary or neutral to ground with a tiny resistor | A milliohm tie is a galvanic bond. Tutorial 04 VSI: 1 mOhm neutral tie drove 58.8 A DC per phase | Let `auto_regularize` (default on) add 1 GOhm (`res.plan.ties`), or own tie >= 1 MOhm |
+| 8 | `res.v` of a floating DC rail is the DC voltage | It is to ground. Bridge with `ac_b="gnd"`: `v("dp")` -0.7..325 V, `v("dn")` -325..0.7 V; `dp - dn` averages 321.85 V | `res.v("dp") - res.v("dn")`, or ground one DC rail (3.3) |
+| 9 | A fixed-step run is second order | Default leaves stale history at edges/jumps/ICs: order 1, ringing. RL `i0=1`: 1.85e-3 at `dt=1e-5`, 0.92e-3 at `5e-6` | `discontinuity_restart=True` (6.3): gate read at step start; jumping `b_extra_fn` needs `.next_jump_after` |
+| 10 | Any `dt` works with PWM | Edges land on `dt` grid unless split. Buck D=0.25, 100 kHz: 6.24 V at `dt=2e-7` (12.5 -> 13 steps), 6.00 V at `1e-7` | Whole-step `D/f_sw` (3.2), or 6.3 + `enable_substep_state_correction=True` |
+| 11 | Omitting `switch_fn` leaves switches open | With `dt`, undriven switches are ALL CLOSED (`simulate` warns): 3.2 buck runs D=1 (24.0 V, not 12 V); without `dt`, `auto` refuses | Always pass `switch_fn` when the circuit has controlled switches |
+| 12 | `except Exception:` around `simulate` keeps a script robust | Broad except turns a refusal into a silent wrong answer | Let it raise, or catch `p.PulsimError` (`.engine`, `.feature`) |
+| 13 | A warning from a run without `dt` is noise | Names what TR-BDF2 could not guarantee (diode boundary, missed narrow pulse). Silence != proof below ceiling/4 (`dt` or `t_end/1000`) | Rerun with `dt`, compare (6.2); `dt` <= 4x narrowest pulse |
+| 14 | `p.time_rms` / `.rms` of a switched current is exact on a fixed grid | Edge is a one-step ramp: low by ~`h/(3 t_on)` in `i^2`. Buck Q1 D=0.25: 1.4942/1.4993/1.5019 A vs exact 1.5044 A (`i_rms` too, not `P_avg`) | `np.sqrt(p.time_average(t, i**2, t_from=...))`: 1.5044 A at all three |
+| 15 | Controllers run each step, chains in insertion order | Ticks at `t_start + k*T` in graph order; algebraic loop, unported block, or stateful block without `p.Rate(T)` raise `ControlGraphBuildError` | `controller_period=` or `p.Rate`; custom code: `p.PythonBlock(fn)` |
 | 16 | No `ResolutionWarning` means resolved | Opt-in (`resolution_diagnostics=True`); estimates, not bounds | Halve `dt` (6.3) |
+| 17 | `form="branch"` (`R_on=0`, `g_off=0`) runs anywhere and silently absorbs impulses | Open `g_off=0` islands raise `floating_node`; shorted loops raise `ideal_voltage_loop`; `pwl` cut-sets/cap-loops need `discontinuity_restart=True` (`dependent_states`); impulses go to `res.reinit_records`, not `P_avg` | Pass `discontinuity_restart=True` on `pwl`; read `res.reinit_records` / `p.losses.impulse_losses`, or `on_impulse='error'` |
+| 18 | PWL diodes need `V_th > V_f` anti-chatter bands | `mode_selection='lcp'` / `'auto'` solves the multi-diode LCP (`0 <= i_d perp V_f + R_on*i_d - v_ak >= 0`) without settle chatter | Leave `V_th=0.0` with `mode_selection='lcp'` or `'auto'`; keep `V_th > V_f` only for real hysteresis |
 
 Traps 1, 3 and 4, executed:
 
@@ -581,13 +579,11 @@ pwl    time-weighted 6.331 V, sample mean 6.330 V
 trbdf2 time-weighted 6.330 V, sample mean 4.607 V
 ```
 
-The engines agree; the sample mean on the variable grid does not.
-When two engines disagree, check the metric before blaming an engine.
-Compare ripple too: the buck of 3.2 reads 11.999 V on both engines but
-16.8 mV pp with `dt` and 15.4 mV without (analytic 16.0 mV): `min`,
-`max` and `ripple_pp` are sample extremes, which the variable grid
-(about 20 samples per period) misses. Read ripple from a fixed-`dt`
-run, or `np.interp` onto a uniform grid.
+Engines agree; sample means on variable grids do not. When engines
+disagree, check the metric first. Also for ripple (3.2 buck: 11.999 V on
+both, 16.8 mV pp with `dt` vs 15.4 mV without, analytic 16.0 mV): `min`/`max`/
+`ripple_pp` are sample extremes, which the variable grid (~20/period) misses.
+Read ripple from fixed `dt` or `np.interp` onto a uniform grid.
 
 ### 6.3 Step-size convergence
 
@@ -632,13 +628,13 @@ pre-1.0; the `v2` sub-namespace of 0.10). Same names, new results:
 | `Simulator(...).run_transient(...)` | `p.simulate(b, t_end, dt=None, ...)` |
 | `YamlParser(...).load(path)` | `p.load_yaml_file(path)` / `p.load_yaml_string(text)` |
 | `simulate` implied the fixed-step engine | `engine='auto'`: `dt` gives a fixed step; no `dt` usually gives TR-BDF2 |
-| `add_mosfet` was one switch bit | it is two (`<name>_body`); use `b.switch_index_of` |
-| an IGBT conducted in reverse | `b.add_igbt(..., V_ce0=0.9, reverse_blocking=True)` blocks it; unset it is the old two-way switch (FutureWarning). SCR: `b.add_thyristor` |
-| `add_three_phase_vsi` built six bare switches | it adds six freewheel diodes (`with_freewheel_diodes=True`) |
-| `p.add_hysteretic_inductor` + `p.make_hysteretic_inductor_observer` | the inductor is solved inside Newton; drop the observer, whose factory now raises |
-| `p.add_pmsm`/`add_bldc`/`add_induction_motor` (observers) | native: `b.add_pmsm_mna`, `b.add_bldc_mna`, `b.add_induction_machine_mna` |
+| `add_mosfet` was one switch bit | two bits (`<name>_body`); use `b.switch_index_of` |
+| an IGBT conducted in reverse | `b.add_igbt(..., V_ce0=0.9, reverse_blocking=True)` blocks it; unset warns (True if `V_ce0>0`). SCR: `b.add_thyristor` |
+| `add_three_phase_vsi` built six bare switches | adds six freewheel diodes (`with_freewheel_diodes=True`) |
+| `p.add_hysteretic_inductor` + observer | solved inside Newton; observer factory now raises |
+| `p.add_pmsm`/`add_bldc`/`add_induction_motor` | native: `b.add_pmsm_mna`, `b.add_bldc_mna`, `b.add_induction_machine_mna` |
 | `p.add_dc_motor` (observer) | deprecated; `b.add_dc_machine` |
-| parts in `pulsim.lib` resolved by part number | they are synthetic; pass `allow_synthetic=True` to use them |
+| `pulsim.lib` parts by part number | synthetic; pass `allow_synthetic=True` |
 
 ## 8. Paste this into your project's assistant config
 
@@ -653,7 +649,7 @@ with the checks in its section 6 before reporting it.
 
 ## 9. Where to read more
 
-- `docs/getting-started.md`, `docs/tutorials/`.
+- `docs/getting-started.md`, `docs/tutorials/`, `docs/ideal-switch.md`.
 - `docs/api-reference.md`, `docs/gotchas.md`, `docs/troubleshooting.md`,
   `docs/losses-and-thermal.md`, `docs/loss-thermal.md`,
   `docs/control-graph.md`, `docs/mental-model.md`, `docs/how-pulsim-works/`.

@@ -68,5 +68,5 @@ Reference values.
 - [ ] 9.3 Re-baseline through the reference harness together with the other number-changing defaults; CHANGELOG lists each changed number and its cause
 
 ## 10. Docs and verification
-- [ ] 10.1 Device guide ("the ideal switch: what the new refusals and records mean"), PSIM / PLECS porting note, AI_GUIDE trap list, CHANGELOG
+- [x] 10.1 Device guide ("the ideal switch: what the new refusals and records mean"), PSIM / PLECS porting note, AI_GUIDE trap list, CHANGELOG
 - [ ] 10.2 ruff, pytest, ctest (`-j2`), `openspec validate --all --strict`, stub check
