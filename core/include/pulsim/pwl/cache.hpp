@@ -2347,6 +2347,69 @@ public:
             std::span<const ParametricUpdate>(&one, 1), mode);
     }
 
+    /// Re-assemble and path-refactor every resident segment (and rank-1
+    /// solver if active) after the caller updated parameters directly in
+    /// `pool_` (e.g. online electrothermal feedback mutating a switch's
+    /// `g_on` or a diode's `(g_on, V_f)`). Invalidates `event_entries_`
+    /// and bumps `generation_` so cached segment pointers reload cleanly.
+    [[nodiscard]] ParametricRefactorResult refactor_branches(
+        std::span<const Index> branch_ids,
+        ParametricRefactorMode mode = ParametricRefactorMode::AllActive) {
+        ParametricRefactorResult result;
+        const auto t0 = std::chrono::steady_clock::now();
+        if (branch_ids.empty()) {
+            const auto t1 = std::chrono::steady_clock::now();
+            result.wall_time_us =
+                std::chrono::duration<double, std::micro>(t1 - t0).count();
+            return result;
+        }
+
+        event_entries_.clear();
+        bump_generation_();
+
+        std::set<Index> affected_cols_set;
+        for (const Index bid : branch_ids) {
+            const auto cols = pool_.columns_affected_by_branch(bid, graph_);
+            for (const Index c : cols) affected_cols_set.insert(c);
+        }
+        const std::vector<Index> affected_cols(
+            affected_cols_set.begin(), affected_cols_set.end());
+        const std::span<const Index> affected_cols_span{
+            affected_cols.data(), affected_cols.size()};
+
+        std::vector<topology::SwitchStateMask> masks_to_process;
+        if (mode == ParametricRefactorMode::CurrentOnly) {
+            if (rank1_initialized_) {
+                masks_to_process.push_back(rank1_mask_);
+            }
+        } else {
+            masks_to_process.reserve(segments_.size() +
+                                     (rank1_initialized_ ? 1 : 0));
+            for (const auto& [m, _seg] : segments_) {
+                masks_to_process.push_back(m);
+            }
+            if (rank1_initialized_ &&
+                std::find(masks_to_process.begin(), masks_to_process.end(),
+                          rank1_mask_) == masks_to_process.end()) {
+                masks_to_process.push_back(rank1_mask_);
+            }
+        }
+
+        for (const auto& mask : masks_to_process) {
+            ++result.masks_processed;
+            if (refactor_one_parametric_(mask, affected_cols_span)) {
+                ++result.path_refactor_hits;
+            } else {
+                ++result.fallback_hits;
+            }
+        }
+
+        const auto t1 = std::chrono::steady_clock::now();
+        result.wall_time_us =
+            std::chrono::duration<double, std::micro>(t1 - t0).count();
+        return result;
+    }
+
 private:
     /// Build a CacheError with the failure LOCALISED where possible
     /// (v2.0 Phase 1). The cache runs on the Pulsim LU backend, so

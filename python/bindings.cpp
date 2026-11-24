@@ -624,7 +624,19 @@ void init_module(py::module_& m) {
         .def_readonly("n_on", &thermal::DeviceLossRecord::n_on)
         .def_readonly("n_off", &thermal::DeviceLossRecord::n_off)
         .def_readonly("has_e_on", &thermal::DeviceLossRecord::has_e_on)
-        .def_readonly("has_e_off", &thermal::DeviceLossRecord::has_e_off);
+        .def_readonly("has_e_off", &thermal::DeviceLossRecord::has_e_off)
+        .def_readonly("electrical_refreshes",
+                      &thermal::DeviceLossRecord::electrical_refreshes)
+        .def_property_readonly(
+            "_feedback_updates",
+            [](const thermal::DeviceLossRecord& r) {
+                std::vector<std::tuple<double, double, double>> out;
+                out.reserve(r.feedback_updates.size());
+                for (const auto& u : r.feedback_updates) {
+                    out.emplace_back(u.t, u.g_on, u.v_f);
+                }
+                return out;
+            });
     m.def("_commutation_points",
         [](const std::vector<std::tuple<bool, Real, Real>>& seq) {
             // One reading rule for the transient tracker and the periodic
@@ -1727,7 +1739,9 @@ void init_module(py::module_& m) {
                  const thermal::LossTable3D* e_on,
                  const thermal::LossTable3D* e_off,
                  const thermal::ConductionTable* v_on,
-                 const std::string& conduction) {
+                 const std::string& conduction,
+                 bool electrical_feedback,
+                 double dT_refresh) {
                   thermal::DeviceLossSpec s;
                   s.device = device;
                   s.junction = junction;
@@ -1744,12 +1758,16 @@ void init_module(py::module_& m) {
                           "must be 'electrical' or 'table', not '" +
                           conduction + "'");
                   }
+                  s.electrical_feedback = electrical_feedback;
+                  s.dT_refresh = dT_refresh;
                   b.set_device_losses(std::move(s));
               },
               py::arg("device"), py::arg("junction"), py::arg("tj"),
               py::arg("heat_node"), py::arg("e_on").none(true),
               py::arg("e_off").none(true), py::arg("v_on").none(true),
               py::arg("conduction"),
+              py::arg("electrical_feedback") = false,
+              py::arg("dT_refresh") = 5.0,
               "Kernel half of CircuitBuilder.set_device_losses (tj = NaN "
               "when not given, '' for an absent node name).")
         .def("_device_loss_names",

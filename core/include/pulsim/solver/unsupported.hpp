@@ -99,6 +99,24 @@ inline void require_branch_form_supported(const topology::Graph& graph,
     }
 }
 
+/// add-in-kernel-event-losses 4.1: online electrical feedback (re-fitting
+/// V_f / g_on from V_on(i, Tj) and refactoring the PWL cache) is implemented
+/// on engine='pwl' only; every other engine refuses it by name.
+inline void refuse_electrical_feedback(const pwl::DevicePool& pool,
+                                       std::string_view engine) {
+    for (const auto& s : pool.device_losses()) {
+        if (!s.electrical_feedback) continue;
+        throw UnsupportedError(
+            std::string(engine), "electrical_feedback", s.device, "",
+            std::format(
+                "engine '{}' does not support online electrical_feedback for "
+                "'{}' (set_device_losses): parametric refactoring of (V_f, "
+                "g_on) from V_on(i, Tj) is implemented on engine='pwl' only. "
+                "Use engine='pwl', or set electrical_feedback=False.",
+                engine, s.device));
+    }
+}
+
 /// add-in-kernel-event-losses: the event-loss hook is in engine='pwl' and
 /// 'trbdf2' (solver/loss_tracker.hpp); every other engine refuses a circuit
 /// with a loss port rather than run with the junction temperature held
@@ -106,6 +124,7 @@ inline void require_branch_form_supported(const topology::Graph& graph,
 inline void refuse_device_losses(const pwl::DevicePool& pool,
                                  std::string_view engine) {
     if (pool.device_losses().empty()) return;
+    refuse_electrical_feedback(pool, engine);
     const auto& s = pool.device_losses().front();
     throw UnsupportedError(
         std::string(engine), "device_losses", s.device, "",
@@ -152,6 +171,9 @@ inline void require_supported(const topology::Graph& graph,
                               const pwl::DevicePool& pool, pwl::Engine e,
                               bool loss_port = false) {
     require_branch_form_supported(graph, pool, e);
+    if (e != pwl::Engine::FixedTrap) {
+        refuse_electrical_feedback(pool, pwl::engine_name(e));
+    }
     if (e != pwl::Engine::FixedTrap && e != pwl::Engine::TrBdf2
         && !(loss_port && e == pwl::Engine::Dsed))
         refuse_device_losses(pool, pwl::engine_name(e));

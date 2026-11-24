@@ -125,7 +125,7 @@ class DiodeStateTrace:
     def current(self) -> np.ndarray:
         if self.i_branch is not None:
             return self.i_branch
-        if not self.V_f:  # legacy expression: bit-identical at V_f = 0
+        if not isinstance(self.V_f, np.ndarray) and not self.V_f:  # legacy expression: bit-identical at V_f = 0
             return self.v * self.g
         return self.g * (self.v - self.v_off)
 
@@ -135,7 +135,7 @@ class DiodeStateTrace:
         if self.i_branch is not None:
             return (self.i_branch_start if self.i_branch_start is not None
                     else self.i_branch)
-        if not self.V_f:
+        if not isinstance(self.V_f, np.ndarray) and not self.V_f:
             return self.v_start * self.g_start
         return self.g_start * (self.v_start - self.v_off_start)
 
@@ -357,6 +357,15 @@ def _build(builder, result, states, times) -> Dict[int, DiodeStateTrace]:
         f, to = d["nodes"]
         v = node_v(states, int(f)) - node_v(states, int(to))
         name = str(d.get("name", ""))
+        from .loss_tables import feedback_params_series as _fb_params
+        g_on_eff, V_f_eff = _fb_params(result, name, times, g_on, V_f)
+        if isinstance(V_f_eff, np.ndarray):
+            v_th_margin = max(0.0, V_th - V_f)
+            V_th_eff = V_f_eff + v_th_margin
+            V_on_eff = np.where(V_f_eff == 0.0, V_th_eff,
+                                np.maximum(V_th_eff, V_f_eff))
+        else:
+            V_on_eff = V_on
         bit = bits.get(bid)
         if rec is not None and bit is not None:
             closed = np.asarray(rec[:, bit], dtype=bool)
@@ -365,10 +374,10 @@ def _build(builder, result, states, times) -> Dict[int, DiodeStateTrace]:
                 v_s = (node_v(states_s, int(f))
                        - node_v(states_s, int(to)))
                 c_s = np.asarray(rec_s[:, bit], dtype=bool)
-            tr = DiodeStateTrace(branch_id=bid, name=name, g_on=g_on,
+            tr = DiodeStateTrace(branch_id=bid, name=name, g_on=g_on_eff,
                                  g_off=g_off, V_th=V_th, v=v,
                                  closed=closed, recorded=True,
-                                 v_start=v_s, closed_start=c_s, V_f=V_f)
+                                 v_start=v_s, closed_start=c_s, V_f=V_f_eff)
             if prm.get("branch_form") and not np.isfinite(g_on):
                 col = int(builder.pool.branch_var_id_for_switch(bid, builder.graph))
                 tr.i_branch = np.asarray(states[:, col], dtype=float)
@@ -419,17 +428,17 @@ def _build(builder, result, states, times) -> Dict[int, DiodeStateTrace]:
             # its law, not a missed turn-on. With its gate ON it is a
             # missed turn-on like a diode's; without a gate record, not
             # judged.
-            off_fwd = ~exempt & ~closed & (v - V_on > 1e-3) & (v > 1e-3)
+            off_fwd = ~exempt & ~closed & (v - V_on_eff > 1e-3) & (v > 1e-3)
             if "gate" in prm:
                 if gates is not None and bit is not None:
                     off_fwd &= gates[:, bit]
                 else:
                     off_fwd[:] = False
-            on_rev = ~exempt & closed & (v - V_f < -1e-3)
+            on_rev = ~exempt & closed & (v - V_f_eff < -1e-3)
             viol = off_fwd | on_rev
             if viol.any():
                 tr.n_rule_violations = int(viol.sum())
-                dv = np.where(closed, V_f - v, v - V_on)
+                dv = np.where(closed, V_f_eff - v, v - V_on_eff)
                 tr.max_violation_V = float(dv[viol].max())
                 tv = times[viol]
                 tr.violation_t_range = (float(tv.min()), float(tv.max()))

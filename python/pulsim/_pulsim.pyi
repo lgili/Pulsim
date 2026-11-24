@@ -327,7 +327,13 @@ class DeviceLossRecord:
     def E_on(self) -> float:
         ...
     @property
+    def _feedback_updates(self) -> list[tuple[float, float, float]]:
+        ...
+    @property
     def device(self) -> str:
+        ...
+    @property
+    def electrical_refreshes(self) -> int:
         ...
     @property
     def events(self) -> list[LossEvent]:
@@ -486,7 +492,7 @@ class CircuitBuilder:
         """
         Devices with a loss port, in set_device_losses order.
         """
-    def _set_device_losses(self, device: str, junction: str, tj: float, heat_node: str, e_on: LossTable3D, e_off: LossTable3D, v_on: ConductionTable, conduction: str) -> None:
+    def _set_device_losses(self, device: str, junction: str, tj: float, heat_node: str, e_on: LossTable3D | None, e_off: LossTable3D | None, v_on: ConductionTable | None, conduction: str, electrical_feedback: bool = False, dT_refresh: float = 5.0) -> None:
         """
         Kernel half of CircuitBuilder.set_device_losses (tj = NaN when not given, '' for an absent node name).
         """
@@ -1014,7 +1020,7 @@ class CircuitBuilder:
         ...
     def _snapshot(self) -> Circuit:
         """``build()`` without the side-state check (``simulate`` keeps the builder's Python side state beside it)."""
-    def set_device_losses(self, device: str, *, junction: str | None = None, Tj: float | None = None, heat_node: str | None = None, E_on: typing.Any = None, E_off: typing.Any = None, V_on: typing.Any = None, conduction: str = "electrical") -> CircuitBuilder:
+    def set_device_losses(self, device: str, *, junction: str | None = None, Tj: float | None = None, heat_node: str | None = None, E_on: typing.Any = None, E_off: typing.Any = None, V_on: typing.Any = None, conduction: str = "electrical", electrical_feedback: bool = False, dT_refresh: float = 5.0) -> CircuitBuilder:
         """
         Give a PWL switch or diode a loss port read INSIDE the run
         (add-in-kernel-event-losses; ``engine='pwl'``, other engines refuse

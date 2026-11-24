@@ -2339,6 +2339,24 @@ public:
                 "set_device_losses(\"{}\"): conduction='table' needs a V_on "
                 "table", n));
         }
+        if (!std::isfinite(spec.dT_refresh) || !(spec.dT_refresh > 0.0)) {
+            throw std::invalid_argument(std::format(
+                "set_device_losses(\"{}\"): dT_refresh must be finite and > 0 "
+                "(got {})", n, spec.dT_refresh));
+        }
+        if (spec.electrical_feedback) {
+            if (!spec.closed_loop()) {
+                throw std::invalid_argument(std::format(
+                    "set_device_losses(\"{}\"): electrical_feedback=True "
+                    "requires junction= (closed-loop thermal node), not a "
+                    "fixed Tj=", n));
+            }
+            if (!spec.v_on) {
+                throw std::invalid_argument(std::format(
+                    "set_device_losses(\"{}\"): electrical_feedback=True "
+                    "requires a V_on (ConductionTable) table", n));
+            }
+        }
         pool_.set_device_losses(std::move(spec));
     }
 

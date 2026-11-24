@@ -275,6 +275,24 @@ public:
         }
     }
 
+    /// Update a diode's on-state parameters in place after an online
+    /// electrothermal feedback refresh so commutation decisions stay in
+    /// sync with the refactored MNA matrix.
+    void update_on_state(Index branch_id, Real new_g_on, Real new_v_f,
+                         Real new_v_th) noexcept {
+        for (auto& d : diodes_) {
+            if (d.branch_id == branch_id) {
+                if (d.var < 0) d.g_on = new_g_on;
+                d.V_f = new_v_f;
+                d.V_th = new_v_th;
+                if (d.var >= 0) d.ideal = false;
+                break;
+            }
+        }
+        any_ideal_ = false;
+        for (const auto& d : diodes_) any_ideal_ = any_ideal_ || d.ideal;
+    }
+
     // ----- Layer 5 V3: snapshot/restore for substep correction -----
     //
     // `snapshot_on_bits()` returns the current `is_on` flag for

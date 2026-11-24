@@ -55,6 +55,7 @@
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/pwl/history_state.hpp"
 #include "pulsim/pwl/pwl_branch_law.hpp"
+#include "pulsim/solver/unsupported.hpp"
 #include "pulsim/stamping/branch_coord.hpp"
 #include "pulsim/thermal/device_losses.hpp"
 #include "pulsim/topology/graph.hpp"
@@ -75,11 +76,15 @@ class LossTracker {
 public:
     LossTracker(const topology::Graph& graph, const pwl::DevicePool& pool,
                 std::string_view engine) {
+        if (engine != "pwl") {
+            refuse_electrical_feedback(pool, engine);
+        }
         const auto& specs = pool.device_losses();
         devs_.reserve(specs.size());
         for (const auto& s : specs) {
             Dev d;
             d.spec = s;
+            if (s.electrical_feedback) any_feedback_ = true;
             d.branch = find_branch_(graph, s.device);
             if (d.branch < 0) {
                 throw std::invalid_argument(std::format(
@@ -94,6 +99,10 @@ public:
                     s.device, pwl::stored_kind_name(k)));
             }
             d.law = pwl::PwlBranchLaw::of(graph, pool, d.branch);
+            if (k == K::Diode) {
+                const auto& dp = pool.diode_params(d.branch);
+                d.v_th_margin = std::max(Real{0}, dp.V_th - dp.V_f);
+            }
             const auto& node_name = s.deposit_node();
             if (!node_name.empty()) {
                 d.node = find_node_(graph, node_name);
@@ -110,24 +119,91 @@ public:
             d.rec.has_e_off = static_cast<bool>(s.e_off);
             devs_.push_back(std::move(d));
         }
-        (void)engine;
         bool deposits = false;
         for (const auto& d : devs_) deposits = deposits || d.node >= 0;
         if (deposits) classify_nodes_(graph, pool);
     }
 
     [[nodiscard]] bool active() const noexcept { return !devs_.empty(); }
+    [[nodiscard]] bool has_electrical_feedback() const noexcept { return any_feedback_; }
 
     /// The state the run starts from and the mask it was stamped under.
-    void begin(const Vector& x0, const topology::SwitchStateMask& m0) {
+    void begin(const Vector& x0, const topology::SwitchStateMask& m0,
+               bool t_ref_ready = false) {
         for (auto& d : devs_) {
             d.on = m0.get(static_cast<Size>(d.law.bit));
             d.v = v_of_(d, x0);
             d.i = i_of_(d, x0, d.on);
             if (d.node >= 0 && d.spec.closed_loop()) {
                 d.x_tj = stamping::read_node_voltage(x0, d.node);
+                if (d.spec.electrical_feedback) {
+                    d.t_ref = d.x_tj;
+                    d.t_ref_set = t_ref_ready;
+                }
             }
         }
+    }
+
+    /// add-in-kernel-event-losses 4.1: after an accepted step ending at `t`,
+    /// re-fit `(V_f, g_on)` from `V_on(i, Tj)` for every feedback-enabled
+    /// device whose `|Tj - T_ref| > dT_refresh`, updating `pool`, `diodes`,
+    /// and this tracker's `PwlBranchLaw`. Returns the branch IDs whose
+    /// electrical parameters changed so the caller can refactor its cache.
+    template <typename DiodeState>
+    [[nodiscard]] std::vector<Index> refresh_electrical_feedback(
+        Real t, pwl::DevicePool& pool, DiodeState& diodes) {
+        std::vector<Index> changed;
+        if (!any_feedback_) return changed;
+        for (auto& d : devs_) {
+            if (!d.spec.electrical_feedback || !d.spec.v_on) continue;
+            if (!d.t_ref_set) {
+                d.t_ref = d.x_tj;
+                d.t_ref_set = true;
+                continue;
+            }
+            if (!(std::abs(d.x_tj - d.t_ref) > d.spec.dT_refresh)) continue;
+            const auto fit = thermal::fit_conduction_linear(
+                *d.spec.v_on, d.x_tj, d.law.diode);
+            d.t_ref = d.x_tj;
+            ++d.rec.electrical_refreshes;
+            d.rec.feedback_updates.push_back({t, fit.g_on, fit.v_f});
+            d.law.g_on = fit.g_on;
+            if (d.law.diode) {
+                d.law.v_f = fit.v_f;
+                const Real new_v_th = fit.v_f + d.v_th_margin;
+                pool.update_diode_on_state(d.branch, fit.g_on, fit.v_f, new_v_th);
+                diodes.update_on_state(d.branch, fit.g_on, fit.v_f, new_v_th);
+            } else {
+                pool.update_switch_g_on(d.branch, fit.g_on);
+            }
+            changed.push_back(d.branch);
+        }
+        return changed;
+    }
+
+    /// After `restore(...)` on a resumed run, apply the last refreshed
+    /// `(g_on, V_f)` of each feedback-enabled device to the fresh run's
+    /// `pool`, `diodes`, and `d.law`.
+    template <typename DiodeState>
+    [[nodiscard]] std::vector<Index> replay_feedback_state(
+        pwl::DevicePool& pool, DiodeState& diodes) {
+        std::vector<Index> changed;
+        if (!any_feedback_) return changed;
+        for (auto& d : devs_) {
+            if (!d.spec.electrical_feedback || d.rec.feedback_updates.empty()) continue;
+            const auto& u = d.rec.feedback_updates.back();
+            d.law.g_on = u.g_on;
+            if (d.law.diode) {
+                d.law.v_f = u.v_f;
+                const Real new_v_th = u.v_f + d.v_th_margin;
+                pool.update_diode_on_state(d.branch, u.g_on, u.v_f, new_v_th);
+                diodes.update_on_state(d.branch, u.g_on, u.v_f, new_v_th);
+            } else {
+                pool.update_switch_g_on(d.branch, u.g_on);
+            }
+            changed.push_back(d.branch);
+        }
+        return changed;
     }
 
     /// Add the heat power owed for the step being solved: a current INTO
@@ -639,6 +715,10 @@ private:
         // an event() whose right limit the next accept_step() starts from
         bool ev_pending = false, ev_on = false;
         Real ev_t = 0, ev_v = 0, ev_i = 0, ev_e = 0;
+        // online electrical feedback (task 4.1)
+        Real t_ref = 0;
+        bool t_ref_set = false;
+        Real v_th_margin = 0;   // diode max(0, V_th_init - V_f_init)
     };
 
     /// Undo the pending event's booking (its record, ledger and heat).
@@ -733,6 +813,7 @@ private:
     std::vector<char> fixed_, plain_; // per node (empty: no deposit node)
     bool bound_ = false;
     bool left_known_ = true;          // false after a version-1 resume, until a commit
+    bool any_feedback_ = false;       // any device has electrical_feedback=true
     Real h_now_ = 1;
     thermal::CompensatedSum injected_;
     std::size_t n_reinit_ = 0;   // reinit records already booked
@@ -744,9 +825,13 @@ public:
     /// resumed run's records and junction heat continue the first run's.
     [[nodiscard]] std::vector<Real> save() const {
         // version 2 adds left_ and pred_ (two more lists), written only when
-        // they hold something (pwl never fills them: its state stays version 1)
-        const bool v2 = !left_.empty() || !pred_.empty();
-        std::vector<Real> o{v2 ? Real{2} : Real{1}, static_cast<Real>(devs_.size()), h_now_,
+        // they hold something (pwl without feedback stays version 1);
+        // version 3 adds per-device electrical feedback state (t_ref,
+        // t_ref_set, electrical_refreshes, feedback_updates).
+        const bool v3 = any_feedback_;
+        const bool v2 = v3 || !left_.empty() || !pred_.empty();
+        std::vector<Real> o{v3 ? Real{3} : v2 ? Real{2} : Real{1},
+                            static_cast<Real>(devs_.size()), h_now_,
                             injected_.s, injected_.c};
         for (const auto* v : {&queue_, &now_, &left_, &pred_}) {
             if (v == &left_ && !v2) break;
@@ -769,6 +854,15 @@ public:
             for (const auto& e : d.rec.events) {
                 o.insert(o.end(), {e.t, Real(e.turn_on), e.v, e.i, e.tj, e.e});
             }
+            if (v3) {
+                o.push_back(d.t_ref);
+                o.push_back(Real(d.t_ref_set));
+                o.push_back(static_cast<Real>(d.rec.electrical_refreshes));
+                o.push_back(static_cast<Real>(d.rec.feedback_updates.size()));
+                for (const auto& u : d.rec.feedback_updates) {
+                    o.insert(o.end(), {u.t, u.g_on, u.v_f});
+                }
+            }
         }
         return o;
     }
@@ -784,7 +878,8 @@ public:
         };
         auto count = [&]() { return static_cast<std::size_t>(next()); };
         const Real version = next();
-        if ((version != Real{1} && version != Real{2}) || count() != devs_.size()) {
+        if ((version != Real{1} && version != Real{2} && version != Real{3}) ||
+            count() != devs_.size()) {
             throw std::invalid_argument(
                 "device losses: the snapshot's loss state is for another set "
                 "of loss ports (set_device_losses) than this circuit's");
@@ -795,7 +890,7 @@ public:
         left_.clear();
         pred_.clear();
         // a version-1 state does not say which power its slots hold
-        left_known_ = version == Real{2};
+        left_known_ = version >= Real{2};
         for (auto* v : {&queue_, &now_, &left_, &pred_}) {
             if (v == &left_ && version == Real{1}) break;
             v->clear();
@@ -831,6 +926,24 @@ public:
                 e.tj = next();
                 e.e = next();
                 d.rec.events.push_back(e);
+            }
+            if (version == Real{3}) {
+                d.t_ref = next();
+                d.t_ref_set = next() != 0;
+                d.rec.electrical_refreshes = count();
+                d.rec.feedback_updates.clear();
+                for (std::size_t n = count(); n > 0; --n) {
+                    thermal::FeedbackUpdate u;
+                    u.t = next();
+                    u.g_on = next();
+                    u.v_f = next();
+                    d.rec.feedback_updates.push_back(u);
+                }
+            } else {
+                d.t_ref = d.x_tj;
+                d.t_ref_set = true;
+                d.rec.electrical_refreshes = 0;
+                d.rec.feedback_updates.clear();
             }
         }
         if (k != s.size()) {

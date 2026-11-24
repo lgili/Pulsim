@@ -1196,10 +1196,18 @@ public:
         std::vector<Index> cols;
         switch (sk) {
             case StoredKind::Resistor:
-            case StoredKind::Switch:
             case StoredKind::Capacitor:
                 if (branch.from >= 0) cols.push_back(branch.from);
                 if (branch.to   >= 0) cols.push_back(branch.to);
+                break;
+            case StoredKind::Switch:
+            case StoredKind::Diode:
+                if (branch.from >= 0) cols.push_back(branch.from);
+                if (branch.to   >= 0) cols.push_back(branch.to);
+                if (const Index v = branch_var_id_for_switch(branch_id, graph);
+                    v >= 0) {
+                    cols.push_back(v);
+                }
                 break;
             case StoredKind::Inductor: {
                 // Inductor's L value enters the branch-current
@@ -1280,6 +1288,43 @@ public:
             throw std::out_of_range(std::format(
                 "DevicePool::update_voltage_source_V: branch {} "
                 "is not a VoltageSource", branch_id));
+        }
+    }
+
+    /// Update a PWL switch's on-state conductance (and branch-form R_on if
+    /// registered in branch form). Used by online electrothermal feedback.
+    void update_switch_g_on(Index branch_id, Real new_g_on) {
+        auto& entry = require_entry_(branch_id, "update_switch_g_on");
+        if (auto* p = std::get_if<SwitchParams>(&entry)) {
+            p->g_on = new_g_on;
+            if (auto it = branch_form_.find(branch_id);
+                it != branch_form_.end()) {
+                it->second.R_on = Real{1} / new_g_on;
+            }
+        } else {
+            throw std::out_of_range(std::format(
+                "DevicePool::update_switch_g_on: branch {} "
+                "is not a Switch", branch_id));
+        }
+    }
+
+    /// Update a PWL diode's on-state parameters (g_on, V_f, V_th) and
+    /// branch-form R_on if registered in branch form.
+    void update_diode_on_state(Index branch_id, Real new_g_on, Real new_v_f,
+                               Real new_v_th) {
+        auto& entry = require_entry_(branch_id, "update_diode_on_state");
+        if (auto* p = std::get_if<models::SwitchedDiode::Params>(&entry)) {
+            p->g_on = new_g_on;
+            p->V_f = new_v_f;
+            p->V_th = new_v_th;
+            if (auto it = branch_form_.find(branch_id);
+                it != branch_form_.end()) {
+                it->second.R_on = Real{1} / new_g_on;
+            }
+        } else {
+            throw std::out_of_range(std::format(
+                "DevicePool::update_diode_on_state: branch {} "
+                "is not a Diode", branch_id));
         }
     }
 

@@ -326,7 +326,8 @@ def _kernel_table(obj, name, device):
 
 def set_device_losses(self, device, *, junction=None, Tj=None,
                       heat_node=None, E_on=None, E_off=None, V_on=None,
-                      conduction="electrical"):
+                      conduction="electrical", electrical_feedback=False,
+                      dT_refresh=5.0):
     """Give a PWL switch or diode a loss port read INSIDE the run
     (add-in-kernel-event-losses; ``engine='pwl'``, other engines refuse
     by name).
@@ -341,6 +342,12 @@ def set_device_losses(self, device, *, junction=None, Tj=None,
     ``V_on(|i|, Tj)·|i|`` from the on-state table ``V_on``
     (:class:`pulsim.ConductionTable`, ``conduction="table"``).
 
+    When ``electrical_feedback=True`` (``engine='pwl'`` only; requires
+    ``junction=`` and ``V_on=``), whenever ``|Tj - T_ref| > dT_refresh``
+    (default 5 K) the kernel re-fits ``(V_f, g_on)`` linearly from
+    ``V_on(i, Tj)`` and parametrically refactors the PWL cache so the
+    updated on-state law takes effect on subsequent steps.
+
     Exactly one of ``junction`` (a thermal node of the circuit,
     temperature in °C as its voltage: closed loop) or ``Tj`` (fixed °C:
     open loop; heat into ``heat_node`` when given, else recorded only).
@@ -353,6 +360,23 @@ def set_device_losses(self, device, *, junction=None, Tj=None,
     if Tj is not None and not math.isfinite(tj):
         raise ValueError(f"set_device_losses({device!r}): Tj must be a "
                          f"finite temperature in °C, got {Tj!r}")
+    if isinstance(dT_refresh, bool):
+        raise TypeError(f"set_device_losses({device!r}): dT_refresh must be "
+                        f"a positive float, not bool")
+    dt_ref = float(dT_refresh)
+    if not (math.isfinite(dt_ref) and dt_ref > 0.0):
+        raise ValueError(f"set_device_losses({device!r}): dT_refresh must be "
+                         f"finite and > 0, got {dT_refresh!r}")
+    fb = bool(electrical_feedback)
+    if fb:
+        if junction is None or Tj is not None:
+            raise ValueError(
+                f"set_device_losses({device!r}): electrical_feedback=True "
+                "requires junction= (closed-loop thermal node), not fixed Tj=")
+        if V_on is None:
+            raise ValueError(
+                f"set_device_losses({device!r}): electrical_feedback=True "
+                "requires a V_on (ConductionTable) table")
     e_on = _kernel_table(E_on, "E_on", device)
     e_off = _kernel_table(E_off, "E_off", device)
     if junction is not None and Tj is None:
@@ -365,9 +389,14 @@ def set_device_losses(self, device, *, junction=None, Tj=None,
                 "temperature knot, so the loss does not depend on T_j and "
                 "junction= does not close a loop", RuntimeWarning,
                 stacklevel=2)
-    self._set_device_losses(str(device), j, tj,
-                            "" if heat_node is None else str(heat_node),
-                            e_on, e_off, V_on, str(conduction))
+    if fb or dt_ref != 5.0:
+        self._set_device_losses(str(device), j, tj,
+                                "" if heat_node is None else str(heat_node),
+                                e_on, e_off, V_on, str(conduction), fb, dt_ref)
+    else:
+        self._set_device_losses(str(device), j, tj,
+                                "" if heat_node is None else str(heat_node),
+                                e_on, e_off, V_on, str(conduction))
     return self
 
 
@@ -396,18 +425,46 @@ def loss_events(self, device):
 
 def device_energy(self, device):
     """``{"E_on", "E_off", "E_cond_electrical", "E_cond_table",
-    "E_impulse", "n_on", "n_off"}`` of ``device`` (energies in J).
-    ``E_cond_electrical`` is the device's ``∫v·i`` (always),
-    ``E_cond_table`` the on-state table's (0 without one); the spec's
-    ``conduction`` says which one was deposited as heat. ``E_impulse`` is
-    the impulsive re-initialisation energy booked to the device
-    (``result.reinit_records`` whose ``cause`` it is), deposited as heat."""
+    "E_impulse", "n_on", "n_off", "electrical_refreshes"}`` of ``device``
+    (energies in J). ``E_cond_electrical`` is the device's ``∫v·i``
+    (always), ``E_cond_table`` the on-state table's (0 without one); the
+    spec's ``conduction`` says which one was deposited as heat.
+    ``E_impulse`` is the impulsive re-initialisation energy booked to the
+    device (``result.reinit_records`` whose ``cause`` it is), deposited as
+    heat. ``electrical_refreshes`` counts online ``V_on -> (V_f, g_on)``
+    refactors (0 when ``electrical_feedback=False``)."""
     r = _record(self, device)
     return {"E_on": r.E_on, "E_off": r.E_off,
             "E_cond_electrical": r.E_cond_electrical,
             "E_cond_table": r.E_cond_table,
             "E_impulse": r.E_impulse,
-            "n_on": int(r.n_on), "n_off": int(r.n_off)}
+            "n_on": int(r.n_on), "n_off": int(r.n_off),
+            "electrical_refreshes": int(getattr(r, "electrical_refreshes", 0))}
+
+
+def feedback_params_series(result, device: str, times: np.ndarray,
+                           g_on_init: float, v_f_init: float = 0.0):
+    """Per-sample ``(g_on, V_f)`` of ``device`` when online electrical
+    feedback refactored its parameters during the run, or the unchanged
+    scalar ``(g_on_init, v_f_init)`` otherwise."""
+    recs = getattr(result, "_device_losses", None)
+    if not recs:
+        return g_on_init, v_f_init
+    for r in recs:
+        if r.device != device:
+            continue
+        upds = getattr(r, "_feedback_updates", None)
+        if not upds:
+            return g_on_init, v_f_init
+        t_upd = np.asarray([float(u[0]) for u in upds], dtype=float)
+        g_tab = np.asarray([float(g_on_init), *(float(u[1]) for u in upds)],
+                           dtype=float)
+        v_tab = np.asarray([float(v_f_init), *(float(u[2]) for u in upds)],
+                           dtype=float)
+        # Each refresh commits AFTER step t_upd[j] and applies to t > t_upd[j].
+        idx = np.searchsorted(t_upd, times, side="left")
+        return g_tab[idx], v_tab[idx]
+    return g_on_init, v_f_init
 
 
 def install(builder_cls, result_cls):

@@ -1499,7 +1499,9 @@ def _result_i(self, name: str, t=None, *, port=None):
         # voltage-consistency guard (_result_views).
         closed = _resolve_switch_closed(
             self, sf, times_arr, seq_idx, v_sw, name=name)
-        G_arr = _np.where(closed, g_on, g_off)
+        from .loss_tables import feedback_params_series as _fb_params
+        g_on_eff, _ = _fb_params(self, name, times_arr, g_on, 0.0)
+        G_arr = _np.where(closed, g_on_eff, g_off)
         return _finalize(_hold_unsolved(v_sw * G_arr))
 
     # ------------- static Newton kinds: the kernel's law ---------------

@@ -46,11 +46,90 @@ struct DeviceLossSpec {
     std::shared_ptr<const LossTable3D> e_off;
     std::shared_ptr<const ConductionTable> v_on;
     ConductionHeat conduction = ConductionHeat::Electrical;
+    bool electrical_feedback = false;
+    double dT_refresh = 5.0;  ///< |Tj - T_ref| threshold [K] for online (V_f, g_on) refresh
 
     [[nodiscard]] bool closed_loop() const noexcept { return !junction.empty(); }
     [[nodiscard]] const std::string& deposit_node() const noexcept {
         return closed_loop() ? junction : heat_node;
     }
+};
+
+/// Linear fit V_on(i, Tj) ≈ V_f + R_on * i (or R_on * i when allow_v_f is false).
+struct ConductionLinearFit {
+    double v_f = 0.0;
+    double r_on = 1e-9;
+    double g_on = 1e9;
+};
+
+/// Fit a ConductionTable linearly at junction temperature `tj` over the
+/// positive current knots of `table.i_axis()`. When `allow_v_f` is true
+/// (SwitchedDiode / reverse-blocking IGBT), fits both intercept `V_f >= 0`
+/// and slope `R_on >= 1e-9`; when false (bidirectional resistive Switch),
+/// fits `R_on * i` through the origin.
+[[nodiscard]] inline ConductionLinearFit fit_conduction_linear(
+    const ConductionTable& table, double tj, bool allow_v_f) {
+    constexpr double kMinROn = 1e-9;
+    std::vector<double> is;
+    is.reserve(table.i_axis().size());
+    for (const double ic : table.i_axis()) {
+        if (ic > 0.0) is.push_back(ic);
+    }
+    if (is.empty()) is.push_back(1.0);
+    std::vector<double> vs;
+    vs.reserve(is.size());
+    for (const double ic : is) vs.push_back(table(ic, tj));
+
+    auto fit_through_origin = [&]() -> ConductionLinearFit {
+        double num = 0.0, den = 0.0;
+        for (std::size_t k = 0; k < is.size(); ++k) {
+            num += is[k] * vs[k];
+            den += is[k] * is[k];
+        }
+        const double r = std::max(den > 0.0 ? num / den : kMinROn, kMinROn);
+        return {0.0, r, 1.0 / r};
+    };
+
+    if (!allow_v_f) return fit_through_origin();
+
+    if (is.size() == 1) {
+        if (!table.i_axis().empty() && table.i_axis().front() == 0.0) {
+            const double v0 = table(0.0, tj);
+            if (v0 > 0.0) {
+                const double r = std::max((vs[0] - v0) / is[0], kMinROn);
+                return {v0, r, 1.0 / r};
+            }
+        }
+        return fit_through_origin();
+    }
+
+    const double m = static_cast<double>(is.size());
+    double mean_i = 0.0, mean_v = 0.0;
+    for (std::size_t k = 0; k < is.size(); ++k) {
+        mean_i += is[k];
+        mean_v += vs[k];
+    }
+    mean_i /= m;
+    mean_v /= m;
+    double s_ii = 0.0, s_iv = 0.0;
+    for (std::size_t k = 0; k < is.size(); ++k) {
+        const double di = is[k] - mean_i;
+        s_ii += di * di;
+        s_iv += di * (vs[k] - mean_v);
+    }
+    const double slope = s_ii > 0.0 ? s_iv / s_ii : 0.0;
+    const double intercept = mean_v - slope * mean_i;
+    if (intercept < 0.0) return fit_through_origin();
+    const double r = std::max(slope, kMinROn);
+    return {intercept, r, 1.0 / r};
+}
+
+/// One online electrical-feedback refresh of (g_on, V_f) applied after the
+/// accepted step ending at time `t`; takes effect on subsequent steps (> t).
+struct FeedbackUpdate {
+    double t = 0.0;
+    double g_on = 0.0;
+    double v_f = 0.0;
 };
 
 /// (|v|, |i|) a commutation is charged at.
@@ -107,6 +186,8 @@ struct DeviceLossRecord {
     std::size_t n_off = 0;
     bool has_e_on = false;           ///< whether an E_on table was configured
     bool has_e_off = false;          ///< whether an E_off table was configured
+    std::size_t electrical_refreshes = 0;         ///< online V_on -> (V_f, g_on) refactors
+    std::vector<FeedbackUpdate> feedback_updates; ///< timeline of refreshed (t, g_on, v_f)
 };
 
 }  // namespace pulsim::thermal

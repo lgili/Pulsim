@@ -726,6 +726,10 @@ private:
                 }
                 s.word(x.v_on != nullptr);
                 if (x.v_on) { vec(x.v_on->i_axis()); vec(x.v_on->tj_axis()); vec(x.v_on->v_on()); }
+                if (x.electrical_feedback) {
+                    s.word(1);
+                    v.real(x.dT_refresh);
+                }
             }
         }
 

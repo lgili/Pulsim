@@ -353,9 +353,9 @@ inline SimulationResult run_transient(
 //     entries, compute_b_extra returns the zero vector).
 // -----------------------------------------------------------------------------
 inline SimulationResult run_transient(
-    const pwl::PwlStateSpaceCache& cache,
+    const pwl::PwlStateSpaceCache& cache_in,
     const topology::Graph& graph,
-    const pwl::DevicePool& pool,
+    const pwl::DevicePool& pool_in,
     const SimulationOptions& opts,
     const SwitchScheduleFn& switch_fn_user,
     const BExtraFn& b_extra_fn = {},
@@ -431,17 +431,39 @@ inline SimulationResult run_transient(
     //
     // Tolerance: 0 (exact match required). The user controls both
     // values, so they can synchronise them precisely.
-    if (cache.dt() > Real{0} && cache.dt() != opts.dt) {
+    if (cache_in.dt() > Real{0} && cache_in.dt() != opts.dt) {
         throw std::invalid_argument(
             "run_transient: cache.dt() does not match opts.dt; "
             "rebuild the cache with the same dt the simulation "
             "will use");
     }
-    const Size state_size = pool.state_size(graph);
+    const Size state_size = pool_in.state_size(graph);
     if (state_size == 0) {
         throw std::invalid_argument(
             "run_transient: pool.state_size(graph) is 0");
     }
+
+    // add-in-kernel-event-losses 4.1: when any loss port requests online
+    // electrical feedback, own a private pool + cache copy for the run so
+    // parametric refactors never mutate the caller's CircuitBuilder or cache.
+    // When no port enables electrical_feedback (the default), zero copies
+    // occur and cache / pool bind directly to the caller's references.
+    bool has_electrical_feedback = false;
+    for (const auto& dl : pool_in.device_losses()) {
+        if (dl.electrical_feedback) {
+            has_electrical_feedback = true;
+            break;
+        }
+    }
+    std::optional<pwl::DevicePool> fb_pool;
+    std::optional<pwl::PwlStateSpaceCache> fb_cache;
+    if (has_electrical_feedback) {
+        fb_pool.emplace(pool_in);
+        fb_cache.emplace(graph, *fb_pool);
+        fb_cache->build_lazy(cache_in.dt());
+    }
+    const pwl::PwlStateSpaceCache& cache = fb_cache ? *fb_cache : cache_in;
+    const pwl::DevicePool& pool = fb_pool ? *fb_pool : pool_in;
 
     // ---- Pre-allocate ---------------------------------------------------
     const Size n_steps = opts.expected_step_count();
@@ -1625,8 +1647,15 @@ inline SimulationResult run_transient(
         if (lt) {
             if (resume_from != nullptr && !resume_from->loss_state.empty()) {
                 lt->restore(resume_from->loss_state);   // the heat in flight too
+                if (fb_pool && fb_cache) {
+                    const auto changed = lt->replay_feedback_state(*fb_pool, diodes);
+                    if (!changed.empty()) {
+                        (void)fb_cache->refactor_branches(changed);
+                    }
+                }
             } else {
-                lt->begin(x, stamped_mask);
+                lt->begin(x, stamped_mask,
+                          /*t_ref_ready=*/start_from_dc_op || initial_state != nullptr);
             }
         }
 
@@ -3024,8 +3053,18 @@ inline SimulationResult run_transient(
                 ++result.n_restart_steps;
             }
             // add-in-kernel-event-losses: the step is accepted; read its
-            // commutations and conduction energy (reading rule).
-            if (lt) lt->accept(t_prev, t, x, stamped_mask);
+            // commutations and conduction energy (reading rule), then apply
+            // online electrical feedback (4.1) if any junction moved past dT_refresh.
+            if (lt) {
+                lt->accept(t_prev, t, x, stamped_mask);
+                if (fb_pool && fb_cache) {
+                    const auto changed =
+                        lt->refresh_electrical_feedback(t, *fb_pool, diodes);
+                    if (!changed.empty()) {
+                        (void)fb_cache->refactor_branches(changed);
+                    }
+                }
+            }
         };  // step_commit
 
         auto step_record = [&](Size k) PULSIM_STEP_PHASE {

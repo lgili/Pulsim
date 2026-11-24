@@ -26,15 +26,15 @@
 - [x] 3.7 Test with a PLECS XML fixture (`import_plecs_xml` → `attach_losses`): the on-state table reaches the kernel uncollapsed (heat at two currents and two temperatures equals the table within 1e-9)
 
 ## 4. Electrical feedback (optional)
-- [ ] 4.1 Re-fit `V_f`, `1/g_on` from `V_on(i, T_j)` when `|T_j − T_ref| > dT_refresh`; parametric refactor; refresh count in the result
-- [ ] 4.2 Test: two paralleled devices with unequal `R_th` share current unequally with feedback on and equally with it off
+- [x] 4.1 Re-fit `V_f`, `1/g_on` from `V_on(i, T_j)` when `|T_j − T_ref| > dT_refresh`; parametric refactor; refresh count in the result
+- [x] 4.2 Test: two paralleled devices with unequal `R_th` share current unequally with feedback on and equally with it off
 
 ## 5. Python summaries read kernel records
 - [x] 5.1 `device_loss_summary` and `device_thermal_summary` use `res.loss_events` when present; identical output at fixed `Tj` (regression on the existing loss tests)
 
 ## 6. Documentation
 - [x] 6.1 `docs/losses-and-thermal.md` (online versus post-hoc, the reading rule table, the energy-balance note), `AI_GUIDE.md` (which path to use, `Tj` versus `junction`), `docs/known-limitations.md` and `KNOWN_LIMITATIONS.md` (event energy is not drawn from the circuit; Newton devices excluded), `CHANGELOG.md`
-- [ ] 6.2 Tutorial: PLECS XML → closed-loop T_j on a buck
+- [x] 6.2 Tutorial: PLECS XML → closed-loop T_j on a buck
 
 ## 7. Verification
 - [x] 7.1 `ruff check`, `pytest`, `ctest`, `openspec validate --all --strict`, stub check
