@@ -1,0 +1,990 @@
+"""Compiled control-graph support for :func:`pulsim.periodic_steady_state`.
+
+Extracts and seeds the discrete state vector ``x_ctrl`` of compiled
+control graphs (``MixedDomainBlockChain`` / ``ClosedLoop`` /
+``CxxBlockChain``) via ``CxxBlockChain.dump_state`` / ``load_state`` so
+Newton/Broyden shooting solves ``P([x_circuit; x_ctrl]) = [x_circuit;
+x_ctrl]`` without mutating caller state on failure.
+
+Refuses any plain Python closure, stateful user object, or opaque
+``PythonBlock`` / ``CBlock`` carrying hidden uninspectable state with
+``UnsupportedError("periodic_steady_state", "hidden_controller_state", ...)``.
+"""
+
+from __future__ import annotations
+
+import dis
+import math
+import struct
+import types
+from collections.abc import Sequence
+from functools import partial
+from typing import Any
+
+import numpy as np
+
+from ._control_state import _cxx, _has, _mutable_cell
+from ._refusal import unsupported
+
+_ANALYSIS = "periodic_steady_state"
+
+_STATELESS_KINDS = frozenset({
+    "Gain",
+    "Subtract",
+    "Sum",
+    "MathBlock",
+    "Limiter",
+    "OpAmp",
+    "LookupTable1D",
+    "SignalMux",
+    "SignalDemux",
+    "PwmGenerator",
+    "SpaceVectorModulator",
+    "ClarkeTransform",
+    "InverseClarkeTransform",
+    "ParkTransform",
+    "InverseParkTransform",
+})
+
+_NON_SMOOTH_KINDS = frozenset({
+    "Comparator",
+    "StateMachine",
+    "SampleHold",
+})
+
+_PY_LIBRARY_KINDS = frozenset({
+    "SlidingModeObserver",
+    "FluxMRASObserver",
+})
+
+_SENTINEL = 1.1234567890123456
+
+
+def _unsup_hidden(where: str, reason: str, *, analysis: str = _ANALYSIS):
+    return unsupported(
+        analysis,
+        "hidden_controller_state",
+        f"{analysis}: {where} holds hidden or uninspectable controller "
+        f"state ({reason}), which the periodic shooting solver cannot read "
+        "or seed as part of x0. Use a compiled control graph "
+        "(MixedDomainBlockChain or bind_pi_to_switch) for closed-loop "
+        "periodic steady state, or a stateless schedule "
+        "(make_pwm_switch_fn / SwitchSchedule) for open-loop shooting.",
+    )
+
+
+def _mutates_deref_or_global(fn: types.FunctionType) -> str:
+    """True reason string when ``fn`` executes STORE/DELETE on closure or global."""
+    for ins in dis.get_instructions(fn):
+        if ins.opname in ("STORE_DEREF", "DELETE_DEREF"):
+            return f"mutates closed-over variable {ins.argval!r}"
+        if ins.opname in ("STORE_GLOBAL", "DELETE_GLOBAL"):
+            return f"mutates global variable {ins.argval!r}"
+    return ""
+
+
+def _hidden_state_reason(obj: Any, seen: set | None = None) -> str:
+    """Return a non-empty reason if ``obj`` carries hidden mutable Python state."""
+    if obj is None:
+        return ""
+    mod = type(obj).__module__ or ""
+    if mod.startswith("pulsim._pulsim"):
+        return ""
+    if _cxx(obj) is not None or getattr(obj, "_graph", None) is not None:
+        return ""
+    if getattr(obj, "_pulsim_monitor", False):
+        return _hidden_state_reason(getattr(obj, "fn", None), seen)
+
+    seen = set() if seen is None else seen
+    if id(obj) in seen:
+        return ""
+    seen.add(id(obj))
+
+    if isinstance(obj, partial):
+        r = _hidden_state_reason(obj.func, seen)
+        if r:
+            return r
+        for v in (*obj.args, *obj.keywords.values()):
+            if _mutable_cell(v, set(seen)):
+                return f"partial binds mutable state ({type(v).__name__})"
+        return ""
+
+    if isinstance(obj, types.MethodType):
+        return _hidden_state_reason(obj.__self__, seen)
+
+    if isinstance(obj, types.BuiltinFunctionType):
+        return ""
+
+    if isinstance(obj, types.FunctionType):
+        mut = _mutates_deref_or_global(obj)
+        if mut:
+            return mut
+        for cell in obj.__closure__ or ():
+            if not _has(cell):
+                continue
+            v = cell.cell_contents
+            if isinstance(v, (types.FunctionType, partial, types.MethodType)):
+                r = _hidden_state_reason(v, seen)
+                if r:
+                    return r
+            elif _mutable_cell(v, set(seen)):
+                return f"closure captures mutable {type(v).__name__}"
+        for v in obj.__defaults__ or ():
+            if _mutable_cell(v, set(seen)):
+                return f"default argument holds mutable {type(v).__name__}"
+        for v in (obj.__kwdefaults__ or {}).values():
+            if _mutable_cell(v, set(seen)):
+                return f"keyword default holds mutable {type(v).__name__}"
+        g = obj.__globals__
+        for ins in dis.get_instructions(obj):
+            if ins.opname in ("LOAD_GLOBAL", "LOAD_NAME") and ins.argval in g:
+                v = g[ins.argval]
+                if isinstance(v, (types.FunctionType, partial, types.MethodType)):
+                    r = _hidden_state_reason(v, seen)
+                    if r:
+                        return r
+                elif _mutable_cell(v, set(seen)):
+                    return f"reads mutable global {ins.argval!r} ({type(v).__name__})"
+        return ""
+
+    if isinstance(obj, (types.ModuleType, type)):
+        return ""
+
+    # User callable object (class instance)
+    d = getattr(obj, "__dict__", None)
+    if d:
+        return f"stateful {type(obj).__name__} instance"
+    slots = getattr(type(obj), "__slots__", None)
+    if slots:
+        slot_names = (slots,) if isinstance(slots, str) else slots
+        for s in slot_names:
+            if s not in ("__dict__", "__weakref__") and hasattr(obj, s):
+                return f"stateful {type(obj).__name__} instance"
+    return ""
+
+
+def _resolve_observer(builder, obj, *, allow_compile: bool = True):
+    """Turn a MixedDomainBlockChain or observer into a compiled observer."""
+    from .blockchain import MixedDomainBlockChain
+
+    if isinstance(obj, MixedDomainBlockChain):
+        if obj._cxx_chain is not None:
+            ref = getattr(obj, "_last_observer_ref", None)
+            obs = ref() if ref is not None else None
+            if obs is not None and getattr(obs, "_cxx_chain", None) is obj._cxx_chain:
+                return obs
+        if not allow_compile:
+            raise ValueError(
+                "periodic_steady_state: MixedDomainBlockChain has not been "
+                "compiled; call chain.make_step_observer(builder) or pass "
+                "the circuit builder."
+            )
+        return obj.make_step_observer(builder)
+    return obj
+
+
+def normalize_control_args(
+    builder,
+    *,
+    switch_fn=None,
+    closed_loops=None,
+    step_observer=None,
+    controller_period: float | None = None,
+    control=None,
+):
+    """Normalize ``control=`` / ``closed_loops=`` / ``step_observer=``."""
+    from .blockchain import MixedDomainBlockChain
+
+    if control is not None:
+        if closed_loops is not None or step_observer is not None:
+            raise ValueError(
+                "periodic_steady_state: pass control= OR closed_loops= / "
+                "step_observer=, not both."
+            )
+        if isinstance(control, MixedDomainBlockChain):
+            step_observer = _resolve_observer(builder, control)
+        elif hasattr(control, "step_observer") and hasattr(control, "switch_fn"):
+            closed_loops = [control]
+        elif isinstance(control, Sequence) and not isinstance(control, (str, bytes)):
+            closed_loops = list(control)
+        else:
+            step_observer = control
+
+    if isinstance(step_observer, MixedDomainBlockChain):
+        step_observer = _resolve_observer(builder, step_observer)
+
+    loops = list(closed_loops) if closed_loops is not None else None
+    if loops is not None:
+        norm_loops = []
+        for lp in loops:
+            obs = getattr(lp, "step_observer", lp)
+            if isinstance(obs, MixedDomainBlockChain):
+                obs = _resolve_observer(builder, obs)
+                # Keep loop wrapper semantics if a chain was placed directly
+                norm_loops.append(lp)
+            else:
+                norm_loops.append(lp)
+        loops = norm_loops
+
+    return switch_fn, loops, step_observer, controller_period
+
+
+def check_hidden_controller_state(
+    *,
+    switch_fn=None,
+    closed_loops=None,
+    step_observer=None,
+    analysis: str = _ANALYSIS,
+    refuse_closed_loop_fn=None,
+) -> None:
+    """Refuse hidden Python controller state across switch_fn / observers / loops.
+
+    Note: ``refuse_closed_loop_fn(sf)`` is checked before the closure check
+    on ``switch_fn`` so closed-loop gate wrappers like a closure around
+    ``duty_get`` of ``bind_pi_to_duty_callable`` keep raising
+    ``feature='closed_loop'`` when their controller is absent.
+    """
+    # 1. Check closed_loops entries
+    for i, lp in enumerate(closed_loops or ()):
+        obs = getattr(lp, "step_observer", lp)
+        if _cxx(obs) is None:
+            reason = _hidden_state_reason(obs) or (
+                f"non-graph callable {type(obs).__name__}"
+            )
+            raise _unsup_hidden(f"closed_loops[{i}]", reason, analysis=analysis)
+        _check_graph_blocks_inspectable(obs, analysis=analysis)
+        sw = getattr(lp, "switch_fn", None)
+        if sw is not None:
+            r = _hidden_state_reason(sw)
+            if r:
+                raise _unsup_hidden(
+                    f"closed_loops[{i}].switch_fn", r, analysis=analysis
+                )
+
+    # 2. Check step_observer
+    if step_observer is not None:
+        if _cxx(step_observer) is not None:
+            _check_graph_blocks_inspectable(step_observer, analysis=analysis)
+        else:
+            reason = _hidden_state_reason(step_observer)
+            if reason:
+                raise _unsup_hidden("step_observer", reason, analysis=analysis)
+            # Plain Python step_observer without compiled control graph
+            raise _unsup_hidden(
+                "step_observer",
+                f"plain Python callable {type(step_observer).__name__} is not "
+                "a compiled control graph",
+                analysis=analysis,
+            )
+
+    # 3. Check switch_fn (allow closed-loop refusal to run first if provided)
+    if switch_fn is not None:
+        if refuse_closed_loop_fn is not None:
+            refuse_closed_loop_fn(switch_fn)
+        r = _hidden_state_reason(switch_fn)
+        if r:
+            raise _unsup_hidden("switch_fn", r, analysis=analysis)
+
+
+def _check_graph_blocks_inspectable(obs, *, analysis: str = _ANALYSIS) -> None:
+    cxx = _cxx(obs)
+    graph = getattr(obs, "_graph", None)
+    uncaptured = list(cxx.uncaptured_blocks())
+    if uncaptured:
+        raise _unsup_hidden(
+            f"control graph block {uncaptured[0]!r}",
+            "state is not captured by CxxBlockChain.save_state()",
+            analysis=analysis,
+        )
+    if graph is None:
+        raise _unsup_hidden(
+            "control graph",
+            "observer carries a CxxBlockChain without Python block metadata",
+            analysis=analysis,
+        )
+    for spec in getattr(graph, "blocks", ()):
+        b = spec.block
+        kind = type(b).__name__
+        if kind == "CBlock":
+            raise _unsup_hidden(
+                f"block {spec.name!r} (CBlock)",
+                "C block state is opaque to shooting",
+                analysis=analysis,
+            )
+        if kind in _PY_LIBRARY_KINDS:
+            raise _unsup_hidden(
+                f"block {spec.name!r} ({kind})",
+                "Python library block state is opaque to shooting",
+                analysis=analysis,
+            )
+        if kind == "PythonBlock":
+            wrapped = getattr(b, "_wrapped", b)
+            fn = getattr(b, "fn", wrapped)
+            reason = _hidden_state_reason(wrapped) or _hidden_state_reason(fn)
+            if reason:
+                raise _unsup_hidden(
+                    f"PythonBlock {spec.name!r}",
+                    reason,
+                    analysis=analysis,
+                )
+            # A PythonBlock wrapping a callable object even with empty __dict__
+            # or anything non-function is uninspectable unless pure function.
+            if not isinstance(wrapped, (types.FunctionType, types.BuiltinFunctionType, partial)):
+                raise _unsup_hidden(
+                    f"PythonBlock {spec.name!r}",
+                    f"callable object {type(wrapped).__name__} has no "
+                    "inspectable state vector",
+                    analysis=analysis,
+                )
+        elif kind in _NON_SMOOTH_KINDS:
+            raise unsupported(
+                analysis,
+                "controller_state",
+                f"{analysis}: control block {spec.name!r} ({kind}) holds "
+                "non-differentiable discrete/mode state, which Newton "
+                "shooting cannot solve.",
+            )
+        elif kind not in _STATELESS_KINDS and kind not in _STATE_SPECS:
+            raise _unsup_hidden(
+                f"block {spec.name!r} ({kind})",
+                "unsupported block kind in periodic shooting",
+                analysis=analysis,
+            )
+
+
+# ---------------------------------------------------------------------------
+# State-slot probing and serialization layout
+# ---------------------------------------------------------------------------
+
+def _dummy_chain_for_spec(spec, overrides: dict[str, Any] | None = None):
+    """Compile a minimal 1-block CxxBlockChain matching ``spec``."""
+    from . import _pulsim as _k
+
+    overrides = overrides or {}
+    c = _k.CxxBlockChain()
+    b = spec.block
+    kind = type(b).__name__
+    inputs = spec.inputs
+    output = spec.output
+    outs = [str(o) for o in output] if isinstance(output, (tuple, list)) else [str(output)]
+
+    def cref(n=1):
+        return [_k.CxxInputRef.const_value(0.0) for _ in range(n)]
+
+    def add_ported(pkind, params, n_in, n_out=1):
+        c.add_ported(
+            pkind,
+            {
+                k: [float(e) for e in v]
+                if isinstance(v, (list, tuple))
+                else [float(v)]
+                for k, v in params.items()
+            },
+            cref(n_in),
+            [f"o{i}" for i in range(n_out)],
+        )
+
+    if kind == "Gain":
+        c.add_gain(k=float(b.k), x=_k.CxxInputRef.const_value(0.0), output="o0")
+    elif kind == "Subtract":
+        c.add_subtract(
+            a=_k.CxxInputRef.const_value(0.0),
+            b=_k.CxxInputRef.const_value(0.0),
+            output="o0",
+        )
+    elif kind == "Sum":
+        srcs = (
+            inputs["inputs"].value
+            if "inputs" in inputs
+            else [inputs[k] for k in ("a", "b", "c") if k in inputs]
+        )
+        add_ported("sum", {"weights": [float(v) for v in b.weights]}, len(srcs))
+    elif kind == "PIController":
+        c.add_pi_controller(
+            Kp=float(b.Kp),
+            Ki=float(b.Ki),
+            output_min=float(b.output_min),
+            output_max=float(b.output_max),
+            setpoint=_k.CxxInputRef.const_value(0.0),
+            measured=_k.CxxInputRef.const_value(0.0),
+            dt=_k.CxxInputRef.const_value(0.0),
+            output="o0",
+            integrator_state=float(overrides.get("integrator_state", 0.0)),
+            prev_error=float(overrides.get("_prev_error", 0.0)),
+        )
+    elif kind == "PIDController":
+        add_ported(
+            "pid",
+            dict(
+                Kp=b.Kp,
+                Ki=b.Ki,
+                Kd=b.Kd,
+                alpha=b.derivative_alpha,
+                output_min=b.output_min,
+                output_max=b.output_max,
+                integrator_state=overrides.get("integrator_state", 0.0),
+                derivative_state=overrides.get("derivative_state", 0.0),
+                prev_error=overrides.get("_prev_error", 0.0),
+            ),
+            3,
+        )
+    elif kind == "FirstOrderLowPass":
+        add_ported(
+            "first_order_low_pass",
+            dict(tau=b.tau, state=overrides.get("state", 0.0)),
+            2,
+        )
+    elif kind == "Integrator":
+        add_ported(
+            "integrator",
+            dict(
+                gain=b.gain,
+                output_min=b.output_min,
+                output_max=b.output_max,
+                state=overrides.get("state", 0.0),
+            ),
+            2,
+        )
+    elif kind == "Differentiator":
+        add_ported(
+            "differentiator",
+            dict(
+                alpha=b.alpha,
+                state=overrides.get("state", 0.0),
+                prev_x=overrides.get("_prev_x", 0.0),
+            ),
+            2,
+        )
+    elif kind == "Limiter":
+        c.add_limiter(
+            min_v=float(b.output_min),
+            max_v=float(b.output_max),
+            x=_k.CxxInputRef.const_value(0.0),
+            output="o0",
+        )
+    elif kind == "MovingAverageFilter":
+        add_ported("ema", dict(alpha=b.alpha, state=overrides.get("state", 0.0)), 1)
+    elif kind == "RateLimiter":
+        add_ported(
+            "rate_limiter",
+            dict(
+                slew_up=b.slew_up,
+                slew_down=b.slew_down,
+                state=overrides.get("state", 0.0),
+            ),
+            2,
+        )
+    elif kind == "TransferFunction":
+        nx = len(b.num)
+        ny = len(b.den)
+        xh = list(overrides.get("xh", [0.0] * nx))
+        yh = list(overrides.get("yh", [0.0] * ny))
+        add_ported(
+            "transfer_function",
+            {"num": list(b.num), "den": list(b.den), "x_hist": xh, "y_hist": yh},
+            1,
+        )
+    elif kind == "OpAmp":
+        add_ported("op_amp", dict(gain=b.gain, rail_min=b.rail_min, rail_max=b.rail_max), 2)
+    elif kind == "LookupTable1D":
+        add_ported("lookup_table_1d", {"xs": list(b.xs), "ys": list(b.ys)}, 1)
+    elif kind == "MathBlock":
+        ops = ("add", "sub", "mul", "div", "abs", "neg", "sqrt", "pow2")
+        add_ported("math", dict(op=ops.index(str(b.op).lower())), 2)
+    elif kind == "SignalMux":
+        n_in = 1 + len(inputs["inputs"].value)
+        add_ported("signal_mux", {}, n_in)
+    elif kind == "SignalDemux":
+        add_ported("signal_demux", dict(n_outputs=int(b.n_outputs)), 1, n_out=int(b.n_outputs))
+    elif kind == "PwmGenerator":
+        add_ported("pwm", dict(frequency=b.frequency, phase=b.phase), 2)
+    elif kind == "SpaceVectorModulator":
+        add_ported("svm", dict(v_dc=b.v_dc), 2, n_out=3)
+    elif kind == "ClarkeTransform":
+        add_ported("clarke", {}, 3, n_out=3)
+    elif kind == "InverseClarkeTransform":
+        add_ported("inverse_clarke", {}, 3, n_out=3)
+    elif kind == "ParkTransform":
+        add_ported("park", {}, 3, n_out=2)
+    elif kind == "InverseParkTransform":
+        add_ported("inverse_park", {}, 3, n_out=2)
+    elif kind == "PLL":
+        add_ported(
+            "pll",
+            dict(
+                f_nominal=b.f_nominal,
+                Kp=b.Kp,
+                Ki=b.Ki,
+                theta_hat=overrides.get("theta_hat", 0.0),
+                omega_hat=overrides.get("omega_hat", 0.0),
+                integ=overrides.get("_integ", 0.0),
+            ),
+            3,
+            n_out=len(outs),
+        )
+    elif kind == "DelayBlock":
+        c.add_delay(
+            samples=int(b.samples),
+            initial_value=float(overrides.get("initial_value", b.initial_value)),
+            x=_k.CxxInputRef.const_value(0.0),
+            output="o0",
+        )
+        c.reset()
+    elif kind == "PythonBlock":
+        c.add_python_block(lambda *a: 0.0, [], ["o0"], with_state=False)
+    else:
+        raise ValueError(f"unsupported control block kind {kind!r}")
+    c.name_last("b", kind)
+    c.compile()
+    return c
+
+
+_STATE_SPECS: dict[str, tuple[str, ...]] = {
+    "PIController": ("integrator_state", "_prev_error"),
+    "PIDController": ("integrator_state", "derivative_state", "_prev_error"),
+    "FirstOrderLowPass": ("state",),
+    "Integrator": ("state",),
+    "Differentiator": ("state", "_prev_x"),
+    "MovingAverageFilter": ("state",),
+    "RateLimiter": ("state",),
+    "PLL": ("theta_hat", "omega_hat", "_integ"),
+    "DelayBlock": ("buf",),
+    "TransferFunction": ("xh", "yh"),
+}
+
+_EMPTY_CHAIN_LEN: int | None = None
+
+
+def _empty_chain_len() -> int:
+    global _EMPTY_CHAIN_LEN
+    if _EMPTY_CHAIN_LEN is None:
+        from . import _pulsim as _k
+
+        c = _k.CxxBlockChain()
+        c.compile()
+        _EMPTY_CHAIN_LEN = len(c.dump_state(c.save_state()))
+    return _EMPTY_CHAIN_LEN
+
+
+def _dummy_dump_bytes(spec, overrides: dict[str, Any] | None = None) -> tuple[bytes, int]:
+    """Return ``(block_dump_bytes, n_sig)`` for a 1-block dummy chain."""
+    c = _dummy_chain_for_spec(spec, overrides)
+    raw = c.dump_state(c.save_state())
+    kind = type(spec.block).__name__
+    outs = (
+        [str(o) for o in spec.output]
+        if isinstance(spec.output, (tuple, list))
+        else [str(spec.output)]
+    )
+    if kind in ("SpaceVectorModulator", "ClarkeTransform", "InverseClarkeTransform"):
+        n_sig = 3
+    elif kind in ("ParkTransform", "InverseParkTransform"):
+        n_sig = 2
+    elif kind == "PLL":
+        n_sig = len(outs)
+    elif kind == "SignalDemux":
+        n_sig = int(spec.block.n_outputs)
+    else:
+        n_sig = 1
+    hdr = 16 + 8 + 1  # magic + n_blocks + name_len("b") + "b"
+    tail_len = (_empty_chain_len() - 16) + 16 * n_sig
+    return raw[hdr : len(raw) - tail_len], n_sig
+
+
+def _find_double_offset(b0: bytes, b1: bytes) -> int:
+    diff = [i for i in range(len(b0)) if b0[i] != b1[i]]
+    if not diff:
+        raise RuntimeError("failed to locate controller state byte offset")
+    off = diff[0]
+    if off + 8 > len(b0):
+        raise RuntimeError("controller state byte offset out of range")
+    return off
+
+
+def _probe_block_schema(spec) -> tuple[int, list[tuple[str, int, float]]]:
+    """Return ``(block_dump_len, [(field_name, offset_in_dump, init_val), ...])``."""
+    b = spec.block
+    kind = type(b).__name__
+    d0, _ = _dummy_dump_bytes(spec)
+    dump_len = len(d0)
+    if kind in _STATELESS_KINDS or kind == "PythonBlock":
+        return dump_len, []
+
+    if kind == "DelayBlock":
+        samples = int(b.samples)
+        init_v = float(b.initial_value)
+        # In DelayBlock, buf (k doubles) sits at the end of block_dump
+        # (preceded by uint64 size == samples). Verify by sentinel probe.
+        d1, _ = _dummy_dump_bytes(spec, {"initial_value": _SENTINEL})
+        diff = [i for i in range(dump_len) if d0[i] != d1[i]]
+        # Last samples*8 bytes are buf[0..samples-1]
+        buf_start = dump_len - 8 * samples
+        assert buf_start >= 8 and diff[-1] < dump_len, (buf_start, dump_len)
+        count = struct.unpack_from("<Q", d1, buf_start - 8)[0]
+        assert count == samples, (count, samples)
+        fields = [(f"buf[{k}]", buf_start + 8 * k, init_v) for k in range(samples)]
+        return dump_len, fields
+
+    if kind == "TransferFunction":
+        nx = len(b.num)
+        ny = len(b.den)
+        fields: list[tuple[str, int, float]] = []
+        base_xh = list(getattr(b, "_x_hist", []) or [])
+        base_yh = list(getattr(b, "_y_hist", []) or [])
+        for i in range(nx):
+            xh = [0.0] * nx
+            xh[i] = _SENTINEL
+            d1, _ = _dummy_dump_bytes(spec, {"xh": xh, "yh": [0.0] * ny})
+            off = _find_double_offset(d0, d1)
+            val = float(base_xh[i]) if i < len(base_xh) else 0.0
+            fields.append((f"x_hist[{i}]", off, val))
+        for i in range(ny):
+            yh = [0.0] * ny
+            yh[i] = _SENTINEL
+            d1, _ = _dummy_dump_bytes(spec, {"xh": [0.0] * nx, "yh": yh})
+            off = _find_double_offset(d0, d1)
+            val = float(base_yh[i]) if i < len(base_yh) else 0.0
+            fields.append((f"y_hist[{i}]", off, val))
+        return dump_len, fields
+
+    attrs = _STATE_SPECS[kind]
+    fields = []
+    for attr in attrs:
+        d1, _ = _dummy_dump_bytes(spec, {attr: _SENTINEL})
+        off = _find_double_offset(d0, d1)
+        fields.append((attr, off, float(getattr(b, attr))))
+    return dump_len, fields
+
+
+def _skip_tail_to_pub(raw: bytes, sig_count_pos: int) -> tuple[int, int, int]:
+    """From ``sig_count_pos``, return ``(sig_data_pos, pub_data_pos, end_pos)``."""
+    pos = sig_count_pos
+    n_sig = struct.unpack_from("<Q", raw, pos)[0]
+    sig_data_pos = pos + 8
+    pos = sig_data_pos + 8 * n_sig
+    n_bk = struct.unpack_from("<Q", raw, pos)[0]
+    pos += 8 + 8 * n_bk
+    n_bv = struct.unpack_from("<Q", raw, pos)[0]
+    pos += 8 + 8 * n_bv
+    n_rec = struct.unpack_from("<Q", raw, pos)[0]
+    pos += 8
+    for _ in range(n_rec):
+        cnt = struct.unpack_from("<Q", raw, pos)[0]
+        pos += 8 + 8 * cnt
+    n_rt = struct.unpack_from("<Q", raw, pos)[0]
+    pos += 8 + 8 * n_rt
+    pos += 24  # n_evals, n_block_evals, n_calls
+    n_grp = struct.unpack_from("<Q", raw, pos)[0]
+    pos += 8 + 33 * n_grp  # k(8)+n_ticks(8)+pending_at(8)+pending(1)+jitter_max(8)
+    n_pub = struct.unpack_from("<Q", raw, pos)[0]
+    pub_data_pos = pos + 8
+    pos = pub_data_pos + 8 * n_pub
+    return sig_data_pos, pub_data_pos, pos
+
+
+def _clean_template_bytes(cxx, chain) -> tuple[bytes, int, list[tuple[str, int, float]]]:
+    """Build a clean ``dump_state`` template (zero ticks/calls/recordings)
+    and return ``(template_bytes, sig_count_pos, block_state_slots)``."""
+    raw = cxx.dump_state(cxx.save_state())
+    pos = 16  # magic(8) + n_blocks(8)
+    out = bytearray(raw[:pos])
+    slots: list[tuple[str, int, float]] = []
+
+    for spec in chain.blocks:
+        name_len = struct.unpack_from("<Q", raw, pos)[0]
+        name_bytes = raw[pos : pos + 8 + name_len]
+        out.extend(name_bytes)
+        pos += 8 + name_len
+
+        kind = type(spec.block).__name__
+        expected_len, block_fields = _probe_block_schema(spec)
+        block_start_in_out = len(out)
+
+        if kind == "DelayBlock":
+            samples = int(spec.block.samples)
+            init_v = float(spec.block.initial_value)
+            # Check actual buf size in raw (may be 0 before first tick)
+            # Format: size_t samples (8) + double initial_value (8) + uint64 buf_len (8) + buf
+            buf_len = struct.unpack_from("<Q", raw, pos + 16)[0]
+            raw_block_len = 24 + 8 * buf_len
+            if buf_len == samples:
+                out.extend(raw[pos : pos + raw_block_len])
+            else:
+                out.extend(raw[pos : pos + 16])
+                out.extend(struct.pack("<Q", samples))
+                out.extend(struct.pack(f"<{samples}d", *([init_v] * samples)))
+            pos += raw_block_len
+        elif kind == "TransferFunction":
+            nx = len(spec.block.num)
+            ny = len(spec.block.den)
+            block_bytes = bytearray(raw[pos : pos + expected_len])
+            # Ensure nx == len(num) and ny == len(den) in the template
+            # Last 8 bytes of PyTransferFunction dump are int nx, int ny.
+            struct.pack_into("<ii", block_bytes, expected_len - 8, nx, ny)
+            out.extend(block_bytes)
+            pos += expected_len
+        else:
+            out.extend(raw[pos : pos + expected_len])
+            pos += expected_len
+
+        for fname, rel_off, init_val in block_fields:
+            slots.append((f"ctrl({spec.name}.{fname})", block_start_in_out + rel_off, init_val))
+
+    sig_count_pos_in_raw = pos
+    sig_count_pos_in_out = len(out)
+    # Parse tail of raw to copy sig, b_extra, zeroed recordings, zeroed groups, pub, zeroed horizon
+    n_sig = struct.unpack_from("<Q", raw, pos)[0]
+    out.extend(raw[pos : pos + 8 + 8 * n_sig])
+    pos += 8 + 8 * n_sig
+
+    n_bk = struct.unpack_from("<Q", raw, pos)[0]
+    out.extend(raw[pos : pos + 8 + 8 * n_bk])
+    pos += 8 + 8 * n_bk
+    n_bv = struct.unpack_from("<Q", raw, pos)[0]
+    out.extend(raw[pos : pos + 8 + 8 * n_bv])
+    pos += 8 + 8 * n_bv
+
+    # Clear recordings & recording_times while preserving recording channel count
+    n_rec = struct.unpack_from("<Q", raw, pos)[0]
+    pos += 8
+    out.extend(struct.pack("<Q", n_rec))
+    for _ in range(n_rec):
+        cnt = struct.unpack_from("<Q", raw, pos)[0]
+        pos += 8 + 8 * cnt
+        out.extend(struct.pack("<Q", 0))
+    n_rt = struct.unpack_from("<Q", raw, pos)[0]
+    pos += 8 + 8 * n_rt
+    out.extend(struct.pack("<Q", 0))
+
+    # Zero n_evals, n_block_evals, n_calls
+    pos += 24
+    out.extend(struct.pack("<QQQ", 0, 0, 0))
+
+    # Zero each group's runtime counters (k, n_ticks, pending_at, pending, jitter_max)
+    n_grp = struct.unpack_from("<Q", raw, pos)[0]
+    pos += 8
+    out.extend(struct.pack("<Q", n_grp))
+    for _ in range(n_grp):
+        out.extend(struct.pack("<QQd?d", 0, 0, -math.inf, False, 0.0))
+        pos += 33
+
+    # Copy pub_
+    n_pub = struct.unpack_from("<Q", raw, pos)[0]
+    out.extend(raw[pos : pos + 8 + 8 * n_pub])
+    pos += 8 + 8 * n_pub
+
+    # last_t, t0, solver_dt, queued, horizon_t, has_horizon_x, hx
+    last_t, t0, solver_dt = struct.unpack_from("<ddd", raw, pos)
+    pos += 24
+    out.extend(struct.pack("<ddd", 0.0, 0.0, solver_dt))
+    n_q = struct.unpack_from("<Q", raw, pos)[0]
+    pos += 8 + n_q
+    out.extend(struct.pack("<Q", n_q))
+    out.extend(b"\x00" * n_q)
+    pos += 8 + 1  # horizon_t, has_horizon_x
+    n_hx = struct.unpack_from("<Q", raw, pos)[0]
+    pos += 8 + 8 * n_hx
+    out.extend(struct.pack("<d?Q", 0.0, False, 0))
+    assert pos == len(raw), (pos, len(raw))
+    _ = sig_count_pos_in_raw, last_t, t0
+
+    return bytes(out), sig_count_pos_in_out, slots
+
+
+def _divides(P: float, T: float) -> bool:
+    if not (P > 0.0 and math.isfinite(P)):
+        return False
+    k = round(T / P)
+    return k >= 1 and abs(T / P - k) <= 1e-12 * max(1.0, T / P)
+
+
+class _SingleGraphState:
+    """State mapper for one compiled ``CxxBlockChain``."""
+
+    def __init__(self, obs, period: float):
+        self.obs = obs
+        self.cxx = _cxx(obs)
+        self.graph = obs._graph
+        self.orig_state = self.cxx.save_state()
+
+        # Periodicity check on all discrete rate groups
+        n_groups = int(self.cxx.tick_counts().__len__())
+        for gi in range(1, n_groups):
+            p_grp = float(self.cxx.group_period(gi))
+            if not _divides(p_grp, period):
+                raise unsupported(
+                    _ANALYSIS,
+                    "period",
+                    f"{_ANALYSIS}: control graph rate period {p_grp!r} s "
+                    f"does not divide shooting period={period!r} s.",
+                )
+
+        template, sig_count_pos, block_slots = _clean_template_bytes(
+            self.cxx, self.graph
+        )
+        self._template = template
+        self._sig_count_pos = sig_count_pos
+        sig_data_pos, pub_data_pos, _ = _skip_tail_to_pub(template, sig_count_pos)
+
+        # If any rate group has compute_delay != 0 or offset > 0, its
+        # published output channel values carry across the period boundary.
+        delayed_slots = self._delayed_channel_slots(sig_data_pos, pub_data_pos)
+        self.slots: list[tuple[str, int, float]] = [*block_slots, *delayed_slots]
+        # Verify template round-trips cleanly through load_state
+        self.cxx.load_state(self._template)
+
+    def _delayed_channel_slots(
+        self, sig_data_pos: int, pub_data_pos: int
+    ) -> list[tuple[str, int, float]]:
+        groups = getattr(self.graph, "_groups", {}) or {}
+        if not groups:
+            return []
+        inv_group = {gid: rate for rate, gid in groups.items()}
+        block_rates = getattr(self.graph, "_block_rates", None) or []
+        slot_names = list(self.graph.blocks)
+        _ = slot_names
+        # Map channel name -> slot index via chain's sink/channel names
+        # We can find the channel slot index by probing set_channel on template?
+        # Even simpler: CxxBlockChain doesn't expose slot_names, so only add
+        # delayed channel slots when offset > 0 or compute_delay != 0!
+        delayed_channels: list[tuple[str, str]] = []
+        for idx, spec in enumerate(self.graph.blocks):
+            rate = block_rates[idx] if idx < len(block_rates) else spec.rate
+            if rate is None:
+                continue
+            delay_kind, _ = rate._delay()
+            if delay_kind == 2:  # one_sample: sig[s] at t=0- becomes pub[s] at t=0
+                outs = (
+                    list(spec.output)
+                    if isinstance(spec.output, (tuple, list))
+                    else [spec.output]
+                )
+                for ch in outs:
+                    delayed_channels.append((ch, "sig"))
+            elif float(rate.offset) > 0.0 or delay_kind == 1:
+                outs = (
+                    list(spec.output)
+                    if isinstance(spec.output, (tuple, list))
+                    else [spec.output]
+                )
+                for ch in outs:
+                    delayed_channels.append((ch, "pub"))
+        _ = inv_group
+        if not delayed_channels:
+            return []
+
+        # Probe slot index of each delayed channel using save/set_channel/dump
+        live = self.cxx.save_state()
+        out_slots: list[tuple[str, int, float]] = []
+        try:
+            for ch, which in delayed_channels:
+                self.cxx.restore_state(self.cxx.load_state(self._template))
+                b0 = self.cxx.dump_state(self.cxx.save_state())
+                self.cxx.set_output(ch, _SENTINEL)
+                b1 = self.cxx.dump_state(self.cxx.save_state())
+                s0, p0, _ = _skip_tail_to_pub(b0, self._sig_count_pos)
+                n_sig = struct.unpack_from("<Q", b0, self._sig_count_pos)[0]
+                slot_idx = None
+                for k in range(n_sig):
+                    if b0[s0 + 8 * k : s0 + 8 * (k + 1)] != b1[s0 + 8 * k : s0 + 8 * (k + 1)]:
+                        slot_idx = k
+                        break
+                if slot_idx is None:
+                    continue
+                if which == "sig":
+                    off = sig_data_pos + 8 * slot_idx
+                    init_v = struct.unpack_from("<d", self._template, off)[0]
+                    out_slots.append((f"ctrl(sig:{ch})", off, init_v))
+                else:
+                    off = pub_data_pos + 8 * slot_idx
+                    init_v = struct.unpack_from("<d", self._template, off)[0]
+                    out_slots.append((f"ctrl(pub:{ch})", off, init_v))
+        finally:
+            self.cxx.restore_state(live)
+        return out_slots
+
+    @property
+    def n_ctrl(self) -> int:
+        return len(self.slots)
+
+    def initial_values(self) -> np.ndarray:
+        return np.array([v for _, _, v in self.slots], dtype=float)
+
+    def seed(self, values: np.ndarray) -> None:
+        buf = bytearray(self._template)
+        for (_, off, _), val in zip(self.slots, values):
+            struct.pack_into("<d", buf, off, float(val))
+        self.cxx.restore_state(self.cxx.load_state(bytes(buf)))
+
+    def read(self) -> np.ndarray:
+        raw = self.cxx.dump_state(self.cxx.save_state())
+        _s_pos, p_pos, _ = _skip_tail_to_pub(raw, self._sig_count_pos)
+        t_pub_start = _skip_tail_to_pub(self._template, self._sig_count_pos)[1]
+        delta_pub = p_pos - t_pub_start
+        vals = []
+        for _, off, _ in self.slots:
+            actual_off = off + delta_pub if off >= t_pub_start else off
+            vals.append(struct.unpack_from("<d", raw, actual_off)[0])
+        return np.array(vals, dtype=float)
+
+    def restore_original(self) -> None:
+        self.cxx.restore_state(self.orig_state)
+
+
+class ControlGraphStateMapper:
+    """Flat discrete state vector ``x_ctrl`` over all active control graphs."""
+
+    def __init__(self, graphs: Sequence, period: float):
+        self.graphs = [_SingleGraphState(g, float(period)) for g in graphs]
+        self.labels = [lbl for g in self.graphs for lbl, _, _ in g.slots]
+        self.devices = [
+            [lbl[5:].split(".")[0]] for g in self.graphs for lbl, _, _ in g.slots
+        ]
+        self.n_ctrl = len(self.labels)
+        self._slices: list[tuple[_SingleGraphState, slice]] = []
+        i = 0
+        for g in self.graphs:
+            k = g.n_ctrl
+            self._slices.append((g, slice(i, i + k)))
+            i += k
+
+    def initial_state(self) -> np.ndarray:
+        if self.n_ctrl == 0:
+            return np.empty(0, dtype=float)
+        return np.concatenate([g.initial_values() for g in self.graphs])
+
+    def seed(self, x_ctrl: np.ndarray) -> None:
+        x_ctrl = np.asarray(x_ctrl, dtype=float)
+        for g, sl in self._slices:
+            g.seed(x_ctrl[sl])
+
+    def read(self) -> np.ndarray:
+        if self.n_ctrl == 0:
+            return np.empty(0, dtype=float)
+        return np.concatenate([g.read() for g in self.graphs])
+
+    def restore_original(self) -> None:
+        for g in self.graphs:
+            g.restore_original()
+
+
+def active_graph_ids(plan) -> set[int]:
+    return {id(_cxx(g)) for g in getattr(plan, "graphs", ()) if _cxx(g) is not None}
+
+
+def active_sink_sources(plan) -> set[str]:
+    names: set[str] = set()
+    for g in getattr(plan, "graphs", ()):
+        gr = getattr(g, "_graph", None)
+        for _ch, _wire, name in getattr(gr, "_sinks", ()) or ():
+            names.add(name)
+    return names
+
+
+def gate_graph_ids(sf) -> set[int]:
+    """Return ``id(cxx_chain)`` for graphs owning ``sf`` (if identifiable)."""
+    g = getattr(sf, "_graph", None)
+    cxx = getattr(g, "_cxx_chain", None) if g is not None else None
+    if cxx is not None:
+        return {id(cxx)}
+    return set()

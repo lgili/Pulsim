@@ -52,6 +52,16 @@ def sweep_points():
         _POINTS.reset(tok)
 
 
+@contextlib.contextmanager
+def suppress_sweep_points():
+    """Temporarily suspend sweep-point graph resets (used inside shooting runs)."""
+    tok = _POINTS.set(None)
+    try:
+        yield
+    finally:
+        _POINTS.reset(tok)
+
+
 def _cxx(obs):
     return getattr(obs, "_cxx_chain", None)
 
