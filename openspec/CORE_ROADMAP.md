@@ -181,7 +181,7 @@ the rest.
 
 | Change id | Scope | Items | Capabilities | Effort | Needs | Status |
 |---|---|---|---|---|---|---|
-| `add-in-kernel-event-losses` | Loss tables in C++; energy injected into the thermal node at each commutation (the event records of the ideal switch); closed-loop T_j on every engine | M3 | `loss-thermal` (new) | M | event queue; branch-form loss records | in progress [28/31] |
+| `add-in-kernel-event-losses` | Loss tables in C++; energy injected into the thermal node at each commutation (the event records of the ideal switch); closed-loop T_j on every engine; online electrical feedback and PLECS buck tutorial | M3 | `loss-thermal` (new) | M | event queue; branch-form loss records | integrated [31/31] |
 | `add-immutable-circuit-ir` | Immutable `Circuit` with named parameters and expressions, hierarchy kept, clone / `with_params` (re-binding without rebuild) / `to_yaml`, domain-tagged nodes | A9 | `circuit-ir` (new), `netlist-yaml` | M–L | simulation object | in progress [46/49] |
 | `add-parameter-sensitivities` | Forward sensitivities through the cached LU with event jump correction; exact-propagator form; steady-state gradients | A10 | `parameter-sweep` | L | device interface, stepper | in progress [15/30] |
 | `add-periodic-steady-state-shooting` | One Newton shooting solver on the true state with located events and saltation matrices; works in DCM; completion: every strategy, nonlinear devices, ideal-switch reset maps | P8 | `periodic-steady-state` (new) | M–L | slice 1: none; completion: event queue, device interface, CORE A | in progress [19/24] |
@@ -192,7 +192,7 @@ the rest.
 | `add-controlled-source-set` | VCCS, CCVS, CCCS, gyrator; sine / pulse / table current sources | M7 | `device-models`, `netlist-yaml` | S | — | archived |
 | `add-permeance-magnetic-domain` | Permeance–capacitor magnetic networks on the gyrator; nonlinear permeance; eddy and excess loss | M8 | `magnetic-models` | M–L | controlled sources, power MOSFET (charge-law variant), device interface | in progress [23/28] |
 | `add-external-device-abi` | User devices through a C ABI (f, q, Jacobians), then sympy-to-C codegen, then an OSDI host | M9 | `device-interface` | M, then L | device interface | in progress [20/25] |
-| `add-compiled-control-graph` | Control graph with rates, sorted schedule, loop detection, discrete blocks on tick events, C export | A6 | `control-graph` (new) | L | event queue | in progress [27/33] |
+| `add-compiled-control-graph` | Control graph with rates, sorted schedule, loop detection, discrete blocks on tick events, C export | A6 | `control-graph` (new) | L | event queue | in progress [29/33] |
 | `add-high-order-stiff-integrator` | Single-factor ESDIRK4(3) as an integrator strategy for resonant dynamics | P10 | `transient-timestep` | L | stepper | in progress [22/30] |
 | `add-realistic-passives` | ESR / ESL parameters, C(V) table, R_ac(f) ladder fit, transmission-line model | M12 | `device-models` | S–M | — | in progress [24/35] |
 
@@ -200,7 +200,7 @@ the rest.
 
 | Change id | Scope | Items | Capabilities | Effort | Needs | Status |
 |---|---|---|---|---|---|---|
-| `update-number-changing-release` | Coordinates Decision 3's single number-changing release flip (`simulate()` / `sim::kRunOptionTable` defaults, `form='branch'`, `engine='auto'` exact route), one re-baseline of goldens/scoreboards/tests, and migration notes (**B**) | Decision 3 | `transient-timestep`, `device-models`, `benchmark-suite` | M | Phase 2, CORE A, CORE B | in progress [13/28; blockers 1.1–1.8 and owner decisions 2.1–2.5 closed, ready for 1.9 rehearsal and flip] |
+| `update-number-changing-release` | Coordinates Decision 3's single number-changing release flip (`simulate()` / `sim::kRunOptionTable` defaults, `form='branch'`, `engine='auto'` exact route), one re-baseline of goldens/scoreboards/tests, and migration notes (**B**) | Decision 3 | `transient-timestep`, `device-models`, `benchmark-suite` | M | Phase 2, CORE A, CORE B | in progress [14/28; blockers 1.1–1.9 and owner decisions 2.1–2.5 closed, ready for 3.x release flip] |
 | `add-adaptive-runge-kutta-solvers` | Superseded by `refactor-unified-transient-stepper` strategies (Decision 9); `core/integrators/` retires with the stepper | Decision 9 | `transient-timestep` | — | — | withdrawn/archived |
 
 ## Rules that apply to every change
