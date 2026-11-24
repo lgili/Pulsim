@@ -301,23 +301,18 @@ merging `core-auto-route-exact`, `core-a-complementarity`, Wave 1 tracks, and
      with `c_k = 1` (`Im == 0`) or `2` (`Im != 0`), paired with a static peeled
      cancellation bound `EB` and precomputed `O(n^2)` tables outside bisection.
    - `_paralleled_bridges(10)` with `output_rtol=1e-5`, `t_end=0.02` now
-     completes in **26.87 s** (21,857 steps, `n_output_capped = 0`, max bus
-     difference vs `pwl` `1.735e-4 <= 1e-3`). Regression tests added in
+     completes in ~27 s (`n_output_capped = 0`, max bus difference vs `pwl`
+     `1.735e-4 <= 1e-3`). Regression tests added in
      `core/tests/dsed/test_exact_lti.cpp` and `python/tests/test_exact_output_grid.py`.
-3. **Output cap polling reset (`core/include/pulsim/dsed/scheduler.hpp`):**
-   - `next_gate_edge_` sets `t_sw = t + dt_max * 0.1` when a switching function
-     (e.g., diode-only) has no finite `next_edge_after`, sliding `t_target`
-     every step and resetting `output_count_` to 0 in `output_step_`. Now
-     `output_step_` receives `t_output_target` (real edges / corners / ticks),
-     preserving gate polling while enforcing `output_cap_` per physical interval.
-4. **Rehearsal matrix & pytest blast radius (`benchmarks/NEXT_DEFAULTS_REHEARSAL.md`):**
+3. **Rehearsal matrix & pytest blast radius (`benchmarks/NEXT_DEFAULTS_REHEARSAL.md`):**
    - Differential matrix (109 circuits) + analytic (27 cases): **0 cells** in the
      first three worse classes (`fails`, `samples wrong`, `disagree without
-     truth`); `auto+next` 104/4/1/0/0 (analytic 27/0/0/0) in 6.5 s (`auto`
+     truth`); `auto+next` **106/2/1/0/0** (analytic 27/0/0/0) in 6.5 s (`auto`
      baseline 106/2/1/0/0); `dsed+next` 100/0/0/9/0 (analytic 22/0/0/5) in 2.0 s;
-     `pwl+next` 91/17/1/0/0 (analytic 27/0/0/0) in 0.5 s; **160 cells better**
-     overall vs 8 worse (all 8 under `auto:route` with truth error `<= 5e-11` /
-     `<= 3.9e-14`).
+     `pwl+next` 91/17/1/0/0 (analytic 27/0/0/0) in 0.5 s; **162 cells better**
+     overall (`73` `auto+next`, `89` `pwl+next`) vs 6 worse under `auto+next`
+     (all 6 under `auto:route` with truth error `<= 5e-11` / `0`), `0 worse`
+     on `dsed+next` and `pwl+next`.
    - Full `python/tests` (`-m "not examples"`, `-p next_defaults_pytest`):
      **5562 passed, 538 failed, 0 errors, 7 skipped, 3 xfailed**. All 30
      `new refusal by name` failures are explained (`24` intentional

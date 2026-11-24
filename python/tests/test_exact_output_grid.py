@@ -231,8 +231,7 @@ def test_default_exact_output_rtol_applies_and_defers_cleanly(monkeypatch):
 def test_stiff_parasitic_mode_does_not_collapse_output_grid():
     """A stiff parasitic mode (-1e11 /s from g_off across paralleled diode
     bridges) with roundoff residual in V^-1*x must not collapse exact_chord_step
-    into nanosecond stepping, and the output cap must engage cleanly when
-    the switching function has no explicit gate edges."""
+    into nanosecond stepping."""
     from tests.test_exact_route import _paralleled_bridges
 
     rtol = 1e-5
@@ -241,8 +240,8 @@ def test_stiff_parasitic_mode_does_not_collapse_output_grid():
     t = np.asarray(r.times)
     assert np.all(np.diff(t) >= 0)
     assert t[-1] == pytest.approx(t_end, rel=1e-12)
-    # Without the decaying-mode cap + output_cap_ polling fix, 2 ms blew past
-    # 500k+ nanosecond steps; with the fix, step count stays modest and bounded.
+    # Without the decaying-mode cap in exact_chord_step, 2 ms blew past
+    # 500k+ nanosecond steps; with the cap, step count stays modest and bounded.
     assert len(t) < 25000, f"step explosion returned: {len(t)} steps"
     dense = pulsim.simulate(_paralleled_bridges(2), t_end, engine="exact", dt=1e-6)
     td = np.asarray(dense.times)

@@ -13,7 +13,7 @@ fixes before the release; the last three need a decision or a re-baseline with e
 
 **strict gate only (disagrees; RMS error of the samples against the truth within tol)**
 
-1. 3 cells (auto). Largest `exact` (RMS of the samples against the truth) 3.9e-14. On `auto` the exact engine runs without dt: 10 us default output ceiling; the strict gate interpolates linearly between those samples. Circuits (today -> profile): `magnetics/core_loss_steinmetz_sine.yaml` agree 0.000123 / ex 4.1e-05 -> disagree 0.0066 / ex 3.9e-14; `magnetics/transformer_leakage.yaml` agree 0.000231 / ex 1.8e-05 -> disagree 0.00275 / ex 7.5e-15; `thermal/electrothermal_resistor_self_heating.yaml` agree 0 / ex 0 -> disagree 0.00178 / ex 0. Repro (any of them): `next_defaults_rehearsal._no_dt_run(v1_reader.load('benchmarks/circuits/magnetics/core_loss_steinmetz_sine.yaml'), 'dsed')`
+1. 1 cells (auto). Largest `exact` (RMS of the samples against the truth) 0. On `auto` the exact engine runs without dt: 10 us default output ceiling; the strict gate interpolates linearly between those samples. Circuits (today -> profile): `thermal/electrothermal_resistor_self_heating.yaml` agree 0 / ex 0 -> disagree 0.00178 / ex 0. Repro (any of them): `next_defaults_rehearsal._no_dt_run(v1_reader.load('benchmarks/circuits/thermal/electrothermal_resistor_self_heating.yaml'), 'dsed')`
 
 **strict error > 2x the base's, still agrees**
 
@@ -23,9 +23,9 @@ fixes before the release; the last three need a decision or a re-baseline with e
 
 4. 1 test, option `form='branch'`: bdf1 (retired) refuses a branch-form switch / diode by name and names pwl / trbdf2 (update-number-changing-release 1.7; ac_sweep runs them since): at the flip bdf1 keeps the conductance form or the test moves off bdf1. Repro: `python/tests/test_engine_conformance.py::test_device_cell[Switch-bdf1]` under `-p next_defaults_pytest`.
 
-### 2. Accepted changes of number (160 cells better under the profile)
+### 2. Accepted changes of number (162 cells better under the profile)
 
-By engine and basis: auto outcome 1, auto reference 8, auto truth 62, pwl outcome 11, pwl reference 13, pwl truth 65. Each is listed in 'Better under the full profile' below with its basis; the CHANGELOG
+By engine and basis: auto outcome 1, auto reference 8, auto truth 64, pwl outcome 11, pwl reference 13, pwl truth 65. Each is listed in 'Better under the full profile' below with its basis; the CHANGELOG
 migration note of the release cites them.
 
 ### 3. Owner decisions (add-kernel-simulation-object DECISIONS 23, branch feat/core-p3-simulation-object; undriven switches first)
@@ -150,7 +150,7 @@ Graded as `REFERENCE_STATUS.md` (strict gate, harness tolerances, suspect -> unv
 | trbdf2+next+esdirk43 | extra | 102 | 6 | 1 | 0 | 0 | 0 | 109 | 1.5 |
 | auto | d | 106 | 2 | 1 | 0 | 0 | 0 | 109 | 0.8 |
 | auto:route | b | 80 | 28 | 1 | 0 | 0 | 0 | 109 | 3.8 |
-| auto+next | d | 104 | 4 | 1 | 0 | 0 | 0 | 109 | 6.5 |
+| auto+next | d | 106 | 2 | 1 | 0 | 0 | 0 | 109 | 6.5 |
 
 Configuration (a) reproduces REFERENCE_STATUS.md's strict counts: **yes** (read from that file: {'pwl': (81, 27, 1, 0, 0), 'pwl+restart': (89, 19, 1, 0, 0), 'pwl+split': (91, 17, 1, 0, 0), 'trbdf2': (106, 2, 1, 0, 0), 'dsed': (100, 0, 0, 9, 0)}).
 
@@ -219,7 +219,7 @@ run); `mode` = the `mode_selection='auto'` choices recorded by the runs (lcp / l
 | trbdf2+next+esdirk43 | trbdf2 | 68 | 21 | 136 | 119 | legacy 133 |
 | auto | auto | 0 | 0 | 109 | 0 |  |
 | auto:route | auto | 29 | 49 | 109 | 97 |  |
-| auto+next | auto | 71 | 8 | 109 | 104 | lcp 39, legacy 96 |
+| auto+next | auto | 73 | 6 | 109 | 104 | lcp 39, legacy 96 |
 
 ## Worse under the full profile than under today's default for that engine
 
@@ -231,8 +231,6 @@ the single options (b) that alone make the same cell worse; `combination` when n
 | circuit | engine | today | full profile | responsible | class; message |
 |---|---|---|---|---|---|
 | diodes/back_to_back_diodes_sine.yaml | auto | agree 0 / ex 2e-16 | agree 1.15e-05 / ex 2e-16 | auto:route | strict error > 2x the base's, still agrees;  |
-| magnetics/core_loss_steinmetz_sine.yaml | auto | agree 0.000123 / ex 4.1e-05 | disagree 0.0066 / ex 3.9e-14 | auto:route | strict gate only (disagrees; RMS error of the samples against the truth within tol);  |
-| magnetics/transformer_leakage.yaml | auto | agree 0.000231 / ex 1.8e-05 | disagree 0.00275 / ex 7.5e-15 | auto:route | strict gate only (disagrees; RMS error of the samples against the truth within tol);  |
 | switching/buck/ll06_buck_vcswitch.yaml | auto | agree 8.21e-05 / ex 6.3e-06 | agree 0.000171 / ex 8.8e-12 | auto:route | strict error > 2x the base's, still agrees;  |
 | switching/inverter/ll09_half_bridge_inverter_leg.yaml | auto | agree 4.27e-05 / ex 3.2e-06 | agree 0.000167 / ex 5e-11 | auto:route | strict error > 2x the base's, still agrees;  |
 | switching/multilevel/cascaded_h_bridge_5level.yaml | auto | agree 0 / ex 6e-16 | agree 5.72e-05 / ex 1.9e-16 | auto:route | strict error > 2x the base's, still agrees;  |
@@ -351,7 +349,9 @@ strict err_rms more than 2x smaller (basis `reference`, no truth or truth unchan
 | linear/rl_natural_response.yaml | auto | agree 6.66e-06 / ex 5.1e-06 | agree 1.23e-06 / ex 1.5e-15 | auto:route | truth |
 | linear/rlc_series_resonant.yaml | auto | agree 0.000354 / ex 0.00034 | agree 2.87e-05 / ex 7.8e-15 | auto:route | truth |
 | linear/sine_voltage_rc.yaml | auto | agree 0.000111 / ex 2.4e-05 | agree 2.93e-06 / ex 3.1e-15 | auto:route | truth |
+| magnetics/core_loss_steinmetz_sine.yaml | auto | agree 0.000123 / ex 4.1e-05 | agree 3.7e-06 / ex 5.8e-14 | combination | truth |
 | magnetics/half_bridge_transformer_dc.yaml | auto | agree 2.08e-05 / ex 1.5e-05 | agree 2.66e-06 / ex 6.7e-13 | combination | truth |
+| magnetics/transformer_leakage.yaml | auto | agree 0.000231 / ex 1.8e-05 | agree 2.88e-06 / ex 2.3e-14 | combination | truth |
 | motors/motor_dc_brush_step_load.yaml | auto | agree 6.06e-06 / ex 2.3e-06 | agree 3.62e-07 / ex 1e-13 | auto:route | truth |
 | motors/motor_induction_locked_rotor.yaml | auto | agree 5.1e-05 / ex 1.4e-05 | agree 1.63e-06 / ex 6.4e-14 | auto:route | truth |
 | motors/motor_pmsm_dq_open_loop.yaml | auto | agree 6.51e-06 / ex 2.5e-06 | agree 4.45e-07 / ex 1.3e-13 | auto:route | truth |
@@ -447,11 +447,11 @@ so its strict cell can disagree where `dsed+next` (netlist dt as the output grid
 | linear/sine_voltage_rc.yaml | trbdf2 / agree 0.000111 / ex 2.4e-05 | dsed / agree 2.93e-06 / ex 3.1e-15 |  |
 | linear/two_stage_rc_lowpass.yaml | trbdf2 / agree 3.44e-06 | dsed / agree 4.43e-07 |  |
 | linear/voltage_divider_3stage.yaml | trbdf2 / agree 0 / ex 0 | dsed / agree 0 / ex 0 |  |
-| magnetics/core_loss_steinmetz_sine.yaml | trbdf2 / agree 0.000123 / ex 4.1e-05 | dsed / disagree 0.0066 / ex 3.9e-14 |  |
+| magnetics/core_loss_steinmetz_sine.yaml | trbdf2 / agree 0.000123 / ex 4.1e-05 | dsed / agree 3.7e-06 / ex 5.8e-14 |  |
 | magnetics/coupled_inductor_step.yaml | trbdf2 / agree 3.76e-06 | dsed / agree 6.83e-07 |  |
 | magnetics/half_bridge_transformer_dc.yaml | trbdf2 / agree 2.08e-05 / ex 1.5e-05 | dsed / agree 2.66e-06 / ex 6.7e-13 |  |
 | magnetics/inductor_chain_step.yaml | trbdf2 / agree 9.05e-07 | dsed / agree 4.82e-07 |  |
-| magnetics/transformer_leakage.yaml | trbdf2 / agree 0.000231 / ex 1.8e-05 | dsed / disagree 0.00275 / ex 7.5e-15 |  |
+| magnetics/transformer_leakage.yaml | trbdf2 / agree 0.000231 / ex 1.8e-05 | dsed / agree 2.88e-06 / ex 2.3e-14 |  |
 | magnetics/transformer_step_up.yaml | trbdf2 / agree 0 / ex 4e-16 | dsed / agree 4.64e-06 / ex 4e-16 |  |
 | motors/motor_dc_brush_step_load.yaml | trbdf2 / agree 6.06e-06 / ex 2.3e-06 | dsed / agree 3.62e-07 / ex 1e-13 |  |
 | motors/motor_induction_locked_rotor.yaml | trbdf2 / agree 5.1e-05 / ex 1.4e-05 | dsed / agree 1.63e-06 / ex 6.4e-14 |  |
@@ -590,11 +590,11 @@ Circuits whose engine changes under `auto`: **101**.
 | linear/sine_voltage_rc.yaml | 4.42e-05 / ex 2.3e-05 | 4.42e-05 / ex 2.3e-05 | 4.42e-05 / ex 2.3e-05 | 0.000111 / ex 2.4e-05 | 3.06e-06 / ex 6.3e-15 | 4.42e-05 / ex 2.3e-05 | 4.42e-05 / ex 2.3e-05 | 4.42e-05 / ex 2.3e-05 | 4.42e-05 / ex 2.3e-05 | 4.42e-05 / ex 2.3e-05 | 4.42e-05 / ex 2.3e-05 | 4.42e-05 / ex 2.3e-05 | 0.000111 / ex 2.4e-05 | 0.000111 / ex 2.4e-05 | 0.000111 / ex 2.4e-05 | 0.000111 / ex 2.4e-05 | 0.000111 / ex 2.4e-05 | 3.06e-06 / ex 6.3e-15 | 3.06e-06 / ex 6.3e-15 | 3.06e-06 / ex 6.3e-15 | 3.06e-06 / ex 6.3e-15 | 3.06e-06 / ex 6.3e-15 | 9.66e-05 / ex 1.8e-09 | 9.66e-05 / ex 1.8e-09 | 0.000111 / ex 2.4e-05 | 2.92e-06 / ex 3.4e-15 | 2.93e-06 / ex 3.1e-15 |
 | linear/two_stage_rc_lowpass.yaml | 0.00145 | 1.01e-05 | 1.01e-05 | 3.44e-06 | 4.62e-07 | 1.01e-05 | 1.01e-05 | 0.00145 | 0.00145 | 0.00145 | 0.00145 | 1.01e-05 | 3.44e-06 | 3.44e-06 | 3.44e-06 | 3.44e-06 | 3.44e-06 | 4.62e-07 | 4.62e-07 | 4.62e-07 | 4.62e-07 | 4.62e-07 | 1.16e-05 | 1.16e-05 | 3.44e-06 | 6.7e-07 | 4.43e-07 |
 | linear/voltage_divider_3stage.yaml | 0 / ex 0 | 0 / ex 0 | 0 / ex 0 | 0 / ex 0 | 0 / ex 0 | 0 / ex 0 | 0 / ex 0 | 0 / ex 0 | 0 / ex 0 | 0 / ex 0 | 0 / ex 0 | 0 / ex 0 | 0 / ex 0 | 0 / ex 0 | 0 / ex 0 | 0 / ex 0 | 0 / ex 0 | 0 / ex 0 | 0 / ex 0 | 0 / ex 0 | 0 / ex 0 | 0 / ex 0 | 0 / ex 0 | 0 / ex 0 | 0 / ex 0 | 0 / ex 0 | 0 / ex 0 |
-| magnetics/core_loss_steinmetz_sine.yaml | 0.000228 / ex 0.00015 | 0.000227 / ex 0.00015 | 0.000227 / ex 0.00015 | 0.000123 / ex 4.1e-05 | 3.5e-06 / ex 1.9e-14 | 0.000227 / ex 0.00015 | 0.000227 / ex 0.00015 | 0.000228 / ex 0.00015 | 0.000228 / ex 0.00015 | 0.000228 / ex 0.00015 | 0.000228 / ex 0.00015 | 0.000227 / ex 0.00015 | 0.000123 / ex 4.1e-05 | 0.000123 / ex 4.1e-05 | 0.000123 / ex 4.1e-05 | 0.000123 / ex 4.1e-05 | 0.000123 / ex 4.1e-05 | 3.5e-06 / ex 1.9e-14 | 3.5e-06 / ex 1.9e-14 | 3.5e-06 / ex 1.9e-14 | 3.5e-06 / ex 1.9e-14 | 3.5e-06 / ex 1.9e-14 | 0.000107 / ex 2.7e-09 | 0.000107 / ex 2.7e-09 | 0.000123 / ex 4.1e-05 | 0.0106 / ex 2e-15 | 0.0066 / ex 3.9e-14 |
+| magnetics/core_loss_steinmetz_sine.yaml | 0.000228 / ex 0.00015 | 0.000227 / ex 0.00015 | 0.000227 / ex 0.00015 | 0.000123 / ex 4.1e-05 | 3.5e-06 / ex 1.9e-14 | 0.000227 / ex 0.00015 | 0.000227 / ex 0.00015 | 0.000228 / ex 0.00015 | 0.000228 / ex 0.00015 | 0.000228 / ex 0.00015 | 0.000228 / ex 0.00015 | 0.000227 / ex 0.00015 | 0.000123 / ex 4.1e-05 | 0.000123 / ex 4.1e-05 | 0.000123 / ex 4.1e-05 | 0.000123 / ex 4.1e-05 | 0.000123 / ex 4.1e-05 | 3.5e-06 / ex 1.9e-14 | 3.5e-06 / ex 1.9e-14 | 3.5e-06 / ex 1.9e-14 | 3.5e-06 / ex 1.9e-14 | 3.5e-06 / ex 1.9e-14 | 0.000107 / ex 2.7e-09 | 0.000107 / ex 2.7e-09 | 0.000123 / ex 4.1e-05 | 0.0106 / ex 2e-15 | 3.7e-06 / ex 5.8e-14 |
 | magnetics/coupled_inductor_step.yaml | 0.00032 | 0.00032 | 0.00032 | 3.76e-06 | 6.72e-06 | 0.00032 | 0.00032 | 0.00032 | 0.00032 | 0.00032 | 0.00032 | 0.00032 | 3.76e-06 | 3.76e-06 | 3.76e-06 | 3.76e-06 | 3.76e-06 | 6.72e-06 | 6.72e-06 | 6.72e-06 | 6.72e-06 | 6.72e-06 | 4.48e-05 | 4.48e-05 | 3.76e-06 | 5.11e-06 | 6.83e-07 |
 | magnetics/half_bridge_transformer_dc.yaml | 0.101 / ex 0.1 | 0.000128 / ex 0.00013 | 0.000127 / ex 0.00013 | 2.08e-05 / ex 1.5e-05 | 3.41e-06 / ex 3e-06 | 0.000128 / ex 0.00013 | 0.000127 / ex 0.00013 | 0.101 / ex 0.1 | 0.101 / ex 0.1 | 0.101 / ex 0.1 | 0.101 / ex 0.1 | 0.000127 / ex 0.00013 | 2.08e-05 / ex 1.5e-05 | 2.08e-05 / ex 1.5e-05 | 2.08e-05 / ex 1.5e-05 | 2.08e-05 / ex 1.5e-05 | 2.08e-05 / ex 1.5e-05 | 3.41e-06 / ex 3e-06 | 3.41e-06 / ex 3e-06 | 3.41e-06 / ex 3e-06 | 3.41e-06 / ex 3e-06 | 3.41e-06 / ex 3e-06 | 2.81e-05 / ex 4.4e-08 | 2.81e-05 / ex 4.4e-08 | 2.08e-05 / ex 1.5e-05 | 0.00195 / ex 3e-06 | 2.66e-06 / ex 6.7e-13 |
 | magnetics/inductor_chain_step.yaml | 0.00231 | 5.34e-06 | 5.34e-06 | 9.05e-07 | 4.89e-07 | 5.34e-06 | 5.34e-06 | 0.00231 | 0.00231 | 0.00231 | 0.00231 | 5.34e-06 | 9.05e-07 | 9.05e-07 | 9.05e-07 | 9.05e-07 | 9.05e-07 | 4.89e-07 | 4.89e-07 | 4.89e-07 | 4.89e-07 | 4.89e-07 | 9.85e-07 | 9.85e-07 | 9.05e-07 | 4.9e-07 | 4.82e-07 |
-| magnetics/transformer_leakage.yaml | 0.0041 / ex 0.0015 | 0.00409 / ex 0.0015 | 0.00409 / ex 0.0015 | 0.000231 / ex 1.8e-05 | 3.11e-05 / ex 6e-15 | 0.00409 / ex 0.0015 | 0.00409 / ex 0.0015 | 0.0041 / ex 0.0015 | 0.0041 / ex 0.0015 | 0.0041 / ex 0.0015 | 0.0041 / ex 0.0015 | 0.00409 / ex 0.0015 | 0.000231 / ex 1.8e-05 | 0.000231 / ex 1.8e-05 | 0.000231 / ex 1.8e-05 | 0.000231 / ex 1.8e-05 | 0.000231 / ex 1.8e-05 | 3.11e-05 / ex 6e-15 | 3.11e-05 / ex 6e-15 | 3.11e-05 / ex 6e-15 | 3.11e-05 / ex 6e-15 | 3.11e-05 / ex 6e-15 | 0.000789 / ex 2.2e-07 | 0.000789 / ex 2.2e-07 | 0.000231 / ex 1.8e-05 | 0.00315 / ex 6.2e-15 | 0.00275 / ex 7.5e-15 |
+| magnetics/transformer_leakage.yaml | 0.0041 / ex 0.0015 | 0.00409 / ex 0.0015 | 0.00409 / ex 0.0015 | 0.000231 / ex 1.8e-05 | 3.11e-05 / ex 6e-15 | 0.00409 / ex 0.0015 | 0.00409 / ex 0.0015 | 0.0041 / ex 0.0015 | 0.0041 / ex 0.0015 | 0.0041 / ex 0.0015 | 0.0041 / ex 0.0015 | 0.00409 / ex 0.0015 | 0.000231 / ex 1.8e-05 | 0.000231 / ex 1.8e-05 | 0.000231 / ex 1.8e-05 | 0.000231 / ex 1.8e-05 | 0.000231 / ex 1.8e-05 | 3.11e-05 / ex 6e-15 | 3.11e-05 / ex 6e-15 | 3.11e-05 / ex 6e-15 | 3.11e-05 / ex 6e-15 | 3.11e-05 / ex 6e-15 | 0.000789 / ex 2.2e-07 | 0.000789 / ex 2.2e-07 | 0.000231 / ex 1.8e-05 | 0.00315 / ex 6.2e-15 | 2.88e-06 / ex 2.3e-14 |
 | magnetics/transformer_step_up.yaml | 4.64e-06 / ex 4e-16 | 4.64e-06 / ex 4e-16 | 4.64e-06 / ex 4e-16 | 0 / ex 4e-16 | 5.1e-06 / ex 4e-16 | 4.64e-06 / ex 4e-16 | 4.64e-06 / ex 4e-16 | 4.64e-06 / ex 4e-16 | 4.64e-06 / ex 4e-16 | 4.64e-06 / ex 4e-16 | 4.64e-06 / ex 4e-16 | 4.64e-06 / ex 4e-16 | 0 / ex 4e-16 | 0 / ex 4e-16 | 0 / ex 4e-16 | 0 / ex 4e-16 | 0 / ex 4e-16 | 5.1e-06 / ex 4e-16 | 5.1e-06 / ex 4e-16 | 5.1e-06 / ex 4e-16 | 5.1e-06 / ex 4e-16 | 5.1e-06 / ex 4e-16 | 0 / ex 4e-16 | 0 / ex 4e-16 | 0 / ex 4e-16 | 4.64e-06 / ex 4e-16 | 4.64e-06 / ex 4e-16 |
 | motors/motor_dc_brush_step_load.yaml | 0.000289 / ex 0.00029 | 4.5e-07 / ex 1.4e-07 | 4.5e-07 / ex 1.4e-07 | 6.06e-06 / ex 2.3e-06 | 3.62e-07 / ex 1.2e-13 | 4.5e-07 / ex 1.4e-07 | 4.5e-07 / ex 1.4e-07 | 0.000289 / ex 0.00029 | 0.000289 / ex 0.00029 | 0.000289 / ex 0.00029 | 0.000289 / ex 0.00029 | 4.5e-07 / ex 1.4e-07 | 6.06e-06 / ex 2.3e-06 | 6.06e-06 / ex 2.3e-06 | 6.06e-06 / ex 2.3e-06 | 6.06e-06 / ex 2.3e-06 | 6.06e-06 / ex 2.3e-06 | 3.62e-07 / ex 1.2e-13 | 3.62e-07 / ex 1.2e-13 | 3.62e-07 / ex 1.2e-13 | 3.62e-07 / ex 1.2e-13 | 3.62e-07 / ex 1.2e-13 | 7.51e-06 / ex 1.4e-08 | 7.51e-06 / ex 1.4e-08 | 6.06e-06 / ex 2.3e-06 | 3.63e-07 / ex 1e-13 | 3.62e-07 / ex 1e-13 |
 | motors/motor_induction_locked_rotor.yaml | 2.25e-06 / ex 1.3e-06 | 2.25e-06 / ex 1.3e-06 | 2.25e-06 / ex 1.3e-06 | 5.1e-05 / ex 1.4e-05 | 1.63e-06 / ex 2.8e-14 | 2.25e-06 / ex 1.3e-06 | 2.25e-06 / ex 1.3e-06 | 2.25e-06 / ex 1.3e-06 | 2.25e-06 / ex 1.3e-06 | 2.25e-06 / ex 1.3e-06 | 2.25e-06 / ex 1.3e-06 | 2.25e-06 / ex 1.3e-06 | 5.1e-05 / ex 1.4e-05 | 5.1e-05 / ex 1.4e-05 | 5.1e-05 / ex 1.4e-05 | 5.1e-05 / ex 1.4e-05 | 5.1e-05 / ex 1.4e-05 | 1.63e-06 / ex 2.8e-14 | 1.63e-06 / ex 2.8e-14 | 1.63e-06 / ex 2.8e-14 | 1.63e-06 / ex 2.8e-14 | 1.63e-06 / ex 2.8e-14 | 4.21e-05 / ex 4.4e-10 | 4.21e-05 / ex 4.4e-10 | 5.1e-05 / ex 1.4e-05 | 1.63e-06 / ex 5.7e-14 | 1.63e-06 / ex 6.4e-14 |
