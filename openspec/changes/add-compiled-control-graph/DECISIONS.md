@@ -824,28 +824,28 @@ then ticked themselves): the queue path changed no number.
   before. The full ctest had not finished building when this was written:
   run it before pushing.
 
-## G34. Control graph docs, migration notes, and verification (tasks 10.1–10.2)
+## G34. Control graph docs, migration notes, and partial verification (task 10.1; 10.2 pending `ctest` + full `pytest`)
 
 - **Taken.** Updated `docs/control-graph.md` with self-contained runnable
-  Python examples (5 executed via `test_doc_snippets.run_markdown`, plus
-  strict C99 compile command and `add_c_block` reload) covering Kahn
-  topological ordering, Tarjan SCC algebraic-loop detection and
-  `DelayBlock`, `Rate` inheritance and integer tick counters,
-  `compute_delay` and `control_tick="state"` across `pwl`/`trbdf2`/`dsed`,
-  circuit sinks (`drive_source`, `gate`, `CxxChainPwmGate`), solver
-  snapshot/pickle resume, sweep state isolation, `PythonBlock` vs kernel
-  blocks, explicit implemented-vs-planned status for Group 7 continuous
-  blocks, and `export_c`. Added `control-graph.md` to `mkdocs.yml` under
-  User Guide (not Tutorials), added the 2.0->2.1+ insertion-order and
-  `use_kernel=False` migration section to `docs/migration-guide.md`,
-  referenced `docs/control-graph.md` in `python/pulsim/AI_GUIDE.md`
-  (32,714 bytes <= 32,768 budget), and added a concise `CHANGELOG.md`
-  entry.
-- **Evidence.** `docs/control-graph.md` snippets (5/5 ran cleanly),
-  `ruff check python/` (clean), `DO_NOT_TRACK=1 openspec validate --all --strict`
-  (69/69 passed), and `pytest` (391/391 passed across `test_doc_snippets.py`,
-  `test_ai_guide.py`, `test_stubs.py`, and all `control_graph`, `control_tick`,
-  `closed_loop`, `c_block`, `dsed_control_ticks`, and `yaml_chain` suites).
-  No C++ files were modified; `ctest` was not applicable in the docs-only
-  share worktree without a `build/` tree.
-- **Reverse.** Revert the single docs/tasks commit on this branch.
+  Python examples (added to `DOC_FILES` in `python/tests/test_doc_snippets.py`
+  so CI runs all 5 blocks automatically, plus strict C99 compile command
+  and `add_c_block` reload) covering Kahn topological ordering, Tarjan
+  SCC algebraic-loop detection and `DelayBlock`, `Rate` inheritance and
+  integer tick counters, `compute_delay` and `control_tick="state"`
+  across `pwl`/`trbdf2`/`dsed`, circuit sinks (`drive_source`, `gate`,
+  `CxxChainPwmGate` via `bind_pi_to_switch` / `chain._cxx_chain.make_pwm_gate`),
+  solver snapshot/pickle resume, sweep state isolation, `PythonBlock` vs
+  kernel blocks, explicit implemented-vs-planned status for Group 7
+  continuous blocks, and `export_c`. Added `control-graph.md` to
+  `mkdocs.yml` under User Guide (not Tutorials), added the 2.0->2.1+
+  insertion-order and `use_kernel=False` migration section to
+  `docs/migration-guide.md`, referenced `docs/control-graph.md` in
+  `python/pulsim/AI_GUIDE.md` (32,714 bytes <= 32,768 budget), and added
+  a concise `CHANGELOG.md` entry. Left task `10.2` unchecked until the
+  coordinator runs `ctest -j2` and full `pytest` on the integrated tree.
+- **Evidence.** `pytest -v python/tests/test_doc_snippets.py python/tests/test_ai_guide.py`
+  (including `docs/control-graph.md` in `test_doc_snippets.py`),
+  `test_stubs.py` + control-graph suites (391+ passed), `ruff check python/`
+  (clean), `DO_NOT_TRACK=1 openspec validate --all --strict` (69/69 passed),
+  and `mkdocs build --strict` (clean).
+- **Reverse.** Revert the docs/tasks commits on this branch.

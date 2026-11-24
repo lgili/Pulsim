@@ -66,4 +66,4 @@ Closed forms used below.
 
 ## 10. Docs and verification
 - [x] 10.1 Control guide (rates, order, delay, continuous blocks, export), migration note for insertion-order chains, AI_GUIDE, CHANGELOG
-- [x] 10.2 ruff, pytest, ctest (`-j2`), `openspec validate --all --strict`, stub check (docs/control-graph.md snippets 5/5, ruff clean, openspec 69/69, pytest 391/391 incl. test_doc_snippets, test_ai_guide, test_stubs, control-graph/c-block/closed-loop/dsed suites; ctest skipped in share worktree with no build/, no C++ changes)
+- [ ] 10.2 ruff, pytest, ctest (`-j2`), `openspec validate --all --strict`, stub check (passed so far on docs branch: `ruff check python/`, `openspec validate --all --strict` 69/69, `mkdocs build --strict`, `test_doc_snippets.py` incl. `docs/control-graph.md`, `test_ai_guide.py`, `test_stubs.py`, and 367 control-graph/c-block/closed-loop/dsed tests; pending `ctest -j2` and full `pytest` on the integrated tree)

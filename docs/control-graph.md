@@ -186,9 +186,11 @@ the current computed signals.
 | `0 < Td < period` (fixed time) | at the first instant `>= t_k + Td` | `pwl` (refused on `trbdf2` as `UnsupportedError`, feature `compute_delay`) |
 | `"one_sample"` | at the next tick `t_{k+1}` (models a microcontroller latching duty for the next carrier period) | `pwl`, `trbdf2`, `dsed` / `exact` |
 
-A `Rate` with a non-zero `offset` (`0 <= offset < period`) ticks at
-`t_start + offset + k*period` on both `pwl` and `trbdf2` (the unified
-event queue lands a step on every tick).
+A `Rate` with a non-zero `offset` (`0 <= offset < period`) schedules
+ticks at `t_start + offset + k*period`: `trbdf2` and `dsed` / `exact`
+land a step on each exact instant via the unified event queue, while
+`pwl` stays strictly on its fixed `dt` grid (serving any off-grid tick
+at the next grid step).
 
 ### Engine delivery summary (`pwl`, `trbdf2`, `dsed` / `exact`)
 
@@ -259,7 +261,7 @@ A control graph drives the circuit through declared sinks:
   publication instants, so `trbdf2` lands every transition on a tick and
   `pwl` with `discontinuity_restart=True, enable_substep_state_correction=True`
   splits at them.
-- **PWM modulators (`bind_pi_to_switch` / `make_pwm_gate`)** — the
+- **PWM modulators (`bind_pi_to_switch` / `chain._cxx_chain.make_pwm_gate`)** — the
   graph writes a duty register; the native `CxxChainPwmGate` computes
   carrier start and OFF edges analytically (`next_edge_after(t)`).
   `trbdf2` lands those edges within 1 ppm of commanded duty and
