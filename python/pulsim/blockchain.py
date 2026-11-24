@@ -370,6 +370,8 @@ class MixedDomainBlockChain:
         if self._sinks:
             state_size = int(builder.pool.state_size(builder.graph))
             observer._b_extra_fn = cxx.make_sink_b_extra_fn(state_size)  # type: ignore[attr-defined]
+        import weakref
+        self._last_observer_ref = weakref.ref(observer)
         return observer
 
     # -------- C++ backend compilation -------------------------------------
@@ -817,6 +819,7 @@ class MixedDomainBlockChain:
             return m
         # a gate driven by graph state: refused by periodic_steady_state
         switch_fn._closed_loop = "MixedDomainBlockChain.make_pwm_switch_fn"  # type: ignore[attr-defined]
+        switch_fn._graph = self  # type: ignore[attr-defined]
         return switch_fn
 
     def make_multi_pwm_switch_fn(self, channels,
@@ -871,6 +874,7 @@ class MixedDomainBlockChain:
                     m.set(idx, True)
             return m
         switch_fn._closed_loop = "MixedDomainBlockChain.make_multi_pwm_switch_fn"  # type: ignore[attr-defined]
+        switch_fn._graph = self  # type: ignore[attr-defined]
         return switch_fn
 
     def _sink(self, channel: str) -> float:

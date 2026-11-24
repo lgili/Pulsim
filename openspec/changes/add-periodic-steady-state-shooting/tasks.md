@@ -66,8 +66,8 @@ grid inside the loop wait for the loop freeze to lift.
 - [ ] 6.3 Tests: peak-current-mode buck of the table — multipliers −1.267293 and 0.998949 within 1e-5, `stable = False`, and with `I_ref` lowered to give D < 0.5 `stable = True`; with saltation disabled in the test harness the multipliers are 0.9993 ± 0.0146j (the regression this guards); a rectifier with `V_th = V_f + 1e-3` has `M` equal to a finite difference of the map within 1e-6
 
 ## 7. Controller states (needs `add-compiled-control-graph`)
-- [ ] 7.1 Controller states of the control graph in `x₀`; refusal for Python closures with hidden state
-- [ ] 7.2 Tests: voltage-mode buck with a PI at the switching rate — the orbit has zero mean error within 1e-9 and equals a long transient within 1e-8
+- [x] 7.1 Controller states of the control graph in `x₀`; refusal for Python closures with hidden state
+- [x] 7.2 Tests: voltage-mode buck with a PI at the switching rate — the orbit has zero mean error within 1e-9 and equals a long transient within 1e-8
 
 ## 8. Docs and verification
 - [x] 8.1 Steady-state guide (true state, section, what a multiplier outside the unit circle means), Bode guide, AI_GUIDE, CHANGELOG with the before/after numbers

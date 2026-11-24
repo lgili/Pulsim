@@ -177,6 +177,18 @@ class PeriodicSteadyStateResult:
     #: ``1 - |mu|``; the map's own error is not in it). The stop rule
     #: holds every component of it within ``rtol``.
     orbit_error_estimate: float = float("nan")
+    #: Converged discrete controller states at the section (in
+    #: ``controller_labels`` order); empty for open-loop shooting.
+    controller_state: np.ndarray = field(
+        default_factory=lambda: np.empty(0, dtype=float))
+    #: Labels of ``controller_state`` (suffix of ``state_labels``).
+    controller_labels: list = field(default_factory=list)
+
+    @property
+    def circuit_state(self) -> np.ndarray:
+        """The circuit portion of ``x0`` (excluding ``controller_state``)."""
+        n_ctrl = len(self.controller_state)
+        return self.x0 if n_ctrl == 0 else self.x0[:-n_ctrl]
 
     @property
     def orbit(self):
@@ -336,12 +348,14 @@ def _closed_loop_source(sf):
     return None
 
 
-def _refuse_graph_driven(builder, analysis="periodic_steady_state"):
+def _refuse_graph_driven(builder, analysis="periodic_steady_state",
+                         active_sinks=()):
     """A control graph's ``drive_source`` adds a 0 V / 0 A source whose
     value only the graph's observer supplies: without it the source
     would sit at zero."""
     from ._circuit_ir import c_blocks_of, graph_driven_of
-    driven = graph_driven_of(builder)
+    active = set(active_sinks)
+    driven = [d for d in graph_driven_of(builder) if d not in active]
     if driven:
         raise _unsup(
             "closed_loop",
@@ -360,16 +374,35 @@ def _refuse_graph_driven(builder, analysis="periodic_steady_state"):
             device=blocks[0], analysis=analysis)
 
 
-def _refuse_closed_loop(sf, analysis="periodic_steady_state"):
+def _gate_is_active(sf, active_graphs) -> bool:
+    if not active_graphs:
+        return False
+    from ._control_pss import gate_graph_ids
+    ids = gate_graph_ids(sf)
+    if ids and ids.issubset(active_graphs):
+        return True
+    if callable(sf):
+        import inspect
+        try:
+            cv = inspect.getclosurevars(sf)
+        except (TypeError, ValueError):
+            return False
+        for v in (*cv.nonlocals.values(), *cv.globals.values()):
+            if _direct_source(v):
+                v_ids = gate_graph_ids(v)
+                if v_ids and v_ids.issubset(active_graphs):
+                    return True
+    return False
+
+
+def _refuse_closed_loop(sf, analysis="periodic_steady_state",
+                        active_graphs=()):
     """A gate that reads a controller's output (``bind_pi_to_switch``, a
-    control graph's ``make_pwm_switch_fn``) is refused by name on every
-    engine: the shooting state is the circuit's true state, the
-    controller's is not in it, and the period runs call no observer, so
-    the orbit would be the plant's under a frozen duty. A hand-written
-    closure over controller state cannot be recognised: a gate the map
-    cannot name as closed-loop is taken as open-loop."""
+    control graph's ``make_pwm_switch_fn``) is refused by name when its
+    controller graph is not part of the shooting run: the period runs
+    would hold a frozen duty."""
     src = _closed_loop_source(sf)
-    if src:
+    if src and not _gate_is_active(sf, set(active_graphs)):
         raise _unsup(
             "closed_loop",
             f"switch_fn comes from {src}: the gate follows a controller "
@@ -380,8 +413,9 @@ def _refuse_closed_loop(sf, analysis="periodic_steady_state"):
             "duty (make_pwm_switch_fn).", analysis=analysis)
 
 
-def _check_schedule(sf, T, analysis="periodic_steady_state"):
-    _refuse_closed_loop(sf, analysis)
+def _check_schedule(sf, T, analysis="periodic_steady_state",
+                    active_graphs=()):
+    _refuse_closed_loop(sf, analysis, active_graphs=active_graphs)
     if isinstance(sf, _pkg.SwitchSchedule) and not sf.has_edges:
         raise _unsup(
             "switch_fn", "the gate schedule cannot name its edges (a "
@@ -1121,32 +1155,299 @@ def _classify(mu):
 
 
 def _pss_refusal(builder, period, switch_fn=None, engine="exact",
-                 dt=None, options=None):
+                 dt=None, options=None, closed_loops=None,
+                 step_observer=None, controller_period=None, control=None):
     """The ``UnsupportedError`` :func:`periodic_steady_state` would raise
     for this circuit and schedule before its first run (its
     applicability checks), or ``None``."""
     from ._refusal import UnsupportedError
     try:
         if engine in ("exact", "dsed"):
-            _Solver(builder, float(period), switch_fn)
+            from ._control_pss import (
+                check_hidden_controller_state, normalize_control_args,
+            )
+            b_res, _circ = _from_circuit(builder)
+            switch_fn, closed_loops, step_observer, controller_period = \
+                normalize_control_args(
+                    b_res, switch_fn=switch_fn, closed_loops=closed_loops,
+                    step_observer=step_observer,
+                    controller_period=controller_period, control=control)
+            check_hidden_controller_state(
+                switch_fn=switch_fn, closed_loops=closed_loops,
+                step_observer=step_observer,
+                refuse_closed_loop_fn=None if (closed_loops or step_observer)
+                else _refuse_closed_loop)
+            if closed_loops or step_observer is not None:
+                _ClosedLoopExactMap(
+                    builder, float(period), switch_fn, closed_loops,
+                    step_observer, controller_period)
+            else:
+                _Solver(builder, float(period), switch_fn)
         else:
             from ._transient_shooting import TransientMap
             TransientMap(builder, float(period), switch_fn, engine, dt,
-                         options)
+                         options, closed_loops=closed_loops,
+                         step_observer=step_observer,
+                         controller_period=controller_period, control=control)
     except UnsupportedError as e:
         return e
     return None
 
 
 def periodic_steady_state_supported(builder, period, switch_fn=None, *,
-                                    engine="exact", dt=None, options=None):
+                                    engine="exact", dt=None, options=None,
+                                    closed_loops=None, step_observer=None,
+                                    controller_period=None, control=None):
     """``(True, "")`` when :func:`periodic_steady_state` can solve this
     circuit with this schedule on ``engine``, else ``(False, reason)``
     with the message of the ``UnsupportedError`` it would raise. Runs
     the same checks, and no period; a configuration error (a bad period,
     a schedule that is not T-periodic) still raises."""
-    e = _pss_refusal(builder, period, switch_fn, engine, dt, options)
+    e = _pss_refusal(builder, period, switch_fn, engine, dt, options,
+                     closed_loops=closed_loops, step_observer=step_observer,
+                     controller_period=controller_period, control=control)
     return (True, "") if e is None else (False, str(e))
+
+
+class _ClosedLoopExactMap:
+    """One period of the exact stepper coupled to compiled control graphs."""
+
+    loop = "fd-broyden"
+    engine = "exact"
+
+    def __init__(self, builder, T, switch_fn, closed_loops, step_observer,
+                 controller_period):
+        from ._control_plan import compose_control
+        from ._control_pss import (
+            ControlGraphStateMapper, _divides, active_graph_ids,
+            active_sink_sources,
+        )
+        PwlStateSpaceCache = _pkg.PwlStateSpaceCache
+        _pulsim = _pkg._pulsim
+
+        builder, circuit = _from_circuit(builder)
+        self.builder = builder
+        self._orig_builder = builder if circuit is None else circuit
+        self.T = float(T)
+        self.comps = list(builder.components())
+        self.user_sf = switch_fn
+        self.user_loops = closed_loops
+        self.user_obs = step_observer
+        self.controller_period = controller_period
+
+        plan = compose_control(
+            builder, closed_loops, step_observer, controller_period,
+            switch_fn, resume=False, snapshot=None)
+        active_graphs = active_graph_ids(plan)
+        active_sinks = active_sink_sources(plan)
+        _refuse_graph_driven(builder, active_sinks=active_sinks)
+        _check_circuit(builder, self.T, self.comps)
+
+        plan_dsed = plan.for_variable_step("dsed")
+        if plan_dsed.every_step:
+            raise _unsup(
+                "step_observer",
+                "a step_observer without a Rate or controller_period has no "
+                "discrete cadence on engine='exact'; give the control graph "
+                "a Rate(period) or pass controller_period=.")
+        ticks = list(plan_dsed.ticks)
+        offsets = list(plan_dsed.tick_offsets) or [0.0] * len(ticks)
+        for (_fn, p_tick), off in zip(ticks, offsets):
+            if not _divides(float(p_tick), self.T):
+                raise _unsup(
+                    "period",
+                    f"controller rate period {float(p_tick)!r} s does not "
+                    f"divide shooting period={self.T!r} s.")
+            if not (0.0 <= float(off) < float(p_tick)):
+                raise _err(
+                    f"controller offset {float(off)!r} must lie in "
+                    f"[0, {float(p_tick)!r}).")
+
+        n_sw = builder.graph.num_switches
+        _n, _nd, controlled = _pulsim._switch_census(builder.graph,
+                                                      builder.pool)
+        sf = plan_dsed.switch_fn
+        if sf is None:
+            if len(controlled):
+                raise _err(
+                    f"the circuit has {len(controlled)} controlled "
+                    "switch(es) and no switch_fn: there is no gate "
+                    "schedule to be periodic in.")
+            sf = _ConstSchedule(n_sw)
+        _check_schedule(sf, self.T, active_graphs=active_graphs)
+        self.sf = sf
+        self.n_sw = n_sw
+
+        self.cache = PwlStateSpaceCache(builder.graph, builder.pool)
+        if circuit is not None:
+            self.cache.share_symbolic(circuit)
+        self.cache.build_lazy(self.T)
+        self.ad = _pulsim._NativeCircuitBuilderAdapter(
+            builder, self.cache, plan_dsed.b_extra_fn)
+        self._run_native = _pulsim.run_ped_native_builder
+        from ._dsed_dispatch import MODE_GUARD, _shadow_h_e
+        self._guard = (
+            {"mode_guard_h_e": _shadow_h_e(builder, sf, self.T)}
+            if MODE_GUARD and _nd else {})
+
+        m0 = sf(0.0)
+        try:
+            self.ad.set_mask(m0)
+            n_circ = self.ad.n_state
+            key = (None if circuit is None
+                   else (circuit.structure_hash(), str(m0)))
+            hit = _LABELS.get(key) if key is not None else None
+            if hit is None:
+                hit = _labels(builder, self.cache, m0, self.comps)
+                if key is not None:
+                    if len(_LABELS) > 256:
+                        _LABELS.clear()
+                    _LABELS[key] = hit
+            circ_labels = list(hit[0])
+            circ_devs = [list(d) for d in hit[1]]
+        except (RuntimeError, NotImplementedError) as e:
+            raise _unsup(
+                "state_space",
+                "the exact stepper cannot extract this circuit's "
+                f"state space ({str(e).splitlines()[0]}).") from e
+        if n_circ == 0:
+            raise _err(
+                "the circuit has no capacitors or inductors, so it "
+                "has no periodic state: its solution is algebraic at "
+                "every instant.")
+
+        self.mapper = ControlGraphStateMapper(plan.graphs, self.T)
+        self.n_circuit = n_circ
+        self.n_ctrl = self.mapper.n_ctrl
+        self.n = self.n_circuit + self.n_ctrl
+        self.labels = [*circ_labels, *self.mapper.labels]
+        self.label_devices = [*circ_devs, *self.mapper.devices]
+        self.ctrl_labels = list(self.mapper.labels)
+
+        self._tick_kw = ({
+            "tick_fns": [f for f, _p in ticks],
+            "tick_periods": [float(p) for _f, p in ticks],
+            "tick_offsets": [float(o) for o in offsets],
+            "tick_monitors": [
+                bool(getattr(f, "_pulsim_monitor", False)) for f, _p in ticks
+            ],
+        } if ticks else {})
+
+        dyn = bool(self.ad.has_dynamic_sources)
+        self.fd_rel = 1e-5 if dyn else 1e-6
+        run_noise = 1e-11 if dyn else 1e-14
+        self.marginal = max(1e-6, 100.0 * run_noise / self.fd_rel)
+        self.n_runs = self.n_steps = 0
+        self.n_jacobians = self.n_broyden = 0
+
+    def initial_x0(self) -> np.ndarray:
+        return np.concatenate([
+            np.zeros(self.n_circuit, dtype=float),
+            self.mapper.initial_state(),
+        ])
+
+    def run(self, x):
+        x = np.asarray(x, dtype=float)
+        x_circ = x[:self.n_circuit].copy()
+        x_ctrl = x[self.n_circuit:].copy()
+        self.mapper.seed(x_ctrl)
+        self.n_runs += 1
+        try:
+            r = self._run_native(
+                self.ad, self.sf, x_circ, self.T, rtol=1e-11, atol=1e-14,
+                dt_init=self.T * 1e-6, dt_max=self.T, store_every=1,
+                enable_event_projection=False, diode_law_rel=0.0,
+                event_log=True, **self._tick_kw, **self._guard)
+        except RuntimeError as e:
+            raise _conv(f"a period run failed: {e}") from e
+        states = np.asarray(r["states"], dtype=float)
+        self.n_steps += int(r["n_accept"])
+        x_circ_end = states[-1].copy()
+        sc_circ = np.abs(states).max(axis=0)
+        if self.n_ctrl > 0:
+            x_ctrl_end = self.mapper.read()
+            x_end = np.concatenate([x_circ_end, x_ctrl_end])
+            ref_sc = (float(sc_circ.max())
+                      if sc_circ.size and float(sc_circ.max()) > 0 else 1.0)
+            sc_ctrl = np.maximum(
+                np.maximum(np.abs(x_ctrl), np.abs(x_ctrl_end)),
+                1e-3 * ref_sc)
+            sc = np.concatenate([sc_circ, sc_ctrl])
+        else:
+            x_end = x_circ_end
+            sc = sc_circ
+        return x_end, sc, r
+
+    def name_states(self, v, scale=None):
+        return _Solver.name_states(self, v, scale)
+
+    def sampled_model(self, res, inputs, outputs):
+        raise _unsup(
+            "sampled_model",
+            "sampled_model() is not supported with closed-loop "
+            "controllers (open-loop exact shooting only).",
+            kind="closed_loop",
+        )
+
+
+def _solve_closed_loop_exact(builder, period, switch_fn, closed_loops,
+                             step_observer, controller_period, start_from,
+                             max_period_runs, n_relax, rtol, sensitivities):
+    if sensitivities is not None:
+        raise _unsup(
+            "sensitivities",
+            "orbit sensitivities are not supported with closed-loop "
+            "controllers (open-loop exact shooting only).")
+    m = _ClosedLoopExactMap(
+        builder, float(period), switch_fn, closed_loops, step_observer,
+        controller_period)
+    n = m.n
+    if start_from is None:
+        x = m.initial_x0()
+    elif isinstance(start_from, PeriodicSteadyStateResult):
+        x = np.asarray(start_from.x0, dtype=float).copy()
+    else:
+        x = np.asarray(start_from, dtype=float).reshape(-1).copy()
+    if x.shape != (n,):
+        raise _err(f"start_from has {x.size} entries; the state has {n} "
+                   f"({m.labels}).")
+
+    from ._control_state import suppress_sweep_points
+    from ._transient_shooting import solve
+
+    try:
+        x0, M, mu, history, _full, residual, vrun, err_est = solve(
+            m, x, rtol=rtol, max_period_runs=max_period_runs, n_relax=n_relax)
+    except BaseException:
+        m.mapper.restore_original()
+        raise
+
+    # Seed the converged controller initial state cleanly
+    x_ctrl_star = x0[m.n_circuit:].copy()
+    m.mapper.seed(x_ctrl_star)
+
+    def orbit():
+        from . import simulate as _simulate
+        with suppress_sweep_points():
+            m.mapper.seed(x_ctrl_star)
+            return _simulate(
+                m._orig_builder, t_end=m.T, dt=m.T, engine="dsed",
+                switch_fn=m.user_sf, closed_loops=m.user_loops,
+                step_observer=m.user_obs,
+                controller_period=m.controller_period,
+                initial_state=x0[:m.n_circuit], rtol=1e-11, atol=1e-14)
+
+    unstable = [(i, complex(v), _classify(v)) for i, v in enumerate(mu)
+                if abs(v) >= 1.0]
+    pattern = [(str(ev["name"]), float(ev["t"]) / m.T)
+               for ev in vrun.get("event_log", ())]
+    return PeriodicSteadyStateResult(
+        x0=x0, state_labels=list(m.labels), _orbit=orbit, monodromy=M,
+        multipliers=mu, stable=not unstable, unstable_multipliers=unstable,
+        pattern=pattern, residual=residual, residual_history=history,
+        pattern_history=[], n_period_runs=m.n_runs, n_engine_steps=m.n_steps,
+        period=m.T, _ctx=m, orbit_error_estimate=err_est,
+        controller_state=x_ctrl_star, controller_labels=list(m.ctrl_labels))
 
 
 def periodic_steady_state(builder, *, period: float, switch_fn=None,
@@ -1157,6 +1458,10 @@ def periodic_steady_state(builder, *, period: float, switch_fn=None,
                           engine: str = "exact",
                           dt: float | None = None,
                           options: dict | None = None,
+                          closed_loops=None,
+                          step_observer=None,
+                          controller_period: float | None = None,
+                          control=None,
                           _observables=None,
                           _python_loop: bool = False) -> PeriodicSteadyStateResult:
     """Periodic steady state of a switching circuit by Newton shooting
@@ -1222,6 +1527,20 @@ def periodic_steady_state(builder, *, period: float, switch_fn=None,
     if not (period > 0 and math.isfinite(period)):
         raise _err(f"period must be a positive finite number, got "
                    f"{period!r}")
+    from ._control_pss import (
+        check_hidden_controller_state, normalize_control_args,
+    )
+    b_res, _circ = _from_circuit(builder)
+    switch_fn, closed_loops, step_observer, controller_period = \
+        normalize_control_args(
+            b_res, switch_fn=switch_fn, closed_loops=closed_loops,
+            step_observer=step_observer, controller_period=controller_period,
+            control=control)
+    has_ctrl = bool(closed_loops) or step_observer is not None
+    check_hidden_controller_state(
+        switch_fn=switch_fn, closed_loops=closed_loops,
+        step_observer=step_observer,
+        refuse_closed_loop_fn=None if has_ctrl else _refuse_closed_loop)
     if engine not in ("exact", "dsed"):
         if engine not in ("pwl", "trbdf2"):
             raise _err(f"engine must be 'exact', 'dsed', 'pwl' or "
@@ -1231,10 +1550,16 @@ def periodic_steady_state(builder, *, period: float, switch_fn=None,
             builder, period=float(period), switch_fn=switch_fn,
             engine=engine, dt=dt, options=options, start_from=start_from,
             max_period_runs=max_period_runs, n_relax=n_relax, rtol=rtol,
-            sensitivities=sensitivities)
+            sensitivities=sensitivities, closed_loops=closed_loops,
+            step_observer=step_observer, controller_period=controller_period)
     if dt is not None or options:
         raise _err("dt and options set the period runs of engine='pwl' / "
                    "'trbdf2'; the exact stepper takes neither.")
+    if has_ctrl:
+        return _solve_closed_loop_exact(
+            builder, period, switch_fn, closed_loops, step_observer,
+            controller_period, start_from, max_period_runs, n_relax, rtol,
+            sensitivities)
     s = _Solver(builder, period, switch_fn)
     n = s.n
     if start_from is None:

@@ -341,3 +341,55 @@ a source that follows a controller (`feature='closed_loop'`).
    bound: not the ≥ 5× a finer ladder needs, so (1e-2, 1e-3) stays
    (8.2e-8 L, 7.1e-12 C). → Reverse: `_rounding_floor` and its two
    twins; `n_steps=1` back to 50 once the request lands.
+
+## On controller states in `x0` (2026-11-24, Task 7.1 & 7.2)
+
+23. **Compiled control-graph states `x_ctrl` sit in `x0 = [x_circuit; x_ctrl]`,
+    seeded and read via `CxxBlockChain.dump_state` / `load_state` with no
+    C++ binding changes; opaque Python closures/stateful callables are
+    refused with `UnsupportedError("periodic_steady_state", "hidden_controller_state", ...)`.**
+    - *Normalization & graph discovery:* `python/pulsim/_control_pss.py`
+      (`normalize_control_args`, `ControlGraphStateMapper`) accepts
+      `closed_loops=`, `step_observer=`, `control=`, or `switch_fn=`
+      gates produced by `MixedDomainBlockChain` (`make_pwm_switch_fn`,
+      `make_multi_pwm_switch_fn`, `bind_pi_to_duty_callable`). `steady_state`
+      with `dt=None` forwards `closed_loops`, `step_observer`,
+      `controller_period`, and `control` to `periodic_steady_state`.
+    - *State extraction & seeding without caller mutation:* `ControlGraphStateMapper`
+      snapshots initial `dump_state()` blobs, seeds `x_ctrl` into the compiled
+      `CxxBlockChain` slots (clearing per-run tick counters / recordings), runs
+      one period under `suppress_sweep_points()`, and reads back `[x_circuit(T);
+      x_ctrl(T)]`. On failure the initial controller blob is restored; on
+      convergence the shooting state sits cleanly on the result via
+      `PeriodicSteadyStateResult.controller_state`, `controller_labels`, and
+      `circuit_state`, alongside combined `x0` and `state_labels`.
+    - *Scale-invariant singularity check & `pwl` tick phase:* Mixed
+      circuit+controller Jacobians `I - M` can have small singular values from
+      controller scaling (e.g. `Ki * T = 1e-3`) while all Floquet multipliers stay
+      far from 1; `_transient_shooting.py` pairs a scaled SVD check
+      `sig[-1] <= 1e-10 * max(1.0, sig[0])` with the eigenvalue check
+      `min|eigvals(I - M)| <= marginal`, plus a scale floor for near-zero states
+      such as `prev_error`. On `engine="pwl"` with compiled control, shooting
+      defaults `control_tick` to `"state"` so 1-period shooting matches
+      `simulate(..., control_tick="state")` on `[0, N*T]`.
+    - *Refusal boundary:* `check_hidden_controller_state` inspects `switch_fn`,
+      `step_observer`, `closed_loops`, `control`, and `PythonBlock` nodes,
+      raising `UnsupportedError("periodic_steady_state", "hidden_controller_state", ...)`
+      for closures with mutable cell contents, `nonlocal`/global mutations,
+      stateful callable objects, or uninspectable `PythonBlock` / `CBlock`
+      callbacks, while allowing stateless pure-time schedules (`make_pwm_switch_fn`,
+      `SwitchSchedule`, stateless `lambda t: ...`).
+    - *Measured voltage-mode buck + PI at `f_sw = 100 kHz` (`V_in = 24 V`,
+      `V_ref = 12 V`, `L = 100 uH`, `C = 47 uF`, `R = 5 ohm`, `Kp = 0.03`,
+      `Ki = 100.0`; switching-rate sampled error `|v(out)[0] - V_ref|`; 6000-period
+      settled transient comparison across `[i_L, v_C, integrator_state, prev_error]`):*
+      - `exact`: 4 steps, 12 runs, `|v0 - V_ref| = 4.086e-14 V`
+        (`|mean - V_ref| = 5.678e-5 V` ripple offset at `C = 47 uF`, dropping to
+        `6.989e-9 V` at `C = 4700 uF`), `max|x0 - x_tr| = 3.554e-10`
+        (`ctrl_diff = 1.765e-12`).
+      - `pwl` (`dt = T/100`, `control_tick="state"`): 4 steps, 12 runs,
+        `|v0 - V_ref| = 3.375e-14 V`, `max|x0 - x_tr| = 3.523e-10`
+        (`ctrl_diff = 1.270e-12`).
+      - `trbdf2` (`dt = T/100`): 5 steps, 13 runs,
+        `|v0 - V_ref| = 3.197e-14 V`, `max|x0 - x_tr| = 3.777e-9`
+        (`ctrl_diff = 3.777e-9`, `< 1e-8` across all states).
