@@ -43,6 +43,13 @@ new = tuple.__new__
 DEFAULT_DISCONTINUITY_RESTART = False
 DEFAULT_SUBSTEP_STATE_CORRECTION = False
 
+# Default output-grid chord tolerance on engine='exact'/'dsed' when the caller
+# leaves output_rtol=None and passes no dt, store_every>1, recorders,
+# sensitivities, integrator='bdf2', or integrator='auto' resume snapshot
+# (update-number-changing-release decision 2.5 / task 3.1). None today; the
+# number-changing release sets it to 1e-5.
+DEFAULT_EXACT_OUTPUT_RTOL: Optional[float] = None
+
 # Undriven-switch policy when a circuit has controlled switches and no
 # switch_fn / controller drives them (update-number-changing-release
 # decision 2.1, add-kernel-simulation-object task 11.3):

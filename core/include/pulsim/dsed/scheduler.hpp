@@ -578,14 +578,18 @@ public:
 
             // 1. Next time event from the queue: gate edge, source corner, tick
             Real t_sw = t_end;
-            Real t_gate = next_gate_edge_(t, t_end, t_sw);
+            bool sw_polled = false;
+            Real t_gate = next_gate_edge_(t, t_end, t_sw, &sw_polled);
             // an edge a few ulps before t_end is t_end (scheduler_auto.hpp); ulps
             // only: the 1e-12 s floor swallowed a 1 ps pulse ending a period run
             if (t_gate < t_end && near_time(t_gate, t_end, Real{0})) t_gate = t_end;
-            const Real t_target = std::min({t_gate, t_end, queue_.next_of(events::Kind::ControlTick)});
+            const Real t_tick = queue_.next_of(events::Kind::ControlTick);
+            const Real t_target = std::min({t_gate, t_end, t_tick});
             // a source corner is landed on exactly: a single-shot pulse
             // read one ulp early would keep its old piece for a step
             const bool at_corner = t_gate < t_sw;
+            const Real t_real_gate = (sw_polled && !at_corner) ? t_end : t_gate;
+            const Real t_output_target = std::min({t_real_gate, t_end, t_tick});
 
             // 2. Propose step capped at next gate
             Real h_use = std::min({h, dt_max_, t_target - t});
@@ -635,7 +639,7 @@ public:
                     if (fast_k_ < fast_t_.size()) {
                         h_ex = std::min(h_ex, fast_t_[fast_k_] - t);
                     }
-                    if (output_rtol_ > Real{0}) h_ex = output_step_(t, x, h_ex, result.n_events, t_target);
+                    if (output_rtol_ > Real{0}) h_ex = output_step_(t, x, h_ex, result.n_events, t_output_target);
                     // no sliver step short of the edge (scheduler_auto.hpp)
                     if (h_ex < t_target - t && near_time(t + h_ex, t_target)) {
                         h_ex = t_target - t;
@@ -1078,10 +1082,12 @@ private:
     /// add-unified-event-queue group 3: both come from the run's queue
     /// (`start_time_events_`). `t_sw` is the switch function's part (the
     /// gate edge, its poll, or `t_end`), which tells a corner apart.
-    [[nodiscard]] Real next_gate_edge_(Real t_now, Real t_end, Real& t_sw) {
+    [[nodiscard]] Real next_gate_edge_(Real t_now, Real t_end, Real& t_sw,
+                                       bool* sw_polled = nullptr) {
         // Both sources are asked again at every step, as before the queue:
         // an SPWM oracle's answer moves by an ulp with the query point
         // (DECISIONS 9), so a cached edge would move the trajectory.
+        if (sw_polled != nullptr) *sw_polled = false;
         t_sw = t_end;
         if constexpr (HasNextEdge<SwitchFn>) {
             queue_.invalidate(gate_src_);
@@ -1092,6 +1098,7 @@ private:
                 // A gate that names no edge is sampled every dt_max/10 and
                 // re-read at each landing; without it a plain Python gate
                 // ran with its t = 0 mask frozen.
+                if (sw_polled != nullptr) *sw_polled = true;
                 t_sw = std::min(t_now + dt_max_ * Real{0.1}, t_end);
             }
         }

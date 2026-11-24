@@ -675,3 +675,101 @@ TEST_CASE("Exact: a degenerate-cluster bridge mode to a 60-digit exponential",
     REQUIRE(est <= kExactTierBound);
     REQUIRE(est >= Real{0.5} * err);   // an estimate (1.3-10x above on probes), not a bound
 }
+
+TEST_CASE("Exact: exact_chord_step resists stiff roundoff while bounding fast transients and ramps",
+          "[v2][dsed][exact_lti]") {
+    const auto chord_err = [](const ExactLTI& e, const Vector& x0,
+                              const Vector* c0, const Vector* c1, Real d) {
+        Vector x1(x0.size()), xm(x0.size());
+        if (c0 != nullptr && c1 != nullptr) {
+            exact_advance_affine_into(e, x0, d, *c0, *c1, x1);
+        } else {
+            exact_advance_into(e, x0, d, x1);
+        }
+        Real max_e = 0;
+        for (Real u : {Real{0.25}, Real{0.5}, Real{0.75}}) {
+            if (c0 != nullptr && c1 != nullptr) {
+                exact_advance_affine_into(e, x0, u * d, *c0, *c1, xm);
+            } else {
+                exact_advance_into(e, x0, u * d, xm);
+            }
+            const Vector lin = (Real{1} - u) * x0 + u * x1;
+            max_e = std::max(max_e, (xm - lin).cwiseAbs().maxCoeff());
+        }
+        return max_e;
+    };
+
+    SECTION("stiff parasitic mode with roundoff noise does not collapse slow chord step") {
+        // Coupled slow (-100 /s) and stiff (-1e11 /s) modes rotated by pi/6
+        const Real th = Real{0.5235987755982988};
+        DenseMatrix Q(2, 2);
+        Q << std::cos(th), -std::sin(th), std::sin(th), std::cos(th);
+        DenseMatrix D = DenseMatrix::Zero(2, 2);
+        D(0, 0) = -1e11;
+        D(1, 1) = -100.0;
+        const DenseMatrix A = Q * D * Q.transpose();
+        const Vector b = Vector::Zero(2);
+        const Vector scale = Vector::Ones(2);
+        const auto e = make_exact_lti(A, b, scale, Real{1e-2});
+        REQUIRE(e.tier == 1);
+
+        // State on slow mode (amplitude 1) + 1e-13 residual on stiff mode:
+        // |zdd_stiff| ~ 1e9, which collapsed the old uncapped bound to ~1e-9 s.
+        const Vector x0 = Q * (Vector(2) << Real{1e-13}, Real{1.0}).finished();
+        const Vector tol = Vector::Constant(2, Real{1e-5});
+        bool bounded = false;
+        const Real d = exact_chord_step(e, x0, nullptr, nullptr, tol, Real{1e-2}, bounded);
+        REQUIRE(bounded);
+        // Slow analytical bound: sqrt(8*tol / (100^2 * cos(pi/6))) ≈ 9.61e-5 s (not ~1e-9 s)
+        REQUIRE(d > Real{9.0e-5});
+        REQUIRE(chord_err(e, x0, nullptr, nullptr, d) <= tol[0]);
+    }
+
+    SECTION("real fast decaying transient still tightens step to respect chord tolerance") {
+        DenseMatrix A = DenseMatrix::Zero(2, 2);
+        A(0, 0) = -1e7;
+        A(1, 1) = -10.0;
+        const auto e = make_exact_lti(A, Vector::Zero(2), Vector::Ones(2), Real{1e-4});
+        REQUIRE(e.tier == 1);
+
+        const Vector x0 = (Vector(2) << Real{1.0}, Real{1.0}).finished();
+        const Vector tol = Vector::Constant(2, Real{1e-4});
+        bool bounded = false;
+        const Real d = exact_chord_step(e, x0, nullptr, nullptr, tol, Real{1e-4}, bounded);
+        REQUIRE(bounded);
+        REQUIRE(d < Real{1e-7});
+        Vector xm(2), x1(2);
+        exact_advance_into(e, x0, d, x1);
+        for (Real u : {Real{0.25}, Real{0.5}, Real{0.75}}) {
+            exact_advance_into(e, x0, u * d, xm);
+            const Vector lin = (Real{1} - u) * x0 + u * x1;
+            REQUIRE((xm - lin).cwiseAbs().maxCoeff() <= tol[0]);
+        }
+    }
+
+    SECTION("piecewise-linear ramp (c1 != nullptr) with lambda = 0 and stiff parasitic mode") {
+        DenseMatrix A = DenseMatrix::Zero(2, 2);
+        A(0, 0) = -1e11;
+        A(1, 1) = 0.0;   // pure integrator driven by a linear ramp -> quadratic in t
+        const auto e = make_exact_lti(A, Vector::Zero(2), Vector::Ones(2), Real{1e-3});
+        REQUIRE(e.tier == 1);
+
+        const Vector x0 = (Vector(2) << Real{1e-13}, Real{0.0}).finished();
+        const Vector c0 = Vector::Zero(2);
+        const Vector c1 = (Vector(2) << Real{0.0}, Real{2e6}).finished();
+        const Vector tol = Vector::Constant(2, Real{1e-4});
+        bool bounded = false;
+        const Real d = exact_chord_step(e, x0, &c0, &c1, tol, Real{1e-3}, bounded);
+        REQUIRE(bounded);
+        // On mode 1, x1(t) = 1e6 * t^2 -> x1'' = 2e6 -> chord error = 2e6 * d^2 / 8 <= 1e-4 -> d <= 2.0e-5
+        REQUIRE(d > Real{1.9e-5});
+        REQUIRE(d <= Real{2.05e-5});
+        Vector xm(2), x1(2);
+        exact_advance_affine_into(e, x0, d, c0, c1, x1);
+        for (Real u : {Real{0.25}, Real{0.5}, Real{0.75}}) {
+            exact_advance_affine_into(e, x0, u * d, c0, c1, xm);
+            const Vector lin = (Real{1} - u) * x0 + u * x1;
+            REQUIRE((xm - lin).cwiseAbs().maxCoeff() <= tol[1] * Real{1.001});
+        }
+    }
+}

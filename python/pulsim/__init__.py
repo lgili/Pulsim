@@ -3612,6 +3612,16 @@ def _plan_run(
         # update-number-changing-release: the output-grid rule acts only where
         # the engine picks the samples (no dt, no store_every, no recorders);
         # anything explicit keeps today's samples exactly.
+        if output_rtol is None and _planning.DEFAULT_EXACT_OUTPUT_RTOL is not None:
+            _is_auto_snap = (
+                resume_from is not None
+                and hasattr(resume_from, "controller_state")
+                and _dsed._auto_snapshot(resume_from)
+            )
+            if (dt is None and not recorders and (store_every or 1) == 1
+                    and sensitivities is None and integrator != "bdf2"
+                    and not _is_auto_snap):
+                output_rtol = _planning.DEFAULT_EXACT_OUTPUT_RTOL
         if output_rtol is not None:
             if isinstance(output_rtol, bool) or not 0.0 < output_rtol < float("inf"):
                 raise ValueError(f"simulate(output_rtol={output_rtol!r}): must be > 0 (None = off)")

@@ -774,48 +774,170 @@ inline constexpr Real kSettleTau = Real{40};
 /// The output-grid rule (update-number-changing-release): the longest step
 /// δ ≤ h from x whose chord x(0)→x(δ) stays within tol_j of x_j(τ) for every
 /// τ ∈ [0, δ] and every component j. Between events ẋ = Ax + b + c0 + c1·τ,
-/// so ẍ(τ) = Σ_k V_jk z̈_k e^{λ_k τ} with z̈ = V⁻¹ẍ(0), ẍ(0) = A(Ax + b + c0) + c1,
-/// and a chord's error is at most δ²/8 · max_τ |ẍ_j(τ)|. Two bounds of that
-/// max, both rigorous (g_k = e^{max(0, Re λ_k)δ}; complex pairs by modulus):
-///   B_j = Σ_k |V_jk z̈_k| g_k                     (triangle inequality)
-///   |ẍ_j(0)| + δ Σ_k |V_jk z̈_k| |λ_k| g_k        (|e^s − 1| ≤ |s| e^{max(0, Re s)})
-/// the second keeps the cancellation between modes at τ = 0 (a source's forced
-/// response cancelled by the free response at rest). δ is the largest step
-/// that either bound admits. Tier 1 only (a diagonalising basis); `bounded` =
-/// false and h returned otherwise. c0 / c1 nullable (no piecewise-linear source).
+/// so ẍ(τ) = Σ_k V_jk z̈_k e^{λ_k τ} with z̈ = V⁻¹ẍ(0), and the affine forcing
+/// w + c0 + c1·τ has zero chord error. Therefore, for λ_k ≠ 0, each mode's
+/// exact chord error on [0, δ] is (z̈_k / λ_k²) · (e^{λ_k τ} − (1 − τ/δ) − (τ/δ)e^{λ_k δ}):
+///   - any mode:   |V_jk e_k| ≤ δ²/8 · |V_jk z̈_k| · g_k(δ),   g_k = e^{max(0, Re λ_k)δ}
+///   - Re λ_k ≤ 0: |V_jk e_k| ≤ c_k · |V_jk z̈_k| / |λ_k|² = cap_jk
+///     with c_k = 1 for real eigenvalues (exponential lies in [e^s, 1]) and
+///     c_k = 2 for complex pairs (|e^{su}| ≤ 1). Stiff decaying modes with tiny
+///     residual z_k cannot collapse δ to roundoff times.
+/// Two monotone bounds, δ* = max δ admitting either EA ≤ tol_j or EB ≤ tol_j:
+///   EA_j(δ) = Σ_k min(δ²/8 · |V_jk z̈_k| · g_k(δ), cap_jk)
+///   EB_j(δ) = Σ_{k ∈ S_j} cap_jk + δ²/8 · (|Σ_{k ∉ S_j} Re(V_jk z̈_k)| + δ Σ_{k ∉ S_j} |V_jk z̈_k| |λ_k| g_k(δ))
+/// where S_j is the static peeled subset of decaying modes (independent of δ)
+/// whose cap_jk ≤ δ_h²/8 · |V_jk z̈_k| and cumulative cap sum ≤ 0.5 · tol_j.
+/// Both bounds are monotonically non-decreasing in δ and preserve zero-state
+/// forced/free cancellation on slow modes. Precomputing O(n²) modal tables
+/// before log-bisection avoids transcendental work inside the 60 iterations.
+/// Tier 1 only; `bounded` = false and h returned otherwise.
 [[nodiscard]] inline Real exact_chord_step(const ExactLTI& e, const Vector& x,
                                            const Vector* c0, const Vector* c1,
                                            const Vector& tol, Real h, bool& bounded) {
     bounded = e.valid && e.tier == 1;
     if (!bounded || !(h > Real{0})) return h;
     const auto n = x.size();
-    // modal coordinates: z = V⁻¹x, ż = Λz + w (+ V⁻¹c0), z̈ = Λż (+ V⁻¹c1)
+    const Real inf = std::numeric_limits<Real>::infinity();
+
+    // Modal second derivative at τ = 0: z = V⁻¹x, ż = Λz + w (+ V⁻¹c0), z̈ = Λż (+ V⁻¹c1)
     Eigen::VectorXcd zdd(n);
+    std::vector<Real> lam_re(static_cast<std::size_t>(n));
+    std::vector<Real> lam_abs(static_cast<std::size_t>(n));
+    std::vector<Real> zdd_abs(static_cast<std::size_t>(n));
+    std::vector<Real> cap_scale(static_cast<std::size_t>(n), inf);
+    bool has_growing = false;
+
     for (Eigen::Index k = 0; k < n; ++k) {
         std::complex<Real> z{e.Vinv_re.row(k).dot(x), e.Vinv_im.row(k).dot(x)};
         std::complex<Real> zd = e.lambda[k] * z + e.w[k];
-        if (c0 != nullptr) zd += std::complex<Real>{e.Vinv_re.row(k).dot(*c0), e.Vinv_im.row(k).dot(*c0)};
+        if (c0 != nullptr) {
+            zd += std::complex<Real>{e.Vinv_re.row(k).dot(*c0), e.Vinv_im.row(k).dot(*c0)};
+        }
         zdd[k] = e.lambda[k] * zd;
-        if (c1 != nullptr) zdd[k] += std::complex<Real>{e.Vinv_re.row(k).dot(*c1), e.Vinv_im.row(k).dot(*c1)};
+        if (c1 != nullptr) {
+            zdd[k] += std::complex<Real>{e.Vinv_re.row(k).dot(*c1), e.Vinv_im.row(k).dot(*c1)};
+        }
+        const auto sk = static_cast<std::size_t>(k);
+        const Real re = e.lambda[k].real();
+        const Real la = std::abs(e.lambda[k]);
+        lam_re[sk] = re;
+        lam_abs[sk] = la;
+        zdd_abs[sk] = std::abs(zdd[k]);
+        if (re > Real{0}) {
+            has_growing = true;
+        } else if (la > Real{0}) {
+            const Real ck = (e.lambda[k].imag() == Real{0}) ? Real{1} : Real{2};
+            cap_scale[sk] = ck / (la * la);
+        }
     }
-    // whether step d satisfies one of the two bounds for every component
-    auto fits = [&](Real d) {
-        for (Eigen::Index j = 0; j < n; ++j) {
-            Real B = Real{0}, C = Real{0}, a0 = Real{0};
-            for (Eigen::Index k = 0; k < n; ++k) {
-                const Real re = e.lambda[k].real();
-                const Real g = re > Real{0} ? std::exp(re * d) : Real{1};
-                const Real m = std::hypot(e.V_re(j, k), e.V_im(j, k)) * std::abs(zdd[k]) * g;
-                B += m;
-                C += m * std::abs(e.lambda[k]);
-                a0 += e.V_re(j, k) * zdd[k].real() - e.V_im(j, k) * zdd[k].imag();
+
+    // Hoisted per-(j, k) tables and static peeled cancellation quantities (δ-independent)
+    const auto nn = static_cast<std::size_t>(n);
+    std::vector<Real> M(nn * nn, Real{0});
+    std::vector<Real> cap(nn * nn, inf);
+    std::vector<Real> cap_sum(nn, Real{0});
+    std::vector<Real> a0_rem(nn, Real{0});
+    std::vector<Real> C_rem(nn, Real{0});
+    std::vector<unsigned char> peeled;
+    if (has_growing) peeled.assign(nn * nn, 0);
+
+    const Real h2_8 = h * h * Real{0.125};
+    std::vector<std::size_t> cand;
+    cand.reserve(nn);
+
+    for (Eigen::Index j = 0; j < n; ++j) {
+        const auto sj = static_cast<std::size_t>(j);
+        const auto row = sj * nn;
+        cand.clear();
+        for (Eigen::Index k = 0; k < n; ++k) {
+            const auto sk = static_cast<std::size_t>(k);
+            const Real m = std::hypot(e.V_re(j, k), e.V_im(j, k)) * zdd_abs[sk];
+            M[row + sk] = m;
+            if (std::isfinite(cap_scale[sk])) {
+                const Real c = m * cap_scale[sk];
+                cap[row + sk] = c;
+                if (h2_8 * m > c && c <= Real{0.5} * tol[j]) {
+                    cand.push_back(sk);
+                }
             }
-            if (d * d * std::min(B, std::abs(a0) + d * C) > Real{8} * tol[j]) return false;
+        }
+        std::vector<unsigned char> row_peeled(nn, 0);
+        if (!cand.empty()) {
+            std::sort(cand.begin(), cand.end(), [&](std::size_t a, std::size_t b) {
+                return cap[row + a] < cap[row + b];
+            });
+            Real s = Real{0};
+            const Real budget = Real{0.5} * tol[j];
+            for (std::size_t sk : cand) {
+                const Real c = cap[row + sk];
+                if (s + c <= budget) {
+                    s += c;
+                    row_peeled[sk] = 1;
+                    if (has_growing) peeled[row + sk] = 1;
+                }
+            }
+            cap_sum[sj] = s;
+        }
+        Real a0 = Real{0};
+        Real C = Real{0};
+        for (Eigen::Index k = 0; k < n; ++k) {
+            const auto sk = static_cast<std::size_t>(k);
+            if (row_peeled[sk]) continue;
+            a0 += e.V_re(j, k) * zdd[k].real() - e.V_im(j, k) * zdd[k].imag();
+            if (!has_growing) {
+                C += M[row + sk] * lam_abs[sk];
+            }
+        }
+        a0_rem[sj] = std::abs(a0);
+        C_rem[sj] = C;
+    }
+
+    // Whether step d satisfies min(EA, EB) <= tol[j] for every state j
+    auto fits = [&](Real d) {
+        const Real d2_8 = d * d * Real{0.125};
+        for (Eigen::Index j = 0; j < n; ++j) {
+            const auto sj = static_cast<std::size_t>(j);
+            const auto row = sj * nn;
+            const Real tj = tol[j];
+
+            Real EB;
+            if (!has_growing) {
+                EB = cap_sum[sj] + d2_8 * (a0_rem[sj] + d * C_rem[sj]);
+            } else {
+                Real C_d = Real{0};
+                for (std::size_t sk = 0; sk < nn; ++sk) {
+                    if (peeled[row + sk]) continue;
+                    const Real m = M[row + sk];
+                    if (m == Real{0}) continue;
+                    const Real re = lam_re[sk];
+                    const Real g = re > Real{0} ? std::exp(re * d) : Real{1};
+                    C_d += m * lam_abs[sk] * g;
+                }
+                EB = cap_sum[sj] + d2_8 * (a0_rem[sj] + d * C_d);
+            }
+            if (EB <= tj) continue;
+
+            Real EA = Real{0};
+            bool ea_ok = true;
+            for (std::size_t sk = 0; sk < nn; ++sk) {
+                const Real m = M[row + sk];
+                if (m == Real{0}) continue;
+                const Real re = lam_re[sk];
+                const Real term = re > Real{0}
+                    ? (d2_8 * m * std::exp(re * d))
+                    : std::min(d2_8 * m, cap[row + sk]);
+                EA += term;
+                if (!(EA <= tj)) {
+                    ea_ok = false;
+                    break;
+                }
+            }
+            if (!ea_ok) return false;
         }
         return true;
     };
     if (fits(h)) return h;
-    // the admitted set is an interval [0, δ*] (both bounds grow with d): bisect in log d
+    // the admitted set is an interval [0, δ*] (both EA and EB grow monotonically with d): bisect in log d
     Real lo = h * Real{1e-12}, hi = h;
     if (!fits(lo)) return lo;
     for (int it = 0; it < 60 && hi > lo * Real{1.01}; ++it) {

@@ -175,3 +175,78 @@ def test_events_keep_both_limits_and_order():
     assert np.abs(t1[np.searchsorted(t1, ev).clip(0, t1.size - 1)] - ev).max() <= 1e-15
     # the rule moves samples, not decisions: the gate edges are the same
     assert np.asarray(r0.event_times).size >= 60
+
+
+def test_default_exact_output_rtol_applies_and_defers_cleanly(monkeypatch):
+    """When _plan.DEFAULT_EXACT_OUTPUT_RTOL is set (at the release flip),
+    engine='exact' without dt uses it, while sensitivities, integrator='bdf2',
+    explicit dt, and integrator='auto' resume snapshots keep it off without
+    refusing; explicit output_rtol=... still refuses where required."""
+    from pulsim import _plan
+
+    monkeypatch.setattr(_plan, "DEFAULT_EXACT_OUTPUT_RTOL", 1e-5)
+
+    b = pulsim.CircuitBuilder()
+    b.add_voltage_source("Vin", "in", "gnd", 10.0)
+    b.add_resistor("R", "in", "out", 10.0)
+    b.add_inductor("L", "out", "gnd", 1e-3)
+
+    # Applies by default without dt on exact
+    r_def = pulsim.simulate(b, 2e-4, engine="exact")
+    assert "output_grid" in r_def.diagnostics
+
+    # Explicit dt turns it off without error
+    r_dt = pulsim.simulate(b, 2e-4, dt=1e-6, engine="exact")
+    assert "output_grid" not in r_dt.diagnostics
+
+    # integrator='bdf2' keeps it off when defaulted, refuses when explicit
+    r_bdf2 = pulsim.simulate(b, 2e-4, engine="exact", integrator="bdf2")
+    assert "output_grid" not in r_bdf2.diagnostics
+    with pytest.raises(pulsim.UnsupportedError) as ei_bdf2:
+        pulsim.simulate(b, 2e-4, engine="exact", integrator="bdf2", output_rtol=1e-5)
+    assert ei_bdf2.value.feature == "output_rtol"
+
+    # sensitivities keeps it off when defaulted, refuses when explicit
+    b_sens = pulsim.CircuitBuilder()
+    b_sens.add_voltage_source("Vin", "in", "gnd", 10.0)
+    b_sens.add_resistor("R", "in", "out", 10.0)
+    b_sens.add_capacitor("C", "out", "gnd", 1e-6)
+    r_sens = pulsim.simulate(b_sens, 1e-5, engine="exact", sensitivities=["R.R"])
+    assert "output_grid" not in r_sens.diagnostics
+    with pytest.raises(pulsim.UnsupportedError) as ei_sens:
+        pulsim.simulate(b_sens, 1e-5, engine="exact", sensitivities=["R.R"], output_rtol=1e-5)
+    assert ei_sens.value.feature == "output_rtol"
+
+    # integrator='auto' snapshot (taken while output_rtol was off) keeps the
+    # defaulted output_rtol off on resume without refusing
+    monkeypatch.setattr(_plan, "DEFAULT_EXACT_OUTPUT_RTOL", None)
+    seg1 = pulsim.simulate(b, 1e-4, engine="exact", integrator="auto")
+    assert seg1.final_snapshot.controller_state[1][0] == 101.0
+    monkeypatch.setattr(_plan, "DEFAULT_EXACT_OUTPUT_RTOL", 1e-5)
+    seg2 = pulsim.simulate(b, 2e-4, engine="exact", resume_from=seg1.final_snapshot)
+    assert "output_grid" not in seg2.diagnostics
+    assert seg2.times[-1] == pytest.approx(2e-4, rel=1e-12)
+
+
+def test_stiff_parasitic_mode_does_not_collapse_output_grid():
+    """A stiff parasitic mode (-1e11 /s from g_off across paralleled diode
+    bridges) with roundoff residual in V^-1*x must not collapse exact_chord_step
+    into nanosecond stepping, and the output cap must engage cleanly when
+    the switching function has no explicit gate edges."""
+    from tests.test_exact_route import _paralleled_bridges
+
+    rtol = 1e-5
+    t_end = 2e-3
+    r = pulsim.simulate(_paralleled_bridges(2), t_end, engine="exact", output_rtol=rtol)
+    t = np.asarray(r.times)
+    assert np.all(np.diff(t) >= 0)
+    assert t[-1] == pytest.approx(t_end, rel=1e-12)
+    # Without the decaying-mode cap + output_cap_ polling fix, 2 ms blew past
+    # 500k+ nanosecond steps; with the fix, step count stays modest and bounded.
+    assert len(t) < 25000, f"step explosion returned: {len(t)} steps"
+    dense = pulsim.simulate(_paralleled_bridges(2), t_end, engine="exact", dt=1e-6)
+    td = np.asarray(dense.times)
+    bus_r = np.asarray(r.v("p")) - np.asarray(r.v("n"))
+    bus_d = np.asarray(dense.v("p")) - np.asarray(dense.v("n"))
+    tg = np.linspace(0.0, t_end, 1001)
+    assert np.abs(np.interp(tg, t, bus_r) - np.interp(tg, td, bus_d)).max() <= 1e-3

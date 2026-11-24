@@ -269,3 +269,58 @@ DECISIONS 23 is decided explicitly for this release:
   continuous step sizing as the default in this release so the two-pillar
   release is not coupled to an unimplemented performance feature.
   `benchmarks/tools/next_defaults.py` `NOT_APPLIED` updated accordingly.
+
+## 4. Rehearsal 1.9 on consolidated tree, 2026-11-24
+
+Closes task 1.9 on the consolidated `feat/core-integration-wip` tree (after
+merging `core-auto-route-exact`, `core-a-complementarity`, Wave 1 tracks, and
+`add-compiled-control-graph` docs).
+
+1. **Tri-state `DEFAULT_EXACT_OUTPUT_RTOL` resolution (`python/pulsim/_plan.py`, `python/pulsim/__init__.py`):**
+   - Added `DEFAULT_EXACT_OUTPUT_RTOL: Optional[float] = None` (flips to `1e-5`
+     at task 3.1; wired into `benchmarks/tools/next_defaults_pytest.py` as
+     `("dsed", "DEFAULT_EXACT_OUTPUT_RTOL")`).
+   - When `output_rtol is None`, the default resolves from
+     `_plan.DEFAULT_EXACT_OUTPUT_RTOL` only when `engine == "dsed"`,
+     `dt is None`, `not recorders`, `(store_every or 1) == 1`,
+     `sensitivities is None`, `integrator != "bdf2"`, and not resuming an
+     `integrator='auto'` snapshot. Explicit `output_rtol=...` still refuses by
+     name (`UnsupportedError(..., "output_rtol", ...)`). This eliminated all 68
+     pre-fix `output_rtol` refusals and 47 fixture errors in the pytest blast
+     radius (`test_exact_output_grid.py::test_default_exact_output_rtol_applies_and_defers_cleanly`).
+2. **`exact_chord_step` stiff-mode cap, peeled cancellation, and hoisted tables (`core/include/pulsim/dsed/exact_lti.hpp`):**
+   - On `_paralleled_bridges(10)` (50 Hz, 30 diodes ON, `n_aug = 91`), a stiff
+     parasitic eigenvalue (`-1.5e11 /s`) carrying `|z_k| ~ 1e-12..1e-9` from
+     floating-point `V^-1 * x` inflated `|zdd_k|` by `|lambda|^2` to `1e11..1e13`,
+     collapsing `exact_chord_step` to `0.45..4.5 ns` (5,290 steps in 10 us,
+     ~2 h for 20 ms) while recomputing `hypot`/`abs` O(n^2 × 60) times inside
+     bisection (resolving the `DECISIONS.md` section 1 review note).
+   - Fixed with the exact modal identity for affine forcing: for any mode with
+     `Re(lambda_k) <= 0`, `|lambda_k| > 0`, the exact chord error on `[0, d]`
+     satisfies `|V_jk e_k| <= min((d^2/8) |V_jk zdd_k|, c_k |V_jk zdd_k| / |lambda_k|^2)`
+     with `c_k = 1` (`Im == 0`) or `2` (`Im != 0`), paired with a static peeled
+     cancellation bound `EB` and precomputed `O(n^2)` tables outside bisection.
+   - `_paralleled_bridges(10)` with `output_rtol=1e-5`, `t_end=0.02` now
+     completes in **26.87 s** (21,857 steps, `n_output_capped = 0`, max bus
+     difference vs `pwl` `1.735e-4 <= 1e-3`). Regression tests added in
+     `core/tests/dsed/test_exact_lti.cpp` and `python/tests/test_exact_output_grid.py`.
+3. **Output cap polling reset (`core/include/pulsim/dsed/scheduler.hpp`):**
+   - `next_gate_edge_` sets `t_sw = t + dt_max * 0.1` when a switching function
+     (e.g., diode-only) has no finite `next_edge_after`, sliding `t_target`
+     every step and resetting `output_count_` to 0 in `output_step_`. Now
+     `output_step_` receives `t_output_target` (real edges / corners / ticks),
+     preserving gate polling while enforcing `output_cap_` per physical interval.
+4. **Rehearsal matrix & pytest blast radius (`benchmarks/NEXT_DEFAULTS_REHEARSAL.md`):**
+   - Differential matrix (109 circuits) + analytic (27 cases): **0 cells** in the
+     first three worse classes (`fails`, `samples wrong`, `disagree without
+     truth`); `auto+next` 104/4/1/0/0 (analytic 27/0/0/0) in 6.5 s (`auto`
+     baseline 106/2/1/0/0); `dsed+next` 100/0/0/9/0 (analytic 22/0/0/5) in 2.0 s;
+     `pwl+next` 91/17/1/0/0 (analytic 27/0/0/0) in 0.5 s; **160 cells better**
+     overall vs 8 worse (all 8 under `auto:route` with truth error `<= 5e-11` /
+     `<= 3.9e-14`).
+   - Full `python/tests` (`-m "not examples"`, `-p next_defaults_pytest`):
+     **5562 passed, 538 failed, 0 errors, 7 skipped, 3 xfailed**. All 30
+     `new refusal by name` failures are explained (`24` intentional
+     `undriven_switch` refusals under Owner Decision 2.1, `1` retired `bdf1`
+     cell, `5` `test_switch_conductance_validation` `R_on` pattern assertions);
+     `0` `output_rtol` refusals remain.

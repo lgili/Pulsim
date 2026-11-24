@@ -40,9 +40,13 @@ _FAILS: list = []
 
 # Options whose default the library resolves itself (pulsim._plan): the
 # profile sets the library default instead of the keyword, so the split
-# follows the rule and mmc_arms turns the rule's default off, as at the release.
-LIBRARY_DEFAULTS = {"discontinuity_restart": "DEFAULT_DISCONTINUITY_RESTART",
-                    "enable_substep_state_correction": "DEFAULT_SUBSTEP_STATE_CORRECTION"}
+# follows the rule, mmc_arms turns the rule's default off, and output_rtol
+# stays off on sensitivities / bdf2 / auto-resume, as at the release.
+LIBRARY_DEFAULTS = {
+    "discontinuity_restart": ("pwl", "DEFAULT_DISCONTINUITY_RESTART"),
+    "enable_substep_state_correction": ("pwl", "DEFAULT_SUBSTEP_STATE_CORRECTION"),
+    "output_rtol": ("dsed", "DEFAULT_EXACT_OUTPUT_RTOL"),
+}
 
 
 def _inject(eng, kw):
@@ -106,9 +110,9 @@ def _install() -> bool:
     if _SAVED:
         return False
     saved_plan = {}
-    for k, attr in LIBRARY_DEFAULTS.items():
+    for k, (eng_key, attr) in LIBRARY_DEFAULTS.items():
         saved_plan[attr] = getattr(_plan, attr)
-        setattr(_plan, attr, nd.PROFILE["pwl"][k].value)
+        setattr(_plan, attr, nd.PROFILE[eng_key][k].value)
     for attr, entry in nd.POLICY.items():
         saved_plan[attr] = getattr(_plan, attr)
         setattr(_plan, attr, entry.value)
