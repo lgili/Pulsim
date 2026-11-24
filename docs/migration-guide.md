@@ -376,6 +376,33 @@ behaviour pass `V_f=0.0, V_th=0.7`. `add_bridge_rectifier` gained a
 `V_f=0.0` drop; its `V_th=0.7` threshold is unchanged. `add_mosfet`'s
 `V_F` stays a body-diode threshold.
 
+## After 2.0.0 — Compiled control graph (order, rates, Python evaluator removed)
+
+`MixedDomainBlockChain` now compiles to a scheduled C++ kernel graph
+with typed signal slots, explicit `Rate` groups, algebraic-loop
+detection, and C99 export (`pulsim.export_c`).
+
+- **Breaking — insertion order no longer creates an implicit delay:**
+  blocks run in topological order of their direct-feedthrough inputs
+  (Kahn's algorithm, deterministic insertion-order ties). A chain where
+  a consumer was added before its producer warns once at build time
+  listing every reordered pair (`chain._cxx_chain.reorders()`). Insert
+  `p.DelayBlock(samples=1)` explicitly to keep a one-step delay.
+- **Breaking — Python evaluator removed:** `make_step_observer(...,
+  use_kernel=False)` now raises `DeprecationWarning`, and an unknown
+  block class raises `pulsim.ControlGraphBuildError` instead of falling
+  back to Python. Wrap custom Python logic in `p.PythonBlock(fn)`.
+- **Closed-loop helpers and C blocks:** `bind_pi_to_switch`,
+  `bind_pi_to_duty_callable`, and `add_c_block` compile onto the same
+  kernel graph. The `PIController` instance passed to `bind_pi_to_switch`
+  is no longer mutated in place (read `loop.duty_history` /
+  `loop.error_history`), and `add_c_block` no longer fires an extra tick
+  at `t_end`.
+
+See [Control graph: order, rates, delay and export](control-graph.md)
+for the complete migration tables, rate/delay semantics, and C99 export
+guide.
+
 ## See also
 
 - `examples/scripts/` — 20 runnable reference scripts.

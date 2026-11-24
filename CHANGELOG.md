@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Control graph guide, migration notes, and navigation (`add-compiled-control-graph`)
+
+* **Docs** updated [docs/control-graph.md](docs/control-graph.md) (and added
+  it to `mkdocs.yml` under User Guide, referenced from `AI_GUIDE.md`) with
+  runnable examples covering topological Kahn scheduling, algebraic-loop
+  detection and `DelayBlock`, `Rate` inheritance and integer tick counters,
+  `compute_delay` and `control_tick="state"` delivery across `pwl`, `trbdf2`,
+  and `dsed`/`exact`, `PythonBlock` vs zero-Python-call kernel blocks,
+  current status of planned continuous-rate blocks (group 7), solver
+  snapshot/pickle resume, and strict C99 `export_c` + `add_c_block` reload.
+* **Docs (migration)** added the insertion-order chain and
+  `use_kernel=False` deprecation migration section to
+  [docs/migration-guide.md](docs/migration-guide.md) (insert
+  `DelayBlock(samples=1)` to preserve an explicit one-step delay; wrap
+  custom Python blocks in `PythonBlock(fn)`).
+
 ### esdirk43 runs the stateful kinds and the losses; the exact engine's loss port
 
 * **Added** `integrator='esdirk43'` (engine `trbdf2`) runs the nonlinear

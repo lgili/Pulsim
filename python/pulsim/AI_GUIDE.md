@@ -656,6 +656,6 @@ with the checks in its section 6 before reporting it.
 - `docs/getting-started.md`, `docs/tutorials/`.
 - `docs/api-reference.md`, `docs/gotchas.md`, `docs/troubleshooting.md`,
   `docs/losses-and-thermal.md`, `docs/loss-thermal.md`,
-  `docs/mental-model.md`, `docs/how-pulsim-works/`.
+  `docs/control-graph.md`, `docs/mental-model.md`, `docs/how-pulsim-works/`.
 - `CHANGELOG.md`: what changed and why.
 - Changing `simulate()`: put it in the plan (`docs/internals/run-planning.md`).

@@ -65,5 +65,5 @@ Closed forms used below.
 - [x] 9.3 (trbdf2 runs them, the state-time law; the exact strategy refuses by name, DECISIONS G21) C blocks on `trbdf2` and on the exact strategy: same output as on the fixed engine within the engine tolerance (refused / open-loop today)
 
 ## 10. Docs and verification
-- [ ] 10.1 Control guide (rates, order, delay, continuous blocks, export), migration note for insertion-order chains, AI_GUIDE, CHANGELOG
-- [ ] 10.2 ruff, pytest, ctest (`-j2`), `openspec validate --all --strict`, stub check
+- [x] 10.1 Control guide (rates, order, delay, continuous blocks, export), migration note for insertion-order chains, AI_GUIDE, CHANGELOG
+- [x] 10.2 ruff, pytest, ctest (`-j2`), `openspec validate --all --strict`, stub check (docs/control-graph.md snippets 5/5, ruff clean, openspec 69/69, pytest 391/391 incl. test_doc_snippets, test_ai_guide, test_stubs, control-graph/c-block/closed-loop/dsed suites; ctest skipped in share worktree with no build/, no C++ changes)
