@@ -169,3 +169,70 @@ TEST_CASE("a junction without capacitance is refused when the run starts",
             Catch::Matchers::ContainsSubstring("'tj'") &&
             Catch::Matchers::ContainsSubstring("capacitance"));
 }
+
+TEST_CASE("DeviceLossRecord exposes has_e_on and has_e_off for switching tables",
+          "[thermal][device_losses]") {
+    auto run_case = [](bool with_on, bool with_off, double e_val, bool use_trbdf2) {
+        auto b = chopper();
+        thermal::DeviceLossSpec s;
+        s.device = "S1";
+        s.tj = 25.0;
+        if (with_on) s.e_on = constant(e_val);
+        if (with_off) s.e_off = constant(e_val);
+        b.set_device_losses(s);
+        pwl::PwlStateSpaceCache cache{b.graph(), b.pool()};
+        if (use_trbdf2) {
+            cache.build_lazy(1e-6);
+            solver::TrBdf2Options o;
+            o.t_start = 0.0;
+            o.t_end = 1.2e-4;
+            return solver::run_transient_trbdf2(cache, b.graph(), b.pool(), o, gate);
+        }
+        cache.build(1e-6);
+        solver::SimulationOptions opts{.t_start = 0.0, .t_end = 1.2e-4, .dt = 1e-6};
+        return solver::run_transient(cache, b.graph(), b.pool(), opts, gate);
+    };
+
+    for (const bool use_trbdf2 : {false, true}) {
+        // Zero-valued switching tables still mark has_e_on / has_e_off true.
+        const auto zero_both = run_case(true, true, 0.0, use_trbdf2);
+        REQUIRE(zero_both.device_losses.size() == 1);
+        CHECK(zero_both.device_losses[0].has_e_on);
+        CHECK(zero_both.device_losses[0].has_e_off);
+        CHECK(zero_both.device_losses[0].E_on == 0.0);
+        CHECK(zero_both.device_losses[0].E_off == 0.0);
+
+        const auto on_only = run_case(true, false, 1e-3, use_trbdf2);
+        REQUIRE(on_only.device_losses.size() == 1);
+        CHECK(on_only.device_losses[0].has_e_on);
+        CHECK_FALSE(on_only.device_losses[0].has_e_off);
+
+        const auto off_only = run_case(false, true, 1e-3, use_trbdf2);
+        REQUIRE(off_only.device_losses.size() == 1);
+        CHECK_FALSE(off_only.device_losses[0].has_e_on);
+        CHECK(off_only.device_losses[0].has_e_off);
+
+        // Conduction-only port has both flags false.
+        const auto cond_only = run_case(false, false, 0.0, use_trbdf2);
+        REQUIRE(cond_only.device_losses.size() == 1);
+        CHECK_FALSE(cond_only.device_losses[0].has_e_on);
+        CHECK_FALSE(cond_only.device_losses[0].has_e_off);
+    }
+
+    // Resume preserves has_e_on / has_e_off on the restored LossTracker.
+    auto b = chopper();
+    thermal::DeviceLossSpec s;
+    s.device = "S1";
+    s.tj = 25.0;
+    s.e_on = constant(0.0);
+    b.set_device_losses(s);
+    solver::LossTracker t1(b.graph(), b.pool(), "pwl");
+    const auto saved = t1.save();
+    solver::LossTracker t2(b.graph(), b.pool(), "pwl");
+    t2.restore(saved);
+    solver::SimulationResult out;
+    t2.write(out);
+    REQUIRE(out.device_losses.size() == 1);
+    CHECK(out.device_losses[0].has_e_on);
+    CHECK_FALSE(out.device_losses[0].has_e_off);
+}

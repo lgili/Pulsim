@@ -374,3 +374,120 @@ def test_ideal_branch_form_switch_with_loss_port():
     assert row["E_sw_total"] == pytest.approx(2e-5, rel=1e-12)
     assert row["E_impulse_total"] == pytest.approx(dw, rel=1e-8)
     assert row["impulse_in_junction"] is True
+
+
+def _kvi_table(k: float) -> p.LossTable:
+    """Bilinear E(v, i, Tj) = k * v * i: strictly positive for v > 0, i > 0,
+    and 0.0 J at ZVS (v = 0) or ZCS (i = 0)."""
+    return p.LossTable(
+        v_axis=[0.0, 50.0],
+        i_axis=[0.0, 20.0],
+        tj_axis=[25.0, 125.0],
+        energy=np.array([
+            [[0.0, 0.0], [0.0, 0.0]],
+            [[0.0, 0.0], [k * 1000.0, k * 1000.0]],
+        ]),
+    )
+
+
+def _zero_table() -> p.LossTable:
+    return p.LossTable(
+        v_axis=[0.0, 50.0],
+        i_axis=[0.0, 20.0],
+        tj_axis=[25.0],
+        energy=np.zeros((2, 2, 1)),
+    )
+
+
+@pytest.mark.parametrize("engine", ["pwl", "trbdf2", "dsed"])
+def test_zvs_nonzero_table_is_not_overridden_by_switch_specs(engine):
+    """Real ZVS (V = 0) with a non-zero LossTable evaluates to 0.0 J in the
+    kernel; passing switch_specs alongside must keep 0.0 J and never override."""
+    t_end = 202.5e-6
+    kw = _engine_kwargs(engine)
+    tab_kvi = _kvi_table(1e-6)  # 1 mJ at (50 V, 20 A), 0 J at V = 0
+    # Non-vacuous caller switch_specs: constant 5 mJ per event even at V = 0.
+    override_spec = {"S1": {"E_on_table": _table(5e-3), "E_off_table": _table(5e-3), "Tj": 25.0}}
+
+    def make_zvs(with_port: bool):
+        b = p.CircuitBuilder()
+        b.add_voltage_source("Vin", "in", "gnd", 0.0)
+        b.add_switch("S1", "in", "sw", 1e3, 1e-9)
+        b.add_diode("D1", "gnd", "sw", 1e3, 1e-9)
+        b.add_inductor("L", "sw", "out", 100e-6)
+        b.add_resistor("RL", "out", "gnd", 10.0)
+        if with_port:
+            b.set_device_losses("S1", Tj=25.0, E_on=tab_kvi, E_off=tab_kvi)
+        fn = p.make_pwm_switch_fn(100e3, 0.5, b.switch_index_of("S1"), b.graph.num_switches)
+        return b, fn
+
+    # Control: without set_device_losses, override_spec produces positive energy.
+    b_plain, fn_plain = make_zvs(with_port=False)
+    r_plain = _sim(b_plain, t_end, fn_plain, engine, **kw)
+    assert _loss_by_name(b_plain, r_plain, switch_specs=override_spec)["S1"]["E_sw_total"] > 0.1
+
+    # With set_device_losses at ZVS, kernel records 0.0 J and wins over switch_specs.
+    b_port, fn_port = make_zvs(with_port=True)
+    r_port = _sim(b_port, t_end, fn_port, engine, **kw)
+    rec = r_port._device_losses[0]
+    assert rec.has_e_on is True and rec.has_e_off is True
+    row_no_spec = _loss_by_name(b_port, r_port)["S1"]
+    row_with_spec = _loss_by_name(b_port, r_port, switch_specs=override_spec)["S1"]
+    assert row_no_spec["n_turn_on_events"] == 20
+    assert row_no_spec["n_turn_off_events"] == 20
+    assert row_no_spec["E_sw_total"] == 0.0
+    assert row_with_spec == row_no_spec
+
+
+@pytest.mark.parametrize("engine", ["pwl", "trbdf2", "dsed"])
+def test_zero_valued_loss_table_is_not_overridden_by_specs(engine):
+    """A zero-valued LossTable(0.0) on a live switching converter keeps 0.0 J
+    even when caller switch_specs / diode_specs are also supplied."""
+    t_end = 202.5e-6
+    kw = _engine_kwargs(engine)
+    ztab = _zero_table()
+    s_spec = {"Q1": {"E_on_ref": 1e-3, "E_off_ref": 1e-3, "V_ref": 24.0, "I_ref": 2.0}}
+    d_spec = {"D1": {"Q_rr": 1e-6}}
+
+    b, fn, _ = _buck()
+    b.set_device_losses("Q1", Tj=25.0, E_on=ztab, E_off=ztab)
+    b.set_device_losses("D1", Tj=25.0, E_off=ztab)
+    res = _sim(b, t_end, fn, engine, **kw)
+
+    recs = {r.device: r for r in res._device_losses}
+    assert recs["Q1"].has_e_on is True and recs["Q1"].has_e_off is True
+    assert recs["D1"].has_e_on is False and recs["D1"].has_e_off is True
+
+    rows_no_spec = _loss_by_name(b, res)
+    rows_with_spec = _loss_by_name(b, res, switch_specs=s_spec, diode_specs=d_spec)
+    for dev in ("Q1", "D1"):
+        assert rows_no_spec[dev]["E_sw_total"] == 0.0
+        assert rows_no_spec[dev]["P_sw_avg"] == 0.0
+        assert rows_with_spec[dev] == rows_no_spec[dev]
+
+
+def test_duck_typed_result_with_device_losses_but_no_loss_events_does_not_crash():
+    """A duck-typed result carrying _device_losses without a callable
+    loss_events() method falls back cleanly instead of raising AttributeError."""
+    b, fn, _ = _buck()
+    b.set_device_losses("Q1", Tj=125.0, E_on=E_ON, E_off=E_OFF)
+    res = _sim(b, 52.5e-6, fn, "pwl", dt=1e-7)
+
+    class _DuckResult:
+        def __init__(self, r):
+            self.times = np.asarray(r.times)
+            self.states = np.asarray(r.states)
+            self.switch_states = np.asarray(r.switch_states)
+            self.engine_used = r.engine_used
+            self._device_losses = list(r._device_losses)
+
+    duck = _DuckResult(res)
+    assert not hasattr(duck, "loss_events")
+
+    rows = _loss_by_name(b, duck)
+    assert "P_sw_avg" not in rows["Q1"]
+
+    s_spec = {"Q1": {"E_on_table": E_ON, "E_off_table": E_OFF, "Tj": 125.0}}
+    rows_spec = _loss_by_name(b, duck, switch_specs=s_spec)
+    assert rows_spec["Q1"]["E_sw_total"] > 0.0
+

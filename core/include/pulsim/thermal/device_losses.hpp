@@ -105,6 +105,8 @@ struct DeviceLossRecord {
     double E_impulse = 0.0;          ///< impulsive re-initialisation energy booked to it
     std::size_t n_on = 0;
     std::size_t n_off = 0;
+    bool has_e_on = false;           ///< whether an E_on table was configured
+    bool has_e_off = false;          ///< whether an E_off table was configured
 };
 
 }  // namespace pulsim::thermal

@@ -1464,9 +1464,9 @@ def _switch_switching_loss(closed_trace: np.ndarray,
 def _kernel_loss_records(result) -> Dict[str, Any]:
     """Map device name -> ``DeviceLossRecord`` for devices tracked by an
     in-kernel loss port (``CircuitBuilder.set_device_losses``), or ``{}``
-    when the result carries no kernel loss records."""
+    when the result carries no usable kernel loss records."""
     recs = getattr(result, "_device_losses", None)
-    if not recs:
+    if not recs or not callable(getattr(result, "loss_events", None)):
         return {}
     return {str(r.device): r for r in recs}
 
@@ -1476,14 +1476,20 @@ def _use_kernel_switching(k_rec: Any, user_spec: Any) -> bool:
     ``result.loss_events`` rather than re-estimating from sampled waveforms.
 
     Uses the kernel record whenever present, except when the kernel port
-    recorded zero switching energy (a conduction-only port with no
-    ``E_on`` / ``E_off`` tables) AND the caller explicitly passed post-hoc
-    ``switch_specs`` / ``diode_specs``.
+    has neither an ``E_on`` nor an ``E_off`` table (a conduction-only port)
+    AND the caller explicitly passed post-hoc ``switch_specs`` /
+    ``diode_specs``. ZVS / ZCS runs and zero-valued ``LossTable`` ports
+    set ``has_e_on`` / ``has_e_off`` on ``DeviceLossRecord`` and therefore
+    keep the kernel's ``0.0 J`` result instead of being overwritten.
     """
     if k_rec is None:
         return False
     if user_spec is None:
         return True
+    has_on = getattr(k_rec, "has_e_on", None)
+    has_off = getattr(k_rec, "has_e_off", None)
+    if has_on is not None or has_off is not None:
+        return bool(has_on) or bool(has_off)
     return bool(
         float(getattr(k_rec, "E_on", 0.0)) > 0.0
         or float(getattr(k_rec, "E_off", 0.0)) > 0.0
