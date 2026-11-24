@@ -30,7 +30,7 @@
 - [ ] 4.2 Test: two paralleled devices with unequal `R_th` share current unequally with feedback on and equally with it off
 
 ## 5. Python summaries read kernel records
-- [ ] 5.1 `device_loss_summary` and `device_thermal_summary` use `res.loss_events` when present; identical output at fixed `Tj` (regression on the existing loss tests)
+- [x] 5.1 `device_loss_summary` and `device_thermal_summary` use `res.loss_events` when present; identical output at fixed `Tj` (regression on the existing loss tests)
 
 ## 6. Documentation
 - [x] 6.1 `docs/losses-and-thermal.md` (online versus post-hoc, the reading rule table, the energy-balance note), `AI_GUIDE.md` (which path to use, `Tj` versus `junction`), `docs/known-limitations.md` and `KNOWN_LIMITATIONS.md` (event energy is not drawn from the circuit; Newton devices excluded), `CHANGELOG.md`

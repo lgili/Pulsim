@@ -732,7 +732,12 @@ def device_thermal_summary(
     * Switching loss for diodes (Q_rr / E_rr_ref) and MOSFET / IGBT
       ideal switches (E_on / E_off) is averaged over the window (the
       whole run by default) via :func:`pulsim.device_loss_summary`
-      and added to the constant offset.
+      and added to the constant offset. When a device carries in-kernel
+      commutation records from ``set_device_losses``
+      (``result.loss_events``), ``P_sw_avg`` comes directly from those
+      kernel records over ``[t_from, t_to)`` (even without
+      ``switch_specs`` / ``diode_specs``, and without double-counting
+      when they are also passed).
     * A Shockley diode (``add_shockley_diode``) dissipates
       ``v_D · i_D`` with ``i_D`` its exponential law at the recorded
       ``v_D``.

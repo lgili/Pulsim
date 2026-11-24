@@ -389,23 +389,17 @@ Review (fresh-context reader) and what was done with it:
   `classify_nodes_` (a controlled source would be read as passive); no
   shipped circuit puts one on a thermal node.
 
+## 18. Python summaries read `res.loss_events` when present (task 5.1)
+
+- **Detection:** `device_loss_summary` maps `result._device_losses` by device name (`_kernel_loss_records`) when `result.loss_events` is callable (a duck-typed result lacking `loss_events` falls back cleanly). For circuits without `set_device_losses`, the map is empty and the post-hoc path is untouched byte for byte.
+- **Precedence (`_use_kernel_switching`):** `DeviceLossRecord` records `has_e_on` / `has_e_off` in C++ (`thermal/device_losses.hpp`, populated by the shared `solver::LossTracker` for `pwl`, `trbdf2`, and `dsed` / `exact`, including across YAML, `Circuit` IR, and resumed runs, with zero Python side-state on `CircuitBuilder`). When a switch or diode (conductance or ideal branch form) has a kernel `DeviceLossRecord`, `device_loss_summary` reads switching counts and energies from `result.loss_events(name)` via `_kernel_switching_loss`, both when `switch_specs` / `diode_specs` is omitted and when it is also passed — including ZVS / ZCS runs and zero-valued `LossTable(0.0)` ports whose commutations evaluate to `0.0 J`. Only when the kernel port is conduction-only (`has_e_on == False` and `has_e_off == False`) AND the caller explicitly passed post-hoc `switch_specs` / `diode_specs` is the caller's post-hoc spec honoured rather than silently zeroed.
+- **Windowing & summation:** Events are filtered by the half-open interval `win.a <= ev["t"] < win.b` — matching `TimeWindow.starts_inside`, diode turn-offs, and `impulse_losses` — so adjacent windows partition events with zero double-counting, a `trbdf2` boundary event at `t_end` matches the post-hoc and `dsed` window semantics, and a resumed run automatically excludes inherited pre-split events. Event energies are summed with `math.fsum` (matching the kernel's Neumaier `CompensatedSum`), and `P_sw_avg = (E_on + E_off) / win.span`.
+- **Thermal summary:** `device_thermal_summary` consumes `P_sw_avg` from `device_loss_summary` over the same window `[win.a, win.b)`, so it automatically uses `res.loss_events` (including without `switch_specs` / `diode_specs`), never double-counts, and produces identical output at fixed `Tj`.
+- **Evidence:** `python/tests/test_loss_summary_kernel_records.py` (parity at fixed `Tj` across `pwl`, `trbdf2`, `dsed`/`exact`; window additivity across cuts on edges; closed-loop `T_j` fidelity; `device_thermal_summary` parity and windowing; resumed runs; untracked/conduction-only ports; ideal branch-form switches).
+- **Reverse:** remove `_kernel_loss_records`, `_use_kernel_switching`, `_kernel_switching_loss` and their three call sites in `python/pulsim/losses.py`.
+
 ## Not done / known gaps
 
-The exact engine (`dsed` / `exact`) still refuses a loss port (its exact
-quadratic-form conduction integral and the event booking from its exact
-limits are not wired; `scheduler.hpp` untouched). Task 3.3's dsed column,
-4.x (electrical feedback), 5.1 (summaries reading kernel records), 6.2
-(tutorial). A device that flips twice inside one pwl split step records no
-event; a cancelled run (`analysis::Cancelled`) carries no records.
-
-Hand-off for the exact engine (not started): the scheduler reports only
-`hook_accepted_(t0, t, x_left, mask)` (`dsed/scheduler.hpp:525`, `:713`);
-the right limit is the post-`fire_event_` state there. The smallest entry
-point is an `on_event`-style call beside `fire_event_` with
-(t, x_pre_event, mask_before, x, current_mask). A PWL device's conduction
-on an LTI segment is `g·∫(w·x)² − g·V_f·∫w·x`, which
-`period_integrals.hpp` already computes exactly for linear observables
-(`PeriodObservable`, the augmented exponential); the heat input needs a
-piecewise-constant source the propagator integrates exactly.
+Task 4.x (electrical feedback) and 6.2 (tutorial). A device that flips twice inside one pwl split step records no event; a cancelled run (`analysis::Cancelled`) carries no records. On the exact engine (`dsed`), `V_on` conduction tables and time-varying sources remain refused by name (`test_exact_loss_port.py`).
 Not measured: a hard-switched half-bridge with output capacitances (the
 requested energy-balance case); the capacitor loop is the balance test.
