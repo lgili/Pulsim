@@ -1,4 +1,4 @@
-# Core roadmap — index of OpenSpec changes (re-centred 2026-11-13)
+# Core roadmap — index of OpenSpec changes (re-centred 2026-11-13; synced 2026-11-24)
 
 Source: the core review of 2026-11-12 (accuracy, speed, models,
 architecture) on branch `feat/diode-forward-drop`. Raw audit reports and
@@ -16,10 +16,15 @@ otherwise. Item codes (D, P, V, M, A) refer to the review.
 
 Legend: effort S / M / L. **B** = changes numerical results or public
 behaviour (deliberate release, migration note). Status, as of
-2026-11-13: **integrated** = done and integrated on
-`feat/core-integration`; **side branch** = done on a side branch,
-awaiting integration; **in progress**; **not started**. A bracket
-narrows the status to the part it names.
+2026-11-24 (synced from `openspec/changes/*/tasks.md` and
+`openspec/changes/archive/` on `feat/core-integration-wip`):
+**archived** = complete and moved to `openspec/changes/archive/`;
+**integrated [n/m]** = core scope integrated with `n/m` tasks checked
+(remaining tasks are release-flip, perf re-measurement, or unarchived
+test-probe dependencies); **in progress [n/m]** = active work with
+`n/m` tasks checked; **withdrawn/archived** = superseded and archived
+without merging specs; **not started**. A bracket narrows the status
+to the part it names.
 
 ## The centre of the roadmap
 
@@ -111,47 +116,47 @@ defaults flip together in one release (decision 3 below).
 
 | Change id | Scope | Items | Capabilities | Effort | Needs | Status |
 |---|---|---|---|---|---|---|
-| `add-engine-conformance-matrix` | Per-device-kind capability table replacing the hand-kept `has_nonlinear_devices()` list; one `UnsupportedError` naming device + engine; conformance test (device × engine, feature × engine) with the invariant "no silent cell". Fixes: dsed and bdf1 drop `NonlinearCapacitor`; pwl with refresh off treats Newton devices as open; `NativeMultiMaskPwm` loses exact edges on trbdf2 | D3, D4, D10 | `engine-conformance` (new), `transient-timestep` | M | — | integrated |
-| `fix-nonlinear-diode-passivity` | Retires `add_nonlinear_diode` (decision 5); SPICE importer maps Ron/Roff/Vfwd diodes to the PWL diode with `V_f` | D1 | `device-models`, `python-bindings` | S | — | integrated [as a retirement] |
-| `fix-mna-sweep-correctness` | Kernel AC sweep: mutual inductance in `E`, caller-supplied switch mask, refusal when a Newton kind is present, no broad `except` | D2 | `ac-analysis` | S | — | integrated |
-| `fix-control-tick-semantics` | Two closed loops without `dt`; per-observer rates on trbdf2 (multi-rate); `controller_period` honoured on pwl | D5, D6, D7 | `transient-timestep`, `python-bindings` | M | — | integrated |
-| `fix-dsed-auto-integrator-selection` | dsed `integrator='auto'` uses the exact stepper whenever available; BDF2 bootstrap is backward Euler | D8 | `transient-timestep` | S | — | integrated |
-| `update-composite-diode-forward-drop` | `add_mosfet` / `add_igbt` / Level-1 body and freewheel diodes take their `V_F` as a conduction drop (**B**) | D9 | `device-models`, `python-bindings` | S | — | side branch |
-| `restore-reference-benchmark-harness` | Harness-only reader for the 126 v1 benchmark circuits; differential runner circuit × engine; analytic reference set; golden checkpoints of the fixed engine (tolerances, exact for discrete data); counter-based perf gate; nightly ngspice job | D11, A1 | `benchmark-suite` | M | — | side branch |
+| `add-engine-conformance-matrix` | Per-device-kind capability table replacing the hand-kept `has_nonlinear_devices()` list; one `UnsupportedError` naming device + engine; conformance test (device × engine, feature × engine) with the invariant "no silent cell". Fixes: dsed and bdf1 drop `NonlinearCapacitor`; pwl with refresh off treats Newton devices as open; `NativeMultiMaskPwm` loses exact edges on trbdf2 | D3, D4, D10 | `engine-conformance` (new), `transient-timestep` | M | — | archived |
+| `fix-nonlinear-diode-passivity` | Retires `add_nonlinear_diode` (decision 5); SPICE importer maps Ron/Roff/Vfwd diodes to the PWL diode with `V_f` | D1 | `device-models`, `python-bindings` | S | — | archived [as a retirement] |
+| `fix-mna-sweep-correctness` | Kernel AC sweep: mutual inductance in `E`, caller-supplied switch mask, refusal when a Newton kind is present, no broad `except` | D2 | `ac-analysis` | S | — | archived |
+| `fix-control-tick-semantics` | Two closed loops without `dt`; per-observer rates on trbdf2 (multi-rate); `controller_period` honoured on pwl | D5, D6, D7 | `transient-timestep`, `python-bindings` | M | — | archived |
+| `fix-dsed-auto-integrator-selection` | dsed `integrator='auto'` uses the exact stepper whenever available; BDF2 bootstrap is backward Euler | D8 | `transient-timestep` | S | — | archived |
+| `update-composite-diode-forward-drop` | `add_mosfet` / `add_igbt` / Level-1 body and freewheel diodes take their `V_F` as a conduction drop (**B**) | D9 | `device-models`, `python-bindings` | S | — | archived |
+| `restore-reference-benchmark-harness` | Harness-only reader for the 126 v1 benchmark circuits; differential runner circuit × engine; analytic reference set; golden checkpoints of the fixed engine (tolerances, exact for discrete data); counter-based perf gate; nightly ngspice job | D11, A1 | `benchmark-suite` | M | — | in progress [23/33] |
 
 ## Phase 1 — speed with bit-identical results
 
 | Change id | Scope | Items | Capabilities | Effort | Needs | Status |
 |---|---|---|---|---|---|---|
-| `update-fixed-step-loop-bookkeeping` | Hoist `masks_seen`; one `switch_fn` call per step; memoise the last mask/segment; C++ constant schedule when no `switch_fn` is given; sparse source passes; zero-copy `res.times` | V3, V4, V12 | `transient-timestep`, `python-bindings` | S | harness | in progress |
-| `update-newton-persistent-solver` | One in-house LU per run for the Newton path, analysed once, values written in place; hoisted work vectors | V1 (stage A) | `linear-solver`, `transient-timestep` | M | harness | side branch [stage A1]; in progress [stage A2/B] |
-| `update-trbdf2-factor-reuse` | Byte-budgeted event cache; allocation-free refactor; step size on a geometric grid with a dt-keyed factor cache (**B**: step sequence) | V2 | `transient-timestep`, `linear-solver` | S + M | harness | side branch [parts 1–2] |
-| `update-linear-time-assembly` | Triplet/reserved assembly, per-circuit stamp-slot map; one symbolic analysis shared by all masks; single-bit flips through `partial_refactor`; fused triangular solve | V5, V6, V11 | `linear-solver`, `pwl-rank1-update` | M | harness | side branch [tier 1]; in progress [tier 2] |
-| `update-sweep-threading-and-import-time` | Thread-pool sweeps when callbacks are C++ schedules; lazy import of the scope GUI stack | V9 | `parameter-sweep`, `python-bindings` | S | — | integrated |
+| `update-fixed-step-loop-bookkeeping` | Hoist `masks_seen`; one `switch_fn` call per step; memoise the last mask/segment; C++ constant schedule when no `switch_fn` is given; sparse source passes; zero-copy `res.times` | V3, V4, V12 | `transient-timestep`, `python-bindings` | S | harness | integrated [34/35] |
+| `update-newton-persistent-solver` | One in-house LU per run for the Newton path, analysed once, values written in place; hoisted work vectors | V1 (stage A) | `linear-solver`, `transient-timestep` | M | harness | in progress [25/33] |
+| `update-trbdf2-factor-reuse` | Byte-budgeted event cache; allocation-free refactor; step size on a geometric grid with a dt-keyed factor cache (**B**: step sequence) | V2 | `transient-timestep`, `linear-solver` | S + M | harness | in progress [18/35] |
+| `update-linear-time-assembly` | Triplet/reserved assembly, per-circuit stamp-slot map; one symbolic analysis shared by all masks; single-bit flips through `partial_refactor`; fused triangular solve | V5, V6, V11 | `linear-solver`, `pwl-rank1-update` | M | harness | in progress [28/39] |
+| `update-sweep-threading-and-import-time` | Thread-pool sweeps when callbacks are C++ schedules; lazy import of the scope GUI stack | V9 | `parameter-sweep`, `python-bindings` | S | — | integrated [22/23] |
 
 ## Phase 2 — accuracy of the method
 
 | Change id | Scope | Items | Capabilities | Effort | Needs | Status |
 |---|---|---|---|---|---|---|
-| `add-discontinuity-restart-rule` | Fixed engine: the restart rule — three consecutive Alexander SDIRK(2,2) steps at every mask change, source breakpoint and t = 0, one factor per mode at `dt_eq = 2γh` (supersedes the backward-Euler pair, decision 2); gate mask sampled at the step start (**B**) | P1 | `transient-timestep` | S–M | harness | side branch [opt-in; being reworked to SDIRK(2,2)×3] |
-| `add-fixed-step-event-splitting` | Fixed engine: PSIM-style step split at diode zero crossings and gate edges, then the restart rule (**B**) | P2 | `transient-timestep` | M | restart rule | in progress |
-| `update-trbdf2-post-event-restart` | TR-BDF2: derivative refresh (or SDIRK(2,2) first step) after an event; step memory stores the controller proposal | P3 | `transient-timestep` | M | harness | in progress |
-| `update-trbdf2-error-control` | Estimator scale factor; Hosea–Shampine stiff filter; step bounds independent of `t_end`; source breakpoints as events (**B**) | P6, P7 | `transient-timestep` | S | — | in progress |
-| `add-newton-roundoff-acceptance` | Transient-only acceptance on stagnated dx plus row-wise backward error; step floor at the roundoff bound; DC cascade unchanged | P4 | `transient-timestep` | S–M | — | in progress |
-| `add-fixed-step-resolution-diagnostics` | Per-step normalised LTE recorded in the result; Nyquist-ringing detector; warning when under-resolved | P5 | `transient-timestep`, `python-bindings` | S–M | — | in progress |
+| `add-discontinuity-restart-rule` | Fixed engine: the restart rule — three consecutive Alexander SDIRK(2,2) steps at every mask change, source breakpoint and t = 0, one factor per mode at `dt_eq = 2γh` (supersedes the backward-Euler pair, decision 2); gate mask sampled at the step start (**B**) | P1 | `transient-timestep` | S–M | harness | integrated [53/55; awaiting release flip] |
+| `add-fixed-step-event-splitting` | Fixed engine: PSIM-style step split at diode zero crossings and gate edges, then the restart rule (**B**) | P2 | `transient-timestep` | M | restart rule | integrated [30/31; awaiting release flip] |
+| `update-trbdf2-post-event-restart` | TR-BDF2: derivative refresh (or SDIRK(2,2) first step) after an event; step memory stores the controller proposal | P3 | `transient-timestep` | M | harness | integrated [27/28] |
+| `update-trbdf2-error-control` | Estimator scale factor; Hosea–Shampine stiff filter; step bounds independent of `t_end`; source breakpoints as events (**B**) | P6, P7 | `transient-timestep` | S | — | in progress [17/24] |
+| `add-newton-roundoff-acceptance` | Transient-only acceptance on stagnated dx plus row-wise backward error; step floor at the roundoff bound; DC cascade unchanged | P4 | `transient-timestep` | S–M | — | in progress [22/30] |
+| `add-fixed-step-resolution-diagnostics` | Per-step normalised LTE recorded in the result; Nyquist-ringing detector; warning when under-resolved | P5 | `transient-timestep`, `python-bindings` | S–M | — | archived |
 
 ## CORE A — the ideal switch with complementarity mode selection
 
 | Change id | Scope | Items | Capabilities | Effort | Needs | Status |
 |---|---|---|---|---|---|---|
-| `add-complementarity-mode-selection` | One LCP per event on the diode ports of the event-step companion network, solved by Lemke (lexicographic), shared by every engine and the DC operating point; enumeration fallback and typed refusal for non-passive ports; ties by widened event step; floating islands as a gauge; shadow mode, then opt-in, then default (**B** at the flip) | — | `mode-selection` (new), `device-models` | M–L | conformance; harness (shadow comparison); linear-time assembly (event-step factor per mode) | not started |
-| `add-branch-form-ideal-switch` | Branch-form switch and diode with legal `R_on = 0`, `g_off = 0` on a mask-invariant pattern; per-mode floating-node and ideal-loop refusals; one re-initialisation service (explicit projection on the exact route, SDIRK(2,2)×3 on the implicit routes) with impulse records; switching energies from tables at the event; the default switch model at the flip (**B**) | P11 | `device-models`, `linear-solver` | L | conformance; complementarity; restart rule and TR-BDF2 post-event restart (for `g_off = 0` on implicit routes) | not started |
+| `add-complementarity-mode-selection` | One LCP per event on the diode ports of the event-step companion network, solved by Lemke (lexicographic), shared by every engine and the DC operating point; enumeration fallback and typed refusal for non-passive ports; ties by widened event step; floating islands as a gauge; shadow mode, then opt-in, then default (**B** at the flip) | — | `mode-selection` (new), `device-models` | M–L | conformance; harness (shadow comparison); linear-time assembly (event-step factor per mode) | in progress [20/32] |
+| `add-branch-form-ideal-switch` | Branch-form switch and diode with legal `R_on = 0`, `g_off = 0` on a mask-invariant pattern; per-mode floating-node and ideal-loop refusals; one re-initialisation service (explicit projection on the exact route, SDIRK(2,2)×3 on the implicit routes) with impulse records; switching energies from tables at the event; the default switch model at the flip (**B**) | P11 | `device-models`, `linear-solver` | L | conformance; complementarity; restart rule and TR-BDF2 post-event restart (for `g_off = 0` on implicit routes) | in progress [25/33] |
 
 ## CORE B — exact propagation as the default
 
 | Change id | Scope | Items | Capabilities | Effort | Needs | Status |
 |---|---|---|---|---|---|---|
-| `add-exact-propagator-strategy` | Slice 1: robustness gaps (V_th = 0, ICs, relative event tolerance, conditioning), overhead removal. Re-centred scope: the default route of `engine='auto'`; hybrid segment rule; dense / expm-action / hand-over scaling rule with counters; exact sources; samples and ticks as events; ideal switches native; per-mask Φ/Γ fixed-step form (**B** at the flip) | P9, V7, V8 | `exact-propagator` (new), `transient-timestep` | L | slice 1: none; default route: CORE A, event queue, stepper | in progress [slice 1] |
+| `add-exact-propagator-strategy` | Slice 1: robustness gaps (V_th = 0, ICs, relative event tolerance, conditioning), overhead removal. Re-centred scope: the default route of `engine='auto'`; hybrid segment rule; dense / expm-action / hand-over scaling rule with counters; exact sources; samples and ticks as events; ideal switches native; per-mask Φ/Γ fixed-step form (**B** at the flip) | P9, V7, V8 | `exact-propagator` (new), `transient-timestep` | L | slice 1: none; default route: CORE A, event queue, stepper | in progress [26/66] |
 
 ## Phase 3 — one kernel, designed around the core
 
@@ -162,11 +167,11 @@ declines (re-centred scope sections of the changes below).
 
 | Change id | Scope | Items | Capabilities | Effort | Needs | Status |
 |---|---|---|---|---|---|---|
-| `add-unified-event-queue` | One queue for time events (gate edges, control ticks, source breakpoints, output samples) and state events (one Illinois); declarative modulators with analytic `next_edge`; one mode selection per event instant | A4, V10 | `event-scheduling` (new) | M | conformance | not started |
-| `add-unified-device-interface` | Device = `f(x,t) + d/dt q(x)` with AD Jacobians, optional state / events / outputs / field table; flat device-state vector; generic `res.i` and loss outputs; AC and DC derived from f and q; the PWL category carries the complementarity form | M1, M4, A2 | `device-interface` (new), `device-models`, `ac-analysis` | M–L | conformance, harness | not started |
-| `add-kernel-simulation-object` | `RunPlan` resolved once above the dispatch, then a C++ `Simulation{Circuit, RunOptions}`; typed error model; one options struct | A3, A8 | `simulation-kernel` (new), `python-bindings` | M–L | conformance | not started |
-| `refactor-unified-transient-stepper` | Event-driven outer loop; integrators (trapezoid + SDIRK×3 on a fixed grid, TR-BDF2 with error control, exact) as segment strategies; one mode-selection and one re-initialisation service; engine names as strategy selectors with a legacy period; fixed-h trap mode proven equal to the pwl goldens; retire `bdf1`, the V0 overload and `integrators/` | A5, A11 | `transient-timestep` | L | device interface, event queue, harness, CORE A | not started |
-| `add-probes-and-recorders` | Netlist-declared probes computed in-kernel; recorders (all / selected / decimated / `t_eval`); one result type that knows its grid | A7 | `simulation-results` (new) | M | device interface | not started |
+| `add-unified-event-queue` | One queue for time events (gate edges, control ticks, source breakpoints, output samples) and state events (one Illinois); declarative modulators with analytic `next_edge`; one mode selection per event instant | A4, V10 | `event-scheduling` (new) | M | conformance | in progress [15/44] |
+| `add-unified-device-interface` | Device = `f(x,t) + d/dt q(x)` with AD Jacobians, optional state / events / outputs / field table; flat device-state vector; generic `res.i` and loss outputs; AC and DC derived from f and q; the PWL category carries the complementarity form | M1, M4, A2 | `device-interface` (new), `device-models`, `ac-analysis` | M–L | conformance, harness | in progress [45/86] |
+| `add-kernel-simulation-object` | `RunPlan` resolved once above the dispatch, then a C++ `Simulation{Circuit, RunOptions}`; typed error model; one options struct | A3, A8 | `simulation-kernel` (new), `python-bindings` | M–L | conformance | in progress [25/47] |
+| `refactor-unified-transient-stepper` | Event-driven outer loop; integrators (trapezoid + SDIRK×3 on a fixed grid, TR-BDF2 with error control, exact) as segment strategies; one mode-selection and one re-initialisation service; engine names as strategy selectors with a legacy period; fixed-h trap mode proven equal to the pwl goldens; retire `bdf1`, the V0 overload and `integrators/` | A5, A11 | `transient-timestep` | L | device interface, event queue, harness, CORE A | in progress [24/70] |
+| `add-probes-and-recorders` | Netlist-declared probes computed in-kernel; recorders (all / selected / decimated / `t_eval`); one result type that knows its grid | A7 | `simulation-results` (new) | M | device interface | in progress [19/54] |
 
 ## Phase 4 — optimisation first
 
@@ -176,20 +181,27 @@ the rest.
 
 | Change id | Scope | Items | Capabilities | Effort | Needs | Status |
 |---|---|---|---|---|---|---|
-| `add-in-kernel-event-losses` | Loss tables in C++; energy injected into the thermal node at each commutation (the event records of the ideal switch); closed-loop T_j on every engine | M3 | `loss-thermal` (new) | M | event queue; branch-form loss records | not started |
-| `add-immutable-circuit-ir` | Immutable `Circuit` with named parameters and expressions, hierarchy kept, clone / `with_params` (re-binding without rebuild) / `to_yaml`, domain-tagged nodes | A9 | `circuit-ir` (new), `netlist-yaml` | M–L | simulation object | not started |
-| `add-parameter-sensitivities` | Forward sensitivities through the cached LU with event jump correction; exact-propagator form; steady-state gradients | A10 | `parameter-sweep` | L | device interface, stepper | not started |
-| `add-periodic-steady-state-shooting` | One Newton shooting solver on the true state with located events and saltation matrices; works in DCM; completion: every strategy, nonlinear devices, ideal-switch reset maps | P8 | `periodic-steady-state` (new) | M–L | slice 1: none; completion: event queue, device interface, CORE A | integrated [slice 1] |
-| `add-design-optimization-workflow` | `evaluate(design) -> EvaluationRecord`: deterministic, thread-safe; typed refused / failed / infeasible records; T_j fixed point until in-kernel losses; batch on the thread sweep backend; worked buck Pareto example with an optional optimiser | — | `design-optimization` (new) | M | first slice: none; then in-kernel losses, IR re-binding, sensitivities | not started |
-| `add-power-mosfet-datasheet-device` | `add_power_mosfet` (channel + Cgs, Cgd(v), Coss(v), R_g, Lauritzen body diode); VDMOS import with capacitances; datasheet fitters; real validated parts; ngspice cross-validation | M2, M10, M11 | `device-models`, `python-bindings` | M | conformance | side branch [machinery, no real parts] |
-| `add-pwl-igbt-and-thyristor` | PWL IGBT with V_ce0 and reverse blocking; kernel thyristor / GTO latch (a gated complementarity port) | M5 | `device-models` | S–M | conformance; CORE A | not started |
-| `add-mna-native-machines` | DC machine as an ideal-transformer composite; induction machine with rotor-flux states; BLDC via `PmsmMna` with a flux table | M6 | `motor-models` | S + M | device interface | integrated [DC machine only] |
-| `add-controlled-source-set` | VCCS, CCVS, CCCS, gyrator; sine / pulse / table current sources | M7 | `device-models`, `netlist-yaml` | S | — | integrated |
-| `add-permeance-magnetic-domain` | Permeance–capacitor magnetic networks on the gyrator; nonlinear permeance; eddy and excess loss | M8 | `magnetic-models` | M–L | controlled sources, power MOSFET (charge-law variant), device interface | not started |
-| `add-external-device-abi` | User devices through a C ABI (f, q, Jacobians), then sympy-to-C codegen, then an OSDI host | M9 | `device-interface` | M, then L | device interface | not started |
-| `add-compiled-control-graph` | Control graph with rates, sorted schedule, loop detection, discrete blocks on tick events, C export | A6 | `control-graph` (new) | L | event queue | not started |
-| `add-high-order-stiff-integrator` | Single-factor ESDIRK4(3) as an integrator strategy for resonant dynamics | P10 | `transient-timestep` | L | stepper | not started |
-| `add-realistic-passives` | ESR / ESL parameters, C(V) table, R_ac(f) ladder fit, transmission-line model | M12 | `device-models` | S–M | — | integrated [without C(V) and Bergeron] |
+| `add-in-kernel-event-losses` | Loss tables in C++; energy injected into the thermal node at each commutation (the event records of the ideal switch); closed-loop T_j on every engine | M3 | `loss-thermal` (new) | M | event queue; branch-form loss records | in progress [27/31] |
+| `add-immutable-circuit-ir` | Immutable `Circuit` with named parameters and expressions, hierarchy kept, clone / `with_params` (re-binding without rebuild) / `to_yaml`, domain-tagged nodes | A9 | `circuit-ir` (new), `netlist-yaml` | M–L | simulation object | in progress [46/49] |
+| `add-parameter-sensitivities` | Forward sensitivities through the cached LU with event jump correction; exact-propagator form; steady-state gradients | A10 | `parameter-sweep` | L | device interface, stepper | in progress [15/30] |
+| `add-periodic-steady-state-shooting` | One Newton shooting solver on the true state with located events and saltation matrices; works in DCM; completion: every strategy, nonlinear devices, ideal-switch reset maps | P8 | `periodic-steady-state` (new) | M–L | slice 1: none; completion: event queue, device interface, CORE A | in progress [19/24] |
+| `add-design-optimization-workflow` | `evaluate(design) -> EvaluationRecord`: deterministic, thread-safe; typed refused / failed / infeasible records; T_j fixed point until in-kernel losses; batch on the thread sweep backend; worked buck Pareto example with an optional optimiser | — | `design-optimization` (new) | M | first slice: none; then in-kernel losses, IR re-binding, sensitivities | integrated [26/26; unarchived — probes/ used by `test_saltation_hook_patch.py`] |
+| `add-power-mosfet-datasheet-device` | `add_power_mosfet` (channel + Cgs, Cgd(v), Coss(v), R_g, Lauritzen body diode); VDMOS import with capacitances; datasheet fitters; real validated parts; ngspice cross-validation | M2, M10, M11 | `device-models`, `python-bindings` | M | conformance | in progress [34/38] |
+| `add-pwl-igbt-and-thyristor` | PWL IGBT with V_ce0 and reverse blocking; kernel thyristor / GTO latch (a gated complementarity port) | M5 | `device-models` | S–M | conformance; CORE A | in progress [26/32] |
+| `add-mna-native-machines` | DC machine as an ideal-transformer composite; induction machine with rotor-flux states; BLDC via `PmsmMna` with a flux table | M6 | `motor-models` | S + M | device interface | integrated [33/35] |
+| `add-controlled-source-set` | VCCS, CCVS, CCCS, gyrator; sine / pulse / table current sources | M7 | `device-models`, `netlist-yaml` | S | — | archived |
+| `add-permeance-magnetic-domain` | Permeance–capacitor magnetic networks on the gyrator; nonlinear permeance; eddy and excess loss | M8 | `magnetic-models` | M–L | controlled sources, power MOSFET (charge-law variant), device interface | in progress [23/28] |
+| `add-external-device-abi` | User devices through a C ABI (f, q, Jacobians), then sympy-to-C codegen, then an OSDI host | M9 | `device-interface` | M, then L | device interface | in progress [20/25] |
+| `add-compiled-control-graph` | Control graph with rates, sorted schedule, loop detection, discrete blocks on tick events, C export | A6 | `control-graph` (new) | L | event queue | in progress [27/33] |
+| `add-high-order-stiff-integrator` | Single-factor ESDIRK4(3) as an integrator strategy for resonant dynamics | P10 | `transient-timestep` | L | stepper | in progress [22/30] |
+| `add-realistic-passives` | ESR / ESL parameters, C(V) table, R_ac(f) ladder fit, transmission-line model | M12 | `device-models` | S–M | — | in progress [24/35] |
+
+## Release coordination & retired proposals
+
+| Change id | Scope | Items | Capabilities | Effort | Needs | Status |
+|---|---|---|---|---|---|---|
+| `update-number-changing-release` | Coordinates Decision 3's single number-changing release flip (`simulate()` / `sim::kRunOptionTable` defaults, `form='branch'`, `engine='auto'` exact route), one re-baseline of goldens/scoreboards/tests, and migration notes (**B**) | Decision 3 | `transient-timestep`, `device-models`, `benchmark-suite` | M | Phase 2, CORE A, CORE B | in progress [9/28; blockers 1.1–1.8 closed, owner decisions 2.1–2.5 being finalized] |
+| `add-adaptive-runge-kutta-solvers` | Superseded by `refactor-unified-transient-stepper` strategies (Decision 9); `core/integrators/` retires with the stepper | Decision 9 | `transient-timestep` | — | — | withdrawn/archived |
 
 ## Rules that apply to every change
 
@@ -335,7 +347,8 @@ Where the earlier list of owner questions now stands:
    Control delay (old 10) → stays an open question of
    `add-compiled-control-graph`.
 9. `add-adaptive-runge-kutta-solvers` (old 7): withdrawn in favour of
-   the stepper's strategies (its archival is a separate step);
+   the stepper's strategies and archived without merging specs on
+   2026-11-24 (`2026-11-24-add-adaptive-runge-kutta-solvers`);
    `core/integrators/` retires with the stepper.
 
 ## Still the owner's

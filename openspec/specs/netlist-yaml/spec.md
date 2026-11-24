@@ -552,3 +552,92 @@ rejected with an error in v0.12.
 - **WHEN** each file is parsed
 - **THEN** all three produce `Integrator::TRBDF2`
 
+### Requirement: Controlled Source Component Types
+
+The YAML loader SHALL accept the component types `vccs` (keys `in_pos`,
+`in_neg`, `from`, `to`, `gm`), `ccvs` (`control`, `out_pos`, `out_neg`,
+`rm`), `cccs` (`control`, `from`, `to`, `gain`) and `gyrator`
+(`p1_pos`, `p1_neg`, `p2_pos`, `p2_neg`, `g`). Validation SHALL be
+strict: an unknown key, a missing required key, or a `control` that
+does not name a branch with a current unknown SHALL fail with an error
+naming the component.
+
+#### Scenario: Gyrator from YAML
+- **WHEN** a netlist declares `type: gyrator` with `g: 0.01` and the
+  four port nodes
+- **THEN** the loaded circuit's `components()` contains a gyrator with
+  `g = 0.01`, identical to one built with `add_gyrator`
+
+#### Scenario: Unknown controlling branch
+- **WHEN** a `cccs` names `control: Rx` and no such sensable branch
+  exists
+- **THEN** loading fails with an error naming the `cccs` and `Rx`
+
+### Requirement: Current Source Waveform Component Types
+
+The YAML loader SHALL accept `sine_current_source` (keys `from`, `to`,
+`i_dc`, `i_amplitude`, `frequency`, optional `phase`),
+`pulse_current_source` (`from`, `to`, `i_initial`, `i_pulsed`,
+`t_start`, `pulse_width`, optional `period`, `rise_time`, `fall_time`)
+and `pwl_current_source` (`from`, `to`, and either `t` and `i` lists of
+equal length or a `file` path, optional `periodic`). Invalid tables
+SHALL be refused with the builder's error.
+
+#### Scenario: Table source from lists
+- **WHEN** a netlist declares `type: pwl_current_source` with
+  `t: [0, 1e-3, 2e-3]` and `i: [0, 1, 0]`
+- **THEN** the loaded source produces 0.5 A at 0.5 ms
+
+#### Scenario: Mismatched lists refused
+- **WHEN** `t` has three entries and `i` has two
+- **THEN** loading fails with an error naming the source
+
+### Requirement: Switched Diode V_f Key
+
+The YAML `diode` device SHALL accept an optional `V_f` key (default 0),
+the forward drop of the PWL switched diode, with the same validation as
+`add_diode`.
+
+#### Scenario: V_f key changes the result
+- **WHEN** a YAML netlist sets `V_f: 0.7` on a `diode`
+- **THEN** the loaded circuit's diode has `V_f = 0.7` in `components()`
+  and its forward voltage includes the drop
+
+#### Scenario: Invalid V_f refused
+- **WHEN** a YAML `diode` sets `V_f: -1`
+- **THEN** loading fails with an error naming the diode
+
+### Requirement: Thermal-Port YAML Contract
+The YAML schema SHALL define `component.thermal` as the thermal-port configuration block with deterministic validation and diagnostics.
+
+#### Scenario: Valid thermal-port configuration
+- **WHEN** a component defines `thermal.enabled=true` with valid thermal constants
+- **THEN** the parser maps `rth`, `cth`, `temp_init`, `temp_ref`, and `alpha` into runtime thermal-device configuration
+- **AND** the thermal port is activated for that component
+
+#### Scenario: Unsupported thermal port activation
+- **WHEN** `component.thermal.enabled=true` is declared for a component type without thermal capability
+- **THEN** parsing fails with deterministic unsupported-thermal-port diagnostics
+
+### Requirement: Strict and Non-Strict Missing-Parameter Policy
+The parser SHALL support explicit strict-mode behavior for missing required thermal constants when a thermal port is enabled.
+
+#### Scenario: Missing thermal constants in strict mode
+- **GIVEN** strict parsing is enabled
+- **WHEN** `component.thermal.enabled=true` and `rth` or `cth` is missing
+- **THEN** parsing fails with field-path diagnostics identifying missing keys
+
+#### Scenario: Missing thermal constants in non-strict mode
+- **GIVEN** strict parsing is disabled
+- **WHEN** `component.thermal.enabled=true` and `rth` or `cth` is missing
+- **THEN** missing values are defaulted from `simulation.thermal.default_rth/default_cth`
+- **AND** deterministic warning diagnostics are emitted
+
+### Requirement: Thermal Constant Range Validation
+Thermal-port constants SHALL be validated for finite numeric ranges.
+
+#### Scenario: Invalid thermal numeric ranges
+- **WHEN** YAML thermal fields contain non-finite values, `rth <= 0`, or `cth < 0`
+- **THEN** parsing fails with deterministic range diagnostics
+- **AND** diagnostics include the exact YAML field path
+
