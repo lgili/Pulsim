@@ -43,6 +43,19 @@ new = tuple.__new__
 DEFAULT_DISCONTINUITY_RESTART = False
 DEFAULT_SUBSTEP_STATE_CORRECTION = False
 
+# Undriven-switch policy when a circuit has controlled switches and no
+# switch_fn / controller drives them (update-number-changing-release
+# decision 2.1, add-kernel-simulation-object task 11.3):
+# - "warn_closed" (today's default): legacy per-engine behaviour (pwl and
+#   dsed run all-CLOSED with a warning; trbdf2 refuses; auto without dt
+#   refuses) — bit- and warning-identical with pre-release behaviour.
+# - "refuse" (the release flip): every engine (pwl, trbdf2, dsed/exact,
+#   auto) refuses with UnsupportedError(engine, "undriven_switch", ...)
+#   naming the controlled switch(es). Passive and diode-only circuits
+#   have no controlled switches and are never refused.
+UNDRIVEN_SWITCH_POLICIES = ("warn_closed", "refuse")
+DEFAULT_UNDRIVEN_SWITCH_POLICY = "warn_closed"
+
 
 # plan.features: the keywords that put a feature in the run (set, not
 # default), plus "builder_ics" when the builder's i0= / c0= seed the state.

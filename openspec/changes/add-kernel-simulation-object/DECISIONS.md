@@ -507,3 +507,20 @@
       `-m reference` 383. The loss-port refusals are item 9 of 23.
       Bytecodes on the merged tip: 2834 / 3683 / 4374 (dsed: the PR head's
       own +26, 3993 -> 4019).
+
+26. **Owner decisions for DECISIONS 23 (items 1–8) and task 6.2 (2026-11-24).**
+    Recorded in `openspec/changes/update-number-changing-release/DECISIONS.md`
+    section 3 (tasks 2.1–2.3):
+    - **Item 1 / task 11.3 (undriven-switch policy):** `pulsim._plan.DEFAULT_UNDRIVEN_SWITCH_POLICY`
+      stays `"warn_closed"` today (unchanged behaviour) and flips to `"refuse"`
+      at the release, raising `UnsupportedError(engine, "undriven_switch", ...)`
+      naming the controlled switch(es) on every engine (`pwl`, `trbdf2`,
+      `dsed`/`exact`, `auto`) while leaving passive and diode-only circuits
+      unaffected.
+    - **Items 2–8:** kept in their current sites for this release (item 4's
+      `engine != "dsed"` guard stays because `dsed` now supports `resume_from`
+      natively on its own absolute clock, item 23.10).
+    - **Task 6.2 (voltage sanity):** `pwl`'s inline `find_implausible_voltage`
+      block in `_finalize` is unified directly onto `_auto_check_voltage_sanity`,
+      giving all three engines one voltage-sanity check (warning- and
+      bit-identical on today's suite).

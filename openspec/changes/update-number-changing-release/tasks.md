@@ -14,10 +14,14 @@ Rehearsal at fe75ee01: the full profile makes NO cell worse on pwl, trbdf2 or th
 - [ ] 1.9 Re-run `next_defaults_rehearsal.py run` and the pytest blast radius on the release candidate; no cell left in the first three worse classes, no refusal group in section 1b
 
 ## 2. Owner decisions before the flip
-- [ ] 2.1 One undriven-switch policy (`add-kernel-simulation-object` DECISIONS 23 item 1, task 11.3 there): today pwl and dsed run all CLOSED with a warning, trbdf2 refuses, `auto` without dt refuses; under the release route `auto` would run it on the exact engine, CLOSED
-- [ ] 2.2 The other per-engine blocks 2–8 of the same decision (`mmc_arms` / `on_cache`, `progress` / `live_stream`, `resume_from` time, `mode_selection='auto'` resolution site, `on_impulse='error'`, pwl-only value checks, `sweep()` recipe)
-- [ ] 2.3 One voltage-sanity check (`add-kernel-simulation-object` task 6.2)
-- [ ] 2.4 TR-BDF2 step grid: flip only with its option and its accuracy sign-off (`update-trbdf2-factor-reuse` 5.6, 6.1)
+- [x] 2.1 One undriven-switch policy (`add-kernel-simulation-object` DECISIONS 23 item 1, task 11.3 there): today pwl and dsed run all CLOSED with a warning, trbdf2 refuses, `auto` without dt refuses; under the release route `auto` would run it on the exact engine, CLOSED
+  - Done (DECISIONS 3.1): `pulsim._plan.DEFAULT_UNDRIVEN_SWITCH_POLICY` (`"warn_closed"` today, `"refuse"` at the release flip); under `"refuse"`, `UnsupportedError(engine, "undriven_switch", ...)` names the controlled switch(es) on every engine (`pwl`, `trbdf2`, `dsed`/`exact`, `auto` with or without `dt`), leaving passive and diode-only circuits unaffected; wired into `benchmarks/tools/next_defaults.py` (`POLICY` / `policy_defaults`) and `next_defaults_pytest.py` (with clean teardown in `pytest_unconfigure`); tests in `python/tests/test_undriven_switch_policy.py`
+- [x] 2.2 The other per-engine blocks 2–8 of the same decision (`mmc_arms` / `on_cache`, `progress` / `live_stream`, `resume_from` time, `mode_selection='auto'` resolution site, `on_impulse='error'`, pwl-only value checks, `sweep()` recipe)
+  - Done (DECISIONS 3.2): all seven blocks explicitly resolved for this release (blocks 2–3, 5–8 kept in their current sites; block 4 keeps the `engine != "dsed"` guard because `dsed` now supports `resume_from` natively on its own absolute clock after `core-a-complementarity`)
+- [x] 2.3 One voltage-sanity check (`add-kernel-simulation-object` task 6.2)
+  - Done (DECISIONS 3.3): unified directly onto `_auto_check_voltage_sanity` in `_finalize` across `pwl`, `trbdf2`, and `dsed` (100 % warning- and bit-identical; removes the duplicated inline broad handler from `_finalize`)
+- [x] 2.4 TR-BDF2 step grid: flip only with its option and its accuracy sign-off (`update-trbdf2-factor-reuse` 5.6, 6.1)
+  - Done (DECISIONS 3.4): deferred `step_grid_per_octave` (Part 3 of `update-trbdf2-factor-reuse`) to a post-release PR; continuous step sizing stays default in this release
 - [x] 2.5 The exact route's output grid without `dt` (rehearsal section "engine='auto' under the profile")
   - Decided (orchestrator, DECISIONS 1): every event instant plus a rule grid, `output_rtol = 1e-5` in the profile; explicit dt / store_every / recorders keep today's samples (simulate() has no t_eval)
 

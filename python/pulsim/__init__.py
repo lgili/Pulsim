@@ -2712,14 +2712,65 @@ _SIMULATE_DEFAULTS = {"t_end": simulate.__defaults__[0],
                       "dt": simulate.__defaults__[1], **simulate.__kwdefaults__}
 
 
+def _controlled_switch_names(builder, controlled):
+    """Map switch-bit indices from ``_switch_census`` to their branch names."""
+    try:
+        sw_kind = _pulsim_module.BranchKind.Switch
+        sw_names = [
+            builder.graph.branch_name(br["id"])
+            for br in builder.graph.branches
+            if br["kind"] == sw_kind
+        ]
+        return [
+            (sw_names[i] if 0 <= i < len(sw_names) and sw_names[i]
+             else f"switch #{i}")
+            for i in controlled
+        ]
+    except (AttributeError, TypeError, KeyError):
+        return [f"switch #{i}" for i in controlled]
+
+
+def _refuse_undriven_controlled(engine, builder):
+    """Under ``DEFAULT_UNDRIVEN_SWITCH_POLICY == 'refuse'``, refuse any run
+    whose circuit has controlled switches and no ``switch_fn`` / controller
+    driving them. Passive and diode-only circuits have no controlled switches
+    and pass unchanged."""
+    try:
+        _, _n_diode, _controlled = _switch_census(
+            builder.graph, builder.pool)
+    except (AttributeError, TypeError):  # test doubles w/o pool
+        return
+    if not _controlled:
+        return
+    names = _controlled_switch_names(builder, _controlled)
+    named = ", ".join(repr(n) for n in names)
+    raise _unsupported(
+        engine, "undriven_switch",
+        f"simulate(engine={engine!r}): no switch_fn was given, but the "
+        f"circuit has {len(_controlled)} controlled switch(es) ({named}; "
+        f"indices {list(_controlled)}). Pass an explicit switch_fn / "
+        "closed_loops that drives these switch(es).",
+        device=names[0])
+
+
 def _undriven(engine, builder, stacklevel=2):
     """The switch_fn of a run given none (Stage A, task 5.2): ONE function,
-    today's three per-engine behaviours kept (DECISIONS 8; one policy is the
-    BREAKING task 11.3). 'trbdf2': all OPEN, silent. 'pwl' / 'dsed': all
-    CLOSED (the v1 legacy), with a warning when the circuit has controlled
-    switches (a bridge leg would shoot through). Each engine calls it where
-    it always decided this: trbdf2 while planning, pwl after the cache hooks,
-    dsed inside its dispatcher (`stacklevel`: the caller's frame depth)."""
+    governed by ``pulsim._plan.DEFAULT_UNDRIVEN_SWITCH_POLICY``. Under
+    ``'warn_closed'`` (today's default), today's per-engine behaviours stay
+    intact (DECISIONS 8): 'trbdf2' all OPEN silent; 'pwl' / 'dsed' all
+    CLOSED with a warning when controlled switches exist. Under ``'refuse'``
+    (the release flip, update-number-changing-release 2.1), any circuit with
+    controlled switches is refused with ``UnsupportedError(engine,
+    'undriven_switch', ...)`` naming them; passive and diode-only circuits
+    continue unaffected."""
+    _policy = _planning.DEFAULT_UNDRIVEN_SWITCH_POLICY
+    if _policy == "refuse":
+        _refuse_undriven_controlled(engine, builder)
+    elif _policy != "warn_closed":
+        raise _options_error(
+            "DEFAULT_UNDRIVEN_SWITCH_POLICY",
+            f"pulsim._plan.DEFAULT_UNDRIVEN_SWITCH_POLICY={_policy!r}: "
+            f"expected one of {_planning.UNDRIVEN_SWITCH_POLICIES!r}")
     n_sw = builder.graph.num_switches
     if engine == "trbdf2":
         # No driver: all-OPEN here (the v2.0 semantics; the
@@ -3478,6 +3529,21 @@ def _plan_run(
     _plan, b_extra_fn = _compose(builder, closed_loops, step_observer,
                                  controller_period, switch_fn, b_extra_fn,
                                  resume_from, control_tick)
+    # Owner decision 2.1 (update-number-changing-release): under
+    # DEFAULT_UNDRIVEN_SWITCH_POLICY == 'refuse', refuse undriven controlled
+    # switches consistently above the dispatch across pwl, trbdf2, dsed/exact
+    # and auto (with or without dt). Under 'warn_closed' (today's default),
+    # each engine keeps its existing behaviour and ordering unchanged.
+    if _plan.switch_fn is None:
+        _undriven_policy = _planning.DEFAULT_UNDRIVEN_SWITCH_POLICY
+        if _undriven_policy == "refuse":
+            _refuse_undriven_controlled(engine, builder)
+        elif _undriven_policy != "warn_closed":
+            raise _options_error(
+                "DEFAULT_UNDRIVEN_SWITCH_POLICY",
+                f"pulsim._plan.DEFAULT_UNDRIVEN_SWITCH_POLICY="
+                f"{_undriven_policy!r}: expected one of "
+                f"{_planning.UNDRIVEN_SWITCH_POLICIES!r}")
 
     # ---- Parameter sensitivities: the exact path only. Above the
     # dispatch (planned for every engine), so every engine refuses or
@@ -4430,28 +4496,10 @@ def _finalize(out, plan):
     # throughout. The current guards cannot see it: they watch i_L,
     # which stays believable. Check the voltage against what the
     # circuit's own sources can account for.
-    # The try covers ONLY the kernel call. Wrapping the warn() too
-    # meant that under `-W error` — where a warning IS an exception —
-    # the detector produced no signal at all: not the warning, and
-    # not the attribute either. A user who asked for warnings to be
-    # fatal is the last one who should be silently spared this.
-    _volt = None
-    try:
-        _k = _pulsim_module
-        _volt = _k.find_implausible_voltage(
-            builder.graph, builder.pool, res,
-            _ro.DEFAULTS["voltage_sanity_factor"]
-            if voltage_sanity_factor is None
-            else float(voltage_sanity_factor))
-    except Exception:  # pragma: no cover — never break a good run
-        _volt = None
-    if _volt is not None and _volt.node >= 0:
-        import warnings
-        res._implausible_voltage = _volt
-        warnings.warn(
-            "simulate(): " + _k.describe_implausible_voltage(
-                builder.graph, builder.pool, _volt),
-            stacklevel=3)
+    # Owner decision 2.3 (update-number-changing-release; add-kernel-
+    # simulation-object task 6.2): all three engines run the same post-run
+    # voltage-sanity check helper (warning- and bit-identical on today's suite).
+    _auto_check_voltage_sanity(res, builder, voltage_sanity_factor)
 
     # A retried step integrated its interval more finely than the
     # caller asked for. That is a change in ACCURACY, and the record

@@ -92,11 +92,21 @@ def _route_kwargs(pulsim, args, kw):
     return [("dsed", _inject("dsed", {**kw, "engine": "dsed"})), trb]
 
 
+_SAVED: dict = {}
+
+
 def _install():
     import pulsim
     from pulsim import _plan
+    if _SAVED:
+        return
+    saved_plan = {}
     for k, attr in LIBRARY_DEFAULTS.items():
+        saved_plan[attr] = getattr(_plan, attr)
         setattr(_plan, attr, nd.PROFILE["pwl"][k].value)
+    for attr, entry in nd.POLICY.items():
+        saved_plan[attr] = getattr(_plan, attr)
+        setattr(_plan, attr, entry.value)
     orig = pulsim.simulate
 
     @functools.wraps(orig)
@@ -107,8 +117,8 @@ def _install():
                 out = orig(*args, **k)
                 _STATS[f"applied:{eng}"] += 1
                 return out
-            except pulsim.UnsupportedError:
-                if i == len(routes) - 1:
+            except pulsim.UnsupportedError as exc:
+                if i == len(routes) - 1 or getattr(exc, "feature", "") == "undriven_switch":
                     raise
                 _STATS["auto: exact refused -> trbdf2"] += 1
     pulsim.simulate = simulate
@@ -130,6 +140,21 @@ def _install():
             k["R_on"] = 1.0 / g_on
         return di(self, name, a, c, None, g_off, V_th, V_f, form="branch", **k)
     cb.add_switch, cb.add_diode = add_switch, add_diode
+    _SAVED.update(plan=saved_plan, simulate=orig, add_switch=sw, add_diode=di)
+
+
+def _uninstall():
+    if not _SAVED:
+        return
+    import pulsim
+    from pulsim import _plan
+    for attr, value in _SAVED["plan"].items():
+        setattr(_plan, attr, value)
+    pulsim.simulate = _SAVED["simulate"]
+    cb = pulsim.CircuitBuilder
+    cb.add_switch = _SAVED["add_switch"]
+    cb.add_diode = _SAVED["add_diode"]
+    _SAVED.clear()
 
 
 def classify(text: str) -> str:
@@ -173,6 +198,10 @@ def summarize(fails, stats, applied):
 
 def pytest_configure(config):
     _install()
+
+
+def pytest_unconfigure(config):
+    _uninstall()
 
 
 def pytest_runtest_logreport(report):

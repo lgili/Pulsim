@@ -97,6 +97,16 @@ ROUTE = Entry(
     "D11 + 'Route report and the default-flip gate' (2026-11-18); task 19.1 (open)",
     "auto")
 
+# Library-level policy defaults resolved in pulsim._plan (not simulate() keywords).
+POLICY = {
+    "DEFAULT_UNDRIVEN_SWITCH_POLICY": Entry(
+        "refuse", "update-number-changing-release",
+        "DECISIONS 3 (Owner Decision 2.1; add-kernel-simulation-object task 11.3): "
+        "controlled switches with no switch_fn are refused on every engine with "
+        "UnsupportedError(engine, 'undriven_switch', ...) naming the switch(es)",
+        "undriven_refuse"),
+}
+
 # Opt-in, not a default: an extra column only.
 EXTRA = {"esdirk43": ("trbdf2", {"integrator": "esdirk43"},
                       Entry("esdirk43", "add-high-order-stiff-integrator",
@@ -106,14 +116,15 @@ EXTRA = {"esdirk43": ("trbdf2", {"integrator": "esdirk43"},
 # Number-changing items the release lists that a harness cannot apply on this tree.
 NOT_APPLIED = (
     ("trbdf2", "step_grid_per_octave = 4", "update-trbdf2-factor-reuse",
-     "tasks 4.2 / 6.1 open: the option does not exist on this tree"),
+     "Owner Decision 2.4: deferred to a post-release PR; continuous step sizing remains the default"),
     ("trbdf2", "filter_error_estimate / sdirk_after_settle", "update-trbdf2-post-event-restart",
      "DECISIONS 9-10: C++-only TrBdf2Options, no simulate() keyword; both stay off"),
     ("pwl, trbdf2", "composite diode V_F as a conduction drop", "update-composite-diode-forward-drop",
      "nothing to flip: already the default on this tree (the add_mosfet / Level-1 docstrings "
      "read V_F as the body diode's CONDUCTION DROP); a builder default, not a run option"),
-    ("all", "one undriven-switch policy and blocks 2-8", "add-kernel-simulation-object",
-     "DECISIONS 23 (branch feat/core-p3-simulation-object): owner decisions, not options"),
+    ("all", "RunPlan blocks 2-8", "add-kernel-simulation-object",
+     "Owner Decision 2.2 (update-number-changing-release DECISIONS 3): kept in their current "
+     "sites for this release; voltage sanity (2.3) is already unified on _auto_check_voltage_sanity"),
 )
 
 
@@ -144,9 +155,28 @@ def builder_form(on: bool = True):
         yield
 
 
+@contextlib.contextmanager
+def policy_defaults(on: bool = True):
+    """Apply the release-candidate ``pulsim._plan`` policy defaults and restore them."""
+    if not on:
+        yield
+        return
+    from pulsim import _plan
+
+    saved = {attr: getattr(_plan, attr) for attr in POLICY}
+    try:
+        for attr, entry in POLICY.items():
+            setattr(_plan, attr, entry.value)
+        yield
+    finally:
+        for attr, value in saved.items():
+            setattr(_plan, attr, value)
+
+
 def table() -> list:
     rows = [(eng, k, e) for eng, d in PROFILE.items() for k, e in d.items()]
     rows += [("all", k, e) for k, e in BUILDER.items()]
+    rows += [("all", f"_plan.{k}", e) for k, e in POLICY.items()]
     rows += [("auto", "route", ROUTE)]
     rows += [(eng, "integrator (extra column)", e) for eng, _, e in EXTRA.values()]
     return rows

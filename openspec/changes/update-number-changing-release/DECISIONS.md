@@ -183,3 +183,89 @@ trbdf2_identity, and a hash of every PSS / sensitivity / orbit / AC output).
    has no dg/dt term (pre-existing; a time-varying source takes the Python
    map, which has it); `bind_param("<dev>.g_on")` on an ideal device makes it
    non-ideal at bind time (intended: the parameter is the device's g_on).
+
+## 3. Owner decisions (2.1–2.4), 2026-11-24
+
+Closes tasks 2.1–2.4 before the release flip while preserving 100 %
+bit-identical and warning-identical behaviour under today's defaults.
+
+### 3.1 One undriven-switch policy (task 2.1; `add-kernel-simulation-object` DECISIONS 23 item 1, task 11.3)
+
+- **Decision:** at the release flip, any circuit with controlled switches and
+  no `switch_fn` (nor `closed_loops` / control graph driving them) is **refused
+  on every engine** (`pwl`, `trbdf2`, `dsed`/`exact`, `auto` with or without
+  `dt`) with `pulsim.UnsupportedError(engine, "undriven_switch", ...)` naming
+  the undriven controlled switch(es). Passive circuits and diode-only circuits
+  have no controlled switches and are never refused.
+- **Pre-flip default:** `pulsim._plan.DEFAULT_UNDRIVEN_SWITCH_POLICY = "warn_closed"`
+  (allowed values: `"warn_closed"`, `"refuse"`). Today's `"warn_closed"` keeps
+  existing per-engine behaviour, call order, warnings and bytecodes unchanged.
+- **Rehearsal wiring:** `benchmarks/tools/next_defaults.py` records
+  `POLICY["DEFAULT_UNDRIVEN_SWITCH_POLICY"] = "refuse"` (plus a
+  `policy_defaults()` context manager); `benchmarks/tools/next_defaults_pytest.py`
+  sets `_plan.DEFAULT_UNDRIVEN_SWITCH_POLICY = "refuse"` during the rehearsal
+  session (re-raising `feature == "undriven_switch"` immediately instead of
+  falling back `exact -> trbdf2`) and restores all patched `_plan` defaults and
+  wrappers in `pytest_unconfigure()`.
+- **Tests:** `python/tests/test_undriven_switch_policy.py`.
+
+### 3.2 RunPlan blocks 2–8 (task 2.2; `add-kernel-simulation-object` DECISIONS 23 items 2–8)
+
+Each position-dependent block recorded in `add-kernel-simulation-object`
+DECISIONS 23 is decided explicitly for this release:
+
+- **Block 2 (`mmc_arms` / `on_cache`):** keep in `_run_pwl`. Both are pwl-only
+  (refused by `sim::kRunOptionTable` on `trbdf2` and `dsed`) and require the
+  run's own `Simulation.cache`; constructing `Simulation` during `_plan_run`
+  would violate planning purity. Deferred to Stage B (`add-kernel-simulation-object`
+  11.1 / 12.2).
+- **Block 3 (`progress` / `live_stream`):** keep in `_run_pwl`. Both are
+  pwl-only, and `live_stream.attach()` mutates the caller's stream object,
+  which must happen at run start rather than during planning.
+- **Block 4 (`resume_from` time):** keep the `engine != "dsed"` guard in
+  `_plan_run`. Following `core-a-complementarity` (`add-exact-propagator-strategy`
+  sessions 24–26), `dsed` natively supports `resume_from` on its own absolute
+  clock (`t_end` is absolute; `_dsed_dispatch._check_resume_snapshot` refuses
+  relabelling `t_start != 0.0`). Rewriting `t_start = float(resume_from.t)` on
+  `dsed` would break exact-engine resume; keeping it for `pwl` and `trbdf2`
+  only (when `t_start == 0.0`) matches all three engines' contracts.
+- **Block 5 (`mode_selection='auto'`):** keep current resolution sites
+  (`_route` for `pwl`/`trbdf2`, `_dsed_dispatch` for `dsed`, `_plan_run` for
+  `sensitivities`). Unify only when the exact engine moves onto
+  `sim::Simulation` (`add-kernel-simulation-object` DECISIONS 16).
+- **Block 6 (`on_impulse='error'`):** keep as-is (`pwl` aborts at the event in
+  C++, `dsed` raises `UnsupportedError("dsed", "impulse", ...)` in `_finalize`
+  from `reinit_records`, `trbdf2` never records impulses). All three honour the
+  contract; moving `dsed`'s abort into the C++ scheduler is a post-release
+  fail-fast optimization.
+- **Block 7 (pwl-only option value checks & tri-state restart/split defaults):**
+  keep in `_plan_run`'s `pwl` branch. Unsupported keywords are refused on
+  `trbdf2` / `dsed` by `sim::kRunOptionTable` and kernel validation, and the
+  tri-state `discontinuity_restart` / `enable_substep_state_correction` default
+  resolution already lives here (blockers 1.5 / 1.8).
+- **Block 8 (`sweep()` recipe `_PWL_RECIPE`):** keep reading once during
+  `_plan_run` (`plan.recipe`) and populating in `_run_pwl`. Moving `sweep()`
+  replay onto `RunOptions` / `Simulation` is post-release
+  (`add-kernel-simulation-object` task 12.2).
+
+### 3.3 One voltage-sanity check (task 2.3; `add-kernel-simulation-object` task 6.2)
+
+- **Decision:** unify all three engines (`pwl`, `trbdf2`, `dsed`) directly onto
+  `_auto_check_voltage_sanity(res, builder, voltage_sanity_factor)` in
+  `_finalize`.
+- **Verification:** `dsed` and `trbdf2` already ran `_auto_check_voltage_sanity`
+  in `_finalize`. Replacing `pwl`'s duplicated inline `find_implausible_voltage`
+  block at the same site in `_finalize` is 100 % warning-identical
+  (`stacklevel=4` inside `_auto_check_voltage_sanity` resolves to the exact
+  same caller frame as `stacklevel=3` inline in `_finalize`; same message,
+  category, order, `res._implausible_voltage`, and `-W error` behaviour) and
+  bit-identical, while removing the last swallowing broad handler from
+  `_SIMULATE_BODY`. No feature toggle is needed.
+
+### 3.4 TR-BDF2 step grid (task 2.4; `update-trbdf2-factor-reuse` Part 3)
+
+- **Decision:** **defer** `step_grid_per_octave` (Part 3 of
+  `update-trbdf2-factor-reuse`, tasks 4.1–6.3) to a post-release PR. Keep
+  continuous step sizing as the default in this release so the two-pillar
+  release is not coupled to an unimplemented performance feature.
+  `benchmarks/tools/next_defaults.py` `NOT_APPLIED` updated accordingly.
