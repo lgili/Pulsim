@@ -1,3 +1,5 @@
+> **Status: Withdrawn (2026-11-13, CORE_ROADMAP Decision 9)** — superseded by refactor-unified-transient-stepper strategies; archived without merging specs.
+
 ## Why
 
 Today Pulsim's transient kernel offers two integrators — Tustin (2nd-order trapezoidal) and BDF1 (1st-order implicit Euler) — both **fixed-step**. Variable stepping exists only at the Python wrapper layer (`run_transient_adaptive`), which restarts the kernel in coarse segments and uses `||dx/dt||` as a heuristic instead of a real LTE estimate. PSIM and PLECS expose embedded-pair Runge-Kutta DOPRI5 (Dormand-Prince 4-5) and L-stable implicit Radau IIA(3) as standard adaptive choices.

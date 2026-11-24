@@ -469,3 +469,351 @@ expressible in YAML.
 - **THEN** the YAML contains
   `simulation.advanced.newton.max_iterations: 100`
 
+### Requirement: Fixed-Step Resolution Diagnostics in Python
+
+`pulsim.simulate` SHALL accept `resolution_diagnostics` (default
+`True`), and a fixed-step result SHALL expose `res.resolution` with the
+per-sample truncation trace aligned with `res.times`, the worst value
+with the name of its branch and its time, the number of branches the
+estimate covered, and the ringing records with node or branch names.
+`res.resolution` SHALL be `None` for the variable-step and exact
+engines and when the option is off. `simulate` SHALL emit exactly one
+`pulsim.ResolutionWarning` (a `UserWarning` subclass) per call when
+the worst relative truncation exceeds 1e-2 or a ringing record exists;
+the message SHALL name the variable and the time and SHALL offer a
+smaller `dt` or omitting `dt`.
+
+#### Scenario: Under-resolved run warns once
+- **GIVEN** a 10 V step into 1 kΩ and 1 nF (τ = 1 µs) with the
+  capacitor on node `a`
+- **WHEN** `simulate(b, t_end=100e-6, dt=1e-5)` is called
+- **THEN** exactly one `ResolutionWarning` is emitted and it names
+  node `a`
+- **AND** `res.resolution.lte_max > 0.1` and
+  `len(res.resolution.ringing) >= 1`
+
+#### Scenario: Resolved run is silent
+- **GIVEN** the same RC
+- **WHEN** `simulate(b, t_end=100e-6, dt=1e-8)` is called
+- **THEN** no `ResolutionWarning` is emitted and
+  `res.resolution.lte_max < 1e-5`
+
+#### Scenario: Trace is aligned with the samples
+- **GIVEN** a fixed-step run with `store_every=10`
+- **WHEN** the result is read
+- **THEN** `len(res.resolution.lte) == len(res.times)` and each entry
+  is the largest estimate of the ten steps before its sample
+
+#### Scenario: Option off and other engines
+- **GIVEN** `resolution_diagnostics=False`, or a run without `dt`
+- **WHEN** the result is read
+- **THEN** `res.resolution` is `None` and no `ResolutionWarning` is
+  emitted
+
+### Requirement: Named Result Accessors
+
+`SimulationResult` SHALL expose `v(name, t=None)`,
+`i(name, t=None)`, and `power(device_name)` methods on the Python
+wrapper that resolve a human node, branch, or device name into the
+corresponding state-vector trace, without requiring the caller to
+compute `node_id_of` / `branch_index_of` offsets or apply the
+`num_nodes` shift for branch currents.
+
+The `name` argument SHALL accept either a node name passed to
+`CircuitBuilder.add_*` (resolved via `node_id_of` for `v`, or
+`branch_index_of` for `i`), or a registered alias when alias
+support lands separately. When `t=None` the method SHALL return
+the full per-sample trace as a contiguous `numpy.ndarray`. When
+`t` is an `int`, the method SHALL return a scalar `float64`. When
+`t` is a slice or boolean mask, the method SHALL return the
+corresponding subset with shape matching the slice semantics.
+
+#### Scenario: Read node voltage by name
+- **GIVEN** a transient run of a buck converter with a node named
+  `"vout"`
+- **WHEN** Python calls `result.v("vout")`
+- **THEN** the returned ndarray equals
+  `np.asarray(result.states)[:, builder.node_id_of("vout")]`
+  element-wise
+- **AND** has shape `(num_steps,)` and dtype `float64`.
+
+#### Scenario: Read branch current by name
+- **GIVEN** the same buck transient with an inductor named `"L1"`
+- **WHEN** Python calls `result.i("L1")`
+- **THEN** the returned ndarray equals
+  `np.asarray(result.states)[:, builder.graph.num_nodes +
+  builder.branch_index_of("L1")]` element-wise
+- **AND** the sign convention follows the
+  `add_inductor(name, from, to, …)` ordering: current is positive
+  when flowing from the `from` terminal toward the `to` terminal.
+
+#### Scenario: Single-step snapshot
+- **GIVEN** a transient with 10 000 samples
+- **WHEN** Python calls `result.v("vout", t=-1)`
+- **THEN** the returned value is a scalar `float64` (not a 0-d
+  ndarray)
+- **AND** equals `result.states[-1, builder.node_id_of("vout")]`.
+
+#### Scenario: Device power lookup
+- **GIVEN** a transient that exercised a MOSFET `"Q1"`
+- **WHEN** Python calls `result.power("Q1")`
+- **THEN** the returned float equals
+  `device_loss_summary(result, builder)["Q1"]["P_total"]`
+  within floating-point precision.
+
+#### Scenario: Unknown name produces typed error with suggestions
+- **GIVEN** a builder with nodes `["vin", "sw", "vout", "gnd"]`
+- **WHEN** Python calls `result.v("voutt")` (typo)
+- **THEN** the call raises `pulsim.NameNotFoundError` (a subclass
+  of `KeyError`)
+- **AND** the exception's `suggestions` attribute equals
+  `["vout"]`
+- **AND** the exception's `kind` attribute equals `"node"`
+- **AND** the exception's `name` attribute equals `"voutt"`.
+
+### Requirement: Builder Device-Name Index Lookups
+
+`CircuitBuilder` SHALL expose `branch_index_of(name)`,
+`switch_index_of(name)`, and `devices()` methods that let callers
+look up state-vector indices and enumerate registered devices
+without re-counting `add_*` call order.
+
+`branch_index_of(name)` SHALL return the zero-based offset of the
+named branch's current within the post-node section of the state
+vector (i.e., the value `i` such that `state_idx == num_nodes + i`
+holds for the branch's current variable).
+
+`switch_index_of(name)` SHALL return the zero-based bit position
+of the named switching device in the `SwitchStateMask` produced
+by `switch_fn(t)`. It SHALL raise `KeyError` if `name` refers to
+a non-switching device (resistor, capacitor, source, …), with a
+message that names the device's actual kind.
+
+`devices()` SHALL return an ordered list of
+`DeviceInfo(name, kind, terminals)` tuples covering every device
+the builder has accepted, in `add_*` call order. `kind` is a
+lowercase string identifying the device family
+(`"resistor" / "capacitor" / "inductor" / "diode" / "mosfet" /
+"igbt" / "switch" / "voltage_source" / "current_source" /
+"transformer" / …`). `terminals` is the ordered list of node
+names the device is wired to.
+
+#### Scenario: PWM lookup by device name
+- **GIVEN** a builder with `add_mosfet_with_body_diode("Q1", "vin", "sw", …)`
+  as the only switching branch
+- **WHEN** Python calls `builder.switch_index_of("Q1")`
+- **THEN** the returned value equals `0`.
+
+#### Scenario: Multiple switches enumerate in call order
+- **GIVEN** a builder with calls
+  ```
+  add_mosfet_with_body_diode("Q1", "vin", "sw", …)
+  add_mosfet_with_body_diode("Q2", "sw", "gnd", …)
+  ```
+- **WHEN** Python calls `builder.switch_index_of("Q1")` and
+  `builder.switch_index_of("Q2")`
+- **THEN** the values equal `0` and `1` respectively
+- **AND** `builder.graph.num_switches == 2`.
+
+#### Scenario: Non-switching device raises with kind info
+- **GIVEN** a builder with a resistor `"R1"` and a MOSFET `"Q1"`
+- **WHEN** Python calls `builder.switch_index_of("R1")`
+- **THEN** the call raises `KeyError`
+- **AND** the message contains both `"R1"` and the device's kind
+  string `"resistor"`.
+
+#### Scenario: Enumerate registered devices
+- **GIVEN** a builder with calls (in this order)
+  ```
+  add_voltage_source("V1", "vin", "gnd", 12.0)
+  add_mosfet_with_body_diode("Q1", "vin", "sw", …)
+  add_inductor("L1", "sw", "vout", 220e-6)
+  ```
+- **WHEN** Python calls `builder.devices()`
+- **THEN** the returned list equals
+  ```
+  [DeviceInfo("V1", "voltage_source", ["vin", "gnd"]),
+   DeviceInfo("Q1", "mosfet", ["vin", "sw"]),
+   DeviceInfo("L1", "inductor", ["sw", "vout"])]
+  ```
+- **AND** the list order matches the `add_*` call sequence.
+
+#### Scenario: Branch-index round-trip with state vector
+- **GIVEN** an inductor `"L1"` with
+  `builder.branch_index_of("L1") == 3` and
+  `builder.graph.num_nodes == 5`
+- **WHEN** Python computes
+  `np.asarray(result.states)[:, 5 + 3]`
+- **THEN** the resulting ndarray is element-wise equal to
+  `result.i("L1")`.
+
+### Requirement: Switched Diode Forward Drop Parameter
+
+`CircuitBuilder.add_diode` SHALL accept `V_f` (keyword, default 0.0),
+and `components()` SHALL report it in the diode's `params`. `res.i`,
+`device_loss_summary` and `device_thermal_summary` SHALL compute a PWL
+diode's current as `g_on·(v − V_f)` while ON and `g_off·v` while OFF;
+the loss summary SHALL report `V_f` and its `P_avg` SHALL include
+`V_f·i`. Loss windows SHALL still add up to the whole run.
+`add_bridge_rectifier` SHALL accept `V_f` (default 0.0) and pass it as
+each diode's drop, with its `V_th` default unchanged.
+
+#### Scenario: Loss includes the drop
+- **GIVEN** 10 A forced through `g_on = 20 S`, `V_f = 0.7 V`
+- **WHEN** `device_loss_summary` is evaluated
+- **THEN** the diode's `P_avg` is 12.0 W and `res.i` reads 10 A
+
+#### Scenario: Thermal and loss summaries agree
+- **WHEN** both summaries run on a `V_f > 0` circuit
+- **THEN** their conduction energies are equal
+
+### Requirement: Three-Phase VSI Freewheel Diode Drop
+
+`add_three_phase_vsi(V_f=0.7)` SHALL pass `V_f` to each freewheel diode
+as its forward drop (BREAKING: it was the turn-on threshold), with a new
+`V_th` keyword (default 0.0) as the threshold.
+
+#### Scenario: VSI diode loss contains V_f·I_avg
+- **GIVEN** the VSI with `R_d = 50 mΩ`, `V_f = 0.7`
+- **WHEN** the freewheel diode carries an inductor current
+- **THEN** its `P_avg` equals `V_f·i_avg + R_d·i_rms²` within 1e-4 on
+  `auto`, and within 1e-2 on pwl at `dt = 2 µs` (measured 4.5e-3: the
+  gate-edge flip steps are trapezoids of their end powers, while
+  `i_avg` and `i_rms` integrate them as a current ramp)
+
+#### Scenario: No sharing below V_f
+- **GIVEN** a half bridge with dead time, `R_on·|i| < V_f`
+- **WHEN** the diode's parallel switch is gated on
+- **THEN** the diode carries less than 1e-6 A and conducts only during
+  the dead time
+
+### Requirement: Engine-Independent Control Composition
+
+`simulate()` SHALL resolve `closed_loops`, `step_observer`,
+`controller_period` and `switch_fn` once, before choosing an engine,
+into one plan: a combined gate function, a list of tick sources with
+their periods, and a list of every-step observers. Both the fixed-step
+and the variable-step paths SHALL consume that plan. Gate functions
+SHALL be merged with `make_combined_switch_fn`. Any number of closed
+loops SHALL be accepted with or without a user `switch_fn`.
+
+#### Scenario: Two closed loops without dt
+- **GIVEN** two bucks sharing a source, each with a `ClosedLoop`
+  (20 kHz and 2 kHz)
+- **WHEN** `simulate(b, 10e-3, closed_loops=[la, lb])` is called
+- **THEN** it completes on the variable-step engine, the loops tick 200
+  and 20 times (it raised `TypeError` before)
+
+#### Scenario: A loop next to a user gate function
+- **WHEN** one closed loop drives one switch and a user `switch_fn`
+  drives another, with no `dt`
+- **THEN** the run completes and both switches follow their drivers
+
+### Requirement: Controller Period Honoured or Refused
+
+`simulate(controller_period=T)` SHALL schedule `step_observer` at the
+tick instants of period `T` on every engine that accepts observers, and
+SHALL raise on the engines that do not. It SHALL NOT be ignored. A
+`step_observer` without a period SHALL remain an every-step callback on
+the fixed-step engine and SHALL remain refused on the variable-step
+engine. `result.control_tick_counts` SHALL list the ticks fired per
+source in registration order.
+
+#### Scenario: Honoured on the fixed-step engine
+- **WHEN** `simulate(b, 2e-3, dt=1e-6, step_observer=obs,
+  controller_period=1e-4)` runs
+- **THEN** `obs` is called 20 times and
+  `result.control_tick_counts == [20]`
+
+#### Scenario: Every-step observer is unchanged
+- **WHEN** the same call is made without `controller_period`
+- **THEN** `obs` is called once per step, as before
+
+#### Scenario: Refused where observers are not supported
+- **WHEN** `controller_period` and `step_observer` are passed with
+  `engine='dsed'`
+- **THEN** the call raises and names `step_observer`
+
+### Requirement: SPICE Piecewise-Linear Diode Import
+
+The SPICE importer SHALL map a diode model that sets any of `Ron`,
+`Roff` or `Vfwd` to the PWL switched diode:
+`add_diode(g_on = area/Ron, g_off = area/Roff, V_th = 0, V_f = Vfwd)`.
+It SHALL NOT create a smooth Newton diode for such a model. The
+refusals for reverse breakdown (`Vrev`, `Rrev`, `Revilimit`) and for
+parameter sets that mix the piecewise-linear and the junction
+parameters SHALL remain.
+
+#### Scenario: Imported diode drops Vfwd plus Ron·i
+- **GIVEN** a netlist with `.model DX D(Ron=0.05 Roff=1Meg Vfwd=0.7)`
+  and a diode using it
+- **WHEN** it is imported and 10 A are forced through the diode
+- **THEN** the branch kind is `StoredKind.Diode`, its parameters are
+  `g_on = 20 S`, `g_off = 1e-6 S`, `V_f = 0.7 V`, the voltage is 1.2 V
+  and `device_loss_summary` reports 12.0 W
+
+#### Scenario: Area scales the conductances
+- **WHEN** the same diode is instantiated with `area = 2`
+- **THEN** `g_on = 40 S` and `g_off = 2e-6 S`
+
+#### Scenario: Breakdown is still refused
+- **WHEN** the model also sets `Vrev=50`
+- **THEN** the import raises an error naming the diode and `Vrev`
+
+### Requirement: Composite Device V_F Keyword Is a Conduction Drop
+
+`CircuitBuilder.add_mosfet` and `add_mosfet_with_body_diode` SHALL
+document and apply `V_F` as the body diode's conduction drop (BREAKING:
+it was the turn-on threshold). `add_mosfet_level1` and `add_igbt_level1`
+SHALL accept `V_F` (keyword, default 0.7) for their body and freewheel
+diodes. `components()` SHALL report `V_f = V_F` and `V_th = 0` for the
+`<name>_body` and `<name>_fwd` branches, and `res.i`,
+`device_loss_summary` and `device_thermal_summary` SHALL include the
+`V_F·i` term for them. The YAML device types `mosfet`,
+`mosfet_with_body_diode`, `mosfet_level1` and `igbt_level1` SHALL accept
+`V_F` with the same meaning.
+
+#### Scenario: Loss summary includes the drop
+- **GIVEN** `add_mosfet_with_body_diode("Q", d, s, V_F=0.7,
+  g_on_diode=20.0)` with the gate off and 10 A forced source to drain
+- **WHEN** `device_loss_summary` is evaluated
+- **THEN** `Q_body` reports `V_f = 0.7` and `P_avg = 12.0 W`, and
+  `res.i("Q_body")` reads 10 A
+
+#### Scenario: Level-1 keyword
+- **WHEN** `add_mosfet_level1("M", d, s, g, K, V_T, V_F=1.0)` is
+  called
+- **THEN** `components()` lists `M_body` with `V_f = 1.0` and
+  `V_th = 0.0`
+
+#### Scenario: YAML
+- **WHEN** a netlist declares `type: mosfet_with_body_diode` with
+  `V_F: 0.7` and is run with 10 A forced through the body diode
+- **THEN** the diode drops 0.710 V
+
+#### Scenario: Zero drop
+- **WHEN** `add_mosfet(..., V_F=0.0)` is used in the forced-current
+  circuit with the gate off
+- **THEN** `v_SD = 0.010 V`
+
+### Requirement: Unified Per-Component Electrothermal Telemetry in Python
+Python bindings SHALL expose a unified per-component electrothermal telemetry surface in `SimulationResult`.
+
+#### Scenario: Access per-component losses and temperatures
+- **WHEN** Python runs a transient simulation with electrothermal options
+- **THEN** `SimulationResult` exposes per-component entries keyed by component identity
+- **AND** each entry includes both loss and temperature fields with deterministic schema and ordering
+
+#### Scenario: Thermal-disabled entry shape remains stable
+- **WHEN** a component has no enabled thermal port
+- **THEN** the component entry still includes thermal fields
+- **AND** thermal status is explicit (`thermal_enabled=false`) with deterministic default values
+
+### Requirement: Backward-Compatible Summary Surfaces
+Python bindings SHALL keep existing `loss_summary` and `thermal_summary` surfaces while introducing unified per-component telemetry.
+
+#### Scenario: Existing tooling reads legacy summaries
+- **WHEN** Python tooling continues to consume `loss_summary` and `thermal_summary`
+- **THEN** behavior remains backward compatible
+- **AND** aggregate values remain consistent with reductions of the unified per-component telemetry
+
