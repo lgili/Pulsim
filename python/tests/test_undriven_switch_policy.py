@@ -216,28 +216,76 @@ def test_next_defaults_policy_defaults_context_manager():
 
 
 def test_next_defaults_pytest_install_and_uninstall_restore_policy():
-    orig_sim = p.simulate
-    orig_sw = p.CircuitBuilder.add_switch
-    orig_di = p.CircuitBuilder.add_diode
-    orig_policy = _plan.DEFAULT_UNDRIVEN_SWITCH_POLICY
-    orig_restart = _plan.DEFAULT_DISCONTINUITY_RESTART
-    orig_split = _plan.DEFAULT_SUBSTEP_STATE_CORRECTION
+    was_active = bool(nd_pytest._SAVED)
+    stats_before = nd_pytest._STATS.copy()
     try:
-        nd_pytest._install()
+        if was_active:
+            assert nd_pytest._install() is False
+            assert nd_pytest._uninstall() is True
+            assert not nd_pytest._SAVED
+            assert _plan.DEFAULT_UNDRIVEN_SWITCH_POLICY == "warn_closed"
+            assert _plan.DEFAULT_DISCONTINUITY_RESTART is False
+            assert _plan.DEFAULT_SUBSTEP_STATE_CORRECTION is False
+
+        orig_sim = p.simulate
+        orig_sw = p.CircuitBuilder.add_switch
+        orig_di = p.CircuitBuilder.add_diode
+        orig_policy = _plan.DEFAULT_UNDRIVEN_SWITCH_POLICY
+        orig_restart = _plan.DEFAULT_DISCONTINUITY_RESTART
+        orig_split = _plan.DEFAULT_SUBSTEP_STATE_CORRECTION
+        installed = nd_pytest._install()
+        try:
+            assert installed is True
+            assert nd_pytest._install() is False
+            assert _plan.DEFAULT_UNDRIVEN_SWITCH_POLICY == "refuse"
+            assert _plan.DEFAULT_DISCONTINUITY_RESTART is True
+            assert _plan.DEFAULT_SUBSTEP_STATE_CORRECTION is True
+            with pytest.raises(p.UnsupportedError) as exc:
+                p.simulate(_single_switch(), 1e-5, engine="auto")
+            assert exc.value.feature == "undriven_switch"
+        finally:
+            if installed:
+                assert nd_pytest._uninstall() is True
+        assert not nd_pytest._SAVED
+        assert _plan.DEFAULT_UNDRIVEN_SWITCH_POLICY == orig_policy
+        assert _plan.DEFAULT_DISCONTINUITY_RESTART == orig_restart
+        assert _plan.DEFAULT_SUBSTEP_STATE_CORRECTION == orig_split
+        assert p.simulate is orig_sim
+        assert p.CircuitBuilder.add_switch is orig_sw
+        assert p.CircuitBuilder.add_diode is orig_di
+    finally:
+        if was_active and not nd_pytest._SAVED:
+            nd_pytest._install()
+        nd_pytest._STATS.clear()
+        nd_pytest._STATS.update(stats_before)
+
+
+def test_next_defaults_pytest_preinstalled_session_survives_round_trip():
+    """Under ``pytest -p next_defaults_pytest``, running the install/uninstall
+    test must leave the session plugin active with its accumulated ``_STATS``
+    intact (no mid-session teardown)."""
+    was_active = bool(nd_pytest._SAVED)
+    stats_before = nd_pytest._STATS.copy()
+    try:
+        if not was_active:
+            assert nd_pytest._install() is True
+        nd_pytest._STATS["applied:pwl"] += 7
+        expected_pwl = nd_pytest._STATS["applied:pwl"]
+
+        test_next_defaults_pytest_install_and_uninstall_restore_policy()
+
+        assert bool(nd_pytest._SAVED) is True
         assert _plan.DEFAULT_UNDRIVEN_SWITCH_POLICY == "refuse"
         assert _plan.DEFAULT_DISCONTINUITY_RESTART is True
         assert _plan.DEFAULT_SUBSTEP_STATE_CORRECTION is True
-        with pytest.raises(p.UnsupportedError) as exc:
-            p.simulate(_single_switch(), 1e-5, engine="auto")
-        assert exc.value.feature == "undriven_switch"
+        assert nd_pytest._STATS["applied:pwl"] == expected_pwl
     finally:
-        nd_pytest._uninstall()
-    assert _plan.DEFAULT_UNDRIVEN_SWITCH_POLICY == orig_policy
-    assert _plan.DEFAULT_DISCONTINUITY_RESTART == orig_restart
-    assert _plan.DEFAULT_SUBSTEP_STATE_CORRECTION == orig_split
-    assert p.simulate is orig_sim
-    assert p.CircuitBuilder.add_switch is orig_sw
-    assert p.CircuitBuilder.add_diode is orig_di
+        if not was_active and nd_pytest._SAVED:
+            assert nd_pytest._uninstall() is True
+        elif was_active and not nd_pytest._SAVED:
+            nd_pytest._install()
+        nd_pytest._STATS.clear()
+        nd_pytest._STATS.update(stats_before)
 
 
 # ---------------------------------------------------------------------------

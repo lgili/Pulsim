@@ -95,11 +95,16 @@ def _route_kwargs(pulsim, args, kw):
 _SAVED: dict = {}
 
 
-def _install():
+def _install() -> bool:
+    """Install the next-defaults session patches.
+
+    Returns ``True`` if this call installed the patches, or ``False`` if they
+    were already active (idempotent no-op).
+    """
     import pulsim
     from pulsim import _plan
     if _SAVED:
-        return
+        return False
     saved_plan = {}
     for k, attr in LIBRARY_DEFAULTS.items():
         saved_plan[attr] = getattr(_plan, attr)
@@ -141,11 +146,17 @@ def _install():
         return di(self, name, a, c, None, g_off, V_th, V_f, form="branch", **k)
     cb.add_switch, cb.add_diode = add_switch, add_diode
     _SAVED.update(plan=saved_plan, simulate=orig, add_switch=sw, add_diode=di)
+    return True
 
 
-def _uninstall():
+def _uninstall() -> bool:
+    """Restore the pre-install library defaults and wrappers.
+
+    Returns ``True`` if active patches were torn down, or ``False`` if nothing
+    was installed.
+    """
     if not _SAVED:
-        return
+        return False
     import pulsim
     from pulsim import _plan
     for attr, value in _SAVED["plan"].items():
@@ -155,6 +166,7 @@ def _uninstall():
     cb.add_switch = _SAVED["add_switch"]
     cb.add_diode = _SAVED["add_diode"]
     _SAVED.clear()
+    return True
 
 
 def classify(text: str) -> str:
