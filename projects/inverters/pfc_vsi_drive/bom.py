@@ -138,11 +138,13 @@ C006 = CapacitorElectro(
     esr_at_100hz=0.2, esr_at_5khz=0.05, esr_at_65khz=0.02,
 )
 
-# Bulk smoothing cap on rectified bus — keeps the bridge in CCM
-# across the line cycle. Without this the bridge enters deep DCM
-# (V_rect collapses between line peaks), the boost has to compensate
-# with huge peak inductor currents, and the loss budget overshoots
-# PSIM by 30-100 %. Matches the cap PSIM has on rect_p.
+# Listed for the BoM only: NOT stamped on rect_p. An earlier model put
+# it there as a "bulk smoothing cap PSIM has on rect_p"; PSIM's own KPIs
+# rule that out. By KCL at rect_p, i_D001 = i_L002 + i_C(rect_p), and
+# PSIM reports I_D001_rms 4.984 A against I_L002_rms 4.948 A and a line
+# PF of 0.979 (OP 2.3): almost no current flows into a rect_p capacitor.
+# With 470 µF there the bridge peak-charges it, the line PF falls to
+# 0.62 and I_L002 turns into ~DC (3.67 A rms instead of 4.95 A).
 C011 = CapacitorElectro(
     ref="C011", C=470e-6, V_rated=400.0,
     esr_at_100hz=0.4, esr_at_5khz=0.05, esr_at_65khz=0.02,

@@ -280,19 +280,19 @@ def test_currents_dict_skips_unsupported_kinds_by_default():
 # Backward-compat — unsupported kinds still raise with a clear hint
 # ---------------------------------------------------------------------------
 def test_unsupported_kind_raises_with_pulsim_losses_hint():
-    """MOSFET/IGBT/etc. are deferred; calling ``result.i()`` on them
-    must raise ``NotImplementedError`` pointing at
-    ``pulsim.losses.device_loss_summary``."""
+    """Kinds whose current needs a stored charge (Lauritzen diode, IGBT
+    tail, nonlinear capacitor) are deferred; calling ``result.i()`` on
+    them must raise ``NotImplementedError`` pointing at
+    ``pulsim.losses.device_loss_summary``. (The level-1 MOSFET, used here
+    before, now reads its kernel law: test_newton_device_currents.py.)"""
     b = p.CircuitBuilder()
     b.add_voltage_source("Vin", "vin", "gnd", 5.0)
-    b.add_voltage_source("Vg", "vg", "gnd", 5.0)
-    b.add_mosfet_level1("M1", "vin", "vd", "vg",
-                            K=0.05, V_T=2.0, lambda_=0.02, kappa=15.0)
-    b.add_resistor("R_load", "vd", "gnd", 10.0)
-    res = p.simulate(b, t_end=1e-4, dt=1e-6, enable_nonlinear_refresh=True)
+    b.add_resistor("R_load", "vin", "a", 10.0)
+    b.add_lauritzen_diode("D1", "a", "gnd")
+    res = p.simulate(b, t_end=1e-4, dt=1e-6)
     with pytest.raises(NotImplementedError) as exc:
-        res.i("M1")
+        res.i("D1")
     msg = str(exc.value)
-    assert "mosfet_level1" in msg.lower()
+    assert "lauritzen_diode" in msg.lower()
     assert "pulsim.losses" in msg or "device_loss_summary" in msg
     _ = math  # silence

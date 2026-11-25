@@ -36,7 +36,7 @@ All controllers are stateful — instantiate ONE per loop and call
 from __future__ import annotations
 
 import math
-from collections.abc import Callable  # noqa: F401 — used in string annotations
+from collections.abc import Callable, Sequence  # noqa: F401 — Callable: string annotations
 from dataclasses import dataclass, field
 
 
@@ -73,6 +73,7 @@ __all__ = [
     "InverseParkTransform",
     # Synchronization (Phase A.1)
     "PLL",
+    "Monitor",
     # Routing (Phase A.1)
     "SignalMux",
     "SignalDemux",
@@ -452,7 +453,13 @@ class Sum:
             raise ValueError(
                 f"Sum: expected {len(self.weights)} inputs, "
                 f"got {len(inputs)}")
-        return sum(w * x for w, x in zip(self.weights, inputs))
+        # A plain left-to-right sum, as the kernel graph runs it: the
+        # builtin sum() is compensated since Python 3.12 (one answer per
+        # interpreter).
+        acc = 0.0
+        for w, x in zip(self.weights, inputs):
+            acc += w * x
+        return acc
 
 
 @dataclass
@@ -569,12 +576,15 @@ class TransferFunction:
         # Keep only what we need.
         if len(self._x_hist) > len(self.num):
             self._x_hist = self._x_hist[:len(self.num)]
-        # Compute the numerator contribution.
-        num_part = sum(b * (self._x_hist[i] if i < len(self._x_hist) else 0.0)
-                        for i, b in enumerate(self.num))
-        # Compute the denominator (feedback) contribution.
-        den_part = sum(a * (self._y_hist[i] if i < len(self._y_hist) else 0.0)
-                        for i, a in enumerate(self.den))
+        # Numerator and denominator (feedback) contributions, summed
+        # left to right as the kernel graph does (the builtin sum() is
+        # compensated since Python 3.12).
+        num_part = 0.0
+        for i, b in enumerate(self.num):
+            num_part += b * (self._x_hist[i] if i < len(self._x_hist) else 0.0)
+        den_part = 0.0
+        for i, a in enumerate(self.den):
+            den_part += a * (self._y_hist[i] if i < len(self._y_hist) else 0.0)
         y = num_part - den_part
         self._y_hist.insert(0, y)
         if len(self._y_hist) > len(self.den):
@@ -961,19 +971,17 @@ def _interp_complex_at_freq(freqs, H, f_target):
     import numpy as _np
     freqs = _np.asarray(freqs, dtype=float)
     H = _np.asarray(H, dtype=complex)
+    # Unwrapped along the sweep, so a lag past -180° stays a lag.
+    ph = _np.degrees(_np.unwrap(_np.angle(H)))
     if f_target <= freqs[0]:
-        return abs(H[0]), _math.degrees(_np.angle(H[0]))
+        return abs(H[0]), float(ph[0])
     if f_target >= freqs[-1]:
-        return abs(H[-1]), _math.degrees(_np.angle(H[-1]))
+        return abs(H[-1]), float(ph[-1])
     # Bracket.
     idx = int(_np.searchsorted(freqs, f_target))
     f0, f1 = freqs[idx - 1], freqs[idx]
     mag0, mag1 = abs(H[idx - 1]), abs(H[idx])
-    ph0 = _math.degrees(_np.angle(H[idx - 1]))
-    ph1 = _math.degrees(_np.angle(H[idx]))
-    # Phase unwrap across the bracket: if jump > 180°, undo it.
-    if ph1 - ph0 >  180.0: ph1 -= 360.0
-    if ph1 - ph0 < -180.0: ph1 += 360.0
+    ph0, ph1 = ph[idx - 1], ph[idx]
     # Log-linear in freq, linear in dB / deg.
     log_f0 = _math.log10(f0)
     log_f1 = _math.log10(f1)
@@ -1038,8 +1046,11 @@ def tune_pi_from_bode(
     dict with keys:
         Kp, Ki                 — gains
         controller             — a `PIController` instance ready to use
-        achieved_pm_deg        — the phase margin the controller delivers
+        achieved_pm_deg        — phase margin of loop_gain(freqs, H, Kp, Ki)
+                                 at its LAST 0 dB crossing (a warning
+                                 says when that is not f_crossover)
         crossover_hz           — `f_crossover` echoed back
+        loop_crossovers_hz     — every 0 dB down-crossing of that loop
         plant_mag_at_crossover — |G(jω_c)|
         plant_phase_at_crossover_deg — ∠G(jω_c)
         warnings               — list[str] of design notes
@@ -1067,16 +1078,25 @@ def tune_pi_from_bode(
         # not exactly PM_target).
         # |L(jω_c)| = Kp·sqrt(1 + (Ki/(Kp·ω_c))²)·Mg
         # ∠L(jω_c) = arctan(-Ki/(Kp·ω_c)) + φ_g
-        wt = Ki / (Kp * omega_c)
-        pm_achieved = 180.0 + _math.degrees(
-            _math.atan(-wt) + _math.radians(phi_g)
-        )
     else:
         phi_pi_rad = _math.radians(phi_pi_deg)
         tau_i = -1.0 / (omega_c * _math.tan(phi_pi_rad))
         Kp = _math.cos(phi_pi_rad) / Mg
         Ki = Kp / tau_i
-        pm_achieved = phase_margin_deg  # by construction
+
+    # The margin is read off the loop these gains make over the whole
+    # sweep, not assumed at f_crossover: near a resonance |L| comes back
+    # above 1 and the LAST 0 dB crossing (the one that sets stability)
+    # is elsewhere. Buck Q = 3.4, f_c = 2 kHz: 60° asked, 6.0° delivered.
+    L = loop_gain(freqs, H, Kp, Ki)
+    pm_achieved = phase_margin_from_loop(freqs, L)
+    xings = _down_crossings_hz(freqs, L)
+    if len(xings) != 1 or abs(xings[0] / f_crossover - 1.0) > 0.05:
+        warnings.append(
+            f"The loop crosses 0 dB at {[round(x, 1) for x in xings]} Hz, "
+            f"not only at f_c={f_crossover:.1f} Hz; achieved_pm_deg "
+            f"({pm_achieved:.1f}°) is the margin at the last crossing."
+        )
 
     controller = PIController(
         Kp=Kp, Ki=Ki,
@@ -1089,6 +1109,7 @@ def tune_pi_from_bode(
         "controller": controller,
         "achieved_pm_deg": pm_achieved,
         "crossover_hz": f_crossover,
+        "loop_crossovers_hz": xings,
         "plant_mag_at_crossover": Mg,
         "plant_phase_at_crossover_deg": phi_g,
         "warnings": warnings,
@@ -1119,31 +1140,36 @@ def phase_margin_from_loop(freqs, L) -> float:
     determines how close the loop is to encircling −1.
     Returns +inf if |L| never crosses 1.
     """
-    import math as _math
     import numpy as _np
     freqs = _np.asarray(freqs, dtype=float)
     L = _np.asarray(L, dtype=complex)
-    mag = _np.abs(L)
-    # Find ALL down-crossings of |L| = 1, take the highest-freq one.
-    crossed = mag[:-1] >= 1.0
-    next_below = mag[1:] < 1.0
-    crossings = _np.where(crossed & next_below)[0]
-    if len(crossings) == 0:
+    crossings = _down_crossings(freqs, L)
+    if not crossings:
         return float("inf")
-    i = int(crossings[-1])    # last crossing
-    # Interpolate the crossing freq in log scale.
-    log_f0, log_f1 = _math.log10(freqs[i]), _math.log10(freqs[i + 1])
-    log_m0, log_m1 = _math.log10(mag[i]), _math.log10(mag[i + 1])
-    alpha = (0.0 - log_m0) / (log_m1 - log_m0)   # mag=1 → log_mag=0
-    log_fc = (1 - alpha) * log_f0 + alpha * log_f1
-    # Interpolate phase at f_c.
-    ph0 = _math.degrees(_np.angle(L[i]))
-    ph1 = _math.degrees(_np.angle(L[i + 1]))
-    if ph1 - ph0 >  180.0: ph1 -= 360.0
-    if ph1 - ph0 < -180.0: ph1 += 360.0
-    log_fc_lin = (log_fc - log_f0) / (log_f1 - log_f0)
-    phase_at_xover = (1 - log_fc_lin) * ph0 + log_fc_lin * ph1
-    return 180.0 + phase_at_xover
+    i, alpha = crossings[-1]    # last crossing
+    # Phase unwrapped along the sweep: a loop lagging 205° has a margin
+    # of -25°, which the wrapped angle (+155°) reported as +335°.
+    ph = _np.degrees(_np.unwrap(_np.angle(L)))
+    return 180.0 + (1 - alpha) * ph[i] + alpha * ph[i + 1]
+
+
+def _down_crossings(freqs, L):
+    """(i, alpha) of every |L| = 1 down-crossing between freqs[i] and
+    freqs[i+1]; alpha is the log-frequency fraction of the crossing."""
+    import numpy as _np
+    mag = _np.abs(_np.asarray(L, dtype=complex))
+    out = []
+    for i in _np.where((mag[:-1] >= 1.0) & (mag[1:] < 1.0))[0]:
+        lm0, lm1 = _np.log10(mag[i]), _np.log10(mag[i + 1])
+        out.append((int(i), float(-lm0 / (lm1 - lm0))))
+    return out
+
+
+def _down_crossings_hz(freqs, L):
+    import numpy as _np
+    lf = _np.log10(_np.asarray(freqs, dtype=float))
+    return [float(10 ** ((1 - a) * lf[i] + a * lf[i + 1]))
+            for i, a in _down_crossings(freqs, L)]
 
 
 def gain_margin_from_loop(freqs, L) -> float:
@@ -1211,22 +1237,131 @@ class ClosedLoop:
     step_observer: "Callable[[float, object], None]"
     duty_history: "list[tuple[float, float]]"
     error_history: "list[tuple[float, float]]"
-    #: Controller sample period T_ctrl = 1/freq [s]. The fixed-step
-    #: engine only THROTTLES on it (the tick lands on whichever
-    #: step first crosses the boundary, and the phase drifts with
-    #: the grid — measured 198 ticks instead of 200 over 20 ms at
-    #: 10 kHz). `engine='auto'` reads this and SCHEDULES a step
-    #: boundary on every k·T_ctrl, which is the cadence a digital
-    #: controller actually samples on — and makes `pi.update(
-    #: dt=T_PWM)` true rather than nominal.
+    #: Controller sample period T_ctrl = 1/freq [s]. `simulate()`
+    #: schedules `step_observer.tick` at t_start + k·T_ctrl,
+    #: ceil(span/T_ctrl) times, on both engines: `trbdf2` lands a
+    #: step on every instant, `pwl` delivers it at the first grid
+    #: point at or after it (exact when T_ctrl is a multiple of dt).
+    #: That makes `pi.update(dt=T_PWM)` true rather than nominal.
     period: float = 0.0
+
+
+class Monitor:
+    """A periodic observer that only READS: ``fn(t, x)`` every ``period``
+    seconds, passed as ``simulate(step_observer=Monitor(fn, period))``.
+
+    Declaring it a monitor (add-unified-event-queue, the ``Monitor`` event
+    kind) promises that ``fn`` changes nothing the circuit sees, and the
+    engines hold it to that: on ``trbdf2`` and ``dsed`` its instants do
+    not end a step, do not re-sample the gate and do not cap the step, so
+    the run is bit-identical to the same run without it; ``fn`` gets the
+    first accepted step at or after each instant (``t`` is that step's
+    time). On ``dsed`` a circuit without diodes needs
+    ``integrator='rk45'`` (refused otherwise: the Monitor would move it
+    off the 'auto' integrator). On ``pwl`` it ticks like any controller
+    (the grid decides).
+    An observer that writes a duty or a source must not be a Monitor.
+    """
+
+    _pulsim_monitor = True
+
+    def __init__(self, fn: Callable[[float, object], None], period: float):
+        if not (float(period) > 0.0):
+            raise ValueError(f"Monitor: period must be > 0 s; got {period!r}")
+        self.fn = fn
+        self.period = float(period)
+
+    def __call__(self, t: float, x: object) -> None:
+        self.fn(t, x)
+
+    tick = __call__
+
+
+class _TickHistory(Sequence):
+    """``(t, value)`` per controller tick, read from the loop's control
+    graph recordings (a read-only sequence; ``np.asarray`` works)."""
+
+    def __init__(self, graph, channel: str) -> None:
+        self._graph, self._channel = graph, channel
+
+    def _items(self) -> list:
+        cxx = self._graph._cxx_chain
+        t = cxx.get_recording_times().tolist()
+        v = cxx.get_channel_history(self._channel).tolist()
+        return list(zip(t, v))
+
+    def __len__(self) -> int:
+        return len(self._graph._cxx_chain.get_recording_times())
+
+    def __getitem__(self, i):
+        return self._items()[i]
+
+    def __iter__(self):
+        return iter(self._items())
+
+    def __eq__(self, other) -> bool:
+        return list(self) == list(other)
+
+    def __repr__(self) -> str:
+        return repr(self._items())
+
+
+def _closure_warning(helper: str, what: str, instead: str) -> None:
+    import warnings
+    warnings.warn(
+        f"{helper}({what}=<callable>): a Python callable runs through the "
+        "pulsim.PythonBlock adapter, one Python call per controller tick. "
+        f"{instead}", DeprecationWarning, stacklevel=4)
+
+
+def _pi_loop_graph(builder, pi, measured, setpoint, T: float, helper: str):
+    """The control graph of a PI loop (label time, one group at T):
+    measured -> PI -> 'duty', with 'error' = setpoint - measured recorded
+    per tick. ``measured`` is a node name (kernel) or a callable on the
+    state vector (PythonBlock); ``setpoint`` a number or a callable on t;
+    ``pi`` a PIController / PIDController (kernel) or any object with
+    ``update(setpoint=, measured=, dt=)`` (PythonBlock)."""
+    from .blockchain import (MixedDomainBlockChain, PythonBlock, Rate,
+                             _InputSource)
+    g = MixedDomainBlockChain(rate=Rate(T), label_time=True)
+    if isinstance(measured, str):
+        meas = measured
+    else:
+        _closure_warning(helper, "measured",
+                         "Pass the node name instead (measured='vout').")
+        g.add("measured", PythonBlock(lambda x: float(measured(x))),
+              inputs=dict(x=_InputSource("state")), output="meas")
+        meas = "channel:meas"
+    if callable(setpoint):
+        _closure_warning(helper, "setpoint",
+                         "Build the reference in a MixedDomainBlockChain "
+                         "(LookupTable1D on 'time') for a kernel-only loop.")
+        g.add("setpoint", PythonBlock(lambda t: float(setpoint(t))),
+              inputs=dict(t="time"), output="sp")
+        sp = "channel:sp"
+    else:
+        sp = float(setpoint)
+    if type(pi).__name__ in ("PIController", "PIDController"):
+        ctrl = pi
+    else:
+        _closure_warning(helper, "pi",
+                         "Use pulsim.PIController / PIDController.")
+        ctrl = PythonBlock(pi)
+    g.add("pi", ctrl, inputs=dict(setpoint=sp, measured=meas, dt="dt"),
+          output="duty")
+    g.add("error", Subtract(), inputs=dict(a=sp, b=meas), output="error")
+    g.record_channel("duty")
+    g.record_channel("error")
+    obs = g.make_step_observer(builder)
+    g._cxx_chain.set_output("duty", 0.5)     # the duty before the first tick
+    return g, obs
 
 
 def bind_pi_to_switch(
     builder,
     *,
     pi: PIController,
-    measured: "Callable[[object], float]",
+    measured: "str | Callable[[object], float]",
     setpoint: "float | Callable[[float], float]",
     switch,
     freq: float,
@@ -1245,24 +1380,32 @@ def bind_pi_to_switch(
         ``switch`` (when given by name) and to size the
         ``SwitchStateMask``.
     pi
-        :class:`PIController` instance. Its ``update`` is called
-        once per PWM period.
+        :class:`PIController` (or :class:`PIDController`): the loop is a
+        control graph (``MixedDomainBlockChain(label_time=True)``) whose
+        kernel block starts from ``pi``'s state; ``pi`` itself is not
+        updated during the run (read ``loop.duty_history``). Any other
+        object with ``update(setpoint=, measured=, dt=)`` runs through a
+        ``PythonBlock`` (DeprecationWarning).
     measured
-        Callable ``state_vec -> float`` extracting the feedback
-        signal. Typical: ``lambda x: x[builder.node_id_of("vout")]``.
+        The feedback node's name (``"vout"``: read in the kernel, no
+        Python call), or a callable ``state_vec -> float`` (runs through
+        a ``PythonBlock``, one Python call per tick; DeprecationWarning).
     setpoint
-        Reference value passed to ``pi.update``. Accepts either a
-        constant ``float`` or a callable ``t -> float`` for time-
-        varying references (load-step setpoints, ramping commands).
+        A constant, or a callable ``t -> float`` for time-varying
+        references (``PythonBlock``; DeprecationWarning).
     switch
         Either a device name (resolved via
         ``builder.switch_index_of``) or an integer bit position.
     freq
-        PWM carrier frequency in Hz. The PI is throttled to one
+        PWM carrier frequency in Hz. Passed as ``closed_loops=[loop]``,
+        ``simulate()`` runs one PI update at every
+        ``t_start + k / freq`` (``ceil(span * freq)`` updates, the
+        first at ``t_start``) on ``pwl`` and ``trbdf2``. Calling
+        ``loop.step_observer`` yourself every step throttles it to one
         update per ``T_PWM = 1 / freq``.
     t_start
-        Simulation start time, used to align the throttle's first
-        tick. Defaults to 0.
+        Ignored since 2.1: the graph's ticks align to the first instant
+        it sees (``simulate()``'s ``t_start``).
 
     Examples
     --------
@@ -1273,7 +1416,7 @@ def bind_pi_to_switch(
         loop = ps.control.bind_pi_to_switch(
             builder,
             pi=pi,
-            measured=lambda x: x[builder.node_id_of("vout")],
+            measured="vout",
             setpoint=5.0,
             switch="Q1",
             freq=10e3,
@@ -1282,11 +1425,6 @@ def bind_pi_to_switch(
                           switch_fn=loop.switch_fn,
                           step_observer=loop.step_observer)
     """
-    # Import lazily so `pulsim.control` doesn't depend on the C++
-    # binding at module-import time (test fixtures sometimes import
-    # control.py without the kernel).
-    from . import SwitchStateMask as _Mask
-
     if freq <= 0:
         raise ValueError(f"freq must be > 0 Hz; got {freq}")
 
@@ -1307,61 +1445,23 @@ def bind_pi_to_switch(
             f"num_switches={n_switches}"
         )
 
-    # Shared mutable state — lives in this closure. The factory hides
-    # the `[0.5]` / `[t_start - T_PWM]` lists callers used to write
-    # by hand.
-    duty_state = [0.5]
-    last_tick = [t_start - T_PWM]  # forces immediate first update
-    duty_history: "list[tuple[float, float]]" = []
-    error_history: "list[tuple[float, float]]" = []
-
-    def switch_fn(t: float):
-        mask = _Mask(n_switches)
-        if pwm_on(t, T_PWM, duty_state[0]):
-            mask.set(idx, True)
-        return mask
-
-    # Setpoint can be a constant (most common) or a callable
-    # `t -> float` for time-varying references (load steps,
-    # ramping commands).
-    _sp_is_callable = callable(setpoint)
-
-    def _tick(t: float, x) -> None:
-        """One controller update, UNCONDITIONALLY.
-
-        `step_observer` below throttles this for engines that call
-        an observer every step and need the loop itself to decide
-        when a period has elapsed. An engine that SCHEDULES the
-        cadence — `engine='auto'` lands a step boundary on every
-        k·T_ctrl — must call this instead: the difference of two
-        exact multiples of T is a floating-point hair BELOW T, so
-        the throttle rejects a third of the scheduled ticks
-        (measured: 129 PI updates for 200 scheduled ticks).
-        """
-        last_tick[0] = t
-        m = float(measured(x))
-        sp = float(setpoint(t)) if _sp_is_callable else float(setpoint)
-        error = sp - m
-        new_duty = pi.update(setpoint=sp, measured=m, dt=T_PWM)
-        duty_state[0] = float(new_duty)
-        duty_history.append((t, duty_state[0]))
-        error_history.append((t, error))
-
-    def step_observer(t: float, x) -> None:
-        # Throttle: skip until at least one T_PWM has elapsed since
-        # the last update. Prevents the loop from chasing PWM ripple.
-        if t - last_tick[0] < T_PWM:
-            return
-        _tick(t, x)
-
-    # How a scheduling engine reaches past the throttle.
-    step_observer.tick = _tick  # type: ignore[attr-defined]
-
+    # A control graph (label time, one group at T_PWM): PI in the kernel,
+    # the gate pwm_on(t, T_PWM, duty) in C++. t_start: the graph ticks
+    # from the first instant it sees (simulate()'s t_start).
+    del t_start
+    graph, step_observer = _pi_loop_graph(builder, pi, measured, setpoint,
+                                          T_PWM, "bind_pi_to_switch")
+    switch_fn = graph._cxx_chain.make_pwm_gate(
+        n_switches, [("duty", idx, T_PWM, 0.0)])
+    # Read by periodic_steady_state: a gate driven by controller state
+    # is refused by name (the shooting state does not hold the PI).
+    switch_fn._closed_loop = "bind_pi_to_switch"  # type: ignore[attr-defined]
+    switch_fn._graph = graph  # type: ignore[attr-defined]
     return ClosedLoop(
         switch_fn=switch_fn,
         step_observer=step_observer,
-        duty_history=duty_history,
-        error_history=error_history,
+        duty_history=_TickHistory(graph, "duty"),
+        error_history=_TickHistory(graph, "error"),
         period=T_PWM,
     )
 
@@ -1370,7 +1470,7 @@ def bind_pi_to_duty_callable(
     builder,
     *,
     pi: PIController,
-    measured: "Callable[[object], float]",
+    measured: "str | Callable[[object], float]",
     setpoint: "float | Callable[[float], float]",
     freq: float,
     t_start: float = 0.0,
@@ -1408,43 +1508,13 @@ def bind_pi_to_duty_callable(
         raise ValueError(f"freq must be > 0 Hz; got {freq}")
 
     T_PWM = 1.0 / float(freq)
-    duty_state = [0.5]
-    last_tick = [t_start - T_PWM]
-    duty_history: "list[tuple[float, float]]" = []
+    del t_start
+    graph, step_observer = _pi_loop_graph(builder, pi, measured, setpoint,
+                                          T_PWM, "bind_pi_to_duty_callable")
+    cxx = graph._cxx_chain
 
     def duty_get() -> float:
-        return duty_state[0]
+        return cxx.sink_value("duty")
+    duty_get._closed_loop = "bind_pi_to_duty_callable"  # type: ignore[attr-defined]
 
-    _sp_is_callable = callable(setpoint)
-
-    def _tick(t: float, x) -> None:
-        """One controller update, UNCONDITIONALLY.
-
-        `step_observer` below throttles this for engines that call
-        an observer every step and need the loop itself to decide
-        when a period has elapsed. An engine that SCHEDULES the
-        cadence — `engine='auto'` lands a step boundary on every
-        k·T_ctrl — must call this instead: the difference of two
-        exact multiples of T is a floating-point hair BELOW T, so
-        the throttle rejects a third of the scheduled ticks
-        (measured: 129 PI updates for 200 scheduled ticks).
-        """
-        last_tick[0] = t
-        sp = float(setpoint(t)) if _sp_is_callable else float(setpoint)
-        new_duty = pi.update(
-            setpoint=sp,
-            measured=float(measured(x)),
-            dt=T_PWM,
-        )
-        duty_state[0] = float(new_duty)
-        duty_history.append((t, duty_state[0]))
-
-    def step_observer(t: float, x) -> None:
-        if t - last_tick[0] < T_PWM:
-            return
-        _tick(t, x)
-
-    step_observer.tick = _tick  # type: ignore[attr-defined]
-    step_observer.period = T_PWM  # type: ignore[attr-defined]
-
-    return duty_get, step_observer, duty_history
+    return duty_get, step_observer, _TickHistory(graph, "duty")

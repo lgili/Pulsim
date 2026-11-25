@@ -440,6 +440,41 @@ def test_plecs_xml_refuses_formulas_by_name(tmp_path):
         lib.import_plecs_xml(g, ignore_formula=True)
 
 
+def test_plecs_table_and_formula_evaluated_with_variables(tmp_path):
+    """add-power-mosfet-datasheet-device 4.5: import-time evaluation."""
+    g = tmp_path / "G.xml"
+    g.write_text(_IGBT.replace("<ComputationMethod>Table only</ComputationMethod>",
+                               "<ComputationMethod>Table and formula</ComputationMethod>"
+                               "<Formula>E*(1+0.02*(Rg-10))</Formula>", 1))
+    raw = lib.import_plecs_xml(_write(tmp_path, _IGBT))
+    part = lib.import_plecs_xml(g, variables={"Rg": 20})
+    assert np.allclose(part.loss_tables["Eon"].energy, 1.2 * raw.loss_tables["Eon"].energy)
+    assert np.array_equal(part.loss_tables["Eoff"].energy, raw.loss_tables["Eoff"].energy)
+    assert "E*(1+0.02*(Rg-10))" in part.provenance.note and "'Rg': 20.0" in part.provenance.note
+    with pytest.raises(lib.PlecsImportError, match="Rg"):
+        lib.import_plecs_xml(g)
+    with pytest.raises(lib.PlecsImportError, match=r"needs \['Rg'\]"):
+        lib.import_plecs_xml(g, variables={"Vge": 15})
+    h = tmp_path / "H.xml"
+    h.write_text(_IGBT.replace("<ComputationMethod>Table only</ComputationMethod>",
+                               "<ComputationMethod>Table and formula</ComputationMethod>"
+                               "<Formula>__import__('os').getcwd()</Formula>", 1))
+    with pytest.raises(lib.PlecsImportError, match="does not accept"):
+        lib.import_plecs_xml(h, variables={})
+    k = tmp_path / "K.xml"
+    k.write_text(_IGBT.replace("<ComputationMethod>Table only</ComputationMethod>",
+                               "<ComputationMethod>Table and formula</ComputationMethod>"
+                               "<Formula>E*lookup('t', i)</Formula>", 1))
+    with pytest.raises(lib.PlecsImportError, match="lookup"):
+        lib.import_plecs_xml(k, variables={"t": 1.0})
+
+
+def _write(tmp_path, text):
+    f = tmp_path / "raw.xml"
+    f.write_text(text)
+    return f
+
+
 @pytest.mark.parametrize("old,new,frag", [
     ("<Voltage>0 2.0 4.0</Voltage>", "<Voltage>0 2.0</Voltage>", "CurrentAxis has 3"),
     ('<Package class="IGBT"', '<Package class="Triac"', "Triac"),

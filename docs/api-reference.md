@@ -31,7 +31,7 @@ p.CircuitBuilder()
   .add_multi_winding_transformer(...)   # N windings, no ceiling
   .add_saturable_transformer_n(...)     # N secondaries on one gapped core
   .add_diode(...)
-  .add_nonlinear_diode(...)
+  .add_shockley_diode(...)
   .add_switch(...)
   .add_mosfet(...)
   .add_mosfet_with_body_diode(...)
@@ -39,6 +39,9 @@ p.CircuitBuilder()
   .add_igbt(...)
   .add_igbt_level1(...)
   .add_vcvs(...)
+  .add_vccs(...) / .add_cccs(...) / .add_ccvs(...) / .add_gyrator(...)
+  .add_sine_current_source(...) / .add_pulse_current_source(...)
+  .add_pwl_current_source(...)        # table i(t)
 
 # Topology / device handles.
 p.Graph, p.DevicePool, p.SwitchStateMask
@@ -73,11 +76,26 @@ The one-call high-level API (proposal #3.3). Builds the PWL cache, derives a def
 | `dt` | `float` or `None` | `None` | Fixed time step, seconds. Passing it selects the fixed-step `pwl` engine; omit it to let `engine='auto'` pick the engine and step. |
 | `t_start` | `float` | `0.0` | Start time. |
 | `switch_fn` | `Callable[[float], SwitchStateMask]` | all closed | Switch driver. |
-| `b_extra_fn` | `Callable[[float], list[float]]` | `None` | Per-step constant residual extras. |
+| `b_extra_fn` | `Callable[[float], list[float]]` | `None` | Per-step addend to the residual F = J·x + b. An entry e on a voltage source's row gives v(+) − v(−) = V − e (write −v to add v); on a node row it draws a current e out of the node. Index rows with `pool.branch_var_id_for_source(id, graph)` / `node_id_of` AFTER the last `add_*`: a branch row is `num_nodes + k` and moves when a node is added. |
 | `start_from_dc_op` | `bool` | `False` | Seed initial state from DC OP. |
-| `enable_nonlinear_refresh` | `bool` or `None` | auto-detect | Force-enable Newton refresh. `None` = auto via `pool.has_nonlinear_devices()`. |
+| `enable_nonlinear_refresh` | `bool` or `None` | `None` | `None`: the kernel stamps the Newton devices when the circuit has any. `True` forces the static chain. `False` on a circuit with a smooth / Shockley diode, MOSFET or IGBT raises `UnsupportedError` (it used to simulate them as open circuits). |
 | `max_newton_iterations` | `int` | `0` (engine default) | Newton iteration cap. |
 | `max_event_iterations` | `int` or `None` | `None` (engine default) | Event-iteration cap. |
+| `allow_implicit_segments` | `bool` or `None` | `None` | `engine='exact'` only. A segment the exact kernel cannot step raises `UnsupportedError('dsed', feature)` with `feature` the failed rule (`'source'`: a `b_extra_fn`; `'cost'`: a stiff, near-defective mode; `'extraction'`: the extractor rejected the circuit) unless `True`, which integrates it numerically. Refused by name on other engines. |
+| `engine` | `str` | `'auto'` | `'auto'`, `'pwl'`, `'trbdf2'` or `'exact'`. `'exact'` is the canonical name of the event-driven exact engine and `'dsed'` its alias: one engine, bit-identical runs; `result.engine_used` and every refusal's `engine` field read `'dsed'` (the capability-table column) until the default flip. |
+
+`pulsim.exact_route(builder, t_end, switch_fn=None, **kw)` runs the
+circuit on `engine='exact'` and classifies every mask it visits as
+exact-eligible or not (add-exact-propagator-strategy D11, report only —
+`'auto'` does not read it): `{"exact": bool, "reason": ..., "segments":
+[{"mask", "exact", "reason", "device", "kind", "detail", "tier",
+"n_segments"}, ...]}`. Reasons: `'device'` (a device with no linear / PWL
+law, named), `'source'` (a user `b_extra_fn`; sine, PWM and pulse sources are exact),
+`'extraction'` (coupled inductors, a capacitor loop, an inductor
+cut-set), `'cost'` (the mask's propagator outside its accuracy tiers).
+The same rows ride on every exact run as `result.exact["segments"]`, with
+`result.exact["auto_would_route"]`: `True` when every visited mask was
+exact (what `'auto'` would route to exact; report only, read by nothing).
 
 Returns a `SimulationResult` with parallel arrays:
 - `result.times` — `list[float]`. With a fixed `dt`: length `floor((t_end − t_start) / dt) + 1`, or that divided by `store_every` (rounded up) when decimation is on. Without one the grid is **variable-step** and the spacing is not uniform — average with [the time-weighted helpers](#statistics-over-a-result-time-weighted), not `.mean()`.
@@ -97,6 +115,40 @@ step. The solver still integrates at `dt`; the recorded grid stays
 strictly uniform at `m · dt` (so FFT / harmonic analysis on the
 result remains valid), and memory drops by the same factor.
 `opts.expected_sample_count()` reports what a run will store.
+
+Every keyword is checked against the engine the run lands on before
+anything is solved: honoured, or refused with `UnsupportedError`
+(`feature` = the keyword). `pulsim.option_capabilities()` returns the
+option x engine table ([known limitations](known-limitations.md#option-capability-matrix)).
+Every pulsim error derives from `pulsim.PulsimError` and keeps its
+standard base (`ValueError`, `RuntimeError`, `KeyError`).
+
+## `Simulation(circuit, options)` — the kernel run object
+
+```python
+import pulsim as p
+c = b.build()               # b: a CircuitBuilder; c: an immutable pulsim.Circuit
+sim = p.Simulation(c, p.RunOptions(t_end=2e-4, dt=2e-7, engine="pwl"))
+sim.set_switch_fn(p.make_pwm_switch_fn(50e3, 0.4, 0, 1))
+first = sim.run_until(1e-4)                    # split run ...
+rest = sim.run()                               # ... equals one run
+print(sim.plan, sim.diagnostics)
+```
+
+The constructor plans the run: preflight ties on its own copy (the
+caller's circuit is unchanged), routing (`plan['engine']`,
+`plan['route_reasons']`), the option and device refusals. `RunOptions`
+fields are the `simulate()` keywords; `None` means "not set" and the
+default comes from one kernel table (`sim::Defaults`). Attachments:
+`set_switch_fn`, `add_tick(period, fn, offset=0.0)`, `set_source_term`,
+`set_step_observer` and `set_tick_before` (`pwl`), `set_live_ring`,
+`set_cancel`, `set_initial_state`; `cache` is the run's PWL cache (built
+on first use); `snapshot()` / `restore()` continue a run exactly.
+Engines `'pwl'` and `'trbdf2'` — `simulate()` itself runs them through
+this object; `'exact'` is refused, and so are C blocks unless
+`controls_composed=True` says the attachments drive them (use
+`simulate()`, which composes them). Invalid values raise
+`pulsim.OptionsError` (`.option`).
 
 ## `CircuitBuilder`
 
@@ -122,6 +174,29 @@ Top-level fluent builder. Stores a `Graph` (topology) + `DevicePool` (per-device
 | `add_sine_voltage_source` | `(name, n_pos, n_neg, v_dc, v_amplitude, frequency, phase=0)` |
 | `add_pulse_voltage_source` | `(name, n_pos, n_neg, v_initial, v_pulsed, t_start, pulse_width, period=0, rise_time=0, fall_time=0)` |
 | `add_vcvs` | `(name, in_pos, in_neg, out_pos, out_neg, gain)` |
+| `add_vccs` | `(name, in_pos, in_neg, n_pos, n_neg, gm)` — `gm·(V(in_pos) − V(in_neg))` leaves at `n_pos` |
+| `add_cccs` | `(name, control, n_pos, n_neg, gain)` — `gain·i(control)` leaves at `n_pos` |
+| `add_ccvs` | `(name, control, out_pos, out_neg, rm)` — `V(out_pos) − V(out_neg) = rm·i(control)` |
+| `add_gyrator` | `(name, p1_pos, p1_neg, p2_pos, p2_neg, g)` — `i1 = g·v2`, `i2 = −g·v1`, both into the `_pos` terminals; a `C` on one port is `C/g²` of inductance on the other |
+| `add_sine_current_source` | `(name, n_pos, n_neg, i_dc, i_amplitude, frequency, phase=0)` |
+| `add_pulse_current_source` | `(name, n_pos, n_neg, i_initial, i_pulsed, t_start, pulse_width, period=0, rise_time=0, fall_time=0)` |
+| `add_pwl_current_source` | `(name, n_pos, n_neg, t, i, periodic=False)` — linear between knots, `i[0]` before `t[0]`, `i[-1]` after (or repeated with period `t[-1] − t[0]`) |
+
+Every current source (DC, sine, pulse, table, `vccs`, `cccs`) drives a
+positive value OUT of `n_pos` into the circuit: 10 mA into 1 kΩ from
+`n_pos` to ground reads +10 V, and `res.i` of the source reads +10 mA.
+`control` names a branch added earlier that carries a current unknown:
+a voltage source of any kind (a 0 V one is the usual sense element), an
+inductor, a VCVS, a CCVS or an ideal-transformer secondary; the current
+is positive from that branch's first node to its second. `res.i` covers
+the new kinds; `res.i(gyrator, port=1)` gives port 1 (port 2 by default).
+A `ccvs` is a voltage source: `res.i` is its branch current, positive
+from `out_pos` through it to `out_neg`.
+
+All seven run on `pwl`, `trbdf2`, `dsed` and the DC operating point (a
+waveform source at its `t = 0` value); the AC sweep takes the four
+controlled ones, and the waveform current sources, being independent,
+add no AC excitation. `trbdf2` lands on table knots and pulse corners.
 
 ### Passive devices
 
@@ -147,17 +222,17 @@ Top-level fluent builder. Stores a `Graph` (topology) + `DevicePool` (per-device
 |---|---|
 | `add_switch` | `(name, n_pos, n_neg, g_on, g_off)` |
 | `add_diode` | `(name, anode, cathode, g_on, g_off, V_th=0, V_f=0)` — binary switched diode; `V_f` is the forward drop while ON (PSIM's diode voltage drop: `v = V_f + i/g_on`), `V_th` the turn-on threshold (effectively `max(V_th, V_f)`), not a drop |
-| `add_nonlinear_diode` | `(name, anode, cathode, params: IdealDiodeParams)` |
+| `add_nonlinear_diode` | **retired** — raises `RetiredDeviceError`: its law sources power for `0 < v < V_F0` (−1.39 A out of the anode at +0.636 V). Use `add_diode(..., V_f=)` or `add_shockley_diode`. `allow_non_passive=True` builds the legacy device (test fixtures only); YAML `type: nonlinear_diode` needs `allow_non_passive: true` |
 
 ### Nonlinear actives
 
 | Method | Signature |
 |---|---|
-| `add_mosfet` | `(name, drain, source, R_on=1e-3, R_off=1e9, body_diode=True, V_F=0.7)` — linear switch model PLUS an anti-parallel body diode `<name>_body`, ON by default. Both are switching branches, so each `add_mosfet` takes **two** bits of the `SwitchStateMask`; use `builder.switch_index_of(name)` |
-| `add_mosfet_with_body_diode` | `(name, drain, source, R_on=1e-3, R_off=1e9, V_F=0.7, g_on_diode=1e3, g_off_diode=1e-9)` |
-| `add_mosfet_level1` | `(name, drain, source, gate, K, V_T, lambda_=0.02, kappa=15.0, with_body_diode=True)` |
+| `add_mosfet` | `(name, drain, source, R_on=1e-3, R_off=1e9, body_diode=True, V_F=0.7)` — linear switch model PLUS an anti-parallel body diode `<name>_body`, ON by default; `V_F` is its conduction drop (`v_SD = V_F + i/1e3 S`). Both are switching branches, so each `add_mosfet` takes **two** bits of the `SwitchStateMask`; use `builder.switch_index_of(name)` |
+| `add_mosfet_with_body_diode` | `(name, drain, source, R_on=1e-3, R_off=1e9, V_F=0.7, g_on_diode=1e3, g_off_diode=1e-9)` — `V_F` is the body diode's conduction drop (`v_SD = V_F + i/g_on_diode`) |
+| `add_mosfet_level1` | `(name, drain, source, gate, K, V_T, lambda_=0.02, kappa=15.0, with_body_diode=True, V_F=0.7)` — `V_F` is the body diode's conduction drop |
 | `add_igbt` | `(name, collector, emitter, R_on=1e-2, R_off=1e9)` (linear) |
-| `add_igbt_level1` | `(name, collector, emitter, gate, V_CE_sat=1.5, R_CE_sat=0.05, V_T=5.0, kappa=10.0, v_knee=0.01, with_fwd=False, tau_tail=0.0, k_tail=0.0)` |
+| `add_igbt_level1` | `(name, collector, emitter, gate, V_CE_sat=1.5, R_CE_sat=0.05, V_T=5.0, kappa=10.0, v_knee=0.01, with_fwd=False, tau_tail=0.0, k_tail=0.0, V_F=0.7)` — `V_F` is the freewheeling diode's conduction drop |
 
 ## `DevicePool`
 
@@ -165,7 +240,8 @@ Opaque parameter store. Most methods are not exposed to Python — you go throug
 
 | Method | Returns | Use case |
 |---|---|---|
-| `has_nonlinear_devices()` | `bool` | Auto-detect by `simulate()`. |
+| `has_nonlinear_devices()` | `bool` | Alias of `requires_newton()`: any kind the capability table (`pulsim.engine_capabilities()`) marks NewtonStatic / NewtonStateful. |
+| `requires_static_refresh()` | `bool` | Any smooth / Shockley diode, MOSFET or IGBT (the kernel then builds the static Newton chain). |
 
 ## Source-helper factories
 
@@ -224,6 +300,24 @@ opts.store_every              # int
   `(num_steps, state_size)` (zero-copy view)
 - `result.commutation_events` — list[CommutationEvent] (event-detection details)
 - `result.num_steps()` — int
+- `result.step_loop_python_callbacks` — tuple naming the Python callables
+  `simulate()` put in the step loop (`"switch_fn"`, `"b_extra_fn"`,
+  `"step_observer"`, `"should_continue"`, `"closed_loops"`); `()` when the
+  loop ran fully native (e.g. a `make_pwm_switch_fn` schedule)
+- `result.control_tick_counts` / `result.control_tick_jitter_max` — ticks
+  delivered per controller source, and the largest lateness on the `dt`
+  grid
+- `result.n_restart_steps` / `result.n_restart_factorizations` — SDIRK
+  restart steps taken and the factorisations they caused, with
+  `discontinuity_restart=True` (0 otherwise)
+- `result.newton` — `NewtonCounters` of the run's Newton workspace
+  (`pwl` / `trbdf2`): `solves`, `iterations`, `analyses`,
+  `factorizations`, `partial_refactors`, `lm_attempts` and
+  `iterations_per_solve` (the iteration count of every Newton call)
+- `result.newton_roundoff_accepts` / `result.newton_roundoff_omega_max` /
+  `result.newton_roundoff_row` — transient Newton solves accepted at row
+  roundoff (row-wise backward error ≤ 8 eps) instead of aborting, the
+  worst backward error and its MNA row (DC never accepts)
 
 ## Statistics over a result (time-weighted)
 
@@ -240,8 +334,8 @@ average output over 2–3 ms:
 | engine | samples | `v[t >= 2e-3].mean()` | `p.time_average(t, v, 2e-3)` |
 |---|---:|---:|---:|
 | `pwl`, `dt=2e-7` | 15001 | 6.3295 V | 6.3308 V |
-| `trbdf2`, `dt=4e-6` (ceiling) | 1775 | **3.0408 V** | 6.3298 V |
-| `auto`, no `dt` | 1297 | **5.0070 V** | 6.3300 V |
+| `trbdf2`, `dt=4e-6` (ceiling) | 1270 | **3.9677 V** | 6.3298 V |
+| `auto`, no `dt` | 1432 | **4.5746 V** | 6.3300 V |
 
 The engines agree; the sample mean does not. The same applies to
 `np.sqrt((v**2).mean())`, and to slicing by index
@@ -283,6 +377,70 @@ What they do:
   NaN/inf inside the window. `steady_state_stats` also requires
   exactly one of `t_from=` / `last=`: averaging from `t = 0` would
   fold the start-up transient into a "steady-state" figure.
+
+### Kernel recorders (`simulate(recorders=...)`)
+
+The same arithmetic, computed by the kernel for probe expressions, per
+declared window and per period, with both limits at events:
+
+```python
+rec = p.Recorder("bus", ["v(dp) - v(dn)", "v(dp,dn)*i(RL)"],
+                 keep="none",                  # 'every' | 'decimate' (every=n) | 'none'
+                 windows=[(30e-3, 40e-3)],     # clipped exactly
+                 period=20e-3, offset=0.0)     # complete periods only
+res = p.simulate(b, t_end=40e-3, recorders=[rec])
+r = res.recorded["bus"]
+r.windows["v(dp) - v(dn)"]["avg"]   # also integral, rms, min, t_min, max, t_max, t0, t1
+r.periods["v(dp) - v(dn)"]["rms"]
+r.event_t, r.event_left[...], r.event_right[...]   # both limits at each event
+r.event_resolution, r.event_t_right                # 'exact' | 'settled' | 'within_dt'
+r.feeding, res.recorder_feed                       # 'in-loop' | 'stored-arrays'
+```
+
+- A window that starts exactly on an event starts from the right limit,
+  one that ends on an event ends on the left limit, and min / max see
+  both limits of events inside it.
+- An impulse (an ideal switch closing a capacitor onto a source, a
+  restart's jump) is a Dirac: `integral` is the regular part on every
+  engine, and the jump is reported by `res.reinit_records` (charge or
+  flux `lambda_`, energy `dW`), counted in a window that contains its
+  instant or starts at it.
+- Event rows say how the right value was obtained (`event_resolution`):
+  `'exact'` — the exact engine's right limit at the instant; `'settled'`
+  — trbdf2's settled post-event state at the instant (the next line starts
+  from it); `'within_dt'` — a bracket: the left limit at `event_t`, the
+  end of the first step under the new mode at `event_t_right` (pwl always,
+  trbdf2 where its settle did not report). No right limit is invented.
+- RMS integrates the line between samples exactly, `h(a² + ab + b²)/3`;
+  a product probe is linear between its own samples, as
+  `time_average` of the product trace is. EXCEPT in the exact engine's
+  loop: there each step's integral and RMS are the closed form of its mode
+  (exact for the trajectory, the same at any `dt` / `output_rtol`; a probe
+  that is a polynomial of degree ≤ 2 in its readings; sine, pulse, PWM and
+  table sources included: they are states of the mode). A piece with no
+  closed form (another probe, a user `b_extra_fn`) is the line and warns;
+  `res.recorder_feed["closed_form"]` counts both. min / max are the values
+  at the samples and window edges.
+- `res.avg` / `res.rms` / `res.integral` and the stored-array pass are the
+  line between STORED samples: exact for the fixed engine's rule, O(h²)
+  otherwise — `engine='exact'` without `dt` stores one sample per 10 µs
+  (1e-4 off on a buck's window average). Use an in-loop recorder there.
+- **Feeding mode per engine** (`r.feeding`, `res.recorder_feed`):
+
+  | engine | mode | |
+  |---|---|---|
+  | `pwl`, `trbdf2` | `'in-loop'` | fed from the engine's step hooks while it runs: every accepted step, whatever `store_every` keeps |
+  | `exact` (event-driven integrator: diodes, loss ports, controllers, `integrator='rk45'`) | `'in-loop'` | fed from its step hooks: full MNA states, event rows at their exact instants (resolution `'exact'`); not with the junction temperature loop or a fresh `t_start` run |
+  | `exact` (`integrator='auto'` / `'bdf2'`) | `'stored-arrays'` | a pass over the stored result (its stored right limits are exact) |
+
+  In-loop readings are functions of the state alone: `v()`, `i()` of an
+  inductor / voltage source / branch-form switch or diode / resistor, and
+  `p()` of those; any other reading, and runs that bypass the kernel
+  Simulation object, use the stored-array pass (`res.recorder_feed["why"]`).
+  `store_every > 1` works with in-loop recorders (statistics equal the
+  full run's) and is refused by name otherwise; `resume_from` continues the
+  record from the snapshot's recorder state.
+  `keep="decimate"` keeps fewer rows with statistics from every step.
 - `steady_state_stats(result, "name")` looks the name up as a node
   (`result.v`) and as a branch (`result.i`); a name that is both raises
   and asks for `kind='v'` / `kind='i'`. An array must be sampled on
@@ -298,6 +456,35 @@ explicit `dt` the grid is uniform and `.mean()` agrees with
 `time_average` to about four significant digits (the difference is the
 half weight the trapezoid gives the two end samples) — the helpers are
 still the form that keeps working when the `dt` is dropped.
+
+## Parameter sweeps — `sweep` / `monte_carlo`
+
+```python
+out = p.sweep(builder_factory, params={"R": [5, 10, 20]}, kpi_fn=kpi,
+              parallel=True, n_workers=4, backend="auto",
+              t_end=1e-3, dt=1e-7, switch_fn=pwm)
+out.kpis["v_out"]; out.failed; out.backend   # "serial" | "thread" | "process"
+```
+
+`backend` applies when `parallel=True`:
+
+- `"auto"` (default) runs the first job in the calling thread and reads
+  its `res.step_loop_python_callbacks`. Empty (native schedule) → the
+  other jobs run on a thread pool; the kernel releases the GIL, so they
+  run in parallel. Any Python callable → a process pool, since
+  threads would serialise on the GIL.
+- `"thread"` forces threads. `builder_factory` and `kpi_fn` then run
+  concurrently in one interpreter: they must not share mutable state.
+  Closures work (nothing is pickled).
+- `"process"` forces processes (the model before 2.1): every argument
+  must pickle, which the native schedules from `make_pwm_switch_fn` and
+  friends do not.
+
+Results are in job order and equal the serial run on every backend. A
+job that raises is recorded in `out.failed` as `(index, message)` on the
+serial and thread backends; the process backend raises. A run without a
+`switch_fn` still installs a Python default mask today, so it reports
+`("switch_fn",)` and `"auto"` keeps processes for it.
 
 ## YAML loader
 
@@ -327,12 +514,26 @@ res = p.simulate(loaded)    # t_end / dt from the file; keywords override
 ```
 
 `simulate(loaded)` takes `t_end`, `dt` (when the file sets one),
-`t_start` and `store_every` from the `simulation:` block; any keyword
-you pass wins. The other `simulation:` fields (Newton tolerances,
-`integrator`, ...) stay on `loaded.options` for you to forward. A
+`t_start` and `store_every` from the `simulation:` block, and every
+other key the file sets (`loaded.simulation_keys`: Newton tolerances and
+caps, `integrator`, `rtol`, `atol`, `dt_init`) as the keyword of the same
+name; a keyword you pass, then `solver=`, wins. A key the engine the run
+lands on cannot honour is not used and raises one `RuntimeWarning`. A
 `LoadedCircuit` with no top-level `simulation:` block (or no `t_end` in
 it) is refused with a `ValueError` naming the file, unless you pass
 `t_end=`.
+
+Controlled and waveform-current-source types: `vccs` (`in_pos`,
+`in_neg`, `from`, `to`, `gm`), `ccvs` (`control`, `out_pos`, `out_neg`,
+`rm`), `cccs` (`control`, `from`, `to`, `gain`), `gyrator` (`p1_pos`,
+`p1_neg`, `p2_pos`, `p2_neg`, `g`), `sine_current_source` (`from`, `to`,
+`i_dc`, `i_amplitude`, `frequency`, `phase`), `pulse_current_source`
+(`from`, `to`, `i_initial`, `i_pulsed`, `t_start`, `pulse_width`,
+`period`, `rise_time`, `fall_time`), `pwl_current_source` (`from`, `to`,
+`t` and `i` lists, or `file:` a two-column comma- or space-separated
+table relative to the working directory, `#` comments allowed;
+`periodic`). These types are strict: an unknown key is an error naming
+the device.
 
 The YAML describes the circuit and run settings only — build any gate
 drive yourself (e.g. `make_pwm_switch_fn`) and pass it as `switch_fn=`.
@@ -388,25 +589,63 @@ second = p.simulate(b, t_end=5e-3, dt=2e-7, resume_from=first.final_snapshot)
 ```
 
 `result.final_snapshot` carries the whole state at the end of a run:
-the MNA vector `x`, the linear trapezoidal companion `history`, the
-solver-owned `diode_on` bits, and one named field per stateful device
-kind — `saturable_history` (7 reals per saturable, gapped-core or
-hysteretic-core inductor, and per saturable-transformer magnetising
-branch: λ, i, v, then the Jiles-Atherton H, M, branch direction and
-sub-step count), `coss_history` (3), `lauritzen_history` (2),
-`igbt_tail_history` (2), `pmsm_history` (9 per machine). Snapshots
-pickle.
+the MNA vector `x`, every device state in one flat vector `dev_state`,
+its layout `dev_layout` (instance count per block; the block names are
+`SolverSnapshot.dev_layout_names`: `linear_companion`,
+`saturable_inductor`, `nonlinear_capacitor`, `lauritzen_diode`,
+`igbt_tail`, `pmsm_mna`) and `layout_signature`, and the solver-owned
+mode bits `mask` (which switched diodes conduct). A fixed-step snapshot
+also carries its time grid (`grid_origin`, `grid_step`, `grid_dt`).
+Snapshots pickle (version 4); version-3 pickles and those written by
+Pulsim 2.0 still load and resume (on a restarted grid, see below).
 
-* `engine='pwl'` resumes **exactly**: a two-segment run reproduces the
-  continuous one to machine precision.
+The 2.0 fields remain as views of the blocks (soft-deprecated: no
+warning yet; to be removed after one release): `history`
+(2 reals per linear L / C), `saturable_history` (7 per saturable,
+gapped-core or hysteretic-core inductor and per saturable-transformer
+magnetising branch: λ, i, v, then the Jiles-Atherton H, M, branch
+direction and sub-step count), `coss_history` (3), `lauritzen_history`
+(2), `igbt_tail_history` (2), `pmsm_history` (9 per machine), and
+`diode_on` (= `mask`). Writing a view turns the snapshot into a
+2.0-style payload that a resume converts field by field.
+
+* `engine='pwl'`: a two-segment run with the same `dt` is the continuous
+  run bit for bit (states, times and final device state), split between
+  gate edges or exactly on one: the resumed run continues the snapshot's
+  time grid. A snapshot without a grid (version 3, 2.0, hand-built, or
+  TR-BDF2's) restarts the grid at its `t`, and an edge can then land one
+  rounding apart (within 1e-11 of each state's scale, measured 8e-12).
 * `engine='trbdf2'` / `'auto'` fills a snapshot and resumes from one to
   the run's own tolerance — the step controller's state (last accepted
   `h`, the LTE history) is not carried, so the resumed segment restarts
-  from `h_init`. A TR-BDF2 snapshot resumes exactly on the fixed engine.
-* `engine='dsed'` has no snapshot of its own and refuses `resume_from=`
-  by name.
-* An invalid snapshot, or one whose device histories do not match the
-  circuit, is refused by name rather than resumed from zero. Builder
+  from `h_init`. A TR-BDF2 snapshot resumes on the fixed engine (from its
+  `x`, device state and mode bits), except one taken where the TR-BDF2
+  run ended exactly on a gate edge (`post_edge_derivatives` is True): its
+  `x` is the pre-edge solve but its device derivatives are already the
+  post-edge ones, and the fixed engine refuses it by name (started from
+  that pair it rang and aborted at the next edge). TR-BDF2 resumes from
+  it.
+* `engine='dsed'` (`'exact'`) writes a snapshot on its event-driven
+  integrator (the one diodes, loss ports and controllers use) and on the
+  default `'auto'` integrator of a diode-free circuit (its own payload,
+  first value 101: a resume continues on `'auto'`, and another integrator
+  or control ticks with it are refused by name; `'bdf2'` writes none):
+  the reduced state, the mode and the schedule position travel in the
+  controller block with kind 3 (no new pickle field), the loss tracker's
+  state in field 17, the control ticks' grid in fields 15-16. A resume at
+  an instant the uninterrupted run also stops at (a gate edge, a located
+  event, a control tick) continues it bit for bit on one machine; a split
+  mid-interval takes another step grid until the next gate edge, so the
+  two agree to rounding. `t_end` is absolute and `t_start` must be 0 or the
+  snapshot's `t`. A pwl / trbdf2 snapshot resumes on it where its full
+  state is one state of its stamped mode (the modes are decided at `t` as
+  at a start); its snapshot is refused by name on pwl and trbdf2 (no
+  companion history to continue from). An in-loop recorder's state
+  (field 18) is continued on the event-driven integrator.
+* An invalid snapshot, or one whose device layout does not match the
+  circuit, is refused by name (the first block that differs) rather
+  than resumed from zero. A snapshot without a layout (2.0 pickle,
+  hand-built, or a named field written) is checked per history by size. Builder
   initial conditions (`i0=`, `c0=`) are not applied when resuming: the
   snapshot is the state.
 
@@ -415,11 +654,91 @@ one-period map is affine only while every dynamic device is a linear
 capacitor or inductor. Settle with a transient run and use its
 `final_snapshot` instead.
 
+## Periodic steady state — `periodic_steady_state(b, *, period, switch_fn=None, start_from=None)`
+
+Newton shooting on the **true state** `x0` (capacitor voltages and
+inductor currents, the dsed reduced state, labels in
+`r.state_labels`) at the section `t = 0` — the rising edge of the
+zero-phase built-in PWM helpers. Each Newton step is one period of
+the dsed exact stepper with every event located in time, and the
+Jacobian is the monodromy `M = Φ_K·S_K·…·S_1·Φ_0` (flow Jacobians
+`e^{A h}` and saltation matrices), so the commutation pattern may
+change between iterations and DCM works. The audit's DCM buck (24 V,
+100 µH, 47 µF, 50 Ω, D = 0.3) converges from zero in 5 map
+evaluations plus one verification period to `v_C = 8.99624708729 V`
+(50-digit reference 8.99624708728943).
+
+```python
+sf = p.make_pwm_switch_fn(100e3, 0.3, b.switch_index_of("S"), b.graph.num_switches)
+r = p.periodic_steady_state(b, period=1e-5, switch_fn=sf)
+r.x0, r.state_labels, r.orbit        # state at t=0; one period (simulate result)
+r.multipliers, r.stable              # Floquet multipliers; max|mu| < 1
+r.pattern                            # [(event, instant/T)] at the orbit
+r.n_period_runs, r.residual_history  # the cost meter, Newton residuals
+r.orbit_error_estimate               # max|(I - M)^-1 (P(x0) - x0)|
+sm = r.sampled_model(inputs=[("duty", "S")], outputs=["vout"])
+sm.response([0.0])                   # H(z=1): d v_out / d D = 23.09 V
+```
+
+* **Tolerance.** `rtol` (default 1e-9) bounds the ORBIT ERROR, not
+  the residual: Newton stops when every component of `G = P(x0) − x0`
+  and of the error estimate `(I − M)⁻¹·G` (the next correction) is
+  within `rtol·(scale_i + |x0_i|)`. With a slow multiplier the error
+  is `|G|/(1 − |μ|)`: on a DCM boost (|μ| = 0.99894) a residual of
+  1.1e-9 V is 1.07e-6 V of state. The estimate includes the map's
+  rounding floor `|(I − M)⁻¹|·(u·scale)` (u the double-precision unit
+  roundoff): a residual that happens to be exactly 0 does not make
+  the orbit exact. When the map's rounding, amplified
+  by `1/(1 − |μ|)`, keeps the estimate above `rtol`, the solve raises
+  `ConvergenceError` (loosen `rtol`) instead of returning an orbit it
+  cannot vouch for.
+
+* **Other engines.** `engine="pwl", dt=T/100` (a gate edge at
+  `t = 0`, `T/dt` an integer) or `engine="trbdf2"` (step ceiling `dt`,
+  default `T/100`) shoot with that engine's own period runs — the fixed
+  engine with its restart rule — and `M` by finite differences with
+  Broyden updates: the orbit is the one that engine's transient
+  reaches (DCM buck: 12 period runs on `pwl`, 1.2e-11 of the state
+  scale from a 4000-period transient). `r.full_state` resumes a
+  transient; `sensitivities=` and nonlinear devices are refused.
+  `run_periodic_shooting` / `run_harmonic_balance` are deprecated
+  delegates of it.
+* **Multipliers.** `stable = max|μ| < 1`. An orbit with a multiplier
+  outside the unit circle is returned with `stable=False`, and
+  `r.unstable_multipliers` names each one: −1 side `flip
+  (period-doubling)`, +1 side `fold`, complex `Neimark-Sacker`. A
+  multiplier on the unit circle (a lossless LC loop, a floating
+  capacitor) is refused: the orbit is not isolated, and the error
+  names the states involved.
+* **Resume** with `simulate(..., engine='dsed', initial_state=r.x0)`.
+* **Small-signal model.** `sampled_model(inputs, outputs)` returns
+  `x[k+1] = A x[k] + B u[k]`, `y = C x + D u` with `A = M` and `B =
+  ∂P/∂u` from the same propagators: `("duty", switch)` moves the
+  switch's turn-off edges by `T` per unit, `("source", name)` is a DC
+  source's value. Outputs are state labels, inductor names or node
+  names sampled at `t = 0`. `response(f)` is `H(e^{j2πfT})`, valid
+  below `1/(2T)`.
+* **Covered** (slice 1): linear R, L, C, controlled switches, PWL
+  diodes, DC sources, sine sources whose period divides `period`,
+  gate schedules that name their edges (`make_pwm_switch_fn` & co.,
+  `NativePwm2Switch`, `NativeMultiMaskPwm`, a callable with
+  `next_edge_after`). **Refused by name**: an opaque Python
+  `switch_fn`, a schedule or source not periodic in `period`, PWM or
+  pulse voltage sources, nonlinear and stateful devices, a grazing
+  event, a marginal multiplier, an exhausted budget
+  (`max_period_runs=60`, with the residual history, last pattern and
+  last multipliers).
+* `steady_state(...)` and `frequency_response(...)` **without `dt`**
+  run on this solver (`frequency_response` takes `B` as a central
+  difference of the true-state map in `u`); with `dt` they keep the
+  fixed-engine companion-history solve, which raises "no periodic
+  orbit found" in DCM.
+
 ## SPICE import — `spice_to_builder(text_or_path, *, strict=False)`
 
 `.MODEL` cards are applied: `D(IS N RS BV IBV)` → `add_shockley_diode`
 with RS as a series resistor (BV mapped to the kernel's knee at IBV),
-LTspice `D(Ron Roff Vfwd)` → `add_nonlinear_diode`, LEVEL-1 `NMOS`
+LTspice `D(Ron Roff Vfwd)` → `add_diode(g_on = area/Ron, g_off = area/Roff, V_th = 0, V_f = Vfwd)`, LEVEL-1 `NMOS`
 → `add_mosfet_level1(K = KP·W_eff/(2·L_eff)·M, V_T = VTO, λ = LAMBDA)`
 with RD/RS series resistors and an explicit body diode when the card
 gives IS/JS, LTspice `VDMOS` → the same with K = KP/2, Rds, and the

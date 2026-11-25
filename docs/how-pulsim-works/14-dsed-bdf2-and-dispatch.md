@@ -10,22 +10,26 @@ mode segment.
 
 This chapter covers:
 
-1. **BDF2** integration + Crank-Nicolson bootstrap (§14.1).
+1. **BDF2** integration + backward-Euler bootstrap (§14.1).
 2. **Stiffness detector** — eigenvalue-based, evaluated once per
    mode segment (§14.2).
 3. **`PEDSimulatorAuto`** — the per-mode-segment dispatcher
    (§14.3).
 4. When BDF2 wins, when it doesn't (§14.4).
 
-If you only care about LTI buck/boost/half-bridge type circuits,
-the auto-dispatcher correctly classifies them as non-stiff and
-sticks to DOPRI5. The BDF2 path matters for snubber-heavy
+`integrator='auto'` first asks whether the mode has a closed-form
+propagator (LTI, constant or sine sources, non-defective
+eigenbasis). If it does, the mode is advanced **exactly** (capped at
+`dt_max` and the next gate edge) and neither integrator runs;
+`result.n_exact_steps` counts these steps. The detector below only
+chooses between DOPRI5 and BDF2 for modes without one (PWM or pulse
+sources, user `b_extra_fn`, defective eigenbasis). The BDF2 path matters for snubber-heavy
 designs, multi-level converters with cell-mismatch dynamics, and
 motors with skin-effect models.
 
 ---
 
-## 14.1 BDF2 + Crank-Nicolson bootstrap
+## 14.1 BDF2 + backward-Euler bootstrap
 
 BDF2 is an **implicit** linear multistep method. For
 $\dot{\mathbf{x}} = f(t, \mathbf{x})$ at step $n+1$:
@@ -55,25 +59,28 @@ limited by **accuracy only**, not by stability.
 
 BDF2 needs $\mathbf{x}_{n-1}$ on the first step (after a mask
 change or at $t = 0$). No prior step exists. Pulsim uses
-**Crank-Nicolson** (trapezoidal rule) for the first step — it's
-A-stable, order 2 (matches BDF2 — same local truncation error
-class), and self-starting:
+**backward Euler** for the first step — L-stable and self-starting:
 
 $$
-\Bigl(I - \tfrac{h}{2} A\Bigr)\, \mathbf{x}_{n+1}
-= \Bigl(I + \tfrac{h}{2} A\Bigr)\, \mathbf{x}_n
-  + \tfrac{h}{2}(\mathbf{b}(t_n) + \mathbf{b}(t_{n+1}))
+(I - h A)\, \mathbf{x}_{n+1} = \mathbf{x}_n + h\, \mathbf{b}(t_{n+1})
 $$
+
+It is first order for that one step; the global error of the BDF2
+recurrence that follows stays second order. Crank–Nicolson, used
+before, is A-stable but not L-stable: on a mode with $h/\tau = 100$
+it multiplies the error by $(1 - 50)/(1 + 50) = -0.96$, so a 1 nF
+node charged from 100 V through 10 Ω read 196 V after one 1 µs step.
+Backward Euler damps it by $1/(1 + 100)$.
 
 After the bootstrap step the BDF2 hot loop has $\mathbf{x}_{n-1}
-= \mathbf{x}_n$ and $\mathbf{x}_n = \mathbf{x}_{n+1}^{CN}$ for the
+= \mathbf{x}_n$ and $\mathbf{x}_n = \mathbf{x}_{n+1}^{BE}$ for the
 second step. From then on it's pure BDF2.
 
 On every gate event the scheduler invalidates the BDF2 state
 (both history $\mathbf{x}_{n-1}$ and cached LU of $J$) — the new
 mask has a new $A$, and the discontinuity in $f$ would corrupt the
 multi-step history. The next mode segment starts fresh with another
-CN bootstrap.
+backward-Euler bootstrap.
 
 ### Step size in BDF2
 
@@ -91,7 +98,7 @@ $h_{\text{BDF2}}$ (default $10^{-6}$ s). The justification:
    3-state stiff RLC benchmark validation.
 
 A future variant could add PI step control on BDF2's local error
-(estimated via the difference $\|x_{n+1}^{BDF2} - x_{n+1}^{CN}\|$).
+(for example the difference between BDF2 and a trapezoidal predictor).
 Not implemented today.
 
 ---
@@ -205,8 +212,8 @@ would:
 
 1. Pay an $O(n_s^3)$ eigensolve on every step ($n_s = 2$ → 1 µs,
    $n_s = 10$ → 50 µs, blowing past the integrator cost).
-2. Risk thrashing — BDF2's bootstrap is stateful (it's order 1 on
-   the CN step, order 2 from step 2 onward). Restarting it every
+2. Risk thrashing — BDF2's bootstrap is stateful (order 1 on the
+   backward-Euler step, order 2 from step 2 onward). Restarting it every
    step would lose accuracy.
 3. Add no value — within a mode segment $A$ is constant, so the
    eigenvalues don't change. The verdict at the start is the
@@ -247,17 +254,17 @@ the auto-dispatch's geo-mean speedup over pure-DOPRI5 is **1.03×**
 3-state stiff RLC, where DOPRI5-only chokes on $h \sim 10^{-9}$).
 
 For the buck-family converters the user cares about most, the
-auto-dispatcher's behaviour is identical to forcing
-`integrator='rk45'`. The dispatcher is a safety net for stiff
-edge cases, not the main performance lever.
+modes are LTI with constant sources, so `integrator='auto'` takes
+the exact stepper, as `integrator='rk45'` does. The dispatcher is a
+safety net for modes without one, not the main performance lever.
 
 ---
 
 ## 14.5 Takeaways
 
-- BDF2 + CN bootstrap is the right choice for stiff PE segments:
-  A-stable, order 2, one LU solve per step (same hot-loop cost as
-  DOPRI5).
+- BDF2 with a backward-Euler start is the right choice for stiff
+  PE segments without an exact stepper: L-stable start, order 2,
+  one LU solve per step (same hot-loop cost as DOPRI5).
 - The eigenvalue-based stiffness detector (`max|λ|·h vs 10`) is
   cheap (one $O(n_s^3)$ per mode segment, $n_s$ small) and
   correct: it routes plain buck to DOPRI5 and snubbered/multi-
@@ -265,8 +272,8 @@ edge cases, not the main performance lever.
 - The per-mode dispatcher avoids per-step re-queries. The
   per-mode integrator cache is keyed by `mode_id_of(mask)` — a
   hash of the SwitchStateMask.
-- For non-stiff converters (buck/boost/half-bridge), the
-  auto-dispatcher's behaviour matches `integrator='rk45'`. The
+- For LTI converters (buck/boost/half-bridge), `'auto'` takes the
+  exact stepper first, as `integrator='rk45'` does. The
   value of auto is in **stiff edge cases** (up to 90× win).
 
 ## Further reading

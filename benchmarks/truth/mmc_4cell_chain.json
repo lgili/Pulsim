@@ -1,0 +1,296 @@
+{
+ "circuit": "circuits/switching/multilevel/mmc_4cell_chain.yaml",
+ "form": "conductance",
+ "supported": true,
+ "observables": [
+  "V(out)"
+ ],
+ "dps": [
+  30,
+  60
+ ],
+ "wall_s": 0.2,
+ "events": [
+  {
+   "t": "0.00004999999999999999561982322",
+   "change": "S4H+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.00005000000000000000917235038",
+   "change": "S2H-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0001000000000000000047921736",
+   "change": "S1H- S3H+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0001500000000000000004119968",
+   "change": "S4H-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.000150000000000000013964524",
+   "change": "S2H+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0002000000000000000095843472",
+   "change": "S1H+ S3H-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0002500000000000000052041704",
+   "change": "S4H+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0002500000000000000187566976",
+   "change": "S2H-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0003000000000000000143765208",
+   "change": "S1H- S3H+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.000350000000000000009996344",
+   "change": "S4H-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0003500000000000000235488712",
+   "change": "S2H+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0004000000000000000191686944",
+   "change": "S1H+ S3H-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0004500000000000000147885176",
+   "change": "S4H+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0004500000000000000283410448",
+   "change": "S2H-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.000500000000000000023960868",
+   "change": "S1H- S3H+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0005500000000000000195806912",
+   "change": "S4H-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0005500000000000000331332184",
+   "change": "S2H+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0006000000000000000287530416",
+   "change": "S1H+ S3H-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0006500000000000000243728648",
+   "change": "S4H+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.000650000000000000037925392",
+   "change": "S2H-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0007000000000000000335452152",
+   "change": "S1H- S3H+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0007500000000000000291650384",
+   "change": "S4H-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0007500000000000000427175656",
+   "change": "S2H+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0008000000000000000383373888",
+   "change": "S1H+ S3H-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.000850000000000000033957212",
+   "change": "S4H+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0008500000000000000475097392",
+   "change": "S2H-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0009000000000000000431295624",
+   "change": "S1H- S3H+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0009500000000000000387493856",
+   "change": "S4H-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0009500000000000000523019128",
+   "change": "S2H+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  }
+ ],
+ "n_commutations": 29,
+ "n_events": 29,
+ "ambiguous": [],
+ "weak_only": 0,
+ "start_mode": "S1H+ S2H+ S3H- S4H-",
+ "dc_start_modes": null,
+ "notes": [],
+ "jumps": [],
+ "impulsive_loss_J": "0.0",
+ "max_dae_residual": "4.15e-59",
+ "max_eigvec_cond": "1.0",
+ "windows": {
+  "full": {
+   "V(out)": {
+    "mean": "5.987187646703456196131873",
+    "rms": "5.987189626706683890939513",
+    "d_prec": "1.33e-31"
+   }
+  },
+  "last20": {
+   "V(out)": {
+    "mean": "5.987187646703456196131873",
+    "rms": "5.987189626706683890939513",
+    "d_prec": "1.33e-31"
+   }
+  }
+ },
+ "energy_J": {
+  "R_chain12": "6.98943786689589e-8",
+  "R_chain23": "9.63961467130255e-7",
+  "R_chain34": "1.85981352070614e-6",
+  "R_chain4out": "3.58464396261441e-6",
+  "Rload": "0.00358464396261441",
+  "S1H": "3.49471896146779e-8",
+  "S2H": "2.79416878578552e-7",
+  "S3H": "2.79974751784037e-7",
+  "S4H": "5.9597325856461e-7",
+  "src:Vcell1": "0.000336581684404274",
+  "src:Vcell2": "0.000897196402651218",
+  "src:Vcell3": "0.000898091727136878",
+  "src:Vcell4": "0.0014604427738297"
+ },
+ "energy_balance_rel": "-2.32e-59",
+ "precision_doubling_rel": "9.22e-32",
+ "event_time_diff_s": "0.0",
+ "u_stored_trace": 0.0,
+ "uniform_dt_floor": 0.02156533690490536,
+ "dt": 2e-07,
+ "stored_dt": 2.5e-08
+}

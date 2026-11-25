@@ -1,0 +1,222 @@
+"""Characterisation of the control path before the compiled control graph
+(add-compiled-control-graph, task group 1).
+
+What these tests pin:
+
+* evaluation order: the chain ran its blocks in INSERTION order and a
+  channel read before any block wrote it read 0 (task 3 flipped these:
+  the tests now pin the scheduled order and keep the old numbers);
+* tick counts per engine for one loop and for two rates;
+* how many Python functions the kernel calls back during one run of a
+  C++ chain, of a ``ClosedLoop`` and of a C block (the baseline of the
+  counter gate, task 9.2).
+"""
+
+from __future__ import annotations
+
+import sys
+import warnings
+
+import numpy as np
+import pytest
+
+import pulsim as p
+
+_RUNNERS = {"run_transient", "run_transient_with_chain",
+            "run_transient_trbdf2",
+            "_run_simulation"}  # simulate()'s kernel object
+
+
+class PyCallsDuringRun:
+    """Counts Python function calls made while a kernel runner (a C
+    function) is on the stack: the callbacks the run pays for."""
+
+    def __init__(self):
+        self.n = 0
+        self._inside = 0
+
+    def _hook(self, frame, event, arg):
+        name = getattr(arg, "__name__", "")
+        if event == "c_call" and name in _RUNNERS:
+            self._inside += 1
+        elif event in ("c_return", "c_exception") and name in _RUNNERS:
+            self._inside -= 1
+        elif event == "call" and self._inside:
+            self.n += 1
+
+    def __enter__(self):
+        sys.setprofile(self._hook)
+        return self
+
+    def __exit__(self, *exc):
+        sys.setprofile(None)
+
+
+# ---------------------------------------------------------------------------
+# 1.1 evaluation order
+# ---------------------------------------------------------------------------
+
+def _chain(order):
+    specs = {
+        "err": (p.Subtract(), dict(a=1.0, b="channel:meas"), "e"),
+        "gain": (p.Gain(k=2.0), dict(x="channel:e"), "u"),
+        "half": (p.Gain(k=0.5), dict(x="channel:u"), "y"),
+    }
+    ch = p.MixedDomainBlockChain()
+    for name in order:
+        blk, inputs, out = specs[name]
+        ch.add(name, blk, inputs=inputs, output=out)
+    return ch
+
+
+def _run_chain(order, n=200):
+    """Drive the compiled chain directly with a known `meas` sequence;
+    return the `y` history."""
+    b = p.CircuitBuilder()
+    b.add_resistor("R", "a", "gnd", 1.0)
+    ch = _chain(order)
+    obs = ch.make_step_observer(b, dt=1e-6)
+    cxx = ch._cxx_chain
+    cxx.record_channel("y", n)
+    x = np.zeros(b.graph.num_nodes() if callable(
+        getattr(b.graph, "num_nodes", None)) else 1)
+    meas = 0.5 * np.sin(np.arange(n) * 0.05)
+    for k in range(n):
+        cxx.set_channel("meas", float(meas[k]))
+        obs(k * 1e-6, x)
+    return np.asarray(cxx.get_channel_history("y")), meas
+
+
+def _run_quiet(order, n=200):
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")      # the reorder report
+        return _run_chain(order, n)
+
+
+def test_insertion_order_no_longer_changes_the_result():
+    # Before the schedule (task 3): the reversed chain ran two steps late
+    # (y_rev[k] = y_fwd[k-2]), largest difference 1.0 on this sequence.
+    y_fwd, meas = _run_quiet(["err", "gain", "half"])
+    y_rev, _ = _run_quiet(["half", "gain", "err"])
+    np.testing.assert_array_equal(y_fwd, 0.5 * (2.0 * (1.0 - meas)))
+    assert y_rev.tobytes() == y_fwd.tobytes()
+
+
+def test_a_channel_is_written_before_it_is_read():
+    # Before: the reversed chain read 0 on its first two evaluations.
+    y_rev, meas = _run_quiet(["half", "gain", "err"], n=3)
+    assert y_rev[0] == 1.0 - meas[0]
+
+
+# The C++ build no longer falls back for a node Gain or a Limiter:
+# test_control_graph.py::test_node_gain_and_limiter_compile_to_the_kernel.
+
+
+# ---------------------------------------------------------------------------
+# 1.2 tick counts per engine
+# ---------------------------------------------------------------------------
+
+def _buck():
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "in", "gnd", 24.0)
+    b.add_switch("Q", "in", "sw", 1e2, 1e-9)
+    b.add_diode("D", "gnd", "sw", 1e2, 1e-9)
+    b.add_inductor("L", "sw", "out", 1e-3)
+    b.add_capacitor("C", "out", "gnd", 47e-6)
+    b.add_resistor("R", "out", "gnd", 10.0)
+    return b
+
+
+def _loop(b, freq):
+    return p.control.bind_pi_to_switch(
+        b, pi=p.PIController(Kp=0.02, Ki=20.0, output_min=0.05,
+                             output_max=0.95),
+        measured=lambda x, i=b.node_id_of("out"): x[i], setpoint=12.0,
+        switch="Q", freq=freq)
+
+
+_ENGINES = [("pwl", {"dt": 1e-6}), ("trbdf2", {}), ("dsed", {})]
+
+
+@pytest.mark.parametrize("engine,kw", _ENGINES)
+def test_one_loop_ticks_200_times_in_20_ms_at_10_khz(engine, kw):
+    b = _buck()
+    lp = _loop(b, 10e3)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(b, 20e-3, engine=engine, closed_loops=[lp], **kw)
+    assert len(lp.duty_history) == 200
+    assert list(r.control_tick_counts) == [200]
+
+
+@pytest.mark.parametrize("engine,kw", _ENGINES)
+def test_two_rates_tick_40_and_400_times(engine, kw):
+    b = _buck()
+    lp = _loop(b, 2e3)
+    calls = []
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(b, 20e-3, engine=engine, closed_loops=[lp],
+                       step_observer=lambda t, x: calls.append(t),
+                       controller_period=50e-6, **kw)
+    assert (len(lp.duty_history), len(calls)) == (40, 400)
+    assert list(r.control_tick_counts) == [40, 400]
+
+
+# ---------------------------------------------------------------------------
+# 1.3 Python calls per run (the baseline of the counter gate)
+# ---------------------------------------------------------------------------
+
+def _rc():
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V1", "in", "gnd", 1.0)
+    b.add_resistor("R", "in", "out", 1e3)
+    b.add_capacitor("C", "out", "gnd", 1e-6)
+    return b
+
+
+N_STEPS = 1000            # t_end = 1 ms, dt = 1 us
+
+
+def test_python_calls_per_run_of_a_cxx_chain():
+    b = _rc()
+    ch = p.MixedDomainBlockChain()
+    ch.add("e", p.Subtract(), inputs=dict(a=1.0, b="out"), output="u")
+    obs = ch.make_step_observer(b, dt=1e-6)
+    assert ch._cxx_chain is not None
+    with PyCallsDuringRun() as c:
+        p.simulate(b, 1e-3, dt=1e-6, engine="pwl", step_observer=obs)
+    assert c.n == 0                    # the fast path runs the chain in C++
+
+
+def test_python_calls_per_run_of_a_closed_loop():
+    b = _buck()
+    lp = _loop(b, 10e3)
+    with PyCallsDuringRun() as c, warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        p.simulate(b, 1e-3, dt=1e-6, engine="pwl", closed_loops=[lp])
+    # Before the consolidation (9.1): 4044 calls, per step the fixed-step
+    # tick scheduler, the composed observer, the gate and pwm_on; per tick
+    # `.tick`, `measured`, PI.update. Now the loop is a control graph with
+    # a C++ gate: per tick only the `measured` lambda (PythonBlock adapter,
+    # the helper's float() wrapper, the lambda). measured='out': 0.
+    assert c.n == 3 * 10
+    assert len(lp.duty_history) == 10
+
+
+def test_python_calls_per_run_of_a_c_block():
+    b = _rc()
+    b.add_resistor("Rl", "o2", "gnd", 1e3)
+
+    def step(t, dt, inp, out, state):
+        out[0] = 0.5 * inp[0]
+
+    h = p.add_c_block(b, inputs=[("v", "out")],
+                      outputs=[("v", "o2", "gnd")], dt=1e-4, fn=step)
+    with PyCallsDuringRun() as c:
+        p.simulate(b, 1e-3, dt=1e-6, engine="pwl")
+    # Before 9.1: 5014 calls (per step the block's observer, its b_extra
+    # injector and helpers) and 11 fires (its throttle also fired at t_end).
+    # Now a graph block: per tick the adapter and the step fn; 10 ticks.
+    assert c.n == 2 * 10
+    assert h.n_fires == 10

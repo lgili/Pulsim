@@ -12,7 +12,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "pulsim"
-version = "2.0.0"
+version = "2.1.0"
 description = "High-performance circuit simulator for power electronics"
 readme = "README.md"
 license = {text = "MIT"}
@@ -60,9 +60,22 @@ fast = [
 lib = [
     "PyYAML>=6.0",
 ]
+# The worked optimisation example's NSGA-II (examples/optimization);
+# without it the example falls back to a Latin-hypercube sample.
+opt = [
+    "pymoo>=0.6",
+]
+# Equations to C for external devices (`pulsim.xdev.compile`): SymPy
+# differentiates the law and prints the C99 model.
+codegen = [
+    "sympy>=1.13",
+]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
+    # CI runs pytest with --timeout: a hang fails with a traceback in
+    # minutes instead of a job cancelled after hours.
+    "pytest-timeout>=2.2",
     "pytest-asyncio>=0.21.0",
     "PyYAML>=6.0",
     # benchmark CLI visual layer (Onda 1 of bench-tool refresh):
@@ -76,6 +89,11 @@ dev = [
     # regenerate the stub in the same commit.
     "pybind11-stubgen==3.0.0",
     "mypy==2.4.1",
+    # 50-digit matrix-exponential references (test_dsed_exact_propagator.py).
+    "mpmath>=1.3",
+    # pulsim.xdev codegen tests (the `codegen` extra); they fail, not skip,
+    # on CI without it.
+    "sympy>=1.13",
 ]
 docs = [
     "mkdocs>=1.6,<2.0",
@@ -149,6 +167,8 @@ python_functions = ["test_*"]
 addopts = "-v --tb=short"
 markers = [
     "doc_snippets: executes the python blocks of the user-facing docs (python/tests/test_doc_snippets.py)",
+    "examples: runs every example script / audited notebook and checks its stated numbers; slow, needs PULSIM_RUN_EXAMPLES=1 (python/tests/test_examples_claims.py)",
+    "reference: reference benchmark harness (analytic set, pwl goldens, counter gate); its own CI job",
 ]
 
 [tool.coverage.run]

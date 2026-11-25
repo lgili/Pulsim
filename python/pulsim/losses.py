@@ -38,6 +38,7 @@ binding changes are required for v1.6 closure.
 
 from __future__ import annotations
 
+import math
 import warnings
 from typing import Any, Callable, Dict, List, Mapping, Optional, Union
 
@@ -291,9 +292,10 @@ def _conduction_stats(v: np.ndarray,
     where ``engine='dsed'`` fired an event, whose stored sample is the
     left limit (``_result_views.step_start_states``).
 
-    ``branch``, the ``(times, i, i_start, E)`` of
+    ``branch``, the ``(times, i, i_start, E, I2)`` of
     :func:`_window_conductance`, replaces the arrays above: the
-    statistics then cover that window.
+    statistics then cover that window, and ``i_rms`` is ``sqrt(I2 / T)``
+    (a flip step counted as the energy counts it).
 
     ``v_off`` / ``v_off_start`` are a per-sample series offset (a
     SwitchedDiode's forward drop ``V_f`` while ON): ``i = g·(v − v_off)``,
@@ -307,8 +309,9 @@ def _conduction_stats(v: np.ndarray,
     g_arr = _arr(g, v)
     vs = v if v_start is None else np.asarray(v_start, dtype=float)
     gs = g_arr if g_start is None else _arr(g_start, v)
+    I2 = None
     if branch is not None:
-        times, i, i_s, E = branch
+        times, i, i_s, E, I2 = branch
     elif v_off is None:
         i = v * g_arr
         i_s = vs * gs
@@ -336,7 +339,9 @@ def _conduction_stats(v: np.ndarray,
         # peaks), and an unweighted mean read +4.6% high on a buck
         # diode at rtol=1e-6 — a bias that GREW as the tolerance
         # tightened.
-        "i_rms": _time_weighted_rms(i, times, i_s),
+        "i_rms": (_time_weighted_rms(i, times, i_s) if I2 is None
+                  or times.size < 2 or not times[-1] > times[0]
+                  else float(np.sqrt(max(I2, 0.0) / (times[-1] - times[0])))),
         "i_peak": i_peak,
         "P_avg": float(P_avg),
         "E_total": float(E_total),
@@ -394,15 +399,32 @@ def _offset_step_power(a, c, ga, gc, oa, oc) -> np.ndarray:
     return np.where(same, lin, trap)
 
 
+def _branch_i2(t, i_w, i_s_w, i2_w, i2_s_w, same_w) -> float:
+    """``∫ i² dt`` of a branch by the energy's own rule: a same-stamp step
+    is the exact integral of the linear current, a step whose ends carry
+    different stamps (the pwl / trbdf2 step that flips a switch or diode)
+    the trapezoid of its end ``i²`` (``i2_*``, cut at a window bound as
+    ``i²``). The line through the flip step's two stamps read a switch's
+    RMS current low by ``I²·h/3`` per pulse, first order in ``dt``
+    (add-ai-usage-guide 12.5); the trapezoid is ``I²·h`` per on/off pair,
+    as the conduction energy."""
+    if t.size < 2:
+        return 0.0
+    a, c = i_s_w[:-1], i_w[1:]
+    lin = (a * a + a * c + c * c) / 3.0
+    trap = 0.5 * (i2_s_w[:-1] + i2_w[1:])
+    return float(np.dot(np.diff(t), np.where(same_w, lin, trap)))
+
+
 def _window_conductance(win: "_views.TimeWindow", v: np.ndarray,
                         g: np.ndarray, v_start: np.ndarray,
                         g_start: np.ndarray,
                         v_off: "Optional[np.ndarray]" = None,
                         v_off_start: "Optional[np.ndarray]" = None):
-    """``(times, i, i_start, E)`` of a conductance branch (``i = g·v``,
+    """``(times, i, i_start, E, I2)`` of a conductance branch (``i = g·v``,
     whole-run per-sample arrays) restricted to ``win``: the window's
     times, the branch current at each windowed sample and step start,
-    and ``∫ v·i dt`` over the window.
+    ``∫ v·i dt`` and ``∫ i² dt`` (:func:`_branch_i2`) over the window.
 
     Every quantity is cut where the whole-run integral is linear, so
     the parts of adjacent windows add up to the whole
@@ -440,24 +462,26 @@ def _window_conductance(win: "_views.TimeWindow", v: np.ndarray,
                                      v_off if v_off_start is None
                                      else v_off_start)
     i, i_s = v * g, vs * gs
+    same = np.ones(v.size, dtype=bool)
+    same[1:] = gs[:-1] == g[1:]
     if win.whole:
         return (win.times, i, i_s,
-                _branch_energy(win.times, v, g, vs, gs))
+                _branch_energy(win.times, v, g, vs, gs),
+                _branch_i2(win.times, i, i_s, i * i, i_s * i_s, same[1:]))
     t = win.times
     i_w, i_s_w = win.cont(i, i_s)
     if t.size < 2:
-        return t, i_w, i_s_w, 0.0
+        return t, i_w, i_s_w, 0.0, 0.0
     v_w, v_s_w = win.cont(v, vs)
     p_w, p_s_w = win.cont(g * v * v, gs * vs * vs)
-    same = np.ones(v.size, dtype=bool)
-    same[1:] = gs[:-1] == g[1:]
     same_w = win.step(same)[1:]
     g_w = win.step(g)[1:]
     a, c = v_s_w[:-1], v_w[1:]
     lin = g_w * (a * a + a * c + c * c) / 3.0
     trap = 0.5 * (p_s_w[:-1] + p_w[1:])
     E = float(np.dot(np.diff(t), np.where(same_w, lin, trap)))
-    return t, i_w, i_s_w, E
+    i2_w, i2_s_w = win.cont(i * i, i_s * i_s)
+    return t, i_w, i_s_w, E, _branch_i2(t, i_w, i_s_w, i2_w, i2_s_w, same_w)
 
 
 def _window_offset_branch(win, v, g, vs, gs, off, off_s):
@@ -465,16 +489,17 @@ def _window_offset_branch(win, v, g, vs, gs, off, off_s):
     off = np.asarray(off, dtype=float)
     off_s = np.asarray(off_s, dtype=float)
     i, i_s = g * (v - off), gs * (vs - off_s)
+    same = np.ones(v.size, dtype=bool)
+    same[1:] = (gs[:-1] == g[1:]) & (off_s[:-1] == off[1:])
     if win.whole:
         return (win.times, i, i_s,
-                _branch_energy(win.times, v, g, vs, gs, off, off_s))
+                _branch_energy(win.times, v, g, vs, gs, off, off_s),
+                _branch_i2(win.times, i, i_s, i * i, i_s * i_s, same[1:]))
     t = win.times
     i_w, i_s_w = win.cont(i, i_s)
     if t.size < 2:
-        return t, i_w, i_s_w, 0.0
+        return t, i_w, i_s_w, 0.0, 0.0
     p_w, p_s_w = win.cont(v * i, vs * i_s)
-    same = np.ones(v.size, dtype=bool)
-    same[1:] = (gs[:-1] == g[1:]) & (off_s[:-1] == off[1:])
     same_w = win.step(same)[1:]
     g_w = win.step(g)[1:]
     o_w = win.step(off)[1:]
@@ -487,7 +512,8 @@ def _window_offset_branch(win, v, g, vs, gs, off, off_s):
     lin = np.where(o_w != 0.0, lin_i, g_w * (a * a + a * c + c * c) / 3.0)
     trap = 0.5 * (p_s_w[:-1] + p_w[1:])
     E = float(np.dot(np.diff(t), np.where(same_w, lin, trap)))
-    return t, i_w, i_s_w, E
+    i2_w, i2_s_w = win.cont(i * i, i_s * i_s)
+    return t, i_w, i_s_w, E, _branch_i2(t, i_w, i_s_w, i2_w, i2_s_w, same_w)
 
 
 def _conduction_model_coeffs(spec: Mapping[str, Any]) -> "tuple[float, float]":
@@ -541,6 +567,15 @@ def _conduction_model_energy(times: np.ndarray, i_arr: np.ndarray,
     return float(V_f0 * _views.pl_integral_abs(times, i_arr, i_start)
                  + r_on * _views.pl_integral_product(
                      times, i_arr, i_arr, i_start, i_start))
+
+
+def conduction_power_avg(entry: Mapping[str, Any]) -> float:
+    """A device's average conduction loss from its
+    :func:`device_loss_summary` entry: the ``conduction_specs`` model where
+    one was applied (``P_cond_model_avg``), else the solved ``P_avg`` (0 for
+    an inductor). The ONE reading both summaries use, so they cannot
+    disagree (release finding F-2-1)."""
+    return float(entry.get("P_cond_model_avg", entry.get("P_avg", 0.0)))
 
 
 def _interp_energy_curve(x_query, curve) -> np.ndarray:
@@ -797,10 +832,19 @@ def _chatter_gaps(trace) -> "tuple[np.ndarray, int]":
     return in_gap, n_gaps
 
 
+def _rule_held(og) -> bool:
+    """Whether the exact engine's output rule held on the whole grid (its chords are
+    within output_rtol): no capped interval, no unbounded mode, the budget not spent."""
+    return (og is not None and og["n_output_capped"] == 0 and og["n_output_unbounded"] == 0
+            and og["output_budget_t"] is None)
+
+
 def _diode_turn_offs(trace, times: np.ndarray,
                      t_rr: float = _DEFAULT_T_RR,
                      other_flip: "Optional[np.ndarray]" = None,
                      i_peak: "Optional[float]" = None,
+                     controlled: bool = False,
+                     interpolable: bool = False,
                      ) -> List[Dict[str, float]]:
     """Turn-off instants of one diode, read from its recorded
     conduction-state trace (``pulsim._diode_state``).
@@ -842,15 +886,20 @@ def _diode_turn_offs(trace, times: np.ndarray,
     steps through the g_off transient, where single samples read
     thousands of volts; those steps carry no time weight here.
 
-    ``unresolved`` is set when the step that carries the turn-off,
-    ``t[k] − t[k−1]``, is longer than ``t_rr``: the solver then says
+    ``unresolved`` is set when the step that holds ``t_eval`` (the one
+    that carries the turn-off unless a sample follows it within ``t_rr``)
+    is longer than ``t_rr``: the solver then says
     nothing about how ``v_D`` rose inside that step, and V_R (hence
-    E_rr) depends on the step size. The one exception is a FORCED
-    turn-off (another bit of the recorded mask flips on the same step,
-    ``other_flip[k]``, and ``I_F >= 0.1 · I_F_peak``) whose blocking
-    voltage is flat
-    after the step: there the voltage jumped at the turn-off and any
-    reading inside the step is the plateau. :func:`device_loss_summary`
+    E_rr) depends on the step size. The exception is a turn-off whose
+    blocking voltage is flat after the step, when it is FORCED (another
+    bit of the recorded mask flips on the same step, ``other_flip[k]``,
+    and ``I_F >= 0.1 · I_F_peak``: the voltage jumped at the turn-off and
+    any reading inside the step is the plateau) or ``controlled`` (an
+    error-controlled trace, trbdf2: its step after the turn-off record
+    would have shrunk on a ring; a fixed step can alias one). ``interpolable``
+    (an exact-engine run under ``output_rtol``: exact samples whose chords
+    are within the rule) reads ``v_D`` on the step line from the right limit
+    and is never unresolved. :func:`device_loss_summary`
     counts and warns about the unresolved ones.
 
     ``Q_F`` exists for the stretches that are not a
@@ -874,6 +923,8 @@ def _diode_turn_offs(trace, times: np.ndarray,
     t = np.asarray(times, dtype=float)
     ks = np.nonzero(closed[:-1] & ~closed[1:])[0] + 1
     v = np.asarray(trace.v, dtype=float)
+    v_st = np.asarray(getattr(trace, "v_start", None) if getattr(trace, "v_start", None) is not None
+                      else v, dtype=float)
     i = np.asarray(trace.current, dtype=float)
     i_fwd = np.maximum(i, 0.0)
     # Where each step starts (the right limit at an engine='dsed'
@@ -907,8 +958,22 @@ def _diode_turn_offs(trace, times: np.ndarray,
         t_off = float(t[k - 1])
         t_blk = float(t[end - 1])
         t_eval = min(t_off + t_rr, t_blk)
-        v_read, flat = _reverse_voltage_at(t, v, k, end, t_eval,
-                                           flat_atol)
+        if interpolable:
+            # exact samples whose chords are within output_rtol (the exact
+            # engine's output rule): v_D on the step line from the step's
+            # start (the right limit at an event) to its end. The midpoint
+            # pairing below is the fixed engine's; on these samples it read
+            # the left limit at the turn-off and drew lines through the next
+            # gate edge's jump (F-5-8: 11.45 V against 19.87 V).
+            j = min(max(int(np.searchsorted(t, t_eval)), k), max(end - 1, k))
+            v0, v1 = float(v_st[j - 1]), float(v[j])
+            dt_j = float(t[j] - t[j - 1])
+            v_read = (v0 if dt_j <= 0.0 else
+                      v0 + (v1 - v0) * min(max((t_eval - float(t[j - 1])) / dt_j, 0.0), 1.0))
+            flat = None
+        else:
+            v_read, flat = _reverse_voltage_at(t, v, k, end, t_eval,
+                                               flat_atol)
         # Reverse bias only: a diode that stopped conducting inside its
         # 0 < v_D < V_th band blocks no voltage yet.
         V_R = max(-v_read, 0.0)
@@ -929,7 +994,24 @@ def _diode_turn_offs(trace, times: np.ndarray,
             forced = forced and bool(other_flip[k])
         # (1e-9 relative slack: dt = T/100 must not miss t_rr = T/100
         # by a rounding error of the stored times.)
-        unresolved = (float(t[k] - t[k - 1]) > t_rr * (1.0 + 1e-9)
+        # The step that holds t_eval: a short sample right after the
+        # turn-off (trbdf2's post-event record) does not resolve a long
+        # step that follows it, unless that step is flat (the sample before
+        # it already holds the post-jump plateau). A fixed step can alias a
+        # ring into equal ends (the "plateau" above): there only a forced
+        # turn-off passes. On trbdf2 (`controlled`) the step passed a local
+        # error test. shortcut: that test is weak exactly here (after a
+        # turn-off record on a linear circuit the step is the L-stable SDIRK
+        # step with a filtered estimate, which damps a ring much faster than
+        # the step instead of reporting it); upgrade: compare the step with
+        # the ring period of the post-turn-off mode.
+        k_e = min(max(int(np.searchsorted(t, t_eval)), k), max(end - 1, k))
+        flat_after = (controlled or forced) and k_e > k and abs(float(v[k_e] - v[k_e - 1])) <= (
+            _RR_FLAT_RTOL * max(abs(float(v[k_e])), abs(float(v[k_e - 1])))
+            + flat_atol)
+        unresolved = (not interpolable
+                      and float(t[k_e] - t[k_e - 1]) > t_rr * (1.0 + 1e-9)
+                      and not flat_after
                       and not (forced and bool(flat)))
         out.append({"t": float(t[k]), "t_off": t_off, "V_R": float(V_R),
                     "I_F": I_F, "forced": bool(forced),
@@ -1016,7 +1098,7 @@ def _warn_chatter_gaps(name: str, n_gaps: int, n_turn_offs: int,
     'trbdf2' / 'auto' and the event-driven 'dsed' do not have, and the
     warning's advice (compare with TR-BDF2) would be circular there.
     ``n_possible_chatter_gaps`` is still reported on every engine."""
-    if engine in ("trbdf2", "dsed"):
+    if engine in ("trbdf2", "dsed", "exact"):
         return
     if (n_gaps < 3 or 2 * n_gaps < n_turn_offs
             or not (t_gaps >= 0.01 * (t_cond + t_gaps))):
@@ -1248,6 +1330,15 @@ def _diode_switching_loss(turn_offs: List[Dict[str, float]],
     }
 
 
+def _edge_law(kind: str, params: Mapping[str, Any]) -> tuple:
+    """``(gated, g_on, g_off)`` of ``thermal::commutation_point`` for a
+    component's kind and params (``builder.components()``): a switch is
+    gated; a branch-form one has ``g_on = inf`` (its current is an
+    unknown)."""
+    return (kind == "switch", float(params.get("g_on", math.inf)),
+            float(params.get("g_off", 0.0)))
+
+
 def _switch_switching_loss(closed_trace: np.ndarray,
                             times: np.ndarray,
                             v_SW: np.ndarray,
@@ -1258,6 +1349,10 @@ def _switch_switching_loss(closed_trace: np.ndarray,
                             v_start: "Optional[np.ndarray]" = None,
                             i_start: "Optional[np.ndarray]" = None,
                             window: "Optional[_views.TimeWindow]" = None,
+                            law: "tuple" = (True, math.inf, 0.0),
+                            impulse_t=(),
+                            projected_limits: bool = True,
+                            name: str = "",
                             ) -> Dict[str, float]:
     """Post-hoc turn-on / turn-off switching loss for an ideal-switch
     branch (MOSFET / IGBT equivalent).
@@ -1285,8 +1380,20 @@ def _switch_switching_loss(closed_trace: np.ndarray,
     measured, so a soft edge -- where the antiparallel diode holds the
     switch near 0 V, e.g. after a dead time -- costs about 0 J. With
     no dead time the complementary switch takes the current at the
-    same instant, the switch blocks the full bus on the soft edge too,
-    and that edge is charged like a hard one.
+    same instant and the switch blocks the full bus on the soft edge
+    too: the two readings then have OPPOSITE signs (a switch would
+    deliver energy crossing from one to the other), so the edge is
+    soft and costs 0 J -- the kernel's rule,
+    ``thermal::commutation_point``; ``law`` is its ``(gated, g_on,
+    g_off)`` (:func:`_edge_law`; gated False for a diode's recovery
+    table). A reverse current within ``(g_off + eps g_on)|v|`` -- the
+    open device's own leakage plus the rounding of the closed law -- has
+    no resolved sign: that edge is hard. An edge whose step carried an
+    impulse of this device (``impulse_t``: the records' step starts) is
+    never soft and reads its post-jump side one sample later, at the
+    first regular state; a stored right limit is that state only where
+    the engine projects it (``projected_limits``: the exact engine; a
+    pwl / trbdf2 right limit at the jump is not, as in the kernel). A non-finite reading at an edge is refused.
 
     ``closed_start`` / ``v_start`` / ``i_start`` are the state at the
     start of the step after each sample
@@ -1394,21 +1501,45 @@ def _switch_switching_loss(closed_trace: np.ndarray,
                     *, blocking_at_post_edge: bool,
                     load_at_post_edge: bool,
                     table=None) -> float:
-        if idxs.size == 0 or (E_ref <= 0 and curve is None
-                               and table is None):
+        if idxs.size == 0:
             return 0.0
         pre_k = np.clip(idxs - 1, 0, v_SW.size - 1)
         load_k = idxs if load_at_post_edge else pre_k
-        V_blk = np.abs(_post_edge(v_SW, v_s, idxs)
-                       if blocking_at_post_edge else v_SW[pre_k])
-        I_load = np.abs(_post_edge(i_SW, i_s, idxs)
-                        if load_at_post_edge else i_SW[pre_k])
+        V_blk = (_post_edge(v_SW, v_s, idxs)
+                 if blocking_at_post_edge else v_SW[pre_k])
+        I_load = (_post_edge(i_SW, i_s, idxs)
+                  if load_at_post_edge else i_SW[pre_k])
+        imp = np.isin(times[pre_k], np.asarray(impulse_t, dtype=float))
+        # the jump's own step is not a regular state: read past it, unless
+        # the post-edge side is an event's right limit (dsed, projected)
+        late = imp & ((cl_s[pre_k] != cl[idxs]) | (not projected_limits))
+        if late.any():
+            # no sample after the jump's step: both sides before the edge
+            # (LossTracker::settle_deferred_)
+            nxt = np.where(idxs + 1 < v_SW.size, idxs + 1, pre_k)
+            if blocking_at_post_edge:
+                V_blk = np.where(late, v_SW[nxt], V_blk)
+            if load_at_post_edge:
+                I_load = np.where(late, i_SW[nxt], I_load)
+        if not (np.all(np.isfinite(V_blk)) and np.all(np.isfinite(I_load))):
+            raise RuntimeError(f"switch_specs[{name!r}]: a non-finite "
+                             "commutation point")
+        if E_ref <= 0 and curve is None and table is None:
+            return 0.0
+        gated, g_on, g_off = law
+        if gated:
+            # a soft edge costs nothing (thermal::commutation_point)
+            rounding = np.finfo(float).eps * g_on if math.isfinite(g_on) else 0.0
+            i_floor = (g_off + rounding) * np.abs(V_blk)
+            hard = ~((V_blk * I_load < 0.0) & (np.abs(I_load) > i_floor)) | imp
+            V_blk, I_load, load_k = V_blk[hard], I_load[hard], load_k[hard]
+        V_blk, I_load = np.abs(V_blk), np.abs(I_load)
         if table is not None:
             # The 3-D table needs no V_ref scaling: the voltage IS
             # one of its axes.
             tab = _as_loss_table(table)
             tj_arr = _resolve_tj(tj_spec, times)
-            return float(np.sum(tab(V_blk, I_load, tj_arr[load_k])))
+            return tab.total(V_blk, I_load, tj_arr[load_k])
         if curve is not None:
             # Nonlinear E(I) from the datasheet curve (at V_ref), scaled
             # linearly by the actual blocking voltage.
@@ -1553,6 +1684,88 @@ def _estimate_dominant_frequency(B: np.ndarray,
 # Top-level summary.
 # ---------------------------------------------------------------
 
+def _warn_ideal_skipped(desc) -> None:
+    # An ideal branch-form element (R_on = 0: g_on = inf) whose branch
+    # unknown was not found: no v·i to report. Say so instead of dropping
+    # the row silently (review M5).
+    if desc.get("params", {}).get("branch_form"):
+        warnings.warn(
+            f"device_loss_summary: '{desc.get('name')}' is an ideal "
+            "branch-form element (R_on = 0) whose branch current was not "
+            "found in the result; it is left out of the summary (and of the "
+            "thermal summary).", UserWarning, stacklevel=3)
+
+
+def _impulse_cause(builder, result, rec) -> str:
+    """The switch a re-initialisation record is booked to: the record's own
+    ``cause`` (pwl / trbdf2: the gated element whose change entered the
+    mode), else the record's switching element whose recorded state changed
+    on the record's step (gated before diode), else its first element."""
+    cause = getattr(rec, "cause", "") or ""
+    if cause:
+        return cause
+    devices = list(getattr(rec, "devices", []) or [])
+    try:
+        states = np.asarray(result.switch_states, dtype=bool)
+        times = np.asarray(result.times, dtype=float)
+    except (AttributeError, TypeError, ValueError):  # no record: fall back
+        states = times = None
+    if states is not None and states.ndim == 2 and len(times) > 1:
+        k = int(getattr(rec, "sample", -1))
+        if k < 1:
+            k = int(np.searchsorted(times, float(rec.t), side="right"))
+        k = min(max(k, 1), len(times) - 1)
+        changed = []
+        for name in devices:
+            try:
+                bit = int(builder.switch_index_of(name))
+            except (IndexError, KeyError, ValueError):  # not a switch-kind branch
+                continue
+            if 0 <= bit < states.shape[1] and states[k, bit] != states[k - 1, bit]:
+                changed.append(name)
+        if changed:
+            gated = [n for n in changed if n not in _diode_names(builder)]
+            return (gated or changed)[0]
+    return devices[0] if devices else ""
+
+
+def _diode_names(builder) -> set:
+    try:
+        return {d.get("name", "") for d in builder.components() if d.get("kind") == "diode"}
+    except AttributeError:  # a builder without components()
+        return set()
+
+
+def impulse_losses(builder, result, *, t_from: Optional[float] = None,
+                   t_to: Optional[float] = None) -> Dict[str, Dict[str, Any]]:
+    """Impulsive re-initialisation energy per causing switch
+    (add-branch-form-ideal-switch D4 / task 6.4).
+
+    A mode with dependent states (a capacitor loop closed, an inductor
+    cut-set opened by ideal elements) re-initialises them: the record
+    ``result.reinit_records[k].dW`` is the energy that leaves the circuit at
+    that instant (1 uF at 10 V closed onto 3 uF at 2 V through an ideal
+    switch: 24 uJ). No resistor or switch conduction integral carries it.
+    Returns ``{switch name: {"E_impulse_total", "n_impulses", "records"}}``;
+    a record counts when its step starts inside ``[t_from, t_to)`` (the rule
+    of the switching events). Engines without records give ``{}``. The exact
+    engine's ``start_projection`` record (a given initial state the start mode
+    cannot keep) is caused by no device and is not booked here.
+    """
+    out: Dict[str, Dict[str, Any]] = {}
+    lo = -np.inf if t_from is None else float(t_from)
+    hi = np.inf if t_to is None else float(t_to)
+    for rec in getattr(result, "reinit_records", None) or []:
+        if not (lo <= float(rec.t) < hi) or getattr(rec, "kind", "") == "start_projection":
+            continue
+        name = _impulse_cause(builder, result, rec)
+        e = out.setdefault(name, {"E_impulse_total": 0.0, "n_impulses": 0, "records": []})
+        e["E_impulse_total"] += float(rec.dW)
+        e["n_impulses"] += 1
+        e["records"].append(rec)
+    return out
+
+
 def device_loss_summary(
     builder,
     result,
@@ -1592,6 +1805,16 @@ def device_loss_summary(
       recorded stamped mask; without a record, ``switch_fn`` is
       re-evaluated (with a warning), and without either the switch
       entry is skipped (kept honest — no silent default).
+    * **ideal branch form** (``form='branch'``, ``R_on = 0``) — the solved
+      branch current and ``v · i`` (``form='branch'``; 0 W of conduction),
+      and always the impulsive category ``E_impulse_total`` /
+      ``n_impulses`` / ``P_impulse_avg`` (0 when nothing was booked to it).
+      A branch-form element with ``R_on > 0`` is reported as a conductance
+      switch (``g_on = 1/R_on``) and gets the impulsive keys only when
+      energy was booked to it. When a device with a kernel loss port has
+      impulsive energy booked to it, the kernel deposited that energy in
+      the port's junction too (``impulse_in_junction=True``; the port's
+      ``device_energy(...)["E_impulse"]``).
     * **shockley_diode** (``add_shockley_diode``) — the current is the
       kernel's exponential law at the recorded ``v_D``
       (``pulsim._diode_state.shockley_current``, the parameters
@@ -1599,6 +1822,16 @@ def device_loss_summary(
       ``i_rms``, ``i_peak``, ``P_avg`` / ``E_total`` (``v_D · i_D``)
       and the law's ``I_S``, ``n``, ``V_T``, ``BV``. Its current
       matches a 1 mOhm sense resistor in series to 3e-12 A.
+    * **mosfet_level1**, **igbt_level1** (without a tail),
+      **nonlinear_diode** — the current is the kernel's device law at
+      each stored state (``static_device_readings``). Reports ``i_avg``,
+      ``i_rms``, ``i_peak``, ``P_avg`` / ``E_total`` (``v · i`` across the
+      drain-source / collector-emitter / anode-cathode pins). A tailed
+      IGBT, a Lauritzen diode and a nonlinear capacitor are not listed.
+    * **excess_loss** (``add_excess_loss``) — the same kernel-law path:
+      ``i_*`` are the MMF statistics, ``P_avg`` / ``E_total`` the in-loop
+      excess core loss ``F·dΦ/dt``; ``category='core_loss'``, with the
+      law's ``c`` and ``eps``.
 
     By default every figure covers the whole run, start-up included.
     ``t_from`` / ``t_to`` restrict it to a window: on a 230 V bridge
@@ -1746,11 +1979,16 @@ def device_loss_summary(
         ``V_blk`` is the measured voltage across the OPEN switch
         (the sample before a turn-on, after a turn-off) and
         ``I_load`` the current through the CLOSED switch (the sample
-        after a turn-on, before a turn-off), both as magnitudes:
-        every edge is charged by what it measured, whichever way the
-        current flows. Reports ``E_sw_on_total``, ``E_sw_off_total``,
-        ``E_sw_total``, ``P_sw_avg``, plus ``n_turn_on_events`` /
-        ``n_turn_off_events`` / ``f_sw_estimate``.
+        after a turn-on, before a turn-off), both as magnitudes. An
+        edge whose two readings have OPPOSITE signs (passive
+        convention) is soft and costs 0 J: the switch would deliver
+        energy passing from one to the other, so the complementary
+        device commutated the current (``thermal::commutation_point``,
+        the rule of the in-kernel loss port), so give both switches of
+        a leg a spec. Reports ``E_sw_on_total``,
+        ``E_sw_off_total``, ``E_sw_total``, ``P_sw_avg``, plus
+        ``n_turn_on_events`` / ``n_turn_off_events`` (soft edges
+        included) / ``f_sw_estimate``.
 
         Soft and hard edges, measured on ``INV__HSa`` of a 600 V,
         10 kHz SPWM ``add_three_phase_vsi`` (10 Ohm + 5 mH star
@@ -1758,19 +1996,19 @@ def device_loss_summary(
         50 A; ``t_from=20e-3`` over a 40 ms run, 200 edges each way):
 
         * with 1 us dead time, an edge where the switch carries
-          FORWARD current (``i > 0``, n_pos to n_neg: 98 turn-ons,
-          103 turn-offs) blocks the bus, 600.8 V, and costs
-          116.5 + 108.3 mJ; an edge where the current is REVERSE (the
-          antiparallel diode conducts across it: 102 + 97 edges) sees
-          the diode's 0.80 V and costs 0.17 + 0.14 mJ. ``P_sw_avg``
-          11.26 W;
-        * with NO dead time the complementary switch takes the
-          current at the same instant, so the reverse-current edges
-          block 599.98 V as well and cost 120.6 + 99.9 mJ, as much as
-          the hard ones: ``P_sw_avg`` 22.63 W. Physically those are
-          the complementary switch's hard edges, which its own entry
-          (``INV__LSa``, 22.64 W) charges too, so a leg's switching
-          loss is counted twice. Model the dead time.
+          FORWARD current (``i > 0``, n_pos to n_neg) blocks the bus
+          plus the diode drop and is hard; an edge where the current
+          is REVERSE sees the antiparallel diode's -0.8 V (signs
+          agree) and costs that drop's share, 0.17 + 0.14 mJ.
+          ``P_sw_avg`` 11.28 W;
+        * with NO dead time the reverse-current edges see +600 V
+          against a negative current: soft, 0 J (they cost
+          120.6 + 99.9 mJ, 22.64 W, before add-ai-usage-guide 12.8).
+          ``P_sw_avg`` 11.61 W, ``INV__LSa`` 10.99 W: the leg's
+          22.60 W against the half-cycle closed form
+          ``2 f (E_on + E_off) I / (50 A pi)`` = 22.65 W. It is 0.3 W over
+          the dead-time value because the dead time lowers the load
+          current (16.24 against 16.77 A rms), not a second edge.
     conduction_specs : mapping, optional
         Per-diode / per-switch offset+slope conduction model. Keys are
         device names or branch ids. Values give the PWL device
@@ -1794,6 +2032,9 @@ def device_loss_summary(
     """
     # The window every statistic is taken over (the whole run by
     # default), checked against the run as simulated.
+    # The events inside stored steps as rows (the fixed engine's event
+    # split under the restart rule; _result_views.with_inner_events).
+    result = _views.with_inner_events(result)
     t_all = np.asarray(result.times, dtype=float)
     span = (float(t_all[0]), float(t_all[-1])) if t_all.size else None
     # From the first solved sample on: a seeded, unsolved row 0 has no
@@ -1817,6 +2058,17 @@ def device_loss_summary(
     known_names = {c.get("name") for c in comps_by_bid.values()
                      if c.get("name")}
     known_bids = set(comps_by_bid)
+    magnetic_resistances = set()
+    if getattr(builder, "magnetic_nodes", None) is not None and builder.magnetic_nodes():
+        for c in comps_by_bid.values():
+            nm = c.get("name")
+            if c.get("kind") != "resistor" or not nm:
+                continue
+            try:
+                builder.magnetic_element(nm)
+            except KeyError:
+                continue
+            magnetic_resistances.add(nm)
 
     def _build_spec_lookup(
         specs: Optional[Mapping[Any, Mapping[str, Any]]],
@@ -1853,8 +2105,31 @@ def device_loss_summary(
         diode_specs, "diode_specs")
     switch_by_bid, switch_by_name = _build_spec_lookup(
         switch_specs, "switch_specs")
+    # A diode's recovery TABLE is read on the exact steady-state route's
+    # period map only; here it used to be ignored without a word.
+    for bid_, desc_ in comps_by_bid.items():
+        if desc_.get("kind") == "diode" and (
+                bid_ in switch_by_bid or desc_.get("name") in switch_by_name):
+            raise ValueError(
+                f"switch_specs names diode {desc_.get('name')!r}: a diode's "
+                "recovery-energy table (E_off_table) is read on the exact "
+                "steady-state route's period map only (pulsim.design "
+                "Evaluator, steady=SteadySpec(method='pss'), engine "
+                "'dsed'); give the sampled summary its recovery through "
+                "diode_specs.")
     cond_by_bid, cond_by_name = _build_spec_lookup(
         conduction_specs, "conduction_specs")
+    # A gated PWL device (IGBT with reverse blocking, GTO, thyristor) is a
+    # diode row: its switching energies would be dropped in silence.
+    for c in comps_by_bid.values():
+        if "gate" in (c.get("params") or {}) and (
+                int(c["branch_id"]) in switch_by_bid
+                or str(c.get("name")) in switch_by_name):
+            raise ValueError(
+                f"switch_specs: {c.get('name')!r} is a gated PWL device "
+                "(IGBT with reverse_blocking, GTO, thyristor); its switching "
+                "energies are not modelled by device_loss_summary yet. Drop "
+                "the entry, or use reverse_blocking=False for the IGBT.")
 
     # The kernel's per-sample record of the stamped mask (None for a
     # result that carries none) and each switch-kind branch's bit.
@@ -1878,6 +2153,90 @@ def device_loss_summary(
         f, to = desc_nodes
         return (_node_voltage_trace(st, int(f))
                 - _node_voltage_trace(st, int(to)))
+
+    _imp_cache: Dict[str, List[float]] = {}
+
+    def _impulse_times() -> Dict[str, List[float]]:
+        """{switch: the start times of the steps that carried an impulse of
+        its structure} (its cause and the elements that flipped with it),
+        computed once."""
+        if not _imp_cache:
+            _imp_cache["\0"] = []
+            for r in getattr(result, "reinit_records", None) or []:
+                if not float(r.dW) > 0:
+                    continue
+                for n in {_impulse_cause(builder, result, r), *r.devices}:
+                    _imp_cache.setdefault(n, []).append(float(r.t))
+        return _imp_cache
+
+    def _ideal_entry(bid: int, desc, kind: str) -> "Optional[Dict[str, Any]]":
+        # An ideal branch-form element (R_on = 0) has no conductance law:
+        # its current is its own solved unknown i_s (what result.i reads),
+        # its voltage the node difference. Each step is the line in i; the
+        # power is the line between the step's end powers v·i (V_f·i while
+        # ON — linear in i, so exact; g_off·v² while OFF), never v-line
+        # times i-line: across a commutation step that product invents a
+        # loss (0.038 W on a 24 V, 0.5 A ideal buck) the element cannot have.
+        try:
+            col = int(builder.pool.branch_var_id_for_switch(bid, builder.graph))
+        except Exception:  # noqa: BLE001 — no branch unknown: leave it out
+            return None
+        nodes = desc.get("nodes", (None, None))
+        if col < 0 or nodes[0] is None or nodes[1] is None:
+            return None
+        i_w, i_ws = states_w[:, col], states_s_w[:, col]
+        p_w, p_ws = win.cont(_branch_v(states, nodes) * states[:, col],
+                             _branch_v(states_s, nodes) * states_s[:, col])
+        if times_w.size > 1 and T > 0:
+            i_avg = _views.pl_integral(times_w, i_w, i_ws) / T
+            E = _views.pl_integral(times_w, p_w, p_ws)
+            P = E / T
+        else:
+            i_avg, E, P = float(i_w.mean()), 0.0, float(p_w.mean())
+        bit = switch_bits.get(int(bid), -1)
+        entry: Dict[str, Any] = {
+            "branch_id": int(bid), "kind": kind, "name": desc.get("name", ""),
+            "form": "branch",
+            "i_avg": float(i_avg),
+            "i_rms": _time_weighted_rms(i_w, times_w, i_ws),
+            "i_peak": float(max(np.abs(i_w).max(), np.abs(i_ws).max())) if i_w.size else 0.0,
+            "P_avg": float(P), "E_total": float(E),
+        }
+        params = desc.get("params", {})
+        if kind == "diode":
+            entry["V_th"] = float(params.get("V_th", 0.0))
+            entry["V_f"] = float(params.get("V_f", 0.0))
+        if kernel_masks is not None and 0 <= bit < kernel_masks.shape[1]:
+            closed = np.asarray(kernel_masks[:, bit], dtype=bool)
+            entry["duty_conducting" if kind == "diode" else "duty_closed"] = _duty(closed)
+            spec = (switch_by_bid.get(bid) or switch_by_name.get(entry["name"])
+                    if kind == "switch" else None)
+            if spec is not None:
+                closed_s = closed
+                if masks_s is not None and masks_s is not kernel_masks:
+                    closed_s = np.asarray(masks_s[:, bit], dtype=bool)
+                imp_t = _impulse_times().get(entry["name"], [])
+                entry.update(_switch_switching_loss(
+                    closed, times, _branch_v(states, nodes), states[:, col], spec,
+                    closed_start=closed_s, v_start=_branch_v(states_s, nodes),
+                    i_start=states_s[:, col], window=win, law=_edge_law(kind, desc.get("params", {})),
+                    impulse_t=imp_t, name=entry["name"],
+                    projected_limits=getattr(result, "engine_used", None) == "dsed"))
+        else:
+            warnings.warn(
+                f"device_loss_summary: ideal {kind} {entry['name']!r} has no recorded "
+                "mask in this result: its duty and switching energy are left out.",
+                RuntimeWarning, stacklevel=3)
+        ignored = [k for k, by_bid, by_name in (
+            ("conduction_specs", cond_by_bid, cond_by_name),
+            ("diode_specs", diode_by_bid, diode_by_name))
+            if by_bid.get(bid) or by_name.get(entry["name"])]
+        if ignored:
+            warnings.warn(
+                f"device_loss_summary: {', '.join(ignored)} for ideal (R_on = 0) "
+                f"{kind} {entry['name']!r} ignored: its conduction is the solved v·i "
+                "and it has no reverse-recovery model.", RuntimeWarning, stacklevel=3)
+        return entry
 
     summary: List[Dict[str, Any]] = []
     switch_seq_idx = 0  # increments once per Switch / Diode branch
@@ -1927,6 +2286,19 @@ def device_loss_summary(
                 continue
             stats = _conduction_stats(_branch_v(states_w, nodes), 1.0 / R,
                                       times_w, _branch_v(states_s_w, nodes))
+            if name and name in magnetic_resistances:
+                # add-permeance-magnetic-domain: F = R_m*dPhi/dt, so the
+                # "current" statistics are the flux rate [V] and P_avg is
+                # the in-loop core loss R_m*(dPhi/dt)^2.
+                summary.append({
+                    "branch_id": int(bid),
+                    "kind": "magnetic_resistance",
+                    "category": "core_loss",
+                    "name": name,
+                    "R_m": R,
+                    **stats,
+                })
+                continue
             summary.append({
                 "branch_id": int(bid),
                 "kind": "resistor",
@@ -1975,6 +2347,56 @@ def device_loss_summary(
             })
             continue
 
+        if kind in ("mosfet_level1", "igbt_level1", "nonlinear_diode",
+                    "excess_loss"):
+            # add-unified-device-interface 9.3: the static Newton kinds'
+            # current from the kernel's device law at each stored state
+            # (and right limit), integrated as the Shockley diode's above.
+            # An IGBT with a tail is skipped (its delta needs the stored
+            # charge): no entry rather than a wrong one.
+            from . import _pulsim as _kmod
+            nodes = desc.get("nodes", (None, None))
+            rd = _kmod.static_device_readings(builder.graph, builder.pool,
+                                              states, int(bid))
+            rd_s = _kmod.static_device_readings(builder.graph, builder.pool,
+                                                states_s, int(bid))
+            if rd is None or rd_s is None or nodes[0] is None or nodes[1] is None:
+                warnings.warn(
+                    f"device_loss_summary: {name!r} ({kind}) is left out: its "
+                    "current needs a stored charge (an IGBT tail). Put a 1 mOhm "
+                    "resistor in series and read its v*i.", UserWarning,
+                    stacklevel=2)
+                continue
+            v_D, v_D_s = win.cont(_branch_v(states, nodes), _branch_v(states_s, nodes))
+            i_D, i_D_s = win.cont(np.asarray(rd[0], float), np.asarray(rd_s[0], float))
+            if times.size > 1 and T > 0:
+                i_avg = _views.pl_integral(times_w, i_D, i_D_s) / T
+                E = _views.pl_integral_product(times_w, v_D, i_D, v_D_s, i_D_s)
+            else:
+                i_avg, E = float(i_D.mean()), 0.0
+            extra = {}
+            if kind == "excess_loss":
+                # add-permeance-magnetic-domain 4.2: the "current" is the
+                # MMF F [A] and the "voltage" the flux rate u [V] of the
+                # unit winding's node, so P_avg is the in-loop excess loss
+                prm = desc.get("params", {})
+                extra = {"category": "core_loss", "c": float(prm.get("c", float("nan"))),
+                         "eps": float(prm.get("eps", float("nan")))}
+            summary.append({
+                "branch_id": int(bid),
+                "kind": kind,
+                **extra,
+                "name": name,
+                "i_avg": float(i_avg),
+                "i_rms": _time_weighted_rms(i_D, times_w, i_D_s),
+                "i_peak": float(max(np.abs(i_D).max(), np.abs(i_D_s).max()))
+                if i_D.size else 0.0,
+                "P_avg": (float(E) / T if times.size > 1 and T > 0
+                          else float((v_D * i_D).mean())),
+                "E_total": float(E),
+            })
+            continue
+
         if kind == "diode":
             # PWL SwitchedDiode. Its ON state is g_on in series with the
             # forward drop V_f — the drop is V_f + i/g_on whatever V_th
@@ -1990,6 +2412,12 @@ def device_loss_summary(
             V_th  = float(params.get("V_th", 0.0))
             V_f   = float(params.get("V_f", 0.0))
             if not (np.isfinite(g_on) and np.isfinite(g_off)):
+                ideal = (_ideal_entry(bid, desc, "diode")
+                         if params.get("branch_form") else None)
+                if ideal is None:
+                    _warn_ideal_skipped(desc)
+                else:
+                    summary.append(ideal)
                 switch_seq_idx += 1
                 continue
             from_id, to_id = desc.get("nodes", (None, None))
@@ -2008,7 +2436,7 @@ def device_loss_summary(
                           else (None, None))
             br = _window_conductance(win, v_D, g_D, d_trace.v_start,
                                      g_D_s, o_D, o_D_s)
-            _, i_D, i_D_s, _ = br
+            _, i_D, i_D_s, _, _ = br
             stats = _conduction_stats(v_D, g_D, times, d_trace.v_start,
                                       g_D_s, branch=br)
             cond_d = np.asarray(d_trace.conducting, dtype=bool)
@@ -2066,7 +2494,9 @@ def device_loss_summary(
                 t_rr = _recovery_time(d_spec, name)
                 offs = _diode_turn_offs(
                     d_trace, times, t_rr=t_rr, other_flip=d_flip,
-                    i_peak=None if win.whole else entry["i_peak"])
+                    i_peak=None if win.whole else entry["i_peak"],
+                    controlled=getattr(result, "engine_used", None) == "trbdf2",
+                    interpolable=_rule_held((getattr(result, "diagnostics", None) or {}).get("output_grid")))
                 if not win.whole:
                     offs = [ev for ev in offs
                             if win.a <= ev["t_off"] < win.b]
@@ -2084,14 +2514,25 @@ def device_loss_summary(
             g_on  = float(params.get("g_on", float("nan")))
             g_off = float(params.get("g_off", float("nan")))
             if not (np.isfinite(g_on) and np.isfinite(g_off)):
+                ideal = (_ideal_entry(bid, desc, "switch")
+                         if params.get("branch_form") else None)
+                if ideal is None:
+                    _warn_ideal_skipped(desc)
+                else:
+                    summary.append(ideal)
                 switch_seq_idx += 1
                 continue
             sw_bit = switch_bits.get(int(bid), switch_seq_idx)
             if switch_fn is None and not (
                     kernel_masks is not None
                     and 0 <= sw_bit < kernel_masks.shape[1]):
-                # Honest skip — no recorded mask and no switch_fn: no
-                # way to know the per-step state.
+                # No recorded mask and no switch_fn: no way to know the
+                # per-step state.
+                warnings.warn(
+                    f"device_loss_summary: switch {name!r} is left out: the "
+                    "result carries no record of the stamped switch mask and "
+                    "switch_fn= was not given (pass the callable used in "
+                    "simulate()).", RuntimeWarning, stacklevel=2)
                 switch_seq_idx += 1
                 continue
             nodes = desc.get("nodes", (None, None))
@@ -2117,7 +2558,7 @@ def device_loss_summary(
             g_SW = np.where(closed, g_on, g_off)
             g_SW_s = np.where(closed_s, g_on, g_off)
             br = _window_conductance(win, v_SW, g_SW, v_SW_s, g_SW_s)
-            _, i_w, i_s_w, _ = br
+            _, i_w, i_s_w, _, _ = br
             stats = _conduction_stats(v_SW, g_SW, times, v_SW_s, g_SW_s,
                                       branch=br)
             entry: Dict[str, Any] = {
@@ -2150,12 +2591,46 @@ def device_loss_summary(
                                             closed_start=closed_s,
                                             v_start=v_SW_s,
                                             i_start=i_SW_s,
-                                            window=win))
+                                            window=win,
+                                            law=_edge_law(kind, params),
+                                            name=name))
             summary.append(entry)
             switch_seq_idx += 1
             continue
 
         # Other kinds (sources, capacitors, ...) — skip silently.
+
+    # Impulsive re-initialisation energy (task 6.4): its own category,
+    # booked to the switch that entered the dependent mode. Not part of
+    # E_total (the ideal element's v·i is 0 on both sides of the pulse).
+    impulses = impulse_losses(builder, result, t_from=t_from, t_to=t_to)
+    # A branch-form element always carries the category (0 J when nothing
+    # was booked to it): its conduction is ~0 by construction, so leaving
+    # the key out would read as "not computed".
+    has_records = any(getattr(r, "kind", "") != "start_projection"
+                      for r in getattr(result, "reinit_records", None) or ())
+    if has_records or any(e.get("form") == "branch" for e in summary):
+        for entry in summary:
+            if entry.get("kind") in ("switch", "diode") and (
+                    has_records or entry.get("form") == "branch"):
+                imp = impulses.pop(entry.get("name", ""), None) or {}
+                E_imp = float(imp.get("E_impulse_total", 0.0))
+                entry["E_impulse_total"] = E_imp
+                entry["n_impulses"] = int(imp.get("n_impulses", 0))
+                entry["P_impulse_avg"] = E_imp / T if T > 0 else 0.0
+        # A loss port (set_device_losses) books the impulsive energy of the
+        # records caused by its device into its junction in the kernel
+        # (E_impulse of device_energy; add-in-kernel-event-losses item 3).
+        names = getattr(builder, "_device_loss_names", None)
+        ported = set(names()) if callable(names) else set()
+        for entry in summary:
+            if entry.get("name") in ported and entry.get("E_impulse_total"):
+                entry["impulse_in_junction"] = True
+        for name, imp in impulses.items():
+            warnings.warn(
+                f"device_loss_summary: {imp['E_impulse_total']:.6g} J of impulsive "
+                f"re-initialisation booked to {name!r}, which has no entry here.",
+                RuntimeWarning, stacklevel=2)
 
     # The window every statistic above was taken over: from the first
     # SOLVED sample (t[1] on a run seeded with initial_state / i0= /

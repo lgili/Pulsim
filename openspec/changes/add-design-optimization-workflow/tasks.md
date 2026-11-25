@@ -1,0 +1,42 @@
+## 1. Records and the evaluator (first slice)
+- [x] 1.1 `python/pulsim/design.py`: `EvaluationRecord`, `Evaluator(build, period, kpis, constraints, steady, engine, options)`, `evaluate`; design hash; provenance
+- [x] 1.2 Default KPIs on one steady period, time-weighted (`np.trapezoid`): efficiency, losses by device and category, ripple, stresses
+- [x] 1.3 Oracle: a CCM buck with resistor-pair switches (`g_on = 1e3`, `g_off = 1e-9`) and a 10 mΩ inductor resistance on `engine='dsed'` with `method='pss'`, KPIs against a numpy reference (matrix exponential per mode on the periodic orbit, in the test, same element values): efficiency, loss and ripple within 1e-8 relative; the ripple also within 2 % of the small-ripple formula `ΔV = (1 − D)·V_out/(8·L·C·f²)` as a sanity check
+
+## 2. Failures as records
+- [x] 2.1 Status mapping of design D3; never a default value; other exceptions re-raised
+- [x] 2.2 Penalty and constraint adaptors
+- [x] 2.3 Tests: a design that builds a Shockley rectifier with `engine='dsed'` (refused today) gives `refused` with the four fields; a design with a non-settling steady state gives `failed` with `'not_settled'`; a ripple bound exceeded gives `infeasible` with the excess in volts; `as_objectives` and `as_constraints` return `penalty` for `refused`/`failed` and finite values otherwise
+
+## 3. Thermal fixed point
+- [x] 3.1 Loop of design D4 with damping, 0.1 K tolerance, 20-iteration cap; re-simulation only when the circuit depends on `T_j`
+- [x] 3.2 Tests: linear loss model `P = P₀·(1 + α·(T − 25))` with `R_th` — the fixed point equals `(T_amb + R_th·P₀·(1 − 25α)) / (1 − R_th·P₀·α)` within 0.01 K; `R_th·P₀·α = 1.2` gives `infeasible` with `thermal_runaway`; a circuit without temperature dependence runs one simulation (counter)
+
+## 4. Steady state
+- [x] 4.1 `SteadySpec` `pss`, `transient`, `auto`; the route in the counters; no silent fallback after a failure
+- [x] 4.2 Tests: DCM buck with `method='pss'` reaches `v_C` within 1e-9 of 8.99624708728943 V; `method='transient'` reaches it within the settle tolerance; `auto` picks `pss` for it and `transient` for a circuit `pss` refuses
+
+## 5. Batch, determinism, thread safety
+- [x] 5.1 `evaluate_many` on the sweep job runner, thread backend, order kept, stop rule for three identical refusals
+- [x] 5.2 Tests: 64 designs on 1 and on 8 workers give equal records (all fields except `wall_s`); two calls of `evaluate` on the same design give equal records; a batch with one refusing design completes with one `refused` record
+
+## 6. Worked example
+- [x] 6.1 `examples/optimization/buck_pareto.py` and a notebook (design D8); optional extra `pulsim[opt]` for pymoo; numpy fallback
+- [x] 6.2 Test (CI, small): 32 Latin-hypercube designs run, status counts printed, the non-dominated set is non-empty and every member satisfies the constraints
+- [x] 6.3 Docs: "Using Pulsim inside an optimiser" (contract, statuses, determinism, why derivative-free, the finite-difference table, synthetic parts)
+
+## 7. Integration with later changes
+- [x] 7.1 With `add-in-kernel-event-losses`: `ThermalSpec(mode='kernel')` default; the fixed point kept as `mode='fixed_point'`; test that both agree within 0.1 K on the example's best design (exact route only; measured 1.3e-4 K; `test_design_thermal_kernel.py`, `test_period_thermal.cpp`, DECISIONS 28)
+- [x] 7.2 With `add-immutable-circuit-ir`: `Evaluator(circuit=…)` with `with_params`; counter test that a batch on one topology performs one symbolic analysis (`test_design_circuit_form.py`; the exact stepper performs none, and shares its labels and observables per structure instead)
+- [x] 7.3 With `add-parameter-sensitivities`: `gradients=True`; test against the sensitivities change's oracle — as `gradients={variable: '<component>.<field>'}` (the variable-to-parameter map is needed; a scaled map is refused), pss route only, `record.grads` (`test_sensitivity_kpi.py`)
+- [x] 7.4 Declarative, picklable KPI and constraint specs; `backend='process'` refuses an unpicklable part by name before any worker starts; the buck example on processes gives the thread records (`test_design_declarative.py`, DECISIONS 21)
+- [x] 7.5 Independent periodicity check of the exact route, once per topology and event pattern; a mismatch is `failed` (`test_design_periodicity.py`, DECISIONS 22)
+- [x] 7.6 Energy-balance guard on every record, tolerance by route from measured residuals; the record carries the residual and the table losses (`test_design_energy_balance.py`, DECISIONS 22)
+
+- [x] 7.7 Kernel batch evaluator: `evaluate_many` runs a circuit-form, declarative evaluator's designs in one GIL-free kernel call on native threads; records equal the Python path's; fallbacks and what the plan cannot express named in `counters['batch']` (`test_design_kernel_batch.py`, `test_design_batch.cpp`, DECISIONS 26)
+- [x] 7.8 `p_in` on the fixed-step `pss` route: each side of a gate edge integrated separately (1.0 % -> 1.5e-7 on a DCM buck at T/200); stepped energy tolerance re-measured and kept at 1e-1 (first order: -3.9e-2 at T/25) (`test_design_pin_quadrature.py`, `probes/pin_quadrature.py`, DECISIONS 29)
+- [x] 7.9 Second worked example with gradients: `examples/optimization/boost_gradient.py` (`value_and_grad` + `scipy.optimize.minimize(jac=True)`, else a grid on the kernel batch); gradient = central difference within 1e-6, targets met within 5 % (`test_example_boost_gradient.py`, tutorial 08 section 7)
+- [x] 7.10 The event hook for comparator-gate saltation as a measured patch (`probes/saltation_hook.patch`, `probes/saltation_hook_check.cpp`: bit-identical, every event named; `test_saltation_hook_patch.py`, DECISIONS 30); landing it and the comparator gate remain
+
+## 8. Verification
+- [x] 8.1 ruff, pytest, `openspec validate --all --strict`

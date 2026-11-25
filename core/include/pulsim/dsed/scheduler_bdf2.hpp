@@ -21,7 +21,7 @@
 //     trivial extension once we land an LLC test scenario at Gate 5.
 //   * State management:
 //       - On mask change: invalidate BDF2 history (y_prev) + LU cache.
-//         The next step uses Crank-Nicolson bootstrap to restart.
+//         The next step uses the backward-Euler bootstrap to restart.
 //       - On h change: invalidate LU cache only (history is still
 //         valid in time-domain; BDF2 just needs to re-factor J).
 //
@@ -51,6 +51,7 @@
 
 #include "pulsim/dsed/bdf2_integrator.hpp"
 #include "pulsim/dsed/time_eps.hpp"
+#include "pulsim/events/event_queue.hpp"
 #include "pulsim/dsed/event_predictor.hpp"
 #include "pulsim/dsed/scheduler.hpp"
 #include "pulsim/numeric/dense.hpp"
@@ -222,7 +223,8 @@ private:
             // applies here: ∞ from `next_edge_after` triggers a
             // `dt_max/10` poll boundary so PWM events from plain
             // Python switch_fns aren't silently missed.
-            const Real raw = switch_fn_.next_edge_after(t_now);
+            const Real raw = events::require_after(t_now, switch_fn_.next_edge_after(t_now),
+                                                   events::Kind::GateEdge);
             if (std::isfinite(raw)) {
                 return std::min(raw, t_end);
             }
@@ -247,7 +249,7 @@ private:
 
         system_.set_mask(new_mask);
         // A and b changed → both history (y_prev) and LU (J = I - (2h/3) A_old)
-        // are invalidated; next step starts fresh via Crank-Nicolson bootstrap.
+        // are invalidated; next step starts fresh via the backward-Euler bootstrap.
         bdf2_state.invalidate();
 
         result.event_log.push_back(EventRecord<MaskT>{

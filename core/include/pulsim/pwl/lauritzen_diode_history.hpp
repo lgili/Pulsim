@@ -43,6 +43,8 @@
 // exactly why stamping the wrong one converges and lies.
 
 #include "pulsim/models/lauritzen_diode.hpp"
+#include "pulsim/device/device.hpp"
+#include "pulsim/device/device_state.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/pwl/trbdf2_stage.hpp"
@@ -120,6 +122,12 @@ public:
                 e.k1 = (Real{1} / e.params.T_M) / den;
                 e.k0 = -(k.c2 * e.q_m_gamma + k.c3 * e.q_m_prev)
                        / h / den;
+            } else if (stage == TrBdf2Stage::BackwardEuler) {
+                // q_M(1 + hA) = q_M,n + h q_E/T_M: the trapezoidal
+                // pair at 2h without the stored derivative f_n.
+                const Real den = Real{1} + h * A;
+                e.k1 = (h / e.params.T_M) / den;
+                e.k0 = e.q_m_prev / den;
             } else {
                 const Real den = Real{1} + h * A / Real{2};
                 e.k1 = (h / (Real{2} * e.params.T_M)) / den;
@@ -180,6 +188,35 @@ public:
         }
     }
 
+    /// SDIRK restart: pseudo previous q_M from the stage-1 solve, by
+    /// the same affine relation stage 1 solved with (K0/K1 of that
+    /// stage, as `capture_gamma`).
+    void extrapolate_previous(const Vector& x1, Real c) {
+        for (auto& e : entries_) {
+            const Real v = stamping::read_node_voltage(x1, e.from)
+                         - stamping::read_node_voltage(x1, e.to);
+            const Real q_m = e.k0 + e.k1 *
+                models::LauritzenDiode::junction_charge<Real>(v, e.params);
+            e.q_m_prev += c * (q_m - e.q_m_prev);
+        }
+    }
+
+    /// TR-BDF2 post-event refresh: dq_M/dt from the device law at the
+    /// probe voltage and the stored charge; q_M is not touched.
+    void refresh_derivatives(const Vector& x_probe) {
+        for (auto& e : entries_) {
+            const Real v =
+                stamping::read_node_voltage(x_probe, e.from)
+                - stamping::read_node_voltage(x_probe, e.to);
+            const Real q_e =
+                models::LauritzenDiode::junction_charge<Real>(
+                    v, e.params);
+            const Real A = Real{1} / e.params.T_M
+                           + Real{1} / e.params.tau;
+            e.f_prev = q_e / e.params.T_M - A * e.q_m_prev;
+        }
+    }
+
     /// Seed from a DC operating point: the device sits on its
     /// steady-state curve, where dq_M/dt = 0 and q_M = i·tau.
     void seed_from_dc_op(const Vector& x) {
@@ -196,11 +233,71 @@ public:
         }
     }
 
-    [[nodiscard]] std::vector<Entry> snapshot() const {
+    // ---- device::StatefulKind (device/kind.hpp) ----
+    static constexpr device::StateBlock kBlock = device::StateBlock::LauritzenDiode;
+    static constexpr DevicePool::StoredKind kStoredKind =
+        DevicePool::StoredKind::LauritzenDiode;
+    static constexpr Size kFlatPerDevice = 2;
+    /// Every real an entry carries from step to step, the snapshot's
+    /// (`to_flat` order) first, then the stage scratch: the in-run
+    /// rollback copies exactly these.
+    template <class E, class F> static void for_each_state(E& e, F&& f) {
+        f(e.q_m_prev);
+        f(e.f_prev);
+        f(e.q_m_gamma);
+        f(e.k0);
+        f(e.k1);
+    }
+    [[nodiscard]] std::vector<Entry>& mutable_entries() noexcept {
         return entries_;
     }
-    void restore(const std::vector<Entry>& snap) {
-        entries_ = snap;
+    void commit(const Vector& x, Real h, TrBdf2Stage stage) {
+        update_from_state(x, h, stage);
+    }
+    /// The slot refresh reads the law, not the probe step.
+    void refresh_derivatives(const Vector& x_probe, Real /*h*/) {
+        refresh_derivatives(x_probe);
+    }
+
+    // ---- the stage form (βh, ψ) of integrator='esdirk43' ----
+    // One q row per device: q = q_M, q̇ = f (the committed derivative). A
+    // stage is backward Euler of βh from the base q_m_prev = ψ (the stamp's
+    // BE rule); after its solve q_M = K0 + K1·q_E(v) under that stage's
+    // K0/K1 (set by every stamp), as capture_gamma reads it.
+    [[nodiscard]] Size stage_rows() const noexcept { return entries_.size(); }
+    void stage_start(Real hh, Real* q0, Real* hqd0) const {
+        for (const auto& e : entries_) {
+            *q0++ = e.q_m_prev;
+            *hqd0++ = hh * e.f_prev;
+        }
+    }
+    void stage_base(const Real* psi, const Real* /*dpsi*/) {
+        for (auto& e : entries_) e.q_m_prev = *psi++;
+    }
+    void stage_increment(const Vector& x, const Real* psi, Real* d) const {
+        for (const auto& e : entries_) {
+            const Real v = stamping::read_node_voltage(x, e.from)
+                         - stamping::read_node_voltage(x, e.to);
+            *d++ = e.k0 + e.k1 * models::LauritzenDiode::junction_charge<Real>(v, e.params)
+                   - *psi++;
+        }
+    }
+    void stage_clear() noexcept {}
+    // ---- TR-BDF2's q rows (the error estimate) ----
+    /// q − q_n at γ (the stage-1 capture) and at the step end (the BDF2
+    /// stage's K0/K1, as `commit` computes it).
+    void trbdf2_increments(const Vector& x1, Real* dqg, Real* dq1) const {
+        for (const auto& e : entries_) {
+            const Real v = stamping::read_node_voltage(x1, e.from)
+                         - stamping::read_node_voltage(x1, e.to);
+            *dq1++ = e.k0 + e.k1 * models::LauritzenDiode::junction_charge<Real>(v, e.params)
+                     - e.q_m_prev;
+            *dqg++ = e.q_m_gamma - e.q_m_prev;
+        }
+    }
+    /// atol_q / atol per row: q_M = τ·i on the steady-state curve.
+    void q_scales(Real* s) const {
+        for (const auto& e : entries_) *s++ = e.params.tau;
     }
 
     /// Flat (q_M, f) pairs, for `SolverSnapshot`. The gamma point
@@ -229,6 +326,12 @@ public:
             entries_[k].f_prev   = flat[2 * k + 1];
         }
     }
+
+    /// The step of the last interface-path stamp (pwl/interface_stamps.hpp):
+    /// `iface::capture_gamma` solves the local charge row at the stage point
+    /// under it, as the hand path reads K0/K1 from the last `begin_step`.
+    /// Set before every interface solve; not state (never rolled back).
+    device::StepCtx iface_ctx{};
 
 private:
     std::vector<Entry> entries_;

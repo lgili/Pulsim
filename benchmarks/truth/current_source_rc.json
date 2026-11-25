@@ -1,0 +1,52 @@
+{
+ "circuit": "circuits/linear/current_source_rc.yaml",
+ "form": "conductance",
+ "supported": true,
+ "observables": [
+  "V(out)"
+ ],
+ "dps": [
+  30,
+  60
+ ],
+ "wall_s": 0.0,
+ "events": [],
+ "n_commutations": 0,
+ "n_events": 0,
+ "ambiguous": [],
+ "weak_only": 0,
+ "start_mode": "",
+ "dc_start_modes": 1,
+ "notes": [],
+ "jumps": [],
+ "impulsive_loss_J": "0.0",
+ "max_dae_residual": "0.0",
+ "max_eigvec_cond": "12.0",
+ "windows": {
+  "full": {
+   "V(out)": {
+    "mean": "4.999999999999999864474728",
+    "rms": "4.999999999999999864474728",
+    "d_prec": "3.15e-32"
+   }
+  },
+  "last20": {
+   "V(out)": {
+    "mean": "4.999999999999999864474728",
+    "rms": "4.999999999999999864474728",
+    "d_prec": "6.53e-33"
+   }
+  }
+ },
+ "energy_J": {
+  "R1": "0.00025",
+  "src:I1": "0.00025"
+ },
+ "energy_balance_rel": "1.52e-61",
+ "precision_doubling_rel": "1.3e-33",
+ "event_time_diff_s": "0",
+ "u_stored_trace": 0.0,
+ "uniform_dt_floor": 0.0,
+ "dt": 5e-06,
+ "stored_dt": 6.25e-07
+}

@@ -101,7 +101,7 @@ def main():
         def update(self, t):
             return self.motor.mech.theta_rad * self.pp
 
-    chain.add("theta", RotorAngleFromMotor(motor, PP),
+    chain.add("theta", p.PythonBlock(RotorAngleFromMotor(motor, PP)),
                 inputs=dict(t="time"), output="theta_elec")
 
     # i_a, i_b, i_c → derived from inductor branch currents (already
@@ -147,17 +147,14 @@ def main():
     chain.add("pwm_c", p.PwmGenerator(frequency=F_PWM),
                 inputs=dict(duty="channel:d_c", t="time"),
                 output="gc_hs")
-    class Comp:
-        def reset(self): pass
-        def update(self, x): return 1.0 - x
-    chain.add("ls_a", Comp(), inputs=dict(x="channel:ga_hs"),
-                output="ga_ls")
-    chain.add("ls_b", Comp(), inputs=dict(x="channel:gb_hs"),
-                output="gb_ls")
-    chain.add("ls_c", Comp(), inputs=dict(x="channel:gc_hs"),
-                output="gc_ls")
+    # Low side = 1 - high side (1.0 + (-1)*x is 1.0 - x exactly).
+    for ph in "abc":
+        chain.add(f"ls_{ph}", p.Sum(weights=(1.0, -1.0)),
+                  inputs=dict(inputs=(1.0, f"channel:g{ph}_hs")),
+                  output=f"g{ph}_ls")
 
-    chain.bind(b); chain._dt = DT
+    chain_obs = chain.make_step_observer(b, dt=DT)
+    set_channel = chain._cxx_chain.set_channel
 
     # --- PMSM observer (mechanical update + back-EMF injection) ---------
     motor_obs, motor_b_extra = p.make_pmsm_observer(b, motor, dt=DT)
@@ -172,13 +169,13 @@ def main():
 
     def combined_observer(t, x):
         # Read phase currents and stash on chain channels.
-        chain.channels["i_a"] = float(x[i_a_idx])
-        chain.channels["i_b"] = float(x[i_b_idx])
-        chain.channels["i_c"] = float(x[i_c_idx])
+        set_channel("i_a", float(x[i_a_idx]))
+        set_channel("i_b", float(x[i_b_idx]))
+        set_channel("i_c", float(x[i_c_idx]))
         # Run the motor's mechanical/back-EMF update.
         motor_obs(t, x)
         # Then evaluate the chain (uses fresh i_a/b/c + new θ_elec).
-        chain.update(t, x)
+        chain_obs(t, x)
 
     # Switch order in builder: each phase adds HS, D_HS, LS, D_LS
     # → 4 switches per phase × 3 phases = 12 switches.
@@ -243,16 +240,28 @@ def main():
     # grid, unlike a plain mean over the samples of a variable-step run.
     mask = (times >= 15e-3) & (times <= 25e-3)
     win = (15e-3, 25e-3)
-    print(f"\n  KPI (15-25 ms — post-startup, pre-voltage-saturation):")
+    print("\n  KPI (15-25 ms — post-startup, pre-voltage-saturation):")
     print(f"    ω        = {p.time_average(times, omega_trace, *win):.2f} rad/s")
     print(f"    θ_m turns= {theta_m_trace[-1]/(2*math.pi):.2f}")
     print(f"    i_d mean = {p.time_average(times, i_d_trace, *win):+.3f} A (target 0)")
     print(f"    i_q mean = {p.time_average(times, i_q_trace, *win):+.3f} A "
-          f"(target {I_Q_REF})")
+          f"(setpoint {I_Q_REF})")
+    # The motor is still accelerating, so the q-axis back-EMF
+    # E_q = pp·ψ·ω is a ramp; a PI (type-1 loop) tracks a ramp
+    # disturbance with a steady error ≈ (dE_q/dt)/Ki. That accounts for
+    # ~0.18 A of the ~0.23 A shortfall at these gains (Ki = 2000 cuts
+    # the shortfall to 0.07 A); the rest is not yet explained.
+    k0, k1 = np.searchsorted(times, win)
+    alpha_m = (omega_trace[k1] - omega_trace[k0]) / (times[k1] - times[k0])
+    print(f"    ramp-tracking lag ≈ pp·ψ·(dω/dt)/Ki = "
+          f"{PP * PSI_PM * alpha_m / KI_I:.3f} A "
+          f"(dω/dt = {alpha_m:.0f} rad/s²)")
     print(f"    |i_a|_peak = {np.abs(i_a[mask]).max():.2f} A")
-    T_em_avg = PP * PSI_PM * 1.5 * I_Q_REF  # ideal: 1.5·pp·ψ·i_q
-    print(f"    expected T_em = (3/2)·pp·ψ_pm·i_q "
-          f"= {T_em_avg:.3f} Nm  (load = {T_LOAD})")
+    i_q_win = p.time_average(times, i_q_trace, *win)
+    T_em_avg = PP * PSI_PM * 1.5 * i_q_win  # 1.5·pp·ψ·i_q (measured i_q)
+    print(f"    T_em = (3/2)·pp·ψ_pm·i_q "
+          f"= {T_em_avg:.3f} Nm  (load = {T_LOAD}; J·dω/dt = "
+          f"{J_MOT * alpha_m:.3f} Nm)")
 
     # Plot
     try:

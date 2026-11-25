@@ -1,0 +1,53 @@
+{
+ "circuit": "circuits/resonance/bode_rlc_low_pass.yaml",
+ "form": "conductance",
+ "supported": true,
+ "observables": [
+  "V(out)"
+ ],
+ "dps": [
+  30,
+  60
+ ],
+ "wall_s": 0.0,
+ "events": [],
+ "n_commutations": 0,
+ "n_events": 0,
+ "ambiguous": [],
+ "weak_only": 0,
+ "start_mode": "",
+ "dc_start_modes": null,
+ "notes": [],
+ "jumps": [],
+ "impulsive_loss_J": "0.0",
+ "max_dae_residual": "1.56e-61",
+ "max_eigvec_cond": "3.11",
+ "windows": {
+  "full": {
+   "V(out)": {
+    "mean": "0.0",
+    "rms": "0.0",
+    "d_prec": "0.0"
+   }
+  },
+  "last20": {
+   "V(out)": {
+    "mean": "0.0",
+    "rms": "0.0",
+    "d_prec": "0.0"
+   }
+  }
+ },
+ "energy_J": {
+  "R_s": "0.0",
+  "R_load": "0.0",
+  "src:Vac": "0.0"
+ },
+ "energy_balance_rel": "0.0",
+ "precision_doubling_rel": "0.0",
+ "event_time_diff_s": "0",
+ "u_stored_trace": 0.0,
+ "uniform_dt_floor": 0.0,
+ "dt": 1e-06,
+ "stored_dt": 1.25e-07
+}

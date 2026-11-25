@@ -26,10 +26,11 @@ Because Pulsim's ``add_transformer`` exposes only a two-winding device,
 the textbook center-tapped secondary is reshaped into a single
 secondary winding feeding a 4-diode full-wave bridge. The peak
 rectified voltage is ``n · V_g/2`` and conduction is ``2D`` per period,
-so the average ``V_o = n D V_g`` still matches the analytical formula.
+so the average ``V_o = n D V_g`` still matches the analytical formula
+(less dead time and transformer leakage; see the notebook).
 
-Switch ordering (insertion order = bit order in the switch mask):
-  bit 0 → S1 (HS), bit 1 → S2 (LS).
+Switch bits come from ``b.switch_index_of``: ``add_mosfet_with_body_diode``
+adds a ``<name>_body`` bit after each MOSFET, so S2 is bit 2, not 1.
 """
 
 from __future__ import annotations
@@ -77,8 +78,10 @@ def _build_builder(bp, k_coupling: float = 0.999):
 def _alternating_switch_fn(num_switches: int,
                             f_sw: float,
                             duty: float,
-                            dead_time: float):
-    """Switch_fn that alternates S1 (bit 0) and S2 (bit 1) per period.
+                            dead_time: float,
+                            idx_s1: int,
+                            idx_s2: int):
+    """Switch_fn that alternates S1 and S2 (bits ``idx_s1``, ``idx_s2``) per period.
 
     Sequence within one period ``T = 1/f_sw``:
 
@@ -96,9 +99,9 @@ def _alternating_switch_fn(num_switches: int,
         phase = math.fmod(t, T)
         m = p.SwitchStateMask(num_switches)
         if 0.0 <= phase < on_time - dead_time * 0.5:
-            m.set(0, True)                          # S1
+            m.set(idx_s1, True)
         elif T * 0.5 <= phase < T * 0.5 + on_time - dead_time * 0.5:
-            m.set(1, True)                          # S2
+            m.set(idx_s2, True)
         return m
 
     return switch_fn
@@ -125,6 +128,8 @@ def simulate_half_bridge(bp,
         f_sw=float(bp.f_sw),
         duty=float(duty),
         dead_time=float(bp.t_dead),
+        idx_s1=b.switch_index_of("S1"),
+        idx_s2=b.switch_index_of("S2"),
     )
 
     res = p.simulate(

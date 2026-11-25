@@ -1,0 +1,95 @@
+{
+ "circuit": "circuits/diodes/back_to_back_diodes_sine.yaml",
+ "form": "conductance",
+ "supported": true,
+ "observables": [
+  "V(out)"
+ ],
+ "dps": [
+  30,
+  60
+ ],
+ "wall_s": 2.3,
+ "events": [
+  {
+   "t": "0.01",
+   "change": "D_pos- D_neg+",
+   "cause": "D_pos root",
+   "strict": 1,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.02",
+   "change": "D_pos+ D_neg-",
+   "cause": "D_pos root",
+   "strict": 1,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.03",
+   "change": "D_pos- D_neg+",
+   "cause": "D_pos root",
+   "strict": 1,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.04",
+   "change": "D_pos+ D_neg-",
+   "cause": "D_pos root",
+   "strict": 1,
+   "candidates": 4,
+   "consistent": 1
+  },
+  {
+   "t": "0.05",
+   "change": "D_pos- D_neg+",
+   "cause": "D_pos root",
+   "strict": 1,
+   "candidates": 4,
+   "consistent": 1
+  }
+ ],
+ "n_commutations": 5,
+ "n_events": 5,
+ "ambiguous": [],
+ "weak_only": 0,
+ "start_mode": "D_pos+ D_neg-",
+ "dc_start_modes": null,
+ "notes": [],
+ "jumps": [],
+ "impulsive_loss_J": "0.0",
+ "max_dae_residual": "1.02e-63",
+ "max_eigvec_cond": "2.0",
+ "windows": {
+  "full": {
+   "V(out)": {
+    "mean": "3.226765240065791604356937e-36",
+    "rms": "0.0001767678560199966081205682",
+    "d_prec": "4.21e-41"
+   }
+  },
+  "last20": {
+   "V(out)": {
+    "mean": "-0.0001199581668218748498410317",
+    "rms": "0.0001652436480897462685094578",
+    "d_prec": "9.78e-36"
+   }
+  }
+ },
+ "energy_J": {
+  "R1": "0.00749925005625",
+  "D_pos": "1.87481250468844e-7",
+  "D_neg": "1.87481250468844e-7",
+  "src:Vac": "0.00749962501875094"
+ },
+ "energy_balance_rel": "0.0",
+ "precision_doubling_rel": "9.26e-31",
+ "event_time_diff_s": "7.3e-21",
+ "u_stored_trace": 1.9870248383377132e-08,
+ "uniform_dt_floor": 1.2745836674202901e-06,
+ "dt": 2e-05,
+ "stored_dt": 2.5e-06
+}

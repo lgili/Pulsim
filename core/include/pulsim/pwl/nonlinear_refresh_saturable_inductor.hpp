@@ -76,7 +76,8 @@ inline Real stamp_saturable_inductor(
     sparse::Matrix& J_nl,
     Vector& f_nl,
     Real h,
-    TrBdf2Stage stage) {
+    TrBdf2Stage stage,
+    bool increment_form = false) {
     const Real v_from = stamping::read_node_voltage(x, e.from);
     const Real v_to   = stamping::read_node_voltage(x, e.to);
     const Real i_L_new = x[e.branch_var_id];
@@ -92,14 +93,37 @@ inline Real stamp_saturable_inductor(
     const bool bdf2 = (stage == TrBdf2Stage::Bdf2Stage2);
     // c1/h in the BDF2 stage, 2/h in the trapezoidal one; equal when
     // h is that stage's own step, which is the whole point of γ.
-    const Real d_coef = bdf2 ? kc.c1 / h : Real{2} / h;
-    // Trapezoidal carries the previous step's voltage; BDF2 is
-    // one-sided and carries none of it.
+    // Backward Euler over h (restart stage): 1/h = 2/(2h), so the
+    // row stays in conductance form with the stage factor's diagonal.
+    const bool be = (stage == TrBdf2Stage::BackwardEuler);
+    const Real d_coef = bdf2 ? kc.c1 / h : be ? Real{1} / h : Real{2} / h;
+    // Trapezoidal carries the previous step's voltage; BDF2 and
+    // backward Euler are one-sided and carry none of it.
     const Real hist =
         bdf2 ? (kc.c2 * e.lambda_gamma + kc.c3 * e.lambda_old) / h
-             : -e.V_L_old - (Real{2} / h) * e.lambda_old;
+             : (be ? Real{0} : -e.V_L_old) - d_coef * e.lambda_old;
 
-    const Real R_row = (v_from - v_to) - d_coef * lambda_new - hist;
+    // engine='trbdf2' asks for the increment form: the same residual
+    // with λ_new − λ_n (and λ_γ − λ_n) taken in closed form, so its
+    // round-off scales with the increment, not with 2/h·λ (see
+    // SaturableInductor::flux_increment). The fixed engine keeps the
+    // flux-difference form it was validated with.
+    const bool incr = increment_form && !e.params.ja && !e.params.table;
+    const Real R_row = !incr
+        ? (v_from - v_to) - d_coef * lambda_new - hist
+        : bdf2
+            ? (v_from - v_to)
+                  - (kc.c1 * models::SaturableInductor::flux_increment(
+                                 i_L_new, e.i_L_old, e.params)
+                     + kc.c2 * models::SaturableInductor::flux_increment(
+                                   e.i_gamma, e.i_L_old, e.params)) / h
+        : be   // (lambda_offset: an esdirk43 stage's base, else 0)
+            ? (v_from - v_to)
+                  - (models::SaturableInductor::flux_increment(
+                         i_L_new, e.i_L_old, e.params) - e.lambda_offset) / h
+            : (v_from - v_to) + e.V_L_old
+                  - d_coef * models::SaturableInductor::flux_increment(
+                                 i_L_new, e.i_L_old, e.params);
 
     const bool from_active = stamping::node_is_active(e.from);
     const bool to_active   = stamping::node_is_active(e.to);
@@ -134,7 +158,7 @@ inline Real refresh_saturable_inductors(
     const SaturableInductorHistory& history,
     Real dt,
     TrBdf2Stage stage = TrBdf2Stage::Trapezoidal) {
-    if (J_nl.rows() > 0) J_nl.setZero();
+    if (J_nl.rows() > 0) sparse::zero_keep_pattern(J_nl);
     if (f_nl.size() > 0) f_nl.setZero();
     Real max_abs_i = Real{0};
     for (const auto& e : history.entries()) {

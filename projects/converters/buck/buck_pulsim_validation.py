@@ -46,18 +46,15 @@ def _build_buck_builder(bp):
 
 def _warm_start(b, bp):
     """Seed the state vector at the ideal CCM operating point
-    ``I_L = V_o/R``, ``V_C = V_o``."""
+    ``V_C = V_o``, with ``i_L`` at its valley ``V_o/R - ΔI_L/2`` because the
+    PWM starts ON at t = 0 (the cycle average would start the LC tank
+    ``ΔI_L/2`` off its orbit)."""
     n_state = b.pool.state_size(b.graph)
     x0 = [0.0] * n_state
     out_idx = b.node_id_of("out")
     x0[out_idx] = float(bp.V_o)
-    for bid in range(b.graph.num_branches):
-        try:
-            i_idx = b.pool.branch_var_id_for_inductor(bid, b.graph)
-            x0[i_idx] = float(bp.V_o / bp.R)
-            break
-        except Exception:
-            continue
+    I_L0 = float(bp.V_o / bp.R - (bp.V_g - bp.V_o) * bp.D / (2.0 * bp.L * bp.f_sw))
+    x0[b.pool.branch_var_id_for_inductor(b.branch_id_of("L1"), b.graph)] = I_L0
     return x0
 
 

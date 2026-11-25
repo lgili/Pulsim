@@ -32,7 +32,7 @@ def diode_divider():
     b = p.CircuitBuilder()
     b.add_voltage_source("V", "vin", "gnd", 5.0)
     b.add_resistor("R", "vin", "na", 1000.0)
-    b.add_nonlinear_diode("D", "na", "gnd", p.IdealDiodeParams())
+    b.add_nonlinear_diode("D", "na", "gnd", p.IdealDiodeParams(), allow_non_passive=True)
     return b
 
 
@@ -58,7 +58,7 @@ def stiff_diode_chain(n=20, g_off=1e-9):
         q = p.IdealDiodeParams()
         q.G_off = g_off
         anode = "gnd" if i == n - 1 else f"n{i+1}"
-        b.add_nonlinear_diode(f"D{i}", anode, f"n{i}", q)
+        b.add_nonlinear_diode(f"D{i}", anode, f"n{i}", q, allow_non_passive=True)
     return b
 
 

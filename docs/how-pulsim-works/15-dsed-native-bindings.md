@@ -446,6 +446,17 @@ We stopped at Bridge.12 because:
 The hot loop is **75% C++ for typical PE circuits** — a healthy
 amortised state.
 
+**Update (add-exact-propagator-strategy, 2026-11).** On the synchronous
+buck of `perf/p9_dsed.py` (2000 periods, 4000 exact steps) the C++ loop
+took about 1 ms of a 17-25 ms call; most of the rest was the binding
+building one dict with two pybind mask objects per event and one
+`np.asarray` per sample. The builder runners take `event_log=True`
+(the per-event dicts, the default) and always return `event_times` /
+`event_types` arrays; `simulate()` passes `event_log=False` and hands
+the states over as one 2-D array. The same call now takes 2.8-3.2 ms.
+`result.exact` carries the counters (`n_eig`, `n_pade`,
+`n_phi_cache_hits`, `n_predicate_evals`) and the per-mask tier table.
+
 ---
 
 ## 15.8 Takeaways

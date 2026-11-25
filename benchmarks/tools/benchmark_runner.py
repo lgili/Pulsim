@@ -18,14 +18,15 @@ try:
 except ImportError:  # pragma: no cover - optional dependency
     yaml = None
 
-try:
-    from pulsim_python_backend import availability_error as python_backend_error
-    from pulsim_python_backend import is_available as python_backend_available
-    from pulsim_python_backend import run_from_yaml as run_pulsim_python
-except ImportError:  # pragma: no cover - local import fallback
-    python_backend_error = None
-    python_backend_available = None
-    run_pulsim_python = None
+# restore-reference-benchmark-harness: scenarios run through the harness
+# v1 reader and `pulsim.simulate` (the old backend module, never in the
+# repository, is gone).
+import sys
+import time as _time
+
+# `kpi` is the package benchmarks/kpi: reachable when run as a script, not only from tests
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import v1_reader  # noqa: E402
 
 # Onda 1 of the bench-tool refresh: optional rich-based terminal UI.
 # `benchmarks/_console.py` exposes BenchProgress + rendering helpers
@@ -83,12 +84,12 @@ class ScenarioResult:
 
 
 def can_use_pulsim_python_backend() -> bool:
-    if python_backend_available is None:
-        return False
+    """True when `pulsim` imports (the runner needs nothing else)."""
     try:
-        return bool(python_backend_available())
-    except Exception:
+        import pulsim  # noqa: F401
+    except ImportError:
         return False
+    return True
 
 
 def load_yaml(path: Path) -> Dict[str, Any]:
@@ -187,43 +188,64 @@ def apply_runtime_defaults(netlist: Dict[str, Any]) -> None:
         simulation["step_mode"] = "fixed"
 
 
+def v2_refusal(simulation: Any, variable: Optional[bool] = None) -> Optional[str]:
+    """Why a v1 scenario's solver selection cannot run on 2.0, or None.
+
+    The runner maps a v1 file to ``pwl`` (fixed step, trapezoidal) or
+    ``trbdf2`` (variable step); a benchmarks.yaml scenario that selects
+    another integrator, an iterative linear solver or Newton-Krylov would
+    otherwise run as that default under the scenario's name.
+    """
+    sim = simulation if isinstance(simulation, dict) else {}
+    if variable is None:
+        variable = str(sim.get("step_mode", "")).lower() == "variable" or bool(sim.get("adaptive_timestep"))
+    integ = str(sim.get("integrator", "trapezoidal")).lower()
+    if integ not in ("trapezoidal", "trap") and not (integ == "trbdf2" and variable):
+        return f"v1 integrator {integ!r}{' (fixed step)' if integ == 'trbdf2' else ''} has no 2.0 equivalent here"
+    solver = sim.get("solver") if isinstance(sim.get("solver"), dict) else {}
+    order = [str(x).lower() for x in solver.get("order") or []]
+    if any(x != "klu" for x in order) or "iterative" in solver:
+        return f"v1 linear solver {order or ['iterative']} has no 2.0 equivalent (2.0 picks its own)"
+    newton = sim.get("newton") if isinstance(sim.get("newton"), dict) else {}
+    if newton.get("enable_newton_krylov"):
+        return "v1 Newton-Krylov has no 2.0 equivalent"
+    return None
+
+
 def run_pulsim(
     netlist_path: Path,
     output_path: Path,
     preferred_mode: Optional[str] = None,
     use_initial_conditions: bool = False,
 ) -> PulsimRunResult:
-    if run_pulsim_python is None:
-        reason = "benchmark backend module import failed"
-        if python_backend_error is not None:
-            try:
-                backend_reason = python_backend_error()
-                if backend_reason:
-                    reason = backend_reason
-            except Exception:
-                pass
-        raise RuntimeError(
-            "Pulsim Python runtime backend unavailable. "
-            "Build Python bindings and expose them via build/python or install pulsim package. "
-            f"Reason: {reason}"
-        )
+    """Run one v1 scenario file through the harness reader and write
+    ``time`` plus every node voltage and inductor current to ``output_path``.
 
-    raw_result = run_pulsim_python(
-        netlist_path,
-        output_path,
-        preferred_mode=preferred_mode,
-        use_initial_conditions=use_initial_conditions,
-    )
-
-    if not hasattr(raw_result, "runtime_s") or not hasattr(raw_result, "telemetry"):
-        raise RuntimeError("Unexpected backend response: structured telemetry result expected")
-
-    return PulsimRunResult(
-        runtime_s=float(getattr(raw_result, "runtime_s")),
-        steps=int(getattr(raw_result, "steps")),
-        mode=str(getattr(raw_result, "mode")),
-        telemetry=dict(getattr(raw_result, "telemetry")),
-    )
+    ``preferred_mode`` (shooting / harmonic balance) has no 2.0 equivalent
+    here and is refused; ``use_initial_conditions`` is read from the file.
+    """
+    if preferred_mode is not None:
+        raise v1_reader.Unmapped(f"periodic mode {preferred_mode!r} is not run by the v2 harness")
+    case = v1_reader.load(netlist_path)
+    sim = load_yaml(netlist_path).get("simulation") or {}
+    variable = str(sim.get("step_mode", "")).lower() == "variable" or bool(sim.get("adaptive_timestep"))
+    engine = "trbdf2" if variable else "pwl"
+    t0 = _time.perf_counter()
+    res = case.run(engine)
+    runtime = _time.perf_counter() - t0
+    b, _, _ = case.build()
+    cols = [c for c in b.state_var_names() if c.startswith(("V(", "I("))]
+    for c in case.observables + [case.validation.get("observable")]:
+        if c and c not in cols:
+            cols.append(c)
+    data = [v1_reader.observable(res, c) for c in cols]
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w", newline="", encoding="utf-8") as handle:
+        w = csv.writer(handle)
+        w.writerow(["time"] + cols)
+        for k, t in enumerate(res.times):
+            w.writerow([repr(float(t))] + [repr(float(d[k])) for d in data])
+    return PulsimRunResult(runtime_s=runtime, steps=len(res.times), mode=engine, telemetry={})
 
 
 def resolve_baseline_path(path: Path) -> Path:
@@ -262,14 +284,23 @@ def analytical_rc_step(times: List[float], v0: float, r: float, c: float) -> Lis
     return [v0 * (1.0 - math.exp(-t / tau)) for t in times]
 
 
-def analytical_rl_step(times: List[float], v0: float, r: float, l: float) -> List[float]:
-    tau = l / r
-    return [v0 * math.exp(-t / tau) for t in times]
+def analytical_rl_step(times: List[float], v0: float, r: float, ind: float,
+                       t_rise: float = 0.0) -> List[float]:
+    """V(L) of a series R-L driven by a 0 -> V step, ``v0 = V(L) at 0+``: v0 e^{-t/tau}.
+    With ``t_rise`` > 0 (a pulse source's linear edge) the exact closed form of the
+    ramp: v0 (tau/t_r)(1 - e^{-t/tau}) on [0, t_r], v0 (tau/t_r)(e^{t_r/tau} - 1)
+    e^{-t/tau} after it (the source's later edges are not modelled)."""
+    tau = ind / r
+    if t_rise <= 0.0:
+        return [v0 * math.exp(-t / tau) for t in times]
+    k = v0 * tau / t_rise
+    return [-k * math.expm1(-t / tau) if t <= t_rise
+            else k * math.expm1(t_rise / tau) * math.exp(-t / tau) for t in times]
 
 
-def analytical_rlc_step(times: List[float], v0: float, r: float, l: float, c: float) -> List[float]:
-    alpha = r / (2.0 * l)
-    omega0 = 1.0 / math.sqrt(l * c)
+def analytical_rlc_step(times: List[float], v0: float, r: float, ind: float, c: float) -> List[float]:
+    alpha = r / (2.0 * ind)
+    omega0 = 1.0 / math.sqrt(ind * c)
     result = []
     if alpha < omega0:
         omega_d = math.sqrt(omega0 * omega0 - alpha * alpha)
@@ -305,13 +336,13 @@ def validate_analytical(times: List[float], values: List[float], model: str, par
         reference = analytical_rc_step(times, v0, r, c)
     elif model == "rl_step":
         r = parse_value(params["r"])
-        l = parse_value(params["l"])
-        reference = analytical_rl_step(times, v0, r, l)
+        ind = parse_value(params["l"])
+        reference = analytical_rl_step(times, v0, r, ind, parse_value(params.get("t_rise", 0.0)))
     elif model == "rlc_step":
         r = parse_value(params["r"])
-        l = parse_value(params["l"])
+        ind = parse_value(params["l"])
         c = parse_value(params["c"])
-        reference = analytical_rlc_step(times, v0, r, l, c)
+        reference = analytical_rlc_step(times, v0, r, ind, c)
     else:
         raise ValueError(f"Unknown analytical model: {model}")
     return compute_errors(values, reference)
@@ -534,6 +565,16 @@ def run_benchmarks(
             use_initial_conditions = bool(
                 simulation_cfg.get("uic", False) if isinstance(simulation_cfg, dict) else False
             )
+            # only a SCENARIO's solver override is refused: a file's own `integrator:` (29 say
+            # bdf1) is history, and benchmark_ngspice / local_limit_suite call run_pulsim directly
+            refusal = v2_refusal((scenario_override or {}).get("simulation"), _is_variable)
+            if refusal is not None:
+                results.append(ScenarioResult(
+                    benchmark_id=benchmark_id, scenario=scenario_name, status="skipped",
+                    runtime_s=0.0, steps=0, max_error=None, rms_error=None,
+                    message=f"refused: {refusal}", telemetry={}))
+                _emit_progress_for_last()
+                continue
 
             with tempfile.TemporaryDirectory() as tmpdir:
                 tmpdir_path = Path(tmpdir)
@@ -554,16 +595,17 @@ def run_benchmarks(
                         use_initial_conditions=use_initial_conditions,
                     )
                 except Exception as exc:
+                    refused = isinstance(exc, v1_reader.Unmapped)
                     results.append(
                         ScenarioResult(
                             benchmark_id=benchmark_id,
                             scenario=scenario_name,
-                            status="failed",
+                            status="skipped" if refused else "failed",
                             runtime_s=0.0,
                             steps=0,
                             max_error=None,
                             rms_error=None,
-                            message=str(exc),
+                            message=f"refused: {exc}" if refused else str(exc),
                             telemetry={},
                         )
                     )
@@ -634,6 +676,10 @@ def run_benchmarks(
                             status = "failed"
                             message = str(exc)
                         else:
+                            # the first stored sample of an algebraic node is not solved
+                            # (KNOWN_LIMITATIONS; DECISIONS OQ8): never compared
+                            if times_eval and times_eval[0] == times[0]:
+                                times_eval, values_eval = times_eval[1:], values_eval[1:]
                             if validation_type == "analytical":
                                 try:
                                     max_error, rms_error = validate_analytical(
@@ -915,7 +961,8 @@ def run_benchmarks(
                                         and sw_obs in series and v_obs in series and i_obs in series):
                                     sw_states = [bool(s > 0.5) for s in series[sw_obs]]
                                     r = compute_switching_loss_per_event(
-                                        sw_states, series[v_obs], series[i_obs], times
+                                        sw_states, series[v_obs], series[i_obs], times,
+                                        float(kpi_entry["window_s"]),
                                     )
                                     for k, v in r.items():
                                         kpis[f"kpi__{k}__{label}"] = v
@@ -1038,19 +1085,8 @@ def main() -> int:
     if yaml is None:
         raise SystemExit("PyYAML is required. Install with: pip install pyyaml")
 
-    backend_reason = None
-    if python_backend_error is not None:
-        try:
-            backend_reason = python_backend_error()
-        except Exception as exc:
-            backend_reason = f"{exc.__class__.__name__}: {exc}"
-
-    if backend_reason is not None:
-        raise SystemExit(
-            "Pulsim Python runtime backend unavailable. "
-            "Build Python bindings and expose build/python on PYTHONPATH or install pulsim package. "
-            f"Reason: {backend_reason}"
-        )
+    if not can_use_pulsim_python_backend():
+        raise SystemExit("pulsim is not importable: build the bindings and put build/python on PYTHONPATH")
 
     use_ui = _HAS_CONSOLE and not args.quiet
     console = _make_console(force_plain=args.quiet) if use_ui else None

@@ -79,10 +79,12 @@ device entry's `type:` field selects the schema:
 | `capacitor` | `from`, `to`, `C` (F) | — |
 | `inductor` | `from`, `to`, `L` (H) | — |
 | `diode` | `anode`, `cathode`, `g_on`, `g_off` | `V_th` (default 0), `V_f` forward drop (default 0) |
-| `nonlinear_diode` | `anode`, `cathode` | `V_F0` (0.7), `R_d` (0.01), `G_off` (1e-9), `kappa` (20) |
+| `nonlinear_diode` | `anode`, `cathode`, `allow_non_passive: true` (retired device; refused without it) | `V_F0` (0.7), `R_d` (0.01), `G_off` (1e-9), `kappa` (20) |
 | `switch` | `from`, `to`, `g_on`, `g_off` | — |
-| `mosfet` | `drain`, `source` | `R_on` (1mΩ), `R_off` (1GΩ) |
-| `mosfet_with_body_diode` | `drain`, `source` | `R_on` (1mΩ), `R_off` (1GΩ), `V_F` (0.7), `g_on_diode` (1k), `g_off_diode` (1n) |
+| `mosfet` | `drain`, `source` | `R_on` (1mΩ), `R_off` (1GΩ), `V_F` body-diode conduction drop (0.7) |
+| `mosfet_with_body_diode` | `drain`, `source` | `R_on` (1mΩ), `R_off` (1GΩ), `V_F` body-diode conduction drop (0.7), `g_on_diode` (1k), `g_off_diode` (1n) |
+| `mosfet_level1` | `drain`, `source`, `gate`, `K`, `V_T` | `lambda` (0.02), `kappa` (15), `with_body_diode` (true), `V_F` body-diode conduction drop (0.7) |
+| `igbt_level1` | `collector`, `emitter`, `gate` | `V_CE_sat` (1.5), `R_CE_sat` (0.05), `V_T` (5), `kappa` (10), `v_knee` (0.01), `with_fwd` (false), `V_F` freewheeling-diode conduction drop (0.7) |
 | `igbt` | `collector`, `emitter` | `R_on` (10mΩ), `R_off` (1GΩ) |
 | `transformer` | `p_from`, `p_to`, `s_from`, `s_to`, `L_p`, `L_s` | `k` (1.0) |
 

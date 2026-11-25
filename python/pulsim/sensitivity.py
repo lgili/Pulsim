@@ -1,0 +1,1878 @@
+"""Forward parameter sensitivities on the exact path.
+
+``add-parameter-sensitivities``, groups 2, 3 and 7 on today's ``dsed``
+exact stepper. Between events a PWL circuit with DC sources is LTI,
+``x' = A x + b``; with ``xb = (x, 1)`` and ``Ab = [[A, b], [0, 0]]`` one
+step is ``xb(t + h) = exp(Ab h) xb(t)``, and its derivative with respect
+to a parameter ``p`` is
+
+    S(t + h) = exp(Ab h) S(t) + (d exp(Ab h)/dp) xb(t)
+
+with the Frechet derivative of the exponential by Daleckii-Krein in the
+eigenbasis of ``Ab``:
+
+    d exp(Ab h) = V (F o (V^-1 dAb V)) V^-1,
+    F_ij = (e^{mu_i h} - e^{mu_j h}) / (mu_i - mu_j) = h e^{a} phi1(b - a)
+
+(``a`` the scaled eigenvalue with the larger real part, so ``phi1``
+never overflows and close eigenvalues lose nothing). When the basis is
+near-defective (critical damping) the same derivative comes from the
+block exponential ``exp([[Ab, 0], [dAb, Ab]] h)`` (Van Loan 1978) by
+Pade [13/13]; when neither is accurate the sensitivity is refused.
+
+``dAb/dp`` is exact: every entry of ``A``, ``b`` and of the node-voltage
+recovery is a linear-fractional (Moebius) function of an R, L, C or
+source value (a rank-one stamp in a Schur complement, or a row scaled by
+``1/C``, ``1/L``), and for a Moebius function the harmonic combination of
+two one-sided differences, ``2 a b / (delta (b - a))``, IS the
+derivative. It is formed at two step sizes and the two must agree, or
+the parameter is refused.
+
+Events (D3): at a state event ``g(x, p) = 0`` (a PWL diode)
+
+    dtau/dp = -(grad g . S- + g_p) / (grad g . f-),  S+ = S- + (f- - f+) dtau/dp
+
+and at a gate edge whose instant depends on the duty, ``dtau/dD = T``.
+``grad g . f- = 0`` is a grazing event: the gradient does not exist
+there and the run refuses it. A predicate that comes close to zero
+inside a segment without crossing (a near miss) is flagged: the
+gradient is exact for the event pattern taken, and a parameter change
+of the size of the margin creates an event and changes it.
+
+Every step of the engine's trajectory is re-derived from these
+propagators; a step the formulas do not reproduce (a numeric step of a
+mask without an exact propagator) refuses the run rather than
+returning the derivative of a different map.
+"""
+
+from __future__ import annotations
+
+import math
+import re
+import warnings
+from dataclasses import dataclass, field
+from typing import Any, Callable, Optional, Sequence
+
+import numpy as np
+
+__all__ = [
+    "SensitivityResult",
+    "KpiValue",
+    "value_and_grad",
+    "simulate_sensitivities",
+]
+
+_U = np.finfo(float).eps
+_TIER_BOUND = 1e-10           # u*kappa and u*||A h||_1, as exact_lti.hpp
+_MAX_PARAMS = 64
+_GRAZE = 1e-9                 # |grad g . f-| <= this * |grad g| |f-|
+_NEAR_MISS = 1e-6             # interior min |g| <= this * max|v_D|
+_MOEBIUS_RTOL = 1e-7
+_STEP_RTOL = 1e-10            # re-derived step against the engine's sample
+_BRANCH_RE = re.compile(r"\(branch #(\d+)\)")
+_GATE, _DIODE_ON, _DIODE_OFF = 0, 1, 2
+
+# kind -> (accepted field names, set_value field, params key)
+_FIELDS = {
+    "resistor": (("R", "R_ohms"), "R", "R_ohms"),
+    "inductor": (("L", "L_henries"), "L", "L_henries"),
+    "capacitor": (("C", "C_farads"), "C", "C_farads"),
+    "voltage_source": (("V",), "V", "V"),
+}
+
+
+def _unsup(feature, msg, *, device="", kind="", engine="dsed"):
+    from ._refusal import unsupported
+    return unsupported(engine, feature, msg, device=device, kind=kind)
+
+
+# ----------------------------------------------------------------------
+# phi functions (complex, vectorised)
+# ----------------------------------------------------------------------
+
+def _expm1c(s):
+    a, b = s.real, s.imag
+    sh = np.sin(b / 2)
+    with np.errstate(over="ignore", invalid="ignore"):
+        return (np.expm1(a) * np.cos(b) - 2 * sh * sh) \
+            + 1j * np.exp(a) * np.sin(b)
+
+
+def _phi1(s):
+    s = np.asarray(s, dtype=complex)
+    out = np.ones_like(s)
+    nz = s != 0
+    out[nz] = _expm1c(s[nz]) / s[nz]
+    return out
+
+
+def _psi(k, m):
+    """``psi_k(m) = int_0^1 th^k e^{th m} dth`` (the k-th derivative of
+    phi1), k = 0..kmax, shape (kmax + 1,) + m.shape."""
+    m = np.asarray(m, dtype=complex)
+    out = np.empty((k + 1,) + m.shape, dtype=complex)
+    small = np.abs(m) <= 1.0
+    # series for |m| <= 1: sum_j m^j / (j! (j + k + 1))
+    term = np.ones_like(m)
+    acc = np.zeros((k + 1,) + m.shape, dtype=complex)
+    for j in range(30):
+        for kk in range(k + 1):
+            acc[kk] += term / (j + kk + 1)
+        term = term * m / (j + 1)
+    # forward recurrence otherwise: psi_k = (e^m - k psi_{k-1}) / m
+    ms = np.where(small, 1.0, m)
+    with np.errstate(over="ignore", invalid="ignore"):
+        em = np.exp(ms)
+        rec = _phi1(ms)
+        out[0] = np.where(small, acc[0], rec)
+        for kk in range(1, k + 1):
+            rec = (em - kk * rec) / ms
+            out[kk] = np.where(small, acc[kk], rec)
+    return out
+
+
+def _dd_exp(a, b):
+    """``(e^a - e^b)/(a - b)`` (``e^a`` when equal), no overflow on the
+    decaying side and no cancellation for close arguments."""
+    a, b = np.broadcast_arrays(np.asarray(a, complex), np.asarray(b, complex))
+    swap = a.real < b.real
+    hi = np.where(swap, b, a)
+    lo = np.where(swap, a, b)
+    with np.errstate(over="ignore", invalid="ignore", under="ignore"):
+        return np.exp(hi) * _phi1(lo - hi)
+
+
+def _dd_phi1(a, b):
+    """``(phi1(a) - phi1(b))/(a - b)`` (``phi1'(a)`` when equal): direct
+    when the points are apart, Taylor about the midpoint otherwise."""
+    a, b = np.broadcast_arrays(np.asarray(a, complex), np.asarray(b, complex))
+    d = a - b
+    m = 0.5 * (a + b)
+    near = np.abs(d) <= 1e-3 * np.maximum(1.0, np.abs(m.real))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        direct = (_phi1(a) - _phi1(b)) / np.where(near, 1.0, d)
+    ps = _psi(5, m)
+    taylor = ps[1] + ps[3] * d ** 2 / 24 + ps[5] * d ** 4 / 1920
+    return np.where(near, taylor, direct)
+
+
+# ----------------------------------------------------------------------
+# Pade [13/13] exponential (Higham 2005), numpy only
+# ----------------------------------------------------------------------
+
+_B13 = (64764752532480000.0, 32382376266240000.0, 7771770303897600.0,
+        1187353796428800.0, 129060195264000.0, 10559470521600.0,
+        670442572800.0, 33522128640.0, 1323241920.0, 40840800.0,
+        960960.0, 16380.0, 182.0, 1.0)
+
+
+def _expm(M):
+    nrm = float(np.abs(M).sum(axis=0).max()) if M.size else 0.0
+    s = max(0, int(math.ceil(math.log2(nrm / 5.371920351148152)))) \
+        if nrm > 5.371920351148152 else 0
+    A = M / 2.0 ** s
+    eye = np.eye(M.shape[0])
+    A2 = A @ A
+    A4 = A2 @ A2
+    A6 = A4 @ A2
+    b = _B13
+    U = A @ (A6 @ (b[13] * A6 + b[11] * A4 + b[9] * A2)
+             + b[7] * A6 + b[5] * A4 + b[3] * A2 + b[1] * eye)
+    V = A6 @ (b[12] * A6 + b[10] * A4 + b[8] * A2) \
+        + b[6] * A6 + b[4] * A4 + b[2] * A2 + b[0] * eye
+    E = np.linalg.solve(V - U, V + U)
+    for _ in range(s):
+        E = E @ E
+    return E
+
+
+# ----------------------------------------------------------------------
+# Parameters
+# ----------------------------------------------------------------------
+
+@dataclass
+class _Param:
+    name: str
+    comp: str
+    kind: str                 # resistor / ... / "duty"
+    value: float
+    setter: Optional[Callable] = None
+    bit: int = -1
+    period: float = 0.0
+
+
+def _resolve(builder, names, switch_fn, loop=None) -> list:
+    if isinstance(names, str):
+        names = [names]
+    names = list(names)
+    if not names:
+        raise ValueError("sensitivities: give at least one parameter name "
+                         "('<component>.<field>').")
+    if len(names) > _MAX_PARAMS:
+        raise _unsup(
+            "sensitivities", f"sensitivities: {len(names)} parameters; "
+            f"the forward method is limited to {_MAX_PARAMS} per run "
+            "(one propagation each). Split the request.")
+    if len(set(names)) != len(names):
+        raise ValueError(f"sensitivities: duplicate names in {names}.")
+    comps = {c["name"]: c for c in builder.components()}
+    out = []
+    for nm in names:
+        if not isinstance(nm, str) or "." not in nm:
+            raise ValueError(
+                f"sensitivities: {nm!r} is not '<component>.<field>'.")
+        cname, fld = nm.rsplit(".", 1)
+        c = comps.get(cname)
+        if c is None and loop is not None and loop.is_param(nm):
+            # a block parameter or constant input of the loop's graph
+            out.append(_Param(nm, cname, "control", float("nan")))
+            continue
+        if c is None:
+            raise ValueError(
+                f"sensitivities: {nm!r}: no component named {cname!r} "
+                f"(components: {sorted(comps)}).")
+        kind = c["kind"]
+        if kind == "switch" and fld == "duty" and loop is not None:
+            raise _unsup(
+                "sensitivity_parameter", f"sensitivities: {nm!r}: in a closed "
+                "loop the duty is the controller's output, not a parameter; "
+                "differentiate the controller's parameters ('<block>.<field>').",
+                device=cname, kind="duty")
+        if kind == "switch" and fld == "duty":
+            out.append(_Param(nm, cname, "duty", float("nan"),
+                              bit=int(builder.switch_index_of(cname))))
+            continue
+        spec = _FIELDS.get(kind)
+        if spec is None or fld not in spec[0]:
+            have = ("'duty' (of its gate schedule)" if kind == "switch"
+                    else f"{list(spec[0])}" if spec else "none")
+            raise _unsup(
+                "sensitivity_parameter",
+                f"sensitivities: {nm!r}: field {fld!r} of {cname!r} "
+                f"({kind}) is not a differentiable parameter of the exact "
+                f"path (differentiable fields: {have}). Integer, "
+                "topology and table parameters, switch conductances and "
+                "Newton-device parameters are refused.",
+                device=cname, kind=fld)
+        out.append(_Param(nm, cname, kind, float(c["params"][spec[2]]),
+                          setter=lambda v, _k=f"{cname}.{spec[1]}":
+                          builder.set_value(_k, v)))
+    return out
+
+
+def _duty_period(sf, bit, t_end, name, nsw=0):
+    """Trailing-edge PWM of one switch bit: rising edges on a fixed grid
+    of period T, falling edges at rise + D T. Returns (T, D); refuses any
+    other schedule (the duty would not be a timing parameter with
+    dtau/dD = T)."""
+    rises, falls, t = [], [], 0.0
+    prev_m = sf(0.0)
+    prev = bool(prev_m.get(bit))
+    others = False
+    while len(rises) < 3 or t < t_end:
+        e = float(sf.next_edge_after(t))
+        if not math.isfinite(e) or e <= t or len(rises) + len(falls) > 200000:
+            break
+        m = sf(e)
+        # another switch with edges (a dead-time pair, a bridge leg): the
+        # duty may move them too, and which ones is not in the schedule
+        others = others or any(bool(m.get(i)) != bool(prev_m.get(i))
+                               for i in range(nsw) if i != bit)
+        prev_m = m
+        now = bool(m.get(bit))
+        if now != prev:
+            (rises if now else falls).append(e)
+            prev = now
+        t = e
+    bad = others or len(rises) < 2 or not falls
+    if not bad:
+        T = rises[1] - rises[0]
+        r = np.asarray(rises)
+        bad = not (T > 0 and np.all(np.abs(np.diff(r) - T) <= 1e-9 * T))
+    if not bad:
+        f = np.asarray(falls)
+        k = np.floor((f - r[0]) / T + 1e-9)
+        D = (f - r[0] - k * T) / T
+        bad = not (np.all(np.abs(D - D[0]) <= 1e-9) and 0 < D[0] < 1)
+    if bad:
+        raise _unsup(
+            "sensitivity_parameter",
+            f"sensitivities: {name!r}: the gate schedule of this switch is "
+            "not a fixed-period trailing-edge PWM driving this switch "
+            "alone (rising edges every T, falling edges at rise + D T, no "
+            "other switch with edges: a dead-time pair or a bridge would "
+            "move the other edges too), so its duty is not a parameter "
+            "whose edge moves by T per unit. Build it with "
+            "make_pwm_switch_fn.", device=name.rsplit(".", 1)[0],
+            kind="duty")
+    return float(T), float(D[0])
+
+
+# ----------------------------------------------------------------------
+# Assembly snapshots and their exact derivatives
+# ----------------------------------------------------------------------
+
+def _branch_diode_vars(builder):
+    """``[(branch_id, var)]`` of the branch-form diodes: the MNA row of
+    each one's solved current (its turn-OFF predicate)."""
+    return [(int(c["branch_id"]), int(builder.pool.branch_var_id_for_switch(
+        c["branch_id"], builder.graph))) for c in builder.components()
+        if c["kind"] == "diode" and c["params"].get("branch_form")]
+
+
+def _snapshot(builder, masks, h_max, ic):
+    """Per mask: ``Ab`` (n+1, n+1) and the recovery ``R`` (n_nodes +
+    n_branch_diodes, n+1) of the node voltages, then of each branch-form
+    diode's current, with ``v = R . xb``; plus the reduced initial state
+    when ``ic``. One flat vector per mask (and one for ic)."""
+    from . import PwlStateSpaceCache
+    from . import _pulsim
+    cache = PwlStateSpaceCache(builder.graph, builder.pool)
+    cache.build_lazy(h_max)
+    ad = _pulsim._NativeCircuitBuilderAdapter(builder, cache, None)
+    rows = list(range(int(builder.graph.num_nodes))) + [
+        v for _bid, v in _branch_diode_vars(builder)]
+    out = {}
+    for key, m in masks.items():
+        ad.set_mask(m)
+        n = int(ad.n_state)
+        Ab = np.zeros((n + 1, n + 1))
+        Ab[:n, :n] = np.asarray(ad.A_matrix(), dtype=float)
+        Ab[:n, n] = np.asarray(ad.b_vector(0.0), dtype=float)
+        R = np.empty((len(rows), n + 1))
+        z = np.zeros(n)
+        for node, row in enumerate(rows):
+            v0 = float(ad.node_pair_voltage(row, -1, 0.0, z))
+            for j in range(n):
+                e = z.copy()
+                e[j] = 1.0
+                R[node, j] = float(ad.node_pair_voltage(row, -1, 0.0, e)) - v0
+            R[node, n] = v0
+        out[key] = np.concatenate([Ab.ravel(), R.ravel()])
+    if ic:
+        ad.set_mask(next(iter(masks.values())))
+        x0, _adj = ad.reduced_initial_state(builder)
+        out["__ic__"] = np.asarray(x0, dtype=float)
+    return out
+
+
+def _harmonic(a, b, delta):
+    """Derivative of a Moebius function from ``a = f(p+d) - f(p)``,
+    ``b = f(p-d) - f(p)``; plain central difference where the two are
+    not of opposite sign (rounding noise of an unaffected entry)."""
+    out = (a - b) / (2 * delta)
+    ok = a * b < 0
+    out[ok] = 2 * a[ok] * b[ok] / (delta * (b[ok] - a[ok]))
+    return out
+
+
+def _param_derivative(builder, prm, masks, h_max, ic, base, n1):
+    v0 = prm.value
+    if not (math.isfinite(v0) and v0 != 0.0):
+        # the steps are relative (v0/8, v0/16): at 0 they are 0 and the
+        # derivative 0/0 (a NaN that passed the check below)
+        raise _unsup(
+            "sensitivity_parameter",
+            f"sensitivities: {prm.name!r} = {v0!r}; its derivative is taken "
+            "from relative steps, which need a finite non-zero value",
+            device=prm.comp, kind=prm.name.rsplit(".", 1)[1])
+    snaps = {}
+    try:
+        for f in (1 / 8, -1 / 8, 1 / 16, -1 / 16):
+            prm.setter(v0 * (1 + f))
+            snaps[f] = _snapshot(builder, masks, h_max, ic)
+    finally:
+        prm.setter(v0)
+    out = {}
+    for key, f0 in base.items():
+        d1 = _harmonic(snaps[1 / 8][key] - f0, snaps[-1 / 8][key] - f0,
+                       v0 / 8)
+        d2 = _harmonic(snaps[1 / 16][key] - f0, snaps[-1 / 16][key] - f0,
+                       v0 / 16)
+        # per row of Ab / of the recovery (one scale for the whole
+        # vector let a 1e12 1/s entry hide a non-Moebius 1 V entry)
+        w = n1 if key != "__ic__" else f0.size
+        F0, D1, D2 = (np.abs(v.reshape(-1, w)) for v in (f0, d1, d2))
+        # assembly rounding: 1024 u of the row (Schur complements of
+        # g_on / g_off stamps cancel; 64 u refused a series 20 mOhm)
+        floor = 1024 * _U * F0.max(axis=1) / (abs(v0) / 16)
+        dev = np.abs(d1 - d2).reshape(-1, w).max(axis=1)
+        lim = _MOEBIUS_RTOL * D1.max(axis=1) + floor
+        del D2
+        if not np.all(dev <= lim):      # a NaN is refused too
+            j = int(np.argmax(dev - lim))
+            dev, scale = float(dev[j]), float(D1.max(axis=1)[j])
+            raise _unsup(
+                "sensitivity_parameter",
+                f"sensitivities: {prm.name!r} does not enter the state space "
+                "as a linear-fractional function (the derivative from two "
+                f"step sizes differs by {dev:.3e} against {scale:.3e} in "
+                f"row {j} of {key}), so it cannot be differentiated "
+                "exactly from assemblies.", device=prm.comp,
+                kind=prm.name.rsplit(".", 1)[1])
+        out[key] = d1
+    return out
+
+
+# ----------------------------------------------------------------------
+# Per-mask propagator with its parameter derivatives
+# ----------------------------------------------------------------------
+
+class _Mode:
+    def __init__(self, label, Ab, dAb, dsc, h_max):
+        self.label = label
+        self.Ab = Ab
+        self.dAb = dAb                      # (n_p, n1, n1)
+        self.n1 = Ab.shape[0]
+        self.dsc = dsc
+        As = dsc[:, None] * Ab / dsc[None, :]
+        self.As = As
+        self.dAs = dsc[None, :, None] * dAb / dsc[None, None, :]
+        self.tier = 3
+        self.reason = ""
+        self._pade = {}
+        try:
+            # graded order (largest rows first): LAPACK's QR deflates from
+            # the bottom, and with the 5e12 1/s idle-mode row last the
+            # -425 1/s eigenvalue of the DCM buck was off by 2.7e-4
+            # (u ||A||), 1e-9 of v_C per step
+            order = np.argsort(-np.abs(As).sum(axis=1), kind="stable")
+            mu, Vp = np.linalg.eig(As[np.ix_(order, order)])
+            V = np.empty_like(Vp)
+            V[order] = Vp
+            kappa = float(np.linalg.cond(V))
+        except np.linalg.LinAlgError:
+            mu, V, kappa = None, None, math.inf
+        self.kappa = kappa
+        if math.isfinite(kappa) and _U * kappa <= _TIER_BOUND:
+            self.tier = 1
+            self.mu, self.V = mu, V
+            self.Vi = np.linalg.inv(V)
+            self.G = self.Vi @ self.dAs @ V          # (n_p, n1, n1)
+            return
+        nA = float(np.abs(As).sum(axis=0).max())
+        nah = nA * h_max
+        if _U * nah <= _TIER_BOUND:
+            self.tier = 2
+            # balance the coupling blocks (a similarity, undone below):
+            # an unbalanced dA/dp would set the Pade scaling and cost
+            # the accuracy of every block
+            nd = np.abs(self.dAs).sum(axis=1).max(axis=1)
+            self.cs = np.where(nd > 0, nA / np.where(nd > 0, nd, 1.0), 1.0)
+            return
+        self.reason = (f"kappa2(V) = {kappa:.3e} (near-defective basis) and "
+                       f"||A h||_1 = {nah:.3e} (stiff): neither propagator "
+                       "is accurate for this mode")
+
+    # tier 1 ----------------------------------------------------------
+    def modal(self, xb, Sb):
+        return (self.Vi @ (self.dsc * xb),
+                self.Vi @ (self.dsc[:, None] * Sb))
+
+    def modal_advance(self, z, Z, s):
+        e = np.exp(self.mu * s)
+        F = s * _dd_exp(self.mu[:, None] * s, self.mu[None, :] * s)
+        return e * z, e[:, None] * Z + np.einsum("pij,j->ip", F * self.G, z)
+
+    def phys(self, z, Z):
+        return ((self.V @ z).real / self.dsc,
+                (self.V @ Z).real / self.dsc[:, None])
+
+    # tier 2 ----------------------------------------------------------
+    def _block(self, s, integral=False):
+        key = (s, integral)
+        E = self._pade.get(key)
+        if E is None:
+            n1, n_p = self.n1, self.dAs.shape[0]
+            N = (1 + n_p) * n1
+            Z = np.zeros((2 * N if integral else N,) * 2)
+            for j in range(1 + n_p):
+                Z[j * n1:(j + 1) * n1, j * n1:(j + 1) * n1] = self.As
+            for j in range(n_p):
+                Z[(j + 1) * n1:(j + 2) * n1, :n1] = self.dAs[j] * self.cs[j]
+            if integral:
+                Z[N:, :N] = np.eye(N)
+            E = _expm(Z * s)
+            if len(self._pade) > 64:
+                self._pade.clear()
+            self._pade[key] = E
+        return E
+
+    def advance(self, xb, Sb, s):
+        """``(xb(s), Sb(s))`` from ``(xb, Sb)``."""
+        if self.tier == 1:
+            z, Z = self.modal(xb, Sb)
+            return self.phys(*self.modal_advance(z, Z, s))
+        n1, n_p = self.n1, Sb.shape[1]
+        y = np.concatenate([self.dsc * xb,
+                            (self.dsc[:, None] * Sb * self.cs).T.ravel()])
+        y = self._block(s) @ y
+        return (y[:n1] / self.dsc,
+                y[n1:].reshape(n_p, n1).T / self.dsc[:, None] / self.cs)
+
+    def integrals(self, xb, Sb, s):
+        """``(int_0^s xb, int_0^s Sb)``, tier 2."""
+        n1, n_p = self.n1, Sb.shape[1]
+        N = (1 + n_p) * n1
+        y = np.concatenate([self.dsc * xb,
+                            (self.dsc[:, None] * Sb * self.cs).T.ravel(),
+                            np.zeros(N)])
+        y = self._block(s, True) @ y
+        q = y[N:]
+        return (q[:n1] / self.dsc,
+                q[n1:].reshape(n_p, n1).T / self.dsc[:, None] / self.cs)
+
+
+# ----------------------------------------------------------------------
+# Runs
+# ----------------------------------------------------------------------
+
+class _ConstSchedule:
+    def __init__(self, n, closed=False):
+        from . import SwitchStateMask
+        self._m = SwitchStateMask(n)
+        for i in range(n if closed else 0):   # simulate(undriven='closed')
+            self._m.set(i, True)
+
+    def __call__(self, t):
+        return self._m
+
+    def next_edge_after(self, t):
+        return math.inf
+
+
+def _check_circuit(builder, switch_fn, b_extra_fn):
+    from . import _pulsim
+    _pulsim._require_supported(builder.graph, builder.pool, "dsed")
+    if b_extra_fn is not None:
+        raise _unsup("b_extra_fn", "sensitivities: a b_extra_fn is an "
+                     "opaque callback between the parameters and the "
+                     "circuit; its derivative is unknown.")
+    from ._circuit_ir import c_blocks_of
+    if c_blocks_of(builder):
+        raise _unsup("c_blocks", "sensitivities: C blocks drive the "
+                     "circuit through an opaque callback.")
+    for c in builder.components():
+        if c["kind"] not in ("resistor", "inductor", "capacitor",
+                             "voltage_source", "current_source", "switch",
+                             "diode"):
+            raise _unsup(
+                "sensitivities",
+                f"sensitivities: component {c['name']!r} ({c['kind']}) is "
+                "not covered by the exact sensitivity path of this slice "
+                "(linear R, L, C, DC sources, controlled switches with a "
+                "schedule, PWL diodes). Time-varying sources, controlled "
+                "sources and Newton devices wait for the unified device "
+                "interface.", device=c["name"],
+                kind=builder.pool.kind_of(c["branch_id"]).name)
+    _n, _nd, controlled = _pulsim._switch_census(builder.graph,
+                                                 builder.pool)
+    if switch_fn is None:
+        if len(controlled):
+            raise _unsup("switch_fn", "sensitivities: the circuit has "
+                         "controlled switches and no switch_fn.")
+        return _ConstSchedule(builder.graph.num_switches)
+    from .periodic_steady_state import _closed_loop_source
+    src = _closed_loop_source(switch_fn)
+    if src and _graph_gate(switch_fn) is not None:
+        return switch_fn          # a control graph's PWM gate: see _Loop
+    if src:
+        raise _unsup(
+            "closed_loop", f"sensitivities: switch_fn comes from {src}: its "
+            "edges follow a controller this path does not run, so they "
+            "would be those of a frozen duty. Differentiate the open-loop "
+            "plant at a fixed duty (make_pwm_switch_fn).")
+    from . import SwitchSchedule
+    if not hasattr(switch_fn, "next_edge_after") or (
+            isinstance(switch_fn, SwitchSchedule)
+            and not switch_fn.has_edges):
+        raise _unsup(
+            "switch_fn", "sensitivities: the gate schedule cannot name its "
+            "edges (an opaque Python callable): its edges would be found by "
+            "sampling and their instants are not a function of the "
+            "parameters. Use make_pwm_switch_fn & co. or give the callable "
+            "a next_edge_after(t).")
+    return switch_fn
+
+
+_KINK_RTOL = 1e-9   # a law's comparison this close to its switch point: ON a kink
+
+
+def _graph_gate(sf):
+    """The control graph behind a PWM gate made by a graph
+    (``CxxChainPwmGate``, e.g. ``bind_pi_to_switch``), or None."""
+    g = getattr(sf, "_graph", None)
+    if g is None or not hasattr(sf, "legs") or not hasattr(g, "_cxx_chain"):
+        return None
+    return g
+
+
+class _Leg:
+    __slots__ = ("bit", "slot", "T", "phase", "drise", "dfall", "row")
+
+    def __init__(self, bit, slot, T, phase, drise, dfall):
+        self.bit, self.slot, self.T, self.phase = int(bit), int(slot), T, phase
+        self.drise, self.dfall, self.row = drise, dfall, -1
+
+
+class _Loop:
+    """A closed loop on the exact path (``add-parameter-sensitivities``
+    group 8): one rate group of a control graph ticking at ``offset + k
+    T`` on the state ``x(kT)``, its signals driving a PWM gate's duty
+    registers. At a tick the controller's state and signals ``c`` move by
+    the tick map ``c+ = g(c, y, p)``, ``y`` the probed node voltages, so
+
+        S_c+ = dg/dc . S_c + dg/dy . (R S + dR xb) + dg/dp
+
+    with the exact Jacobian of ``g`` (``CxxBlockChain.tick_jacobian``: the
+    block laws on the AD scalar). A duty change moves its leg's edges by
+    the modulator's own ``d t_edge / d duty`` (``T`` for the OFF edge of a
+    trailing-edge leg, 0 for its period start), which enters the event
+    jump ``S+ = S- + (f- - f+) dtau`` as ``dtau = d t_edge/d duty . S_duty``.
+    The graph is replayed tick by tick from its state before the run
+    (``commit``), and the replay must land the run's OFF edges."""
+
+    def __init__(self, builder, sf, ticks):
+        g = _graph_gate(sf)
+        cxx = g._cxx_chain
+        groups = sorted(getattr(g, "_groups", {}).values())
+        if not ticks:
+            raise _unsup(
+                "closed_loop", "sensitivities: switch_fn follows a control "
+                "graph that this run does not tick, so the loop would run "
+                "open. Give the loop to simulate(engine='dsed', "
+                "closed_loops=[loop] or step_observer=loop.step_observer, "
+                "sensitivities=[...]).")
+        if len(groups) != 1 or len(ticks) != 1:
+            raise _unsup(
+                "closed_loop", "sensitivities: the closed loop has "
+                f"{len(groups)} rate group(s) and {len(ticks or ())} tick "
+                "source(s); the exact sensitivity path differentiates one "
+                "rate group of one control graph driving its PWM gate.")
+        self.cxx, self.gid = cxx, int(groups[0])
+        self.T = float(cxx.group_period(self.gid))
+        self.offset = float(cxx.group_offset(self.gid))
+        _f, period, off = ticks[0]
+        if abs(float(period) - self.T) > 1e-12 * self.T or float(off) != self.offset:
+            raise _unsup("closed_loop", "sensitivities: the tick source does "
+                         "not run the gate's control graph at its own rate.")
+        self.ticks = ticks
+        self.legs = [_Leg(*lg) for lg in sf.legs()]
+        for lg in self.legs:
+            if not (math.isfinite(lg.drise) and math.isfinite(lg.dfall)):
+                raise _unsup(
+                    "closed_loop", "sensitivities: a dead-time pair leg "
+                    f"(switch bit {lg.bit}): how its edges move with the duty "
+                    "is not derived.", kind="duty")
+        self.n_nodes = int(builder.graph.num_nodes)
+        self.n_full = max(int(builder.pool.state_size(builder.graph)), self.n_nodes)
+        d = self._jac(0.0, np.zeros(self.n_full), [], False)
+        self.rows = list(d["rows"])
+        slot_row = {int(cxx.slot(r[4:])): i for i, r in enumerate(self.rows)
+                    if r.startswith("sig:")}
+        for lg in self.legs:
+            lg.row = slot_row.get(lg.slot, -1)
+            if lg.row < 0:
+                raise _unsup("closed_loop", "sensitivities: the gate's duty "
+                             f"(switch bit {lg.bit}) is not a signal of the "
+                             "ticking group.")
+        bad = [c for c in d["cols"] if c.startswith("x[")
+               and int(c[2:-1]) >= self.n_nodes]
+        if bad:
+            raise _unsup("closed_loop", f"sensitivities: the controller reads "
+                         f"{bad}, a branch current: only node voltages have a "
+                         "recovery row on the exact path.")
+        self.cparams = []
+        self.st0 = self.st1 = None
+
+    def _jac(self, t, xf, params, commit):
+        try:
+            return self.cxx.tick_jacobian(self.gid, t, xf, params, commit)
+        except ValueError as e:
+            if "no derivative" in str(e) or "compute delay" in str(e):
+                raise _unsup("closed_loop", f"sensitivities: {e}.") from e
+            raise ValueError(f"sensitivities: {e}") from e
+
+    def is_param(self, name):
+        try:
+            self._jac(0.0, np.zeros(self.n_full), [name], False)
+        except ValueError:
+            return False
+        return True
+
+    def tick_times(self, n_ticks):
+        return [self.offset + k * self.T for k in range(int(n_ticks))]
+
+    def begin(self, params):
+        """Rewind the graph to its state before the run."""
+        self.cparams = [p.name for p in params if p.kind == "control"]
+        self.pcol = {p.name: j for j, p in enumerate(params)}
+        self.Sc = np.zeros((len(self.rows), len(params)))
+        self.S_duty = [np.zeros(len(params)) for _ in self.legs]
+        self.duty = [float("nan")] * len(self.legs)
+        self.history = []          # per tick: t, duties, S_duty, sides
+        self.cxx.restore_state(self.st0)
+
+    def end(self):
+        self.cxx.restore_state(self.st1)
+
+    def tick(self, ctx, t, x, S, keys):
+        n_p = S.shape[1]
+        xb = np.append(x, 1.0)
+        nn = self.n_nodes
+        v = [ctx.rec[k][:nn] @ xb for k in keys]
+        xf = np.zeros(self.n_full)
+        xf[:nn] = v[0]
+        j = self._jac(t, xf, self.cparams, True)
+        if list(j["rows"]) != self.rows:
+            raise RuntimeError("sensitivities: the tick map changed shape "
+                               f"({self.rows} -> {list(j['rows'])}).")
+        sides = []
+        for kk in j["kinks"]:
+            if not kk["live"]:
+                continue
+            a, b = float(kk["a"]), float(kk["b"])
+            sides.append((kk["block"], kk["law"], bool(kk["side"])))
+            # floor 1e-12: a comparison against 0 is ON its kink at noise level too
+            if not abs(a - b) > _KINK_RTOL * max(abs(a), abs(b), 1e-3):
+                raise _unsup(
+                    "control_kink",
+                    f"sensitivities: at the tick t = {t!r} block "
+                    f"{kk['block']!r} ({kk['law']}) sits on a kink of its "
+                    f"law ({a!r} against {b!r}): the derivative is one-sided "
+                    "there and the side a parameter change takes is not "
+                    "defined.", device=kk["block"], kind=kk["law"])
+        row = {r: i for i, r in enumerate(self.rows)}
+        Sin = np.zeros((len(j["cols"]), n_p))
+        for c, name in enumerate(j["cols"]):
+            if name in row:
+                Sin[c] = self.Sc[row[name]]
+            elif name.startswith("x["):
+                i = int(name[2:-1])
+                if len(v) > 1 and abs(v[1][i] - v[0][i]) > 1e-9 * max(
+                        1.0, abs(v[0][i])):
+                    raise _unsup(
+                        "closed_loop", f"sensitivities: the controller samples "
+                        f"node {i} at t = {t!r}, where an event makes it jump "
+                        f"({v[0][i]!r} -> {v[1][i]!r}): which side the tick "
+                        "reads is not a function of the parameters.")
+                k0 = keys[0]
+                Sin[c] = ctx.rec[k0][i, :-1] @ S + ctx.drec[k0][:, i, :] @ xb
+            else:
+                Sin[c, self.pcol[name]] = 1.0
+        self.Sc = np.asarray(j["J"]) @ Sin
+        vals = j["values"]
+        for li, lg in enumerate(self.legs):
+            self.S_duty[li] = self.Sc[lg.row].copy()
+            self.duty[li] = float(vals[lg.row])
+        self.history.append((t, list(self.duty),
+                             [s.copy() for s in self.S_duty], tuple(sides)))
+
+    def edge_dtau(self, ev):
+        """``dtau/dp`` of a gate edge: each leg whose bit moved, by its
+        modulator's edge geometry; checks the replayed duty lands it."""
+        shifts = []
+        for li, lg in enumerate(self.legs):
+            o, nw = bool(ev["old"].get(lg.bit)), bool(ev["new"].get(lg.bit))
+            if o == nw:
+                continue
+            if o and not nw:
+                k = math.floor((ev["t"] - lg.phase) / lg.T + 1e-9)
+                want = lg.phase + (k + self.duty[li]) * lg.T
+                if abs(ev["t"] - want) > 1e-9 * lg.T:
+                    raise RuntimeError(
+                        f"sensitivities: the replayed controller puts the OFF "
+                        f"edge of switch bit {lg.bit} at {want!r}, the run at "
+                        f"{ev['t']!r}: the replay is not the run.")
+            shifts.append((lg.dfall if (o and not nw) else lg.drise)
+                          * self.S_duty[li])
+        if not shifts:
+            return 0.0
+        # one event is one instant: legs moving together must move as one
+        # (same duty, same edge), else a perturbation splits the event
+        if any(not np.array_equal(s, shifts[0]) for s in shifts[1:]):
+            raise _unsup(
+                "closed_loop", f"sensitivities: at t = {ev['t']!r} gate edges "
+                "of several switches coincide but move differently with the "
+                "parameters: the event splits under a perturbation.")
+        return shifts[0]
+
+
+@dataclass
+class _Traj:
+    times: np.ndarray              # (N,)
+    states: np.ndarray             # (N, n) left limits
+    masks: list                    # mask of the interval starting at k
+    mask_left: list                # mask under which sample k was reached
+    events: dict                   # k -> list of event dicts
+    native: dict
+    n_steps: int
+    ticks: dict = field(default_factory=dict)   # k -> control tick instant
+
+
+_EVENT_SAMPLE_TOL = 1e-12   # = detail::kEventSampleTol (period_integrals.hpp)
+
+
+def _attach_events(times, log) -> dict:
+    """``k -> [event]``: each logged event goes to the first sample at or
+    after it (within 4 ulp, as the kernel's period map does) and must be
+    at that sample, since its jump is applied to the sample's left limit."""
+    events: dict = {}
+    t_last = float(times[-1])
+    t_tol = 4 * np.finfo(float).eps * max(abs(t_last), t_last - times[0])
+    for e in log:
+        t = float(e["t"])
+        k = int(np.searchsorted(times, t - t_tol, side="left"))
+        if k == len(times) or times[k] - t > _EVENT_SAMPLE_TOL * max(
+                abs(t), t_last):
+            raise RuntimeError(
+                f"sensitivities: event {e['name']!r} at t = {e['t']!r} has "
+                "no sample of its own in the trajectory.")
+        events.setdefault(k, []).append(dict(
+            t=t, name=str(e["name"]), type=int(e["predicate_type"]),
+            old=e["old_mask"], new=e["new_mask"]))
+    return events
+
+
+def _run(builder, sf, x0, t_end, dt_max, dt_init, ic_from_builder, loop=None):
+    from . import PwlStateSpaceCache
+    from . import _pulsim
+    cache = PwlStateSpaceCache(builder.graph, builder.pool)
+    cache.build_lazy(dt_max)
+    ad = _pulsim._NativeCircuitBuilderAdapter(builder, cache, None)
+    m0 = sf(0.0)
+    ad.set_mask(m0)
+    if ic_from_builder:
+        x0, _adj = ad.reduced_initial_state(builder)
+    x0 = np.asarray(x0, dtype=float)
+    if ad.has_dynamic_sources:
+        raise _unsup("sensitivities", "sensitivities: the circuit has "
+                     "time-varying sources; this slice covers DC sources.")
+    guard = {}
+    if _branch_diode_vars(builder):
+        # an ideal branch-form diode needs the kernel's diode-mode guard, as
+        # simulate's and periodic_steady_state's runs set it (a conductance-
+        # form circuit keeps its run unchanged)
+        from ._dsed_dispatch import MODE_GUARD, _shadow_h_e
+        if MODE_GUARD:
+            guard = {"mode_guard_h_e": _shadow_h_e(builder, sf, t_end)}
+    if loop is not None:
+        guard.update(
+            tick_fns=[f for f, _p, _o in loop.ticks],
+            tick_periods=[float(p_) for _f, p_, _o in loop.ticks],
+            tick_offsets=[float(o) for _f, _p, o in loop.ticks],
+            tick_monitors=[False] * len(loop.ticks))
+        loop.st0 = loop.cxx.save_state()
+    r = _pulsim.run_ped_native_builder(
+        ad, sf, x0, t_end, rtol=1e-11, atol=1e-14, dt_init=dt_init,
+        dt_max=dt_max, store_every=1, enable_event_projection=False,
+        diode_law_rel=0.0, event_log=True, **guard)
+    if loop is not None:
+        loop.st1 = loop.cxx.save_state()
+    if int(r["n_exact_steps"]) != int(r["n_accept"]):
+        raise _unsup(
+            "sensitivities", "sensitivities: the exact stepper took "
+            f"{int(r['n_accept']) - int(r['n_exact_steps'])} numeric (RK45) "
+            "step(s): a mode has no closed-form propagator there, so the "
+            "trajectory (and its events) is not the exact map this "
+            "derivative belongs to.")
+    times = np.asarray(r["times"], dtype=float)
+    states = np.asarray(r["states"], dtype=float).reshape(len(times), -1)
+    log = list(r["event_log"])
+    events = _attach_events(times, log)
+    masks, left = [], []
+    cur = log[0]["old_mask"] if log else m0
+    for k in range(len(times)):
+        left.append(cur)
+        for e in events.get(k, ()):
+            cur = e["new"]
+        masks.append(cur)
+    traj = _Traj(times, states, masks, left, events, r, int(r["n_accept"]))
+    if loop is not None:
+        n_t = int(list(r.get("control_tick_counts", [0]))[0])
+        tol = 4 * np.finfo(float).eps * max(float(times[-1]), loop.T)
+        for tk in loop.tick_times(n_t):
+            k = int(np.searchsorted(times, tk - tol, side="left"))
+            if k == len(times) or abs(times[k] - tk) > tol:
+                raise RuntimeError(f"sensitivities: the tick at t = {tk!r} has "
+                                   "no sample of its own in the trajectory.")
+            traj.ticks[k] = tk
+    return traj, x0
+
+
+# ----------------------------------------------------------------------
+# The sensitivity computation
+# ----------------------------------------------------------------------
+
+class _Context:
+    """Masks, propagators, exact derivatives, predicate rows."""
+
+    def __init__(self, builder, params, traj, ic_from_builder, h_max):
+        from . import PwlStateSpaceCache
+        from .periodic_steady_state import _labels
+        self.builder = builder
+        self.params = params
+        self.comps = list(builder.components())
+        self.mask_by_key = {}
+        # with the masks between two events logged at one sample (a7)
+        between = [m for evs in traj.events.values() for e in evs
+                   for m in (e["old"], e["new"])]
+        for m in traj.masks + traj.mask_left + between:
+            self.mask_by_key.setdefault(str(m), m)
+        base = _snapshot(builder, self.mask_by_key, h_max, ic_from_builder)
+        n_p = len(params)
+        derivs = [None] * n_p
+        self.n_assemblies = 1
+        for j, prm in enumerate(params):
+            if prm.kind not in ("duty", "control"):
+                derivs[j] = _param_derivative(
+                    builder, prm, self.mask_by_key, h_max, ic_from_builder,
+                    base, len(traj.states[0]) + 1)
+                self.n_assemblies += 4
+        m0 = traj.masks[0]
+        cache = PwlStateSpaceCache(builder.graph, builder.pool)
+        cache.build_lazy(h_max)
+        self.labels, devs = _labels(builder, cache, m0, self.comps)
+        n = len(self.labels)
+        self.n = n
+        mass = np.ones(n)
+        vals = {c["name"]: c["params"] for c in self.comps}
+        for i, d in enumerate(devs):
+            if len(d) == 1 and d[0] in vals:
+                pr = vals[d[0]]
+                mass[i] = float(pr.get("C_farads", pr.get("L_henries", 1.0)))
+        dsc = np.ones(n + 1)
+        dsc[:n] = np.sqrt(mass)
+        # recovery rows: the nodes, then the branch-form diodes' currents
+        self.current_row = {bid: int(builder.graph.num_nodes) + j for j, (bid, _v)
+                            in enumerate(_branch_diode_vars(builder))}
+        nn = int(builder.graph.num_nodes) + len(self.current_row)
+        n1 = n + 1
+        hmax = {}
+        for k in range(len(traj.times) - 1):
+            key = str(traj.masks[k])
+            hmax[key] = max(hmax.get(key, 0.0),
+                            traj.times[k + 1] - traj.times[k])
+        self.modes, self.rec, self.drec = {}, {}, {}
+        for key in self.mask_by_key:
+            f0 = base[key]
+            Ab = f0[:n1 * n1].reshape(n1, n1)
+            self.rec[key] = f0[n1 * n1:].reshape(nn, n1)
+            dAb = np.zeros((n_p, n1, n1))
+            dR = np.zeros((n_p, nn, n1))
+            for j in range(n_p):
+                if derivs[j] is not None:
+                    d = derivs[j][key]
+                    dAb[j] = d[:n1 * n1].reshape(n1, n1)
+                    dR[j] = d[n1 * n1:].reshape(nn, n1)
+            self.drec[key] = dR
+            d = dsc.copy()
+            A = Ab[:n, :n]
+            try:
+                xeq = -np.linalg.solve(A, Ab[:n, n])
+                sc = float(np.linalg.norm(d[:n] * xeq))
+                if math.isfinite(sc) and sc > 0:
+                    d[n] = 1.0 / sc
+            except np.linalg.LinAlgError:
+                pass
+            self.modes[key] = _Mode(key, Ab, dAb, d, hmax.get(key, 0.0))
+        self.S0 = np.zeros((n, n_p))
+        if ic_from_builder:
+            for j in range(n_p):
+                if derivs[j] is not None:
+                    self.S0[:, j] = derivs[j]["__ic__"]
+        self.diodes = {c["branch_id"]: c for c in self.comps
+                       if c["kind"] == "diode"}
+        self.loop = None
+
+    def f(self, key, x):
+        Ab = self.modes[key].Ab
+        return Ab[:-1, :-1] @ x + Ab[:-1, -1]
+
+    def pair_row(self, key, a, k):
+        """``(c, dc)``: ``v_a - v_k = c . xb``, ``dc`` its p-derivative."""
+        R, dR = self.rec[key], self.drec[key]
+        c = (R[a] if a >= 0 else 0.0) - (R[k] if k >= 0 else 0.0)
+        dc = (dR[:, a] if a >= 0 else 0.0) - (dR[:, k] if k >= 0 else 0.0)
+        return np.broadcast_to(c, (self.n + 1,)).astype(float), \
+            np.broadcast_to(dc, (len(self.params), self.n + 1)).astype(float)
+
+    def diode_of(self, name):
+        m = _BRANCH_RE.search(name)
+        if m and int(m.group(1)) in self.diodes:
+            return self.diodes[int(m.group(1))]
+        raise _unsup("event", f"sensitivities: event {name!r} is a state "
+                     "event whose predicate the sensitivity path cannot "
+                     "read, so its time derivative cannot be formed.")
+
+
+def _jump(ctx, ev, x, S, params):
+    """``(S+, dtau/dp)`` at one logged event (cascade merged by the
+    engine: f- under the old mask, f+ under the final one)."""
+    ko, kn = str(ev["old"]), str(ev["new"])
+    fm, fp = ctx.f(ko, x), ctx.f(kn, x)
+    n_p = len(params)
+    dtau = np.zeros(n_p)
+    if ev["type"] == _GATE:
+        for j, prm in enumerate(params):
+            if prm.kind == "duty" and ev["old"].get(prm.bit) \
+                    and not ev["new"].get(prm.bit):
+                dtau[j] = prm.period
+        if ctx.loop is not None:
+            dtau = dtau + ctx.loop.edge_dtau(ev)
+    elif ev["type"] in (_DIODE_ON, _DIODE_OFF):
+        c = ctx.diode_of(ev["name"])
+        a, k = (int(v) for v in c["nodes"])
+        if ev["type"] == _DIODE_OFF and c.get("branch_id") in ctx.current_row:
+            # an ON branch-form diode turns off on its solved current
+            a, k = ctx.current_row[c["branch_id"]], -1
+        row, drow = ctx.pair_row(ko, a, k)
+        grad = row[:-1]
+        den = float(grad @ fm)
+        d = ctx.modes[ko].dsc[:-1]      # the cosine in energy coordinates
+        if abs(den) <= _GRAZE * float(np.linalg.norm(grad / d)
+                                      * np.linalg.norm(fm * d)):
+            raise _unsup(
+                "grazing_event",
+                f"sensitivities: grazing event: {ev['name']} at t = "
+                f"{ev['t']!r} is tangent to its switching surface "
+                f"(grad(g).f = {den:.3e}); the trajectory is not "
+                "differentiable in the parameters there (a parameter "
+                "change on one side removes the event).",
+                device=c["name"], kind="Diode")
+        g_p = drow @ np.append(x, 1.0)
+        dtau = -(grad @ S + g_p) / den
+    else:
+        raise _unsup("event", f"sensitivities: event {ev['name']!r} "
+                     f"(type {ev['type']}) has no time derivative on the "
+                     "exact path.")
+    return S + np.outer(fm - fp, dtau), dtau
+
+
+def _propagate(ctx, traj, S0):
+    """Left-limit sensitivities at every sample, right limits at event
+    samples, ``dtau/dp`` per event; checks every step against the
+    engine."""
+    params = ctx.params
+    N = len(traj.times)
+    n, n_p = ctx.n, S0.shape[1]
+    S_all = np.empty((N, n, n_p))
+    S_right: dict = {}
+    dtaus: list = []
+    S = S0.copy()
+    scale = np.abs(traj.states).max(axis=0) + 1e-12
+    n_sens = 0
+    loop = ctx.loop
+    if loop is not None:
+        loop.begin(params)
+    for k in range(N):
+        x = traj.states[k]
+        S_all[k] = S
+        tick = loop is not None and k in traj.ticks
+        if tick:
+            # the tick reads x(kT); an event at the same instant must leave
+            # the sensitivity continuous (a period start: dtau = 0)
+            loop.tick(ctx, traj.ticks[k], x, S,
+                      [str(traj.mask_left[k]), str(traj.masks[k])])
+        for ev in traj.events.get(k, ()):
+            S, dtau = _jump(ctx, ev, x, S, params)
+            if tick and np.any(dtau != 0):
+                raise _unsup(
+                    "closed_loop", f"sensitivities: the event {ev['name']!r} "
+                    f"moves with the parameters and falls on the control tick "
+                    f"at t = {ev['t']!r} (a duty at 0 or 1, or a diode event "
+                    "on the tick): which the controller samples first is not "
+                    "a function of the parameters.")
+            dtaus.append(dict(ev, k=k, dtau=dtau))
+        if k in traj.events:
+            S_right[k] = S
+        if k == N - 1:
+            break
+        h = traj.times[k + 1] - traj.times[k]
+        mode = ctx.modes[str(traj.masks[k])]
+        if mode.tier == 3:
+            raise _unsup("sensitivities", f"sensitivities: mode {mode.label}"
+                         f": {mode.reason}.")
+        Sb = np.vstack([S, np.zeros((1, n_p))])
+        xb1, Sb1 = mode.advance(np.append(x, 1.0), Sb, h)
+        n_sens += n_p
+        err = np.abs(xb1[:n] - traj.states[k + 1]) / scale
+        if float(err.max()) > _STEP_RTOL:
+            raise _unsup(
+                "sensitivities",
+                f"sensitivities: the step {traj.times[k]!r} -> "
+                f"{traj.times[k + 1]!r} under {mode.label} is not reproduced "
+                f"by the exact propagator (relative {float(err.max()):.2e}): "
+                "the engine took a numeric step there, so the trajectory is "
+                "not the exact map this derivative belongs to.")
+        S = Sb1[:n]
+    return S_all, S_right, dtaus, n_sens
+
+
+# ----------------------------------------------------------------------
+# Results
+# ----------------------------------------------------------------------
+
+class KpiValue:
+    """A KPI and its gradient. Unpacks as ``value, grad``; ``grad`` is
+    a dict by parameter name. ``non_unique`` marks a peak / ripple whose
+    extremum is attained at two separate instants (not differentiable:
+    the gradient given is that of the first)."""
+
+    def __init__(self, value, grad, non_unique=False, where=None):
+        self.value = float(value)
+        self.grad = dict(grad)
+        self.non_unique = bool(non_unique)
+        self.where = where
+
+    def __iter__(self):
+        return iter((self.value, self.grad))
+
+    def __repr__(self):
+        return (f"KpiValue(value={self.value!r}, grad={self.grad!r}, "
+                f"non_unique={self.non_unique})")
+
+
+_KINDS = ("final", "avg", "rms", "energy", "peak", "valley", "ripple")
+
+
+@dataclass
+class SensitivityResult:
+    """``dx/dp`` along an exact-path run.
+
+    ``states`` is ``(n_samples, n_state, n_params)``: the left limit at
+    every sample (as ``res.states``); ``params`` the names in column
+    order; ``labels`` the state names; ``event_dtau`` the event instants'
+    derivatives (``name``, ``t``, ``dtau`` by parameter); ``flags`` the
+    near misses (see the module text); ``counters`` the cost."""
+
+    params: list
+    labels: list
+    times: np.ndarray
+    states: np.ndarray
+    event_dtau: list
+    flags: list
+    counters: dict
+    _ctx: Any = field(default=None, repr=False)
+    _traj: Any = field(default=None, repr=False)
+    _S_right: dict = field(default_factory=dict, repr=False)
+    #: an orbit run (its two ends are one point)
+    periodic: bool = False
+    #: a closed loop: per control tick ``times``, the legs' ``duty``,
+    #: ``duty_sens`` (tick, leg, param) and the ``sides`` its laws took
+    #: (block, law, side) — a change of sides is a saturation / clamp tick
+    control: Optional[dict] = None
+
+    # -- signals ---------------------------------------------------------
+    def _signal(self, name):
+        """``key -> (c, dc)``: the signal is ``c . xb`` under each mask."""
+        ctx = self._ctx
+        n = ctx.n
+        lab = None
+        if name in ctx.labels:
+            lab = ctx.labels.index(name)
+        elif f"i({name})" in ctx.labels:
+            lab = ctx.labels.index(f"i({name})")
+        if lab is not None:
+            c = np.zeros(n + 1)
+            c[lab] = 1.0
+            dc = np.zeros((len(self.params), n + 1))
+            return lambda key: (c, dc)
+        try:
+            node = int(ctx.builder.node_id_of(name))
+        except Exception:  # noqa: BLE001 — not a node
+            node = -1
+        if node < 0:
+            raise ValueError(
+                f"sensitivity: signal {name!r} is not a state "
+                f"({ctx.labels}), an inductor or a node name.")
+        return lambda key: ctx.pair_row(key, node, -1)
+
+    def _col(self, param):
+        try:
+            return self.params.index(param)
+        except ValueError:
+            raise ValueError(f"sensitivity: {param!r} was not requested "
+                             f"(requested: {self.params}).") from None
+
+    def sens(self, signal, param):
+        """``d signal / d param`` at every sample (left limits, as
+        ``res.states``)."""
+        j = self._col(param)
+        row = self._signal(signal)
+        tr = self._traj
+        out = np.empty(len(tr.times))
+        for k in range(len(tr.times)):
+            c, dc = row(str(tr.mask_left[k]))
+            out[k] = c[:-1] @ self.states[k, :, j] \
+                + dc[j] @ np.append(tr.states[k], 1.0)
+        return out
+
+    # -- KPIs ------------------------------------------------------------
+    def kpi(self, signal, kind="avg", *, t_from=None, t_to=None,
+            with_grad=True):
+        """KPI of a signal over ``[t_from, t_to]`` (default the whole
+        run) with its exact gradient. ``kind``: ``final``, ``avg``
+        (time-weighted), ``rms``, ``energy`` (the integral), ``peak``,
+        ``valley``, ``ripple`` (peak - valley). Integrals are closed
+        forms of the exact trajectory, with the event-time terms
+        ``(y- - y+) dtau/dp`` of a signal that jumps at an event."""
+        if kind not in _KINDS:
+            raise ValueError(f"kpi: kind {kind!r}; use one of {_KINDS}.")
+        tr = self._traj
+        t0 = float(tr.times[0] if t_from is None else t_from)
+        t1 = float(tr.times[-1] if t_to is None else t_to)
+        if not (tr.times[0] <= t0 < t1 <= tr.times[-1] * (1 + 1e-12)):
+            raise ValueError(f"kpi: window [{t0!r}, {t1!r}] is not inside "
+                             f"the run [{tr.times[0]!r}, {tr.times[-1]!r}].")
+        t1 = min(t1, float(tr.times[-1]))
+        row = self._signal(signal)
+        tol = 1e-12 * max(abs(t1), t1 - t0)
+        for ev in self.event_dtau:
+            if not np.any(ev["dtau"]) or not (
+                    (t0 > tr.times[0] and abs(ev["t"] - t0) <= tol)
+                    or abs(ev["t"] - t1) <= tol):
+                continue
+            xb = np.append(tr.states[ev["k"]], 1.0)
+            if row(str(ev["old"]))[0] @ xb != row(str(ev["new"]))[0] @ xb:
+                raise _unsup(
+                    kind, f"kpi: the window edge t = {ev['t']!r} sits on "
+                    f"the event {ev['name']!r}, which moves with the "
+                    f"parameters, and {signal!r} jumps there: the KPI is "
+                    "one-sided (not differentiable). Move the window edge.")
+        val, grad, nu, where = _kpi(self, row, kind, t0, t1)
+        if not with_grad:
+            return val
+        return KpiValue(val, dict(zip(self.params, grad)), nu, where)
+
+
+def _pieces(sr, t0, t1):
+    """Intervals overlapping ``[t0, t1]``: ``(k, s0, s1, mode, xb, Sb)``
+    with ``(xb, Sb)`` the right limit at sample ``k``."""
+    tr, ctx = sr._traj, sr._ctx
+    n_p = len(sr.params)
+    t = tr.times
+    k0 = max(0, int(np.searchsorted(t, t0, side="right")) - 1)
+    for k in range(k0, len(t) - 1):
+        if t[k] >= t1:
+            break
+        s0 = max(0.0, t0 - t[k])
+        s1 = min(t[k + 1], t1) - t[k]
+        if s1 <= s0:
+            continue
+        S = sr._S_right.get(k, sr.states[k])
+        yield (k, s0, s1, ctx.modes[str(tr.masks[k])],
+               np.append(tr.states[k], 1.0),
+               np.vstack([S, np.zeros((1, n_p))]))
+
+
+def _event_terms(sr, row, t0, t1, power):
+    """``sum (y-^q - y+^q) dtau/dp`` over events strictly inside."""
+    out = np.zeros(len(sr.params))
+    tr = sr._traj
+    for ev in sr.event_dtau:
+        if not (t0 < ev["t"] < t1):
+            continue
+        xb = np.append(tr.states[ev["k"]], 1.0)
+        ym = row(str(ev["old"]))[0] @ xb
+        yp = row(str(ev["new"]))[0] @ xb
+        out += (ym ** power - yp ** power) * ev["dtau"]
+    return out
+
+
+def _kpi(sr, row, kind, t0, t1):
+    n_p = len(sr.params)
+    W = t1 - t0
+    if kind == "final":
+        tr = sr._traj
+        if t1 >= tr.times[-1]:
+            k = len(tr.times) - 1
+            c, dc = row(str(tr.mask_left[k]))
+            xb = np.append(tr.states[k], 1.0)
+            return (float(c @ xb),
+                    c[:-1] @ sr.states[k] + dc @ xb, False, t1)
+        k, s0, _s1, mode, xb, Sb = next(_pieces(sr, t1, tr.times[-1]))
+        x1, S1 = mode.advance(xb, Sb, s0)
+        c, dc = row(str(tr.masks[k]))
+        return float(c @ x1), c @ S1 + dc @ x1, False, t1
+    if kind in ("peak", "valley", "ripple"):
+        return _extrema(sr, row, kind, t0, t1)
+    acc = 0.0
+    Ig = np.zeros(n_p)
+    power = 2 if kind == "rms" else 1
+    for k, s0, s1, mode, xb, Sb in _pieces(sr, t0, t1):
+        c, dc = row(mode.label)
+        L = s1 - s0
+        if mode.tier != 1:
+            if power == 2:
+                raise _unsup("rms", "kpi: the RMS gradient over a "
+                             f"near-defective mode ({mode.label}) is not "
+                             "available in this slice (closed form needs "
+                             "the eigenbasis).")
+            x0b, S0b = mode.advance(xb, Sb, s0) if s0 > 0 else (xb, Sb)
+            ix, iS = mode.integrals(x0b, S0b, L)
+            acc += float(c @ ix)
+            Ig += c @ iS + dc @ ix
+            continue
+        z, Z = mode.modal(xb, Sb)
+        if s0 > 0:
+            z, Z = mode.modal_advance(z, Z, s0)
+        mu, G = mode.mu, mode.G
+        r = (c / mode.dsc) @ mode.V
+        q = (dc / mode.dsc[None, :]) @ mode.V
+        alpha = r * z
+        beta = r[None, :] * Z.T + q * z[None, :]
+        gamma = r[None, :, None] * G * z[None, None, :]
+        if power == 1:
+            I1 = L * _phi1(mu * L)
+            IF = L * L * _dd_phi1(mu[:, None] * L, mu[None, :] * L)
+            acc += float((alpha * I1).sum().real)
+            Ig += (beta @ I1 + (gamma * IF[None]).sum(axis=(1, 2))).real
+        else:
+            mk = mu[:, None] + mu[None, :]
+            I1kk = L * _phi1(mk * L)
+            acc += float((alpha[:, None] * alpha[None, :] * I1kk).sum().real)
+            P3 = L * L * _dd_phi1(mk[:, :, None] * L, mk[:, None, :] * L)
+            t1_ = np.einsum("k,pi,ki->p", alpha, beta, I1kk)
+            t2_ = np.einsum("k,pij,kij->p", alpha, gamma, P3)
+            Ig += 2 * (t1_ + t2_).real
+    Ig += _event_terms(sr, row, t0, t1, power)
+    if kind == "energy":
+        return acc, Ig, False, None
+    if kind == "avg":
+        return acc / W, Ig / W, False, None
+    rms = math.sqrt(max(acc / W, 0.0))
+    return rms, Ig / (2 * W * rms) if rms > 0 else Ig * 0.0, False, None
+
+
+#: Relative tie of two extremum values (detail::kExtremumTie in
+#: core/include/pulsim/dsed/period_integrals.hpp): reported at the earliest.
+_EXTREMUM_TIE = 1e-12
+
+
+def _extrema_grid(s0, s1, K, re_max):
+    """K uniform cells of [s0, s1] plus s0 + (s1 - s0)/2^m down to about
+    1/(2 re_max): a fast mode's extremum near the start is bracketed (16
+    uniform cells missed a 1.707 peak at 92 ns of a 10 us step and
+    reported 0.5). Mirrors detail::extrema_grid in
+    core/include/pulsim/dsed/period_integrals.hpp; keep the two equal."""
+    h = s1 - s0
+    g = [s0 + h * c / K for c in range(K + 1)]
+    if h * re_max > 16:
+        M = min(60, math.ceil(math.log2(h * re_max / 2)))
+        g += [s0 + math.ldexp(h, -m) for m in range(1, M + 1)]
+    return np.unique(np.asarray(g, dtype=float))
+
+
+def _extrema(sr, row, kind, t0, t1, K=16):
+    """Peak / valley by a sub-grid scan refined by Newton on ``y'``;
+    the gradient is ``dy/dp`` at the extremum (plus ``y' dtau/dp`` when
+    it sits on an event instant)."""
+    cands = []          # (y, t, grad)
+    tr = sr._traj
+    ev_at = {}
+    for ev in sr.event_dtau:
+        if ev["k"] in ev_at and not np.array_equal(ev_at[ev["k"]]["dtau"],
+                                                   ev["dtau"]):
+            ev_at[ev["k"]] = dict(ev, dtau=None)    # two different instants
+        else:
+            ev_at.setdefault(ev["k"], ev)
+    for k, s0, s1, mode, xb, Sb in _pieces(sr, t0, t1):
+        if mode.tier != 1:
+            raise _unsup(kind, f"kpi: {kind} over a near-defective mode "
+                         f"({mode.label}) is not available in this slice.")
+        c, dc = row(mode.label)
+        z, Z = mode.modal(xb, Sb)
+        r = (c / mode.dsc) @ mode.V
+        alpha = r * z
+        mu = mode.mu
+        # at least eight points per period of the fastest oscillation
+        w = float(np.abs(mu.imag).max())
+        Kp = max(K, int(math.ceil((s1 - s0) * w * 8 / (2 * math.pi))))
+        if Kp > 1 << 16:
+            raise _unsup(kind, f"kpi: {kind} over a mode ringing "
+                         f"{Kp // 8} times in one step is not searched.")
+        ss = _extrema_grid(s0, s1, Kp, float(np.abs(mu.real).max()))
+        Kp = ss.size - 1
+
+        def y(s):
+            return float((alpha * np.exp(mu * s)).sum().real)
+
+        def dy(s, order=1):
+            return float((alpha * mu ** order * np.exp(mu * s)).sum().real)
+
+        ys = np.array([y(s) for s in ss])
+        yscale = float(np.abs(ys).max()) or 1.0
+        pts = [s0, s1]
+        for kind_ in (("peak", "valley") if kind == "ripple" else (kind,)):
+            sg = 1.0 if kind_ == "peak" else -1.0
+            # sub-grid maxima, the end cells included (a peak inside the
+            # first or last cell has its sub-grid maximum on the end
+            # point); Newton on y' within the neighbouring cells, kept
+            # only when it converges inside the piece
+            for i in range(Kp + 1):
+                lo, hi = max(i - 1, 0), min(i + 1, Kp)
+                if sg * ys[i] < sg * ys[lo] or sg * ys[i] < sg * ys[hi]:
+                    continue
+                a, b_ = ss[lo], ss[hi]
+                if sg * dy(a) >= 0 >= sg * dy(b_) and a < b_:
+                    # bracketed: bisection on y' to float resolution (a
+                    # stiff mode's e^{mu s} sends Newton out of the cell)
+                    for _ in range(200):
+                        m_ = 0.5 * (a + b_)
+                        if m_ in (a, b_):
+                            break
+                        if sg * dy(m_) >= 0:
+                            a = m_
+                        else:
+                            b_ = m_
+                    s = 0.5 * (a + b_)
+                else:
+                    s = ss[i]
+                    for _ in range(50):
+                        d2 = dy(s, 2)
+                        if d2 == 0:
+                            break
+                        s_new = min(max(s - dy(s) / d2, ss[lo]), ss[hi])
+                        done = abs(s_new - s) <= max(4 * _U * abs(s),
+                                                     1e-13 * (s1 - s0))
+                        s = s_new
+                        if done:
+                            break
+                # a stationary point is a candidate; a sub-grid maximum
+                # strictly inside with none found is a failed search
+                if abs(dy(s)) * (s1 - s0) <= 1e-9 * yscale or (
+                        a < s < b_ and b_ - a <= 4 * _U * max(abs(s), 1.0)):
+                    if s0 < s < s1:
+                        pts.append(s)
+                elif 0 < i < Kp and sg * ys[i] > sg * ys[lo] \
+                        and sg * ys[i] > sg * ys[hi]:
+                    raise _unsup(
+                        kind, f"kpi: the {kind_} search did not converge "
+                        f"in the step at t = {tr.times[k]!r}; the "
+                        "extremum (and its gradient) is not located.")
+        for s in pts:
+            x1, S1 = mode.advance(xb, Sb, s)
+            g = c @ S1 + dc @ x1
+            t = tr.times[k] + s
+            if s == 0.0 and k in ev_at and t0 < t:
+                g = g + (c[:-1] @ sr._ctx.f(mode.label, x1[:-1])) \
+                    * _one_dtau(ev_at[k], kind)
+            cands.append((float(c @ x1), t, g, k, s))
+            if s == s1 and (k + 1) in ev_at and tr.times[k + 1] < t1:
+                key = str(tr.masks[k])
+                cands[-1] = (cands[-1][0], t,
+                             g + (c[:-1] @ sr._ctx.f(key, x1[:-1]))
+                             * _one_dtau(ev_at[k + 1], kind), k, s)
+    ys = np.array([cd[0] for cd in cands])
+    span = float(ys.max() - ys.min()) or max(abs(float(ys.max())), 1.0)
+    out = {}
+    for kind_ in (("peak", "valley") if kind == "ripple" else (kind,)):
+        sg = 1.0 if kind_ == "peak" else -1.0
+        i, j = _running_extremum(ys, [cd[1] for cd in cands], sg)
+        tie = [cd for cd in cands
+               if sg * (ys[i] - cd[0]) <= 1e-9 * span
+               and abs(cd[1] - cands[j][1]) > 1e-9 * (t1 - t0)
+               # the two ends of an orbit are one point
+               and not (sr.periodic and abs(abs(cd[1] - cands[j][1])
+                                            - (t1 - t0)) <= 1e-9 * (t1 - t0)
+                        and t0 == tr.times[0] and t1 == tr.times[-1])]
+        out[kind_] = (cands[i][0], cands[j][2], bool(tie), cands[j][1])
+    if kind == "ripple":
+        p_, v_ = out["peak"], out["valley"]
+        return (p_[0] - v_[0], p_[1] - v_[1], p_[2] or v_[2],
+                (p_[3], v_[3]))
+    return out[kind]
+
+
+def _running_extremum(ys, ts, sg):
+    """``(i, j)``: the kernel's running rule (detail::extremum_candidate)
+    over the candidates in time order. A value within ``_EXTREMUM_TIE`` of
+    the running best is a tie: it keeps the larger value (index ``i``) and
+    the earlier instant (``j``, whose gradient is reported)."""
+    i = j = -1
+    for q in sorted(range(len(ys)), key=lambda q: ts[q]):
+        if i >= 0 and abs(ys[q] - ys[i]) <= _EXTREMUM_TIE * max(
+                abs(ys[q]), abs(ys[i])):
+            if sg * ys[q] > sg * ys[i]:
+                i = q
+        elif i < 0 or sg * ys[q] > sg * ys[i]:
+            i = j = q
+    return i, j
+
+
+def _one_dtau(ev, kind):
+    if ev["dtau"] is None:
+        raise _unsup(kind, f"kpi: the {kind} sits on two events of "
+                     f"different time derivatives at t = {ev['t']!r}: it "
+                     "is not differentiable there.")
+    return ev["dtau"]
+
+
+def _near_misses(ctx, traj, K=8):
+    """Near misses of the PWL diodes' predicates.
+
+    Along each stretch in which a diode keeps its state, its armed
+    predicate ``g`` (turn-off while on, turn-on while off) is sampled on
+    a sub-grid of every step. A near miss is a point where ``|g|`` comes
+    within ``_NEAR_MISS`` of the largest ``|g|`` of that predicate over
+    the run without crossing: an interior local minimum, or a stretch
+    end the diode did not cause itself (a gate edge that switched it, the
+    CCM valley at the DCM boundary). A stretch that starts or ends at the
+    diode's own event sits on ``g = 0`` by construction and is not one.
+    """
+    flags = []
+    for bid, c in ctx.diodes.items():
+        try:
+            bit = int(ctx.builder.switch_index_of(c["name"]))
+        except Exception:  # noqa: BLE001 — not a switch bit
+            continue
+        a, k_ = (int(v) for v in c["nodes"])
+        prm = c["params"]
+        V_f, V_th = float(prm.get("V_f", 0.0)), float(prm["V_th"])
+        tag = f"(branch #{bid})"
+        stretches, cur = [], None
+        for k in range(len(traj.times) - 1):
+            key = str(traj.masks[k])
+            on = bool(traj.masks[k].get(bit))
+            evs = traj.events.get(k, ())
+            own = any(tag in e["name"] and e["type"] != _GATE for e in evs)
+            if cur is None or cur["on"] != on:
+                if cur is not None:
+                    cur["own_end"] = own
+                    stretches.append(cur)
+                cur = dict(on=on, own_start=own or k == 0, pts=[],
+                           mins=[])
+            mode = ctx.modes[key]
+            if on and bid in ctx.current_row:   # branch form: g = its current
+                row, thr = ctx.pair_row(key, ctx.current_row[bid], -1)[0], 0.0
+            else:
+                row = ctx.pair_row(key, a, k_)[0]
+                thr = V_f if on else (V_th if V_f == 0.0 else max(V_th, V_f))
+            h = traj.times[k + 1] - traj.times[k]
+            xb = np.append(traj.states[k], 1.0)
+            if mode.tier == 1:
+                w = float(np.abs(mode.mu.imag).max())
+                Kp = max(K, int(math.ceil(h * w * 8 / (2 * math.pi))))
+                ss = np.linspace(0, h, Kp + 1)
+                z = mode.Vi @ (mode.dsc * xb)
+                r = (row / mode.dsc) @ mode.V
+                a_ = r * z
+                g = (np.exp(np.outer(ss, mode.mu)) @ a_).real - thr
+                # the sampled |g| misses a sharp interior minimum: refine
+                # each sub-grid minimum by Newton on g'
+                ag_ = np.abs(g)
+                for i in range(1, Kp):
+                    if not (ag_[i] <= ag_[i - 1] and ag_[i] <= ag_[i + 1]):
+                        continue
+                    s = ss[i]
+                    for _ in range(50):
+                        d1 = float((a_ * mode.mu * np.exp(mode.mu * s)).sum().real)
+                        d2 = float((a_ * mode.mu ** 2
+                                    * np.exp(mode.mu * s)).sum().real)
+                        if d2 == 0:
+                            break
+                        s_new = min(max(s - d1 / d2, ss[i - 1]), ss[i + 1])
+                        if abs(s_new - s) <= 1e-13 * h:
+                            s = s_new
+                            break
+                        s = s_new
+                    gm = float((a_ * np.exp(mode.mu * s)).sum().real) - thr
+                    if np.sign(gm) == np.sign(g[i]):
+                        cur["mins"].append((traj.times[k] + s, gm))
+            else:
+                # near-defective mode: the block exponential (no S needed)
+                ss = np.linspace(0, h, 4 * K + 1)
+                S0 = np.zeros((len(xb), len(ctx.params)))
+                g = np.array([row @ mode.advance(xb, S0, s)[0]
+                              for s in ss]) - thr
+            cur["pts"].extend(zip(traj.times[k] + ss, g))
+        if cur is not None:
+            # the end of the run counts: an event just before it is
+            # one a parameter change creates (the CCM valley of an orbit
+            # sits on the section)
+            cur["own_end"] = False
+            stretches.append(cur)
+        for on in (True, False):
+            st = [x for x in stretches if x["on"] == on and x["pts"]]
+            if not st:
+                continue
+            gmax = max(abs(g) for x in st for _t, g in x["pts"]) or 1.0
+            tol = _NEAR_MISS * gmax
+            for x in st:
+                t = np.array([q[0] for q in x["pts"]])
+                g = np.array([q[1] for q in x["pts"]])
+                ag = np.abs(g)
+                hits = [i for i in range(1, len(g) - 1)
+                        if ag[i] <= tol and ag[i] < ag[i - 1]
+                        and ag[i] <= ag[i + 1]
+                        and np.sign(g[i - 1]) == np.sign(g[i + 1])]
+                if not x["own_start"] and ag[0] <= tol:
+                    hits.append(0)
+                if not x["own_end"] and ag[-1] <= tol:
+                    hits.append(len(g) - 1)
+                found = [(float(t[i]), float(g[i])) for i in hits]
+                for tm, gm in x["mins"]:
+                    if abs(gm) <= tol and all(
+                            abs(tm - tf) > 1e-9 * (t[-1] - t[0] or 1.0)
+                            for tf, _g in found):
+                        found.append((tm, gm))
+                for tm, gm in sorted(found):
+                    flags.append(dict(kind="near_miss", device=c["name"],
+                                      t=tm, margin=gm,
+                                      state="on" if on else "off"))
+    return flags
+
+
+def _compute(ctx, traj, S0=None):
+    params = ctx.params
+    S0 = ctx.S0 if S0 is None else S0
+    try:
+        S_all, S_right, dtaus, n_sens = _propagate(ctx, traj, S0)
+    finally:
+        if ctx.loop is not None:
+            ctx.loop.end()       # the graph as the run left it
+    flags = _near_misses(ctx, traj)
+    if flags:
+        f = flags[0]
+        warnings.warn(
+            f"sensitivities: {len(flags)} near miss(es): the predicate of "
+            f"{f['device']} comes within {abs(f['margin']):.3e} V of its "
+            f"threshold at t = {f['t']:.6g} s without switching. The "
+            "gradient is exact for this event pattern; a parameter change "
+            "that closes the margin adds an event and changes it (see "
+            "result.sensitivity.flags).", UserWarning, stacklevel=3)
+    counters = dict(n_engine_runs=1, n_engine_steps=traj.n_steps,
+                    n_sens_propagations=n_sens,
+                    n_assemblies=ctx.n_assemblies,
+                    tiers={k: m.tier for k, m in ctx.modes.items()})
+    S_all.setflags(write=False)
+    control = None
+    if ctx.loop is not None:
+        h = ctx.loop.history
+        control = dict(
+            times=np.array([e[0] for e in h]),
+            duty=np.array([e[1] for e in h]),
+            duty_sens=np.array([e[2] for e in h]).reshape(len(h), -1, len(params)),
+            sides=[e[3] for e in h])
+        counters["n_ticks"] = len(h)
+    sr = SensitivityResult(
+        params=[p.name for p in params], labels=list(ctx.labels),
+        times=traj.times, states=S_all,
+        event_dtau=[dict(name=d["name"], t=d["t"], k=d["k"], old=d["old"],
+                         new=d["new"], dtau=d["dtau"]) for d in dtaus],
+        flags=flags, counters=counters, _ctx=ctx, _traj=traj,
+        _S_right=S_right)
+    sr.control = control
+    return sr
+
+
+def _prepare(builder, names, sf, t_end, loop=None):
+    params = _resolve(builder, names, sf, loop)
+    for prm in params:
+        if prm.kind == "duty":
+            prm.period, prm.value = _duty_period(
+                sf, prm.bit, t_end, prm.name,
+                int(builder.graph.num_switches))
+    return params
+
+
+# ----------------------------------------------------------------------
+# Entry points
+# ----------------------------------------------------------------------
+
+def simulate_sensitivities(builder, t_end, *, sensitivities, dt=None,
+                           t_start=0.0, switch_fn=None, initial_state=None,
+                           ic_from_builder=False, dt_init=None,
+                           b_extra_fn=None, integrator=None, ticks=None):
+    """The ``simulate(engine='dsed', sensitivities=[...])`` path: one run
+    of the exact stepper (events located, no event projection: the map
+    ``periodic_steady_state`` differentiates) and the sensitivities of
+    every sample. Returns the ``simulate`` result with ``.sensitivity``
+    (a :class:`SensitivityResult`), ``.sens`` and ``.kpi``."""
+    from ._dsed_dispatch import _result_from_native
+    if integrator not in (None, "auto", "rk45"):
+        raise _unsup("integrator", f"sensitivities: integrator="
+                     f"{integrator!r}; the sensitivities are those of the "
+                     "exact stepper (integrator='auto' or 'rk45').")
+    sf = _check_circuit(builder, switch_fn, b_extra_fn)
+    loop = _Loop(builder, sf, ticks) if _graph_gate(sf) is not None else None
+    if loop is None and ticks:
+        raise _unsup(
+            "closed_loop", "sensitivities: control ticks that drive no PWM "
+            "gate of a control graph (a Python observer, a monitor): their "
+            "effect on the circuit has no derivative here.")
+    window = float(t_end) - float(t_start)
+    params = _prepare(builder, sensitivities, sf, window, loop)
+    dt_max = float(dt) if dt else 1e-5
+    if initial_state is None and not ic_from_builder:
+        from . import _pulsim
+        from . import PwlStateSpaceCache
+        cache = PwlStateSpaceCache(builder.graph, builder.pool)
+        cache.build_lazy(dt_max)
+        ad = _pulsim._NativeCircuitBuilderAdapter(builder, cache, None)
+        ad.set_mask(sf(0.0))
+        initial_state = np.zeros(int(ad.n_state))
+    traj, _x0 = _run(builder, sf, initial_state, window, dt_max,
+                     dt_init if dt_init else 1e-9, ic_from_builder, loop)
+    ctx = _Context(builder, params, traj, ic_from_builder, dt_max)
+    ctx.loop = loop
+    sr = _compute(ctx, traj)
+    res = _result_from_native(traj.native, t_start)
+    sr.times = traj.times + float(t_start)
+    res.sensitivity = sr
+    res.sens = sr.sens
+    res.kpi = sr.kpi
+    return res
+
+
+def value_and_grad(objective, params: Sequence[str]):
+    """``f(x) -> (value, gradient)`` for ``scipy.optimize.minimize(...,
+    jac=True)``. ``objective(values)`` gets a dict ``{name: value}`` and
+    returns a :class:`KpiValue` (or ``(value, {name: grad})``) whose
+    gradient covers every name in ``params``; ``x`` is in the order of
+    ``params``. No finite difference is ever taken: a missing gradient
+    is an error."""
+    names = list(params)
+
+    def f(x):
+        x = np.asarray(x, dtype=float).reshape(-1)
+        if x.size != len(names):
+            raise ValueError(f"value_and_grad: x has {x.size} entries for "
+                             f"{len(names)} parameters {names}.")
+        out = objective(dict(zip(names, (float(v) for v in x))))
+        val, grad = out
+        missing = [n for n in names if n not in grad]
+        if missing:
+            raise ValueError(f"value_and_grad: the objective returned no "
+                             f"gradient for {missing}.")
+        return float(val), np.array([float(grad[n]) for n in names])
+
+    return f
+
+
+def orbit_sensitivities(res, solver, names, n_steps=50):
+    """Steady-state gradients (D5) on a solved orbit: one more period run
+    from ``x*`` (``res.n_period_runs`` counts it), ``dP/dp = S(T)`` with
+    ``S(0) = 0``, ``dx*/dp = (I - M)^-1 dP/dp``, and the orbit's
+    sensitivity with ``S(0) = dx*/dp`` for orbit KPIs. Sets
+    ``res.dx0`` and ``res.sensitivity``."""
+    builder, sf, T = solver.builder, solver.sf, solver.T
+    params = _prepare(builder, names, sf, T)
+    traj, _x0 = _run(builder, sf, res.x0, T, T / n_steps, T * 1e-6, False)
+    solver.n_runs += 1
+    solver.n_steps += traj.n_steps
+    res.n_period_runs, res.n_engine_steps = solver.n_runs, solver.n_steps
+    ctx = _Context(builder, params, traj, False, T / n_steps)
+    if ctx.labels != list(res.state_labels):
+        raise RuntimeError("sensitivities: state order differs between the "
+                           f"solver ({res.state_labels}) and the sensitivity "
+                           f"run ({ctx.labels}).")
+    n = ctx.n
+    # the dP/dp run (T/n_steps) and the solver's run (dt_max = T) must be
+    # one map: the same events, and x(T) = x*
+    ref = [(e["name"], e["t"]) for e in solver.orbit_traj.events]
+    got = [(e["name"], e["t"]) for k in sorted(traj.events)
+           for e in traj.events[k] if e["type"] != _GATE]
+    ref = [e for e in ref if e[0] != "gate_edge"]
+    if [e[0] for e in ref] != [e[0] for e in got] or any(
+            abs(a[1] - b[1]) > 1e-9 * T for a, b in zip(ref, got)):
+        raise _unsup("sensitivities", "sensitivities: the orbit's "
+                     "sensitivity period does not reproduce the solver's "
+                     f"events ({ref} against {got}); the gradient would mix "
+                     "two maps.")
+    x0 = np.asarray(res.x0, dtype=float)
+    sc = np.abs(traj.states).max(axis=0) + 1e-300
+    per = float((np.abs(traj.states[-1] - x0) / sc).max())
+    if per > 1e-7:
+        raise _unsup("sensitivities", "sensitivities: the sensitivity "
+                     f"period moves the orbit by {per:.3e} of the state "
+                     "scale; it is not the solver's map.")
+    S_all, _r, _d, _n = _propagate(ctx, traj, np.zeros((n, len(params))))
+    dPdp = S_all[-1]
+    dx = np.linalg.solve(np.eye(n) - res.monodromy, dPdp)
+    sr = _compute(ctx, traj, dx)
+    sr.periodic = True
+    sr.counters["n_sens_propagations"] += _n
+    res.dPdp = {p.name: dPdp[:, j].copy() for j, p in enumerate(params)}
+    res.dx0 = {p.name: dx[:, j].copy() for j, p in enumerate(params)}
+    res.sensitivity = sr
+    return res
+
+
+# ----------------------------------------------------------------------
+# The time-stepping engines (group 5): the kernel's stage recurrence
+# ----------------------------------------------------------------------
+
+def _opt_err(message):
+    """An OptionsError (a ValueError) naming `sensitivities`."""
+    from ._pulsim import OptionsError
+    err = OptionsError(message)
+    err.option = "sensitivities"
+    return err
+
+
+def _step_names(names, engine):
+    if isinstance(names, str):
+        names = [names]
+    names = list(names)
+    if not names:
+        raise _opt_err("sensitivities: give at least one parameter name "
+                       "('<component>.<field>').")
+    if len(names) > _MAX_PARAMS:
+        raise _unsup(
+            "sensitivities", f"sensitivities: {len(names)} parameters; "
+            f"the forward method is limited to {_MAX_PARAMS} per run. Split "
+            "the request.", engine=engine)
+    for nm in names:
+        if not isinstance(nm, str) or "." not in nm:
+            raise _opt_err(
+                f"sensitivities: {nm!r} is not '<component>.<field>'.")
+    return names
+
+
+@dataclass
+class StepSensitivityResult:
+    """``dx/dp`` of a pwl / trbdf2 run: the derivative of the discrete
+    solution on the steps the run took (design D1). ``states`` is
+    ``(n_samples, n_state, n_params)`` at ``times`` (the start and every
+    accepted step: on pwl the step grid, on trbdf2 the engine's own steps);
+    ``counters`` holds ``n_sens_solves`` (one back-substitution per
+    parameter per stage) and ``n_sens_iterations`` (the refinements of a
+    Newton stage solved on its last iteration's factor), both of accepted
+    steps, and ``n_sens_discarded`` (the back-substitutions of rejected
+    attempts)."""
+
+    params: list
+    times: np.ndarray
+    states: np.ndarray
+    counters: dict
+    engine: str
+    _builder: Any = field(default=None, repr=False)
+
+    @classmethod
+    def from_trace(cls, tr, builder, engine):
+        st = np.asarray(tr["states"], dtype=float)
+        return cls(list(tr["params"]), np.asarray(tr["times"], dtype=float),
+                   np.transpose(st, (0, 2, 1)).copy(),
+                   {"n_sens_solves": int(tr["n_sens_solves"]),
+                    "n_sens_iterations": int(tr["n_sens_iterations"]),
+                    "n_sens_discarded": int(tr["n_sens_discarded"])},
+                   engine, builder)
+
+    def sens(self, signal, param):
+        """``d signal / d param`` at ``times``: ``signal`` a node name or a
+        state index."""
+        try:
+            j = self.params.index(param)
+        except ValueError:
+            raise _opt_err(f"sensitivity: {param!r} was not requested "
+                           f"(requested: {self.params}).") from None
+        if isinstance(signal, (int, np.integer)):
+            row = int(signal)
+        else:
+            row = int(self._builder.node_id_of(signal))
+            if row < 0:
+                raise _opt_err(f"sensitivity: {signal!r} is not a node "
+                               "(pass a state index for a branch current).")
+        return self.states[:, row, j].copy()

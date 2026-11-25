@@ -9,7 +9,8 @@ Conventions for doc authors
 ---------------------------
 
 Which files
-    ``python/pulsim/AI_GUIDE.md``, ``README.md``, ``docs/getting-started.md``
+    ``python/pulsim/AI_GUIDE.md``, ``README.md``, ``docs/getting-started.md``,
+    ``docs/index.md``, ``docs/migration-guide.md``, ``docs/known-limitations.md``
     and ``docs/tutorials/*.md`` (see ``DOC_FILES``). One test per file.
 
 Which blocks
@@ -58,8 +59,9 @@ Annotations
     Any other ``doctest:`` annotation fails the test.
 
 Runtime
-    The whole module warns above ``BUDGET_WARN_S`` and fails above
-    ``BUDGET_FAIL_S`` of snippet wall time.
+    Cost is counted, never timed: the rows returned by every
+    ``pulsim.simulate`` call in the snippets must stay under
+    ``BUDGET_ROWS`` (wall time is printed only).
 """
 
 from __future__ import annotations
@@ -89,11 +91,14 @@ DOC_FILES = [
     REPO_ROOT / "python" / "pulsim" / "AI_GUIDE.md",
     REPO_ROOT / "README.md",
     REPO_ROOT / "docs" / "getting-started.md",
+    REPO_ROOT / "docs" / "index.md",
+    REPO_ROOT / "docs" / "migration-guide.md",
+    REPO_ROOT / "docs" / "known-limitations.md",
     *sorted((REPO_ROOT / "docs" / "tutorials").glob("*.md")),
 ]
-BUDGET_WARN_S = 30.0
-BUDGET_FAIL_S = 60.0
+BUDGET_ROWS = 2_900_000  # measured 2,175,414 rows on 77ce4a28: 33 % margin
 _ELAPSED: dict[str, float] = {}
+_ROWS: dict[str, int] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -343,9 +348,20 @@ def agg_backend(monkeypatch):
 @pytest.mark.parametrize(
     "doc", [d for d in DOC_FILES if d.is_file()],
     ids=lambda d: str(d.relative_to(REPO_ROOT)))
-def test_doc_snippets_run(doc: Path, tmp_path, agg_backend):
+def test_doc_snippets_run(doc: Path, tmp_path, agg_backend, monkeypatch):
+    import pulsim
+
     rel = str(doc.relative_to(REPO_ROOT))
     linecache.checkcache(str(doc))
+    _ROWS[rel] = 0
+    real_simulate = pulsim.simulate
+
+    def counting_simulate(*args, **kwargs):
+        res = real_simulate(*args, **kwargs)
+        _ROWS[rel] += len(getattr(res, "times", ()))
+        return res
+
+    monkeypatch.setattr(pulsim, "simulate", counting_simulate)
     t0 = time.perf_counter()
     failure = None
     try:
@@ -366,17 +382,17 @@ def test_doc_snippets_run(doc: Path, tmp_path, agg_backend):
 
 
 def test_doc_snippets_runtime_budget():
-    """Every executed doc together must stay cheap enough for every CI leg."""
-    if not _ELAPSED:
+    """Every executed doc together must stay cheap enough for every CI leg.
+    The cost is the rows ``pulsim.simulate`` returned to the snippets (a
+    count, so a loaded runner cannot fail it); wall time is printed."""
+    if not _ROWS:
         pytest.skip("no doc snippets ran in this session")
-    total = sum(_ELAPSED.values())
-    detail = ", ".join(f"{k} {v:.1f}s" for k, v in
-                       sorted(_ELAPSED.items(), key=lambda kv: -kv[1]))
-    assert total <= BUDGET_FAIL_S, (
-        f"doc snippets took {total:.1f}s (> {BUDGET_FAIL_S:.0f}s): {detail}")
-    if total > BUDGET_WARN_S:
-        warnings.warn(f"doc snippets took {total:.1f}s "
-                      f"(> {BUDGET_WARN_S:.0f}s): {detail}", stacklevel=1)
+    total = sum(_ROWS.values())
+    detail = ", ".join(f"{k} {v} rows / {_ELAPSED.get(k, 0.0):.1f}s" for k, v in
+                       sorted(_ROWS.items(), key=lambda kv: -kv[1]))
+    print(f"doc snippets: {total} rows: {detail}")
+    assert total <= BUDGET_ROWS, (
+        f"doc snippets simulated {total} rows (> {BUDGET_ROWS}): {detail}")
 
 
 # ---------------------------------------------------------------------------

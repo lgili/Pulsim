@@ -1,0 +1,52 @@
+{
+ "circuit": "circuits/stress/stiff_rlc.yaml",
+ "form": "conductance",
+ "supported": true,
+ "observables": [
+  "V(out)"
+ ],
+ "dps": [
+  30,
+  60
+ ],
+ "wall_s": 0.0,
+ "events": [],
+ "n_commutations": 0,
+ "n_events": 0,
+ "ambiguous": [],
+ "weak_only": 0,
+ "start_mode": "",
+ "dc_start_modes": 1,
+ "notes": [],
+ "jumps": [],
+ "impulsive_loss_J": "0.0",
+ "max_dae_residual": "1.24e-61",
+ "max_eigvec_cond": "37.2",
+ "windows": {
+  "full": {
+   "V(out)": {
+    "mean": "5.0",
+    "rms": "5.0",
+    "d_prec": "4.37e-31"
+   }
+  },
+  "last20": {
+   "V(out)": {
+    "mean": "5.0",
+    "rms": "5.0",
+    "d_prec": "4.37e-31"
+   }
+  }
+ },
+ "energy_J": {
+  "R1": "2.18340336740606e-71",
+  "src:Vdc": "-1.36382508378529e-67"
+ },
+ "energy_balance_rel": "-1.09e-59",
+ "precision_doubling_rel": "1.58e-31",
+ "event_time_diff_s": "0",
+ "u_stored_trace": 0.0,
+ "uniform_dt_floor": 0.0,
+ "dt": 5e-08,
+ "stored_dt": 6.25e-09
+}

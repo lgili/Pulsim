@@ -47,7 +47,9 @@ What is REFUSED by name, because reading it wrong would be silent:
   formula refers to a declared variable or a custom table, in which
   case the correction depends on a knob the file expects you to set
   and the table is refused regardless; the provenance note records
-  any formula that was dropped;
+  any formula that was dropped. A "table and formula" switching-energy
+  table IS evaluated at import when ``variables=`` supplies every
+  variable it uses (arithmetic only, no ``eval``);
 * a table whose value count does not match its axes, a non-monotone
   or duplicated axis (a descending axis is accepted and reversed);
 * a class/type mismatch, more than one ``<SemiconductorData>`` (a
@@ -59,6 +61,7 @@ What is REFUSED by name, because reading it wrong would be silent:
 
 from __future__ import annotations
 
+import ast
 import datetime as _dt
 import re
 import xml.etree.ElementTree as ET
@@ -119,14 +122,75 @@ def _axis(el: ET.Element, tag: str, what: str) -> Tuple[np.ndarray, np.ndarray]:
     return raw[order], order
 
 
+_SAFE_FUNCS = {"exp": np.exp, "log": np.log, "sqrt": np.sqrt, "abs": np.abs,
+               "min": np.minimum, "max": np.maximum, "pow": np.power}
+_SAFE_BINOPS = {ast.Add: np.add, ast.Sub: np.subtract, ast.Mult: np.multiply,
+                ast.Div: np.divide, ast.Pow: np.power}
+
+
+def _formula_names(ftext: str) -> List[str]:
+    return sorted(set(re.findall(r"[A-Za-z_][A-Za-z_0-9]*", ftext)) - set(_SAFE_FUNCS))
+
+
+def _eval_formula(ftext: str, env: Dict[str, Any], what: str):
+    """Evaluate an arithmetic PLECS formula on numpy arrays. Numbers,
+    names bound in ``env``, + − × / and ^ / **, unary ±, and the
+    functions in ``_SAFE_FUNCS`` — nothing else (no ``eval``)."""
+    try:
+        tree = ast.parse(ftext.replace("^", "**"), mode="eval")
+    except SyntaxError as e:
+        raise PlecsImportError(f"{what}: cannot parse the formula {ftext!r}: {e.msg}") from e
+
+    def ev(n):
+        if isinstance(n, ast.Expression):
+            return ev(n.body)
+        if isinstance(n, ast.Constant) and isinstance(n.value, (int, float)) \
+                and not isinstance(n.value, bool):
+            return float(n.value)
+        if isinstance(n, ast.Name) and n.id in env:
+            return env[n.id]
+        if isinstance(n, ast.BinOp) and type(n.op) in _SAFE_BINOPS:
+            return _SAFE_BINOPS[type(n.op)](ev(n.left), ev(n.right))
+        if isinstance(n, ast.UnaryOp) and isinstance(n.op, (ast.UAdd, ast.USub)):
+            x = ev(n.operand)
+            return -x if isinstance(n.op, ast.USub) else x
+        if (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                and n.func.id in _SAFE_FUNCS and not n.keywords):
+            return _SAFE_FUNCS[n.func.id](*[ev(a) for a in n.args])
+        raise PlecsImportError(
+            f"{what}: the formula {ftext!r} uses {ast.dump(n)[:60]!r}, which the "
+            "import-time evaluator does not accept (arithmetic, E, v, i, T, "
+            f"declared variables and {sorted(_SAFE_FUNCS)} only).")
+    return ev(tree)
+
+
 def _method(el: ET.Element, what: str, ignore_formula: bool, notes: List[str],
-            variables: Dict[str, Dict[str, Any]]) -> None:
+            variables: Dict[str, Dict[str, Any]],
+            values: Optional[Dict[str, float]] = None) -> Optional[str]:
+    """None for a plain table; the formula text when a "table and formula"
+    method is to be evaluated at import (``values`` given); raises otherwise."""
     m = el.find("ComputationMethod")
     method = (m.text or "").strip().lower() if m is not None else "table only"
     if method in _TABLE_METHODS:
-        return
+        return None
     formula = el.find("Formula")
     ftext = (formula.text or "").strip() if formula is not None else "(none given)"
+    if method in _MIXED_METHODS and values is not None:
+        if "lookup(" in ftext.replace(" ", ""):
+            raise PlecsImportError(
+                f"{what}: the formula {ftext!r} uses a custom lookup table; the "
+                "import-time evaluator handles arithmetic formulas only.")
+        with np.errstate(all="ignore"):  # shape check only: refuses non-arithmetic
+            _eval_formula(ftext, {n: 1.0 for n in _formula_names(ftext)}, what)
+        missing = [n for n in _formula_names(ftext) if n not in ("E", "v", "i", "T")
+                   and n not in values]
+        if missing:
+            raise PlecsImportError(
+                f"{what}: the formula {ftext!r} needs {missing}; pass them in "
+                "variables= (declared defaults are not applied silently).")
+        used = {n: values[n] for n in _formula_names(ftext) if n in values}
+        notes.append(f"{what}: formula {ftext!r} evaluated at import with {used}")
+        return ftext
     if method in _FORMULA_METHODS:
         raise PlecsImportError(
             f"{what}: ComputationMethod is {method!r} — the loss is an "
@@ -157,17 +221,19 @@ def _method(el: ET.Element, what: str, ignore_formula: bool, notes: List[str],
                 "does not cover it. Use a table-only file, or transcribe the "
                 "values at your setting with provenance.")
         notes.append(f"{what}: formula {ftext!r} ignored (ignore_formula=True)")
-        return
+        return None
     raise PlecsImportError(
         f"{what}: unknown ComputationMethod {method!r}; this importer knows "
         "'Table only', 'Formula only' and 'Table and formula'.")
 
 
 def _energy_raw(el: ET.Element, what: str, ignore_formula: bool, notes: List[str],
-                variables: Dict[str, Dict[str, Any]]):
+                variables: Dict[str, Dict[str, Any]],
+                values: Optional[Dict[str, float]] = None):
     """The signed (v, i, tj, E[v, i, tj]) grid as the file states it,
-    axes sorted ascending."""
-    _method(el, what, ignore_formula, notes, variables)
+    axes sorted ascending (with a "table and formula" evaluated at every
+    grid point when ``values`` is given)."""
+    formula = _method(el, what, ignore_formula, notes, variables, values)
     i, i_ord = _axis(el, "CurrentAxis", what)
     v, v_ord = _axis(el, "VoltageAxis", what)
     tj, t_ord = _axis(el, "TemperatureAxis", what)
@@ -209,6 +275,13 @@ def _energy_raw(el: ET.Element, what: str, ignore_formula: bool, notes: List[str
                     f"{what}: Temperature[{kt_file}]/Voltage[{kv_file}] has "
                     f"{vals.size} values but the CurrentAxis has {i.size} entries.")
             energy[kv, :, kt] = vals[i_ord] * scale
+    if formula is not None:
+        env = {k: float(x) for k, x in values.items()}
+        env.update(E=energy, v=v[:, None, None], i=i[None, :, None], T=tj[None, None, :])
+        energy = np.broadcast_to(np.asarray(_eval_formula(formula, env, what), dtype=float),
+                                 energy.shape).copy()
+        if not np.all(np.isfinite(energy)):
+            raise PlecsImportError(f"{what}: the formula {formula!r} gives non-finite energies.")
     if np.any(energy < 0):
         raise PlecsImportError(f"{what}: negative energy in the table.")
     return v, i, tj, energy
@@ -234,8 +307,12 @@ def _quadrant(v, i, tj, energy, v_sign: int, i_sign: int, what: str) -> LossTabl
 
 
 def _conduction_raw(el: ET.Element, what: str, ignore_formula: bool, notes: List[str],
-                    variables: Dict[str, Dict[str, Any]]):
-    _method(el, what, ignore_formula, notes, variables)
+                    variables: Dict[str, Dict[str, Any]],
+                    values: Optional[Dict[str, float]] = None):
+    if _method(el, what, ignore_formula, notes, variables, values) is not None:
+        raise PlecsImportError(
+            f"{what}: a formula on the conduction table is not evaluated at import "
+            "(only switching-energy tables are); use a table-only file.")
     i, i_ord = _axis(el, "CurrentAxis", what)
     tj, t_ord = _axis(el, "TemperatureAxis", what)
     vd = el.find("VoltageDrop")
@@ -384,7 +461,8 @@ def _variables(root: ET.Element, what: str) -> Dict[str, Dict[str, Any]]:
 
 
 def import_plecs_xml(path, *, ignore_formula: bool = False,
-                     conduction_index: Optional[int] = None) -> Part:
+                     conduction_index: Optional[int] = None,
+                     variables: Optional[Dict[str, float]] = None) -> Part:
     """Read a PLECS thermal description file into a :class:`Part`.
 
     Parameters
@@ -399,6 +477,14 @@ def import_plecs_xml(path, *, ignore_formula: bool = False,
     conduction_index
         Which ``<ConductionLoss>`` to take when the file carries more
         than one (gate-dependent descriptions); refused otherwise.
+    variables
+        Values for the formula variables (``{"Rg": 20}``). With it, a
+        "table and formula" switching-energy table is evaluated at import
+        — the formula sees the table value ``E``, the grid point ``v``,
+        ``i``, ``T`` and these variables, through an arithmetic-only
+        evaluator (no ``eval``) — and the provenance note records the
+        formula and the values. A variable the formula uses but this dict
+        lacks, or a custom ``lookup(...)``, is refused.
     """
     p = Path(path).expanduser()
     try:
@@ -421,6 +507,7 @@ def import_plecs_xml(path, *, ignore_formula: bool = False,
     number = (root.get("partnumber") or p.stem).strip()
     notes: List[str] = [f"PLECS thermal description v{root.get('version', '?')}, class {cls_raw!r}"]
 
+    values = None if variables is None else {str(k): float(x) for k, x in variables.items()}
     variables = _variables(root, p.name)
     limits: Dict[str, Tuple[float, float]] = {}
     for n in ("v", "i", "T"):
@@ -452,7 +539,7 @@ def import_plecs_xml(path, *, ignore_formula: bool = False,
         if len(els) > 1:
             raise PlecsImportError(f"{p}: {len(els)} <{tag}> tables; expected one.")
         what = f"{p.name}/{tag}"
-        v, i, tj, E = _energy_raw(els[0], what, ignore_formula, notes, variables)
+        v, i, tj, E = _energy_raw(els[0], what, ignore_formula, notes, variables, values)
         if cls == "diode":
             # Diode switching losses: negative voltage, positive current
             # (manual p. 199). A file written with positive voltages is
@@ -492,7 +579,7 @@ def import_plecs_xml(path, *, ignore_formula: bool = False,
         if idx < 0 or idx >= len(cls_els):
             raise PlecsImportError(f"{p}: conduction_index={idx} but there are {len(cls_els)} definitions.")
         what = f"{p.name}/ConductionLoss[{idx}]"
-        i, tj, v = _conduction_raw(cls_els[idx], what, ignore_formula, notes, variables)
+        i, tj, v = _conduction_raw(cls_els[idx], what, ignore_formula, notes, variables, values)
         if cls == "diode":
             i_sign = 1 if np.any(i > 0) else -1
             conduction["v_on"] = _conduction_half(i, tj, v, i_sign, what, notes)

@@ -121,22 +121,33 @@ nav:
       - Getting Started: getting-started.md
       - 'Using Pulsim with AI Assistants': ai-guide.md
       - Mental Model: mental-model.md
+      - 'Parameters and Value Updates': parameters.md
+      - 'Node Domains': domains.md
       - 'Tutorial 01 — RC Charging': tutorials/01-rc-charging.md
       - 'Tutorial 02 — Buck Converter': tutorials/02-buck-converter.md
       - 'Tutorial 03 — Isolated Flyback': tutorials/03-flyback-isolated.md
       - 'Tutorial 04 — Three-Phase VSI': tutorials/04-3phase-vsi.md
       - 'Tutorial 05 — LDO with Op-Amp': tutorials/05-ldo-feedback.md
       - 'Tutorial 06 — IGBT Boost': tutorials/06-igbt-boost.md
+      - 'Tutorial 07 — DC Machine': tutorials/07-dc-machine.md
+      - 'Tutorial 08 — Using Pulsim inside an optimiser': tutorials/08-design-optimisation.md
+      - 'Tutorial 09 — Magnetic networks': tutorials/09-magnetic-networks.md
+      - 'Tutorial 10 — Datasheet to double pulse': tutorials/10-power-mosfet-datasheet.md
+      - 'Parameter Sensitivities': sensitivities.md
+      - 'Soft Switching (ZVS / ZCS probes)': SOFT_SWITCHING.md
       - 'Motors — Induction (Phase 2)': motors-induction.md
       - 'Motors — Sensorless Observers (Phase 2)': motors-sensorless.md
       - 'Modular Multilevel Converters (MMC)': mmc.md
       - 'Loss & Thermal Modelling': loss-thermal.md
+      - 'Transmission Line (Bergeron)': transmission-line.md
       - 'Custom Code Blocks (C / C++ / Python)': c-block.md
       - 'Numerical Solvers (Phase 2)': solvers.md
       - API Reference: api-reference.md
+      - 'Result Reference': result-reference.md
+      - 'Device Reference': device-reference.md
       - UX Helpers (discover, plot, monitor): helpers.md
       - Gotchas: gotchas.md
-      - 'Known Limitations (2.0)': known-limitations.md
+      - 'Known Limitations (2.1)': known-limitations.md
   - How Pulsim Works:
       - 'Overview': how-pulsim-works/index.md
       - '1 — Introduction (why SMPS is hard)': how-pulsim-works/01-introduction.md
@@ -166,10 +177,11 @@ nav:
       - 'Layer 4 — PWL State-Space Cache': internals/layer4-pwl-state-space-cache.md
       - 'Layer 4 V1 — Trapezoidal Companion': internals/layer4-v1-trapezoidal-companion.md
       - 'Layer 10 — Benchmarks': internals/layer10-benchmarks.md
+      - 'How a run is planned': internals/run-planning.md
       - 'MMC Arm Block — design doc': internals/mmc-arm-block.md
   - Operations:
       - Build System: build-system.md
       - Performance Tuning: performance-tuning.md
       - Troubleshooting: troubleshooting.md
-      - Migration Guide (legacy → 1.0): migration-guide.md
+      - Migration Guide (2.0 → 2.1, legacy → 1.0): migration-guide.md
       - Docs Versioning and Release: versioning-and-release.md

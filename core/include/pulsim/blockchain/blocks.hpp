@@ -28,6 +28,7 @@
 
 #pragma once
 
+#include "pulsim/blockchain/block_laws.h"
 #include "pulsim/numeric/pwm_phase.hpp"
 #include "pulsim/numeric/types.hpp"
 
@@ -37,6 +38,18 @@
 #include <deque>
 
 namespace pulsim::blockchain {
+
+// Python's min / max keep their argument order (min(a, b) returns b only
+// if b < a), so `py_exact::clamp(lo, hi, u)` is `max(lo, min(hi, u))` bit
+// for bit: NaN -> hi, -0.0 as Python keeps it, lo > hi defined (the
+// standard clamp is undefined there and passes NaN through).
+namespace py_exact {
+[[nodiscard]] inline Real min(Real a, Real b) noexcept { return b < a ? b : a; }
+[[nodiscard]] inline Real max(Real a, Real b) noexcept { return b > a ? b : a; }
+[[nodiscard]] inline Real clamp(Real lo, Real hi, Real u) noexcept {
+    return max(lo, min(hi, u));
+}
+}  // namespace py_exact
 
 // =============================================================================
 // 1. Math blocks
@@ -49,7 +62,7 @@ struct Gain {
     void reset() noexcept {}
 
     [[nodiscard]] Real update(Real x) const noexcept {
-        return k * x;
+        return pl_gain(k, x);
     }
 };
 
@@ -58,7 +71,7 @@ struct Subtract {
     void reset() noexcept {}
 
     [[nodiscard]] Real update(Real a, Real b) const noexcept {
-        return a - b;
+        return pl_subtract(a, b);
     }
 };
 
@@ -125,23 +138,8 @@ struct PIController {
     }
 
     [[nodiscard]] Real update(Real setpoint, Real measured, Real dt) {
-        const Real err = setpoint - measured;
-        Real new_int = integral +
-                          Ki * dt * Real{0.5} * (err + prev_error);
-        Real u_unc = Kp * err + new_int;
-        // Anti-windup — freeze integrator if it would push deeper
-        // into the active saturation.
-        if (u_unc > output_max && err > Real{0}) {
-            new_int = integral;
-            u_unc = Kp * err + new_int;
-        } else if (u_unc < output_min && err < Real{0}) {
-            new_int = integral;
-            u_unc = Kp * err + new_int;
-        }
-        const Real u_clamp = std::clamp(u_unc, output_min, output_max);
-        integral = new_int;
-        prev_error = err;
-        return u_clamp;
+        return pl_pi(Kp, Ki, output_min, output_max, &integral, &prev_error,
+                     setpoint, measured, dt);
     }
 };
 
@@ -184,7 +182,7 @@ struct PIDController {
         prev_meas = measured;
         first = false;
         const Real u_unsat = Kp * err + i_trial - Kd * d_raw;
-        const Real u_sat = std::clamp(u_unsat, output_min, output_max);
+        const Real u_sat = py_exact::clamp(output_min, output_max, u_unsat);
         if (u_unsat == u_sat || (u_unsat - u_sat) * err <= Real{0}) {
             integral = i_trial;
         }
@@ -201,7 +199,9 @@ struct FirstOrderLowPass {
     void reset() noexcept { y = Real{0}; }
 
     [[nodiscard]] Real update(Real input_value, Real dt) {
-        if (dt <= Real{0} || tau <= Real{0}) {
+        // As pulsim.control.FirstOrderLowPass: dt = 0 holds (alpha 0);
+        // it used to pass the input through.
+        if (tau <= Real{0}) {
             y = input_value;
             return y;
         }
@@ -217,6 +217,7 @@ struct MovingAverageFilter {
 
     std::deque<Real> buf;
     Real running_sum = Real{0};
+    template <class F> void fields(F&& f) { f(window); f(buf); f(running_sum); }
 
     void reset() noexcept {
         buf.clear();
@@ -246,7 +247,7 @@ struct Integrator {
 
     [[nodiscard]] Real update(Real x, Real dt) {
         const Real y_trial = y + gain * x * dt;
-        y = std::clamp(y_trial, output_min, output_max);
+        y = py_exact::clamp(output_min, output_max, y_trial);
         return y;
     }
 };
@@ -289,7 +290,7 @@ struct Limiter {
     void reset() noexcept {}
 
     [[nodiscard]] Real update(Real x) const noexcept {
-        return std::clamp(x, min_v, max_v);
+        return pl_limiter(min_v, max_v, x);
     }
 };
 
@@ -300,7 +301,7 @@ struct Limiter {
 /// PWM generator — sawtooth + duty comparator, output 0 / 1.
 struct PwmGenerator {
     Real frequency = Real{100e3};
-    Real phase = Real{0};
+    Real phase = Real{0};   // seconds, delay (was a fraction of the period, advance)
 
     void reset() noexcept {}
 
@@ -310,11 +311,9 @@ struct PwmGenerator {
             return (Real{0} < duty) ? Real{1} : Real{0};
         }
         const Real period = Real{1} / frequency;
-        // `phase` is a fraction of the period here; the period
-        // starts at t = -phase * period. Grid-exact edges (see
-        // pwm_phase.hpp).
-        const auto pos = pwm_phase::cycle_position(
-            t, -phase * period, period);
+        // `phase` in seconds with the sign of `pulsim.control.PwmGenerator`:
+        // a period starts at t = +phase. Grid-exact edges (pwm_phase.hpp).
+        const auto pos = pwm_phase::cycle_position(t, phase, period);
         return pwm_phase::reached(pos, duty) ? Real{0} : Real{1};
     }
 };
@@ -330,23 +329,8 @@ struct SpaceVectorModulator {
     };
 
     [[nodiscard]] DutyTriple update(Real v_alpha, Real v_beta) const noexcept {
-        // Inverse Clarke → 3-phase voltages, then center modulation.
-        const Real va_ref = v_alpha;
-        const Real vb_ref = -Real{0.5} * v_alpha
-                              + Real{0.8660254037844386} * v_beta;
-        const Real vc_ref = -Real{0.5} * v_alpha
-                              - Real{0.8660254037844386} * v_beta;
-        const Real v_max = std::max({va_ref, vb_ref, vc_ref});
-        const Real v_min = std::min({va_ref, vb_ref, vc_ref});
-        const Real v_cm = -(v_max + v_min) * Real{0.5};
-        const Real inv_dc = (v_dc > Real{0}) ? Real{1} / v_dc : Real{0};
         DutyTriple d;
-        d.da = std::clamp((va_ref + v_cm) * inv_dc + Real{0.5},
-                            Real{0}, Real{1});
-        d.db = std::clamp((vb_ref + v_cm) * inv_dc + Real{0.5},
-                            Real{0}, Real{1});
-        d.dc = std::clamp((vc_ref + v_cm) * inv_dc + Real{0.5},
-                            Real{0}, Real{1});
+        pl_svm(v_dc, v_alpha, v_beta, &d.da, &d.db, &d.dc);   // the one law
         return d;
     }
 };
@@ -363,9 +347,7 @@ struct ClarkeTransform {
 
     [[nodiscard]] Out update(Real a, Real b, Real c) const noexcept {
         Out o;
-        o.alpha = (Real{2} * a - b - c) / Real{3};
-        o.beta  = (b - c) / Real{1.7320508075688772};   // (b - c) / √3
-        o.zero  = (a + b + c) / Real{3};
+        pl_clarke(a, b, c, &o.alpha, &o.beta, &o.zero);   // the one law
         return o;
     }
 };
@@ -379,9 +361,7 @@ struct InverseClarkeTransform {
     [[nodiscard]] Out update(Real alpha, Real beta,
                                 Real zero = Real{0}) const noexcept {
         Out o;
-        o.a = alpha + zero;
-        o.b = -Real{0.5} * alpha + Real{0.8660254037844386} * beta + zero;
-        o.c = -Real{0.5} * alpha - Real{0.8660254037844386} * beta + zero;
+        pl_inverse_clarke(alpha, beta, zero, &o.a, &o.b, &o.c);   // the one law
         return o;
     }
 };
@@ -394,11 +374,8 @@ struct ParkTransform {
 
     [[nodiscard]] Out update(Real alpha, Real beta,
                                 Real theta) const noexcept {
-        const Real ct = std::cos(theta);
-        const Real st = std::sin(theta);
         Out o;
-        o.d =  ct * alpha + st * beta;
-        o.q = -st * alpha + ct * beta;
+        pl_park(alpha, beta, theta, &o.d, &o.q);   // the one law
         return o;
     }
 };
@@ -411,11 +388,8 @@ struct InverseParkTransform {
 
     [[nodiscard]] Out update(Real d, Real q,
                                 Real theta) const noexcept {
-        const Real ct = std::cos(theta);
-        const Real st = std::sin(theta);
         Out o;
-        o.alpha = ct * d - st * q;
-        o.beta  = st * d + ct * q;
+        pl_inverse_park(d, q, theta, &o.alpha, &o.beta);   // the one law
         return o;
     }
 };
@@ -424,7 +398,9 @@ struct InverseParkTransform {
 // 5. Synchronisation
 // =============================================================================
 
-/// Phase-locked loop on αβ — cross-product phase detector + PI on q.
+/// Phase-locked loop on αβ — cross-product phase detector + PI on q;
+/// the law of `pulsim.control.PLL` (block_laws.h pl_pll): angle in
+/// [0, 2π). Before 2.1 a second law wrapped it to [-π, π).
 struct PLL {
     Real f_nominal = Real{50};
     Real Kp = Real{50};
@@ -443,23 +419,9 @@ struct PLL {
     struct Out { Real theta, omega, freq; };
 
     [[nodiscard]] Out update(Real v_alpha, Real v_beta, Real dt) {
-        // Project (v_alpha, v_beta) onto the rotating frame at θ; q
-        // component is the phase error.
-        const Real ct = std::cos(theta);
-        const Real st = std::sin(theta);
-        const Real vq = -st * v_alpha + ct * v_beta;
-        // Loop filter (PI) on the q-component (proxy for phase error).
-        integral += Ki * vq * dt;
-        const Real omega_nom = Real{2} * Real{3.141592653589793238462643}
-                                  * f_nominal;
-        omega = omega_nom + Kp * vq + integral;
-        theta += omega * dt;
-        // Wrap to [-π, π).
-        const Real two_pi = Real{2} *
-                              Real{3.141592653589793238462643};
-        while (theta >  Real{3.141592653589793238462643}) theta -= two_pi;
-        while (theta < -Real{3.141592653589793238462643}) theta += two_pi;
-        return Out{theta, omega, omega / two_pi};
+        pl_pll(f_nominal, Kp, Ki, &theta, &omega, &integral, v_alpha,
+               v_beta, dt);   // the one law
+        return Out{theta, omega, omega / (Real{2} * Real{3.141592653589793})};
     }
 };
 

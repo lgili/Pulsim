@@ -1,0 +1,64 @@
+{
+ "circuit": "circuits/linear/ll01_resistive_divider_dc.yaml",
+ "form": "conductance",
+ "supported": true,
+ "observables": [
+  "V(vin)",
+  "V(out)"
+ ],
+ "dps": [
+  30,
+  60
+ ],
+ "wall_s": 0.0,
+ "events": [],
+ "n_commutations": 0,
+ "n_events": 0,
+ "ambiguous": [],
+ "weak_only": 0,
+ "start_mode": "",
+ "dc_start_modes": 1,
+ "notes": [],
+ "jumps": [],
+ "impulsive_loss_J": "0.0",
+ "max_dae_residual": "0.0",
+ "max_eigvec_cond": "18.8",
+ "windows": {
+  "full": {
+   "V(vin)": {
+    "mean": "48.0",
+    "rms": "48.0",
+    "d_prec": "7.88e-32"
+   },
+   "V(out)": {
+    "mean": "8.421052631578947161391497",
+    "rms": "8.421052631578947161391497",
+    "d_prec": "2.15e-31"
+   }
+  },
+  "last20": {
+   "V(vin)": {
+    "mean": "48.0",
+    "rms": "48.0",
+    "d_prec": "7.88e-32"
+   },
+   "V(out)": {
+    "mean": "8.421052631578947161391497",
+    "rms": "8.421052631578947161391497",
+    "d_prec": "2.19e-31"
+   }
+  }
+ },
+ "energy_J": {
+  "Rtop": "0.00266637119113573",
+  "Rbot": "0.000567313019390582",
+  "src:Vdc": "0.00323368421052632"
+ },
+ "energy_balance_rel": "1.17e-62",
+ "precision_doubling_rel": "2.63e-32",
+ "event_time_diff_s": "0",
+ "u_stored_trace": 0.0,
+ "uniform_dt_floor": 0.0,
+ "dt": 2e-06,
+ "stored_dt": 2.5e-07
+}

@@ -128,6 +128,8 @@ public:
 
     // --- Read-only accessors for diagnostics ---
     [[nodiscard]] Real err_prev() const noexcept { return err_prev_; }
+    /// A resumed run continues the memory (dsed ExactResumeState).
+    void set_err_prev(Real e) noexcept { err_prev_ = e; }
     [[nodiscard]] int reject_streak() const noexcept { return reject_streak_; }
 
 private:

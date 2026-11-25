@@ -1,71 +1,78 @@
 // SPDX-License-Identifier: MIT
 //
-// Pulsim — Phase A.1 stage 2 / C++ port: BlockChain executor.
+// Pulsim — the compiled control graph (add-compiled-control-graph),
+// built inside the existing BlockChain.
 //
-// This is the kernel-side BlockChain: a topologically-ordered list
-// of mixed-domain control blocks evaluated per simulation step. The
-// matching Python wrapper (`pulsim.MixedDomainBlockChain`) used
-// to do this work in pure Python via a callback the kernel invoked
-// every step — for a 1 M-step simulation that's ~5-10 s of Python
-// overhead. Doing it in C++ eliminates that overhead entirely; the
-// Python wrapper becomes a builder API only.
+//   * Signals are integer slots in one flat array (`ChainContext::sig`).
+//     Channel names exist only while the graph is built (`slot()`), so
+//     the run loop never hashes a string.
+//   * Each block records which slots it reads (and whether the read is
+//     direct feedthrough) and which it writes. `compile()` orders the
+//     blocks by Kahn's algorithm on the direct-feedthrough graph, ties
+//     broken by insertion index, so a chain already in topological
+//     order keeps its order and any insertion order gives the same
+//     schedule. A strongly connected component (Tarjan) of that graph
+//     is an algebraic loop: the build fails naming its blocks.
+//   * Execution is two-phase: every block's `step` (its output) in
+//     schedule order, then every `update` (the state transition of a
+//     block whose output does not depend on its input this instant,
+//     e.g. a delay).
 //
-// Architecture:
-//
-//   * `Channels` — std::unordered_map<std::string, Real>. Named
-//     scalar "wires" between blocks. Each block reads N channels and
-//     writes 1 or more.
-//   * `InputRef` — describes WHERE to read an input from:
-//       - Const(v)           : baked-in scalar
-//       - Channel("name")    : look up `channels[name]`
-//       - Node("name")       : look up `x[node_idx]` (resolved at bind time)
-//       - Time / Dt          : `ctx.t` or `ctx.dt`
-//   * `ChainContext` — per-step shared state: channels, t, dt, x,
-//     node-name → state-index resolver.
-//   * `BlockChain::step(ctx)` — runs every block in insertion order.
-//   * `BlockChain::make_step_observer(...)` — returns the
-//     `std::function<void(Real, const Vector&)>` lambda the kernel's
-//     `run_transient` expects.
-//
-// The block-step function is a `std::function<void(ChainContext&)>`
-// that captures the block's POD state + the input/output channel
-// names by closure. Factory functions in `block_adapters.hpp` build
-// these closures around the existing POD blocks from `blocks.hpp`.
+// Block factories (`block_adapters.hpp` and the motor / thermal /
+// switchgear / observer adapters) resolve their inputs with `in()` and
+// their outputs with `out()` before building the closure, then call
+// `add()`; `in()` / `out()` record the block's reads and writes.
 
 #pragma once
 
+#include "pulsim/ad/ad_scalar.hpp"
 #include "pulsim/blockchain/blocks.hpp"
+#include "pulsim/events/modulator.hpp"
 #include "pulsim/numeric/dense.hpp"
+#include "pulsim/numeric/pwm_phase.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/topology/graph.hpp"
+#include "pulsim/topology/switch_state.hpp"
 
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstdint>
+#include <cstring>
+#include <deque>
 #include <functional>
+#include <limits>
 #include <memory>
+#include <queue>
 #include <stdexcept>
+#include <tuple>
 #include <string>
+#include <string_view>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
 namespace pulsim::blockchain {
 
-// =============================================================================
-// Channels
-// =============================================================================
+/// Build-time error of a control graph (algebraic loop, a slot written
+/// by two blocks, an unresolved node).
+struct ControlGraphBuildError : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
 
-using Channels = std::unordered_map<std::string, Real>;
-
 
 // =============================================================================
-// InputRef — how to resolve one block-input each step
+// InputRef — how to resolve one block input
 // =============================================================================
 
 struct InputRef {
     enum class Kind { Const, Channel, Node, Time, Dt };
     Kind kind = Kind::Const;
     Real const_value = Real{0};
-    std::string name;       // channel name or node name
-    Index node_idx = -1;    // resolved by BlockChain::bind()
+    std::string name;       // channel or node name (build time only)
+    Index node_idx = -1;    // state-vector index of a Node
+    Index slot = -1;        // signal slot of a Channel, set by BlockChain::in
 
     static InputRef from_const(Real v)            {
         InputRef r; r.kind = Kind::Const; r.const_value = v; return r;
@@ -87,29 +94,33 @@ struct InputRef {
 
 
 // =============================================================================
-// ChainContext — per-step shared state
+// ChainContext — per-evaluation shared state
 // =============================================================================
 
 struct ChainContext {
-    Channels channels;
+    std::vector<Real> sig;          // one slot per signal
     Real t = Real{0};
     Real dt = Real{0};
     const Vector* x = nullptr;
-    // Per-step b_extra contributions, keyed by state-vector index.
-    // Motors and other "source-side" blocks set entries here; the
-    // chain's `make_b_extra_fn(state_size)` emits a Vector from
-    // this map on every b_extra_fn(t) call.
+    // b_extra contributions keyed by state-vector index (motor and
+    // thermal blocks); `make_b_extra_fn` turns them into a Vector.
     std::unordered_map<Index, Real>* b_extra = nullptr;
+
+    /// The slot `s` (an output slot may be -1: not wired, not written).
+    /// Value of slot s; 0 for "no slot" (-1, an empty channel name).
+    [[nodiscard]] Real at(Index s) const noexcept {
+        return s >= 0 ? sig[static_cast<Size>(s)] : Real{0};
+    }
+    void put(Index s, Real v) noexcept {
+        if (s >= 0) sig[static_cast<Size>(s)] = v;
+    }
 };
 
 [[nodiscard]] inline Real resolve(const InputRef& ref,
                                       const ChainContext& ctx) noexcept {
     switch (ref.kind) {
         case InputRef::Kind::Const:   return ref.const_value;
-        case InputRef::Kind::Channel: {
-            auto it = ctx.channels.find(ref.name);
-            return (it == ctx.channels.end()) ? Real{0} : it->second;
-        }
+        case InputRef::Kind::Channel: return ctx.at(ref.slot);
         case InputRef::Kind::Node:
             if (ctx.x && ref.node_idx >= 0 &&
                   ref.node_idx < static_cast<Index>(ctx.x->size())) {
@@ -124,135 +135,1041 @@ struct ChainContext {
 
 
 // =============================================================================
-// BlockStepFn — type-erased step function
+// The tick map on the AD scalar (the tick Jacobian)
 // =============================================================================
+//
+// A block may register, next to its step, the same law evaluated on
+// ad::ADRealN<1> (forward mode, one tangent direction per pass). Every
+// independent quantity of a tick has a name: a block state
+// "<block>.<state>", a block parameter or constant input
+// "<block>.<field>", a probed state entry "x[<i>]", a signal slot
+// "sig:<channel>". A pass seeds one name (or none: the discovery pass);
+// BlockChain::tick_jacobian runs one pass per column. Nothing here runs
+// on the plain double tick.
+
+using AdReal = ad::ADRealN<1>;
+
+struct AdTick {
+    std::vector<AdReal> sig;
+    Real t = Real{0};
+    Real dt = Real{0};
+    const Vector* x = nullptr;
+    std::string seed;                       // "" = no tangent
+    const std::string* block = nullptr;     // the block being evaluated
+    // filled on every pass, in evaluation order
+    std::vector<std::string> state_names;   // states read (pre-tick)
+    std::vector<std::string> state_out_names;
+    std::vector<AdReal> state_out;          // states written (post-tick)
+    std::vector<std::string> param_names;   // parameters / constant inputs
+    std::vector<Index> probes;              // state entries read
+
+    [[nodiscard]] AdReal var(const std::string& name, Real v) const {
+        return name == seed ? AdReal{v, {Real{1}}} : AdReal{v};
+    }
+    [[nodiscard]] std::string named(const std::string& field) const {
+        return *block + "." + field;
+    }
+    /// A parameter of the block being evaluated.
+    [[nodiscard]] AdReal param(const std::string& field, Real v) {
+        param_names.push_back(named(field));
+        return var(param_names.back(), v);
+    }
+    /// A state of the block (its value before the tick).
+    [[nodiscard]] AdReal state(const std::string& field, Real v) {
+        state_names.push_back(named(field));
+        return var(state_names.back(), v);
+    }
+    /// The state's value after the tick.
+    void state_after(const std::string& field, const AdReal& v) {
+        state_out_names.push_back(named(field));
+        state_out.push_back(v);
+    }
+    /// An input; a constant input is the parameter "<block>.<name>".
+    [[nodiscard]] AdReal in(const InputRef& r, const std::string& name) {
+        switch (r.kind) {
+            case InputRef::Kind::Const:   return param(name, r.const_value);
+            case InputRef::Kind::Channel:
+                return r.slot >= 0 ? sig[static_cast<Size>(r.slot)] : AdReal{};
+            case InputRef::Kind::Node:
+                if (x && r.node_idx >= 0 && r.node_idx < static_cast<Index>(x->size())) {
+                    probes.push_back(r.node_idx);
+                    return var("x[" + std::to_string(r.node_idx) + "]", (*x)[r.node_idx]);
+                }
+                return AdReal{};
+            case InputRef::Kind::Time:    return AdReal{t};
+            case InputRef::Kind::Dt:      return AdReal{dt};
+        }
+        return AdReal{};
+    }
+    void put(Index s, const AdReal& v) {
+        if (s >= 0) sig[static_cast<Size>(s)] = v;
+    }
+};
+
+using BlockAdFn = std::function<void(AdTick&)>;
+
+/// One comparison of a law taken on the tick (block_laws.h PL_LT ...):
+/// the operands, the side taken and whether it depends on any column
+/// (a comparison of constants is no kink of the map).
+struct TickKink {
+    std::string block, law;
+    Real a = Real{0}, b = Real{0};
+    bool side = false;
+    bool live = false;
+};
+
+/// The Jacobian of one tick: rows = the states after the tick (in
+/// evaluation order) then every signal slot ("sig:<channel>");
+/// columns = the states before it, the slots, the probed state entries
+/// ("x[i]"), then the requested parameters. Row-major.
+struct TickJacobian {
+    std::vector<std::string> rows, cols;
+    std::vector<Real> values;     // the rows' values after the tick
+    std::vector<Real> J;          // rows.size() x cols.size()
+    std::vector<TickKink> kinks;
+};
 
 using BlockStepFn = std::function<void(ChainContext&)>;
 using BlockResetFn = std::function<void()>;
+/// A copy of one block's state; calling the returned closure puts the
+/// copy back (snapshot / resume, a run's declared initial state).
+using BlockSaveFn = std::function<std::function<void()>()>;
+
+/// Bytes of a graph's state (the controllers' part of a pickled snapshot):
+/// trivially copyable values as their bytes, a vector / deque as its size
+/// and elements, a block struct holding containers through its `fields`.
+/// Read back on the machine (and build) that wrote it.
+namespace state_io {
+struct Writer {
+    std::string buf;
+    void raw(const void* p, std::size_t n) {
+        buf.append(static_cast<const char*>(p), n);
+    }
+};
+struct Reader {
+    std::string_view s;
+    std::size_t i = 0;
+    void raw(void* p, std::size_t n) {
+        if (n > s.size() - i) {
+            throw std::invalid_argument(
+                "control graph state: truncated or from another graph");
+        }
+        std::memcpy(p, s.data() + i, n);
+        i += n;
+    }
+};
+template <class T>
+concept HasFields = requires(T& t) { t.fields([](auto&) {}); };
+template <class T> struct is_seq : std::false_type {};
+template <class E> struct is_seq<std::vector<E>> : std::true_type {};
+template <class E> struct is_seq<std::deque<E>> : std::true_type {};
+
+template <class T>
+void put(Writer& w, const T& v) {
+    if constexpr (is_seq<T>::value) {
+        const std::uint64_t n = v.size();
+        w.raw(&n, sizeof n);
+        for (const auto& e : v) put(w, e);
+    } else if constexpr (HasFields<T>) {
+        const_cast<T&>(v).fields([&w](auto& f) { put(w, f); });
+    } else {
+        static_assert(std::is_trivially_copyable_v<T>,
+                      "a captured block state needs fields() for its containers");
+        w.raw(&v, sizeof v);
+    }
+}
+template <class T>
+void get(Reader& r, T& v) {
+    if constexpr (is_seq<T>::value) {
+        std::uint64_t n = 0;
+        r.raw(&n, sizeof n);
+        if (n > r.s.size()) {
+            throw std::invalid_argument(
+                "control graph state: truncated or from another graph");
+        }
+        v.resize(static_cast<std::size_t>(n));
+        for (auto& e : v) get(r, e);
+    } else if constexpr (HasFields<T>) {
+        v.fields([&r](auto& f) { get(r, f); });
+    } else {
+        r.raw(&v, sizeof v);
+    }
+}
+}  // namespace state_io
 
 
 // =============================================================================
-// BlockChain — ordered list of block-step closures
+// BlockChain — the control graph
 // =============================================================================
 
 class BlockChain {
 public:
+    struct Read { Index slot; bool feedthrough; };
+
+    struct Block {
+        std::string name;
+        std::string kind;
+        BlockStepFn step;       // phase 1: compute the outputs
+        BlockStepFn update;     // phase 2: state transition (may be empty)
+        BlockResetFn reset;
+        BlockSaveFn save;       // empty: stateless, or state not capturable
+        std::function<void(state_io::Writer&)> dump;   // with save
+        std::function<void(state_io::Reader&)> load;
+        std::vector<Read> reads;
+        std::vector<Index> writes;
+        int group = 0;
+    };
+
     BlockChain() = default;
 
-    /// Add a block to the chain. Takes a step closure (does compute +
-    /// channel write) and an optional reset closure.
-    void add(BlockStepFn step,
-                BlockResetFn reset_fn = {}) {
-        blocks_.push_back(std::move(step));
-        if (reset_fn) {
-            resets_.push_back(std::move(reset_fn));
+    // ---- building -------------------------------------------------------
+
+    /// Slot of channel `name`, allocated on first mention (reads 0
+    /// until a block or `set_channel` writes it). "" → -1 (no slot).
+    Index slot(const std::string& name) {
+        if (name.empty()) return -1;
+        auto it = slot_of_.find(name);
+        if (it != slot_of_.end()) return it->second;
+        const Index s = static_cast<Index>(slot_names_.size());
+        slot_of_.emplace(name, s);
+        slot_names_.push_back(name);
+        ctx_.sig.push_back(Real{0});
+        return s;
+    }
+
+    /// Resolve an input of the block being built and record the read.
+    /// `feedthrough` = the block's output depends on this input in the
+    /// same evaluation (an ordering edge); a delay's input is not.
+    InputRef in(InputRef r, bool feedthrough = true) {
+        if (r.kind == InputRef::Kind::Channel) {
+            r.slot = slot(r.name);   // "" -> -1: reads 0, no edge
+            if (r.slot >= 0) pending_.reads.push_back({r.slot, feedthrough});
+        } else if (r.kind == InputRef::Kind::Node && r.node_idx < 0 &&
+                   !r.name.empty()) {   // nameless node_idx < 0: ground
+            if (!node_id_of_) {
+                pending_ = Block{};   // drop this block's partial reads
+                throw ControlGraphBuildError(
+                    "BlockChain: node input '" + r.name + "' is not "
+                    "resolved; pass a pre-resolved node index or call "
+                    "bind_nodes(node_id_of) before adding the block");
+            }
+            r.node_idx = node_id_of_(r.name);
+            if (r.node_idx < 0) {
+                pending_ = Block{};
+                throw ControlGraphBuildError(
+                    "BlockChain: unknown node '" + r.name + "'");
+            }
+        }
+        return r;
+    }
+
+    /// Read a channel by name inside a block being built (adapters that
+    /// read channels without an InputRef).
+    Index in_slot(const std::string& name, bool feedthrough = true) {
+        const Index s = slot(name);
+        if (s >= 0) pending_.reads.push_back({s, feedthrough});
+        return s;
+    }
+
+    /// Slot an output of the block being built writes. "" → -1.
+    Index out(const std::string& name) {
+        const Index s = slot(name);
+        if (s >= 0) pending_.writes.push_back(s);
+        return s;
+    }
+
+    /// Finish the block being built. `step` writes its outputs (phase
+    /// 1); `update`, when given, is its state transition (phase 2).
+    void add(BlockStepFn step, BlockResetFn reset_fn = {},
+             BlockStepFn update = {}) {
+        Block b = std::move(pending_);
+        pending_ = Block{};
+        b.step = std::move(step);
+        b.update = std::move(update);
+        b.reset = std::move(reset_fn);
+        if (b.name.empty()) b.name = "block" + std::to_string(blocks_.size());
+        blocks_.push_back(std::move(b));
+        compiled_ = false;
+    }
+
+    /// The block being built keeps its state in `*p...` (copyable PODs):
+    /// save_state() copies them, restore_state() assigns the copies back.
+    /// A block with a reset but no capture is reported by
+    /// uncaptured_blocks() (its state would not reach a snapshot).
+    template <class... T>
+    void capture(std::shared_ptr<T>... p) {
+        pending_.save = [p...]() -> std::function<void()> {
+            return [p..., c = std::make_tuple(T(*p)...)]() {
+                std::tie(*p...) = c;
+            };
+        };
+        pending_.dump = [p...](state_io::Writer& w) { (state_io::put(w, *p), ...); };
+        pending_.load = [p...](state_io::Reader& r) { (state_io::get(r, *p), ...); };
+    }
+
+    /// Names of the blocks that hold state no snapshot captures.
+    [[nodiscard]] std::vector<std::string> uncaptured_blocks() const {
+        std::vector<std::string> out;
+        for (const auto& b : blocks_) {
+            if (b.reset && !b.save) out.push_back(b.name);
+        }
+        return out;
+    }
+
+    /// Forget the reads and writes of a block whose build failed.
+    void discard_pending() { pending_ = Block{}; }
+
+    /// Name / kind of the most recently added block (error messages,
+    /// the reorder report).
+    void name_last(const std::string& name, const std::string& kind = {}) {
+        if (blocks_.empty()) return;
+        blocks_.back().name = name;
+        if (!kind.empty()) blocks_.back().kind = kind;
+    }
+
+    /// Resolver for node inputs given by name (`InputRef::from_node`).
+    /// Applies to blocks added after this call.
+    void bind_nodes(std::function<Index(const std::string&)> node_id_of) {
+        node_id_of_ = std::move(node_id_of);
+    }
+
+    // ---- schedule -------------------------------------------------------
+
+    /// Order the blocks; throws ControlGraphBuildError on an algebraic
+    /// loop or a slot with two writers. Idempotent.
+    void compile() {
+        if (compiled_) return;
+        const Size n = blocks_.size();
+        std::vector<Index> writer(slot_names_.size(), -1);
+        for (Size i = 0; i < n; ++i) {
+            for (Index s : blocks_[i].writes) {
+                auto& w = writer[static_cast<Size>(s)];
+                if (w >= 0 && w != static_cast<Index>(i)) {
+                    throw ControlGraphBuildError(
+                        "control graph: signal '" + slot_names_[static_cast<Size>(s)] +
+                        "' is written by two blocks, '" +
+                        blocks_[static_cast<Size>(w)].name + "' and '" +
+                        blocks_[i].name + "'");
+                }
+                w = static_cast<Index>(i);
+            }
+        }
+        // Direct-feedthrough edges producer -> consumer.
+        std::vector<std::vector<Size>> succ(n);
+        std::vector<Size> indeg(n, 0);
+        reorders_.clear();
+        for (Size i = 0; i < n; ++i) {
+            for (const Read& r : blocks_[i].reads) {
+                if (!r.feedthrough) continue;
+                const Index w = writer[static_cast<Size>(r.slot)];
+                if (w < 0) continue;            // never written: reads its held value
+                const auto ws = static_cast<Size>(w);
+                if (ws == i) {
+                    throw ControlGraphBuildError(
+                        "control graph: algebraic loop: block '" +
+                        blocks_[i].name + "' reads its own output '" +
+                        slot_names_[static_cast<Size>(r.slot)] +
+                        "' with direct feedthrough. Insert a DelayBlock "
+                        "in the loop.");
+                }
+                succ[ws].push_back(i);
+                ++indeg[i];
+                if (ws > i) {
+                    reorders_.push_back(
+                        "'" + blocks_[i].name + "' reads '" +
+                        slot_names_[static_cast<Size>(r.slot)] +
+                        "' written by '" + blocks_[ws].name +
+                        "', inserted after it");
+                }
+            }
+        }
+        // Kahn, smallest insertion index first.
+        std::priority_queue<Size, std::vector<Size>, std::greater<>> ready;
+        for (Size i = 0; i < n; ++i) if (indeg[i] == 0) ready.push(i);
+        order_.clear();
+        while (!ready.empty()) {
+            const Size i = ready.top();
+            ready.pop();
+            order_.push_back(i);
+            for (Size j : succ[i]) if (--indeg[j] == 0) ready.push(j);
+        }
+        if (order_.size() != n) {
+            throw ControlGraphBuildError(loop_message(succ));
+        }
+        has_update_ = std::any_of(blocks_.begin(), blocks_.end(),
+            [](const Block& b) { return static_cast<bool>(b.update); });
+        delayed_.assign(slot_names_.size(), 0);
+        for (auto& g : groups_) g.out_slots.clear();
+        for (const auto& b : blocks_) {
+            for (Index sl : b.writes) {
+                groups_[static_cast<Size>(b.group)].out_slots.push_back(sl);
+                if (b.group > 0) delayed_[static_cast<Size>(sl)] = 1;
+            }
+        }
+        pub_.resize(ctx_.sig.size(), Real{0});
+        group0_used_ = std::any_of(blocks_.begin(), blocks_.end(),
+            [](const Block& b) { return b.group == 0; });
+        compiled_ = true;
+        sync_duties();
+    }
+
+    /// Consumer/producer pairs whose schedule order differs from their
+    /// insertion order (each a one-step delay in the insertion-order
+    /// chain). Empty until compile().
+    [[nodiscard]] const std::vector<std::string>& reorders() const noexcept {
+        return reorders_;
+    }
+
+    /// Block names in schedule order (compiles).
+    [[nodiscard]] std::vector<std::string> schedule() {
+        compile();
+        std::vector<std::string> out;
+        for (Size i : order_) out.push_back(blocks_[i].name);
+        return out;
+    }
+
+    // ---- rates (task group 4) -------------------------------------------
+    //
+    // Group 0 runs on every observer call with the observer's `dt` (the
+    // insertion-era chains: no rate declared). Groups >= 1 are
+    // Discrete{period, offset}: tick k at t0 + offset + k*period (t0 = the
+    // first instant the graph sees), counted with an integer k, never an
+    // accumulated time. Every group due at one instant runs in ONE pass
+    // of the global schedule, so a fast group reading a slow group's
+    // signal sees the value of that instant.
+    //
+    // compute_delay (per group): 0 = outputs reach the circuit sinks at
+    // the tick; a time Td < period = at the first instant >= tick + Td;
+    // one_sample = at the next tick. Only the sinks (switch masks,
+    // driven sources) see the delay; blocks read the current signals.
+
+    enum class Delay { Zero, Time, OneSample };
+
+    struct Group {
+        Real period = Real{0};
+        Real offset = Real{0};
+        Delay delay = Delay::Zero;
+        Real delay_time = Real{0};
+        std::uint64_t k = 0;            // next tick index
+        std::uint64_t n_ticks = 0;
+        Real pending_at = -std::numeric_limits<Real>::infinity();
+        bool pending = false;
+        Real jitter_max = Real{0};
+        std::vector<Index> out_slots;   // slots its blocks write
+    };
+
+    /// Everything a run changes in the graph: block states, signals,
+    /// tick grid, published values, recordings, counters. Restorable
+    /// only into the chain that saved it.
+    struct State {
+        const BlockChain* owner = nullptr;
+        std::vector<std::function<void()>> blocks;
+        std::vector<Real> sig;
+        std::unordered_map<Index, Real> b_extra;
+        std::vector<std::vector<Real>> recordings;
+        std::vector<Real> recording_times;
+        std::uint64_t n_evals = 0, n_block_evals = 0, n_calls = 0;
+        std::vector<Group> groups;
+        std::vector<Real> pub;
+        Real last_t = Real{0}, t0 = Real{0}, solver_dt = Real{0};
+        std::vector<char> queued;
+        Vector horizon_x;
+        Real horizon_t = Real{0};
+        bool has_horizon_x = false;
+    };
+
+    [[nodiscard]] State save_state() const {
+        State s;
+        s.owner = this;
+        for (const auto& b : blocks_) if (b.save) s.blocks.push_back(b.save());
+        s.sig = ctx_.sig;
+        s.b_extra = b_extra_map_;
+        for (const auto& r : recordings_) s.recordings.push_back(r.history);
+        s.recording_times = recording_times_;
+        s.n_evals = n_evals_;
+        s.n_block_evals = n_block_evals_;
+        s.n_calls = n_calls_;
+        s.groups = groups_;
+        s.pub = pub_;
+        s.last_t = last_t_;
+        s.t0 = t0_;
+        s.solver_dt = solver_dt_;
+        s.queued = queued_;
+        s.horizon_x = horizon_x_;
+        s.horizon_t = horizon_t_;
+        s.has_horizon_x = has_horizon_x_;
+        return s;
+    }
+
+    void restore_state(const State& s) {
+        if (s.owner != this || s.groups.size() != groups_.size() ||
+            s.recordings.size() != recordings_.size() ||
+            s.sig.size() != ctx_.sig.size()) {
+            throw std::invalid_argument(
+                "BlockChain.restore_state: the state belongs to another "
+                "control graph (or this one changed since it was saved)");
+        }
+        assign_state(s);
+    }
+
+    /// restore_state without the checks: also puts back a live copy over
+    /// a graph a failed load_state left with another graph's sizes.
+    void assign_state(const State& s) {
+        for (const auto& r : s.blocks) r();
+        ctx_.sig = s.sig;
+        b_extra_map_ = s.b_extra;
+        for (Size i = 0; i < recordings_.size(); ++i) {
+            recordings_[i].history = s.recordings[i];
+        }
+        recording_times_ = s.recording_times;
+        n_evals_ = s.n_evals;
+        n_block_evals_ = s.n_block_evals;
+        n_calls_ = s.n_calls;
+        groups_ = s.groups;
+        pub_ = s.pub;
+        last_t_ = s.last_t;
+        t0_ = s.t0;
+        solver_dt_ = s.solver_dt;
+        queued_ = s.queued;
+        horizon_x_ = s.horizon_x;
+        horizon_t_ = s.horizon_t;
+        has_horizon_x_ = s.has_horizon_x;
+        sync_duties();
+    }
+
+    /// `s` (a save_state() of this graph) as bytes: what a pickled
+    /// snapshot carries. Read back by load_state on the same machine.
+    [[nodiscard]] std::string dump_state(const State& s) {
+        if (s.owner != this) {
+            throw std::invalid_argument(
+                "BlockChain.dump_state: the state belongs to another graph");
+        }
+        const State live = save_state();
+        restore_state(s);
+        state_io::Writer w;
+        try {
+            io(w);
+        } catch (...) {
+            assign_state(live);
+            throw;
+        }
+        restore_state(live);
+        return std::move(w.buf);
+    }
+
+    /// The State that dump_state wrote (the live graph is left as it is).
+    /// Throws std::invalid_argument for bytes of another graph.
+    [[nodiscard]] State load_state(std::string_view bytes) {
+        const State live = save_state();
+        try {
+            state_io::Reader r{bytes};
+            io(r);
+            if (r.i != bytes.size()) {
+                throw std::invalid_argument(
+                    "control graph state: from another graph (trailing bytes)");
+            }
+            State s = save_state();
+            restore_state(live);
+            return s;
+        } catch (...) {
+            assign_state(live);
+            throw;
         }
     }
 
-    /// Resolve every InputRef of kind Node to a state-vector index.
-    /// Must be called once before `step()` if any block uses
-    /// `InputRef::Kind::Node` inputs.
-    void bind_nodes(const std::function<Index(const std::string&)>&
-                        node_id_of) {
-        // Iterate over registered node refs and look up.
-        for (auto& [name, ref_ptrs] : node_refs_) {
-            Index idx = node_id_of(name);
-            if (idx < 0) {
-                throw std::runtime_error(
-                    "BlockChain::bind_nodes: unknown node '" +
-                    name + "'");
+
+
+    /// Add a discrete group; returns its id (>= 1).
+    int add_group(Real period, Real offset, int delay_kind, Real delay_time) {
+        if (!(period > Real{0}) || !std::isfinite(period)) {
+            throw ControlGraphBuildError(
+                "control graph: a rate period must be a positive finite "
+                "number of seconds (got " + std::to_string(period) + ")");
+        }
+        if (!(offset >= Real{0}) || !(offset < period)) {
+            throw ControlGraphBuildError(
+                "control graph: a rate offset must lie in [0, period)");
+        }
+        Group g;
+        g.period = period;
+        g.offset = offset;
+        g.delay = delay_kind == 2 ? Delay::OneSample
+                : delay_kind == 1 ? Delay::Time : Delay::Zero;
+        if (g.delay == Delay::Time &&
+            !(delay_time > Real{0} && delay_time < period)) {
+            throw ControlGraphBuildError(
+                "control graph: a compute_delay time must lie in "
+                "(0, period)");
+        }
+        g.delay_time = delay_time;
+        groups_.push_back(g);
+        compiled_ = false;
+        return static_cast<int>(groups_.size()) - 1;
+    }
+
+    /// Put block `i` (insertion index) in group `g`.
+    void set_block_group(Size i, int g) {
+        if (i >= blocks_.size() || g < 0 ||
+            g >= static_cast<int>(groups_.size())) {
+            throw ControlGraphBuildError("control graph: unknown block or group");
+        }
+        blocks_[i].group = g;
+        compiled_ = false;
+    }
+
+    [[nodiscard]] bool has_rates() const noexcept { return groups_.size() > 1; }
+    /// Smallest offset of the rate groups (0 without any).
+    [[nodiscard]] Real min_group_offset() const noexcept {
+        Real m = std::numeric_limits<Real>::infinity();
+        for (Size gi = 1; gi < groups_.size(); ++gi) {
+            m = std::min(m, groups_[gi].offset);
+        }
+        return std::isfinite(m) ? m : Real{0};
+    }
+    [[nodiscard]] Size n_groups() const noexcept { return groups_.size(); }
+    [[nodiscard]] Real group_period(int g) const {
+        return groups_.at(static_cast<Size>(g)).period;
+    }
+    [[nodiscard]] Real group_offset(int g) const {
+        return groups_.at(static_cast<Size>(g)).offset;
+    }
+    /// Ticks delivered per group (index 0: evaluations of group 0).
+    [[nodiscard]] std::vector<std::uint64_t> tick_counts() const {
+        std::vector<std::uint64_t> c;
+        for (const auto& g : groups_) c.push_back(g.n_ticks);
+        return c;
+    }
+    /// The instant of the next tick due (any rate group), on the graph's
+    /// own grid t0 + offset + k*period; infinity without rate groups.
+    [[nodiscard]] Real next_due() const noexcept {
+        Real best = std::numeric_limits<Real>::infinity();
+        for (Size gi = 1; gi < groups_.size(); ++gi) {
+            const auto& g = groups_[gi];
+            best = std::min(best, t0_ + g.offset +
+                                      static_cast<Real>(g.k) * g.period);
+        }
+        return best;
+    }
+    /// Each rate group's next tick instant (group order, group 0 left out).
+    [[nodiscard]] std::vector<Real> next_due_per_group() const {
+        std::vector<Real> out;
+        for (Size gi = 1; gi < groups_.size(); ++gi) {
+            const auto& g = groups_[gi];
+            out.push_back(t0_ + g.offset + static_cast<Real>(g.k) * g.period);
+        }
+        return out;
+    }
+    [[nodiscard]] Size n_calls() const noexcept { return n_calls_; }
+    [[nodiscard]] Real tick_jitter_max() const noexcept {
+        Real j = Real{0};
+        for (const auto& g : groups_) j = std::max(j, g.jitter_max);
+        return j;
+    }
+
+    /// A controlled source driven by signal `name`: b_extra[row] +=
+    /// gain * value (the value the sinks see, after compute_delay).
+    void add_source_sink(const std::string& name, Index row, Real gain) {
+        sinks_.push_back({slot(name), row, gain});
+    }
+
+    /// Fixed-step observer protocol: the kernel calls (t_start, x0)
+    /// once, then (t_n, x_{n-1}) before step n. The graph reads the
+    /// state at its own instant t_n - dt, so a tick at tau sees x(tau).
+    void observe_fixed_step(Real t, const Vector& x, Real dt_group0) {
+        rearm_if_restarted(t);
+        Real tx = t;
+        if (n_calls_ == 0) {
+            t0_ = t;
+        } else {
+            if (n_calls_ == 1) {
+                if (!(solver_dt_ > Real{0})) solver_dt_ = t - t0_;
+                check_periods();
             }
-            for (InputRef* p : ref_ptrs) {
-                p->node_idx = idx;
+            // Label time: the tick runs at the call's label t_n with the
+            // state x_{n-1} (the closed-loop helpers' protocol).
+            if (!label_time_) tx = t - solver_dt_;
+        }
+        // A resume at the label of the last run's last call (whose tick the
+        // horizon left out) serves it with that call's state, as the run
+        // that did not stop there did (not with the resumed state).
+        const Vector* xp = &x;
+        if (has_horizon_x_ && n_calls_ > 0 && t == horizon_t_ && t == last_t_) {
+            xp = &horizon_x_;
+        }
+        has_horizon_x_ = false;
+        stash_ = false;
+        last_t_ = t;
+        ++n_calls_;
+        fixed_label_pass_ = label_time_;
+        fixed_queue_pass_ = queue_driven_;
+        run_pass(tx, xp, dt_group0, /*every_call=*/group0_used_,
+                 /*record_t=*/has_rates() ? tx : t);
+        fixed_label_pass_ = false;
+        fixed_queue_pass_ = false;
+        if (stash_) {        // the last call of a run: keep what it saw
+            if (xp != &horizon_x_) horizon_x_ = *xp;
+            horizon_t_ = t;
+            has_horizon_x_ = true;
+        }
+    }
+
+    /// Queue-driven ticks on the fixed engine (control_tick='state'): the
+    /// kernel's event queue decides when a rate group ticks; its tick
+    /// source calls mark_queued(g) and the graph's next fixed-step
+    /// observer call (the same kernel call, after the ticks) runs every
+    /// marked group in one pass. The graph keeps its own grid for the
+    /// tick instants, its jumps and the snapshot.
+    void set_queue_driven(bool on) {
+        queue_driven_ = on;
+        queued_.assign(groups_.size(), 0);
+    }
+    [[nodiscard]] bool queue_driven() const noexcept { return queue_driven_; }
+    /// Forget the tick a horizon left out (a run that is not a resume of
+    /// the snapshot that holds it starts without it).
+    void drop_horizon_state() noexcept { has_horizon_x_ = false; }
+    [[nodiscard]] Real last_call_t() const noexcept { return last_t_; }
+    /// The grid's t0 (set by the first call) and group g's next tick index:
+    /// a queue source registered for g ticks at t0 + offset + k*period.
+    [[nodiscard]] Real grid_t0() const noexcept { return t0_; }
+    [[nodiscard]] std::uint64_t group_next_k(int g) const {
+        return groups_.at(static_cast<Size>(g)).k;
+    }
+    void mark_queued(int g) {
+        if (queued_.size() != groups_.size()) queued_.assign(groups_.size(), 0);
+        queued_.at(static_cast<Size>(g)) = 1;
+    }
+
+    /// Label-time mode (the protocol of the closed-loop helpers and C
+    /// blocks before they became graphs): on the fixed engine a tick due
+    /// at tau runs at the first call whose label t_n >= tau - 1e-9*dt,
+    /// with that call's state x_{n-1}, and its output drives step n
+    /// (from t_{n-1}). Ticks at or after the horizon are not delivered.
+    /// Declares no jumps (next_jump_after = inf), as the helpers did not.
+    void set_label_time(bool on) noexcept { label_time_ = on; }
+    [[nodiscard]] bool label_time() const noexcept { return label_time_; }
+    void set_horizon(Real t_end) noexcept { t_end_ = t_end; }
+
+    /// Set signal `name` and what its circuit sinks see before the first
+    /// tick (a rate group's published value). Call after compile().
+    void set_output(const std::string& name, Real value) {
+        const Index s = slot(name);
+        ctx_.put(s, value);
+        if (s >= 0 && static_cast<Size>(s) < pub_.size()) {
+            pub_[static_cast<Size>(s)] = value;
+        }
+        sync_duties();
+    }
+
+    /// Exact protocol (the variable-step engine lands a step on every
+    /// tick and calls here with the state at the tick).
+    void observe_tick(Real t, const Vector& x) {
+        rearm_if_restarted(t);
+        // The first tick is the earliest group's tick 0, at t0 + its
+        // offset (the kernel schedules t0 + offset + k*period).
+        if (n_calls_ == 0) t0_ = t - min_group_offset();
+        last_t_ = t;
+        ++n_calls_;
+        run_pass(t, &x, Real{0}, /*every_call=*/false, t);
+    }
+
+    void set_solver_dt(Real dt) {
+        solver_dt_ = dt;
+        dt_given_ = dt > Real{0};
+        check_periods();
+    }
+
+    /// A rate group ticks at most once per solver step: a period below
+    /// the fixed step would feed its blocks dt = period while they run
+    /// once per step (integrators at the wrong rate, unbounded lateness).
+    void check_periods() const {
+        if (!(solver_dt_ > Real{0})) return;
+        for (Size gi = 1; gi < groups_.size(); ++gi) {
+            if (groups_[gi].period < solver_dt_ * (Real{1} - Real{1e-9})) {
+                throw ControlGraphBuildError(
+                    "control graph: a Rate period (" +
+                    std::to_string(groups_[gi].period) +
+                    " s) is shorter than the fixed solver step (" +
+                    std::to_string(solver_dt_) +
+                    " s); a group ticks at most once per step. Use a "
+                    "period >= dt, or a smaller dt.");
             }
         }
     }
 
-    /// Reset all block states, clear channels, clear b_extra map,
-    /// clear recorded histories.
+    /// The first instant strictly after `t` at which a published value
+    /// (what the sinks read) may change: every group's publication
+    /// instant, moved to the solver step it is served at on the fixed
+    /// grid. The fixed engine restarts on it with discontinuity_restart
+    /// (a trapezoidal step across a ZOH jump smears it: O(dt)).
+    [[nodiscard]] Real next_jump_after(Real t) const {
+        Real best = std::numeric_limits<Real>::infinity();
+        if (label_time_) return best;   // the helpers declared none
+        const Real h = solver_dt_;
+        for (Size gi = 1; gi < groups_.size(); ++gi) {
+            const auto& g = groups_[gi];
+            const Real lag = g.delay == Delay::Time ? g.delay_time : Real{0};
+            const Real base = t0_ + g.offset + lag;
+            auto served = [&](Real p) {
+                if (!(h > Real{0})) return p;
+                const Real n = std::ceil((p - tick_tol(g) - t0_) / h - Real{1e-9});
+                return t0_ + std::max(n, Real{0}) * h;
+            };
+            const Real back = t - base - (h > Real{0} ? h : Real{0});
+            Real k = std::max(Real{0}, std::floor(back / g.period));
+            for (int it = 0; it < 64; ++it, k += Real{1}) {
+                const Real s = served(base + k * g.period);
+                if (s > t) { best = std::min(best, s); break; }
+            }
+        }
+        return best;
+    }
+
+    /// A reused observer (a second simulate()): time went back, so the
+    /// tick grid restarts at the new t_start. Block state carries over,
+    /// as it always did; reset() clears it.
+    void rearm_if_restarted(Real t) {
+        if (n_calls_ == 0 || !(t < last_t_)) return;
+        n_calls_ = 0;
+        if (!dt_given_) solver_dt_ = Real{0};
+        for (auto& g : groups_) { g.k = 0; g.pending = false; }
+        std::fill(queued_.begin(), queued_.end(), 0);
+        has_horizon_x_ = false;
+    }
+
+    // ---- running --------------------------------------------------------
+
+    /// Reset all block states, zero the signals, clear b_extra and the
+    /// recorded histories.
     void reset() {
-        for (auto& r : resets_) {
-            r();
-        }
-        ctx_.channels.clear();
+        for (auto& b : blocks_) if (b.reset) b.reset();
+        std::fill(ctx_.sig.begin(), ctx_.sig.end(), Real{0});
         b_extra_map_.clear();
         clear_recordings();
+        n_evals_ = 0;
+        n_block_evals_ = 0;
+        for (auto& g : groups_) {
+            g.k = 0; g.n_ticks = 0; g.pending = false; g.jitter_max = Real{0};
+        }
+        std::fill(pub_.begin(), pub_.end(), Real{0});
+        n_calls_ = 0;
+        if (!dt_given_) solver_dt_ = Real{0};
+        std::fill(queued_.begin(), queued_.end(), 0);
+        has_horizon_x_ = false;
+        sync_duties();
     }
 
-    /// Evaluate every block in insertion order.
+    /// Evaluate the graph once at (t, x) with block step `dt`.
     void step(Real t, const Vector* x, Real dt) {
+        compile();
         ctx_.t = t;
         ctx_.dt = dt;
         ctx_.x = x;
         ctx_.b_extra = &b_extra_map_;
-        for (auto& b : blocks_) {
-            b(ctx_);
+        for (Size i : order_) blocks_[i].step(ctx_);
+        if (has_update_) {
+            for (Size i : order_) {
+                if (blocks_[i].update) blocks_[i].update(ctx_);
+            }
         }
-        // After all blocks have run, snapshot any recorded channels.
+        ++n_evals_;
+        n_block_evals_ += static_cast<std::uint64_t>(order_.size());
+        sync_duties();
         if (!recordings_.empty()) {
             recording_times_.push_back(t);
-            for (auto& [name, history] : recordings_) {
-                auto it = ctx_.channels.find(name);
-                history.push_back(it == ctx_.channels.end() ?
-                                     Real{0} : it->second);
+            for (auto& rec : recordings_) {
+                rec.history.push_back(ctx_.sig[static_cast<Size>(rec.slot)]);
             }
         }
     }
 
-    /// Register a channel for per-step logging. After `simulate(...)`
-    /// returns, fetch the recorded values via `get_channel_history`.
-    /// Idempotent — calling twice for the same name is harmless.
-    /// Pre-allocates the history vector based on `reserve_n` for
-    /// efficient appending (caller can pass `simulate` step count).
-    void record_channel(const std::string& name,
-                            std::size_t reserve_n = 0) {
-        auto& vec = recordings_[name];
-        if (reserve_n > 0 && vec.capacity() < reserve_n) {
-            vec.reserve(reserve_n);
-        }
+    /// The AD law of the most recently added block (see AdTick).
+    void set_last_ad(BlockAdFn f) {
+        if (blocks_.empty()) return;
+        ad_fns_.resize(blocks_.size());
+        ad_fns_.back() = std::move(f);
     }
 
-    /// Retrieve the recorded history for a channel (empty if the
-    /// channel wasn't registered).
+    /// The exact Jacobian of one tick of rate group `g` at (t, x) from the
+    /// state the graph holds now (TickJacobian); `params` are names of
+    /// block parameters or constant inputs ("<block>.<field>"). Every
+    /// block of the group must have an AD law, and the group a zero
+    /// compute delay (its sinks see this tick's signals). `commit` then
+    /// runs the group's own (double) tick at (t, x) — the blocks and the
+    /// publication a queue tick runs, without counters or recordings —
+    /// and checks that the AD pass computed the same values bit for bit.
+    TickJacobian tick_jacobian(int g, Real t, const Vector& x,
+                               const std::vector<std::string>& params,
+                               bool commit) {
+        compile();
+        if (g < 1 || static_cast<Size>(g) >= groups_.size()) {
+            throw std::invalid_argument("tick_jacobian: no rate group " + std::to_string(g));
+        }
+        if (groups_[static_cast<Size>(g)].delay != Delay::Zero) {
+            throw std::invalid_argument(
+                "tick_jacobian: rate group " + std::to_string(g) + " has a compute "
+                "delay; its sinks see an earlier tick's signals (not derived)");
+        }
+        ad_fns_.resize(blocks_.size());
+        std::vector<Size> run;
+        for (Size i : order_) {
+            if (blocks_[i].group != g) continue;
+            if (!ad_fns_[i]) {
+                throw std::invalid_argument(
+                    "tick_jacobian: block '" + blocks_[i].name + "' (" +
+                    (blocks_[i].kind.empty() ? std::string("?") : blocks_[i].kind) +
+                    ") has no derivative of its law");
+            }
+            run.push_back(i);
+        }
+        const Real dt = groups_[static_cast<Size>(g)].period;
+        const Size ns = ctx_.sig.size();
+        TickJacobian res;
+        struct Sink final : pl_kink_sink<AdReal> {
+            std::vector<TickKink>* out = nullptr;
+            const std::string* block = nullptr;
+            bool first = true;
+            Size k = 0;
+            void note(const AdReal& a, const AdReal& b, bool side, const char* law) override {
+                const bool live = a.deriv(0) != b.deriv(0);
+                if (first) {
+                    out->push_back(TickKink{*block, law, a.value(), b.value(), side, live});
+                } else if (k < out->size()) {
+                    (*out)[k].live = (*out)[k].live || live;
+                }
+                ++k;
+            }
+        } sink;
+        sink.out = &res.kinks;
+        struct Install {
+            pl_kink_sink<AdReal>* old;
+            explicit Install(pl_kink_sink<AdReal>* s) : old(pl_kink_sink<AdReal>::current()) {
+                pl_kink_sink<AdReal>::current() = s;
+            }
+            ~Install() { pl_kink_sink<AdReal>::current() = old; }
+            Install(const Install&) = delete;
+            Install& operator=(const Install&) = delete;
+        } install(&sink);
+        auto pass = [&](const std::string& seed) {
+            AdTick c;
+            c.seed = seed;
+            c.sig.resize(ns);
+            for (Size s = 0; s < ns; ++s) c.sig[s] = c.var("sig:" + slot_names_[s], ctx_.sig[s]);
+            c.t = t;
+            c.dt = dt;
+            c.x = &x;
+            sink.k = 0;
+            for (Size i : run) {
+                c.block = &blocks_[i].name;
+                sink.block = c.block;
+                ad_fns_[i](c);
+            }
+            sink.first = false;
+            return c;
+        };
+        const AdTick d = pass(std::string{});   // discovery: names, values
+        for (const auto& n : d.state_names) res.cols.push_back(n);
+        for (Size s = 0; s < ns; ++s) res.cols.push_back("sig:" + slot_names_[s]);
+        for (Index p : d.probes) {
+            const std::string n = "x[" + std::to_string(p) + "]";
+            if (std::find(res.cols.begin(), res.cols.end(), n) == res.cols.end()) res.cols.push_back(n);
+        }
+        for (const auto& p : params) {
+            if (std::find(d.param_names.begin(), d.param_names.end(), p) == d.param_names.end()) {
+                std::string have;
+                for (const auto& q : d.param_names) have += (have.empty() ? "" : ", ") + q;
+                throw std::invalid_argument("tick_jacobian: '" + p + "' is not a parameter or "
+                                            "constant input of rate group " + std::to_string(g) +
+                                            " (have: " + have + ")");
+            }
+            res.cols.push_back(p);
+        }
+        res.rows = d.state_out_names;
+        for (Size s = 0; s < ns; ++s) res.rows.push_back("sig:" + slot_names_[s]);
+        const Size nr = res.rows.size(), nc = res.cols.size(), nso = d.state_out.size();
+        for (const auto& v : d.state_out) res.values.push_back(v.value());
+        for (Size s = 0; s < ns; ++s) res.values.push_back(d.sig[s].value());
+        res.J.assign(nr * nc, Real{0});
+        for (Size j = 0; j < nc; ++j) {
+            const AdTick c = pass(res.cols[j]);
+            for (Size r = 0; r < nso; ++r) res.J[r * nc + j] = c.state_out[r].deriv(0);
+            for (Size s = 0; s < ns; ++s) res.J[(nso + s) * nc + j] = c.sig[s].deriv(0);
+        }
+        if (commit) {
+            ctx_.t = t;
+            ctx_.dt = dt;
+            ctx_.x = &x;
+            ctx_.b_extra = &b_extra_map_;
+            for (Size i : run) blocks_[i].step(ctx_);
+            for (Size i : run) {
+                if (blocks_[i].update) blocks_[i].update(ctx_);
+            }
+            publish(groups_[static_cast<Size>(g)]);
+            sync_duties();
+            for (Size s = 0; s < ns; ++s) {
+                const Real a = d.sig[s].value(), b = ctx_.sig[s];
+                if (!(a == b || (std::isnan(a) && std::isnan(b)))) {
+                    throw std::logic_error("tick_jacobian: the AD law of signal '" +
+                                           slot_names_[s] + "' differs from the tick's");
+                }
+            }
+        }
+        return res;
+    }
+
+    [[nodiscard]] std::uint64_t n_evals() const noexcept { return n_evals_; }
+    [[nodiscard]] std::uint64_t n_block_evals() const noexcept {
+        return n_block_evals_;
+    }
+
+    // ---- recording ------------------------------------------------------
+
+    void record_channel(const std::string& name, std::size_t reserve_n = 0) {
+        const Index s = slot(name);
+        if (s < 0) return;   // "" names no channel
+        for (auto& rec : recordings_) {
+            if (rec.slot == s) return;
+        }
+        recordings_.push_back({s, {}});
+        if (reserve_n > 0) recordings_.back().history.reserve(reserve_n);
+    }
+
     [[nodiscard]] const std::vector<Real>& get_channel_history(
         const std::string& name) const {
         static const std::vector<Real> empty{};
-        auto it = recordings_.find(name);
-        return (it == recordings_.end()) ? empty : it->second;
+        auto it = slot_of_.find(name);
+        if (it == slot_of_.end()) return empty;
+        for (const auto& rec : recordings_) {
+            if (rec.slot == it->second) return rec.history;
+        }
+        return empty;
     }
 
-    /// Retrieve the per-recording time vector (parallel to every
-    /// channel history). Empty if no channels were recorded.
     [[nodiscard]] const std::vector<Real>& get_recording_times() const noexcept {
         return recording_times_;
     }
 
-    /// Clear all recorded history (but keep the registered names).
-    /// Call between simulations if you want a fresh trace.
     void clear_recordings() noexcept {
-        for (auto& [_, vec] : recordings_) {
-            vec.clear();
-        }
+        for (auto& rec : recordings_) rec.history.clear();
         recording_times_.clear();
     }
 
-    /// Return a Vector of length `state_size` carrying the current
-    /// b_extra contributions. Used by the chain's `make_b_extra_fn`.
+    // ---- sinks ----------------------------------------------------------
+
     [[nodiscard]] Vector get_b_extra(Size state_size) const {
-        Vector result =
-            Vector::Zero(static_cast<Index>(state_size));
+        Vector result = Vector::Zero(static_cast<Index>(state_size));
         for (auto& [idx, value] : b_extra_map_) {
             if (idx >= 0 && idx < static_cast<Index>(state_size)) {
                 result[idx] = value;
             }
         }
+        for (const auto& k : sinks_) {
+            if (k.row >= 0 && k.row < static_cast<Index>(state_size)) {
+                result[k.row] += k.gain * sink_value(k.slot);
+            }
+        }
         return result;
     }
 
-    /// Build the b_extra_fn callback for `simulate(...)` / `run_transient`.
-    /// Use together with `make_step_observer(dt)` when the chain
-    /// has motor blocks or other sources that need to inject
-    /// back-EMF / current values per step.
     [[nodiscard]] std::function<Vector(Real)>
     make_b_extra_fn(Size state_size) {
         return [this, state_size](Real /*t*/) {
@@ -260,91 +1177,461 @@ public:
         };
     }
 
-    /// Read the latest value on a channel (debugging / replay).
+    /// Latest value of a channel (0 for a name never mentioned).
+    /// Slot of `name`, or -1 if nothing reads or writes it.
+    [[nodiscard]] Index find_slot(const std::string& name) const {
+        auto it = slot_of_.find(name);
+        return it == slot_of_.end() ? Index{-1} : it->second;
+    }
+
     [[nodiscard]] Real get_channel(const std::string& name) const {
-        auto it = ctx_.channels.find(name);
-        return (it == ctx_.channels.end()) ? Real{0} : it->second;
+        auto it = slot_of_.find(name);
+        return it == slot_of_.end() ? Real{0}
+                                    : ctx_.sig[static_cast<Size>(it->second)];
     }
 
-    /// Direct mutable access to channels (e.g. user can prime a
-    /// channel before the simulation starts).
-    Channels& channels() noexcept { return ctx_.channels; }
-    const Channels& channels() const noexcept { return ctx_.channels; }
-
-    /// Register an `InputRef::Kind::Node` reference so `bind_nodes`
-    /// can patch in the state-vector index. Block factories call this
-    /// when they construct an InputRef of kind Node.
-    void register_node_ref(InputRef* ref) {
-        if (ref->kind == InputRef::Kind::Node) {
-            node_refs_[ref->name].push_back(ref);
-        }
+    void set_channel(const std::string& name, Real value) {
+        ctx_.put(slot(name), value);   // "" -> no-op
+        sync_duties();
     }
 
-    /// Number of blocks in the chain (diagnostic).
-    [[nodiscard]] std::size_t size() const noexcept {
-        return blocks_.size();
+    /// A duty register holding what slot `s`'s sinks see, kept current
+    /// by every call that can change it (Immediate latch). The chain owns
+    /// it; a CarrierPwm built on it must not outlive the chain.
+    [[nodiscard]] const events::DutyRegister* duty_register(Index s) {
+        duties_.push_back({s, events::DutyRegister{sink_value(s)}});
+        return &duties_.back().second;
     }
 
-    /// Build the `step_observer` callback that the kernel's
-    /// `run_transient(..., step_observer=...)` expects. The lambda
-    /// captures a pointer to this chain so the chain must outlive
-    /// the simulation.
+    /// Value of slot `s` (sinks resolved to a slot at build time).
+    [[nodiscard]] Real signal(Index s) const noexcept {
+        return ctx_.at(s);
+    }
+
+    /// What a circuit sink sees: a rate group's output after its
+    /// compute_delay; any other slot as it is.
+    [[nodiscard]] Real sink_value(Index s) const noexcept {
+        if (s < 0) return Real{0};
+        const auto u = static_cast<Size>(s);
+        return (u < delayed_.size() && delayed_[u]) ? pub_[u] : ctx_.sig[u];
+    }
+
+    [[nodiscard]] std::size_t size() const noexcept { return blocks_.size(); }
+    [[nodiscard]] const std::vector<Block>& blocks() const noexcept {
+        return blocks_;
+    }
+    [[nodiscard]] const std::vector<std::string>& slot_names() const noexcept {
+        return slot_names_;
+    }
+
+    /// The `step_observer` the kernel's run_transient expects: one
+    /// evaluation per call. The chain must outlive the simulation.
     [[nodiscard]] std::function<void(Real, const Vector&)>
     make_step_observer(Real dt) {
+        compile();
+        if (has_rates()) {
+            return [this, dt](Real t, const Vector& x) {
+                this->observe_fixed_step(t, x, dt);
+            };
+        }
         return [this, dt](Real t, const Vector& x) {
             this->step(t, &x, dt);
         };
     }
 
-private:
-    std::vector<BlockStepFn> blocks_;
-    std::vector<BlockResetFn> resets_;
-    ChainContext ctx_;
-    // Inputs of kind Node, grouped by name, so bind_nodes() can
-    // patch all of them in one pass.
-    std::unordered_map<std::string, std::vector<InputRef*>> node_refs_;
-    // Per-step b_extra contributions written by motor blocks /
-    // source-injecting devices. Cleared between simulations via
-    // reset() but PERSISTS within a simulation (a motor block
-    // updates "its" entry every step; entries not touched keep
-    // their last value).
-    std::unordered_map<Index, Real> b_extra_map_;
+    /// The tick callback for the variable-step engine (one per group;
+    /// any of them runs every group due at that instant).
+    [[nodiscard]] std::function<void(Real, const Vector&)> make_tick_observer() {
+        compile();
+        return [this](Real t, const Vector& x) { this->observe_tick(t, x); };
+    }
 
-    // Per-step channel logging — registered via record_channel().
-    // Each step() appends the current channel value to the matching
-    // history vector. The parallel `recording_times_` records t at
-    // each snapshot for plotting.
-    std::unordered_map<std::string, std::vector<Real>> recordings_;
+private:
+    static constexpr std::uint64_t kStateMagic = 0x5053474300000001ULL;
+
+    // One walk for both directions (Writer: put, Reader: get + checks).
+    template <class IO>
+    void io(IO& a) {
+        constexpr bool rd = std::is_same_v<IO, state_io::Reader>;
+        auto x = [&a](auto& v) {
+            if constexpr (std::is_same_v<IO, state_io::Reader>) {
+                state_io::get(a, v);
+            } else {
+                state_io::put(a, v);
+            }
+        };
+        auto same = [](bool ok) {
+            if (!ok) {
+                throw std::invalid_argument(
+                    "control graph state: written by another graph (its "
+                    "blocks, channels or rate groups differ)");
+            }
+        };
+        std::uint64_t magic = kStateMagic;
+        x(magic);
+        same(magic == kStateMagic);
+        std::uint64_t n = blocks_.size();
+        x(n);
+        same(n == blocks_.size());
+        for (auto& b : blocks_) {
+            std::vector<char> name(b.name.begin(), b.name.end());
+            x(name);
+            same(std::string(name.begin(), name.end()) == b.name);
+            if constexpr (rd) { if (b.load) b.load(a); }
+            else { if (b.dump) b.dump(a); }
+        }
+        const Size n_sig = ctx_.sig.size();
+        x(ctx_.sig);
+        same(ctx_.sig.size() == n_sig);
+        std::vector<Index> bk;
+        std::vector<Real> bv;
+        for (const auto& [k, v] : b_extra_map_) { bk.push_back(k); bv.push_back(v); }
+        x(bk);
+        x(bv);
+        same(bk.size() == bv.size());
+        if constexpr (rd) {
+            b_extra_map_.clear();
+            for (Size i = 0; i < bk.size(); ++i) b_extra_map_[bk[i]] = bv[i];
+        }
+        n = recordings_.size();
+        x(n);
+        same(n == recordings_.size());
+        for (auto& rec : recordings_) x(rec.history);
+        x(recording_times_);
+        x(n_evals_);
+        x(n_block_evals_);
+        x(n_calls_);
+        n = groups_.size();
+        x(n);
+        same(n == groups_.size());
+        for (auto& g : groups_) {
+            x(g.k);
+            x(g.n_ticks);
+            x(g.pending_at);
+            x(g.pending);
+            x(g.jitter_max);
+        }
+        const Size n_pub = pub_.size();
+        x(pub_);
+        same(pub_.size() == n_pub);
+        x(last_t_);
+        x(t0_);
+        x(solver_dt_);
+        x(queued_);
+        x(horizon_t_);
+        x(has_horizon_x_);
+        std::vector<Real> hx(horizon_x_.data(), horizon_x_.data() + horizon_x_.size());
+        x(hx);
+        if constexpr (rd) {
+            horizon_x_ = Vector::Map(hx.data(), static_cast<Index>(hx.size()));
+            sync_duties();
+        }
+    }
+
+    [[nodiscard]] static Real tick_tol(const Group& g) noexcept {
+        return Real{1e-9} * g.period;
+    }
+
+    void sync_duties() noexcept {
+        for (auto& [s, reg] : duties_) reg.value = sink_value(s);
+    }
+
+    void publish(const Group& g) {
+        for (Index s : g.out_slots) {
+            pub_[static_cast<Size>(s)] = ctx_.sig[static_cast<Size>(s)];
+        }
+    }
+
+    /// One pass at instant `tx`: the due groups (and group 0 when
+    /// `every_call`) in schedule order, outputs then updates.
+    void run_pass(Real tx, const Vector* x, Real dt0, bool every_call,
+                  Real record_t) {
+        compile();
+        for (Size gi = 1; gi < groups_.size(); ++gi) {
+            auto& g = groups_[gi];
+            if (g.pending && tx >= g.pending_at - tick_tol(g)) {
+                publish(g);
+                g.pending = false;
+            }
+        }
+        due_.assign(groups_.size(), 0);
+        due_[0] = every_call ? 1 : 0;
+        bool any = every_call;
+        std::vector<Real> tau(groups_.size(), Real{0});
+        for (Size gi = 1; gi < groups_.size(); ++gi) {
+            auto& g = groups_[gi];
+            tau[gi] = t0_ + g.offset + static_cast<Real>(g.k) * g.period;
+            // Label time on the fixed grid: the old scheduler's rule,
+            // t >= due - 1e-9*dt and due < t_end - 1e-9*dt.
+            const Real tol = fixed_label_pass_ ? Real{1e-9} * solver_dt_
+                                               : tick_tol(g);
+            bool hit = false;
+            if (fixed_queue_pass_) {
+                hit = gi < queued_.size() && queued_[gi] != 0;
+                // due on the graph's grid but not taken: the queue's last
+                // instant is < t_end, so this is a run's last call
+                if (!hit && tx >= tau[gi] - tol) stash_ = true;
+            } else {
+                if (fixed_label_pass_ && !(tau[gi] < t_end_ - tol)) {
+                    // left out by the horizon only: a resume at this
+                    // label serves it with this call's state
+                    if (tx >= tau[gi] - tol) stash_ = true;
+                    continue;
+                }
+                hit = tx >= tau[gi] - tol;
+            }
+            if (hit) {
+                due_[gi] = 1;
+                any = true;
+                g.jitter_max = std::max(g.jitter_max, tx - tau[gi]);
+                ++g.k;
+                ++g.n_ticks;
+                if (g.delay == Delay::OneSample) publish(g);
+            }
+        }
+        if (fixed_queue_pass_) std::fill(queued_.begin(), queued_.end(), 0);
+        if (!any) {
+            sync_duties();   // a pending publication may have landed
+            return;
+        }
+        if (every_call) ++groups_[0].n_ticks;
+        ctx_.t = has_rates() ? tx : record_t;
+        ctx_.x = x;
+        ctx_.b_extra = &b_extra_map_;
+        std::uint64_t n = 0;
+        for (Size i : order_) {
+            const auto g = static_cast<Size>(blocks_[i].group);
+            if (!due_[g]) continue;
+            ctx_.dt = g == 0 ? dt0 : groups_[g].period;
+            blocks_[i].step(ctx_);
+            ++n;
+        }
+        if (has_update_) {
+            for (Size i : order_) {
+                const auto g = static_cast<Size>(blocks_[i].group);
+                if (!due_[g] || !blocks_[i].update) continue;
+                ctx_.dt = g == 0 ? dt0 : groups_[g].period;
+                blocks_[i].update(ctx_);
+            }
+        }
+        ++n_evals_;
+        n_block_evals_ += n;
+        for (Size gi = 1; gi < groups_.size(); ++gi) {
+            if (!due_[gi]) continue;
+            auto& g = groups_[gi];
+            if (g.delay == Delay::Zero) {
+                publish(g);
+            } else if (g.delay == Delay::Time) {
+                g.pending = true;
+                g.pending_at = tau[gi] + g.delay_time;
+            }
+        }
+        sync_duties();
+        if (!recordings_.empty()) {
+            recording_times_.push_back(record_t);
+            for (auto& rec : recordings_) {
+                rec.history.push_back(ctx_.sig[static_cast<Size>(rec.slot)]);
+            }
+        }
+    }
+
+    std::string loop_message(const std::vector<std::vector<Size>>& succ) const {
+        // Tarjan SCC; report the first component with > 1 block.
+        const Size n = blocks_.size();
+        std::vector<Index> idx(n, -1), low(n, 0);
+        std::vector<bool> on(n, false);
+        std::vector<Size> st;
+        Index counter = 0;
+        std::vector<std::vector<Size>> comps;
+        std::function<void(Size)> visit = [&](Size v) {
+            idx[v] = low[v] = counter++;
+            st.push_back(v);
+            on[v] = true;
+            for (Size w : succ[v]) {
+                if (idx[w] < 0) {
+                    visit(w);
+                    low[v] = std::min(low[v], low[w]);
+                } else if (on[w]) {
+                    low[v] = std::min(low[v], idx[w]);
+                }
+            }
+            if (low[v] == idx[v]) {
+                std::vector<Size> comp;
+                Size w;
+                do {
+                    w = st.back();
+                    st.pop_back();
+                    on[w] = false;
+                    comp.push_back(w);
+                } while (w != v);
+                if (comp.size() > 1) comps.push_back(std::move(comp));
+            }
+        };
+        for (Size v = 0; v < n; ++v) if (idx[v] < 0) visit(v);
+        std::string msg = "control graph: algebraic loop through blocks ";
+        if (!comps.empty()) {
+            auto comp = comps.front();
+            std::sort(comp.begin(), comp.end());
+            for (Size k = 0; k < comp.size(); ++k) {
+                msg += (k ? ", '" : "'") + blocks_[comp[k]].name + "'";
+            }
+        }
+        msg += " (each output depends on its input in the same instant). "
+               "Insert a DelayBlock in the loop.";
+        return msg;
+    }
+
+    struct Recording { Index slot; std::vector<Real> history; };
+
+    std::vector<Block> blocks_;
+    Block pending_;
+    std::vector<Size> order_;
+    std::vector<BlockAdFn> ad_fns_;   // per block, may be empty (tick_jacobian)
+    std::vector<std::string> reorders_;
+    bool compiled_ = false;
+    bool has_update_ = false;
+    std::unordered_map<std::string, Index> slot_of_;
+    std::vector<std::string> slot_names_;
+    std::function<Index(const std::string&)> node_id_of_;
+    ChainContext ctx_;
+    std::unordered_map<Index, Real> b_extra_map_;
+    std::vector<Recording> recordings_;
     std::vector<Real> recording_times_;
+    std::uint64_t n_evals_ = 0;
+    std::uint64_t n_block_evals_ = 0;
+    struct Sink { Index slot; Index row; Real gain; };
+    std::vector<Group> groups_{Group{}};     // group 0: every observer call
+    std::vector<char> due_;
+    std::vector<char> delayed_;
+    std::vector<Real> pub_;
+    std::deque<std::pair<Index, events::DutyRegister>> duties_;   // PWM legs
+    std::vector<Sink> sinks_;
+    std::uint64_t n_calls_ = 0;
+    Real last_t_ = Real{0};
+    bool dt_given_ = false;
+    bool group0_used_ = true;
+    Real t0_ = Real{0};
+    Real solver_dt_ = Real{0};
+    bool label_time_ = false;
+    bool fixed_label_pass_ = false;
+    bool queue_driven_ = false;
+    bool fixed_queue_pass_ = false;
+    std::vector<char> queued_;
+    Vector horizon_x_;
+    Real horizon_t_ = Real{0};
+    bool has_horizon_x_ = false;
+    bool stash_ = false;
+    Real t_end_ = std::numeric_limits<Real>::infinity();
+};
+
+
+/// A graph's driven-source b_extra with its declared jump instants
+/// (`next_jump_after`), both called in C++.
+struct ChainBExtra {
+    BlockChain* chain = nullptr;
+    std::function<Vector(Real)> fn;
+};
+
+
+/// A graph's tick callback handed to the variable-step engine.
+struct ChainTick {
+    BlockChain* chain = nullptr;
+    std::function<void(Real, const Vector&)> fn;
 };
 
 
 // =============================================================================
-// SwitchFnFactory — build a `switch_fn(t)` from chain channels
+// make_chain_switch_fn — a switch_fn(t) from chain signals
 // =============================================================================
 
-/// Build a `switch_fn(t)` that drives `num_switches` from the chain's
-/// channels. `channel_to_switch[i]` is a (channel_name, switch_idx)
-/// pair: the switch is ON when the channel value > 0.5.
-[[nodiscard]] inline std::function<
-    topology::SwitchStateMask(Real)>
-make_chain_switch_fn(BlockChain& chain,
-                          Size num_switches,
-                          const std::vector<std::pair<std::string, Index>>&
-                              channel_to_switch) {
-    auto pairs = channel_to_switch;  // owned copy
+/// Switch `idx` is ON when its signal is > 0.5. Signals are resolved to
+/// slots now (a name no block writes reads 0).
+[[nodiscard]] inline std::function<topology::SwitchStateMask(Real)>
+make_chain_switch_fn(BlockChain& chain, Size num_switches,
+                     const std::vector<std::pair<std::string, Index>>&
+                         channel_to_switch) {
+    std::vector<std::pair<Index, Index>> pairs;
+    for (const auto& [ch, idx] : channel_to_switch) {
+        pairs.emplace_back(chain.slot(ch), idx);
+    }
     auto* chain_ptr = &chain;
     return [chain_ptr, num_switches, pairs](Real /*t*/) {
         topology::SwitchStateMask mask{num_switches};
-        for (const auto& [ch, idx] : pairs) {
-            auto it = chain_ptr->channels().find(ch);
-            if (it != chain_ptr->channels().end() &&
-                  it->second > Real{0.5}) {
+        for (const auto& [s, idx] : pairs) {
+            if (chain_ptr->sink_value(s) > Real{0.5}) {
                 mask.set(static_cast<Size>(idx), true);
             }
         }
         return mask;
     };
 }
+
+
+/// A PWM gate whose duty is a graph signal (what its sinks see): one
+/// events::CarrierPwm per leg, reading a DutyRegister the chain keeps
+/// equal to the signal (BlockChain::duty_register). Bit `idx` is ON while
+/// the carrier position u < duty - tol, the comparison of
+/// pulsim.control.pwm_on operation for operation. Runs in C++, no GIL.
+/// The chain must outlive the gate.
+struct ChainPwmGate {
+    Size num_switches = 0;
+    std::vector<events::CarrierPwm> legs;   // one switch each, distinct bits
+    std::vector<Index> leg_slots;           // the duty slot of each leg
+
+    /// Leg on switch `idx` whose duty is what slot `slot`'s sinks see.
+    void add_leg(BlockChain& chain, Index slot, Index idx, Real period, Real phase) {
+        for (const auto& l : legs) {
+            if (l.hs == idx) {
+                throw std::invalid_argument(
+                    "make_pwm_gate: switch bit " + std::to_string(idx)
+                    + " is driven by two legs");
+            }
+        }
+        legs.push_back(events::CarrierPwm{period, phase, chain.duty_register(slot), idx});
+        leg_slots.push_back(slot);
+    }
+
+    [[nodiscard]] topology::SwitchStateMask operator()(Real t) const {
+        topology::SwitchStateMask mask{num_switches};
+        for (const auto& l : legs) l.apply(t, mask);
+        return mask;
+    }
+
+    /// First gate edge strictly after `t` under the duties held now: each
+    /// leg's period start and its OFF threshold. A tick that moves a duty
+    /// makes the answer stale: trbdf2 re-queries after a tick, pwl after
+    /// every observer call (a loop ticks through its observer).
+    [[nodiscard]] Real next_edge_after(Real t) const {
+        Real best = std::numeric_limits<Real>::infinity();
+        for (const auto& l : legs) best = std::min(best, l.next_edge(t));
+        return best;
+    }
+};
+
+/// A discrete gate (task 6.2): bit `idx` is ON while its signal (what the
+/// sinks see) exceeds 0.5. The signal moves only when a rate group
+/// publishes, so the gate's edges are among the graph's publication
+/// instants (`next_jump_after`, which a label-time graph leaves
+/// undeclared): engines land them instead of sampling the gate. The
+/// chain must outlive the gate.
+struct ChainSignalGate {
+    BlockChain* chain = nullptr;
+    Size num_switches = 0;
+    std::vector<std::pair<Index, Index>> pairs;   // (slot, switch index)
+
+    [[nodiscard]] topology::SwitchStateMask operator()(Real /*t*/) const {
+        topology::SwitchStateMask mask{num_switches};
+        for (const auto& [s, idx] : pairs) {
+            if (chain->sink_value(s) > Real{0.5}) {
+                mask.set(static_cast<Size>(idx), true);
+            }
+        }
+        return mask;
+    }
+
+    [[nodiscard]] Real next_edge_after(Real t) const {
+        return chain->next_jump_after(t);
+    }
+};
 
 }  // namespace pulsim::blockchain

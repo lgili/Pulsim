@@ -65,8 +65,10 @@ struct IdealDiode {
     /// Templated on any FloatingPoint type; ADL handles `exp` via
     /// `using std::exp` so `S = Real` and `S = ADRealN<N>` both
     /// dispatch correctly.
-    template <numeric::FloatingPoint S>
-    [[nodiscard]] static S current(const S* v, const Params& p) noexcept {
+    // `P`: the parameter struct, or a law's `Params<S>` with the same
+    // member names (device/laws.hpp), so ∂i/∂p comes from this body too.
+    template <numeric::FloatingPoint S, class P = Params>
+    [[nodiscard]] static S current(const S* v, const P& p) noexcept {
         using std::exp;
         const S v_diode = v[0] - v[1];
         const S delta = v_diode - p.V_F0;

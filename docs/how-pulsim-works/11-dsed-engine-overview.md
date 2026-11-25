@@ -23,6 +23,13 @@ is **14.5×**.
 The next five chapters walk through the math + architecture top-down.
 This chapter just sets up the *why*.
 
+> **Name.** `engine='exact'` is the canonical name of this engine and
+> `'dsed'` its alias: one engine, bit-identical runs. Results
+> (`result.engine_used`) and refusals (`UnsupportedError.engine`) keep
+> naming `'dsed'`, the capability-table column. `pulsim.exact_route()`
+> and `result.exact['segments']` report which masks of a run step on the
+> closed-form propagator, and why the others do not.
+
 ---
 
 ## 11.1 Why fixed-step trap struggles with PE switching
@@ -130,6 +137,36 @@ existed, every edge of a plain callable moved onto the sample grid: a
 synchronous buck at 100 kHz, D = 0.25 and 100 ns dead time ran with no
 dead time and D = 0.30 (14.28 V against 11.49 V, body diodes never
 conducting) at the default `dt_max`.
+
+### The exact propagator (add-exact-propagator-strategy)
+
+On a mask whose sources are constant, `simulate(engine='dsed')` skips
+the RK45/BDF2 loop and steps with the exact solution
+$x(t+h) = V e^{\Lambda h} V^{-1} x + h\,\varphi_1(\Lambda h) V^{-1} b$.
+Each mask records how it was stepped in `result.exact["masks"]`
+(`tier`, `kappa`, `norm_Ah`, `reason`):
+
+| Tier | Method | Taken when |
+|---|---|---|
+| 1 | eigendecomposition in energy coordinates ($\sqrt{C}$, $\sqrt{L}$) | $u\,\kappa_2(V) \le 10^{-10}$ |
+| 2 | Padé [13/13] of the augmented matrix, cached per $h$ | $u\,\lVert A h_{max}\rVert_1 \le 10^{-10}$ (a near-defective mask, e.g. a critically damped RLC) |
+| 3 | none: the numeric path for that mask, recorded with its reason | otherwise (stiff and non-normal) |
+
+Events are located by bracketing time to $\max(4u|t|, 10^{-12} h)$ and
+the state at an event is the bracket end past the crossing. A diode
+whose signal is zero to rounding (`V_th = 0` at rest, a current zero)
+is decided on its exact OFF-mode trajectory, not by the sign of a
+rounding residue, so `V_th = 0`, `V_th = V_f` and `V_f > V_th` run
+without a hysteresis band. That settle can still pick a wrong mode
+(a boost with `V_th = 0` held its diode ON at -1.07 A). The default-mode
+guard judges every settled mode on its exact trajectory and lets the
+diode LCP decide the events it fails (`diagnostics['mode_guard']`);
+`simulate` then still checks every stored sample against the diode law
+and raises `DiodeModeInconsistentError` naming the diode for what the
+guard misses (a double crossing inside one step at `V_th = 0`). Builder initial conditions (`c0=`, `i0=`,
+`set_initial`) map per device onto the reduced state;
+`result.initial_condition_adjustment` is the largest change made to a
+declared capacitor voltage (0 when they are consistent).
 
 The native C++ implementation of the loop + the
 `NativePwm2Switch` fast path that gives DSED its 24× story are

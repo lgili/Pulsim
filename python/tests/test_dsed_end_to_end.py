@@ -17,7 +17,6 @@ Verifies:
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 
 def _make_buck_ccm(V_in: float = 24.0,
@@ -198,9 +197,11 @@ def test_dsed_integrator_bdf2_runs_end_to_end():
           f"events: {res.n_events}")
 
 
-def test_dsed_integrator_auto_picks_rk45_on_non_stiff_buck():
-    """`integrator='auto'` on a non-stiff buck CCM should route to
-    RK45 (the dispatcher correctly classifies the buck as non-stiff)."""
+def test_dsed_integrator_auto_takes_the_exact_stepper_on_buck():
+    """`integrator='auto'` on a buck CCM takes the exact stepper: every
+    mode is LTI with a constant source, so neither numeric integrator
+    runs (fix-dsed-auto-integrator-selection; before, 'auto' asked the
+    stiffness detector first and ran RK45 here)."""
     import pulsim as p
     b = _make_buck_ccm()
     sf = _pwm_switch_fn(T_sw=1.0 / 100e3, D=0.5)
@@ -211,14 +212,14 @@ def test_dsed_integrator_auto_picks_rk45_on_non_stiff_buck():
         rtol=1e-6, switch_fn=sf,
     )
     assert not res.empty()
-    assert res.n_rk45_steps > 0
-    # Buck CCM at standard params is NOT stiff → BDF2 should never fire
+    assert res.n_exact_steps > 0
     assert res.n_bdf2_steps == 0
     # Should match the RK45-only result (V_out = D·V_in = 12V exactly)
     final_vc = float(res.states_reduced[-1][0])
     assert abs(final_vc - 12.0) / 24.0 < 0.05    # within 5% of V_out_expected
     print(f"  Auto final v_C: {final_vc:.4f} V, "
-          f"rk45={res.n_rk45_steps}, bdf2={res.n_bdf2_steps}, "
+          f"exact={res.n_exact_steps}, rk45={res.n_rk45_steps}, "
+          f"bdf2={res.n_bdf2_steps}, "
           f"events={res.n_events}")
 
 
@@ -330,9 +331,11 @@ def test_dsed_simulate_handles_npc_split_bus():
     assert abs(abs(v2) - V_dc / 2) < 5.0
 
 
-def test_dsed_simulate_rejects_parallel_caps():
-    """Parallel caps form a cycle in the cap-edge graph; the extractor
-    rejects them with a clear error pointing to the workaround."""
+def test_dsed_simulate_runs_parallel_caps():
+    """Parallel caps form a cycle in the cap-edge graph; the extractor's
+    general reduction keeps one as a state (add-exact-propagator-strategy
+    DECISIONS, dependent states): the 3 uF charge through 20 Ohm, tau 60 us
+    (it was refused before)."""
     import pulsim as p
     b = p.CircuitBuilder()
     b.add_voltage_source("V1", "vin", "gnd", 5.0)
@@ -341,9 +344,10 @@ def test_dsed_simulate_rejects_parallel_caps():
     b.add_capacitor("C2",      "n1",  "n2",  2e-6)   # PARALLEL
     b.add_resistor("R2",       "n2",  "gnd", 10.0)
 
-    with pytest.raises((RuntimeError, NotImplementedError),
-                       match=r"(?i)parallel|cycle|cap"):
-        p.simulate(b, t_end=1e-3, engine='dsed', integrator='rk45')
+    r = p.simulate(b, t_end=1e-3, engine='dsed', integrator='rk45')
+    t = np.asarray(r.times)
+    v = np.asarray(r.v("n1")) - np.asarray(r.v("n2"))
+    assert np.abs(v - 5.0 * (1 - np.exp(-t / 60e-6))).max() < 1e-6
 
 
 # ---------------------------------------------------------------------------
@@ -431,6 +435,7 @@ def test_dsed_user_b_extra_fn_callback():
     res = p.simulate(
         b, t_end=10e-3, engine='dsed', integrator='rk45',
         rtol=1e-7, atol=1e-10, b_extra_fn=b_extra,
+        allow_implicit_segments=True,   # a b_extra_fn is numeric (13.2)
     )
     final_vc = float(res.states_reduced[-1][0])
     # State magnitude should be ~7V (5V DC + 2V from b_extra_fn).

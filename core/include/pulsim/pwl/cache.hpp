@@ -23,9 +23,11 @@
 #include "pulsim/numeric/dictionary.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/assemble.hpp"
+#include "pulsim/pwl/branch_structure.hpp"
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/pwl/row_names.hpp"
 #include "pulsim/pwl/segment.hpp"
+#include "pulsim/pwl/symbolic_plan.hpp"
 #include "pulsim/sparse/matrix.hpp"
 #include "pulsim/sparse/solver.hpp"
 #include "pulsim/topology/enumerator.hpp"
@@ -33,6 +35,7 @@
 #include "pulsim/topology/switch_state.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <atomic>
 #include <bit>
 #include <chrono>
@@ -40,6 +43,8 @@
 #include <expected>
 #include <format>
 #include <numeric>
+#include <array>
+#include <limits>
 #include <queue>
 #include <set>
 #include <stdexcept>
@@ -96,6 +101,16 @@ struct CacheMetrics {
     std::uint64_t event_refactors       = 0;  // solve_at: dt changed,
                                               // in-place numeric refactor
     std::uint64_t event_builds          = 0;  // solve_at: fresh entry
+    std::uint64_t event_evictions       = 0;  // solve_at: LRU evictions
+                                              // under the byte budget
+
+    // ---- update-linear-time-assembly tier 1 ----
+    std::uint64_t structure_builds      = 0;  // sparse-structure (template)
+                                              // builds of G/C/J, ≤ 1 per regime
+    std::uint64_t symbolic_analyses     = 0;  // symbolic analyses run
+                                              // (shared: ≤ 1 per regime)
+    std::uint64_t symbolic_fallbacks    = 0;  // shared analysis refused
+                                              // (pattern mismatch) → private
 };
 
 /// Result of `PwlStateSpaceCache::refactor_parametric` (v1.4.0,
@@ -233,6 +248,7 @@ public:
     void build(Real dt) {
         dt_ = dt;
         lazy_mode_ = false;
+        bump_generation_();
         segments_.clear();
         event_entries_.clear();
         const Size num_switches = graph_.num_switches();
@@ -255,6 +271,7 @@ public:
     void build_lazy(Real dt) {
         dt_ = dt;
         lazy_mode_ = true;
+        bump_generation_();
         segments_.clear();
         event_entries_.clear();
     }
@@ -337,20 +354,175 @@ public:
     /// f = J·x + b_total = 0, so the solution is x = -(L^-1 ·
     /// (U^-1 · b_total)) = solver.solve(-b_total). We compute that
     /// directly: rhs = -(b_constant + b_extra), then solve.
+    /// update-fixed-step-loop-bookkeeping: changes whenever a segment
+    /// may have moved or changed (build, lazy insert/eviction,
+    /// parametric refactor). A caller that keeps a `const PwlSegment*`
+    /// from `lookup` may reuse it while the generation is unchanged.
+    [[nodiscard]] std::uint64_t generation() const noexcept {
+        return generation_.load(std::memory_order_relaxed);
+    }
+
+    /// The LRU tick a lookup hit writes, for a caller that reuses a
+    /// segment pointer instead of looking it up again.
+    void touch_segment(const PwlSegment& seg) const noexcept {
+        if (lazy_mode_) {
+            seg.touch(lru_clock_.fetch_add(
+                std::uint64_t{1}, std::memory_order_relaxed) + 1);
+        }
+    }
+
+    /// `solve(mask, …)` on a segment the caller already looked up
+    /// (same arithmetic; no LRU tick — the caller's lookup or
+    /// `touch_segment` wrote it).
+    void solve_segment(const PwlSegment& seg, const Vector& b_extra,
+                       Vector& x) const {
+        seg.solver->solve_neg_sum(seg.b_constant, b_extra, x);
+    }
+
     void solve(const topology::SwitchStateMask& mask,
                 const Vector& b_extra,
                 Vector& x) const {
         const PwlSegment& seg = lookup(mask);
-        // Thread-local rhs workspace (v2.0 Phase 1, audit finding
-        // `per-step-heap-allocations`): the expression assigns
-        // directly into the reused buffer — no temporary, no heap
-        // traffic once sized. thread_local (not an instance
-        // member) so concurrent GIL-released transients sharing a
-        // cache stay numerically correct (adversarial-review
-        // finding ZA-1).
-        Vector& rhs = solve_rhs_tls_();
-        rhs = -(seg.b_constant + b_extra);
-        seg.solver->solve(rhs, x);
+        // Fused rhs + row permutation (update-linear-time-assembly):
+        // same arithmetic as `solve(-(b_constant + b_extra))`, on the
+        // solver's thread-local workspace (review ZA-1).
+        seg.solver->solve_neg_sum(seg.b_constant, b_extra, x);
+    }
+
+    /// The reduction's solves, refined in double-double (exact engine 8).
+    /// A bus held to ground by 1 MΩ against 1 kS diodes gives G_aa a
+    /// condition ~1e10 or more, and G_sa·G_aa⁻¹·G_as − G_ss then cancels
+    /// node voltages of ~R_g·i down to the bus row (~1/R): plain double
+    /// lost 0.55 of A's −100 /s bus entry with ten rectifier banks (bus
+    /// 2e-4 V off at 0.1 ms, a diode predicate 3e-5 V off, a reversed
+    /// diode kept ON for 4.6 µs). Every solve is refined with compensated
+    /// residuals (fma + TwoSum, Dot2: as if in twice the working precision)
+    /// and the solution kept as hi + lo; the products with G_sa are summed
+    /// the same way and rounded once. A column whose refinement does not
+    /// converge keeps its plain solve. The stamped G itself is rounded
+    /// data: the result is accurate for that G, not for the netlist.
+    /// A mode whose refined operators all lie within 1e-12 of the plain
+    /// ones (relative to each row's largest entry) keeps the plain ones,
+    /// bit for bit.
+    /// `solve(r, x)` applies the plain G_aa⁻¹ (the sparse LU, or the general
+    /// path's SVD inverse when G_aa has full rank there).
+    template <class Solve>
+    static void refine_schur_(const sparse::Matrix& Gaa, const sparse::Matrix& Gas,
+                              const sparse::Matrix& Gsa, const sparse::Matrix& Gss,
+                              const Vector& ba, const Vector& bs, Solve&& solve,
+                              DenseMatrix& X, Vector& xb, DenseMatrix& Ginv,
+                              DenseMatrix& S, Vector& Sb, DenseMatrix& GsaGinv) {
+        const auto na = Gaa.rows();
+        const auto ns = Gsa.rows();
+        // s + c += a·b, product and sum both error-free
+        const auto acc = [](Real& s, Real& c, Real a, Real b) {
+            const Real p = a * b;
+            const Real pe = std::fma(a, b, -p);
+            const Real t = s + p;
+            const Real bp = t - s;
+            c += (s - (t - bp)) + (p - bp) + pe;
+            s = t;
+        };
+        Vector s(na), c(na), rho(na), d;
+        // x = G_aa⁻¹·r as hi + lo, starting from the plain solve in hi
+        const auto refine = [&](const Vector& r, Vector& hi, Vector& lo) {
+            lo.setZero(na);
+            const Vector plain = hi;
+            bool converged = false;
+            Real last = std::numeric_limits<Real>::infinity();
+            for (int it = 0; it < 10; ++it) {
+                s = r;
+                c.setZero();
+                for (Eigen::Index k = 0; k < Gaa.outerSize(); ++k) {
+                    for (sparse::Matrix::InnerIterator e(Gaa, k); e; ++e) {
+                        acc(s[e.row()], c[e.row()], -e.value(), hi[k]);
+                        acc(s[e.row()], c[e.row()], -e.value(), lo[k]);
+                    }
+                }
+                rho = s + c;
+                solve(rho, d);
+                const Real dn = d.cwiseAbs().maxCoeff();
+                if (!(dn < Real{0.5} * last)) break;   // stalled: keep what we have
+                // a second, smaller correction shows the iteration contracts
+                if (it > 0) converged = true;
+                last = dn;
+                for (Eigen::Index i = 0; i < na; ++i) {  // (hi, lo) += d
+                    const Real t = hi[i] + d[i];
+                    const Real bp = t - hi[i];
+                    const Real e = (hi[i] - (t - bp)) + (d[i] - bp) + lo[i];
+                    hi[i] = t + e;
+                    lo[i] = e - (hi[i] - t);
+                }
+                constexpr Real u = std::numeric_limits<Real>::epsilon();
+                if (!(dn > Real{4} * u * u * hi.cwiseAbs().maxCoeff())) {
+                    converged = true;
+                    break;
+                }
+            }
+            if (!converged) {   // never trade the plain column for a non-contracting one
+                hi = plain;
+                lo.setZero(na);
+            }
+        };
+        const DenseMatrix Gss_d = DenseMatrix(Gss);
+        Vector ps(ns), pc(ns);
+        // out += G_sa·(hi + lo), summed error-free, rounded once
+        const auto product = [&](const Vector& hi, const Vector& lo, Vector& out) {
+            ps = out;
+            pc.setZero();
+            for (Eigen::Index k = 0; k < Gsa.outerSize(); ++k) {
+                for (sparse::Matrix::InnerIterator e(Gsa, k); e; ++e) {
+                    acc(ps[e.row()], pc[e.row()], e.value(), hi[k]);
+                    acc(ps[e.row()], pc[e.row()], e.value(), lo[k]);
+                }
+            }
+            out = ps + pc;
+        };
+        DenseMatrix Xr(na, X.cols()), Gr(na, na), Sr(ns, S.cols()), Pr(ns, na);
+        Vector xbr, Sbr, hi, lo, col, r;
+        for (Eigen::Index j = 0; j < X.cols(); ++j) {
+            r.setZero(na);
+            for (sparse::Matrix::InnerIterator e(Gas, j); e; ++e) r[e.row()] = e.value();
+            hi = X.col(j);
+            refine(r, hi, lo);
+            Xr.col(j) = hi + lo;
+            col = -Gss_d.col(j);
+            product(hi, lo, col);
+            Sr.col(j) = col;
+        }
+        hi = xb;
+        refine(ba, hi, lo);
+        xbr = hi + lo;
+        Sbr = -bs;
+        product(hi, lo, Sbr);
+        for (Eigen::Index j = 0; j < na; ++j) {
+            r.setZero(na);
+            r[j] = Real{1};
+            hi = Ginv.col(j);
+            refine(r, hi, lo);
+            Gr.col(j) = hi + lo;
+            col.setZero(ns);
+            product(hi, lo, col);
+            Pr.col(j) = col;
+        }
+        // the plain operators stay unless some row moved past 1e-12 of its scale
+        const auto moved = [](const auto& a, const auto& b) {
+            for (Eigen::Index i = 0; i < a.rows(); ++i) {
+                const Real sc = b.row(i).cwiseAbs().maxCoeff();
+                if ((a.row(i) - b.row(i)).cwiseAbs().maxCoeff() > Real{1e-12} * sc) return true;
+            }
+            return false;
+        };
+        if (!(moved(S, Sr) || moved(Sb, Sbr) || moved(GsaGinv, Pr) || moved(X, Xr)
+              || moved(xb, xbr) || moved(Ginv, Gr))) {
+            return;
+        }
+        X = std::move(Xr);
+        xb = std::move(xbr);
+        Ginv = std::move(Gr);
+        S = std::move(Sr);
+        Sb = std::move(Sbr);
+        GsaGinv = std::move(Pr);
     }
 
     // -------------------------------------------------------------
@@ -411,7 +583,48 @@ public:
         DenseMatrix recover_from_state;         // n_mna × n_state
         Vector recover_const;                   // n_mna
         DenseMatrix recover_from_b;             // n_mna × n_mna
+        // Mass of each state (C of a cap, L of an inductor): the
+        // energy-coordinate scale √m of dsed's exact propagator.
+        std::vector<Real> state_mass;
+        // Dependent states (add-exact-propagator-strategy DECISIONS,
+        // dependent states): a mode whose G_aa is singular (a capacitor
+        // loop, an inductor cut-set) holds the states on K·x = k. The
+        // flow keeps a consistent state consistent; an inconsistent one
+        // is projected at mode entry, weighted by the energy matrix E
+        // (C on the capacitor block, L with its mutual terms on the
+        // inductor block). Empty (0 rows) when the mode has no
+        // constraint. `constraint_devices` names the algebraic rows that
+        // carry it, `state_labels` every state (for the impulse record).
+        DenseMatrix constraint_K;               // d × n_state
+        Vector constraint_k;                    // d
+        DenseMatrix energy_weight;              // n_state × n_state
+        std::vector<std::string> constraint_devices;
+        std::vector<std::string> state_labels;
     };
+
+    /// The device names of an MNA row for a re-initialisation record, as the
+    /// fixed engine's ReinitRecord names them: a node row by its
+    /// capacitors ("C1"; "C1, C3" when several share it), a branch-current
+    /// row by its inductor, source or branch-form switch; else row_label.
+    [[nodiscard]] std::string record_label_(Index r) const {
+        std::string caps;
+        for (Index b = 0; b < graph_.num_branches(); ++b) {
+            const auto& br = graph_.branch(b);
+            if (!pool_.is_registered(b)) continue;
+            const auto k = pool_.kind_of(b);
+            if (r < graph_.num_nodes()) {
+                if (k == DevicePool::StoredKind::Capacitor && (br.from == r || br.to == r))
+                    caps += (caps.empty() ? "" : ", ") + std::string(graph_.branch_name(b));
+                continue;
+            }
+            const bool owns =
+                (pool_.is_inductor(b) && pool_.branch_var_id_for_inductor(b, graph_) == r) ||
+                (pool_.is_voltage_source(b) && pool_.branch_var_id_for_source(b, graph_) == r) ||
+                (pool_.is_branch_form(b) && pool_.branch_var_id_for_switch(b, graph_) == r);
+            if (owns) return std::string(graph_.branch_name(b));
+        }
+        return caps.empty() ? row_label(graph_, pool_, r) : caps;
+    }
 
     /// Extract continuous-time `(A, b)` for the given switch mask.
     ///
@@ -455,6 +668,27 @@ public:
         const topology::SwitchStateMask& mask,
         Real h_a = Real{1e-6},
         Real h_b = Real{5e-7}) const {
+        // add-branch-form-ideal-switch task 8: the implicit engines'
+        // per-mode structural pass before the extraction, refusing by the
+        // same names (floating_node, ideal_voltage_loop, dependent_states);
+        // this extractor is the exact engine's
+        if (pool_.num_branch_switches() > 0) {
+            BranchStructureChecker structure{graph_, pool_, "dsed"};
+            if (structure.active()) {
+                const auto& ms = structure.check(mask, true);
+                // an ON ideal diode closing a loop of sources and closed ideal
+                // elements: the implicit engines turn it OFF and re-decide; the
+                // exact engine poses the mode it is given, so it refuses it by name
+                if (!ms.loop_diodes.empty()) {
+                    const std::string d{graph_.branch_name(ms.loop_diodes.front())};
+                    throw UnsupportedError(
+                        "dsed", "ideal_voltage_loop", d, "Diode",
+                        "engine 'dsed': the ideal diode '" + d + "' (R_on = 0), ON, closes a "
+                        "loop of voltage sources and closed ideal elements (loop: "
+                        + ms.loop_texts.front() + "): its current is undefined.");
+                }
+            }
+        }
         // ---------------------------------------------------------
         // Steps 1-2 (v2.0 Phase 1): EXACT (G, C, b) split from the
         // assembler — no more two-assembly finite-difference
@@ -474,6 +708,7 @@ public:
                                 G_split, C_split, b_a);
 
         const int n_mna = static_cast<int>(G_split.rows());
+        const Vector b_orig = b_a;    // the general reduction's input
 
         // v2.0 Phase 3 item 4 (audit E.4): the matrix STAYS SPARSE.
         // The old path densified the full MNA here and later fed a
@@ -600,15 +835,381 @@ public:
             }
         }
 
+        // -----------------------------------------------------------------
+        // The general (dense) reduction, taken only where the structural
+        // path above cannot reduce the mode: a capacitor loop (a capacitor
+        // closing a loop of capacitors or of capacitors and voltage
+        // sources), an inductor loop or cut-set (G_aa singular: a node or an
+        // island reached only through inductors / current sources),
+        // magnetically coupled inductors (a non-diagonal mass), or a circuit
+        // without reactive state. Every mode the structural path reduces is
+        // left to it (bit-identical). add-exact-propagator-strategy
+        // DECISIONS, reduced state per mode.
+        //
+        // States are those the structural path would choose: the
+        // capacitors of a spanning forest of the capacitor graph (same BFS,
+        // same orientation; a capacitor closing a loop is a link, not a
+        // state) by capacitor index, then every inductor. With
+        //   M̃ ẏ + G̃ y + ũ = 0,  M̃ = Tᵀ(C/2)T,  G̃ = TᵀGT,  ũ = Tᵀb,
+        // M̃ lives on the state rows only (M_ss: C of the tree plus the
+        // links, −L with the mutual terms). Index 1 (G_aa regular) is the
+        // Schur complement with the full M_ss. Index 2 (G_aa singular,
+        // left / right null spaces W / N of dimension d): the algebraic rows
+        // W impose K x = k on the states (K = Wᵀ G_as), and the null part of
+        // the algebraic unknowns, a = −G_aa⁺(G_as x + u_a) + N μ, is fixed
+        // by the hidden constraint K ẋ = 0. The flow ẋ = Π f keeps every
+        // consistent state consistent; K, k and the energy weight ride on
+        // the result for the projection at mode entry.
+        // -----------------------------------------------------------------
+        auto general = [&]() -> ContinuousLTI {
+            const int n = n_mna;
+            const int nc = static_cast<int>(caps.size());
+            const Index gnd = static_cast<Index>(n);
+            auto mi = [&](Index x) { return x == kGround ? gnd : x; };
+            std::vector<std::vector<std::pair<Index, int>>> adj(static_cast<Size>(n) + 1);
+            for (int k = 0; k < nc; ++k) {
+                adj[static_cast<Size>(mi(caps[k].from))].push_back({mi(caps[k].to), k});
+                adj[static_cast<Size>(mi(caps[k].to))].push_back({mi(caps[k].from), k});
+            }
+            std::vector<char> vis(static_cast<Size>(n) + 1, char{0});
+            std::vector<std::array<Index, 2>> tree;   // (pos, neg), BFS order
+            std::vector<Index> cap_pos(static_cast<Size>(nc), kInvalidIndex);
+            auto bfs = [&](Index root) {
+                std::queue<Index> q;
+                q.push(root);
+                vis[static_cast<Size>(root)] = 1;
+                while (!q.empty()) {
+                    const Index u = q.front();
+                    q.pop();
+                    for (auto [v, k] : adj[static_cast<Size>(u)]) {
+                        if (vis[static_cast<Size>(v)]) continue;
+                        vis[static_cast<Size>(v)] = 1;
+                        tree.push_back({v, u});
+                        cap_pos[static_cast<Size>(k)] = v;
+                        q.push(v);
+                    }
+                }
+            };
+            bfs(gnd);
+            for (Index i = 0; i < static_cast<Index>(n); ++i) {
+                if (!vis[static_cast<Size>(i)] && !adj[static_cast<Size>(i)].empty()) bfs(i);
+            }
+            DenseMatrix Tg = DenseMatrix::Identity(n, n);
+            for (auto it = tree.rbegin(); it != tree.rend(); ++it) {
+                if ((*it)[1] == gnd) continue;
+                Tg.col((*it)[1]) += Tg.col((*it)[0]);
+            }
+            std::vector<Index> srows;
+            std::vector<bool> scap;
+            std::vector<Real> smass;
+            for (int k = 0; k < nc; ++k) {
+                if (cap_pos[static_cast<Size>(k)] == kInvalidIndex) continue;   // a link
+                srows.push_back(cap_pos[static_cast<Size>(k)]);
+                scap.push_back(true);
+            }
+            for (const auto& l : inds) {
+                srows.push_back(l.branch_var);
+                scap.push_back(false);
+            }
+            const int ns = static_cast<int>(srows.size());
+            std::vector<int> spos(static_cast<Size>(n), -1);
+            for (int i = 0; i < ns; ++i) spos[static_cast<Size>(srows[static_cast<Size>(i)])] = i;
+            std::vector<Index> arows;
+            for (int r = 0; r < n; ++r) {
+                if (spos[static_cast<Size>(r)] < 0) arows.push_back(r);
+            }
+            const int na = static_cast<int>(arows.size());
+            const DenseMatrix Gt = Tg.transpose() * DenseMatrix(G_split) * Tg;
+            const DenseMatrix Mt = Tg.transpose() * (DenseMatrix(C_split) * Real{0.5}) * Tg;
+            auto sub = [](const DenseMatrix& X, const std::vector<Index>& r,
+                          const std::vector<Index>& c) {
+                DenseMatrix Y(static_cast<Index>(r.size()), static_cast<Index>(c.size()));
+                for (Size i = 0; i < r.size(); ++i)
+                    for (Size j = 0; j < c.size(); ++j) Y(static_cast<Index>(i), static_cast<Index>(j)) = X(r[i], c[j]);
+                return Y;
+            };
+            const DenseMatrix Gss = sub(Gt, srows, srows), Gsa = sub(Gt, srows, arows);
+            const DenseMatrix Gas = sub(Gt, arows, srows), Gaa = sub(Gt, arows, arows);
+            const DenseMatrix Mss = sub(Mt, srows, srows);
+            if (na > 0 && ns > 0) {      // (maxCoeff of an empty block is undefined)
+                const Real mmax = Mt.cwiseAbs().maxCoeff();
+                const Real off = std::max(sub(Mt, srows, arows).cwiseAbs().maxCoeff(),
+                                          sub(Mt, arows, arows).cwiseAbs().maxCoeff());
+                if (off > Real{1e-12} * mmax) {
+                    throw std::runtime_error(
+                        "compute_lti_state_space: a reactive element lies on a "
+                        "coordinate the capacitor forest does not carry (general "
+                        "reduction); use engine='pwl' or 'trbdf2'.");
+                }
+            }
+            // energy weight: C on the capacitor block, L (sign flipped) on
+            // the inductor block
+            DenseMatrix E = Mss;
+            for (int i = 0; i < ns; ++i) {
+                if (!scap[static_cast<Size>(i)]) {
+                    E.row(i) *= Real{-1};
+                }
+            }
+            for (int i = 0; i < ns; ++i) smass.push_back(std::abs(Mss(i, i)));
+            Eigen::FullPivLU<DenseMatrix> mlu(Mss);
+            if (ns > 0) {
+                // the energy weight must be positive definite, by the structural
+                // path's criterion on the unit-diagonal scaling (a pivot of
+                // sqrt(1 − k²) ≤ 1e-6 is |k| = 1 to rounding): refused by name
+                const Vector dinv = E.diagonal().cwiseAbs().cwiseSqrt().cwiseInverse();
+                const DenseMatrix En = dinv.asDiagonal() * E * dinv.asDiagonal();
+                const Eigen::LLT<DenseMatrix> ellt(En);
+                if (!dinv.allFinite() || ellt.info() != Eigen::Success
+                    || ellt.matrixL().toDenseMatrix().diagonal().minCoeff() <= Real{1e-6}) {
+                    throw std::runtime_error(
+                        "compute_lti_state_space: the coupled-inductor "
+                        "matrix is not positive definite (|k| >= 1 on a "
+                        "transformer / coupled-inductor pair): the winding "
+                        "currents are not independent states.");
+                }
+            }
+            // G_aa: rank-revealing. The structural path found it singular
+            // (its sparse LU failed, or the equilibrated block is past the
+            // same cut as below).
+            DenseMatrix P = DenseMatrix::Zero(na, na), W(na, 0), N(na, 0);
+            if (na > 0) {
+                // on the equilibrated block Gs = Dr·G_aa·Dc (rows, then columns,
+                // to a unit largest entry), the scale the structural path's rank
+                // check uses (cond₁ after its G_aa⁻¹): a cancellation pivot is
+                // ~eps there whatever the conductance scale
+                Vector dr(na), dc(na);
+                for (int i = 0; i < na; ++i) {
+                    const Real m = Gaa.row(i).cwiseAbs().maxCoeff();
+                    dr[i] = m > Real{0} ? Real{1} / m : Real{1};
+                }
+                const DenseMatrix Gr = dr.asDiagonal() * Gaa;
+                for (int j = 0; j < na; ++j) {
+                    const Real m = Gr.col(j).cwiseAbs().maxCoeff();
+                    dc[j] = m > Real{0} ? Real{1} / m : Real{1};
+                }
+                const DenseMatrix Gs = Gr * dc.asDiagonal();
+                Eigen::JacobiSVD<DenseMatrix> svd(Gs, Eigen::ComputeFullU | Eigen::ComputeFullV);
+                const Vector& sg = svd.singularValues();
+                const Real tol = sg.size() ? sg[0] * Real(std::max(na, 16))
+                                             * std::numeric_limits<Real>::epsilon() * Real{4}
+                                           : Real{0};
+                int rho = 0;
+                while (rho < na && sg[rho] > tol) ++rho;
+                const int d = na - rho;
+                // G_aa = Dr⁻¹·Gs·Dc⁻¹: generalized inverse Dc·Gs⁺·Dr, left null
+                // space Dr·U₀, right null space Dc·V₀
+                P = dc.asDiagonal()
+                    * (svd.matrixV().leftCols(rho)
+                       * sg.head(rho).cwiseInverse().asDiagonal()
+                       * svd.matrixU().leftCols(rho).transpose())
+                    * dr.asDiagonal();
+                W = dr.asDiagonal() * svd.matrixU().rightCols(d);
+                N = dc.asDiagonal() * svd.matrixV().rightCols(d);
+            }
+            const int d = static_cast<int>(W.cols());
+            // f(x, u) = Af·x + Fs·u_s + Fa·u_a
+            DenseMatrix Af(ns, ns), Fs(ns, ns), Fa(ns, na);
+            DenseMatrix PGas = P * Gas;
+            if (ns > 0) {
+                DenseMatrix S = Gsa * PGas - Gss, GsaP = Gsa * P;
+                if (d == 0 && na > 0) {   // regular G_aa: the solves refined as above
+                    Vector xb = Vector::Zero(na), Sb = Vector::Zero(ns);
+                    refine_schur_(Gaa.sparseView(), Gas.sparseView(), Gsa.sparseView(),
+                                  Gss.sparseView(), Vector::Zero(na), Vector::Zero(ns),
+                                  [&](const Vector& r, Vector& o) { o = P * r; },
+                                  PGas, xb, P, S, Sb, GsaP);
+                }
+                Af = mlu.solve(S);
+                Fs = -mlu.inverse();
+                Fa = mlu.solve(GsaP);
+            }
+            DenseMatrix Rax = -PGas, Ras = DenseMatrix::Zero(na, ns), Raa = -P;
+            DenseMatrix K(d, ns);
+            Vector kc = Vector::Zero(d);
+            const Vector u_const = Tg.transpose() * b_orig;
+            Vector ua_const(na);
+            for (int i = 0; i < na; ++i) ua_const[i] = u_const[arows[static_cast<Size>(i)]];
+            if (d > 0) {
+                if (ns == 0) {
+                    throw std::runtime_error(
+                        "compute_lti_state_space: algebraic block G_aa is singular "
+                        "and the circuit has no state to carry the constraint.");
+                }
+                K = W.transpose() * Gas;
+                const DenseMatrix MinvGsaN = mlu.solve(Gsa * N);
+                const DenseMatrix H = K * MinvGsaN;
+                Eigen::FullPivLU<DenseMatrix> hlu(H);
+                // isInvertible() is relative to H's own largest pivot, so an H that is
+                // rounding of K·M⁻¹G_sa·N (no state fixes the null direction: a floating
+                // group whose ties fell under the SVD cut) passed and its 1/rounding
+                // inverse sent the group to 1e17 V. The same cut as the SVD's, on the
+                // scale H has without cancellation.
+                const DenseMatrix Minv = mlu.inverse();
+                const Real h_scale = ((W.cwiseAbs().transpose() * Gas.cwiseAbs())
+                                      * Minv.cwiseAbs() * (Gsa.cwiseAbs() * N.cwiseAbs()))
+                                         .maxCoeff();
+                if (hlu.isInvertible()
+                    && !(hlu.matrixLU().diagonal().cwiseAbs().minCoeff()
+                         > Real{4} * Real(std::max(d, 16))
+                               * std::numeric_limits<Real>::epsilon() * h_scale)) {
+                    // name the group by its node with the largest null-vector entry
+                    std::string where;
+                    Real nmax = Real{0};
+                    for (int i = 0; i < na; ++i) {
+                        const Real ni = N.row(i).cwiseAbs().maxCoeff();
+                        const auto info = describe_row(graph_, pool_,
+                                                       static_cast<Index>(arows[static_cast<Size>(i)]));
+                        if (info.kind == RowKind::NodeVoltage && ni > nmax) {
+                            nmax = ni;
+                            where = info.label;
+                        }
+                    }
+                    throw std::runtime_error(
+                        "compute_lti_state_space: algebraic block G_aa is numerically "
+                        "singular at " + (where.empty() ? std::string{"a node group"} : where)
+                        + ": a direction it cannot resolve (a node group tied to "
+                        "the rest only by conductances below its rounding) is fixed by "
+                        "no state for this switch mask.");
+                }
+                if (!hlu.isInvertible()) {
+                    throw std::runtime_error(
+                        "compute_lti_state_space: algebraic block G_aa is singular "
+                        "beyond a capacitor loop / inductor cut-set (index > 2): "
+                        "circuit topology does not have a unique algebraic solution "
+                        "for this switch mask.");
+                }
+                const DenseMatrix G = hlu.solve(K);            // H⁻¹K (d × ns)
+                const DenseMatrix Pi = DenseMatrix::Identity(ns, ns) - MinvGsaN * G;
+                // a gains N·μ, μ = H⁻¹K·f
+                Rax += N * (G * Af);
+                Ras = N * (G * Fs);
+                Raa += N * (G * Fa);
+                Af = Pi * Af;
+                Fs = Pi * Fs;
+                Fa = Pi * Fa;
+                kc = -(W.transpose() * ua_const);
+                // a time-varying source on a constraint would drive the
+                // dependent state by its derivative: not modelled -> refuse
+                const DenseMatrix WTa = W.transpose() * sub(Tg.transpose(), arows, [&] {
+                    std::vector<Index> all(static_cast<Size>(n));
+                    std::iota(all.begin(), all.end(), Index{0});
+                    return all;
+                }());
+                using SK = DevicePool::StoredKind;
+                for (Index bid = 0; bid < graph_.num_branches(); ++bid) {
+                    if (!pool_.is_registered(bid)) continue;
+                    const auto k = pool_.kind_of(bid);
+                    Vector st = Vector::Zero(n);
+                    if (k == SK::PWMVoltageSource || k == SK::SineVoltageSource
+                        || k == SK::PulseVoltageSource) {
+                        st[pool_.branch_var_id_for_source(bid, graph_)] = Real{1};
+                    } else if (k == SK::SineCurrentSource || k == SK::PulseCurrentSource
+                               || k == SK::PwlCurrentSource) {
+                        const auto& br = graph_.branch(bid);
+                        if (br.from >= 0) st[br.from] = Real{1};
+                        if (br.to >= 0) st[br.to] = Real{-1};
+                    } else {
+                        continue;
+                    }
+                    if ((WTa * st).cwiseAbs().maxCoeff()
+                        > Real{1e-9} * std::max(Real{1}, WTa.cwiseAbs().maxCoeff())) {
+                        // refused by name (dsed-only extractor): the capacitor-source
+                        // loop of an ON ideal diode (v_C = v_s(t) - V_f) is not posed
+                        throw UnsupportedError("dsed", "source_capacitor_loop",
+                            std::string{graph_.branch_name(bid)}, "Source", std::format(
+                            "compute_lti_state_space: the time-varying source {} sits "
+                            "in a capacitor loop / inductor cut-set: the dependent "
+                            "state follows the source's derivative, which the exact "
+                            "kernel does not model. Use engine='pwl' or 'trbdf2'.",
+                            row_label(graph_, pool_, pool_.is_registered(bid) && graph_.branch(bid).kind == topology::BranchKind::Source
+                                      && (k == SK::PWMVoltageSource || k == SK::SineVoltageSource || k == SK::PulseVoltageSource)
+                                      ? pool_.branch_var_id_for_source(bid, graph_) : Index{0})));
+                    }
+                }
+            }
+            // u = Tᵀ b: F_u (ns × n) and R_u (na × n) act on the whole u
+            DenseMatrix Fu = DenseMatrix::Zero(ns, n), Ru = DenseMatrix::Zero(na, n);
+            for (int i = 0; i < ns; ++i) {
+                Fu.col(srows[static_cast<Size>(i)]) = Fs.col(i);
+                Ru.col(srows[static_cast<Size>(i)]) = Ras.col(i);
+            }
+            for (int i = 0; i < na; ++i) {
+                Fu.col(arows[static_cast<Size>(i)]) = Fa.col(i);
+                Ru.col(arows[static_cast<Size>(i)]) = Raa.col(i);
+            }
+            DenseMatrix Bp = Fu * Tg.transpose();                 // ns × n
+            Vector b_red = Bp * b_orig;
+            DenseMatrix Y = DenseMatrix::Zero(n, ns);             // y_T from x
+            DenseMatrix Yb = DenseMatrix::Zero(n, n);             // y_T from u
+            for (int i = 0; i < ns; ++i) Y(srows[static_cast<Size>(i)], i) = Real{1};
+            for (int i = 0; i < na; ++i) {
+                Y.row(arows[static_cast<Size>(i)]) = Rax.row(i);
+                Yb.row(arows[static_cast<Size>(i)]) = Ru.row(i);
+            }
+            DenseMatrix rs = Tg * Y;
+            DenseMatrix rb = Tg * Yb * Tg.transpose();
+            Vector rc = rb * b_orig;
+            ContinuousLTI out{std::move(Af), std::move(b_red), std::move(srows), std::move(scap),
+                              std::move(Bp), std::move(rs), std::move(rc), std::move(rb),
+                              std::move(smass), {}, {}, {}, {}, {}};
+            out.constraint_K = std::move(K);
+            out.constraint_k = std::move(kc);
+            out.energy_weight = std::move(E);
+            for (const Index r : out.state_row_indices)
+                out.state_labels.push_back(record_label_(r));
+            // devices as pwl names them: the branch rows (switches, sources,
+            // inductors) that carry the constraint; node rows only if none does
+            std::vector<Index> crow;
+            for (int i = 0; i < W.rows(); ++i)
+                if (d > 0 && W.row(i).cwiseAbs().maxCoeff() > Real{1e-9})
+                    crow.push_back(arows[static_cast<Size>(i)]);
+            // (a branch-form switch first: impulse_losses books the record to
+            // devices[0], and a source in the same loop is not the cause)
+            auto is_switch_row = [&](Index r) {
+                for (Index b = 0; b < graph_.num_branches(); ++b)
+                    if (pool_.is_registered(b) && pool_.is_branch_form(b)
+                        && pool_.branch_var_id_for_switch(b, graph_) == r) return true;
+                return false;
+            };
+            const bool any_branch = std::any_of(crow.begin(), crow.end(),
+                [&](Index r) { return r >= graph_.num_nodes(); });
+            std::stable_partition(crow.begin(), crow.end(), is_switch_row);
+            for (const Index r : crow)
+                if (!any_branch || r >= graph_.num_nodes())
+                    out.constraint_devices.push_back(record_label_(r));
+            return out;
+        };
+
         const int n_cap = static_cast<int>(caps.size());
         const int n_ind = static_cast<int>(inds.size());
         const int n_state = n_cap + n_ind;
         if (n_state == 0) {
-            throw std::runtime_error(
-                "compute_lti_state_space: circuit has no "
-                "dynamic elements (caps or inductors); the "
-                "PED engine integrates state equations, so a "
-                "purely static circuit has no state to evolve.");
+            // A static mode (no capacitor, no inductor): nothing to
+            // propagate, every unknown is algebraic, x = −G⁻¹(b + b_extra).
+            // The exact engine still lands its events (source corners,
+            // switch edges, diode predicates read through this map);
+            // add-exact-propagator-strategy DECISIONS, static circuits.
+            auto solver = sparse::make_default_solver();
+            if (!solver->analyze(G_st_sp) || !solver->factorize(G_st_sp)) {
+                throw std::runtime_error(
+                    "compute_lti_state_space: algebraic block "
+                    "G_aa is singular in a static mode; circuit "
+                    "topology does not have a unique algebraic "
+                    "solution for this switch mask.");
+            }
+            DenseMatrix Ginv(n_mna, n_mna);
+            Vector rhs = Vector::Zero(n_mna), sol;
+            for (int j = 0; j < n_mna; ++j) {
+                rhs[j] = Real{1};
+                solver->solve(rhs, sol);
+                Ginv.col(j) = sol;
+                rhs[j] = Real{0};
+            }
+            Vector rec_const0 = -(Ginv * b_a);
+            return ContinuousLTI{DenseMatrix(0, 0), Vector(0), {}, {},
+                                 DenseMatrix(0, n_mna), DenseMatrix(n_mna, 0),
+                                 std::move(rec_const0), DenseMatrix(-Ginv), {},
+                                 {}, {}, {}, {}, {}};
         }
 
         // Declared OUTSIDE the n_cap > 0 block so it stays in scope
@@ -719,11 +1320,8 @@ public:
             // Any cap left unoriented = parallel-cap cycle. Defer.
             for (int k = 0; k < n_cap; ++k) {
                 if (caps[k].pos == kInvalidIndex) {
-                    throw std::runtime_error(
-                        "compute_lti_state_space: capacitors form a "
-                        "cycle (parallel caps share both terminals) — "
-                        "merge them into a single equivalent cap "
-                        "upstream. Phase 5.1b TODO.");
+                    // a capacitor loop: one cap is a link, not a state
+                    return general();
                 }
                 // The anchor (kGroundIdx OR a real MNA node) can be
                 // a `neg` value. The `pos` is always a real MNA row.
@@ -886,11 +1484,8 @@ public:
             auto solver = sparse::make_default_solver();
             if (!solver->analyze(Gaa_sp) ||
                 !solver->factorize(Gaa_sp)) {
-                throw std::runtime_error(
-                    "compute_lti_state_space: algebraic block "
-                    "G_aa is singular; circuit topology does "
-                    "not have a unique algebraic solution for "
-                    "this switch mask.");
+                // a capacitor loop / inductor cut-set: dependent states
+                return general();
             }
             // G_aa⁻¹·G_as, one sparse solve per state column.
             DenseMatrix Ginv_Gas(n_alg, n_state);
@@ -924,7 +1519,47 @@ public:
                     rhs[j] = Real{0};
                 }
             }
-            const DenseMatrix Gsa_Ginv = Gsa_sp * Ginv;
+            // The rank decision, on the equilibrated block: a cancellation
+            // pivot (g − g·g/g of a series resistor closing an inductor
+            // cut-set) survives the sparse LU at rounding level and would
+            // return a 1/eps eigenvalue. cond₁(Dr·G_aa·Dc) past the general
+            // reduction's SVD cut sends the mode there, so the decision does
+            // not flip with the last bit of a resistor (DECISIONS, dependent
+            // states, rounding fuzz).
+            {
+                Vector dr = Vector::Zero(n_alg), dc = Vector::Zero(n_alg);
+                for (int k = 0; k < Gaa_sp.outerSize(); ++k)
+                    for (sparse::Matrix::InnerIterator it(Gaa_sp, k); it; ++it)
+                        dr[it.row()] = std::max(dr[it.row()], std::abs(it.value()));
+                for (int i = 0; i < n_alg; ++i)
+                    dr[i] = dr[i] > Real{0} ? Real{1} / dr[i] : Real{1};
+                for (int k = 0; k < Gaa_sp.outerSize(); ++k)
+                    for (sparse::Matrix::InnerIterator it(Gaa_sp, k); it; ++it)
+                        dc[it.col()] = std::max(dc[it.col()],
+                                                std::abs(it.value()) * dr[it.row()]);
+                for (int j = 0; j < n_alg; ++j)
+                    dc[j] = dc[j] > Real{0} ? Real{1} / dc[j] : Real{1};
+                Vector cs = Vector::Zero(n_alg);
+                for (int k = 0; k < Gaa_sp.outerSize(); ++k)
+                    for (sparse::Matrix::InnerIterator it(Gaa_sp, k); it; ++it)
+                        cs[it.col()] += std::abs(it.value()) * dr[it.row()] * dc[it.col()];
+                Real inv_norm = Real{0};
+                for (int j = 0; j < n_alg; ++j) {
+                    Real c = Real{0};
+                    for (int i = 0; i < n_alg; ++i)
+                        c += std::abs(Ginv(i, j)) / (dc[i] * dr[j]);
+                    inv_norm = std::max(inv_norm, c);
+                }
+                const Real cut = Real{1} / (Real{4} * Real(std::max(n_alg, 16))
+                                            * std::numeric_limits<Real>::epsilon());
+                if (!(cs.maxCoeff() * inv_norm <= cut)) {
+                    return general();
+                }
+            }
+            DenseMatrix Gsa_Ginv = Gsa_sp * Ginv;
+            refine_schur_(Gaa_sp, Gas_sp, Gsa_sp, Gss_sp, b_a_v, b_s,
+                          [&](const Vector& r, Vector& o) { solver->solve(r, o); },
+                          Ginv_Gas, Ginv_ba, Ginv, Schur_G, Schur_b, Gsa_Ginv);
             for (int j = 0; j < n_alg; ++j) {
                 B.col(alg_rows[j]) = Gsa_Ginv.col(j);
             }
@@ -988,26 +1623,33 @@ public:
         // would be a false positive whose message ("would silently
         // return dynamics computed as if the coupling were absent")
         // is itself untrue for that circuit.
-        Size coupled_pairs = 0;
+        // Coupled windings (k != 0): the inductor block of M_ss is the
+        // full inductance matrix Lmat (L_ii self, L_ij = M, the same
+        // −2L / −2M pair assemble.hpp stamps into C), applied as a
+        // solve −Lmat⁻¹ on the inductor rows. Without coupling the
+        // per-row scaling below is kept unchanged (bit identity).
+        DenseMatrix Lmat;
         for (const auto& tc : pool_.transformer_couplings()) {
-            if (models::TwoWindingTransformer::mutual_inductance(
-                    tc.params) != Real{0}) {
-                ++coupled_pairs;
+            const Real M = models::TwoWindingTransformer::
+                mutual_inductance(tc.params);
+            if (M == Real{0}) continue;      // k = 0: independent windings
+            const auto row_of = [&](Index branch_id) {
+                const Index bv =
+                    pool_.branch_var_id_for_inductor(branch_id, graph_);
+                for (int i = 0; i < n_ind; ++i)
+                    if (inds[i].branch_var == bv) return i;
+                throw std::runtime_error(
+                    "compute_lti_state_space: a coupled winding is not "
+                    "a linear inductor state.");
+            };
+            if (Lmat.size() == 0) {
+                Lmat = DenseMatrix::Zero(n_ind, n_ind);
+                for (int i = 0; i < n_ind; ++i) Lmat(i, i) = inds[i].L;
             }
-        }
-        if (coupled_pairs > 0) {
-            throw std::runtime_error(std::format(
-                "compute_lti_state_space: this circuit has {} "
-                "magnetically coupled inductor pair(s) (k != 0 on the "
-                "transformer / coupled-inductor API). The "
-                "continuous-time LTI extraction applies a DIAGONAL "
-                "inverse mass matrix, so it cannot represent the "
-                "mutual-inductance off-diagonal terms and would "
-                "silently return dynamics computed as if the coupling "
-                "were absent. Use the fixed-step PWL engine "
-                "(engine='pwl'), which stamps the mutual terms "
-                "exactly, for magnetically coupled circuits.",
-                coupled_pairs));
+            const int p = row_of(tc.primary_branch_id);
+            const int s = row_of(tc.secondary_branch_id);
+            Lmat(p, s) += M;
+            Lmat(s, p) += M;
         }
         // ---------------------------------------------------------
         DenseMatrix A = Schur_G;
@@ -1018,11 +1660,33 @@ public:
             b_reduced(i) *= inv;
             B.row(i) *= inv;
         }
-        for (int i = 0; i < n_ind; ++i) {
-            const Real inv = Real{-1} / inds[i].L;
-            A.row(n_cap + i) *= inv;
-            b_reduced(n_cap + i) *= inv;
-            B.row(n_cap + i) *= inv;
+        if (Lmat.size() == 0) {
+            for (int i = 0; i < n_ind; ++i) {
+                const Real inv = Real{-1} / inds[i].L;
+                A.row(n_cap + i) *= inv;
+                b_reduced(n_cap + i) *= inv;
+                B.row(n_cap + i) *= inv;
+            }
+        } else {
+            // Positive definite or refused: |k| = 1 makes Lmat singular
+            // (the winding currents are then not independent states).
+            Eigen::LLT<DenseMatrix> llt(Lmat);
+            const Real lmax = Lmat.diagonal().cwiseAbs().maxCoeff();
+            if (llt.info() != Eigen::Success
+                || llt.matrixL().toDenseMatrix().diagonal().minCoeff()
+                       <= Real{1e-6} * std::sqrt(lmax)) {
+                throw std::runtime_error(
+                    "compute_lti_state_space: the coupled-inductor "
+                    "matrix is not positive definite (|k| >= 1 on a "
+                    "transformer / coupled-inductor pair): the winding "
+                    "currents are not independent states.");
+            }
+            A.middleRows(n_cap, n_ind) =
+                -llt.solve(DenseMatrix(A.middleRows(n_cap, n_ind)));
+            b_reduced.segment(n_cap, n_ind) =
+                -llt.solve(Vector(b_reduced.segment(n_cap, n_ind)));
+            B.middleRows(n_cap, n_ind) =
+                -llt.solve(DenseMatrix(B.middleRows(n_cap, n_ind)));
         }
 
         return ContinuousLTI{
@@ -1034,6 +1698,13 @@ public:
             std::move(rec_state),
             std::move(rec_const),
             std::move(rec_b),
+            [&] {
+                std::vector<Real> m;
+                for (const auto& c : caps) m.push_back(c.C);
+                for (const auto& i : inds) m.push_back(i.L);
+                return m;
+            }(),
+            {}, {}, {}, {}, {},   // no constraint on a structural mode
         };
     }
 
@@ -1064,7 +1735,7 @@ public:
     /// analyze+factorize'd segment — unbounded memory AND two full
     /// symbolic analyses per event.
     ///
-    /// Now: a small LRU (≤ `kMaxEventEntries` masks) of reusable
+    /// Now: a byte-budgeted LRU of reusable
     /// EVENT SOLVERS. Each entry stores the mask's (G, C, b) split
     /// (`J(dt) = G + (1/dt)·C`, see `assemble_segment_split`) and a
     /// solver analyzed ONCE — a dt change is a value re-combine +
@@ -1101,12 +1772,22 @@ public:
             // new mask, leaving the table one entry poorer for
             // nothing (adversarial-review finding F6-c).
             EventEntry e;
-            assemble_segment_split(graph_, pool_, mask,
-                                    e.G, e.C, e.b_constant);
+            {
+                sparse::Matrix G, C;
+                asm_.split(graph_, pool_, mask, G, C, e.b_constant);
+                if (dt > Real{0}) {
+                    asm_.combine(G, C, dt, e.J);   // = G + (1/dt)·C
+                    asm_.scatter(G, C, e.gs, e.cs);
+                } else {
+                    Vector b_unused;
+                    asm_.assemble(graph_, pool_, mask, Real{0}, e.J,
+                                  b_unused);
+                }
+            }
             e.solver = sparse::make_default_solver(
                 pool_.state_size(graph_), sparse::Backend::Auto);
-            const sparse::Matrix J = combine_event_J_(e, mask, dt);
-            if (!e.solver->analyze(J)) {
+            const sparse::Matrix& J = e.J;
+            if (!analyze_shared_(*e.solver, J, dt > Real{0})) {
                 throw std::runtime_error(std::format(
                     "PwlStateSpaceCache::solve_at: analyze failed "
                     "(structurally singular) for mask {} (dt={}){}",
@@ -1125,10 +1806,22 @@ public:
             e.current_dt       = dt;
             e.touch(tick);
             e.analyzed_dynamic = (dt > Real{0});
-            // Everything that can throw is behind us; NOW make room.
-            if (event_entries_.size() >=
-                static_cast<std::size_t>(kMaxEventEntries)) {
-                evict_lru_event_entry_();
+            // Everything that can throw is behind us; NOW make room
+            // (update-trbdf2-factor-reuse: the segment byte budget,
+            // accounted separately for this table; the incoming entry
+            // is always inserted).
+            if (segment_budget_bytes_ > 0) {
+                const std::size_t incoming = e.approx_bytes();
+                std::size_t resident = 0;
+                for (const auto& [m, other] : event_entries_) {
+                    resident += other.approx_bytes();
+                }
+                while (!event_entries_.empty() &&
+                       resident + incoming > segment_budget_bytes_) {
+                    resident -= evict_lru_event_entry_();
+                    event_evictions_.fetch_add(
+                        1, std::memory_order_relaxed);
+                }
             }
             it = event_entries_.emplace(mask, std::move(e)).first;
             event_builds_.fetch_add(1, std::memory_order_relaxed);
@@ -1136,7 +1829,14 @@ public:
             // Known mask, new dt: numeric refactor on the SAME
             // symbolic analysis (pattern is dt-invariant).
             EventEntry& e = it->second;
-            const sparse::Matrix J = combine_event_J_(e, mask, dt);
+            if (dt > Real{0}) {
+                // In place on the entry's own J: no allocation.
+                SegmentAssembler::combine_scattered(e.gs, e.cs, dt, e.J);
+            } else {
+                Vector b_unused;
+                asm_.assemble(graph_, pool_, mask, Real{0}, e.J, b_unused);
+            }
+            const sparse::Matrix& J = e.J;
             if (!e.solver->factorize(J)) {
                 // The solver destroys its previous factor up-front,
                 // so the entry can no longer serve ANY dt — erase it
@@ -1145,12 +1845,14 @@ public:
                 // current_dt made a later solve_at at the previously
                 // WORKING dt hit the reuse branch and die with
                 // logic_error instead of transparently rebuilding).
-                event_entries_.erase(it);
-                throw std::runtime_error(std::format(
+                // Message first: `J` lives in the entry erased below.
+                std::string msg = std::format(
                     "PwlStateSpaceCache::solve_at: refactorize "
                     "failed (numerically singular) for mask {} "
                     "(dt={}){}", mask.to_string(), dt,
-                    explain_singular(graph_, pool_, J, nullptr)));
+                    explain_singular(graph_, pool_, J, nullptr));
+                event_entries_.erase(it);
+                throw std::runtime_error(msg);
             }
             e.current_dt = dt;
             e.touch(tick);
@@ -1160,28 +1862,76 @@ public:
             event_hits_.fetch_add(1, std::memory_order_relaxed);
         }
         const EventEntry& e = it->second;
-        Vector& rhs = solve_rhs_tls_();
-        rhs = -(e.b_constant + b_extra);
-        e.solver->solve(rhs, x);
+        e.solver->solve_neg_sum(e.b_constant, b_extra, x);
     }
 
-    /// Maximum number of event-solver entries `solve_at` keeps
-    /// resident (LRU beyond this). Sub-step event correction
-    /// alternates between the pre- and post-commutation masks, so
-    /// a handful of slots covers real converters with headroom.
-    static constexpr Size kMaxEventEntries = 8;
+    /// The resident factor `solve_at(mask, dt, …)` just used, read-only: no
+    /// build, no refactor, no LRU touch (add-parameter-sensitivities 5.5:
+    /// the sensitivity solve adds no factorization and moves no eviction).
+    /// Throws std::logic_error when none is resident at that dt.
+    [[nodiscard]] const sparse::DirectSolver& resident_factor(
+        const topology::SwitchStateMask& mask, Real dt) const {
+        if (dt == dt_) {
+            const auto it = segments_.find(mask);
+            if (it != segments_.end() && it->second.solver) return *it->second.solver;
+        } else {
+            const auto it = event_entries_.find(mask);
+            if (it != event_entries_.end() && it->second.current_dt == dt
+                && it->second.solver) {
+                return *it->second.solver;
+            }
+        }
+        throw std::logic_error(std::format(
+            "PwlStateSpaceCache::resident_factor: no factor resident for mask "
+            "{} at dt = {}", mask.to_string(), dt));
+    }
 
-    /// Number of event-solver entries currently resident
-    /// (≤ `kMaxEventEntries`). Same sampling caveat as
+    /// Any factor of `mask` resident now (the event entry's, else the
+    /// segment's at the cache dt), read-only like `resident_factor`; its dt
+    /// in `dt_out`. nullptr when none is (add-parameter-sensitivities 6.3:
+    /// an interpolated landing made no solve of its own).
+    [[nodiscard]] const sparse::DirectSolver* any_resident_factor(
+        const topology::SwitchStateMask& mask, Real& dt_out) const {
+        if (const auto it = event_entries_.find(mask);
+            it != event_entries_.end() && it->second.solver) {
+            dt_out = it->second.current_dt;
+            return it->second.solver.get();
+        }
+        if (const auto it = segments_.find(mask); it != segments_.end() && it->second.solver) {
+            dt_out = dt_;
+            return it->second.solver.get();
+        }
+        return nullptr;
+    }
+
+    /// Number of event-solver entries currently resident (bounded by
+    /// the byte budget, see `set_segment_budget_bytes`). Same sampling
+    /// caveat as
     /// `num_built_segments()` — `solve_at` mutates this container.
     [[nodiscard]] Size num_event_entries() const noexcept {
         return event_entries_.size();
     }
 
+    /// The matrix and constant vector behind the resident `solve_at`
+    /// factor of (mask, dt), or nullptr when none is resident at that dt.
+    /// Values equal `SegmentAssembler::assemble(mask, dt)`: TR-BDF2's
+    /// round-off bounds read |J| here instead of re-assembling.
+    [[nodiscard]] const sparse::Matrix* resident_event_matrix(
+        const topology::SwitchStateMask& mask, Real dt,
+        const Vector** b_constant) const noexcept {
+        const auto it = event_entries_.find(mask);
+        if (dt == dt_ || it == event_entries_.end()
+            || it->second.current_dt != dt) {
+            return nullptr;
+        }
+        *b_constant = &it->second.b_constant;
+        return &it->second.J;
+    }
+
     /// Number of DISTINCT dt values currently loaded across the
     /// event-solver entries. (v2.0 Phase 1: an entry holds ONE
     /// factor at its most recent dt — dt values are no longer
-    /// accumulated, so this is bounded by `kMaxEventEntries`.)
+    /// accumulated, so this is at most `num_event_entries()`.)
     [[nodiscard]] Size num_alt_dt_values() const noexcept {
         std::set<Real> dts;
         for (const auto& [mask, e] : event_entries_) {
@@ -1245,10 +1995,11 @@ public:
     void solve_rank1(const topology::SwitchStateMask& mask,
                       const Vector& b_extra,
                       Vector& x) const {
+        // Template assembly: no structure is built after the cache's
+        // first assembly of this regime (update-linear-time-assembly).
         sparse::Matrix J;
         Vector b;
-        assemble_segment(graph_, pool_, mask, dt_, J, b);
-        sparse::compress_in_place(J);
+        asm_.assemble(graph_, pool_, mask, dt_, J, b);
 
         if (!rank1_initialized_) {
             // First call: fresh analyze + factorize on a new solver
@@ -1259,7 +2010,7 @@ public:
             // The caller may override via set_rank1_backend(...).
             rank1_solver_ = sparse::make_default_solver(
                 pool_.state_size(graph_), rank1_backend_hint_);
-            if (!rank1_solver_->analyze(J)) {
+            if (!analyze_shared_(*rank1_solver_, J, dt_ > Real{0})) {
                 throw std::runtime_error(std::format(
                     "PwlStateSpaceCache::solve_rank1: initial analyze "
                     "failed (structurally singular) for mask {}",
@@ -1315,7 +2066,12 @@ public:
             //     path-based attempt only when the union path covers
             //     > MAX_PATH_LENGTH_RATIO of the columns (where
             //     path-based wouldn't save work vs a fresh factorise).
-            bool try_path = can_try_partial;
+            // Branch form (add-branch-form-ideal-switch D2): a flip swaps
+            // (s, a) between 1 and -g_off and (s, s) between -R_on and 1;
+            // the path refactor keeps the old pivot order and lands on a
+            // g_off-sized pivot (|x - x_ref| = 1.3e4 on the 16-mask bridge).
+            // Refactor in full there; the conductance form is unchanged.
+            bool try_path = can_try_partial && pool_.num_branch_switches() == 0;
             if (try_path && pop > 1) {
                 const Index n_state = static_cast<Index>(
                     pool_.state_size(graph_));
@@ -1373,9 +2129,7 @@ public:
             }
         }
 
-        Vector& rhs = solve_rhs_tls_();
-        rhs = -(rank1_b_constant_ + b_extra);
-        rank1_solver_->solve(rhs, x);
+        rank1_solver_->solve_neg_sum(rank1_b_constant_, b_extra, x);
     }
 
     /// Override the backend `solve_rank1` uses for its sliding solver.
@@ -1394,6 +2148,13 @@ public:
         if (!rank1_initialized_) {
             rank1_backend_hint_ = hint;
         }
+    }
+
+    /// Share symbolic analyses with every cache given the same plan
+    /// (`ir::Circuit::symbolic_plan()`: all circuits of one structure).
+    /// Set before the first factorisation.
+    void share_symbolic(std::shared_ptr<SymbolicPlan> plan) noexcept {
+        plan_ = std::move(plan);
     }
 
     /// Snapshot the rank-1 telemetry counters. Read-only from outside;
@@ -1416,6 +2177,13 @@ public:
                 std::memory_order_relaxed),
             .event_builds = event_builds_.load(
                 std::memory_order_relaxed),
+            .event_evictions = event_evictions_.load(
+                std::memory_order_relaxed),
+            .structure_builds = asm_.structure_builds(),
+            .symbolic_analyses = symbolic_analyses_.load(
+                std::memory_order_relaxed),
+            .symbolic_fallbacks = symbolic_fallbacks_.load(
+                std::memory_order_relaxed),
         };
     }
 
@@ -1436,8 +2204,9 @@ public:
     // — and every in-repo caller (run_transient's Newton path
     // included) consumes its reference before the next cache call.
     //
-    // Note: the ≤ 8 event-solver entries (`solve_at`) are OUTSIDE
-    // this budget — they are bounded by count, not bytes.
+    // The event-solver entries (`solve_at`) are bounded by the same
+    // budget, accounted separately (update-trbdf2-factor-reuse), in
+    // eager and lazy mode alike.
     //
     // Eager `build()` mode never evicts: pre-building all 2^N
     // factors is an explicit caller decision, and the eager
@@ -1648,8 +2417,7 @@ private:
     try_make_segment(const topology::SwitchStateMask& mask, Real dt) {
         sparse::Matrix J;
         Vector b;
-        assemble_segment(graph_, pool_, mask, dt, J, b);
-        sparse::compress_in_place(J);
+        asm_.assemble(graph_, pool_, mask, dt, J, b);
 
         // v1.4.0: each segment's solver is the Pulsim in-house LU
         // (`Backend::Auto` → Pulsim since v1.3.0). This gives
@@ -1663,7 +2431,7 @@ private:
         // paper-comparison purposes.
         auto solver = sparse::make_default_solver(
             pool_.state_size(graph_), sparse::Backend::Auto);
-        if (!solver->analyze(J)) {
+        if (!analyze_shared_(*solver, J, dt > Real{0})) {
             return std::unexpected(make_cache_error_(
                 CacheError::Kind::StructurallySingular, mask, dt, J,
                 solver.get()));
@@ -1734,6 +2502,7 @@ private:
         }
         seg->touch(lru_clock_.fetch_add(
             std::uint64_t{1}, std::memory_order_relaxed) + 1);
+        bump_generation_();   // insert (and any eviction above)
         segments_.emplace(mask, std::move(*seg));
         return {};
     }
@@ -1742,6 +2511,7 @@ private:
     /// Eager `build()` calls in a loop; lazy `lookup()` on
     /// demand.
     void build_one_segment(const topology::SwitchStateMask& mask) {
+        bump_generation_();
         segments_.emplace(mask, make_segment(mask, dt_));
     }
 
@@ -1802,10 +2572,10 @@ private:
         auto it = segments_.find(mask);
         if (it != segments_.end()) {
             any_target_existed = true;
+            bump_generation_();
             sparse::Matrix new_J;
             Vector new_b;
-            assemble_segment(graph_, pool_, mask, dt_, new_J, new_b);
-            sparse::compress_in_place(new_J);
+            asm_.assemble(graph_, pool_, mask, dt_, new_J, new_b);
             const bool ok = refactor_solver_(
                 it->second.solver.get(),
                 it->second.J, it->second.b_constant,
@@ -1823,8 +2593,7 @@ private:
             any_target_existed = true;
             sparse::Matrix new_J;
             Vector new_b;
-            assemble_segment(graph_, pool_, mask, dt_, new_J, new_b);
-            sparse::compress_in_place(new_J);
+            asm_.assemble(graph_, pool_, mask, dt_, new_J, new_b);
             // The rank-1 sliding solver doesn't cache J (it
             // re-assembles every solve_rank1 call), but its
             // factor + b_constant are stateful and must be
@@ -1934,6 +2703,11 @@ private:
                 if (prev_mask.get(switch_idx) != curr_mask.get(switch_idx)) {
                     if (branch.from >= 0) uniq.insert(branch.from);
                     if (branch.to   >= 0) uniq.insert(branch.to);
+                    if (const Index v =
+                            pool_.branch_var_id_for_switch(branch.id, graph_);
+                        v >= 0) {
+                        uniq.insert(v);
+                    }
                 }
                 ++switch_idx;
             }
@@ -1951,17 +2725,18 @@ private:
     // -------------------------------------------------------------
     // v2.0 Phase 1 — event-dt solver entries (`solve_at`).
     //
-    // One entry per recently-evented mask, LRU-bounded at
-    // `kMaxEventEntries`. Each stores the (G, C, b) split so a dt
-    // change is `J = G + (1/dt)·C` + numeric factorize on the
-    // entry's ONE symbolic analysis — replacing the v1.x
+    // One entry per recently-evented mask, LRU-bounded by the byte
+    // budget. Each stores `G` and `C` scattered onto the pattern of
+    // its `J`, so a dt change is an in-place `J = G + (1/dt)·C` +
+    // numeric factorize on the entry's ONE symbolic analysis — replacing the v1.x
     // exact-Real-dt-keyed map that retained a full analyzed +
     // factorized segment per (mask, dt) pair forever.
     // `mutable` so `solve_at` (const) can populate on demand.
     // -------------------------------------------------------------
     struct EventEntry {
-        sparse::Matrix G;          // static stamps for this mask
-        sparse::Matrix C;          // 1/dt coefficients (mask-inv.)
+        sparse::Matrix J;          // J at current_dt (union pattern)
+        std::vector<Real> gs;      // G on J's pattern (dt > 0 only)
+        std::vector<Real> cs;      // 1/dt coefficients on J's pattern
         Vector b_constant;          // dt-independent source stamps
         std::unique_ptr<sparse::DirectSolver> solver;  // analyzed once
         Real current_dt = Real{-1};
@@ -1990,7 +2765,7 @@ private:
 
         EventEntry() = default;
         EventEntry(EventEntry&& o) noexcept
-            : G{std::move(o.G)}, C{std::move(o.C)},
+            : J{std::move(o.J)}, gs{std::move(o.gs)}, cs{std::move(o.cs)},
               b_constant{std::move(o.b_constant)},
               solver{std::move(o.solver)},
               current_dt{o.current_dt},
@@ -1998,8 +2773,9 @@ private:
               analyzed_dynamic{o.analyzed_dynamic} {}
         EventEntry& operator=(EventEntry&& o) noexcept {
             if (this != &o) {
-                G                = std::move(o.G);
-                C                = std::move(o.C);
+                J                = std::move(o.J);
+                gs               = std::move(o.gs);
+                cs               = std::move(o.cs);
                 b_constant       = std::move(o.b_constant);
                 solver           = std::move(o.solver);
                 current_dt       = o.current_dt;
@@ -2014,33 +2790,27 @@ private:
         void touch(std::uint64_t t) const noexcept {
             lru_tick.store(t, std::memory_order_relaxed);
         }
+        /// Estimated resident bytes (J, the scattered split, b and the
+        /// solver's factor) for the event-table budget.
+        [[nodiscard]] std::size_t approx_bytes() const noexcept {
+            const auto nnz  = static_cast<std::size_t>(J.nonZeros());
+            const auto cols = static_cast<std::size_t>(J.cols());
+            std::size_t total =
+                nnz * (sizeof(Real) + sizeof(sparse::Matrix::StorageIndex)) +
+                (cols + 1) * sizeof(sparse::Matrix::StorageIndex) +
+                (gs.size() + cs.size()) * sizeof(Real) +
+                static_cast<std::size_t>(b_constant.size()) * sizeof(Real);
+            if (solver) total += solver->factor_bytes();
+            return total;
+        }
         EventEntry(const EventEntry&) = delete;
         EventEntry& operator=(const EventEntry&) = delete;
     };
 
-    /// Recombine an event entry's split at `dt`. `dt > 0` is the
-    /// hot path (`G + (1/dt)·C`); `dt <= 0` falls back to the V0
-    /// static-only assembly (caps/inductors skipped — matching
-    /// what the v1.x aux cache produced for a static solve_at).
-    [[nodiscard]] sparse::Matrix combine_event_J_(
-        const EventEntry& e,
-        const topology::SwitchStateMask& mask,
-        Real dt) const {
-        if (dt > Real{0}) {
-            sparse::Matrix J = e.G + (Real{1} / dt) * e.C;
-            return J;
-        }
-        sparse::Matrix J;
-        Vector b_unused;
-        assemble_segment(graph_, pool_, mask, Real{0}, J, b_unused);
-        sparse::compress_in_place(J);
-        return J;
-    }
-
-    /// Erase the least-recently-used event entry. Called only when
-    /// the table is full and a NEW mask arrives.
-    void evict_lru_event_entry_() const {
-        if (event_entries_.empty()) return;
+    /// Erase the least-recently-used event entry; returns its bytes.
+    /// Called only when a NEW mask arrives and the budget is full.
+    std::size_t evict_lru_event_entry_() const {
+        if (event_entries_.empty()) return 0;
         auto victim = event_entries_.begin();
         for (auto it = event_entries_.begin();
              it != event_entries_.end(); ++it) {
@@ -2048,7 +2818,9 @@ private:
                 victim = it;
             }
         }
+        const std::size_t bytes = victim->second.approx_bytes();
         event_entries_.erase(victim);
+        return bytes;
     }
 
     mutable numeric::Dictionary<topology::SwitchStateMask,
@@ -2060,18 +2832,51 @@ private:
     // only race benignly on recency ORDER, never on the counter
     // itself (adversarial-review finding ZA-1 hygiene).
     mutable std::atomic<std::uint64_t> lru_clock_{0};
+    std::atomic<std::uint64_t> generation_{0};
+    void bump_generation_() noexcept {
+        generation_.fetch_add(1, std::memory_order_relaxed);
+    }
 
-    // v2.0 Phase 1 — thread-local rhs workspace shared by solve /
-    // solve_at / solve_rank1 (audit finding
-    // `per-step-heap-allocations`). Function-local thread_local
-    // (NOT an instance member): each thread owns its buffer, so
-    // concurrent solves on a shared warm cache remain numerically
-    // correct exactly as they were with the old stack-local rhs
-    // (adversarial-review finding ZA-1). The buffer is fully
-    // consumed within each call — no live use spans a nested call.
-    [[nodiscard]] static Vector& solve_rhs_tls_() {
-        static thread_local Vector rhs;
-        return rhs;
+    // update-linear-time-assembly tier 1: one pattern template per
+    // assembly regime and one symbolic analysis per regime, shared by
+    // segments, event entries and the rank-1 solver. Mutated only on the
+    // miss paths, which already mutate the cache.
+    mutable SegmentAssembler asm_;
+    mutable std::shared_ptr<const sparse::SymbolicAnalysis> sym_dynamic_;
+    mutable std::shared_ptr<const sparse::SymbolicAnalysis> sym_static_;
+    mutable std::atomic<std::uint64_t> symbolic_analyses_{0};
+    mutable std::atomic<std::uint64_t> symbolic_fallbacks_{0};
+    std::shared_ptr<SymbolicPlan> plan_;  // add-immutable-circuit-ir
+
+    /// Analyse `J` on `solver`, adopting the regime's shared analysis
+    /// when `J` has its pattern. Returns `analyze`'s verdict.
+    [[nodiscard]] bool analyze_shared_(sparse::DirectSolver& solver,
+                                       const sparse::Matrix& J,
+                                       bool dynamic) const {
+        auto& sym = dynamic ? sym_dynamic_ : sym_static_;
+        bool seeded = false;
+        if (!sym && plan_) {
+            sym = plan_->get(dynamic);
+            seeded = sym != nullptr;
+        }
+        if (sym && solver.adopt_symbolic(*sym, J)) {
+            return true;
+        }
+        if (seeded) sym.reset();  // the plan's pattern is not this one
+        if (!solver.analyze(J)) {
+            return false;
+        }
+        symbolic_analyses_.fetch_add(1, std::memory_order_relaxed);
+        auto mine = solver.export_symbolic(J);
+        if (!sym) {
+            sym = std::move(mine);
+            if (plan_ && sym) plan_->offer(dynamic, sym);
+        } else if (mine) {
+            // A sharing-capable backend refused the shared analysis:
+            // the pattern differs from the regime's.
+            symbolic_fallbacks_.fetch_add(1, std::memory_order_relaxed);
+        }
+        return true;
     }
 
     // Layer 4 V8: sliding solver + state for the rank-1 fast-path
@@ -2096,6 +2901,7 @@ private:
     mutable std::atomic<std::uint64_t> event_hits_{0};
     mutable std::atomic<std::uint64_t> event_refactors_{0};
     mutable std::atomic<std::uint64_t> event_builds_{0};
+    mutable std::atomic<std::uint64_t> event_evictions_{0};
 
     // v2.0 Phase 1 — lazy segment cache byte budget (audit finding
     // `no-mode-cache-eviction`). 0 disables eviction. The default

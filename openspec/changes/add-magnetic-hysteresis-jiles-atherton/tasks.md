@@ -55,9 +55,9 @@
   one loop settling, not a loop family.)
 - [ ] 4.2 `examples/scripts/run_psfb_with_ja_transformer.py` — PSFB with JA transformer; compares average loss to Steinmetz / iGSE prediction.
   (Reconciled 2026-11: examples/scripts/run_psfb_ja_loss_analysis.py
-  replays JA on a linear PSFB's captured current after the run; the
-  transformer is not hysteretic in the loop and there is no Steinmetz
-  or iGSE comparison.)
+  replays JA on a linear PSFB's magnetising current after the run and
+  prints an iGSE figure from the circuit's B(t) beside it; the
+  transformer is not hysteretic in the loop.)
 - [x] 4.3 `examples/yaml/hysteretic_inductor_demo.yaml` — depends on YAML support.
   (Reconciled 2026-11: shipped as examples/hysteretic_inductor_demo.yaml;
   it loads and simulates as its header says: 0.06 s at dt = 2e-5,

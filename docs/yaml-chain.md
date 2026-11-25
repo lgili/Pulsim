@@ -183,27 +183,23 @@ simulation:
 ```
 
 The loader puts the parsed values on `loaded.options`
-(a `SimulationOptions` instance). You can forward them into
-`simulate()`:
+(a `SimulationOptions` instance) and lists the keys the file sets in
+`loaded.simulation_keys`. `pulsim.simulate(loaded)` forwards each of
+them as the keyword of the same name; a keyword you pass, then
+`solver=`, wins:
 
 ```python
 loaded = pulsim.load_yaml_file("buck.yaml")
-res = pulsim.simulate(
-    loaded.builder,
-    t_end=loaded.options.t_end,
-    dt=loaded.options.dt,
-    integrator=loaded.options.integrator,
-    rtol=loaded.options.rtol,
-    atol=loaded.options.atol,
-    dt_init=loaded.options.dt_init,
-)
+res = pulsim.simulate(loaded)                    # the file's keys
+res = pulsim.simulate(loaded, engine="trbdf2")   # rtol / atol used here
 ```
 
-**Today** only `integrator="kernel"` (default) actually runs;
-`"dopri5"` and `"radau"` raise a clear `NotImplementedError` with
-a pointer to the v1.6 cache refactor. The schema is wired so YAML
-files stay forward-compatible. See [solvers.md](solvers.md) for
-the detailed rationale.
+A key the engine the run lands on cannot honour (`rtol` on the fixed
+step, the Newton keys on the exact engine) is not used and raises one
+`RuntimeWarning` naming it. `integrator: kernel` and `dt_init: 0` are
+the loader's placeholders and ask nothing. `"dopri5"` and `"radau"`
+are refused by the engine that takes an integrator. See
+[solvers.md](solvers.md) for the detailed rationale.
 
 ## End-to-end example
 

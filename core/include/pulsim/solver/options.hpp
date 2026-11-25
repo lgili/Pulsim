@@ -20,10 +20,13 @@
 // t_end, or the last sample <= t_end if dt doesn't divide the
 // span evenly).
 
+#include "pulsim/device/device_path.hpp"
 #include "pulsim/numeric/types.hpp"
+#include "pulsim/sim/defaults.hpp"
 
 #include <cmath>
 #include <string>
+#include <vector>
 
 namespace pulsim::solver {
 
@@ -47,7 +50,7 @@ struct SimulationOptions {
     /// recorded only when `(expected_step_count() - 1)` is a
     /// multiple of `store_every`; choose a divisor of the step
     /// count when the exact end state matters (or leave it at 1).
-    Size store_every = 1;
+    Size store_every = sim::Defaults::store_every;
 
     /// Per-step event-iteration cap. After each cache.solve,
     /// Layer 5 V2.1 re-solves with the updated diode state until
@@ -55,7 +58,7 @@ struct SimulationOptions {
     ///
     /// Default 16 — comfortable for typical PE workloads.
     /// Set to 0 to disable iteration (V2 behaviour).
-    Size max_event_iterations = Size{16};
+    Size max_event_iterations = sim::Defaults::max_event_iterations;
 
     /// Phase-0 fix #9 — behaviour when the event iteration hits a
     /// mask CYCLE (diode pair flip-flopping A→B→A, which no budget
@@ -68,6 +71,16 @@ struct SimulationOptions {
     /// strictness).
     bool strict_event_iterations = false;
 
+    /// Which code stamps the Newton kinds (add-unified-device-interface
+    /// DECISIONS #23): the hand stamps (default, bit-identical) or every
+    /// kind's law on the `device::Device` contract. A circuit with a kind
+    /// not yet ported refuses `Interface` by name.
+    device::DevicePath device_path = device::DevicePath::Legacy;
+
+    /// add-parameter-sensitivities group 5: '<component>.<field>' names
+    /// whose forward sensitivities the run carries (empty: none, no cost).
+    std::vector<std::string> sensitivities;
+
     // ---- Newton (Layer 5 V4) ----------------------------------------
     //
     // When `run_transient` is called with a non-empty
@@ -77,7 +90,7 @@ struct SimulationOptions {
     /// Max Newton iterations per step. Default 50 — comfortable
     /// for the smooth-blend IdealDiode and other PE-typical
     /// nonlinearities.
-    Size max_newton_iterations = Size{50};
+    Size max_newton_iterations = sim::Defaults::max_newton_iterations;
 
     /// Newton convergence tolerance on ||dx||_inf. Default 1e-9.
     /// ABSOLUTE on purpose: an absolute step test is what keeps
@@ -85,11 +98,16 @@ struct SimulationOptions {
     /// cascade stop 10.67 V from the right answer). Do not loosen it
     /// to get past a Newton abort — that has produced silently wrong
     /// operating points (a flyback at 3.53 V instead of 15.31 V).
-    Real tol_newton_dx = Real{1e-9};
+    /// One ulp of an inductor current is 2L/h·ε·|i| of residual, so at
+    /// small h this test can be out of reach: transient solves that
+    /// stagnate there are accepted on a row-wise backward error of at
+    /// most 8ε instead (pwl::NewtonRoundoffAcceptance, counted in
+    /// SimulationResult::newton_roundoff_accepts). DC never is.
+    Real tol_newton_dx = sim::Defaults::tol_newton_dx;
 
     /// Newton convergence tolerance on ||residual||_inf.
     /// Default 1e-9. Absolute; same caveat as tol_newton_dx.
-    Real tol_newton_res = Real{1e-9};
+    Real tol_newton_res = sim::Defaults::tol_newton_res;
 
     /// Enable backtracking line search inside Newton
     /// (Layer 4 V4 / globalization). When `false` (default),
@@ -105,6 +123,13 @@ struct SimulationOptions {
     /// sinusoidal rectifier, etc.). Takes precedence over
     /// line search when both are enabled.
     bool enable_newton_lm = false;
+
+    /// Newton roundoff-acceptance run budget: the most consecutive
+    /// solves that may be accepted at roundoff with no converged solve
+    /// between them (add-newton-roundoff-acceptance DECISIONS 10d). One
+    /// more raises NewtonRoundoffBudgetExceeded, which no retry ladder
+    /// swallows. A test handle; 130 = 10x the worst honest run.
+    Size newton_roundoff_budget = sim::Defaults::newton_roundoff_budget;
 
     /// v2.0 Phase 2 (B.4) — local time-step reduction on a failed
     /// step.
@@ -130,23 +155,68 @@ struct SimulationOptions {
     /// are entitled to know about.
     ///
     /// 0 disables the retry and restores the pre-v2.0 hard failure.
-    Size max_dt_halvings = Size{6};   // dt/64 floor
+    Size max_dt_halvings = sim::Defaults::max_dt_halvings;   // dt/64 floor
 
-    /// Layer 5 V3 — sub-step state correction.
+    /// Fixed-step event splitting (add-fixed-step-event-splitting).
     ///
-    /// When `true` AND `cache.dt() > 0` (dynamic path), each
-    /// time step that detects a commutation event mid-step
-    /// is RETROACTIVELY split into two sub-steps at the
-    /// estimated event time `t_est`. Sub-step 1 uses the
-    /// pre-event mask and `cache.solve_at(mask_pre, dt₁, …)`
-    /// (Layer 4 V7's auxiliary-dt solve). Sub-step 2 uses
-    /// the post-event mask and `cache.solve_at(mask_post,
-    /// dt₂, …)`. The result eliminates the single-shot
-    /// commutation wobble visible at coarse dt.
-    ///
-    /// V0 corrects ONLY the first detected event per step.
-    /// Default `false` to preserve V2.2 behaviour.
+    /// A step (t_{k-1}, t_k] that contains an event is split at it: a
+    /// trapezoidal sub-step up to the event under the pre-event mask,
+    /// then an SDIRK(2,2) restart step from the event to t_k (and the
+    /// two grid steps after it, the restart window). Events: gate edges
+    /// named by the schedule's `next_edge_after` (an opaque switch_fn
+    /// keeps the restart rule's start-of-step sampling), built-in source
+    /// jumps, and a diode crossing located by linear interpolation of
+    /// `SwitchedDiode::crossing_signal` between x_{k-1} and the step's
+    /// first solve (pre-event bits). Up to 8 events per step in time
+    /// order; one within 1 % of dt of a boundary is taken at it.
+    /// Samples stay on the uniform grid. REQUIRES
+    /// `discontinuity_restart` (run_transient throws otherwise).
+    /// Default `false`: off = the restart rule alone, bit for bit.
     bool enable_substep_state_correction = false;
+
+    /// The split's snap, as a fraction of dt: an event this close to a
+    /// step boundary is taken at it, and events this close merge. The
+    /// default 0.01 moves an edge by up to dt/100 (first order, small
+    /// constant); simulate(control_tick='state') sets 1e-6 (G30).
+    Real split_snap = Real{0.01};
+
+    /// Discontinuity restart (add-discontinuity-restart-rule). The step
+    /// containing a discontinuity — a change of the stamped mask, a
+    /// diode flip inside the step, a source jump (or a b_extra_fn jump
+    /// declared through its next-jump oracle), the first step of a run
+    /// that does not start consistent — and the next two are taken as
+    /// Alexander SDIRK(2,2) steps (γ = 1 − 1/√2, L-stable) instead of
+    /// trapezoidal ones: second order across events on the grid, no
+    /// Nyquist alternation after them, resonant modes kept. It also makes the gate mask of the
+    /// step (t_{k-1}, t_k] switch_fn(t_{k-1}) (start-sampled) and
+    /// evaluates a pulse/PWM source at its LEFT limit on a jump that
+    /// coincides with the step end. Off = the engine before the rule,
+    /// bit for bit.
+    bool discontinuity_restart = false;
+    /// add-branch-form-ideal-switch D4: a dependent mode (an inductor
+    /// cut-set or a capacitor loop made by ideal elements) entered with
+    /// inconsistent states is re-initialised by the SDIRK x3 restart and
+    /// recorded in `SimulationResult::reinit_records`; true refuses the run
+    /// at the first such event instead (`on_impulse='error'`).
+    bool on_impulse_error = false;
+    /// add-complementarity-mode-selection on the fixed engine: how PWL
+    /// diodes are decided at each site (step, restart stage, split
+    /// sub-step, static step). 0: the settle loop; 1 'shadow': the settle,
+    /// and the LCP of the site's diode ports beside it (numbers unchanged,
+    /// disagreements in SimulationResult::mode_report); 2 'lcp': the LCP
+    /// decides, the settle does not run.
+    int mode_selection = 0;
+    /// Default-mode guard (task 4b.3): a settle that ends in a mode that
+    /// violates a diode's own law (a mask cycle or an exhausted budget) is
+    /// re-decided by the LCP. Off: the breach is kept as before.
+    bool mode_guard = true;
+
+    /// add-fixed-step-resolution-diagnostics: per-step normalised
+    /// truncation estimate of the linear capacitors and inductors and a
+    /// Nyquist-ringing detector over the state vector, recorded in
+    /// `SimulationResult::resolution`. Read-only: the states are the
+    /// same bit for bit either way; off skips both passes.
+    bool resolution_diagnostics = false;   // opt-in (review M5: cost > 3 %)
 
     /// Floating-inductor freeze (post-solve guard).
     ///
@@ -226,11 +296,11 @@ struct SimulationOptions {
 
     /// Relative tolerance for adaptive RK integrators. Ignored
     /// by `"kernel"`.
-    Real rtol = Real{1e-5};
+    Real rtol = sim::Defaults::rtol_variable;
 
     /// Absolute tolerance for adaptive RK integrators. Ignored
     /// by `"kernel"`.
-    Real atol = Real{1e-8};
+    Real atol = sim::Defaults::atol_variable;
 
     /// Initial step-size for adaptive RK integrators (0 ⇒ auto
     /// via Hairer/Wanner heuristic). Ignored by `"kernel"`.

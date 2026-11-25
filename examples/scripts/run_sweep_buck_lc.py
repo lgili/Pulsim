@@ -27,7 +27,10 @@ F_PWM = 100e3
 T_PWM = 1.0 / F_PWM
 DUTY  = 0.5
 R_LOAD = 5.0
-T_END = 1.5e-3
+# The slowest corner (C = 200 µF, R = 5 Ω) rings down with
+# τ = 2RC = 2 ms: 1.5 ms from a cold start measured the start-up ring,
+# not the ripple. Seeded ICs (build) plus 6 ms leave it negligible.
+T_END = 6e-3
 DT    = 1.0e-7
 
 
@@ -37,8 +40,13 @@ def build(L: float, C: float) -> p.CircuitBuilder:
     b.add_voltage_source("Vin", "vin", "gnd", V_IN)
     b.add_switch("Q1", "vin", "sw", g_on=1e3, g_off=1e-9)
     b.add_diode("D_FW", "gnd", "sw", g_on=1e3, g_off=1e-9, V_th=0.7)
-    b.add_inductor("L1", "sw", "vout", L)
-    b.add_capacitor("Cout", "vout", "gnd", C)
+    # Seed the CCM steady state (V_out = D·V_in, i_L at its valley at
+    # the start of the ON time): a cold start rings with τ = 2RC and,
+    # at L = 500 µH / C = 200 µF, still dominated the ripple after 12 ms.
+    v_out = DUTY * V_IN
+    i_valley = v_out / R_LOAD - (V_IN - v_out) * DUTY * T_PWM / (2 * L)
+    b.add_inductor("L1", "sw", "vout", L, i0=i_valley)
+    b.add_capacitor("Cout", "vout", "gnd", C, c0=v_out)
     b.add_resistor("R_load", "vout", "gnd", R_LOAD)
     return b
 
@@ -76,11 +84,10 @@ def ripple_kpi(res, params) -> dict:
 
 
 def main() -> None:
-    # 5 × 5 grid → 25 simulations. Each sim is ~10 ms wall → ~250 ms
-    # total. Demonstrates sweep without needing parallel.
+    # 5 × 5 grid → 25 simulations, a few seconds in total. Demonstrates sweep without needing parallel.
     L_grid = np.geomspace(50e-6, 500e-6, 5)
     C_grid = np.geomspace(10e-6, 200e-6, 5)
-    print(f"  L: {[f'{l*1e6:.0f}µH' for l in L_grid]}")
+    print(f"  L: {[f'{L*1e6:.0f}µH' for L in L_grid]}")
     print(f"  C: {[f'{c*1e6:.0f}µF' for c in C_grid]}")
 
     out = p.sweep(
@@ -92,7 +99,7 @@ def main() -> None:
         max_event_iterations=8,
     )
 
-    print(f"\n  Sweep summary:")
+    print("\n  Sweep summary:")
     print(f"    n_simulations: {out.n_simulations}")
     print(f"    wall_time:     {out.wall_time_s:.2f} s")
     print(f"    failed runs:   {len(out.failed)}")
@@ -102,19 +109,25 @@ def main() -> None:
     ripple = out.kpis["v_ripple_pp"].reshape(out.shape)
     v_mean = out.kpis["v_mean"].reshape(out.shape)
 
-    print(f"\n  Ripple [mV peak-to-peak] grid (rows=L, cols=C):")
+    print("\n  Ripple [mV peak-to-peak] grid (rows=L, cols=C):")
     print(f"    L\\C    {'  '.join(f'{c*1e6:>5.0f}µF' for c in C_grid)}")
-    for i, l in enumerate(L_grid):
+    for i, L in enumerate(L_grid):
         row = "  ".join(f"{ripple[i, j]*1e3:>6.1f}"
                           for j in range(len(C_grid)))
-        print(f"    {l*1e6:>3.0f}µH  {row}")
+        print(f"    {L*1e6:>3.0f}µH  {row}")
+
+    # CCM reference: ΔV_pp = V_out·(1−D) / (8·L·C·f²).
+    L_m, C_m = np.meshgrid(L_grid, C_grid, indexing="ij")
+    ripple_ref = V_IN * DUTY * (1 - DUTY) / (8 * L_m * C_m * F_PWM**2)
+    print(f"  max |ripple / (V_out(1-D)/(8LCf²)) - 1|: "
+          f"{np.abs(ripple / ripple_ref - 1).max() * 100:.1f} %")
 
     print(f"\n  V_mean [V] grid (target {V_IN*DUTY:.1f} V):")
     print(f"    L\\C    {'  '.join(f'{c*1e6:>5.0f}µF' for c in C_grid)}")
-    for i, l in enumerate(L_grid):
+    for i, L in enumerate(L_grid):
         row = "  ".join(f"{v_mean[i, j]:>6.2f}"
                           for j in range(len(C_grid)))
-        print(f"    {l*1e6:>3.0f}µH  {row}")
+        print(f"    {L*1e6:>3.0f}µH  {row}")
 
     # Plot.
     try:

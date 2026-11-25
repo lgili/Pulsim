@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Boost CL with SATURABLE inductor — V17 + IGBT + Newton + software PI.
+"""Boost CL with SATURABLE inductor — V17 + Newton + software PI.
 
 The kernel stress: when the inductor saturates, its effective
 small-signal inductance collapses by ~100x. The plant's
@@ -8,7 +8,6 @@ for L = L_0 will become aggressive when L → L_residual. This
 combination of:
 
   * V17 saturable inductor (Newton refresh + sat-history)
-  * V14 IGBT (Newton refresh)
   * Smooth-blend diode (Newton)
   * Software PI in step_observer
   * Cache lookup per step
@@ -17,10 +16,14 @@ is the densest "everything-at-once" stress test we can build.
 
    V_in (12V) ── L_sat ──┬── D_boost ── vout ──┬── R_load
                           │                     │
-                          T1 (IGBT) ── gnd      C_out
+                          Q1 (ideal switch) ── gnd      C_out
 
 Setpoint: 18 V (modest target — pushes L_sat into the saturation
 knee but not deep, so the loop has to negotiate the changing gain).
+The loop needs ~10 ms to settle, so the step comes at 20 ms and the
+KPI windows are the last 5 ms before / after it. The cold start (C at
+0 V) drives the inductor deep into saturation: the inrush peaks at
+~128 A (12 V into L_residual = 1 µH and C = 100 µF, Z = 0.1 Ω).
 """
 
 from __future__ import annotations
@@ -34,12 +37,12 @@ import pulsim as p
 
 V_IN     = 12.0
 V_REF    = 18.0
-V_REF_2  = 22.0          # step up at t=2 ms
-T_STEP   = 2.0e-3
+V_REF_2  = 22.0          # step up at t=T_STEP
+T_STEP   = 20.0e-3
 F_PWM    = 50e3
 T_PWM    = 1.0 / F_PWM
 DT       = 1.0e-7
-T_END    = 4.0e-3
+T_END    = 40.0e-3
 
 # Saturable inductor parameters.
 L_0         = 100e-6     # 100 µH at low current
@@ -126,7 +129,7 @@ def main() -> None:
         lpf.update(input_value=float(x[vout_idx]), dt=DT)
         loop.step_observer(t, x)
 
-    print(f"\n  Closed-loop SATURABLE boost:")
+    print("\n  Closed-loop SATURABLE boost:")
     print(f"    PI(Kp={KP}, Ki={KI}), duty ∈ [{DUTY_MIN}, {DUTY_MAX}]")
     print(f"    L_0 = {L_0*1e6:.0f} µH, I_sat = {I_SAT} A, "
           f"L_residual = {L_RESIDUAL*1e6:.1f} µH")
@@ -153,35 +156,24 @@ def main() -> None:
     v_out_arr = res.v("vout")
     v_sw_arr  = res.v("sw")
 
-    # Recover the inductor current from the state vector.
-    # SaturableInductor branch adds a branch-current unknown,
-    # accessible via pool.branch_var_id_for_inductor (if exposed).
-    # If not, fall back to estimating from V_sw / impedance.
-    # The L_boost is branch index 1 (after Vin = 0).
-    i_L_arr: "np.ndarray | None" = None
-    try:
-        # v1.5 named accessor — bypasses the manual
-        # pool.branch_var_id_for_inductor lookup the previous
-        # revision needed because the state-vector offset for an
-        # inductor isn't simply num_nodes + branch_id.
-        i_L_arr = np.asarray(res.i("L_boost"))
-        have_iL = True
-    except Exception:
-        have_iL = False
+    # Inductor current by name.
+    i_L_arr = np.asarray(res.i("L_boost"))
+    have_iL = True
 
     # Time-weighted window means (p.time_average): correct on any grid,
     # unlike a plain mean over the samples of a variable-step run.
-    pre  = p.time_average(res.times, v_out_arr, 1.0e-3, T_STEP)
-    post = p.time_average(res.times, v_out_arr, t_from=T_STEP + 0.5e-3)
-    print(f"\n  KPI:")
-    print(f"    V_out pre-step  (1–{T_STEP*1e3:.0f} ms): "
+    pre  = p.time_average(res.times, v_out_arr, T_STEP - 5e-3, T_STEP)
+    post = p.time_average(res.times, v_out_arr, t_from=T_END - 5e-3)
+    print("\n  KPI:")
+    print(f"    V_out pre-step  ({T_STEP*1e3-5:.0f}–{T_STEP*1e3:.0f} ms): "
           f"mean = {pre:.2f} V (target {V_REF:.1f})")
-    print(f"    V_out post-step: mean = {post:.2f} V "
+    print(f"    V_out post-step ({T_END*1e3-5:.0f}–{T_END*1e3:.0f} ms): mean = {post:.2f} V "
           f"(target {V_REF_2:.1f})")
     if have_iL:
-        print(f"    i_L max = {i_L_arr.max():.3f} A  "
-              f"(I_sat = {I_SAT} A — saturation = "
-              f"{'YES' if i_L_arr.max() > I_SAT else 'no'})")
+        i_ss = i_L_arr[times >= (T_END - 5e-3) * 1e3].max()
+        print(f"    i_L max = {i_L_arr.max():.3f} A at cold start, "
+              f"{i_ss:.3f} A in steady state  (I_sat = {I_SAT} A — saturation = "
+              f"{'YES' if i_ss > I_SAT else 'no'})")
 
     try:
         import matplotlib.pyplot as plt

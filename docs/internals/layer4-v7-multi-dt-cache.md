@@ -46,14 +46,25 @@ auxiliary map keyed by *exact Real dt* of per-mask segments — one
 fully analyzed + factorized segment per `(mask, dt)` pair,
 forever. Sub-step event correction produces an essentially unique
 dt per commutation, so that map grew without bound. Now each
-recently-evented mask owns ONE **event solver** (small LRU,
-`kMaxEventEntries = 8`) storing the mask's `(G, C, b)` split; a dt
-change recombines `J = G + (1/dt)·C` and runs a numeric
-`factorize()` on the entry's single symbolic analysis (the
+recently-evented mask owns ONE **event solver** storing the mask's
+`(G, C, b)` split; a dt change recombines `J = G + (1/dt)·C` and runs a
+numeric `factorize()` on the entry's single symbolic analysis (the
 sparsity pattern is dt-invariant). No dt-keyed storage exists.
 `num_alt_dt_values()` / `num_alt_segments_at(dt)` keep their
-signatures but now report over the ≤ 8 resident entries' *current*
-dt values. `refactor_parametric` drops the entries (their split is
+signatures but report over the resident entries' *current* dt values.
+
+**update-trbdf2-factor-reuse (parts 1-2).** The table used to hold 8
+entries; the three-phase VSI visits 87 masks, so TR-BDF2 rebuilt
+entries 3,198 times in a 20 ms run. It is now bounded by the segment
+byte budget (`set_segment_budget_bytes`, default 1 GiB), accounted
+separately from the segment table, LRU, evicted only after everything
+that can throw (`CacheMetrics.event_evictions`). Each entry keeps its
+`J` and the split scattered onto `J`'s pattern (`+0.0` where an operand
+has no entry), so a new dt writes `J[k] = G[k] + (1/dt)·C[k]` in place —
+the per-entry arithmetic of Eigen's `G + (1/dt)·C` — and the in-house
+LU keeps its factorisation work vectors and L/U capacity: a refactor of
+a resident entry allocates nothing. A factor is a pure function of
+`(mask, dt)`, so which entries are resident never changes a result. `refactor_parametric` drops the entries (their split is
 a snapshot of the pool's parameters).
 
 ## Why not Sherman-Morrison
@@ -77,8 +88,8 @@ different angle:
   dt)` is pure factor reuse (`event_hits`).
 - The commutation pattern (pre/post masks at fresh dts every
   event) holds steady at 2 entries with zero growth.
-- Entries are LRU-bounded at `kMaxEventEntries`; evicted masks
-  rebuild transparently and match a fresh cache at 1e-12.
+- Entries are LRU-bounded by the byte budget; under a tight budget
+  evicted masks rebuild and give the bits of an unlimited table.
 - The refactor path matches a from-scratch build at the same dt
   on a dynamic RLC circuit (1e-12).
 - A numerically singular refactorize ERASES the entry (a stale

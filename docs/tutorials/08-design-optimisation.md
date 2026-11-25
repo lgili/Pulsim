@@ -1,0 +1,238 @@
+# Tutorial 08 — Using Pulsim inside an optimiser
+
+An optimiser calls `f(design)` thousands of times. It needs the same
+answer for the same input, a finite answer or an explicit failure, and
+a cost per call it can budget. `pulsim.design.Evaluator` is that
+contract around your own `build(design)` function.
+
+## 1. The contract
+
+`build(design)` returns the circuit and its gate schedule. The
+evaluator reaches the periodic steady state, takes every KPI on ONE
+steady period with time-weighted integrals (never a plain `.mean()` of
+samples), and returns an immutable `EvaluationRecord`.
+
+```python
+import pulsim as p
+from pulsim.design import Evaluator, SteadySpec, as_objectives, as_constraints
+
+T = 1e-5          # 100 kHz
+
+def build(d):
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", 24.0)
+    b.add_switch("S", "vin", "sw", 1e3, 1e-9)
+    b.add_diode("D1", "gnd", "sw", 1e3, 1e-9)
+    b.add_inductor("L", "sw", "x", d["L"])
+    b.add_resistor("RLs", "x", "vout", 0.01)
+    b.add_capacitor("C", "vout", "gnd", d["C"])
+    b.add_resistor("RL", "vout", "gnd", 1.0)
+    pwm = p.make_pwm_switch_fn(1 / T, 0.5, b.switch_index_of("S"),
+                               b.graph.num_switches)
+    return b, pwm
+
+ev = Evaluator(build, period=T, loads=("RL",), output="vout",
+               constraints={"ripple_v": (None, 0.12)})
+rec = ev.evaluate({"L": 100e-6, "C": 47e-6})
+print(rec.status, rec.counters["steady_method"])
+print(f"efficiency {rec.kpis['efficiency']:.6f}")
+print(f"ripple     {rec.kpis['ripple_v'] * 1e3:.4f} mV")
+print(f"losses     {sorted(rec.losses)}")
+```
+
+```text
+ok pss
+efficiency 0.989117
+ripple     15.9588 mV
+losses     ['D1', 'RLs', 'S']
+```
+
+The efficiency and the ripple agree with a matrix-exponential
+reference of the same orbit to 2e-12 and 6e-11 relative, and the total
+loss to 8e-15 (`python/tests/test_design_evaluation.py`). The record also carries the
+design, a SHA-256 `design_id`, the per-device losses by category, the
+route and solver counters, and the provenance (version, extension
+hash, options digest), and `counters["energy_residual"]` (2e-13 here)
+with `counters["p_table"]`, the datasheet losses outside that balance
+(observation; the guard fails a record above 1e-8).
+
+## 2. Four statuses, never a default number
+
+| status | when | what the record carries |
+|---|---|---|
+| `ok` | steady period reached, every bound met | KPIs, violations all 0 |
+| `infeasible` | a bound exceeded, or a thermal runaway | KPIs and `violations[name]` in the KPI's unit (runaway: no KPIs) |
+| `refused` | `pulsim.UnsupportedError` anywhere | `refusal = (engine, feature, device, kind)`, no KPIs |
+| `failed` | an engine's non-convergence, `not_settled`, a non-finite KPI, `energy_balance` (P_in ≠ ΣP + dE/T beyond the route's tolerance) | `reason`, counters, no KPIs |
+
+Any other exception propagates: it is a bug, not a design outcome. One
+is raised on purpose: `pulsim.design.PeriodicityError`, when a plain
+`dsed` period started from a kernel orbit does not return to it (a
+defect of the period map, checked once per topology and event
+pattern, so it stops the whole batch rather than failing some records). Do
+not wrap `evaluate` in a broad `except`; that is how refusals became
+silent wrong answers in a GUI.
+
+```python
+small_c = ev.evaluate({"L": 100e-6, "C": 4.8e-6})
+print(small_c.status, f"{small_c.violations['ripple_v'] * 1e3:.2f} mV over")
+
+def shockley(d):
+    b, pwm = build(d)
+    b.add_shockley_diode("D2", "gnd", "sw")
+    return b, pwm
+
+refused = Evaluator(shockley, period=T, loads=("RL",),
+                    engine="dsed").evaluate({"L": 100e-6, "C": 47e-6})
+print(refused.status, refused.refusal)
+```
+
+```text
+infeasible 30.40 mV over
+refused ('dsed', '', 'D2', 'ShockleyDiode')
+```
+
+For an optimiser, map records to vectors. `refused` and `failed` get
+`penalty` in every component; count them, never read the penalty as a
+value:
+
+```python
+for r in (rec, small_c, refused):
+    print(r.status, as_objectives(r, ["efficiency", "ripple_v"],
+                                  maximise=["efficiency"], penalty=1e30),
+          as_constraints(r, ["ripple_v"], penalty=1e30))
+```
+
+```text
+ok [-0.98911739  0.01595878] [0.]
+infeasible [-0.98911759  0.15040419] [0.03040419]
+refused [1.e+30 1.e+30] [1.e+30]
+```
+
+## 3. Steady state, junction temperature, batches
+
+* `SteadySpec(method="pss")` is Newton shooting on the exact stepper
+  (`pulsim.periodic_steady_state`), or, with `engine="pwl"` (and
+  `options={"dt": T/100}`) or `engine="trbdf2"`, on that engine's own
+  period runs (`counters["route"] == "pss/pwl"`; about twice the period
+  runs, no `gradients=`); `"transient"` simulates until the
+  estimated distance to the orbit is below `tol` (else `failed`,
+  `not_settled`); `"auto"` (default) takes `pss` when its applicability
+  check accepts the circuit and the transient otherwise, and says so in
+  `counters["steady_method"]`. A `pss` failure is `failed`, never a
+  silent transient.
+* `ThermalSpec(r_th={"S": 2.0}, t_amb=40)` closes `T_j`. On the exact
+  `pss` route it is solved in the kernel (`mode="kernel"`, the default
+  there): the switching tables are re-read at every commutation of the
+  fixed orbit and `T_j = t_amb + r_th P(T_j)` is solved exactly
+  (residual < 1e-9 K), a runaway (`r_th dP/dT_j >= 1`) being
+  `infeasible`. Elsewhere, or with `loss_at=` / `temperature_dependent=`,
+  it is a damped fixed point (`mode="fixed_point"`, within 0.1 K); the
+  circuit is re-simulated only when `temperature_dependent=True` (then
+  `build` reads `design["_T_j"]`). See `docs/losses-and-thermal.md`.
+* `Evaluator(circuit=base, fields={"L": "L.L", "C": "C.C"},
+  schedule=lambda d: make_pwm_switch_fn(d["f_sw"], ...), ...)` instead
+  of `build=`: one immutable `pulsim.Circuit` (`builder.build()`)
+  shared by every evaluation and thread, a design being `with_params` /
+  `with_value` of it (targets: a `builder.param` name or
+  `"<component>.<field>"`). Same records as the factory form; no
+  rebuild, one symbolic analysis per batch, the state labels and KPI
+  observables resolved once (about 0.16 ms per buck design).
+* `ev.evaluate_many(designs, workers=8)` keeps the input order and gives
+  the same records on 1 or 8 threads. With the circuit form, the `pss`
+  route and declarative KPIs and bounds, it is the KERNEL BATCH: every
+  design -- derivation, orbit, integrals, losses, KPIs, constraints,
+  status -- in one kernel call on 8 native threads with the GIL
+  released; records equal `ev.evaluate(d)`'s bit for bit. Section 6
+  says which path runs when, with measured rates.
+* For processes the evaluator must pickle. Name KPIs and bounds as data:
+  `kpis={"i_pk": Kpi.i_peak("L")}`, `Kpi.efficiency()`,
+  `Kpi.ripple("vout")`, `Kpi.mean("vout")`, `Kpi.i_rms("L")`,
+  `Kpi.formula("vol", "3e-4 * (L * i_peak.L * i_rms.L) ** 0.75")`
+  (arithmetic over KPIs, design variables and `loss.<device>`),
+  `constraints=[Constraint.max("ripple_v", 0.05)]`; give the circuit form
+  a module-level factory, `circuit=functools.partial(build_circuit,
+  part)`, which each worker calls once. Lambdas still work on threads;
+  on processes the first part that does not pickle is refused by name
+  (`UnsupportedError`) before any worker starts.
+
+## 4. Why derivative-free
+
+Central finite differences of `dv_C(40 T)/dL` on a DCM buck, relative
+error at relative steps 1e-6 … 1e-2 (`add-parameter-sensitivities`):
+
+| engine | relative error |
+|---|---|
+| `pwl`, dt = T/100 | −9.3, −9.5, −12.9, +2.0, −0.46 |
+| `pwl`, dt = T/400 | +9.1, +9.1, +2.6, −0.040, +0.041 |
+| `trbdf2`, default tolerances | −1.1e-4 … +2.9e-3 |
+
+The fixed engine puts each diode commutation on its grid, so an
+event-dependent KPI is a staircase in the parameters and its gradient
+is noise. The evaluator offers no finite differences; use a
+derivative-free optimiser (NSGA-II, CMA-ES, a Latin-hypercube sample).
+
+## 5. The worked example and its parts
+
+`examples/optimization/buck_pareto.py` sweeps a synchronous 48 V →
+12 V buck over `f_sw`, `L`, `C` and a choice of two MOSFETs, and
+prints the efficiency-against-volume front (pymoo's NSGA-II when it is
+installed, `pip install pymoo`; otherwise a Latin-hypercube sample and
+a numpy non-dominated filter). **Its two MOSFETs are synthetic
+illustrations and its volume law is illustrative**: the front is an
+observation of that model, not a design result. Pulsim's shipped parts
+are synthetic too (`pulsim.lib.part` refuses them unless
+`allow_synthetic=True`); for real numbers import the vendor's PLECS
+thermal file with `pulsim.lib.import_plecs_xml`.
+
+## 6. Which path runs when
+
+`evaluate_many(designs, workers=n, backend=None)` picks, per evaluator
+and then per design (`ev.last_batch` counts both; a Python-path record
+names its reason in `counters["batch"]`):
+
+| path | when | Python per design |
+|---|---|---|
+| kernel batch | circuit form, `SteadySpec("pss")` or `"auto"` on the exact engine, KPIs `Kpi.*` / `Kpi.formula`, constraints, switch loss tables at a numeric `Tj`, native schedule (`make_pwm_switch_fn` & co.) | none in the evaluation (the `period` / `schedule` factories are called once per design before it; the record is built after it) |
+| Python path, named | a callable KPI, the factory form, a thermal loop, `gradients=`, a variable that moves a value the observables read; or a design the kernel did not finish (orbit not converged, energy balance, non-finite KPI, a refusal), re-run so its `failed` / `refused` record is the Python path's | all of it |
+| `backend="thread"` | asked for | all of it; threads only overlap the GIL-free orbit |
+| `backend="process"` | asked for; the evaluator must pickle | all of it, in parallel workers (about 0.3 s start-up each) |
+
+Measured on the buck example's designs (4096, both parts, evaluator
+reused, best of 5 interleaved; a 10-core Mac with a load average of
+15-19 from other builds -- an OBSERVATION of that machine, not a
+guarantee):
+
+| evaluations/s | 1 | 2 | 4 | 8 workers |
+|---|---|---|---|---|
+| kernel batch (default) | 10022 | 15502 | 21621 | 25369 |
+| Python path, threads | 3597 | 2391 | 2286 | 2405 |
+
+The kernel call alone goes from 10246 to 49721 designs/s on 1 to 8
+threads; building the records in Python (about 20 us each) is what
+remains serial.
+
+
+## 7. With gradients: a boost's L and C
+
+Section 4's staircase is the fixed engine's. On the exact route the
+orbit sensitivities give d(KPI)/d(value) without a finite difference
+(`Evaluator(gradients={"L": "L.L", "C": "C.C"})`, `record.grads`), and
+`pulsim.value_and_grad` turns a `values -> (cost, gradient)` function
+into what `scipy.optimize.minimize(jac=True)` takes.
+`examples/optimization/boost_gradient.py` sizes a 12 V → 24 V boost
+(100 kHz, ideal devices, 10 mΩ DCR) for 50 mV output ripple and 0.6 A
+inductor ripple at the smallest L and C:
+
+| path | when | result (OBSERVATION, the machine of section 6) |
+|---|---|---|
+| L-BFGS-B with exact gradients | scipy importable | L = 99.73 µH, C = 119.57 µF after 20 evaluations; ripple 50.06 mV, 0.600 A |
+| 8 × 8 log grid on the kernel batch | no scipy, or `--grid` | 64 of 64 in the kernel; best L = 125.85 µH, C = 153.70 µF; ripple 38.95 mV, 0.476 A |
+
+Tested (`python/tests/test_example_boost_gradient.py`): the gradient at
+the start equals a central difference within 1e-6; the optimiser
+lowers the cost and meets both ripple targets within 5 %; the grid runs
+entirely in the kernel and its records equal the Python path's. A
+record with gradients runs on the Python path (section 6). Observed:
+the grid's 64 evaluations stop 22 % from the targets, the 20 gradient
+steps within 0.2 %.

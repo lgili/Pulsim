@@ -15,9 +15,9 @@ Returns a `SweepResult` containing:
   * `kpis`: dict of KPI arrays,
   * `n_simulations`, `wall_time_s`.
 
-Optional parallel execution via `multiprocessing`. For small parameter
-spaces (≤ 100 points) the serial path is fast enough; for grid
-sweeps over 1000+ points, set `parallel=True`.
+Optional parallel execution with `parallel=True`: on threads when the
+step loop is native (the kernel releases the GIL), on processes when
+it calls Python — see `backend` on :func:`sweep`.
 
 Typical usage — design buck output ripple vs (L, C):
 
@@ -59,12 +59,24 @@ and `n_samples=500`.
 
 from __future__ import annotations
 
+import functools
 import itertools
+import pickle
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Optional, Sequence
 
 import numpy as np
+
+from ._builder_ergonomics import RetiredDeviceError
+from ._control_state import point_kwargs as _point_kwargs
+from ._control_state import sweep_points as _sweep_points
+from ._refusal import UnsupportedError
+
+# Configuration refusals hold for every point: they propagate out of
+# sweep() / monte_carlo() on every backend. Anything else a job raises
+# is a per-job failure, recorded in `failed` on every backend.
+_REFUSALS = (UnsupportedError, RetiredDeviceError)
 
 
 __all__ = [
@@ -95,7 +107,10 @@ class SweepResult:
     shape: tuple = ()
     n_simulations: int = 0
     wall_time_s: float = 0.0
-    failed: list = field(default_factory=list)  # indices that raised
+    failed: list = field(default_factory=list)  # (index, message) that raised
+    backend: str = "serial"  # "serial", "thread", "process" or "kernel"
+    # sweep(circuit, ...): kernel_points, symbolic_analyses, preflights
+    counters: dict = field(default_factory=dict)
 
     def to_dataframe(self):
         """Convert to a pandas DataFrame (one row per simulation)."""
@@ -111,14 +126,316 @@ class SweepResult:
 
 def _run_one_simulation(args):
     """Worker — runs one simulation. Top-level so multiprocessing can
-    pickle it."""
+    pickle it. Returns ``(kpis, step_loop_python_callbacks)``."""
     (builder_factory, kpi_fn, params,
       simulate_kwargs) = args
     # Lazy import inside the worker to support multiprocessing.
     import pulsim as _v2
     builder = builder_factory(**params)
     res = _v2.simulate(builder, **simulate_kwargs)
-    return kpi_fn(res, params)
+    return (kpi_fn(res, params),
+            tuple(getattr(res, "step_loop_python_callbacks", ("unknown",))))
+
+
+def _run_one_captured(args, job=None):
+    """Process-pool worker: ``("ok", result)`` or ``("failed", message)``;
+    a configuration refusal is raised (and re-raised in the parent)."""
+    try:
+        return "ok", (job or _run_one_simulation)(args)
+    except _REFUSALS:
+        raise
+    except Exception as exc:  # noqa: BLE001 — recorded, as on threads
+        return "failed", str(exc)
+
+
+def _run_one_reraise(args, job):
+    """Process-pool worker that lets every exception propagate."""
+    return "ok", job(args)
+
+
+def _run_one_pickled(blob, job, reraise):
+    """Process-pool worker: loads its job here, so a job that does not
+    load in the child (its module is not importable there) raises in the
+    parent by name instead of killing the worker."""
+    try:
+        args = pickle.loads(blob)
+    except Exception as exc:  # noqa: BLE001 — re-raised with the cause
+        raise RuntimeError(
+            f"backend='process': a worker could not load its job ({exc!r}); "
+            "every function in a job must be importable by module name in "
+            "a fresh interpreter, with the same pulsim") from None
+    return (_run_one_reraise if reraise else _run_one_captured)(args, job)
+
+
+_BACKENDS = ("auto", "thread", "process")
+
+
+def _run_jobs(args_iter, *, parallel, backend, n_workers, verbose,
+              job=_run_one_simulation, reraise=False):
+    """Run every job; returns ``(kpi_list, failed, backend_used)``.
+
+    ``job(args) -> (value, step_loop_python_callbacks)``; default one
+    ``simulate`` + ``kpi_fn``. Results are in job order on every
+    backend. Every backend records a raising job in ``failed`` and goes
+    on, except a configuration refusal (``UnsupportedError``,
+    ``RetiredDeviceError``), which holds for every point and
+    propagates; with ``reraise`` every exception propagates (a job
+    that turns design outcomes into values, ``pulsim.design``).
+    """
+    if backend not in _BACKENDS:
+        raise ValueError(
+            f"backend must be one of {_BACKENDS}, got {backend!r}")
+    n_runs = len(args_iter)
+    kpi_list: list = [{} for _ in range(n_runs)]
+    failed: list = []
+
+    def run_captured(i):
+        try:
+            kpis, cbs = job(args_iter[i])
+        except _REFUSALS:
+            raise   # a refusal holds for every point
+        except Exception as exc:
+            if reraise:
+                raise
+            failed.append((i, str(exc)))
+            return None
+        kpi_list[i] = kpis
+        return cbs
+
+    def progress(done):
+        if verbose and done % max(1, n_runs // 10) == 0:
+            print(f"    {done}/{n_runs} done")
+
+    if not parallel:
+        for i in range(n_runs):
+            run_captured(i)
+            progress(i + 1)
+        return kpi_list, failed, "serial"
+
+    import os
+    nw = n_workers if n_workers is not None else \
+          max(1, (os.cpu_count() or 2) - 1)
+    first = 0
+    if backend == "auto":
+        # The first job tells whether the step loop calls Python: if
+        # it does, threads would serialise on the GIL.
+        cbs = run_captured(0) if n_runs else ()
+        progress(1)
+        backend = "thread" if cbs == () else "process"
+        first = min(1, n_runs)
+    if verbose:
+        print(f"    parallel: {nw} {backend} workers")
+    rest = range(first, n_runs)
+    if backend == "thread":
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(nw) as ex:
+            for k, _ in enumerate(ex.map(run_captured, rest), first + 1):
+                progress(k)
+    else:
+        # A multiprocessing.Pool waits forever for a worker that died
+        # (spawn: a job whose module the child cannot import); this
+        # executor raises BrokenProcessPool instead.
+        from concurrent.futures import ProcessPoolExecutor
+        from concurrent.futures.process import BrokenProcessPool
+        blobs = []
+        for i in rest:   # refused before any worker starts
+            try:
+                blobs.append(pickle.dumps(args_iter[i]))
+            except Exception as exc:
+                raise TypeError(
+                    f"backend='process': job {i} does not pickle ({exc}); "
+                    "use backend='thread' or top-level functions") from exc
+        worker = functools.partial(_run_one_pickled, job=job, reraise=reraise)
+        if os.name == "nt":
+            nw = min(nw, 61)   # ProcessPoolExecutor's limit on Windows
+        with ProcessPoolExecutor(nw) as ex:
+            try:
+                for k, (i, (status, out)) in enumerate(
+                        zip(rest, ex.map(worker, blobs)), first + 1):
+                    if status == "ok":
+                        kpi_list[i] = out[0]
+                    else:
+                        failed.append((i, out))
+                    progress(k)
+            except BrokenProcessPool as exc:
+                raise RuntimeError(
+                    "backend='process': a worker process died before "
+                    f"returning, or its result did not unpickle ({exc}); a "
+                    "spawned worker must import the same pulsim and every "
+                    "function of the job") from exc
+            except BaseException:
+                ex.shutdown(wait=False, cancel_futures=True)
+                raise
+    failed.sort()
+    return kpi_list, failed, backend
+
+
+class _CircuitPoints:
+    """``sweep(circuit, ...)`` / ``monte_carlo(circuit, ...)``: point
+    ``p`` is ``circuit.with_params`` of its parameter names, then
+    ``with_value`` of its ``"device.field"`` names. Every point shares
+    the circuit's structure, so its symbolic analysis is done once."""
+
+    def __init__(self, circuit):
+        self.circuit = circuit
+
+    def __call__(self, **p):
+        c = self.circuit.with_params(
+            {k: v for k, v in p.items() if "." not in k})
+        for k, v in p.items():
+            if "." in k:
+                c = c.with_value(k, v)
+        return c
+
+
+# simulate() kwargs that put Python in the step loop or act per run: such
+# a sweep keeps the Python path.
+_PER_RUN_KWARGS = ("step_observer", "closed_loops", "b_extra_fn",
+                   "should_continue", "live_stream", "mmc_arms", "on_cache",
+                   "resume_from", "sensitivities")
+
+
+def _run_circuit_points(points, grid, kpi_fn, *, parallel, backend,
+                        n_workers, verbose, simulate_kwargs,
+                        point_kwargs=None):
+    """``sweep(circuit, ...)`` / ``monte_carlo(circuit, ...)`` (task 5.2).
+
+    Point 0 runs through ``simulate`` and records what it handed the pwl
+    kernel; every other point is derived, regularised and run by
+    ``_run_pwl_points`` on native threads without the GIL, then finished
+    by ``simulate`` (its warnings and result attributes, no second run).
+    Anything the kernel path cannot replay — another engine, a Python
+    hook in the step loop, ``backend="process"`` — runs as before.
+    Returns ``(kpi_list, failed, backend_used, stats)``."""
+    from . import _circuit_ir as cir
+    from . import _pulsim
+    from . import simulate
+
+    kw = simulate_kwargs
+    n = len(grid)
+    stats = {"kernel_points": 0, "symbolic_analyses": 0, "preflights": 0}
+    kws = point_kwargs or [kw] * n       # the controllers copied per point
+    args_iter = [(points, kpi_fn, p, k) for p, k in zip(grid, kws)]
+    if (n < 2 or (parallel and backend == "process")
+            or any(kw.get(k) is not None for k in _PER_RUN_KWARGS)
+            or kw.get("progress") or kw.get("enable_nonlinear_refresh") is False):
+        return (*_run_jobs(args_iter, parallel=parallel, backend=backend,
+                           n_workers=n_workers, verbose=verbose), stats)
+
+    kpi_list: list = [{} for _ in range(n)]
+    failed: list = []
+
+    def run_point(i, run=None, recipe=None):
+        """Point i through simulate (finishing ``run`` when given; filling
+        ``recipe``). Only this call sees the context variables — never a
+        simulate() the kpi_fn makes."""
+        tokens = [cir.KERNEL_RUN.set(run), cir.PWL_RECIPE.set(recipe)]
+        try:
+            return simulate(points(**grid[i]) if run is None else run.circuit,
+                            **kws[i])
+        finally:
+            cir.PWL_RECIPE.reset(tokens[1])
+            cir.KERNEL_RUN.reset(tokens[0])
+
+    def finish(i, run=None, recipe=None):
+        try:
+            res = run_point(i, run, recipe)
+        except _REFUSALS:
+            raise
+        except Exception as exc:  # noqa: BLE001 — recorded, as on threads
+            failed.append((i, str(exc)))
+            return None
+        try:
+            kpi_list[i] = kpi_fn(res, grid[i])
+        except _REFUSALS:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            failed.append((i, str(exc)))
+        return res
+
+    recipe: dict = {}
+    res0 = finish(0, recipe=recipe)
+    rk = recipe.get("kwargs", {})
+    native = (res0 is not None and recipe and not recipe["mmc"]
+              and not recipe["on_cache"]
+              and getattr(res0, "engine_used", None) == "pwl"
+              and tuple(getattr(res0, "step_loop_python_callbacks", ("?",))) == ()
+              and all(rk.get(k) is None for k in (
+                  "b_extra_fn", "step_observer", "should_continue",
+                  "live_ring", "resume_from", "tick_fns")))
+    if not native:
+        rest, rest_failed, used = _run_jobs(
+            args_iter[1:], parallel=parallel, backend=backend,
+            n_workers=n_workers, verbose=verbose)
+        kpi_list[1:] = rest
+        failed += [(i + 1, m) for i, m in rest_failed]
+        return kpi_list, sorted(failed), used, stats
+
+    import os
+    nw = (n_workers if n_workers is not None
+          else max(1, (os.cpu_count() or 2) - 1)) if parallel else 1
+    names = list(grid[0])
+    table = np.array([[float(p[k]) for k in names] for p in grid[1:]],
+                     dtype=float).reshape(n - 1, len(names))
+    x0 = None if recipe["ic_from_builder"] else rk.get("initial_state")
+    runs, st = _pulsim._run_pwl_points(
+        points.circuit, names, table, recipe["opts"], float(recipe["dt"]),
+        rk["switch_fn"], bool(rk.get("start_from_dc_op", False)),
+        rk.get("enable_nonlinear_refresh"),
+        None if x0 is None else np.asarray(x0, dtype=float),
+        recipe["auto_regularize"], int(nw))
+    report, ties = st["report"], tuple(st["ties"])
+    stats.update(kernel_points=sum(r is not None for r in runs),
+                 symbolic_analyses=int(st["symbolic_analyses"]),
+                 preflights=int(st["preflights"]))
+    for i, r in enumerate(runs, 1):
+        if r is None:
+            finish(i)  # raises or records exactly as the Python path
+            continue
+        result, circuit, builder, own = r
+        rep, tz = (report, list(ties)) if own is None else (own[0], list(own[1]))
+        finish(i, cir.KernelRun(result, circuit, builder, rep, tz))
+    used = "kernel" if stats["kernel_points"] else "serial"
+    return kpi_list, sorted(failed), used, stats
+
+
+def _run_points(args_iter, grid, kpi_fn, parallel, backend, n_workers,
+                verbose, simulate_kwargs):
+    """``_run_jobs`` for a factory; the kernel path for a circuit."""
+    if isinstance(args_iter[0][0] if args_iter else None, _CircuitPoints):
+        return _run_circuit_points(
+            args_iter[0][0], grid, kpi_fn, parallel=parallel,
+            backend=backend, n_workers=n_workers, verbose=verbose,
+            simulate_kwargs=simulate_kwargs,
+            point_kwargs=[a[3] for a in args_iter])
+    return (*_run_jobs(args_iter, parallel=parallel, backend=backend,
+                       n_workers=n_workers, verbose=verbose), {})
+
+
+def _circuit_form(builder_factory, parallel, backend, simulate_kwargs):
+    """``(factory, backend)`` for a ``pulsim.Circuit`` first argument:
+    its points run on threads, which share the circuit (it is immutable),
+    or with ``backend="process"`` in workers that receive it through its
+    YAML pickle."""
+    from . import Circuit
+    if not isinstance(builder_factory, Circuit):
+        return builder_factory, backend
+    from ._circuit_ir import c_blocks_of
+    if parallel and c_blocks_of(builder_factory):
+        # Every derived circuit shares the C blocks' handles; each run
+        # restarts them (G22), so serial points are independent, but
+        # threads would step one block state at once.
+        from ._refusal import unsupported
+        names = ", ".join(str(h.name) for h in c_blocks_of(builder_factory))
+        raise unsupported(
+            "sweep", "c_blocks",
+            f"sweep(circuit, parallel=True) / monte_carlo: the circuit "
+            f"carries C blocks ({names}), one state shared by every point, "
+            "so threads would step it at once. Run parallel=False, or pass "
+            "a builder factory that adds the blocks per point.")
+    # controllers in the keyword arguments: _control_state.point_kwargs
+    return _CircuitPoints(builder_factory), (
+        "process" if parallel and backend == "process" else "thread")
 
 
 def sweep(builder_factory: Callable[..., Any],
@@ -127,6 +444,7 @@ def sweep(builder_factory: Callable[..., Any],
             kpi_fn: Callable[..., Dict[str, float]],
             parallel: bool = False,
             n_workers: Optional[int] = None,
+            backend: str = "auto",
             verbose: bool = True,
             **simulate_kwargs,
             ) -> SweepResult:
@@ -136,7 +454,12 @@ def sweep(builder_factory: Callable[..., Any],
     ----------
     builder_factory
         Function `(**params) -> CircuitBuilder` that constructs a
-        populated builder.
+        populated builder, or a :class:`pulsim.Circuit`: each point is
+        then ``circuit.with_params`` of its parameter names (and
+        ``with_value`` of its ``"device.field"`` names). Its points
+        share one symbolic analysis and run on threads when
+        ``parallel`` (``backend="process"`` ships the circuit to each
+        worker as YAML; the points there do not share the analysis).
     params
         Dict mapping parameter names to value sequences. The sweep
         runs over the Cartesian product (every combination).
@@ -144,11 +467,30 @@ def sweep(builder_factory: Callable[..., Any],
         `(SimulationResult, params_dict) -> dict[str, float]`. Called
         once per simulation to extract scalar metrics from the result.
     parallel
-        If True, use `multiprocessing.Pool` (one process per
-        simulation in flight). Default False — serial is faster for
-        small grids due to process-startup cost.
+        If True, run the jobs on a pool chosen by `backend`. Default
+        False (serial).
     n_workers
         Pool size when parallel. Defaults to `os.cpu_count() − 1`.
+    backend
+        ``"auto"`` (default), ``"thread"`` or ``"process"``; used only
+        when ``parallel=True``. ``"auto"`` runs the first job in the
+        calling thread and reads its
+        ``res.step_loop_python_callbacks``: empty (the step loop is
+        native, e.g. a ``make_pwm_switch_fn`` schedule) → the other
+        jobs run on threads, which share the GIL-free kernel; any
+        Python callable → a process pool. On threads,
+        `builder_factory` and `kpi_fn` run concurrently in this
+        interpreter, so they must not share mutable state;
+        ``"process"`` restores the separate-process model (arguments
+        must then pickle, which the native schedules from
+        ``make_pwm_switch_fn`` and friends do not). Under ``"auto"``
+        the arguments are pickled after the first job ran, so a
+        callable that caches an unpicklable object on its first call
+        (a ``SwitchStateMask``) must drop it in ``__getstate__``.
+        Results are in job order and equal the serial ones on every
+        backend; every backend records a raising job in ``failed``,
+        and a configuration refusal (``UnsupportedError``,
+        ``RetiredDeviceError``) propagates.
     **simulate_kwargs
         Forwarded to `simulate(...)` for each run (t_end, dt,
         switch_fn, etc.).
@@ -158,6 +500,8 @@ def sweep(builder_factory: Callable[..., Any],
     SweepResult
         Parallel arrays of parameters and KPIs.
     """
+    builder_factory, backend = _circuit_form(builder_factory, parallel, backend,
+                                              simulate_kwargs)
     keys = list(params.keys())
     vals = [list(params[k]) for k in keys]
     shape = tuple(len(v) for v in vals)
@@ -169,50 +513,19 @@ def sweep(builder_factory: Callable[..., Any],
                f"(grid shape {shape})  "
                f"params: {keys}")
 
+    kws = _point_kwargs(simulate_kwargs, n_runs, parallel)
     args_iter = []
     grid_params = []
-    for combo in grid_iter:
+    for combo, kw in zip(grid_iter, kws):
         p_dict = dict(zip(keys, combo))
         grid_params.append(p_dict)
-        args_iter.append(
-            (builder_factory, kpi_fn, p_dict, simulate_kwargs))
+        args_iter.append((builder_factory, kpi_fn, p_dict, kw))
 
     t0 = time.perf_counter()
-    failed = []
-    kpi_records = []
-
-    if parallel:
-        from multiprocessing import Pool
-        import os
-        nw = n_workers if n_workers is not None else \
-              max(1, (os.cpu_count() or 2) - 1)
-        if verbose:
-            print(f"    parallel: {nw} workers")
-        with Pool(nw) as pool:
-            try:
-                for i, kpis in enumerate(
-                        pool.imap_unordered(_run_one_simulation,
-                                              args_iter)):
-                    kpi_records.append((i, kpis))
-                    if verbose and (i + 1) % max(1, n_runs // 10) == 0:
-                        print(f"    {i+1}/{n_runs} done")
-            except Exception:
-                pool.terminate()
-                raise
-        # Imap is unordered → sort to match the grid index.
-        kpi_records.sort(key=lambda x: x[0])
-        kpi_list = [k for _, k in kpi_records]
-    else:
-        kpi_list = []
-        for i, args in enumerate(args_iter):
-            try:
-                kpi_list.append(_run_one_simulation(args))
-            except Exception as exc:
-                failed.append((i, str(exc)))
-                # Push placeholder NaN KPIs for this row.
-                kpi_list.append({})
-            if verbose and (i + 1) % max(1, n_runs // 10) == 0:
-                print(f"    {i+1}/{n_runs} done")
+    with _sweep_points():        # the caller's graphs restart per point
+        kpi_list, failed, backend_used, counters = _run_points(
+            args_iter, grid_params, kpi_fn, parallel, backend, n_workers,
+            verbose, simulate_kwargs)
 
     wall = time.perf_counter() - t0
     if verbose:
@@ -234,6 +547,7 @@ def sweep(builder_factory: Callable[..., Any],
     return SweepResult(
         params=params_arr, kpis=kpis_arr, shape=shape,
         n_simulations=n_runs, wall_time_s=wall, failed=failed,
+        backend=backend_used, counters=counters,
     )
 
 
@@ -245,6 +559,7 @@ def monte_carlo(builder_factory: Callable[..., Any],
                   seed: Optional[int] = None,
                   parallel: bool = False,
                   n_workers: Optional[int] = None,
+                  backend: str = "auto",
                   verbose: bool = True,
                   **simulate_kwargs,
                   ) -> SweepResult:
@@ -253,7 +568,8 @@ def monte_carlo(builder_factory: Callable[..., Any],
     Parameters
     ----------
     builder_factory
-        `(**params) -> CircuitBuilder`.
+        `(**params) -> CircuitBuilder`, or a :class:`pulsim.Circuit`
+        (as in :func:`sweep`).
     distributions
         Dict mapping parameter names to draw functions. Each draw
         function is called as ``rng_draw(np_default_rng)`` and must
@@ -270,6 +586,8 @@ def monte_carlo(builder_factory: Callable[..., Any],
     ----------------
     Same as :func:`sweep`.
     """
+    builder_factory, backend = _circuit_form(builder_factory, parallel, backend,
+                                              simulate_kwargs)
     rng = np.random.default_rng(seed)
     samples = []
     for _ in range(n_samples):
@@ -280,33 +598,15 @@ def monte_carlo(builder_factory: Callable[..., Any],
         print(f"  monte_carlo: {n_samples} random draws  "
                f"params: {list(distributions)}")
 
-    args_iter = [(builder_factory, kpi_fn, s, simulate_kwargs)
-                   for s in samples]
+    kws = _point_kwargs(simulate_kwargs, n_samples, parallel)
+    args_iter = [(builder_factory, kpi_fn, s, kw)
+                 for s, kw in zip(samples, kws)]
 
     t0 = time.perf_counter()
-    failed = []
-    kpi_list = []
-    if parallel:
-        from multiprocessing import Pool
-        import os
-        nw = n_workers if n_workers is not None else \
-              max(1, (os.cpu_count() or 2) - 1)
-        if verbose:
-            print(f"    parallel: {nw} workers")
-        with Pool(nw) as pool:
-            records = list(enumerate(
-                pool.imap_unordered(_run_one_simulation, args_iter)))
-        records.sort(key=lambda x: x[0])
-        kpi_list = [k for _, k in records]
-    else:
-        for i, args in enumerate(args_iter):
-            try:
-                kpi_list.append(_run_one_simulation(args))
-            except Exception as exc:
-                failed.append((i, str(exc)))
-                kpi_list.append({})
-            if verbose and (i + 1) % max(1, n_samples // 10) == 0:
-                print(f"    {i+1}/{n_samples} done")
+    with _sweep_points():        # the caller's graphs restart per point
+        kpi_list, failed, backend_used, counters = _run_points(
+            args_iter, samples, kpi_fn, parallel, backend, n_workers,
+            verbose, simulate_kwargs)
 
     wall = time.perf_counter() - t0
     if verbose:
@@ -327,6 +627,7 @@ def monte_carlo(builder_factory: Callable[..., Any],
     return SweepResult(
         params=params_arr, kpis=kpis_arr, shape=(),
         n_simulations=n_samples, wall_time_s=wall, failed=failed,
+        backend=backend_used, counters=counters,
     )
 
 
@@ -366,28 +667,22 @@ def monte_carlo(builder_factory: Callable[..., Any],
 # etc.) is unchanged.
 
 
-# Component-kind dispatch table for the in-place builder updaters.
-# Maps `DevicePool::StoredKind` enum values to the matching
-# `CircuitBuilder.update_<kind>(name, value)` method name. Keys are
-# integers (the enum's underlying value); we look up the integer
-# from `pool.kind_of(branch_id)` which returns the StoredKind.
-#
-# The kind enum is exposed to Python as `_pulsim.StoredKind` —
-# we don't import it eagerly to keep this module importable without
-# the kernel extension (e.g. for docs builds). Lookup happens
-# inside the helper via duck-typing on `pool.kind_of()`'s return.
-_KIND_TO_UPDATE_METHOD = {
-    "Resistor":      "update_resistor_R",
-    "Inductor":      "update_inductor_L",
-    "Capacitor":     "update_capacitor_C",
-    "VoltageSource": "update_voltage_source_V",
+# The kinds `refactor_parametric` supports, and the value field
+# `builder.set_value("<name>.<field>", v)` updates in place for each.
+# Lookup happens inside the helper via duck-typing on
+# `pool.kind_of()`'s return (its `.name`).
+_KIND_TO_FIELD = {
+    "Resistor":      "R",
+    "Inductor":      "L",
+    "Capacitor":     "C",
+    "VoltageSource": "V",
 }
 
 
 def _resolve_param_kind(builder, name: str) -> Optional[str]:
     """Look up the device kind for a builder-time component name.
 
-    Returns one of the strings in `_KIND_TO_UPDATE_METHOD`, or None
+    Returns one of the strings in `_KIND_TO_FIELD`, or None
     if the name is unknown / the kind isn't parametric-refactor-supported.
     """
     try:
@@ -401,7 +696,7 @@ def _resolve_param_kind(builder, name: str) -> Optional[str]:
     # kind comes back as the `StoredKind` enum; its `.name` attribute
     # is the canonical string ("Resistor", "Inductor", etc.).
     kind_str = getattr(kind, "name", str(kind))
-    if kind_str in _KIND_TO_UPDATE_METHOD:
+    if kind_str in _KIND_TO_FIELD:
         return kind_str
     return None
 
@@ -515,21 +810,20 @@ def sweep_path_aware(
                 # injected into KPIs but not a real pool entry).
                 if kind is None:
                     continue
-                method = getattr(builder, _KIND_TO_UPDATE_METHOD[kind])
-                method(n, v)
+                builder.set_value(f"{n}.{_KIND_TO_FIELD[kind]}", v)
             return builder
         return sweep(_legacy_factory, params=params,
                      kpi_fn=kpi_fn, parallel=False,
                      verbose=verbose, t_end=t_end, dt=dt,
                      **simulate_kwargs)
 
-    # Resolve every param name → (branch_id, update_method_name) once.
+    # Resolve every param name → (branch_id, field) once.
     resolved = []
     for n in keys:
         kind = _resolve_param_kind(builder, n)
         assert kind is not None, "pre-flight guarantees kind"
         resolved.append((n, builder.branch_id_of(n),
-                         _KIND_TO_UPDATE_METHOD[kind]))
+                         _KIND_TO_FIELD[kind]))
 
     # Build the cache ONCE at the initial values.
     cache = _v2.PwlStateSpaceCache(builder.graph, builder.pool)
@@ -561,8 +855,8 @@ def sweep_path_aware(
         grid_params.append(p_dict)
 
         # 1. Push pool updates through builder convenience setters.
-        for n, b_id, method_name in resolved:
-            getattr(builder, method_name)(n, p_dict[n])
+        for n, b_id, fld in resolved:
+            builder.set_value(f"{n}.{fld}", p_dict[n])
 
         # 2. Refactor every active mask's cached factor via the
         #    path-based update. Batch overload pushes all updates
@@ -587,6 +881,8 @@ def sweep_path_aware(
                               "should_continue"}})
             _warn_if_breached(sim, f"sweep point {i} {p_dict}")
             kpi_list.append(kpi_fn(sim, p_dict))
+        except _REFUSALS:
+            raise   # a refusal holds for every point; never a "failed" sample
         except Exception as exc:
             failed.append((i, str(exc)))
             kpi_list.append({})
@@ -668,8 +964,7 @@ def monte_carlo_path_aware(
             for n, v in p.items():
                 kind = _resolve_param_kind(builder, n)
                 if kind is not None:
-                    method = getattr(builder, _KIND_TO_UPDATE_METHOD[kind])
-                    method(n, v)
+                    builder.set_value(f"{n}.{_KIND_TO_FIELD[kind]}", v)
             return builder
         return monte_carlo(
             _legacy_factory, distributions=distributions,
@@ -682,7 +977,7 @@ def monte_carlo_path_aware(
         kind = _resolve_param_kind(builder, n)
         assert kind is not None, "pre-flight guarantees kind"
         resolved.append((n, builder.branch_id_of(n),
-                         _KIND_TO_UPDATE_METHOD[kind]))
+                         _KIND_TO_FIELD[kind]))
 
     cache = _v2.PwlStateSpaceCache(builder.graph, builder.pool)
     cache.build(dt)
@@ -712,8 +1007,8 @@ def monte_carlo_path_aware(
     total_refactor_us = 0.0
 
     for i, sample in enumerate(samples):
-        for n, b_id, method_name in resolved:
-            getattr(builder, method_name)(n, sample[n])
+        for n, b_id, fld in resolved:
+            builder.set_value(f"{n}.{fld}", sample[n])
         if len(resolved) == 1:
             res = cache.refactor_parametric(
                 resolved[0][1], sample[resolved[0][0]])
@@ -733,6 +1028,8 @@ def monte_carlo_path_aware(
                               "should_continue"}})
             _warn_if_breached(sim, f"MC sample {i}")
             kpi_list.append(kpi_fn(sim, sample))
+        except _REFUSALS:
+            raise   # a refusal holds for every point; never a "failed" sample
         except Exception as exc:
             failed.append((i, str(exc)))
             kpi_list.append({})
@@ -774,13 +1071,13 @@ def _make_options(t_end: float, dt: float, **simulate_kwargs):
     opts.dt      = float(dt)
     # Pass-through Newton / event knobs if present.
     for k in ("max_newton_iterations", "max_event_iterations"):
-        if k in simulate_kwargs:
+        if simulate_kwargs.get(k) is not None:  # None = the kernel default
             setattr(opts, k, int(simulate_kwargs[k]))
     for k in ("tol_newton_dx", "tol_newton_res"):
         if k in simulate_kwargs and simulate_kwargs[k] is not None:
             setattr(opts, k, float(simulate_kwargs[k]))
     for k in ("enable_newton_line_search", "enable_newton_lm",
-                "enable_substep_state_correction"):
+                "enable_substep_state_correction", "discontinuity_restart"):
         if k in simulate_kwargs and simulate_kwargs[k] is not None:
             setattr(opts, k, bool(simulate_kwargs[k]))
     # review finding PY-1: without this, sweeps could neither opt back

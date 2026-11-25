@@ -36,6 +36,8 @@ the last tabulated point.
 
 from __future__ import annotations
 
+import math
+import weakref
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
@@ -46,6 +48,9 @@ def _ascending(name: str, axis) -> np.ndarray:
     a = np.asarray(axis, dtype=float).ravel()
     if a.size == 0:
         raise ValueError(f"LossTable: {name} axis is empty")
+    if not np.all(np.isfinite(a)):
+        raise ValueError(f"LossTable: {name} axis has non-finite entries "
+                         f"{a.tolist()}")
     if a.size > 1 and not np.all(np.diff(a) > 0):
         raise ValueError(
             f"LossTable: {name} axis must be strictly ascending, got "
@@ -133,6 +138,11 @@ class LossTable:
             np.asarray(tj, dtype=float))
         shape = vq.shape
         vq, iq, tq = vq.ravel(), iq.ravel(), tq.ravel()
+        for name, q in (("v", vq), ("i", iq), ("tj", tq)):
+            if not np.all(np.isfinite(q)):
+                # NaN propagated, +-inf gave NaN, inf or a clamped 0: a
+                # silent number where the kernel table refuses
+                raise ValueError(f"LossTable: non-finite {name} query")
 
         v0, v1, wv = _interp_axis(vq, self.v_axis)
         i0, i1, wi = _interp_axis(iq, self.i_axis)
@@ -145,6 +155,38 @@ class LossTable:
                 for at, ww_t in ((t0, 1.0 - wt), (t1, wt)):
                     out += e[av, ai, at] * ww_v * ww_i * ww_t
         return np.maximum(out, 0.0).reshape(shape)
+
+    def total(self, v, i, tj) -> float:
+        """``float(np.sum(self(v, i, tj)))`` for 1-D ``v, i, tj`` of one
+        length: each point read by the kernel table (the same rule, bit
+        for bit), summed as numpy sums. A non-finite query takes this
+        class's own path, which refuses it as the kernel does."""
+        v, i, tj = (np.asarray(a, dtype=float) for a in (v, i, tj))
+        if not (np.isfinite(v).all() and np.isfinite(i).all()
+                and np.isfinite(tj).all()):
+            return float(np.sum(self(v, i, tj)))
+        f = self._kernel()
+        return float(np.sum([f(a, b, c) for a, b, c in zip(
+            v.tolist(), i.tolist(), tj.tolist())]))
+
+    def _kernel(self):
+        """The kernel copy of this table, built once per table."""
+        k = _KERNEL.get(id(self))
+        if k is None or k[0]() is not self:
+            key = id(self)
+            k = (weakref.ref(self, lambda _r, key=key: _KERNEL.pop(key, None)),
+                 self.to_kernel())
+            _KERNEL[id(self)] = k
+        return k[1]
+
+    def to_kernel(self):
+        """The same table as a kernel `pulsim._pulsim.LossTable3D`
+        (`core/include/pulsim/thermal/loss_table.hpp`), which reads it
+        with this class's rule: multilinear, extrapolated, clamped at 0."""
+        from ._pulsim import LossTable3D
+        return LossTable3D(self.v_axis.tolist(), self.i_axis.tolist(),
+                           self.tj_axis.tolist(),
+                           self.energy.ravel(order="C").tolist())
 
     # -- construction ----------------------------------------------
     @classmethod
@@ -225,6 +267,11 @@ class LossTable:
                 f"Tj={self.tj_axis.tolist()})")
 
 
+# id(table) -> (weakref, kernel LossTable3D): the kernel copy of a table,
+# built once (LossTable.total); not a field, so records still pickle
+_KERNEL: dict = {}
+
+
 def as_loss_table(obj) -> LossTable:
     """Accept a `LossTable`, or a mapping in `from_curves` form."""
     if isinstance(obj, LossTable):
@@ -259,3 +306,111 @@ def resolve_tj(tj, times: np.ndarray) -> np.ndarray:
             "junction temperature, an array on the result's own time "
             "grid, or a callable t -> Tj.")
     return arr
+
+
+# ---- add-in-kernel-event-losses: the loss port and its records ---------
+
+def _kernel_table(obj, name, device):
+    """A kernel ``LossTable3D`` from a :class:`LossTable` (or one already)."""
+    if obj is None:
+        return None
+    from ._pulsim import LossTable3D
+    if isinstance(obj, LossTable3D):
+        return obj
+    if isinstance(obj, LossTable):
+        return obj._kernel()
+    raise TypeError(f"set_device_losses({device!r}): {name} must be a "
+                    f"pulsim.LossTable or LossTable3D, not "
+                    f"{type(obj).__name__}")
+
+
+def set_device_losses(self, device, *, junction=None, Tj=None,
+                      heat_node=None, E_on=None, E_off=None, V_on=None,
+                      conduction="electrical"):
+    """Give a PWL switch or diode a loss port read INSIDE the run
+    (add-in-kernel-event-losses; ``engine='pwl'``, other engines refuse
+    by name).
+
+    At each commutation the kernel reads the blocking voltage and the
+    commutated current by the reading rule (turn-on: ``v`` before,
+    ``i`` after; turn-off: the reverse), evaluates ``E_on`` / ``E_off``
+    (:class:`LossTable`, ``E(v, i, Tj)``; a diode's ``E_off`` is its
+    recovery) at the junction temperature, and deposits the energy as a
+    rectangular heat pulse over the next step. Conduction heat is the
+    device's own ``v·i`` (``conduction="electrical"``) or
+    ``V_on(|i|, Tj)·|i|`` from the on-state table ``V_on``
+    (:class:`pulsim.ConductionTable`, ``conduction="table"``).
+
+    Exactly one of ``junction`` (a thermal node of the circuit,
+    temperature in °C as its voltage: closed loop) or ``Tj`` (fixed °C:
+    open loop; heat into ``heat_node`` when given, else recorded only).
+    The node that takes the heat needs a capacitor on it. Read the
+    results with ``res.loss_events(device)`` and
+    ``res.device_energy(device)``.
+    """
+    j = "" if junction is None else str(junction)
+    tj = math.nan if Tj is None else float(Tj)
+    if Tj is not None and not math.isfinite(tj):
+        raise ValueError(f"set_device_losses({device!r}): Tj must be a "
+                         f"finite temperature in °C, got {Tj!r}")
+    e_on = _kernel_table(E_on, "E_on", device)
+    e_off = _kernel_table(E_off, "E_off", device)
+    if junction is not None and Tj is None:
+        tables = [t for t in (e_on, e_off) if t is not None]
+        if tables and all(len(t.tj_axis) == 1 for t in tables) and (
+                V_on is None or len(V_on.tj_axis) == 1):
+            import warnings
+            warnings.warn(
+                f"set_device_losses({device!r}): every table has one "
+                "temperature knot, so the loss does not depend on T_j and "
+                "junction= does not close a loop", RuntimeWarning,
+                stacklevel=2)
+    self._set_device_losses(str(device), j, tj,
+                            "" if heat_node is None else str(heat_node),
+                            e_on, e_off, V_on, str(conduction))
+    return self
+
+
+def _record(self, device):
+    for r in self._device_losses:
+        if r.device == device:
+            return r
+    names = [r.device for r in self._device_losses]
+    raise KeyError(f"no loss port named {device!r} in this result "
+                   f"(devices with one: {names})")
+
+
+LOSS_EVENT_DTYPE = np.dtype([("t", "f8"), ("kind", "U3"), ("v", "f8"),
+                             ("i", "f8"), ("Tj", "f8"), ("E", "f8")])
+
+
+def loss_events(self, device):
+    """The commutations of ``device`` as a structured array with fields
+    ``t, kind ('on'|'off'), v, i, Tj, E`` (``set_device_losses``)."""
+    ev = _record(self, device).events
+    out = np.empty(len(ev), dtype=LOSS_EVENT_DTYPE)
+    for k, e in enumerate(ev):
+        out[k] = (e.t, "on" if e.turn_on else "off", e.v, e.i, e.tj, e.e)
+    return out
+
+
+def device_energy(self, device):
+    """``{"E_on", "E_off", "E_cond_electrical", "E_cond_table",
+    "E_impulse", "n_on", "n_off"}`` of ``device`` (energies in J).
+    ``E_cond_electrical`` is the device's ``∫v·i`` (always),
+    ``E_cond_table`` the on-state table's (0 without one); the spec's
+    ``conduction`` says which one was deposited as heat. ``E_impulse`` is
+    the impulsive re-initialisation energy booked to the device
+    (``result.reinit_records`` whose ``cause`` it is), deposited as heat."""
+    r = _record(self, device)
+    return {"E_on": r.E_on, "E_off": r.E_off,
+            "E_cond_electrical": r.E_cond_electrical,
+            "E_cond_table": r.E_cond_table,
+            "E_impulse": r.E_impulse,
+            "n_on": int(r.n_on), "n_off": int(r.n_off)}
+
+
+def install(builder_cls, result_cls):
+    builder_cls.set_device_losses = set_device_losses
+    result_cls.loss_events = loss_events
+    result_cls.device_energy = device_energy

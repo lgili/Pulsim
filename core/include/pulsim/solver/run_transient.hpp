@@ -41,28 +41,54 @@
 #include "pulsim/pwl/history_state.hpp"
 #include "pulsim/pwl/nonlinear_refresh_saturable_inductor.hpp"
 #include "pulsim/pwl/igbt_tail_history.hpp"
+#include "pulsim/pwl/device_refresh.hpp"
+#include "pulsim/pwl/stateful_histories.hpp"
 #include "pulsim/pwl/lauritzen_diode_history.hpp"
 #include "pulsim/pwl/pmsm_mna_history.hpp"
 #include "pulsim/pwl/nonlinear_capacitor_history.hpp"
 #include "pulsim/pwl/nonlinear_refresh_igbt_tail.hpp"
 #include "pulsim/pwl/nonlinear_refresh_lauritzen_diode.hpp"
 #include "pulsim/pwl/nonlinear_refresh_pmsm_mna.hpp"
+#include "pulsim/pwl/nonlinear_refresh_mosfet_level1.hpp"
 #include "pulsim/pwl/nonlinear_refresh_nonlinear_capacitor.hpp"
 #include "pulsim/pwl/nonlinear_solve.hpp"
 #include "pulsim/pwl/saturable_inductor_history.hpp"
+#include "pulsim/solver/jump_series.hpp"
+#include "pulsim/solver/loss_tracker.hpp"
+#include "pulsim/events/event_queue.hpp"
+#include "pulsim/events/mode_set.hpp"
+#include "pulsim/events/step_hooks.hpp"
 #include "pulsim/solver/options.hpp"
 #include "pulsim/solver/result.hpp"
+#include "pulsim/solver/step/controllers.hpp"
+#include "pulsim/solver/step/integrators.hpp"
+#include "pulsim/solver/step/stepper.hpp"
+#include "pulsim/solver/step/sensitivity.hpp"
+#include "pulsim/solver/unsupported.hpp"
 #include "pulsim/sources/pulse_b_extra.hpp"
+#include "pulsim/sources/current_waveform_b_extra.hpp"
 #include "pulsim/sources/pwm_b_extra.hpp"
+#include "pulsim/sources/source_jumps.hpp"
 #include "pulsim/sources/sine_b_extra.hpp"
 #include "pulsim/topology/graph.hpp"
 #include "pulsim/topology/switch_state.hpp"
+#include "pulsim/pwl/branch_structure.hpp"
+#include "pulsim/pwl/reinit.hpp"
+#include "pulsim/pwl/mode_ports.hpp"
+#include "pulsim/pwl/transmission_line_history.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstdlib>
+#include <cmath>
+#include <limits>
+#include <memory>
 #include <format>
 #include <functional>
+#include <optional>
 #include <stdexcept>
+#include <unordered_map>
 
 namespace pulsim::solver {
 
@@ -80,6 +106,55 @@ namespace pulsim::solver {
     // user, diode, diode_owned must all be the same width. Word-wise
     // since Phase 1 (dynamic mask width — no 64-switch assumption).
     return user.overlay(diode, diode_owned);
+}
+
+// -----------------------------------------------------------------------------
+// seed_held_machine_capacitors — the DC point holds each machine's speed
+// and angle node (add-mna-native-machines D19), where the capacitor is
+// NOT at rest: C·dθ/dt = C·ω0, J·dω/dt = net torque. Its companion
+// current is the KCL residual the hold replaced: the linear DC rows
+// (no hold) plus the machine's mechanical injection from the refresh,
+// i_C(leaving n) = −r[n]. A node with other than one capacitor to
+// ground keeps i_C = 0.
+// -----------------------------------------------------------------------------
+inline void seed_held_machine_capacitors(
+    const topology::Graph& graph, const pwl::DevicePool& pool,
+    const topology::SwitchStateMask& mask, Real t, const Vector& x,
+    const pwl::PmsmMnaHistory& pmsm, pwl::HistoryState& history) {
+    std::vector<Index> nodes;
+    for (const auto& m : pool.pmsm_mna_machines()) {
+        nodes.push_back(m.omega_node);
+        nodes.push_back(m.theta_node);
+    }
+    for (const auto& m : pool.induction_machines()) nodes.push_back(m.omega_node);
+    if (nodes.empty()) return;
+    sparse::Matrix J;
+    Vector r;
+    pwl::dc_assemble(graph, pool, mask, J, r, t, Real{0}, Real{1},
+                     /*hold_mechanics=*/false);
+    r += J * x;
+    sparse::Matrix J_nl(J.rows(), J.cols());
+    Vector f_nl = Vector::Zero(J.rows());
+    (void)pwl::refresh_pmsm_mna(x, J_nl, f_nl, pmsm, Real{1});
+    r += f_nl;   // only the mechanical rows are read
+    for (const Index n : nodes) {
+        if (!stamping::node_is_active(n)) continue;
+        Index cap = -1;
+        int n_caps = 0;
+        for (Index br = 0; br < graph.num_branches(); ++br) {
+            const auto& e = graph.branch(br);
+            if ((e.from != n && e.to != n) || !pool.is_registered(br) ||
+                pool.kind_of(br) != pwl::DevicePool::StoredKind::Capacitor) {
+                continue;
+            }
+            ++n_caps;
+            if (!stamping::node_is_active(e.from == n ? e.to : e.from)) cap = br;
+        }
+        if (n_caps != 1 || cap < 0) continue;
+        const Real i_leaving = -r[n];
+        history.set_capacitor_current(
+            cap, graph.branch(cap).from == n ? i_leaving : -i_leaving);
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -286,18 +361,37 @@ inline SimulationResult run_transient(
     const topology::Graph& graph,
     const pwl::DevicePool& pool,
     const SimulationOptions& opts,
-    const SwitchScheduleFn& switch_fn,
+    const SwitchScheduleFn& switch_fn_user,
     const BExtraFn& b_extra_fn = {},
     bool start_from_dc_op = false,
     const pwl::NonlinearRefreshFn& nl_refresh = {},
-    const StepObserverFn& step_observer = {},
+    const StepObserverFn& step_observer_in = {},
     const Vector* initial_state = nullptr,
     const ShouldContinueFn& should_continue = {},
     /// v2.0 Phase 4 — resume EXACTLY from a previous run's
     /// `final_snapshot`. Unlike `initial_state`, which restores x
     /// and INVENTS the companion history from it, this restores
     /// the history and the solver-owned diode bits too.
-    const SolverSnapshot* resume_from = nullptr) {
+    const SolverSnapshot* resume_from = nullptr,
+    /// add-discontinuity-restart-rule — the instants at which
+    /// `b_extra_fn` jumps, declared by the caller: the first jump
+    /// strictly after t, +inf when none. Only read with
+    /// `discontinuity_restart`; an undeclared callback jump is not
+    /// restarted (and is not detected).
+    const std::function<Real(Real)>& b_extra_next_jump = {},
+    /// add-fixed-step-event-splitting — the schedule's analytic gate
+    /// edges (`SwitchSchedule::next_edge_after`): the first edge
+    /// strictly after t, +inf when none. Empty: the gate edges of an
+    /// opaque switch_fn are not located (start-of-step sampling).
+    const std::function<Real(Real)>& next_edge_fn = {},
+    /// add-unified-event-queue group 5 — control ticks scheduled by the
+    /// kernel's event queue: tick k of source j is delivered at the first
+    /// grid point t_n >= t_start + offset_j + k*T_j (to 1e-9*dt), for the
+    /// instants < t_end - 1e-9*dt, after `ticks->before` and before
+    /// `step_observer` at that step.
+    const events::TickPlan* ticks = nullptr,
+    /// Accepted-step / commutation listeners (events/step_hooks.hpp).
+    events::StepHooks* hooks = nullptr) {
 
     // ---- Input validation ---------------------------------------------
     if (!opts.valid()) {
@@ -306,10 +400,35 @@ inline SimulationResult run_transient(
             "(check t_start < t_end, dt > 0, store_every >= 1, "
             "all finite)");
     }
-    if (!switch_fn) {
+    if (opts.enable_substep_state_correction && !opts.discontinuity_restart) {
+        // The event split ends every step that contains an event with
+        // the restart rule's SDIRK window; without the rule there is no
+        // window to end it with.
+        throw UnsupportedError(
+            "pwl", "enable_substep_state_correction", "", "",
+            "run_transient: enable_substep_state_correction=True requires "
+            "discontinuity_restart=True (the event split ends every step "
+            "that contains an event with the restart rule's SDIRK "
+            "window); set both, or neither");
+    }
+    if (!(opts.split_snap >= Real{1e-12} && opts.split_snap <= Real{0.25})) {
+        throw std::invalid_argument(
+            "run_transient: split_snap must be in [1e-12, 0.25] (a "
+            "fraction of dt)");
+    }
+    if (!switch_fn_user) {
         throw std::invalid_argument(
             "run_transient: switch_fn callback is required");
     }
+    // Every mask the caller hands in has the circuit's width (a short
+    // one silently dropped bits, e.g. a branch-form diode's).
+    const SwitchScheduleFn switch_fn =
+        [&switch_fn_user, n_sw = static_cast<Size>(graph.num_switches())](
+            Real t_q) {
+            auto m = switch_fn_user(t_q);
+            topology::require_mask_width(m, n_sw);
+            return m;
+        };
     // The cache's dt must match opts.dt. If the user built the
     // cache for a different dt, the trap companion's g_eq is wrong
     // and the solution silently drifts. Catch up-front.
@@ -336,6 +455,46 @@ inline SimulationResult run_transient(
     // DECIMATED sample count (opts.store_every).
     result.reserve(opts.expected_sample_count(),
                     static_cast<Index>(state_size));
+
+    // ---- add-unified-event-queue group 5: control ticks on the queue --
+    // The ticks run at the start of a step, before the caller's observer,
+    // wherever the observer runs (the priming call at t_start included).
+    // The rule of the scheduler this replaces (_control_plan.py
+    // FixedStepTicks): integer k, due when t >= t_k - 1e-9*dt, instants
+    // t_k < t_end - 1e-9*dt, one tick per source per step.
+    events::EventQueue tick_queue;
+    const Real tick_tol = Real{1e-9} * opts.dt;
+    const bool has_ticks = ticks != nullptr && !ticks->rates.empty();
+    if (has_ticks) {
+        if (!ticks->fn) {
+            throw std::invalid_argument(
+                "run_transient: a TickPlan with rates needs fn");
+        }
+        for (const auto& r : ticks->rates) {
+            tick_queue.add_periodic(events::Kind::ControlTick, r);
+        }
+        // t0_tol = the take tolerance: a tick a previous run left out at
+        // its t_end (within tick_tol of it) is a resumed run's first.
+        // A closed_end rate's instant at t_end fires at the last observer
+        // call (labelled t_end, as every tick: the state there is x_{n-1}).
+        tick_queue.start(opts.t_start, opts.t_end - tick_tol, tick_tol,
+                         opts.t_end + tick_tol);
+        result.control_tick_counts.assign(ticks->rates.size(), 0);
+    }
+    const StepObserverFn step_observer = !has_ticks ? StepObserverFn{} :
+        StepObserverFn([&](Real t, const Vector& xs) {
+            if (ticks->before) ticks->before(t, xs);
+            for (const auto& ev : tick_queue.take_due(
+                     t, tick_tol,
+                     events::kind_bit(events::Kind::ControlTick))) {
+                ++result.control_tick_counts[ev.source];
+                result.control_tick_jitter_max =
+                    std::max(result.control_tick_jitter_max, t - ev.t);
+                ticks->fn(ev.source, events::TickInfo{ev.t, ev.ordinal}, t,
+                          xs);
+            }
+            if (step_observer_in) step_observer_in(t, xs);
+        });
     result.begin_switch_state_record(
         static_cast<Size>(graph.num_switches()),
         opts.expected_sample_count());
@@ -382,231 +541,202 @@ inline SimulationResult run_transient(
                 std::to_string(state_size)
                 + " — it belongs to a different circuit.");
         }
-        x = resume_from->x;
-        history.from_flat(resume_from->history);
+        if (resume_from->post_edge_derivatives) {
+            throw std::invalid_argument(std::format(
+                "run_transient(resume_from=...): the snapshot was taken "
+                "by a variable-step run that ended exactly on a gate edge "
+                "(t = {}): its x is the pre-edge solve but its device "
+                "derivatives are already the post-edge ones, and a "
+                "fixed-step run started from that pair rings and fails at "
+                "the next edge. Resume it with engine='trbdf2', or end "
+                "the first run off the edge.", resume_from->t));
+        }
+        x = resume_from->x;   // device state: hs.load below
     }
+    // The time grid: t_k = t_origin + (k_off + k)·dt. A resume from a
+    // fixed-step snapshot taken with this dt continues ITS grid, so the
+    // resumed sample times (and the gate edges they meet) are the
+    // continuous run's to the bit; restarting the grid at t_split moved
+    // them by ~1e-20 s and an edge then landed a rounding apart.
+    Real t_origin = opts.t_start;
+    Size k_off = 0;
+    if (resume_snap != nullptr && std::isfinite(resume_snap->grid_origin)
+        && resume_snap->grid_dt == opts.dt && resume_snap->t == opts.t_start
+        // consistency only, to a few ulps: the check and the loop's
+        // t_k may round differently (FMA contraction); the loop's
+        // expression is the same in both runs, so t_k is exact anyway
+        && std::abs(resume_snap->grid_origin
+                    + static_cast<Real>(resume_snap->grid_step) * opts.dt
+                    - opts.t_start)
+               <= Real{8} * std::numeric_limits<Real>::epsilon()
+                      * (std::abs(resume_snap->grid_origin)
+                         + static_cast<Real>(resume_snap->grid_step)
+                               * opts.dt)) {
+        t_origin = resume_snap->grid_origin;
+        k_off = resume_snap->grid_step;
+    }
+    // The grid point k of this run: t_origin + (k_off + k)·dt.
+    const step::FixedClock fixed_grid{t_origin, opts.dt};
 
-    pwl::SaturableInductorHistory sat_history;
-    sat_history.init(graph, pool);
-    // Warm-start: seed the saturable-inductor (i_L_old, V_L_old) from
-    // `initial_state` too. Otherwise the first Newton refresh sees zeros
-    // and stamps a wrong Jacobian → convergence failure or wrong solution
-    // on step 1. No-op when there are no saturable inductors. Must run
-    // AFTER init() and after `x = *initial_state` above.
-    if (initial_state != nullptr) {
-        sat_history.seed_from_dc_op(x);
-    }
-    // Resume WINS over a builder-IC seed: the snapshot is the state.
-    if (resume_snap != nullptr) sat_history.from_flat(resume_snap->saturable_history);
-    const bool has_saturable = !sat_history.empty();
+    // The five stateful-device histories (Coss, Lauritzen, PMSM, IGBT
+    // tail, saturable inductor), one object: every operation below visits
+    // all five (add-unified-device-interface step 1). Seeded from
+    // `initial_state` so the first Newton refresh does not see zeros;
+    // resume WINS over a builder-IC seed: the snapshot is the state.
+    pwl::StatefulHistories hs;
+    hs.get<pwl::ExternalDeviceHistory>().set_start_time(opts.t_start);   // ctx->t of init
+    hs.init(graph, pool);
+    hs.set_path(opts.device_path, graph, pool, "run_transient");
+    if (initial_state != nullptr) hs.seed_from_dc_op(x);
+    if (resume_snap != nullptr) hs.load(*resume_snap, history, "run_transient");
 
-    // V17: shared dt that the saturable-inductor refresh
-    // reads each iteration. Updated when sub-step correction
-    // splits dt into dt1 + dt2.
-    // Fixed for the whole run. An earlier comment here claimed it
-    // was "updated when sub-step correction splits dt into dt1+dt2";
-    // it never was, and it is safe only because that path solves
-    // linearly through cache.solve_at and never consults this. The
-    // dt-retry refuses saturable-inductor circuits for the same
-    // reason — see `dt_retry_can_help`.
-    Real refresh_dt = opts.dt;
+    // The step every stateful stamp of the next solve integrates over:
+    // set at the one point every solve passes through
+    // (run_event_iteration), including the dt-retry sub-steps, the
+    // commutation split and the SDIRK stages of discontinuity_restart
+    // (BackwardEuler over the γ·h each stage advances).
+    pwl::StepCtx step_ctx{opts.dt, pwl::TrBdf2Stage::Trapezoidal, opts.t_start};
 
-    // V17: if any saturable inductors are present, wrap the
-    // user's nl_refresh with our additive saturable
-    // stamping. The user-supplied refresh runs first (it
-    // zero-clears + stamps diodes/MOSFETs/IGBTs); we then
-    // ADD the saturable inductor contributions on top.
-    // Phase 4 C.1 — charge-based Coss. Unlike the saturable
-    // inductor below, this one is handed the ACTUAL step size each
-    // solve (`refresh_dt` is assigned before every solve on every
-    // path, including the sub-step and retry ones) and its history
-    // has snapshot/restore, so a step that is thrown away rolls
-    // back. Those two omissions are exactly why the saturable
-    // inductor has to refuse a variable step.
-    pwl::NonlinearCapacitorHistory coss_history;
-    coss_history.init(graph, pool);
-    if (initial_state != nullptr) {
-        coss_history.seed_from_dc_op(x);
-    }
-    // Resume WINS over a builder-IC seed: the snapshot is the state.
-    if (resume_snap != nullptr) coss_history.from_flat(resume_snap->coss_history);
-    const bool has_coss = !coss_history.empty();
-
-    // The Lauritzen diode's stored charge, same shape as the Coss
-    // history above: state that the Newton stamp reads and the
-    // step commits, snapshot/restored on rejection.
-    pwl::LauritzenDiodeHistory laur_history;
-    laur_history.init(graph, pool);
-    if (initial_state != nullptr) {
-        laur_history.seed_from_dc_op(x);
-    }
-    // Resume WINS over a builder-IC seed: the snapshot is the state.
-    if (resume_snap != nullptr) laur_history.from_flat(resume_snap->lauritzen_history);
-    const bool has_lauritzen = !laur_history.empty();
-
-    // Phase 4 C.3 — the MNA-native PMSM's flux-linkage state. Same
-    // shape as the Lauritzen diode: stamped per Newton iteration
-    // from committed history, snapshot/restored on rejection.
-    pwl::PmsmMnaHistory pmsm_history;
-    pmsm_history.init(graph, pool);
-    if (initial_state != nullptr) {
-        pmsm_history.seed_from_dc_op(x);
-    }
-    // Resume WINS over a builder-IC seed: the snapshot is the state.
-    if (resume_snap != nullptr) pmsm_history.from_flat(resume_snap->pmsm_history);
-    const bool has_pmsm = !pmsm_history.empty();
-
-    // The IGBT turn-off tail's stored charge. Same shape again,
-    // except this pass stamps a DELTA on top of the ordinary IGBT
-    // stamp rather than replacing it — see the refresh header.
-    pwl::IgbtTailHistory tail_history;
-    tail_history.init(graph, pool);
-    if (initial_state != nullptr) {
-        tail_history.seed_from_dc_op(x);
-    }
-    // Resume WINS over a builder-IC seed: the snapshot is the state.
-    if (resume_snap != nullptr) tail_history.from_flat(resume_snap->igbt_tail_history);
-    const bool has_igbt_tail = !tail_history.empty();
-
-    pwl::NonlinearRefreshFn nl_refresh_effective = nl_refresh;
-    if (has_coss) {
-        nl_refresh_effective =
-            [user_refresh = nl_refresh_effective, &coss_history,
-             &refresh_dt](const Vector& xx,
-                            sparse::Matrix& J_nl,
-                            Vector& f_nl,
-                            const topology::Graph& g,
-                            const pwl::DevicePool& pp) -> Real {
-                Real max_i = Real{0};
-                if (user_refresh) {
-                    max_i = user_refresh(xx, J_nl, f_nl, g, pp);
-                } else {
-                    J_nl.setZero();
-                    f_nl.setZero();
-                }
-                return std::max(
-                    max_i,
-                    pwl::refresh_nonlinear_capacitors(
-                        xx, J_nl, f_nl, coss_history,
-                        refresh_dt));
-            };
-    }
-    if (has_lauritzen) {
-        nl_refresh_effective =
-            [user_refresh = nl_refresh_effective, &laur_history,
-             &refresh_dt](const Vector& xx,
-                            sparse::Matrix& J_nl,
-                            Vector& f_nl,
-                            const topology::Graph& g,
-                            const pwl::DevicePool& pp) -> Real {
-                Real max_i = Real{0};
-                if (user_refresh) {
-                    max_i = user_refresh(xx, J_nl, f_nl, g, pp);
-                } else {
-                    J_nl.setZero();
-                    f_nl.setZero();
-                }
-                return std::max(
-                    max_i,
-                    pwl::refresh_lauritzen_diodes(
-                        xx, J_nl, f_nl, laur_history,
-                        refresh_dt));
-            };
-    }
-    if (has_pmsm) {
-        nl_refresh_effective =
-            [user_refresh = nl_refresh_effective, &pmsm_history,
-             &refresh_dt](const Vector& xx,
-                            sparse::Matrix& J_nl,
-                            Vector& f_nl,
-                            const topology::Graph& g,
-                            const pwl::DevicePool& pp) -> Real {
-                Real max_i = Real{0};
-                if (user_refresh) {
-                    max_i = user_refresh(xx, J_nl, f_nl, g, pp);
-                } else {
-                    J_nl.setZero();
-                    f_nl.setZero();
-                }
-                return std::max(
-                    max_i,
-                    pwl::refresh_pmsm_mna(
-                        xx, J_nl, f_nl, pmsm_history, refresh_dt));
-            };
-    }
-    if (has_igbt_tail) {
-        nl_refresh_effective =
-            [user_refresh = nl_refresh_effective, &tail_history,
-             &refresh_dt](const Vector& xx,
-                            sparse::Matrix& J_nl,
-                            Vector& f_nl,
-                            const topology::Graph& g,
-                            const pwl::DevicePool& pp) -> Real {
-                Real max_i = Real{0};
-                if (user_refresh) {
-                    max_i = user_refresh(xx, J_nl, f_nl, g, pp);
-                } else {
-                    J_nl.setZero();
-                    f_nl.setZero();
-                }
-                return std::max(
-                    max_i,
-                    pwl::refresh_igbt_tails(
-                        xx, J_nl, f_nl, tail_history,
-                        refresh_dt));
-            };
-    }
-    if (has_saturable) {
-        nl_refresh_effective =
-            // `nl_refresh_effective`, NOT the raw `nl_refresh`.
-            // This wrapper is installed LAST, so capturing the raw
-            // user callback discarded every wrapper before it: a
-            // circuit with a saturable inductor and any of {Coss,
-            // Lauritzen diode, MNA-native PMSM, IGBT tail} lost all
-            // four of those Newton stamps in silence. Measured: an
-            // electrically DISCONNECTED saturable inductor on its
-            // own node dropped an IGBT's turn-off energy from
-            // 16.87 mJ to 0.045 mJ — exactly the no-tail value.
-            // The other four wrappers (lines above) always captured
-            // the accumulated one; this was the odd one out.
-            [user_refresh = nl_refresh_effective, &sat_history,
-             &refresh_dt](const Vector& x,
-                            sparse::Matrix& J_nl,
-                            Vector& f_nl,
-                            const topology::Graph& g,
-                            const pwl::DevicePool& p)
-                -> Real {
-                Real max_i = Real{0};
-                if (user_refresh) {
-                    max_i = user_refresh(x, J_nl, f_nl, g, p);
-                } else {
-                    if (J_nl.rows() > 0) J_nl.setZero();
-                    if (f_nl.size() > 0) f_nl.setZero();
-                }
-                // Additive saturable-inductor stamping, through
-                // the one shared helper — this file used to carry a
-                // third byte-identical copy of the body, alongside
-                // the two in nonlinear_refresh_saturable_inductor.hpp.
-                for (const auto& e : sat_history.entries()) {
-                    max_i = std::max(
-                        max_i,
-                        pwl::stamp_saturable_inductor(
-                            e, x, J_nl, f_nl, refresh_dt,
-                            pwl::TrBdf2Stage::Trapezoidal));
-                }
-                return max_i;
-            };
-    }
+    // The Newton refresh is built by the kernel (add-unified-device-
+    // interface step 2): the static stamps (with no callback from the
+    // caller, Newton devices get the standard ones instead of being
+    // simulated as open circuits: 10.000 V on a clamp that reads 0.594 V),
+    // then every stateful history, all reading `step_ctx`, which
+    // run_event_iteration sets before every solve. `nl_refresh` is a
+    // deprecated override of the static stamps only.
+    const pwl::NonlinearRefreshFn nl_static =
+        pwl::static_device_refresh(pool, nl_refresh, opts.device_path);
+    const pwl::NonlinearRefreshFn nl_refresh_effective =
+        pwl::build_device_refresh(nl_static, hs, step_ctx,
+                                  /*sat_increment_form=*/false);
 
     pwl::DiodeEventState diodes{graph, pool};
     diodes.reset();
-    if (resume_snap != nullptr && !resume_snap->diode_on.empty()) {
+    if (resume_snap != nullptr && !resume_snap->mask.empty()) {
         // The solver-owned conduction bits the snapshot promised to
         // carry (size-checked by name inside).
-        diodes.restore_on_bits(resume_snap->diode_on);
+        diodes.restore_on_bits(resume_snap->mask);
     }
     const auto diode_owned = diodes.diode_owned_bits();
     const bool has_diodes = diodes.num_diodes() > 0;
+    // the commanded gate per sample (2.2); cleared before the result leaves
+    if (diodes.num_gated() > 0) {
+        result.gate_mask_fn = [&diodes] { return diodes.gate_mask(); };
+    }
+    // Ideal (R_on = 0) branch-form diodes sit exactly at V_on while ON, so
+    // the voltage-crossing record below never sees them turn off; their
+    // commutations are read from the stamped state, step start to step end.
+    std::vector<char> commut_on_prev;
+    bool has_ideal_diode = false;
+    for (const auto& e : diodes.entries())
+        has_ideal_diode = has_ideal_diode || pool.is_branch_form(e.branch_id);
+
+    // add-branch-form-ideal-switch D3: the per-mode structural pass, run
+    // once per mode before its first solve (inactive, and free, without
+    // an ideal branch-form element).
+    pwl::BranchStructureChecker structure{graph, pool, "pwl"};
+    // Ideal diodes turned OFF this step because they closed a stiff loop.
+    std::vector<Index> loop_released;
+    std::string loop_last;   // the loops of the last release, in loop order
+    std::vector<bool> loop_bits;
+    // Returns true when it turned loop-closing ideal diodes OFF: the
+    // caller re-forms the mask and checks again.
+    auto check_mode = [&](const topology::SwitchStateMask& m, bool dynamic,
+                          Real at_t) -> bool {
+        const auto& ms = structure.check(m, dynamic);
+        result.mode_structure_checks = structure.checks_run();
+        if (!ms.loop_diodes.empty()) {
+            // A diode across a loop of sources and closed ideal elements
+            // conducts an undefined current; OFF is its only consistent
+            // state when the loop reverse-biases it (the turn-on edge of
+            // a CCM buck: switch ON while the freewheeling diode still
+            // conducts). If the diode law turns it back ON within the
+            // same step the loop forward-biases it: refuse.
+            Index b = ms.loop_diodes.front();
+            std::string loop = ms.loop_texts.front();
+            bool again = false;
+            for (std::size_t m = 0; m < ms.loop_diodes.size(); ++m) {
+                const Index d = ms.loop_diodes[m];
+                if (std::find(loop_released.begin(), loop_released.end(), d) !=
+                    loop_released.end()) {
+                    b = d;
+                    loop = ms.loop_texts[m];
+                    again = true;
+                    break;
+                }
+            }
+            if (!dynamic || again) {
+                throw UnsupportedError(
+                    "pwl", "ideal_voltage_loop",
+                    std::string(graph.branch_name(b)), "Diode",
+                    std::format(
+                        "engine 'pwl': at t = {} the ideal diode '{}' (R_on = "
+                        "0) closes a loop of voltage sources and closed ideal "
+                        "elements in mode {} (loop: {}){}: its current is undefined. "
+                        "Give it R_on > 0.",
+                        at_t, graph.branch_name(b), m.to_string(), loop,
+                        again ? ", and the loop forward-biases it (turned OFF,"
+                                " it turned back ON)" : ""));
+            }
+            diodes.snapshot_on_bits_into(loop_bits);
+            const auto ents = diodes.entries();
+            loop_last.clear();
+            for (std::size_t m = 0; m < ms.loop_texts.size(); ++m)
+                loop_last += (m ? "; " : "") + ms.loop_texts[m];
+            for (const Index d : ms.loop_diodes) {
+                loop_released.push_back(d);
+                for (Size q = 0; q < ents.size(); ++q) {
+                    if (ents[q].branch_id == d) loop_bits[q] = false;
+                }
+            }
+            diodes.restore_on_bits(loop_bits);
+            ++result.ideal_loop_releases;
+            return true;
+        }
+        return false;
+    };
+    // D4: the SDIRK x3 restart realises the projection onto a dependent
+    // mode; without the rule the trapezoid rings (+-397 V). Decided on the
+    // COMMITTED mode: an event-iteration iterate may pass through one
+    // (CCM buck: switch off, diode not yet on; review M6).
+    // `in_dependent_mode` and the record live in pwl/reinit.hpp (shared
+    // with engine='trbdf2').
+    auto in_dependent_mode = [&](const pwl::DependentStructure& d,
+                                 const Vector& xs) {
+        return pwl::in_dependent_mode(graph, pool, d, xs);
+    };
+    auto refuse_dependent = [&](const pwl::ModeStructure& ms,
+                                const topology::SwitchStateMask& m, Real at_t) {
+        if (opts.discontinuity_restart) return;
+        const auto it = std::find_if(
+            ms.dependent.begin(), ms.dependent.end(),
+            [&](const pwl::DependentStructure& d) { return in_dependent_mode(d, x); });
+        if (it == ms.dependent.end()) return;
+        const auto& d = *it;
+        const Index el = d.elements.front();
+        std::string states;
+        for (Index b : d.states) {
+            if (!states.empty()) states += ", ";
+            states += graph.branch_name(b);
+        }
+        throw UnsupportedError(
+            "pwl", "dependent_states", std::string(graph.branch_name(el)),
+            std::string(pwl::stored_kind_name(pool.kind_of(el))),
+            std::format(
+                "engine 'pwl': at t = {} the mode {} makes {} dependent "
+                "(a {} through the ideal element '{}'): its re-initialisation "
+                "is the SDIRK x3 restart, so pass discontinuity_restart=True, "
+                "or give '{}' {} > 0.",
+                at_t, m.to_string(),
+                states,
+                d.kind == pwl::DependentStructure::Kind::CutSet
+                    ? "cut-set of inductors" : "loop of capacitors",
+                graph.branch_name(el), graph.branch_name(el),
+                d.kind == pwl::DependentStructure::Kind::CutSet ? "g_off"
+                                                                : "R_on"));
+    };
+    // D4 records: the last committed mask and each branch's mask bit.
+    pwl::ReinitTracker reinit{graph, pool, structure.active()};
 
     // ---- DC operating-point pre-charge (Layer 5 V3) ------------------
     //
@@ -649,12 +779,41 @@ inline SimulationResult run_transient(
         dc_opts.enable_line_search = opts.enable_newton_line_search;
         dc_opts.enable_lm          = opts.enable_newton_lm;
 
-        auto dc = pwl::compute_dc_operating_point(
-            graph, pool, switch_fn(opts.t_start), nl_refresh,
-            dc_opts, has_diodes ? &diodes : nullptr,
-            "run_transient(start_from_dc_op)");
+        // The DC mode is the one the DC diode iteration converges to; the
+        // start mask (diodes OFF) can be a false floating island (review
+        // L2). On a failed solve the start mask's check names the cause.
+        const auto dc_start_mask = has_diodes
+            ? diodes.combine(switch_fn(opts.t_start))
+            : switch_fn(opts.t_start);
+        // The DC refresh (device DECISIONS #56): the static chain has no
+        // DC stamp for a Lauritzen diode (it solved it open); the caller's
+        // override keeps winning.
+        const pwl::NonlinearRefreshFn& dc_refresh =
+            (nl_refresh || pool.lauritzen_diode_branches().empty())
+                ? nl_static
+                : pwl::dc_device_refresh(pool, true, opts.device_path);
+        auto dc = [&] {
+            try {
+                return pwl::compute_dc_operating_point(
+                    graph, pool, switch_fn(opts.t_start), dc_refresh,
+                    dc_opts, has_diodes ? &diodes : nullptr,
+                    "run_transient(start_from_dc_op)", "pwl");
+            } catch (const std::runtime_error&) {
+                if (structure.active()) {
+                    (void)check_mode(dc_start_mask, false, opts.t_start);
+                }
+                throw;
+            }
+        }();
+        if (structure.active()) (void)check_mode(dc.mask, false, opts.t_start);
         x = std::move(dc.x);
         history.seed_from_dc_op(x);
+        // every stateful kind on its DC curve: PMSM λ, i, θ at the held
+        // point (D19), external charges, Lauritzen q_M, IGBT tail Q,
+        // nonlinear-capacitor q, saturable flux (empty kinds: no-op)
+        hs.seed_from_dc_op(x);
+        seed_held_machine_capacitors(graph, pool, dc.mask, opts.t_start, x,
+                                     hs.get<pwl::PmsmMnaHistory>(), history);
         initial_mask = dc.mask;
         initial_mask_known = true;
     }
@@ -683,20 +842,104 @@ inline SimulationResult run_transient(
     // Phase-1 zero-alloc scope.)
     Vector x_prev;                                  // pre-step state snapshot
     pwl::PwlSegment retry_seg;                      // off-nominal-dt companion
-    std::vector<pwl::HistoryEntry> history_snap;    // V3 rollback snapshot
+    pwl::NewtonWorkspace newton_ws;   // one Newton analysis per pattern per run
+    const sparse::Matrix* sens_J_lin = nullptr;   // the last Newton solve's J_lin
+    // add-parameter-sensitivities group 5: the stage recurrence (step/
+    // sensitivity.hpp); off (no params) it is one test per step.
+    step::StageSensitivity sens{graph, pool, opts.sensitivities, "pwl",
+                                opts.tol_newton_dx};
+    if (sens.on() && (resume_from != nullptr || start_from_dc_op)) {
+        throw UnsupportedError("pwl", "sensitivities", "", "",
+            resume_from != nullptr
+                ? "sensitivities with resume_from: the sensitivity state is not "
+                  "part of a snapshot; run from the start."
+                : "sensitivities with start_from_dc_op: the DC point depends on "
+                  "the parameters and its derivative is not carried; start "
+                  "from a parameter-free state.");
+    }
+    std::vector<Real> history_snap;                 // rollback: (v_prev, i_prev) pairs
     // Phase 4 C.1 — the Coss rolls back with everything else. The
     // saturable inductor cannot, which is the second reason it
     // refuses a variable step; this device was given the
     // capability up front rather than as a follow-up.
-    std::vector<pwl::NonlinearCapacitorHistory::Entry> coss_snap;
-    std::vector<pwl::LauritzenDiodeHistory::Entry> laur_snap;
-    std::vector<pwl::PmsmMnaHistory::Entry> pmsm_snap;
-    std::vector<pwl::IgbtTailHistory::Entry> tail_snap;
-    std::vector<pwl::SaturableInductorHistory::Entry> sat_snap;
+    pwl::StatefulHistories::Snapshot hs_snap;   // V3 rollback point
     std::vector<bool> diodes_snap;                  // V3 diode-bit snapshot
     std::vector<bool> last_solved_bits;             // breach re-sync bits
+    // Restart stage-1 state, kept for the stage-2 fallback (see
+    // run_restart): x1, its diode bits and the histories at x0.
+    Vector rs_x1, rs_x2;
+    Vector edge_xl;   // the edge's mode decision: a linearized solve (decide_edge_mode)
+    std::vector<bool> edge_bits;   // the diode bits after its stage
+    std::vector<bool> rs_bits, rs_bits2, rs_bits_be, rs_solved2;
+    std::vector<bool> rs_bits0;   // the diode bits at stage 1's start
+    // The diode bits after stage 1 of a restart that starts at the step
+    // start: a branch-form flip already there was forced at t_prev.
+    std::vector<bool> rs_bits_first;
+    bool rs_first_valid = false;
+    std::vector<Real> rs_hist;
+    pwl::StatefulHistories::Snapshot rs_hs;
+    // Consistent initialisation at a restart (release group A, F-5-1/F-3-3):
+    // stage 1 (x1), the histories at x0, the stage's b_extra and the history
+    // parts of it; the impulse records owed by the attempt (written in the
+    // record phase); and the event's right limit x0+ at event_rl_t (NaN: none
+    // this step), for the event-sample storage to read.
+    Vector ip_x1, ip_b, ip_h0, ip_h1, ip_x2, ip_x3f, ip_x2m, ip_s2, ip_s3;
+    std::vector<Real> ip_hist, ip_d, ip_r, ip_nc;
+    // the jump's vector series (consistent_start): the reading's x3, the later
+    // stages and their sources; the start mode's probe (ip_y1, ip_bits1, ip_m1)
+    Vector ip_x3m, ip_xk, ip_sk, ip_y1, ip_y2, ip_w, ip_c, ip_g;
+    std::vector<Vector> ip_xs;   // the series' stages 4, 5, …
+    DenseMatrix ip_Dw;
+    std::vector<Real> ip_m1, ip_f0, ip_s0, ip_s0v;
+    std::vector<Size> ip_js;
+    std::vector<bool> ip_bits1;
+    // An ideal element's jump (the tracker records it): stage 1 from x0+ for
+    // the step's lines only (ln_pre), the run keeps its own stage 1.
+    Vector ln_x1;
+    std::vector<Real> ln_v0;
+    std::vector<bool> ln_bits;
+    bool ln_pre = false;
+    pwl::StatefulHistories::Snapshot ip_hs;
+    std::vector<solver::ReinitRecord> impulse_pending;
+    Vector event_rl_x;
+    // The OFF state's leakage conductance in total (conductance-form
+    // switches and diodes): the restart rule's current resolution
+    // (`consistent_start`).
+    const Real g_leak = [&] {
+        Real g = 0;
+        for (Index bi = 0; bi < graph.num_branches(); ++bi) {
+            if (!pool.is_registered(bi)) continue;
+            if (pool.kind_of(bi) == pwl::DevicePool::StoredKind::Switch) {
+                g += pool.switch_g_off(bi);
+            }
+        }
+        for (const auto& d : diodes.entries()) g += d.g_off;
+        return g;
+    }();
+    Real event_rl_t = std::numeric_limits<Real>::quiet_NaN();
     std::vector<CommutationEvent> step_events;      // per-step event scratch
-    std::vector<bool> post_event_bits;              // substep-correction scratch
+    std::vector<bool> post_event_bits;              // event-split scratch
+    std::vector<bool> decided_bits;                 // the split's decided mode
+    // add-fixed-step-event-splitting workspace: the step's first solve
+    // (pre-event bits) and its mask, the located gate/source events,
+    // the diode events located in the step.
+    Vector x_first;
+    topology::SwitchStateMask mask_first(
+        static_cast<std::size_t>(graph.num_switches()));
+    constexpr Size kMaxStepEvents = 8;
+    std::array<Real, kMaxStepEvents> ev_t{};
+    // The gate sample of the interval that starts at ev_t[i]: the LAST
+    // event of a cluster merged within `snap` (review M1).
+    std::array<Real, kMaxStepEvents> ev_s{};
+    std::vector<CommutationEvent> split_events;
+    split_events.reserve(8);
+    std::vector<Real> cross_scratch;
+    std::vector<Index> island;          // the split's floating islands
+    std::vector<char> off_branch;
+    topology::SwitchStateMask prev_gate;   // unlocated-edge count (no oracle)
+    bool have_prev_gate = false;
+    Real edge_from = std::numeric_limits<Real>::infinity();   // oracle memo:
+    Real edge_next = -std::numeric_limits<Real>::infinity();  // first edge after edge_from
     // The mask of the LAST solve that produced x — recorded with
     // each stored sample (SimulationResult::switch_state_bits).
     topology::SwitchStateMask stamped_mask(
@@ -705,33 +948,544 @@ inline SimulationResult run_transient(
     // only while x is still a seeded, unsolved sample 0) — what
     // final_snapshot.stamped_mask carries.
     bool stamped_known = false;
+    // add-pwl-igbt-and-thyristor: the stamped mask at the step start,
+    // so a gated device's commutation record follows its stamped state.
+    topology::SwitchStateMask gated_prev_stamp = stamped_mask;
 
     // Event-iteration cap. 0 disables iteration entirely
     // (matching Layer 5 V2 behaviour for regression testing).
     const Size max_iters = opts.max_event_iterations;
+
+    // ---- add-complementarity-mode-selection on pwl (tasks 4.2, 4b.3, 6.3)
+    // Every decision site (a step, a restart stage, a split sub-step, a
+    // static step) can pose the LCP of its own diode k-port
+    // (pwl/mode_ports.hpp): beside the settle ('shadow'), instead of it
+    // ('lcp'), or after a settle that ended in a mode violating a diode's
+    // law (the default guard). Not posed: Newton runs and branch-form
+    // diodes ('shadow' / 'lcp' are refused there), max_event_iterations = 0.
+    if (opts.mode_selection < 0 || opts.mode_selection > 2) {
+        throw std::invalid_argument(
+            "run_transient: mode_selection must be 0 (settle), 1 (shadow) or 2 (lcp)");
+    }
+    if (opts.mode_selection != 0 && !has_diodes) {
+        throw UnsupportedError(
+            "pwl", "mode_selection", "", "",
+            "engine 'pwl': mode_selection decides PWL diodes and this circuit has "
+            "none: nothing to select. Drop mode_selection.");
+    }
+    std::optional<pwl::PwlModePorts> mode_ports;
+    events::ModeSelector mode_selector;
+    events::PassivityClass mode_passivity;
+    std::vector<std::string> mode_diode_names, mode_device_names;
+    Vector mode_x0, mode_xj, mode_u, mode_xs;
+    DenseMatrix mode_Z;
+    std::vector<bool> mode_bits0, mode_bits;
+    std::vector<char> mode_prev_on, mode_coords, mode_settled;
+    // add-pwl-igbt-and-thyristor: the mode LCP and judge_mode know no gate
+    // (they would turn a gate-off IGBT on), so gated circuits keep the settle.
+    const bool has_gated = diodes.num_gated() > 0;
+    if (opts.mode_selection != 0 && has_gated) {
+        std::string gated_name;
+        for (const auto& e : diodes.entries()) {
+            if (e.gate != models::SwitchedDiode::Gate::None) {
+                gated_name = std::string(graph.branch_name(e.branch_id));
+                break;
+            }
+        }
+        throw UnsupportedError(
+            "pwl", "mode_selection", gated_name, "Diode",
+            std::format("engine 'pwl': mode_selection with the gated device '{}' "
+                        "(IGBT with reverse blocking, GTO, thyristor or TRIAC): the "
+                        "complementarity port knows no gate. Drop mode_selection.",
+                        gated_name));
+    }
+    if (has_diodes && (opts.mode_selection != 0 || (opts.mode_guard && !has_gated))) {
+        mode_ports.emplace(cache, graph, pool, diodes);
+        // A branch-form diode is a port of its own R_on (an ideal one is
+        // posed OFF: task 6.1). The default guard stays off on such circuits:
+        // it would change the numbers of a run that asked for nothing.
+        const bool bf = !mode_ports->branch_form_diode().empty() && opts.mode_selection == 0;
+        const char* mname = opts.mode_selection == 1 ? "shadow" : "lcp";
+        if (opts.mode_selection != 0 && nl_refresh_effective) {
+            throw UnsupportedError(
+                "pwl", "mode_selection", "", "",
+                std::format("engine 'pwl': mode_selection='{}' with a Newton device "
+                            "in the circuit: the diode port model is linear, a Newton "
+                            "device's stamp moves with its operating point. Drop "
+                            "mode_selection.", mname));
+        }
+        if (opts.mode_selection != 0 && max_iters == 0) {
+            throw UnsupportedError(
+                "pwl", "mode_selection", "", "",
+                std::format("engine 'pwl': mode_selection='{}' with "
+                            "max_event_iterations=0: the diode modes are frozen, "
+                            "nothing is decided. Drop mode_selection or allow event "
+                            "iterations.", mname));
+        }
+        if (bf || nl_refresh_effective || max_iters == 0) {
+            mode_ports.reset();
+        } else {
+            mode_passivity = pwl::passivity_of(graph, pool);
+            mode_selector.passive = mode_passivity.passive();
+            for (const auto& e : diodes.entries()) {
+                mode_diode_names.push_back(pwl::branch_label(graph, e.branch_id));
+                mode_device_names.emplace_back(graph.branch_name(e.branch_id));
+            }
+        }
+    }
+    result.mode_report.mode = mode_ports ? opts.mode_selection : 0;
+    result.mode_report.passivity = mode_passivity.name();
+    result.mode_report.passivity_device = mode_passivity.device;
+    result.mode_report.passivity_kind = mode_passivity.kind;
+    result.mode_guard.enabled =
+        mode_ports.has_value() && opts.mode_guard && opts.mode_selection != 2;
+
+    auto mode_mask_of = [&](const std::vector<char>& on) {
+        topology::SwitchStateMask m(static_cast<std::size_t>(graph.num_switches()));
+        const auto& es = diodes.entries();
+        for (std::size_t j = 0; j < es.size(); ++j)
+            if (on[j]) m.set(es[j].switch_idx, true);
+        return m;
+    };
+    auto mode_str = [](const auto& on) {
+        std::string s;
+        for (const auto c : on) s += c ? '1' : '0';
+        return s;
+    };
+    auto mode_kind = [&](Real for_dt, bool be) -> const char* {
+        return for_dt <= Real{0} ? "static"
+             : be ? "restart" : for_dt == opts.dt ? "step" : "substep";
+    };
+    auto mode_count_site = [](ModeReport& r, std::string_view kind) {
+        if (kind == "step") ++r.sites_step;
+        else if (kind == "restart") ++r.sites_restart;
+        else if (kind == "substep") ++r.sites_substep;
+        else ++r.sites_static;
+    };
+    auto mode_note = [](ModeReport& r, const events::ModeSelection& s) {
+        ++r.lcp_events;
+        r.lcps += static_cast<Size>(s.lcps);
+        r.pivots_total += static_cast<Size>(s.pivots_total);
+        r.max_pivots_per_event = std::max(r.max_pivots_per_event, s.pivots_total);
+        r.ties += static_cast<Size>(s.ties);
+        r.widenings += static_cast<Size>(s.widenings);
+        r.capped += static_cast<Size>(s.capped);
+        r.leak_pins += static_cast<Size>(s.leak_pins);
+        r.pin_judgements += static_cast<Size>(s.pin_judgements);
+        r.unfixed += static_cast<Size>(s.unfixed);
+        r.enumerations += static_cast<Size>(s.enumerations);
+        r.nonunique_modes += static_cast<Size>(s.nonunique_modes);
+        r.released += static_cast<Size>(s.released);
+        r.shorted_held += static_cast<Size>(s.shorted_held);
+        r.shorted_released += static_cast<Size>(s.shorted_released);
+    };
+    auto mode_failed = [](const events::ModeSelection& s) {
+        return s.status != events::LcpStatus::Solution &&
+               s.status != events::LcpStatus::Trivial;
+    };
+    // The site's start: x0 and the diode bits its first solve uses.
+    auto mode_begin = [&]() {
+        mode_x0 = x;
+        diodes.snapshot_on_bits_into(mode_bits0);
+    };
+    // The LCP of the site J(gates + start bits, for_dt)·s = −(b_c + bx);
+    // be: a restart stage (γ·h on the factor of 2γh); for_dt = 0: static.
+    auto mode_select = [&](const topology::SwitchStateMask& gates, Real for_dt,
+                           bool be, const Vector& bx, const Vector* x_site = nullptr) {
+        const auto& es = diodes.entries();
+        mode_prev_on.assign(es.size(), 0);
+        for (std::size_t j = 0; j < es.size(); ++j) mode_prev_on[j] = mode_bits0[j] ? 1 : 0;
+        const Real h_site = for_dt <= Real{0} ? Real{1} : be ? for_dt * Real{0.5} : for_dt;
+        // Every pass, the selector's tie widenings included, is posed on the
+        // site's own step (DECISIONS F2): the next site is one step away, and
+        // a 100·h / 1e4·h backward-Euler look-ahead with the sources frozen
+        // decided a floating bridge's ties on a trajectory that never happens.
+        // pwl::select_site is the engine-neutral driver (trbdf2 hook: not yet).
+        return pwl::select_site(
+            mode_selector, *mode_ports, cache, diodes,
+            [&](const std::vector<char>& on) {
+                return combine_masks(gates, mode_mask_of(on), diode_owned);
+            },
+            mode_prev_on, mode_x0, for_dt, h_site, bx, mode_Z, mode_u, mode_xj, mode_coords,
+            x_site);
+    };
+    // The quiet-site test of 'lcp' (DECISIONS #40): every diode's crossing
+    // signal on the start solve `xs` clear of zero by kQuietBand of the
+    // circuit scale (10× the selector's tie tolerance, with its σ·C_max/h
+    // term): the LCP reads the same signals from the same solve.
+    topology::SwitchStateMask mode_last_gates;
+    bool mode_gates_known = false;
+    Vector mode_xq, mode_xc;
+    std::unordered_map<topology::SwitchStateMask, std::vector<bool>> mode_answers;
+    // a hysteresis port (V_th > V_f) turns ON only past V_th on the START solve,
+    // which a cached answer's own solve does not show: no answer cache then
+    const bool mode_hysteresis = mode_ports.has_value() &&
+        std::any_of(mode_ports->ports().begin(), mode_ports->ports().end(),
+                    [](const events::DiodePort& p) { return p.V_th > p.V_f; });
+    auto mode_quiet = [&](const std::vector<bool>& bits, const topology::SwitchStateMask& m,
+                          Real for_dt, Real h, const Vector& bx, const Vector& xs) {
+        constexpr Real kQuietBand = Real{1e-8};
+        const Vector* xq = &xs;
+        if (mode_ports->has_islands(m)) {
+            mode_xq = xs;
+            mode_ports->correct(m, for_dt, bx, mode_xq);
+            xq = &mode_xq;
+        }
+        const auto sc = mode_ports->scale(mode_x0);
+        const Real band_v = kQuietBand * sc.vscale;
+        const Real band_i = kQuietBand * sc.iscale + band_v * sc.c_max / h;
+        const auto& es = diodes.entries();
+        for (std::size_t j = 0; j < es.size(); ++j) {
+            const auto p = es[j].params();
+            const bool on = bits[j];
+            const Real v = es[j].law_voltage(*xq, on);
+            if (on ? !(models::SwitchedDiode::branch_current(true, v, p) > band_i)
+                   : !(v - models::SwitchedDiode::turn_on_voltage(p) < -band_v)) {
+                return false;
+            }
+        }
+        return true;
+    };
+    // 'lcp': the LCP decides the site; one solve under its mode. Returns
+    // whether the mode changed from the start bits (DECISIONS #40). The start
+    // mode is solved first (`x_start`: given by the caller, or solved here).
+    //   * quiet site — any site whose start solve gives every diode's
+    //     crossing signal (ON: the current; OFF: the gap to V_on) clear of
+    //     zero by kQuietBand of the circuit scale, after the floating
+    //     islands' KCL: the LCP's q is that start mode, nonnegative, so Lemke
+    //     returns it with no pivot and the start solve is the step. With an
+    //     ideal diode ON (posed open: Lemke pivots) only on a passive circuit,
+    //     whose LCP has one solution.
+    //   * cached site — the LCP's last answer from the same start mask, clear
+    //     of the band on its own solve: kept on a passive circuit without
+    //     ideal or hysteresis ports (one solution, and nothing held).
+    //   * the LCP reads the port voltages from that solve (no ideal diode ON
+    //     at the start: the LCP poses those cut out, another system) and,
+    //     when it keeps the start mode, the start solve is the step.
+    // Not on a static site whose nominal segment is not the cache's static
+    // factor (other bits than solve_at's).
+    auto mode_lcp_site = [&](Real at_t, const char* kind,
+                             const topology::SwitchStateMask& gates, Real for_dt,
+                             bool be, const Vector& bx, auto&& solve,
+                             const Vector* x_start = nullptr) {
+        auto& r = result.mode_report;
+        mode_count_site(r, kind);
+        const auto start_mask = combine_masks(gates, diodes.current_diode_mask(), diode_owned);
+        const bool same_gates = mode_gates_known && gates == mode_last_gates;
+        mode_last_gates = gates;
+        mode_gates_known = true;
+        bool ideal_on = false;
+        for (std::size_t j = 0; j < mode_bits0.size(); ++j)
+            ideal_on = ideal_on || (mode_bits0[j] && mode_ports->ideal(j));
+        // An ideal diode ON at a gate edge may close a loop with the new
+        // gates (the CCM turn-on): its start mask is singular, and the LCP
+        // poses it cut out anyway. With the previous site's gates the start
+        // mask is the mask that site solved.
+        if ((for_dt <= Real{0} && cache.dt() != Real{0}) || (ideal_on && !same_gates)) {
+            x_start = nullptr;
+        } else if (!x_start) {
+            solve(start_mask, mode_xs);
+            x_start = &mode_xs;
+        }
+        const Real h_site = for_dt <= Real{0} ? Real{1} : be ? for_dt * Real{0.5} : for_dt;
+        // (a) the start mode, clear of the band: the LCP's answer
+        if (x_start && (!ideal_on || mode_selector.passive) &&
+            mode_quiet(mode_bits0, start_mask, for_dt, h_site, bx, *x_start)) {
+            x = *x_start;
+            // the step stores what the LCP decided on: the islands' KCL imposed
+            // (F-2-3: a rounded common mode read a decided-OFF diode forward-biased)
+            mode_ports->correct(start_mask, for_dt, bx, x);
+            stamped_mask = start_mask;
+            stamped_known = true;
+            last_solved_bits = mode_bits0;
+            ++r.quiet_sites;
+            return false;
+        }
+        // (b) the LCP's last answer from this start mask (the active-set cache),
+        // clear of the band on its own solve: the LCP's answer
+        if (x_start && mode_selector.passive && !structure.active() && !mode_hysteresis) {
+            const auto it = mode_answers.find(start_mask);
+            if (it != mode_answers.end() && it->second != mode_bits0) {
+                diodes.restore_on_bits(it->second);
+                const auto cmask = combine_masks(gates, diodes.current_diode_mask(), diode_owned);
+                solve(cmask, mode_xc);
+                if (mode_quiet(it->second, cmask, for_dt, h_site, bx, mode_xc)) {
+                    x = mode_xc;
+                    mode_ports->correct(cmask, for_dt, bx, x);
+                    mode_bits = it->second;
+                    stamped_mask = cmask;
+                    stamped_known = true;
+                    last_solved_bits = mode_bits;
+                    ++r.cached_sites;
+                    return true;
+                }
+                diodes.restore_on_bits(mode_bits0);
+            }
+        }
+        if (ideal_on) x_start = nullptr;
+        const auto sel = mode_select(gates, for_dt, be, bx, x_start);
+        mode_note(r, sel);
+        r.port_solves = mode_ports->solves();
+        r.port_matrices = mode_ports->port_builds();
+        if (mode_failed(sel) && mode_Z.rows() == static_cast<Index>(mode_diode_names.size())) {
+            // An ideal port shorted by a loop (Z_jj = 0) that the loop
+            // forward-biases: refused by the name the settle's release uses.
+            // (the selector's own short test: |Z_jj|·iscale <= tol_w)
+            const auto sc = mode_ports->scale(mode_x0);
+            const Real tol_w = mode_selector.tol * sc.vscale;
+            for (std::size_t j = 0; j < mode_diode_names.size(); ++j) {
+                const auto jj = static_cast<Index>(j);
+                if (!mode_ports->ideal(j) || std::abs(mode_Z(jj, jj)) * sc.iscale > tol_w ||
+                    !(mode_u[jj] - mode_ports->ports()[j].V_f > tol_w)) {
+                    continue;
+                }
+                // name the loop: the posed mask with this diode closed
+                std::string loop = mode_diode_names[j];
+                if (structure.active()) {
+                    std::vector<char> on_j = mode_coords;
+                    on_j[j] = 1;
+                    const auto& ms = structure.check(
+                        combine_masks(gates, mode_mask_of(on_j), diode_owned), for_dt > Real{0});
+                    const Index bj = diodes.entries()[j].branch_id;
+                    for (std::size_t m = 0; m < ms.loop_diodes.size(); ++m)
+                        if (ms.loop_diodes[m] == bj) loop = ms.loop_texts[m];
+                }
+                throw UnsupportedError(
+                    "pwl", "ideal_voltage_loop", mode_device_names[j], "Diode",
+                    std::format("engine 'pwl': at t = {} the ideal diode {} (R_on = 0) "
+                                "closes a loop of voltage sources and closed ideal "
+                                "elements (loop: {}) that forward-biases it by {} V "
+                                "(mode_selection='lcp': no consistent mode): its "
+                                "current is undefined. Give it R_on > 0.",
+                                at_t, mode_diode_names[j], loop,
+                                mode_u[jj] - mode_ports->ports()[j].V_f));
+            }
+            // No single port shorted: a loop through several ideal ports (each
+            // posed open, none with Z_jj = 0) leaves the LCP a secondary ray.
+            // Close every ideal port the posed network does not reverse-bias;
+            // a loop among them is the refusal, named as the settle names it.
+            if (structure.active() && sel.status == events::LcpStatus::SecondaryRay) {
+                const auto sc = mode_ports->scale(mode_x0);
+                const Real tol_w = mode_selector.tol * sc.vscale;
+                const std::vector<char> on_f =
+                    mode_selector.closure_candidate(mode_ports->ports(), mode_coords, tol_w);
+                const auto& ms = structure.check(
+                    combine_masks(gates, mode_mask_of(on_f), diode_owned), for_dt > Real{0});
+                if (!ms.loop_diodes.empty()) {
+                    const auto name = std::string(graph.branch_name(ms.loop_diodes.front()));
+                    throw UnsupportedError(
+                        "pwl", "ideal_voltage_loop", name, "Diode",
+                        std::format("engine 'pwl': at t = {} the ideal diode {} (R_on = 0) "
+                                    "closes a loop of voltage sources and closed ideal "
+                                    "elements (loop: {}) that no mode of its diodes can "
+                                    "carry (mode_selection='lcp': no consistent mode): its "
+                                    "current is undefined. Give it R_on > 0.",
+                                    at_t, name, ms.loop_texts.front()));
+                }
+            }
+        }
+        events::raise_if_refused(sel, "pwl", at_t, mode_diode_names, mode_passivity,
+                                 &mode_device_names);
+        mode_bits.assign(sel.on.begin(), sel.on.end());
+        diodes.restore_on_bits(mode_bits);
+        const auto mask = combine_masks(gates, diodes.current_diode_mask(), diode_owned);
+        if (structure.active()) {
+            // The LCP releases an ideal diode a loop reverse-biases (Z_jj = 0,
+            // q_j > 0) and finds no mode when the loop forward-biases it, so a
+            // loop diode left ON here is a defect, not a mode to release.
+            const auto& ms = structure.check(mask, for_dt > Real{0});
+            result.mode_structure_checks = structure.checks_run();
+            if (!ms.loop_diodes.empty()) {
+                throw UnsupportedError(
+                    "pwl", "ideal_voltage_loop",
+                    std::string(graph.branch_name(ms.loop_diodes.front())), "Diode",
+                    std::format("engine 'pwl': at t = {} mode_selection='lcp' left the "
+                                "ideal diode '{}' ON in a loop of voltage sources and "
+                                "closed ideal elements (mode {}, loop: {}): its current "
+                                "is undefined. Give it R_on > 0.",
+                                at_t, graph.branch_name(ms.loop_diodes.front()),
+                                mask.to_string(), ms.loop_texts.front()));
+            }
+        }
+        if (x_start && mask == start_mask) {
+            x = *x_start;                  // the start mode kept: its solve is the step
+        } else {
+            solve(mask, x);
+        }
+        mode_ports->correct(mask, for_dt, bx, x);
+        stamped_mask = mask;
+        stamped_known = true;
+        last_solved_bits = mode_bits;
+        if (x_start) {
+            if (mode_answers.size() >= 256) mode_answers.clear();
+            mode_answers[start_mask] = mode_bits;
+        }
+        if (pwl::judge_mode(diodes, sel.on, x, mode_ports->scale(mode_x0),
+                            mode_selector.tol) != 1) {
+            ++r.inconsistent;
+        }
+        return mode_bits != mode_bits0;
+    };
+    // 'shadow': the LCP beside a finished settle; a different mode is
+    // recorded with both candidates judged on the site's own solve.
+    auto mode_shadow_site = [&](Real at_t, const char* kind,
+                                const topology::SwitchStateMask& gates, Real for_dt,
+                                bool be, const Vector& bx, Size rounds, bool cycle) {
+        auto& r = result.mode_report;
+        // No solve at this site: no settled mode to compare.
+        if (last_solved_bits.size() != diodes.entries().size()) return;
+        mode_count_site(r, kind);
+        r.settle_rounds_total += rounds;
+        if (cycle) ++r.mask_cycles;
+        try {
+            const auto sel = mode_select(gates, for_dt, be, bx);
+            mode_note(r, sel);
+            if (mode_failed(sel)) {
+                ++r.errors;
+                r.last_error = std::string(events::to_string(sel.status));
+            } else {
+                mode_settled.assign(last_solved_bits.begin(), last_solved_bits.end());
+                if (sel.on != mode_settled) {
+                    ModeDisagreement d;
+                    d.t = at_t;
+                    d.site = kind;
+                    d.settle_mode = mode_str(mode_settled);
+                    d.lcp_mode = mode_str(sel.on);
+                    d.previous_mode = mode_str(mode_prev_on);
+                    d.settle_rounds = rounds;
+                    d.pivots = sel.pivots_total;
+                    d.status = events::to_string(sel.status);
+                    const auto sc = mode_ports->scale(mode_x0);
+                    d.settle_consistent = pwl::judge_mode(
+                        diodes, mode_settled, x, sc, mode_selector.tol, &d.settle_violation);
+                    cache.solve_at(combine_masks(gates, mode_mask_of(sel.on), diode_owned),
+                                   for_dt, bx, mode_xj);
+                    d.lcp_consistent = pwl::judge_mode(
+                        diodes, sel.on, mode_xj, sc, mode_selector.tol, &d.lcp_violation);
+                    r.disagreements.push_back(std::move(d));
+                }
+            }
+        } catch (const std::exception& e) {
+            ++r.errors;
+            r.last_error = e.what();
+        }
+        r.port_solves = mode_ports->solves();
+        r.port_matrices = mode_ports->port_builds();
+    };
+    // The default guard: the settled mode judged on its own solve; one that
+    // violates a diode's law is replaced by the LCP's when that one is
+    // consistent. Returns true when it repaired.
+    auto mode_guard_site = [&](Real at_t, const topology::SwitchStateMask& gates,
+                               Real for_dt, bool be, const Vector& bx, auto&& solve) {
+        auto& g = result.mode_guard;
+        if (last_solved_bits.size() != diodes.entries().size()) return false;   // no solve
+        mode_settled.assign(last_solved_bits.begin(), last_solved_bits.end());
+        const auto sc = mode_ports->scale(mode_x0);
+        Real viol = 0;
+        int vj = -1;
+        if (pwl::judge_mode(diodes, mode_settled, x, sc, mode_selector.tol, &viol, &vj) == 1)
+            return false;
+        events::ModeSelection sel;
+        try {
+            sel = mode_select(gates, for_dt, be, bx);
+        } catch (const std::exception& e) {
+            ++g.failed;
+            g.lcp.last_error = e.what();
+            return false;
+        }
+        mode_note(g.lcp, sel);
+        g.lcp.port_solves = mode_ports->solves();
+        g.lcp.port_matrices = mode_ports->port_builds();
+        if (mode_failed(sel)) { ++g.failed; return false; }
+        if (sel.on == mode_settled) { ++g.confirmed; return false; }
+        const auto mask = combine_masks(gates, mode_mask_of(sel.on), diode_owned);
+        solve(mask, mode_xj);
+        if (pwl::judge_mode(diodes, sel.on, mode_xj, sc, mode_selector.tol) != 1) {
+            ++g.failed;
+            return false;
+        }
+        x = mode_xj;
+        mode_bits.assign(sel.on.begin(), sel.on.end());
+        diodes.restore_on_bits(mode_bits);
+        last_solved_bits = mode_bits;
+        stamped_mask = mask;
+        stamped_known = true;
+        ++g.repairs;
+        g.repair_times.push_back(at_t);
+        g.repair_diodes.push_back(vj >= 0 ? mode_diode_names[static_cast<std::size_t>(vj)]
+                                          : std::string{});
+        g.repair_violations.push_back(viol);
+        return true;
+    };
 
     // Built-in time-varying source detection + reusable b_extra buffers
     // (audit #6/#16), shared by BOTH the dynamic and static paths below. The
     // PWM/sine/pulse helpers otherwise allocate + zero a state-size vector AND
     // scan every branch on every step; detect ONCE which kinds the circuit
     // contains, then reuse buffers and skip absent kinds in the hot loops.
-    bool has_pwm = false, has_sine = false, has_pulse = false;
+    // update-fixed-step-loop-bookkeeping: the (branch, row) lists are
+    // built once, in the branch order of the dense passes, and each step
+    // writes its rows directly. `b[row] += (0 + (−v))` is the dense pass's
+    // `out[row] += −v` on a zeroed buffer followed by `b += out`, bit for
+    // bit; the rows a source does not own skip `b + (+0.0)`, which only
+    // differs from `b` for a −0.0 entry (checked by byte comparison).
+    using SrcRows = std::vector<std::pair<Index, Index>>;
+    SrcRows pwm_rows, sine_rows, pulse_rows;
     for (Index b_id = 0; b_id < graph.num_branches(); ++b_id) {
-        if (graph.branch(b_id).kind != topology::BranchKind::Source) {
+        const auto& br = graph.branch(b_id);
+        if (br.kind != topology::BranchKind::Source) {
             continue;
         }
-        switch (pool.kind_of(b_id)) {
+        switch (pool.kind_of(br.id)) {
         case pwl::DevicePool::StoredKind::PWMVoltageSource:
-            has_pwm = true; break;
+            pwm_rows.emplace_back(br.id,
+                pool.branch_var_id_for_source(br.id, graph)); break;
         case pwl::DevicePool::StoredKind::SineVoltageSource:
-            has_sine = true; break;
+            sine_rows.emplace_back(br.id,
+                pool.branch_var_id_for_source(br.id, graph)); break;
         case pwl::DevicePool::StoredKind::PulseVoltageSource:
-            has_pulse = true; break;
+            pulse_rows.emplace_back(br.id,
+                pool.branch_var_id_for_source(br.id, graph)); break;
         default:
             break;
         }
     }
-    Vector be_pwm, be_sine, be_pulse;  // reused per step (filled in place)
+    // add-controlled-source-set: sine / pulse / table current sources
+    // (node rows, two per source: kept on the dense helper).
+    const bool has_iwave =
+        sources::has_current_waveform_sources(pool, graph);
+    Vector be_iwave;
+    const bool has_pwm = !pwm_rows.empty();
+    const bool has_pulse = !pulse_rows.empty();
+    // `src_t`: PWM/pulse sample time; `sine_t`: the sine's; `lb`: a
+    // jumping source at `src_t` reads value_at(src_t − lb) (as the dense
+    // passes did).
+    auto add_source_rows = [&](Vector& b, Real src_t, Real sine_t,
+                               Real lb) {
+        const auto read_t = [&](Index id) {
+            const bool jumps = lb > Real{0} &&
+                sources::source_jumps_at(pool, id, src_t);
+            // src_t != sine_t: a jump snapped to the step end; only the
+            // source that jumps there is re-timed (review: a ramped
+            // pulse was read up to 0.01 dt early).
+            if (src_t != sine_t && !jumps) {
+                return sine_t;
+            }
+            return jumps ? src_t - lb : src_t;
+        };
+        for (const auto& [id, row] : pwm_rows) {
+            b[row] += Real{0} + -models::PWMVoltageSource::value_at(
+                pool.pwm_voltage_source_params(id), read_t(id));
+        }
+        for (const auto& [id, row] : sine_rows) {
+            b[row] += Real{0} + -models::SineVoltageSource::value_at(
+                pool.sine_voltage_source_params(id), sine_t);
+        }
+        for (const auto& [id, row] : pulse_rows) {
+            b[row] += Real{0} + -models::PulseVoltageSource::value_at(
+                pool.pulse_voltage_source_params(id), read_t(id));
+        }
+    };
 
     // Is a smaller step even capable of helping? Reachability to
     // ground is a property of the GRAPH, not of dt, so a circuit
@@ -766,6 +1520,59 @@ inline SimulationResult run_transient(
             graph, [](const topology::Branch&) { return true; })
             .empty();
 
+    // ---- update-fixed-step-loop-bookkeeping ----
+    // The step's rollback snapshots are read only by the dt-retry ladder,
+    // the restart rule's re-take and the split; without any of them they
+    // are not taken (`rollback_snapshots` counts the ones that are).
+    const bool may_roll_back = dt_retry_can_help ||
+        opts.discontinuity_restart || opts.enable_substep_state_correction;
+    // Event-iteration cycle scratch, hoisted (reset per iteration).
+    events::MaskCycle<64> masks_seen;
+    // `switch_fn` once per distinct solve time within an outer step:
+    // the observer runs before the first read, so a schedule that is a
+    // function of t and of observer-written state sees the same masks.
+    constexpr Size kGateMemo = 16;
+    std::array<Real, kGateMemo> gate_memo_t{};
+    std::array<topology::SwitchStateMask, kGateMemo> gate_memo_m{};
+    Size gate_memo_n = 0;
+    auto gate_at = [&](Real tq) -> const topology::SwitchStateMask& {
+        for (Size q = 0; q < gate_memo_n; ++q) {
+            if (gate_memo_t[q] == tq) return gate_memo_m[q];
+        }
+        ++result.switch_fn_calls;
+        const Size slot = gate_memo_n < kGateMemo ? gate_memo_n++
+                                                  : kGateMemo - 1;
+        gate_memo_t[slot] = tq;
+        gate_memo_m[slot] = switch_fn(tq);
+        return gate_memo_m[slot];
+    };
+    // Last nominal-dt segment, valid while the cache generation holds
+    // (a lazy insert/eviction or a parametric refactor bumps it). A hit
+    // still writes the LRU tick, so eviction order is unchanged.
+    // The MNA-native machines' flux rows exist only in the Newton
+    // refresh: their linear part is singular, so the cache cannot
+    // factorise it and every nominal step failed into a dt/2 retry.
+    // They take the assembled (unfactorised) carrier at every dt.
+    const bool newton_only_rows = !pool.pmsm_mna_machines().empty() ||
+                                  !pool.induction_machines().empty();
+    topology::SwitchStateMask seg_memo_mask;
+    const pwl::PwlSegment* seg_memo = nullptr;
+    std::uint64_t seg_memo_gen = 0;
+    auto nominal_segment =
+        [&](const topology::SwitchStateMask& m) -> const pwl::PwlSegment& {
+        if (seg_memo != nullptr && seg_memo_gen == cache.generation() &&
+            seg_memo_mask == m) {
+            cache.touch_segment(*seg_memo);
+            return *seg_memo;
+        }
+        ++result.segment_searches;
+        const auto& seg = cache.lookup(m);
+        seg_memo = &seg;
+        seg_memo_mask = m;
+        seg_memo_gen = cache.generation();
+        return seg;
+    };
+
     // v2.0 Phase 2: one accumulator for the step's right-hand side,
     // used by the nominal step, by both halves of the sub-step
     // commutation correction, and by the dt-retry path. It was
@@ -774,23 +1581,108 @@ inline SimulationResult run_transient(
     // b_extra_fn, then only the built-in source kinds this circuit
     // actually contains), so having one copy of it is also the only
     // way to keep that promise honest.
-    auto accumulate_b_extra = [&](Real at_t, Real for_dt) {
-        history.compute_b_extra(for_dt, b_extra);
+    // add-discontinuity-restart-rule. With the rule a step that ENDS
+    // on a source jump reads the source's left limit (the jump applies
+    // from the next step, which restarts): value_at(t - left_by), far
+    // above the pwm_phase snap and far below a plateau. 0 = off.
+    const bool restart_rule = opts.discontinuity_restart;
+    // Release group B: a rule run keeps event limits (a stored sample at a
+    // jump is its left limit; the dynamic path adds its restart lines)
+    // (every step stored: a decimated run keeps none rather than some)
+    if (restart_rule && opts.store_every == 1) {
+        result.has_event_limits = true;
+        result.event_limit_width = static_cast<Size>(x.size());
+        result.event_limit_switches = graph.num_switches();
+    }
+    const Real left_by = restart_rule ? opts.dt * Real{1e-3} : Real{0};
+    // b_extra_fn's declared jumps (restart rule only), memoised: the
+    // answer for `bj_from` stays valid until t passes `bj_next`.
+    const bool has_b_jumps = restart_rule && static_cast<bool>(b_extra_next_jump);
+    Real bj_from = std::numeric_limits<Real>::infinity();
+    Real bj_next = -std::numeric_limits<Real>::infinity();
+    auto b_jump_after = [&](Real t_q) {
+        if (!(bj_from <= t_q && t_q < bj_next)) {
+            bj_from = t_q;
+            bj_next = b_extra_next_jump(t_q);
+        }
+        return bj_next;
+    };
+    // The time b_extra_fn is read at for a solve at `at_t`: its left
+    // limit when a declared jump falls in (at_t - left_by, at_t].
+    auto b_read_t = [&](Real at_t) {
+        return has_b_jumps && b_jump_after(at_t - left_by) <= at_t
+            ? at_t - left_by : at_t;
+    };
+    // add-fixed-step-event-splitting (validated above to imply the rule).
+    const bool split = opts.enable_substep_state_correction;
+    // Events this close to a step boundary are taken at it (design D4).
+    const Real snap = opts.dt * opts.split_snap;
+    // A source jump snapped to the step end (t - snap <= tau < t): the
+    // solve AT `src_end_at` reads the built-in sources at `src_end_read`
+    // (= tau, so value_at(tau - left_by) is the pre-jump level). NaN
+    // compares unequal to every time: off.
+    Real src_end_at = std::numeric_limits<Real>::quiet_NaN();
+    Real src_end_read = Real{0};
+    // add-in-kernel-event-losses: the loss ports (none: no tracker, and
+    // nothing below changes a bit of the run).
+    std::optional<LossTracker> loss_tracker;
+    if (!pool.device_losses().empty()) loss_tracker.emplace(graph, pool, "pwl");
+    LossTracker* const lt = loss_tracker ? &*loss_tracker : nullptr;
+    // add-realistic-passives D18: the Bergeron lines' committed past (none:
+    // no object, nothing below reads or writes it).
+    std::optional<pwl::LineHistory> line_history;
+    if (!pool.line_pairs().empty()) {
+        line_history.emplace(graph, pool);
+        const auto& lname = line_history->tau_min_name();
+        if (!(cache.dt() > Real{0})) {
+            throw UnsupportedError("pwl", "static_path", lname, "TransmissionLine",
+                "run_transient: the transmission line '" + lname + "' needs the "
+                "dynamic path (a cache built with dt > 0, as simulate() builds it).");
+        }
+        if (opts.dt > line_history->tau_min()) {
+            throw UnsupportedError("pwl", "dt", lname, "TransmissionLine", std::format(
+                "run_transient: dt = {} s is longer than the delay {} s of the "
+                "transmission line '{}': its far-end wave would be read from the "
+                "future. Use dt <= delay (a divisor of it is exact).",
+                opts.dt, line_history->tau_min(), lname));
+        }
+        if (resume_snap != nullptr) {
+            line_history->restore(resume_snap->line_state, "run_transient",
+                                  opts.t_start - resume_snap->t);
+        } else {
+            // a DC point or a given state (seeded as one, as the companions
+            // are): its waves; the zero start: the line at rest
+            line_history->start(opts.t_start, x,
+                                start_from_dc_op || initial_state != nullptr);
+        }
+    }
+    pwl::LineHistory* const lines = line_history ? &*line_history : nullptr;
+    // `backward_euler`: a restart stage (no stored derivative), the
+    // BE-like solve of size for_dt/2 on the factor of for_dt.
+    auto accumulate_b_extra = [&](Real at_t, Real for_dt,
+                                  bool backward_euler = false) {
+        const Real src_t = at_t == src_end_at ? src_end_read : at_t;
+        if (backward_euler) {
+            history.compute_b_extra_backward_euler(for_dt * Real{0.5},
+                                                   b_extra);
+        } else {
+            history.compute_b_extra(for_dt, b_extra);
+        }
         if (b_extra_fn) {
-            b_extra += b_extra_fn(at_t);
+            b_extra += b_extra_fn(b_read_t(at_t));
         }
-        if (has_pwm) {
-            sources::compute_pwm_b_extra(pool, graph, at_t, be_pwm);
-            b_extra += be_pwm;
+        add_source_rows(b_extra, src_t, at_t, left_by);
+        if (has_iwave) {
+            // src_t: a pulse current jump snapped to the step end reads
+            // its left limit, as the voltage sources do. shortcut: a sine
+            // current is then read at tau (< 0.01 dt early), upgrade if
+            // the helper ever takes two times.
+            sources::compute_current_waveform_b_extra(pool, graph, src_t,
+                                                      be_iwave, left_by);
+            b_extra += be_iwave;
         }
-        if (has_sine) {
-            sources::compute_sine_b_extra(pool, graph, at_t, be_sine);
-            b_extra += be_sine;
-        }
-        if (has_pulse) {
-            sources::compute_pulse_b_extra(pool, graph, at_t, be_pulse);
-            b_extra += be_pulse;
-        }
+        if (lt) lt->inject(b_extra);   // heat owed for this step
+        if (lines) lines->inject(b_extra, at_t);   // the waves tau ago (D18)
     };
 
     // v2.0 Phase 2: a run that dies part-way keeps what it computed.
@@ -799,6 +1691,7 @@ inline SimulationResult run_transient(
     // stack they would otherwise unwind with. `t_reached` tracks the
     // step being attempted so the exception can say where it stopped.
     Real t_reached = opts.t_start;
+    Size k_reached = 0;   // grid index of t_reached (snapshot)
     try {
 
     if (cache.dt() > Real{0}) {
@@ -828,9 +1721,7 @@ inline SimulationResult run_transient(
             const bool seeded =
                 initial_state != nullptr || resume_snap != nullptr;
             stamped_mask = has_diodes
-                    ? combine_masks(switch_fn(opts.t_start),
-                                    diodes.current_diode_mask(),
-                                    diode_owned)
+                    ? diodes.combine(switch_fn(opts.t_start))
                     : switch_fn(opts.t_start);
             stamped_known = !seeded;
             result.record_switch_state(stamped_mask,
@@ -840,69 +1731,1710 @@ inline SimulationResult run_transient(
         // Prime the observer with the initial condition so a
         // discrete-time PI / sampler / lookup-table sees the
         // true starting state at t_start.
-        if (step_observer) {
-            step_observer(opts.t_start, x);
+        if (step_observer || step_observer_in) {
+            (has_ticks ? step_observer : step_observer_in)(opts.t_start, x);
+        }
+        if (lt) {
+            if (resume_from != nullptr && !resume_from->loss_state.empty()) {
+                lt->restore(resume_from->loss_state);   // the heat in flight too
+            } else {
+                lt->begin(x, stamped_mask);
+            }
         }
 
-        for (Size k = 1; k < n_steps; ++k) {
-            // User-cancellation check (Phase: live scope). Lets a
-            // GUI / external watchdog stop the simulation early
-            // while preserving the partial trace.
-            if (should_continue && !should_continue()) {
-                break;
+        if (hooks) hooks->start(x, stamped_mask, {&history, &hs, nullptr});
+        if (sens.on()) {
+            sens.refuse_setup(lt != nullptr, static_cast<bool>(nl_refresh),
+                              opts.enable_newton_lm);
+            sens.start(opts.t_start, x);
+            if (stamped_known) sens.start_mode(stamped_mask);   // seeded: decided at step 1
+        }
+
+        // ---- discontinuity restart (add-discontinuity-restart-rule) --
+        // The next step restarts: the first step of a run that does
+        // not start consistent (zero state, builder ICs,
+        // initial_state=); a resume carries its own flag; a DC
+        // operating point is consistent (i_C = 0, v_L = 0 exactly), and
+        // its first step restarts only on a mask change or a jump.
+        // Steps of the SDIRK restart still owed: a discontinuity's
+        // step and the next two (kRestartSteps). A run that does not
+        // start consistent owes them from its first step; a resume
+        // carries its own count.
+        constexpr Size kRestartSteps = 3;
+        constexpr Real kGamma = Real{1} - Real{0.70710678118654752440};
+        Size restart_left =
+            !restart_rule ? Size{0}
+            : resume_snap != nullptr ? resume_snap->restart_steps_left
+            : start_from_dc_op ? Size{0} : kRestartSteps;
+        const bool has_jump_sources = restart_rule && (has_pwm || has_pulse || has_iwave);
+        // Both SDIRK stages solve on the trapezoidal factor of 2γ·dt: a
+        // second FIXED step, kept by the cache's event table (one entry
+        // per mask, the segment byte budget, the regime's shared
+        // symbolic analysis, in-place refactor; a parameter refactor
+        // drops it). The 8-entry LRU this table replaced refactored on
+        // every restart step of a VSI (3172 builds in 3157).
+        const Real restart_dt = Real{2} * (kGamma * opts.dt);
+        Size restart_factorizations = 0;
+
+        pwl::NewtonRoundoffAcceptance newton_roundoff_run;
+        newton_roundoff_run.enabled = true;
+        newton_roundoff_run.max_consecutive = opts.newton_roundoff_budget;
+
+        // ---- add-fixed-step-resolution-diagnostics (read-only) ----
+        // Truncation: e = (h/12)|f_{k+1} − 2f_k + f_{k−1}| per linear
+        // C/L (f = i/C, v/L from the committed companion), over the
+        // variable's running peak; valid only on three plain steps under
+        // one stamped mask. Ringing: per state entry, runs of
+        // sign-alternating differences above max(1 % of the local
+        // magnitude, 1e-9 of the peak); a run of >= 4 is recorded once.
+        const bool diag = opts.resolution_diagnostics;
+        auto& rd = result.resolution;
+        rd.enabled = diag;
+        // Two buffers for the whole workspace (the zero-alloc budget):
+        // per C/L f_k, f_{k−1}, peak |y|, 1/C or 1/L; per state entry
+        // Δ_{k−1}, peak |x|, run start, run max |Δ|; run length, record.
+        Size rd_run = 0;
+        topology::SwitchStateMask rd_prev_mask;
+        Real rd_since_store = 0;
+        std::vector<Real> rd_buf;
+        std::vector<Size> rd_ibuf;
+        Real *rd_f1 = nullptr, *rd_f2 = nullptr, *rd_peak = nullptr,
+             *rd_inv = nullptr, *rd_dprev = nullptr, *rd_xpeak = nullptr,
+             *rd_t0 = nullptr, *rd_dmax = nullptr;
+        Size *rd_cnt = nullptr, *rd_open = nullptr;
+        Size rd_steps = 0, rd_unest = 0;
+        Real rd_kind_peak[2] = {Real{0}, Real{0}};   // capacitors, inductors
+        constexpr Size kRdNone = std::numeric_limits<Size>::max();
+        if (diag) {
+            const auto& ents = history.entries();
+            const Size nh = ents.size();
+            const auto n = static_cast<Size>(x.size());
+            rd_buf.assign(4 * nh + 4 * n, Real{0});
+            rd_ibuf.assign(2 * n, Size{0});
+            rd_f1 = rd_buf.data();
+            rd_f2 = rd_f1 + nh;
+            rd_peak = rd_f2 + nh;
+            rd_inv = rd_peak + nh;
+            rd_dprev = rd_inv + nh;
+            rd_xpeak = rd_dprev + n;
+            rd_t0 = rd_xpeak + n;
+            rd_dmax = rd_t0 + n;
+            rd_cnt = rd_ibuf.data();
+            rd_open = rd_cnt + n;
+            std::fill(rd_open, rd_open + n, kRdNone);
+            for (Size j = 0; j < nh; ++j) {
+                rd_inv[j] = Real{1} / ents[j].C_or_L;
             }
-            const Real t = opts.t_start +
-                            static_cast<Real>(k) * opts.dt;
+            rd.n_branches_covered = nh;
+            rd.lte.reserve(result.times.capacity());
+        }
+
+        // ---- refactor-unified-transient-stepper slice 3a (DECISIONS 13) --
+        // The step is five phases (begin, take, after_solve, commit,
+        // record), each ONE lambda that the step skeleton calls
+        // (`step::run<Trapezoidal>(FixedController, IndexPhaseBody)`; the
+        // only driver since the legacy loop's deletion, DECISIONS 19).
+        // The step's locals that cross phases live here, (re)set at the
+        // program point where the loop body declared them. The step's
+        // times are re-read into a const local at the top of each phase:
+        // a hoisted, mutable `t` is reloaded after every opaque call (the
+        // commutation-record loop runs per diode), a const local is not.
+        Real t_step = Real{0};
+        Real t_prev_step = Real{0};
+        Real gate_t = Real{0};
+        Size n_ev = 0;
+        bool ev_overflow = false;
+        bool capture_first = false;
+        Real gate_t0 = Real{0};
+        topology::SwitchStateMask mask_pre;
+        Size iters = 0;
+        bool flipped = false;
+        bool mask_cycle = false;
+        Real committed_dt = opts.dt;
+        bool step_retried = false;
+        bool edge_restart_step = false;
+        bool restart = false;
+        bool committed_be = false;
+        // The last restart trigger (written only when one fires) and how far
+        // its event can lie from the step start (a built-in source / b_extra
+        // jump inside a step without the split): δt_loc of the impulse
+        // probe (consistent_start) at a TIME event.
+        Real rs_trig_t = std::numeric_limits<Real>::quiet_NaN();
+        Real rs_trig_loc = 0;
+        Real be_commit_h = kGamma * opts.dt;
+        // Release group B: the lines of the step under the restart rule
+        // (StepLines): stage 1 of the last restart (sub)step and how its
+        // stage 2 was taken; `q_ok` false: the step is not representable
+        // (the dt-retry ladder, more events than lines).
+        // Allocated under the rule only: the default loop sees one null
+        // pointer (instructions per step, DECISIONS 14/16/18).
+        const auto lines_box = restart_rule ? std::make_unique<StepLines>() : nullptr;
+        StepLines* const L = lines_box.get();
+        // The step hooks, called in the shared phases (slice 3c,
+        // DECISIONS 17): probes R1 (`StepHooks::step`, the step's start
+        // state and mask), R2 (`on_event`, the stamps on each side of a
+        // commutation) and the device interface's #31 (`device_state` after
+        // the commit). The start mask is copied only with a listener, at
+        // the end of the previous step's record (one test per step without
+        // one); a seeded start's guessed stamp is no R2 left side.
+        const bool hook_step = hooks != nullptr && hooks->has_step();
+        const bool hook_event = hooks != nullptr && hooks->has_event();
+        const bool hook_mask = hook_step || hook_event;
+        // probes 0b.10: run-invariant flags, not the listener lists, per
+        // step; each step starts from the previous one's committed end
+        // (x_prev = x, mask_start = its stamp), so every step but the first
+        // is contiguous for the step sink (it skips its own jump test).
+        const bool hook_ds = hooks != nullptr && hooks->has_device_state();
+        const bool hook_acc = hooks != nullptr && !hooks->empty();
+        bool hook_contig = false;
+        topology::SwitchStateMask mask_start;
+        bool mask_start_known = false;
+        if (hook_mask) {
+            mask_start = stamped_mask;
+            mask_start_known = stamped_known;
+        }
+        auto commit_backward_euler = [&](Real h_e) {
+            history.update_from_state_backward_euler(x, h_e);
+            hs.commit(x, h_e, pwl::TrBdf2Stage::BackwardEuler);
+        };
+        // add-parameter-sensitivities group 6: the calls into the recurrence
+        // (solver/step/sensitivity.hpp) from the event and restart paths; the
+        // jump itself lives there. `sens_inline`: this step was opened (its
+        // gate change at t_prev taken) by its first call into the recurrence;
+        // reset by the step's closing block. Nothing runs per step when the
+        // sensitivities are off.
+        bool sens_inline = false;
+        topology::SwitchStateMask sens_gate;
+        bool sens_gate_known = false;
+        auto sens_stage = [&](int s, const step::StagePsi& psi, Real at_t, Real for_dt) {
+            if (nl_refresh_effective) {
+                sens.stage(s, psi, stamped_mask, x, at_t,
+                           sens.newton_factor(newton_ws, at_t), sens_J_lin);
+            } else {
+                sens.stage(s, psi, stamped_mask, x, at_t,
+                           cache.resident_factor(stamped_mask, for_dt), nullptr);
+            }
+        };
+        auto sens_gate_event = [&](Real at, Real g_t, bool located) {
+            if (!sens_gate_known) {   // an edge inside the first step counts too
+                sens_gate = gate_at(opts.t_start);
+                sens_gate_known = true;
+            }
+            const topology::SwitchStateMask g = gate_at(g_t);
+            if (!(g == sens_gate)) sens.time_event(at, sens_gate, g, located);
+            sens_gate = g;
+        };
+        // the step's gate change at its start (gate_t0 = the gate time the
+        // step started with), before any stage of the step
+        auto sens_open = [&]() {
+            if (sens_inline) return;
+            sens_inline = true;
+            // located only by the schedule's oracle: an opaque switch_fn's
+            // edge is sampled at a grid point (a staircase in a duty)
+            sens_gate_event(t_prev_step, gate_t0,
+                            split && !ev_overflow && static_cast<bool>(next_edge_fn));
+        };
+        auto sens_begin = [&](Real t_from, const Vector& x0) {
+            sens_open();
+            sens.begin_step(t_from, x0);
+        };
+        // the located diode crossings (split_events) at tau; the pre-event
+        // mode's factor is the first solve's (mask_first at for_dt)
+        auto sens_diode_events = [&](Real tau, Real for_dt) {
+            const auto ents = diodes.entries();
+            auto src = [&](Real ts, Vector& out) {
+                add_source_rows(out, ts, ts, Real{0});
+                if (has_iwave) {
+                    sources::compute_current_waveform_b_extra(pool, graph, ts, be_iwave,
+                                                              Real{0});
+                    out += be_iwave;
+                }
+            };
+            for (const auto& ev : split_events) {
+                for (const auto& e : ents) {
+                    if (e.branch_id != ev.branch_id) continue;
+                    if (nl_refresh_effective) {
+                        sens.refuse_newton_event(tau, graph.branch_name(e.branch_id));
+                        sens.refuse_step(tau, "a diode event of a Newton solve");
+                    }
+                    sens.state_event(tau, graph.branch_name(e.branch_id), e.from, e.to,
+                                     (!ev.new_state && e.var >= 0) ? e.var : Index{-1},
+                                     mask_first, cache.resident_factor(mask_first, for_dt),
+                                     Real{2} / for_dt, src);
+                }
+            }
+        };
+        // split_step is a closure built on every split step, with the
+        // sensitivities on or off: each by-reference capture is a load and a
+        // store per step, so the event paths reach the recurrence through
+        // this ONE reference (the group-6 cost gate, DECISIONS 16).
+        const struct {
+            bool on;
+            step::StageSensitivity& s;
+            decltype(sens_begin)& begin;
+            decltype(sens_stage)& stage;
+            decltype(sens_gate_event)& gate_event;
+            decltype(sens_diode_events)& diode_events;
+        } sx{sens.on(), sens, sens_begin, sens_stage, sens_gate_event, sens_diode_events};
+        // The mode of a LOCATED event (restart stage 1 at a gate edge, a
+        // scheduled or located event at t_from) is decided before the
+        // stage's Newton solve: the diode set consistent with the
+        // pre-event state x0 in the new switch configuration, read on the
+        // stage's linearization at x0 (one Newton iteration from x0, kept
+        // nowhere), re-decided until no diode flips. Newton started in the
+        // step-start bits must never be what discovers the commutation:
+        // with an inductor cut it drives a node to kilovolts and stalls on
+        // the round-off there (release finding F-3-7: mid_a −1.26e4 V,
+        // abort). A linear stage IS its linearization: its event
+        // iteration's solves are that decision (one memoryless solve per
+        // mask, none kept from a stale mask), and 'lcp' decides at its
+        // site first. Returns the flips (rule-on path only; out of line, built
+        // once per run: a per-step closure cost the default path +1 %).
+        auto decide_edge_mode = [&](Real at_t, Real for_dt) PULSIM_STEP_DRIVER -> Size {
+            if (!nl_refresh_effective || !has_diodes) return 0;
+            step_ctx = step::BackwardEuler::on_factor(for_dt).ctx();   // as the stage
+            step_ctx.t = at_t;
+            const auto gates_e = gate_at(gate_t);
+            Size flips = 0;
+            while (flips < max_iters) {
+                const auto m = diodes.combine(gates_e);
+                const pwl::PwlSegment* seg_e = &retry_seg;
+                if (for_dt == opts.dt && !newton_only_rows) {
+                    seg_e = &nominal_segment(m);
+                } else {
+                    pwl::assemble_segment(graph, pool, m, for_dt, retry_seg.J,
+                                          retry_seg.b_constant);
+                    sparse::compress_in_place(retry_seg.J);
+                    retry_seg.state_size = state_size;
+                }
+                edge_xl = x;
+                try {   // one iteration: it throws "not converged", edge_xl kept
+                    pwl::solve_with_newton_in_place(*seg_e, nl_refresh_effective, graph,
+                                                    pool, edge_xl, b_extra, 1,
+                                                    opts.tol_newton_dx, opts.tol_newton_res);
+                } catch (const std::runtime_error&) {
+                }
+                if (!edge_xl.allFinite() || !events::redecide(diodes, edge_xl)) break;
+                ++flips;
+            }
+            return flips;
+        };
+
+        // Consistent initialisation (release group A, F-5-1 / F-3-3): an
+        // SDIRK step may only start from a consistent state. Stage 1 (BE of
+        // γh from x0) relaxes every mode faster than γh; when x0 is
+        // inconsistent with the new mode (an inductor's path cut) its
+        // increment x1 − x0 is O(1), not O(h), and x0* reverses it: stage 2
+        // solves from −√2·x0 (100 A -> −141 A) and a device that conducts
+        // there keeps it.
+        //
+        // The probe: x2 and x3, two more BE stages of γh from x1 (stage 1's
+        // bits, same factor, discarded). Per state (capacitor voltage,
+        // inductor current) the differences Δk = xk − x(k−1) give
+        //   d  = Δ1 − Δ2   (x0+ = x0 + d = 2·x1 − x2: the stages' line
+        //                   extrapolated back to the event),
+        //   d' = Δ2 − Δ3   (the same estimate one stage later).
+        // A linear mode of rate λ (a = 1/(1 + |λ|γh)) holding a jump J gives
+        // d = −J(1 − a)², Δ2 = −J·a(1 − a), d' = a·d; a smooth trajectory
+        // (x0 on the new mode's slow manifold, the stages O(γh·ẋ)) gives
+        // d ≈ d' ≈ −(γh)²ẍ. ONE rule, in both readings of the sources (frozen
+        // at t1, moved; see below): the event is impulsive when some state has
+        //   |d| > max(|Δ2|/γ, (1 + 1/γ)·|d'|) + 1e-8·(1 + |x0| + |x1|)
+        //                                      [+ G_off·(1 + V_max)].
+        // For one mode each term is the same threshold, a < γ/(1 + γ), i.e.
+        // τ < γ²h ≈ 0.09·h: a mode the grid does not resolve. On a smooth
+        // trajectory |Δ2|/γ ≈ h·|ẋ| covers an inflection (d, d' = O(h³)) and
+        // (1 + 1/γ)|d'| ≈ 4.4·|d| an extremum (Δ2 ≈ 0). Neither reads the rate
+        // before the event: an 8 A cut of 1 µH at 100 V, dt 0.1 µs, is a jump
+        // although h·V/L = 10 A (reviewer A1, third session).
+        // The event-time allowance δt_loc·|ẋ(0−)|: d is measured from the
+        // step start, so a kink of the state at an instant θ inside the
+        // probe (a diode turning an inductor off at zero current) gives
+        // |d| ≤ θ·|ẋ(0−)|, ẋ(0−) the state's rate before the event (history
+        // slot i/C, v/L; L⁻¹v for coupled windings; the law's L(i), C(v)).
+        // δt_loc is how far the event can be from the step start: 0 at a
+        // TIME event (a gate edge, a source jump at its scheduled instant,
+        // the first step) — any jump above noise is a jump there; the split's
+        // resolution `snap` at a located diode crossing; the probe window γh
+        // when the event is not located (a window step, a stage-1 diode flip:
+        // a crossing the previous solve had not reached lies inside it).
+        // ONE number per restart, chosen by the caller (`loc`); a stage-1
+        // flip widens it to γh for every state of that step (shortcut: a
+        // real jump below γh·|ẋ(0−)| at a gate edge whose stage 1 also
+        // flips a diode is integrated, not recorded).
+        // The tolerance: 1e-8 relative with a one-unit floor is the event
+        // services' noise level (`events::held_tolerance`; it holds the Newton
+        // tolerance 1e-9 and the round-off). For an inductor current, plus the
+        // leakage scale the same tolerance gives a conductance-form OFF
+        // element: G_off (every switch's and diode's g_off) times the node
+        // voltages — a current the OFF elements' leakage can carry (a buck's
+        // 2.4e-8 A settling at a zero start) is the model's own noise. Then
+        // the jump J = κ·d is recorded (½·JᵀM·J, κ = 1/(1 − a)²: the whole
+        // jump, see below), the histories move to x0 + J and stage 1 is solved again
+        // from there; else nothing of the probe is kept (the restart is the
+        // plain one, bit for bit).
+        // Built once per run, out of line: a closure built per step (in the
+        // step body) cost the default path 62-77 instructions per step.
+        auto consistent_start = [&](auto& run_event_iteration, Real t_from, Real h_s,
+                                    Real dt_eq, Real loc, Size& iters_1,
+                                    bool& breach_1) PULSIM_STEP_DRIVER -> bool {
+            const auto& ents = history.entries();
+            if (ents.empty() &&
+                hs.get<pwl::SaturableInductorHistory>().entries().empty() &&
+                hs.get<pwl::NonlinearCapacitorHistory>().entries().empty()) {
+                return false;
+            }
+            // a stage-1 diode flip (iters_1 > 1: the event iteration changed
+            // the bits; breach_1 alone is an unsettled iteration)
+            const Real dt_loc = (iters_1 > 1 || breach_1) ? std::max(loc, h_s) : loc;
+            ip_x1 = x;
+            ip_b = b_extra;
+            history.snapshot_into(ip_hist);
+            hs.snapshot_into(ip_hs);
+            const Size iters_s = iters;
+            const bool flipped_s = flipped;
+            const bool cycle_s = mask_cycle;
+            const auto stamped_s = stamped_mask;
+            // ip_h0: the history part of b_extra at x0 (swapped for x0+'s
+            // below, if impulsive).
+            history.compute_b_extra_backward_euler(h_s, ip_h0);
+            // Two readings of the built-in sources over the probe: frozen at
+            // t1, and moved with the stages (t2 = t + 2γh, t3 = t + 3γh). A
+            // jump is the state's, so it must show in both: a fast mode
+            // TRACKING its forcing extrapolates to x0 + γh·ẋ with the sources
+            // frozen (a rectifier's capacitor from rest: 43 V), and a device
+            // whose region the moving source changes inside the probe makes
+            // a kink with them moved (a MOSFET gate ramp crossing V_th: 1.9e-4
+            // V on 1 µF); each is the other reading's x0. A source's own jump
+            // inside the probe is read at its left limit (else the probe reads
+            // it as the event's: 0.96 mJ on a rectifier from a 1 V pulse's
+            // edge at 0.4·dt); a second one leaves the frozen reading only. A
+            // b_extra_fn keeps its t1 value (called once per solve time;
+            // shortcut: a fast mode it alone forces reads its tracking as a
+            // jump in both readings, upgrade if a controller ever drives one).
+            const Real t1 = t_from + h_s, t2 = t1 + h_s, t3 = t2 + h_s;
+            const Real src1 = t1 == src_end_at ? src_end_read : t1;
+            auto src_move = [&](Vector& out, Real at_t) {   // sources(at_t) − sources(t1)
+                Real at = at_t;
+                if (has_jump_sources && sources::source_jump_in(pool, graph, t1, at_t)) {
+                    // (source_jump_in counts [t1, at_t))
+                    at = sources::next_source_jump_after(pool, graph, t1);
+                    if (!(at < at_t) ||
+                        sources::next_source_jump_after(pool, graph, at) <= at_t) {
+                        return false;
+                    }
+                }
+                out.setZero(ip_b.size());
+                add_source_rows(out, at, at_t, left_by);
+                ip_h1.setZero(ip_b.size());
+                add_source_rows(ip_h1, src1, t1, left_by);
+                out -= ip_h1;
+                if (has_iwave) {
+                    // shortcut: past a jump in (t1, at_t] the current waveforms
+                    // are read at its left limit, not at at_t; upgrade if a
+                    // fast mode tracks one.
+                    sources::compute_current_waveform_b_extra(pool, graph, at,
+                                                              be_iwave, left_by);
+                    out += be_iwave;
+                    sources::compute_current_waveform_b_extra(pool, graph, src1,
+                                                              be_iwave, left_by);
+                    out -= be_iwave;
+                }
+                return true;
+            };
+            const bool moved = src_move(ip_s2, t2) && src_move(ip_s3, t3) &&
+                               ip_s3.lpNorm<Eigen::Infinity>() > Real{0};
+            bool solved = true;
+            // One more BE stage of γh, from y (the histories at y), the
+            // sources shifted by *s (nullptr: frozen); x: its start, its end.
+            auto stage_from = [&](const Vector& y, const Vector* s, Real at) {
+                history.restore(ip_hist);
+                hs.restore(ip_hs);
+                history.extrapolate_previous(y, Real{1});
+                hs.extrapolate_previous(y, Real{1});
+                history.compute_b_extra_backward_euler(h_s, ip_h1);
+                b_extra = ip_b - ip_h0 + ip_h1;
+                if (s != nullptr) b_extra += *s;
+                if (!solved) return;
+                try {
+                    run_event_iteration(at, dt_eq, true, true);
+                } catch (const pwl::NewtonRoundoffBudgetExceeded&) {
+                    throw;
+                } catch (const std::runtime_error&) {
+                    solved = false;   // no probe: the plain restart
+                }
+            };
+            stage_from(ip_x1, nullptr, t1);
+            ip_x2 = x;   // the frozen reading: x2, x3
+            stage_from(ip_x2, nullptr, t1);
+            ip_x3f = x;
+            if (moved) {
+                x = ip_x1;
+                stage_from(ip_x1, &ip_s2, t2);
+                ip_x2m = x;
+                stage_from(ip_x2m, &ip_s3, t3);   // x: the moved reading's x3
+            } else {
+                ip_x2m = ip_x2;
+            }
+            history.restore(ip_hist);
+            hs.restore(ip_hs);
+            event_rl_x = Real{2} * ip_x1 - ip_x2m;
+            ip_x3m = x;   // the reading's x3 (the series' later stages reuse x)
+            // Per state (C or L): the jump x0+ − x0, the rule's bound;
+            // energy ½ΔᵀMΔ with the transformers' mutuals.
+            auto state = [&](const pwl::HistoryEntry& e, const Vector& v) {
+                return e.kind == pwl::DevicePool::StoredKind::Capacitor
+                    ? stamping::read_node_voltage(v, e.from) -
+                          stamping::read_node_voltage(v, e.to)
+                    : v[e.inductor_branch_var_id];
+            };
+            auto is_cap = [](const pwl::HistoryEntry& e) {
+                return e.kind == pwl::DevicePool::StoredKind::Capacitor;
+            };
+            const Size ne = ents.size();
+            const auto& sats = hs.get<pwl::SaturableInductorHistory>().entries();
+            const auto& ncs = hs.get<pwl::NonlinearCapacitorHistory>().entries();
+            const Size nn = ncs.size();
+            ip_d.resize(2 * ne);
+            ip_nc.assign(3 * ncs.size(), Real{0});
+            // ẋ(0−) per state, from the history slots at x0 (restored above)
+            ip_r.resize(ne);
+            for (Size k = 0; k < ne; ++k) {
+                const auto& e = ents[k];
+                ip_r[k] = (is_cap(e) ? e.i_prev : e.v_prev) / e.C_or_L;
+            }
+            for (const auto& tc : history.transformer_couplings()) {
+                const Real m =
+                    models::TwoWindingTransformer::mutual_inductance(tc.params);
+                const auto& ep = ents[tc.p_entry_idx];
+                const auto& es = ents[tc.s_entry_idx];
+                const Real det = ep.C_or_L * es.C_or_L - m * m;
+                if (!(det > Real{0})) continue;   // k = 1: keep v/L
+                ip_r[tc.p_entry_idx] = (es.C_or_L * ep.v_prev - m * es.v_prev) / det;
+                ip_r[tc.s_entry_idx] = (ep.C_or_L * es.v_prev - m * ep.v_prev) / det;
+            }
+            Real v_max = 0;   // node voltages after the event
+            for (Index n = 0; n < graph.num_nodes(); ++n) {
+                v_max = std::max({v_max, std::abs(ip_x1[n]), std::abs(x[n])});
+            }
+            const Real tol_i = g_leak * (Real{1} + v_max);
+            // One reading of one state (s0 = x0, s1..s3 the stages): the jump
+            // d = (s1 − s0) − (s2 − s1) against the rate after the event and
+            // the next difference d' = (s2 − s1) − (s3 − s2) (see above).
+            auto jumps = [&](Real s0, Real s1, Real s2, Real s3, Real tol) {
+                return std::abs(Real{2} * s1 - s2 - s0) >
+                       std::max(std::abs(s2 - s1) / kGamma,
+                                (Real{1} + Real{1} / kGamma) *
+                                    std::abs(Real{2} * s2 - s1 - s3)) + tol;
+            };
+            // A saturable core's current and a nonlinear capacitor's charge
+            // are states too, under the same rule (ẋ(0−) from the law).
+            auto law_jumps = [&](Real s0, Real s1, auto&& st, Real tol) {
+                return solved && jumps(s0, s1, st(ip_x2m), st(ip_x3m), tol) &&
+                       jumps(s0, s1, st(ip_x2), st(ip_x3f), tol);
+            };
+            auto ncv = [&](const pwl::NonlinearCapacitorHistory::Entry& e, const Vector& y) {
+                return stamping::read_node_voltage(y, e.from) -
+                       stamping::read_node_voltage(y, e.to);
+            };
+            auto ncq = [&](const pwl::NonlinearCapacitorHistory::Entry& e, const Vector& y) {
+                return models::NonlinearCapacitor::charge(e.params, ncv(e, y));
+            };
+            // The event-time allowance of state k: δt_loc·|ẋ(0−)|, or the
+            // motion over one stage of the mode the event started in (ip_m1,
+            // below) when stage 1 turned a diode: 0 until measured.
+            ip_m1.assign(ne + nn + sats.size(), Real{0});
+            auto allow = [&](Real r0, Size k) {
+                return std::max(dt_loc * std::abs(r0), ip_m1[k]);
+            };
+            // The rule's test per state (linear entries: ip_d[2k + 1]; nonlinear
+            // capacitors in CHARGE: ip_nc[3k + 2]).
+            auto detect = [&]() {
+                bool any = false;
+                for (Size k = 0; k < ne; ++k) {
+                    const auto& e = ents[k];
+                    const Real s0 = is_cap(e) ? e.v_prev : e.i_prev;
+                    const Real s1 = state(e, ip_x1);
+                    const Real tol = Real{1e-8} * (Real{1} + std::abs(s0) + std::abs(s1)) +
+                                     (is_cap(e) ? Real{0} : tol_i) + allow(ip_r[k], k);
+                    const bool jk = jumps(s0, s1, state(e, ip_x2m), state(e, ip_x3m), tol) &&
+                                    jumps(s0, s1, state(e, ip_x2), state(e, ip_x3f), tol);
+                    ip_d[2 * k + 1] = jk ? Real{1} : Real{0};
+                    any = any || jk;
+                }
+                // A nonlinear capacitor (F-S-6): tested in CHARGE, the quantity
+                // the event conserves (in voltage a smooth constant-current
+                // charge through a law whose C changes 100x reads as a jump);
+                // the noise floor is the voltage one times C(v1), the allowance
+                // δt_loc·|i(0−)|.
+                for (Size k = 0; k < nn; ++k) {
+                    const auto& e = ncs[k];
+                    const Real v1 = ncv(e, ip_x1);
+                    const Real tol = models::NonlinearCapacitor::capacitance(e.params, v1) * Real{1e-8} *
+                                         (Real{1} + std::abs(e.v_prev) + std::abs(v1)) +
+                                     allow(e.i_prev, ne + k);
+                    const bool jk = law_jumps(e.q_prev, ncq(e, ip_x1),
+                                              [&](const Vector& y) { return ncq(e, y); }, tol);
+                    ip_nc[3 * k + 2] = jk ? Real{1} : Real{0};
+                    any = any || jk;
+                }
+                return any;
+            };
+            bool jumped = detect();
+            // A diode stage 1 turned (its bits differ from the event start's):
+            // a state that moved at a finite rate after the event and stopped
+            // when that diode turned, at θ inside stage 1, makes |d| ≤ θ·|ẋ(0+)|
+            // with ẋ(0+) the rate in the mode the event STARTED in — the gate
+            // mask after the event with the diode bits before stage 1 (a current
+            // source moving a node 0.7 V in 80 ps until a diode clamps it: a
+            // state event the step does not locate, not a jump; ẋ(0−) = 0 there,
+            // the switch held the node). That rate is the start mode's own probe
+            // after its fast modes: three single stages from x0 in it, Δ2 = γh·ẋ where its own
+            // test finds no jump.
+            // A real jump is a fast mode of the start mode and leaves Δ2 at the
+            // slow rate (a capacitor dumped through a switch whose stage 1 also
+            // turns a diode is still recorded). Measured only when the test
+            // fired (impulsive candidates); a failed solve keeps the old bound.
+            if (jumped && solved && has_diodes &&
+                rs_bits0.size() == diodes.entries().size()) {
+                diodes.snapshot_on_bits_into(ip_bits1);
+                if (ip_bits1 != rs_bits0) {
+                    const auto stamped_1 = stamped_mask;
+                    const bool cycle_1 = mask_cycle;
+                    diodes.restore_on_bits(rs_bits0);
+                    history.restore(ip_hist);
+                    hs.restore(ip_hs);
+                    b_extra = ip_b;
+                    x = ip_x1;
+                    bool m1_ok = true, y3_ok = false;
+                    try {
+                        run_event_iteration(t1, dt_eq, true, true);
+                    } catch (const pwl::NewtonRoundoffBudgetExceeded&) {
+                        throw;
+                    } catch (const std::runtime_error&) {
+                        m1_ok = false;
+                    }
+                    if (m1_ok) {
+                        ip_y1 = x;
+                        stage_from(ip_y1, nullptr, t1);
+                        m1_ok = solved;
+                        ip_y2 = x;
+                        if (m1_ok) stage_from(ip_y2, nullptr, t1);   // x: y3
+                        y3_ok = m1_ok && solved;   // may leave the law's range: below
+                        if (!y3_ok) x = ip_y2;
+                        solved = true;
+                    }
+                    history.restore(ip_hist);   // x0's histories: s0 below
+                    hs.restore(ip_hs);
+                    if (m1_ok) {
+                        // per state, over one stage of the start mode: a smooth move
+                        // (no jump of that mode by the rule's d-test, |Δ1 − Δ2| ≤ |Δ2|/γ
+                        // + noise) is bounded by |Δ2|. A jump of that mode (Δk = s +
+                        // f·ρ^(k−1): one fast mode of factor ρ, tail f, slow motion s)
+                        // only by its slow rate, Aitken's s = (Δ1Δ3 − Δ2²)/(Δ1 + Δ3 −
+                        // 2Δ2), held to ≤ |Δ2|: |Δ2| there holds the fast tail
+                        // c·ρ(1 − ρ), and at ρ ≈ 0.18..0.23 it hid a real 4.93 µJ share
+                        // (review). (Not the full d'-test: the start mode's later
+                        // stages leave the state's range — a 14 V stage of the clamp's
+                        // ramp reaches a junction law's floor at stage 3, whose
+                        // Newton solve then fails: no third stage, no Aitken.)
+                        auto m1 = [&](Real s0, Real a1, Real a2, Real a3, Real noise) {
+                            const Real d1 = a1 - s0, d2 = a2 - a1, d3 = a3 - a2;
+                            if (!(std::abs(d1 - d2) > std::abs(d2) / kGamma + noise)) return std::abs(d2);
+                            if (!y3_ok) return Real{0};   // a jump of the start mode, no s
+                            const Real den = d1 + d3 - Real{2} * d2;
+                            const Real sl = std::abs(den) > Real{1e-12} * (std::abs(d1) + std::abs(d2) + std::abs(d3))
+                                ? (d1 * d3 - d2 * d2) / den
+                                : d3;
+                            return std::min(std::abs(sl), std::abs(d2));
+                        };
+                        for (Size k = 0; k < ne; ++k) {
+                            const auto& e = ents[k];
+                            const Real s0 = is_cap(e) ? e.v_prev : e.i_prev;
+                            const Real a1 = state(e, ip_y1);
+                            ip_m1[k] = m1(s0, a1, state(e, ip_y2), state(e, x),
+                                          Real{1e-8} * (Real{1} + std::abs(s0) + std::abs(a1)) +
+                                              (is_cap(e) ? Real{0} : tol_i));
+                        }
+                        for (Size k = 0; k < nn; ++k) {
+                            const auto& e = ncs[k];
+                            const Real v1 = ncv(e, ip_y1);
+                            ip_m1[ne + k] = m1(e.q_prev, ncq(e, ip_y1), ncq(e, ip_y2), ncq(e, x),
+                                               models::NonlinearCapacitor::capacitance(e.params, v1) *
+                                                   Real{1e-8} * (Real{1} + std::abs(e.v_prev) + std::abs(v1)));
+                        }
+                        for (Size k = 0; k < sats.size(); ++k) {
+                            const auto& e = sats[k];
+                            const Index br = e.branch_var_id;
+                            ip_m1[ne + nn + k] = m1(e.i_L_old, ip_y1[br], ip_y2[br], x[br],
+                                                    Real{1e-8} * (Real{1} + std::abs(e.i_L_old) +
+                                                                  std::abs(ip_y1[br])) + tol_i);
+                        }
+                    }
+                    diodes.restore_on_bits(ip_bits1);
+                    history.restore(ip_hist);
+                    hs.restore(ip_hs);
+                    stamped_mask = stamped_1;
+                    mask_cycle = cycle_1;
+                    if (m1_ok) {
+                        // A state over the old bound but within the start mode's
+                        // motion MOVED (flag 2): it is carried to x0 + J like a
+                        // jump — else stage 2's pseudo-state carries the move
+                        // (−0.7107 V for the clamp's −0.71) — but recorded by
+                        // nobody (the source did the work; no loss, no right
+                        // limit at t_from: the state is continuous there).
+                        ip_f0.resize(ne + nn);
+                        for (Size k = 0; k < ne; ++k) ip_f0[k] = ip_d[2 * k + 1];
+                        for (Size k = 0; k < nn; ++k) ip_f0[ne + k] = ip_nc[3 * k + 2];
+                        jumped = detect();
+                        for (Size k = 0; k < ne; ++k) {
+                            if (ip_f0[k] != Real{0} && ip_d[2 * k + 1] == Real{0}) ip_d[2 * k + 1] = Real{2};
+                        }
+                        for (Size k = 0; k < nn; ++k) {
+                            if (ip_f0[ne + k] != Real{0} && ip_nc[3 * k + 2] == Real{0}) {
+                                ip_nc[3 * k + 2] = Real{2};
+                            }
+                        }
+                    }
+                }
+            }
+            // jumped: a recorded jump (flag 1); moving: any state carried
+            bool moving = jumped;
+            for (Size k = 0; k < ne; ++k) moving = moving || ip_d[2 * k + 1] != Real{0};
+            for (Size k = 0; k < nn; ++k) moving = moving || ip_nc[3 * k + 2] != Real{0};
+            auto refuse_jump = [&](Index br, Real dp, const char* kind, const char* unit,
+                                   const char* why) {
+                const std::string name(graph.branch_name(br));
+                throw UnsupportedError(
+                    "pwl", "impulse", name, kind,
+                    std::format("discontinuity_restart: at t = {} the event "
+                                "moves {} '{}' by {:.6g} {} in an instant; {}; "
+                                "run this circuit without discontinuity_restart.",
+                                t_from, kind, name, dp, unit, why));
+            };
+            // A saturable core: refused by name. Its dual (flux conserved,
+            // i⁺ from λ(i)) is not this code: the hysteretic law's λ(i)
+            // depends on its (H, M) path and has no inverse here.
+            for (Size k = 0; k < sats.size(); ++k) {
+                const auto& e = sats[k];
+                const Real l0 = models::SaturableInductor::inductance(e.i_L_old, e.params);
+                auto st = [&](const Vector& y) { return y[e.branch_var_id]; };
+                const Real s1 = st(ip_x1);
+                const Real tol = Real{1e-8} * (Real{1} + std::abs(e.i_L_old) + std::abs(s1)) +
+                                 tol_i + allow(l0 > Real{0} ? e.V_L_old / l0 : Real{0}, ne + nn + k);
+                if (law_jumps(e.i_L_old, s1, st, tol)) {
+                    refuse_jump(e.branch_id, Real{2} * st(ip_x1) - st(ip_x2m) - e.i_L_old,
+                                "saturable_inductor", "A",
+                                "the consistent restart carries a jump on capacitors "
+                                "(linear or nonlinear) and linear inductors only");
+                }
+            }
+            // A jumping state's whole jump, one mode at a time: J = d/(1 − a)²,
+            // a = d'/d (moved reading; < γ/(1 + γ) by the rule): per mode
+            // d = −J(1 − a)², d' = a·d. With d alone the a(2 − a)·J left in x0+
+            // came back reversed through stage 2's pseudo-state (0.955 A of a
+            // 100 A IGBT cut held by its FWD, a = 0.0034: τ = L·g_off = 1 ps at
+            // dt 1 ns). Other states keep d (O(h²) on a smooth trajectory). A
+            // nonlinear capacitor's in charge: q0+ = q0 + J_q (the stages are
+            // charge-form solves of the law). Two or more jumping states: the
+            // vector series below replaces these.
+            ip_js.clear();
+            for (Size k = 0; k < ne; ++k) {
+                const auto& e = ents[k];
+                const Real s0 = is_cap(e) ? e.v_prev : e.i_prev;
+                const Real s1 = state(e, ip_x1), s2 = state(e, ip_x2m);
+                const Real dp = Real{2} * s1 - s2 - s0;
+                Real jd = dp;
+                if (ip_d[2 * k + 1] != Real{0}) {
+                    const Real a = std::clamp((Real{2} * s2 - s1 - state(e, ip_x3m)) / dp, Real{0},
+                                              kGamma / (Real{1} + kGamma));
+                    jd = dp / ((Real{1} - a) * (Real{1} - a));
+                    ip_js.push_back(k);
+                }
+                ip_d[2 * k] = jd;
+            }
+            for (Size k = 0; k < nn; ++k) {
+                if (ip_nc[3 * k + 2] == Real{0}) continue;
+                const auto& e = ncs[k];
+                const Real q1 = ncq(e, ip_x1), q2 = ncq(e, ip_x2m);
+                const Real dq = Real{2} * q1 - q2 - e.q_prev;
+                const Real a = dq != Real{0}
+                    ? std::clamp((Real{2} * q2 - q1 - ncq(e, ip_x3m)) / dq, Real{0},
+                                 kGamma / (Real{1} + kGamma))
+                    : Real{0};
+                ip_nc[3 * k + 1] = e.q_prev + dq / ((Real{1} - a) * (Real{1} - a));
+                ip_js.push_back(ne + k);
+            }
+            // A mode with structural dependent states (ideal elements) keeps
+            // the SDIRK x3 projection and the tracker's record (one service
+            // owns an ideal element's re-initialisation; both would record
+            // the same jump twice).
+            const bool structural = structure.active() &&
+                                    !structure.check(stamped_mask, true).dependent.empty();
+            // The whole jump as a VECTOR (derivation in solver/jump_series.hpp and
+            // fixes/jump-conservation.md): the stages' second differences D_k
+            // (D1 = d, D2 = d') are a Krylov sequence of the stage map, J = [D1 …
+            // Dm]·(I − H)⁻²·e1. The per-state a is that series for one mode per
+            // state; two modes of different a in one floating island (C1 –1 mΩ–
+            // C2 –R2– C3) took a different multiple per state and left the
+            // island's charge off by 3.4 %. J lies in span{D_k} with ONE
+            // coefficient vector for every state, so each charge (flux) the stages
+            // conserve J conserves to rounding — over ALL states: a state of the
+            // island the test does not flag (a mode the grid resolves) takes the
+            // same combination (ladders of five or more capacitors lost 8 % of
+            // their charge when only the flagged states did — review). A Ritz value
+            // outside the rule's fast range (ρ > γ/(1 + γ): a mode the grid
+            // integrates, slow content) keeps factor 1, as the rule's d keeps a
+            // state that does not jump. m modes take m + 2 stages: m grows while
+            // the fit of D_{m+1} is above the stages' noise (the rule's floor),
+            // to m = 6. Fallbacks, in order (each conserves less): the fit over the
+            // flagged states only (more than six modes over all states); the
+            // per-state a (a stage failed, a source jump inside the extra stages,
+            // or more than six modes among the flagged states). shortcut: those
+            // fallbacks do not conserve an island's charge that involves states
+            // outside the fit; upgrade if a circuit shows them (more than six
+            // distinct modes at one event).
+            ip_xs.clear();
+            bool stages_ok = true;
+            // x0 per entry, read now: each extra stage moves the histories
+            ip_s0.resize(ne + nn);
+            for (Size k = 0; k < ne; ++k) ip_s0[k] = is_cap(ents[k]) ? ents[k].v_prev : ents[k].i_prev;
+            for (Size k = 0; k < nn; ++k) ip_s0[ne + k] = ncs[k].q_prev;
+            ip_s0v.resize(nn);
+            for (Size k = 0; k < nn; ++k) ip_s0v[k] = ncs[k].v_prev;
+            // the stage values of entry k (k < ne: linear; else a nonlinear
+            // capacitor's charge) at stage j (0 = x0, 1..3 the probe, 4.. ip_xs)
+            auto sval = [&](Size k, Index j) -> Real {
+                if (j == 0) return ip_s0[k];
+                const Vector& y = j == 1 ? ip_x1 : j == 2 ? ip_x2m : j == 3 ? ip_x3m
+                                                                       : ip_xs[static_cast<Size>(j - 4)];
+                return k < ne ? state(ents[k], y) : ncq(ncs[k - ne], y);
+            };
+            auto stage_to = [&](Index j) {   // stages up to j exist (ip_xs)
+                while (stages_ok && 3 + static_cast<Index>(ip_xs.size()) < j) {
+                    const Index have = 3 + static_cast<Index>(ip_xs.size());
+                    const Vector& prev = have == 3 ? ip_x3m : ip_xs.back();
+                    const Real tk = t1 + static_cast<Real>(have) * h_s;
+                    if (moved && !src_move(ip_sk, tk)) {
+                        stages_ok = false;
+                        break;
+                    }
+                    ip_xk = prev;
+                    x = ip_xk;
+                    stage_from(ip_xk, moved ? &ip_sk : nullptr, moved ? tk : t1);
+                    if (!solved) {
+                        solved = true;
+                        stages_ok = false;
+                        break;
+                    }
+                    ip_xs.push_back(x);
+                }
+                return stages_ok;
+            };
+            // the series over the entries in ip_js; writes J into ip_d / ip_nc
+            auto series = [&](bool all) -> bool {
+                const Size ns = ip_js.size();
+                const auto nsi = static_cast<Index>(ns);
+                ip_w.resize(nsi);
+                Real thr2 = 0;
+                for (Size i = 0; i < ns; ++i) {
+                    const Size k = ip_js[i];
+                    Real w = 0, noise = 0;
+                    if (k < ne) {
+                        const auto& e = ents[k];
+                        w = std::sqrt(e.C_or_L);
+                        noise = Real{1e-8} * (Real{1} + std::abs(sval(k, 0)) + std::abs(sval(k, 1))) +
+                                (is_cap(e) ? Real{0} : tol_i);
+                    } else {
+                        const auto& e = ncs[k - ne];
+                        const Real v1 = ncv(e, ip_x1);
+                        const Real c1 = models::NonlinearCapacitor::capacitance(e.params, v1);
+                        w = Real{1} / std::sqrt(c1);
+                        noise = c1 * Real{1e-8} * (Real{1} + std::abs(ip_s0v[k - ne]) + std::abs(v1));
+                    }
+                    ip_w[static_cast<Index>(i)] = w;
+                    thr2 += (w * noise) * (w * noise);
+                }
+                auto second = [&](Index j, Vector& out) {   // D_{j+1}, unweighted
+                    out.resize(nsi);
+                    for (Size i = 0; i < ns; ++i) {
+                        const Size k = ip_js[i];
+                        out[static_cast<Index>(i)] =
+                            Real{2} * sval(k, j + 1) - sval(k, j) - sval(k, j + 2);
+                    }
+                };
+                const Index mmax = std::min<Index>(nsi, 6);
+                Index m = 1;
+                Real r2 = 0;
+                for (;; ++m) {
+                    if (!stage_to(m + 2)) return false;
+                    ip_Dw.resize(nsi, m + 1);
+                    for (Index j = 0; j <= m; ++j) {
+                        second(j, ip_sk);
+                        ip_Dw.col(j) = ip_sk.cwiseProduct(ip_w);
+                    }
+                    r2 = solver::jump_series_fit(ip_Dw, m, ip_c);
+                    if (!(r2 > thr2) || m == mmax) break;
+                }
+                if (r2 > thr2 && nsi > mmax) return false;
+                if (!solver::jump_series_coeffs(ip_c, kGamma / (Real{1} + kGamma), ip_g)) return false;
+                Vector jv = Vector::Zero(nsi);
+                for (Index j = 0; j < m; ++j) {
+                    second(j, ip_sk);
+                    jv += ip_g[j] * ip_sk;
+                }
+                if (!jv.allFinite()) return false;
+                for (Size i = 0; i < ns; ++i) {
+                    const Size k = ip_js[i];
+                    const Real ji = jv[static_cast<Index>(i)];
+                    if (k < ne) {
+                        ip_d[2 * k] = ji;
+                    } else {
+                        ip_nc[3 * (k - ne) + 1] = ip_s0[k] + ji;
+                        // carried by the series without the rule's flag: moved, unrecorded
+                        if (all && ip_nc[3 * (k - ne) + 2] == Real{0}) ip_nc[3 * (k - ne) + 2] = Real{3};
+                    }
+                }
+                return true;
+            };
+            if (solved && !structural && moving && ne + nn >= 2) {
+                ip_f0.assign(ip_js.begin(), ip_js.end());   // the flagged entries
+                ip_js.resize(ne + nn);
+                for (Size k = 0; k < ne + nn; ++k) ip_js[k] = k;
+                if (!series(true) && ip_f0.size() >= 2) {
+                    ip_js.resize(ip_f0.size());
+                    for (Size i = 0; i < ip_f0.size(); ++i) ip_js[i] = static_cast<Size>(ip_f0[i]);
+                    (void)series(false);
+                }
+                history.restore(ip_hist);
+                hs.restore(ip_hs);
+            }
+            Real e_jump = 0;
+            Size dom = 0;
+            Real dom_e = -1;
+            for (Size k = 0; k < ne; ++k) {
+                const Real jd = ip_d[2 * k];
+                const Real ek = Real{0.5} * ents[k].C_or_L * jd * jd;
+                if (ip_d[2 * k + 1] == Real{2}) continue;   // a move: no loss
+                e_jump += ek;
+                if (ip_d[2 * k + 1] == Real{1} && ek > dom_e) {
+                    dom_e = ek;
+                    dom = k;
+                }
+            }
+            for (const auto& tc : history.transformer_couplings()) {
+                const Real m =
+                    models::TwoWindingTransformer::mutual_inductance(tc.params);
+                if (ip_d[2 * tc.p_entry_idx + 1] == Real{2} || ip_d[2 * tc.s_entry_idx + 1] == Real{2}) continue;
+                e_jump += m * ip_d[2 * tc.p_entry_idx] * ip_d[2 * tc.s_entry_idx];
+            }
+            // A nonlinear capacitor that jumps: v0+ = Q⁻¹(q0+), its energy from
+            // the law (jump_energy: ∫(Q − Q(v0)) dv), never ½·C·ΔV² with a
+            // frozen C. ip_nc per device: (v0+, q0+, jumped).
+            bool nc_jumped = false;
+            for (Size k = 0; k < nn; ++k) {
+                if (ip_nc[3 * k + 2] == Real{0}) continue;
+                const auto& e = ncs[k];
+                const Real qp = ip_nc[3 * k + 1];
+                const Real vp = models::NonlinearCapacitor::voltage_of_charge(e.params, qp, ncv(e, ip_x1));
+                if (!std::isfinite(vp)) {
+                    refuse_jump(e.branch_id, Real{2} * ncv(e, ip_x1) - ncv(e, ip_x2m) - e.v_prev,
+                                "nonlinear_capacitor", "V",
+                                "the charge after it lies outside the law's range");
+                }
+                ip_nc[3 * k] = vp;
+                nc_jumped = true;
+                if (ip_nc[3 * k + 2] >= Real{2}) continue;   // a move / carried: no loss
+                const Real ek = models::NonlinearCapacitor::jump_energy(e.params, e.v_prev, vp);
+                e_jump += ek;
+                if (ek > dom_e) {
+                    dom_e = ek;
+                    dom = ne + k;   // ≥ ne: a nonlinear capacitor
+                }
+            }
+            if (structural && nc_jumped) {   // the tracker re-initialises linear states only
+                for (Size k = 0; k < ncs.size(); ++k) {
+                    if (ip_nc[3 * k + 2] != Real{0}) {
+                        refuse_jump(ncs[k].branch_id, ip_nc[3 * k] - ncs[k].v_prev,
+                                    "nonlinear_capacitor", "V",
+                                    "an ideal element's re-initialisation carries "
+                                    "linear capacitors and inductors only");
+                    }
+                }
+            }
+            const bool impulsive = solved && moving && !structural;
+            if (!impulsive && solved && moving && L) [[unlikely]] {
+                // the lines' stage 1 from x0+ (a window integral is the
+                // regular part; the jump is the tracker's record); the run's
+                // histories, bits and solution are put back below
+                const std::vector<Real> at_x0 = ip_hist;
+                for (Size k = 0; k < ne; ++k) ip_hist[2 * k + (is_cap(ents[k]) ? 0 : 1)] += ip_d[2 * k];
+                history.restore(ip_hist);
+                ln_v0.resize(ne);
+                for (Size k = 0; k < ne; ++k) ln_v0[k] = ents[k].v_prev;
+                if (has_diodes) diodes.snapshot_on_bits_into(ln_bits);
+                history.compute_b_extra_backward_euler(h_s, ip_h1);
+                b_extra = ip_b - ip_h0 + ip_h1;
+                x = ip_x1;
+                bool ln_ok = true;
+                try {   // a lines-only solve never fails the run's step
+                    run_event_iteration(t_from + h_s, dt_eq, true, true);
+                } catch (const pwl::NewtonRoundoffBudgetExceeded&) {
+                    throw;
+                } catch (const std::runtime_error&) {
+                    ln_ok = false;
+                }
+                ln_x1 = x;
+                ln_pre = ln_ok && stamped_mask == stamped_s;   // same mode: else the run's own
+                ip_hist = at_x0;
+                history.restore(ip_hist);
+                if (has_diodes) diodes.restore_on_bits(ln_bits);
+            }
+            if (!impulsive) {
+                x = ip_x1;
+                b_extra = ip_b;
+                iters = iters_s;
+                flipped = flipped_s;
+                mask_cycle = cycle_s;
+                stamped_mask = stamped_s;
+                return false;
+            }
+            // The record (every non-structural device kind). dW =
+            // ½·JᵀM·J > 0 by the test above (M is positive semidefinite).
+            // Only a jump (flag 1) is recorded; moves alone record nothing.
+            if (jumped) {
+                const bool nl = dom >= ne;   // the dominant state: a nonlinear capacitor
+                const Index d_from = nl ? ncs[dom - ne].from : ents[dom].from;
+                const Index d_to = nl ? ncs[dom - ne].to : ents[dom].to;
+                const bool cut = !nl && ents[dom].kind != pwl::DevicePool::StoredKind::Capacitor;
+                solver::ReinitRecord rec;
+                rec.t = t_from;
+                rec.kind = cut ? "cut_set" : "capacitor_loop";
+                for (Size k = 0; k < ne; ++k) {
+                    if (ip_d[2 * k + 1] == Real{1}) {   // the rule
+                        rec.states.emplace_back(graph.branch_name(ents[k].branch_id));
+                    }
+                }
+                for (Size k = 0; k < ncs.size(); ++k) {
+                    if (ip_nc[3 * k + 2] == Real{1}) {
+                        rec.states.emplace_back(graph.branch_name(ncs[k].branch_id));
+                    }
+                }
+                // the flux (V·s) or charge (C) moved on the dominant state
+                rec.lambda = nl ? ip_nc[3 * (dom - ne) + 1] - ncs[dom - ne].q_prev
+                                : ents[dom].C_or_L * ip_d[2 * dom];
+                for (const auto& tc : history.transformer_couplings()) {
+                    const Real m =
+                        models::TwoWindingTransformer::mutual_inductance(tc.params);
+                    if (tc.p_entry_idx == dom) {
+                        rec.lambda += m * ip_d[2 * tc.s_entry_idx];
+                    }
+                    if (tc.s_entry_idx == dom) {
+                        rec.lambda += m * ip_d[2 * tc.p_entry_idx];
+                    }
+                }
+                rec.dW = e_jump;
+                // The devices that opened: the switching / nonlinear
+                // elements at the dominant state's terminals.
+                Index dev0 = kInvalidIndex;
+                for (Index b = 0; b < graph.num_branches(); ++b) {
+                    const auto& br = graph.branch(b);
+                    if (br.kind != topology::BranchKind::Switch &&
+                        br.kind != topology::BranchKind::Nonlinear) {
+                        continue;
+                    }
+                    auto touches = [&](Index n) {
+                        return stamping::node_is_active(n) &&
+                               (br.from == n || br.to == n);
+                    };
+                    if (!touches(d_from) && !touches(d_to)) continue;
+                    if (dev0 == kInvalidIndex) dev0 = b;
+                    rec.devices.emplace_back(graph.branch_name(b));
+                }
+                rec.cause = rec.devices.empty() ? std::string{} : rec.devices.front();
+                if (opts.on_impulse_error) {
+                    std::string sts;
+                    for (const auto& s : rec.states) sts += (sts.empty() ? "" : ", ") + s;
+                    throw UnsupportedError(
+                        "pwl", "impulse", rec.cause,
+                        dev0 != kInvalidIndex && pool.is_registered(dev0)
+                            ? std::string(pwl::stored_kind_name(pool.kind_of(dev0)))
+                            : std::string{},
+                        std::format(
+                            "on_impulse='error': at t = {} '{}' makes {} "
+                            "dependent ({}); re-initialising them moves "
+                            "{:.6g} {} and removes {:.6g} J.",
+                            t_from, rec.cause, sts,
+                            cut ? "an inductor cut-set" : "a capacitor loop",
+                            rec.lambda, cut ? "V*s" : "C", rec.dW));
+                }
+                impulse_pending.push_back(std::move(rec));
+                event_rl_t = t_from;
+            }
+            // The C / L histories at x0+. The stateful device histories
+            // (hs: junction / tail charges, flux of a saturable core or a
+            // machine) stay at x0, restored above: they are continuous
+            // through the event (only the C / L states are probed), and
+            // their laws read x0+'s algebraic entries, which carry the
+            // extrapolated impulse (F-5-1: -6.8e8 V).
+            // (event_rl_x keeps the stages' line 2·x1 − x2; the states take
+            // x0 + J from the snapshot at x0)
+            for (Size k = 0; k < ne; ++k) ip_hist[2 * k + (is_cap(ents[k]) ? 0 : 1)] += ip_d[2 * k];
+            history.restore(ip_hist);
+            // a nonlinear capacitor that jumped starts from its (v0+, q0+)
+            auto& ncm = hs.get<pwl::NonlinearCapacitorHistory>().mutable_entries();
+            for (Size k = 0; k < ncm.size(); ++k) {
+                if (ip_nc[3 * k + 2] != Real{0}) {
+                    ncm[k].v_prev = ip_nc[3 * k];
+                    ncm[k].q_prev = ip_nc[3 * k + 1];
+                }
+            }
+            history.compute_b_extra_backward_euler(h_s, ip_h1);
+            b_extra = ip_b - ip_h0 + ip_h1;
+            x = ip_x1;   // the solve's start (Newton): the relaxed stage
+            // rs_bits0 stays the bits at x0: the stage-2 guard's undo of a
+            // turn-off of a diode conducting at the interval start (the
+            // flyback's secondary) still applies.
+            // Stage 1 again, from x0+: its mode decided there. (Here, not in
+            // run_restart: one call site fewer in the step body.)
+            run_event_iteration(t_from + h_s, dt_eq, true);
+            iters_1 += iters - 1;
+            if (flipped && has_diodes && !last_solved_bits.empty()) {
+                diodes.restore_on_bits(last_solved_bits);
+            }
+            breach_1 = breach_1 || flipped;
+            return true;
+        };
+        // F-3-1's location of the decided mode's commutation (split_step);
+        // built once per run, out of line (see consistent_start).
+        auto locate_islands = [&](Real a, Real b, Real h, Real& t_d)
+                                  PULSIM_STEP_DRIVER {
+            const auto ents = diodes.entries();
+            diodes.snapshot_on_bits_into(decided_bits);
+            {
+                const Index nn = graph.num_nodes();
+                island.resize(static_cast<Size>(nn) + 1);
+                for (Index n = 0; n <= nn; ++n) island[n] = n;
+                auto find = [&](Index n) {
+                    n = n < 0 ? nn : n;   // ground: slot nn
+                    while (island[n] != n) n = island[n] = island[island[n]];
+                    return n;
+                };
+                off_branch.assign(static_cast<Size>(graph.num_branches()), 0);
+                for (Size j = 0; j < ents.size(); ++j) {
+                    if (!diodes_snap[j]) off_branch[ents[j].branch_id] = 1;
+                }
+                for (Index bi = 0; bi < graph.num_branches(); ++bi) {
+                    if (off_branch[bi]) continue;
+                    const auto& br = graph.branch(bi);
+                    island[find(br.from)] = find(br.to);
+                }
+                auto island_of = [&](Size j) {
+                    const Index g = find(-1);
+                    const Index rf = find(ents[j].from);
+                    const Index rt = find(ents[j].to);
+                    return rf != g ? rf : (rt != g ? rt : kInvalidIndex);
+                };
+                auto flips = [&](Size j) {
+                    return cross_scratch[j] <= b &&
+                           decided_bits[j] != diodes_snap[j];
+                };
+                // A flipped diode between two floating islands joins them
+                // (an isolated bridge: D1 on the transformer side, D4 on the
+                // output side conduct together).
+                for (Size j = 0; j < ents.size(); ++j) {
+                    if (!flips(j)) continue;
+                    const Index g = find(-1);
+                    const Index rf = find(ents[j].from);
+                    const Index rt = find(ents[j].to);
+                    if (rf != g && rt != g) island[rf] = rt;
+                }
+                bool grouped = false;
+                for (Size j = 0; j < ents.size(); ++j) {
+                    const Index r = flips(j) ? island_of(j) : kInvalidIndex;
+                    if (r == kInvalidIndex) continue;
+                    Real s0 = 0, s1 = 0;
+                    Size n_mode = 0;
+                    int dir = 0;
+                    bool mixed = false, first = true;
+                    for (Size k = 0; k < ents.size(); ++k) {
+                        if (!flips(k) || island_of(k) != r) continue;
+                        first = first && k >= j;
+                        const int d = decided_bits[k] ? 1 : -1;
+                        mixed = mixed || (dir != 0 && d != dir);
+                        dir = d;
+                        const auto& e = ents[k];
+                        const bool on = diodes_snap[k];
+                        s0 += models::SwitchedDiode::crossing_signal(
+                            on, e.law_voltage(x_prev, on), e.params());
+                        s1 += models::SwitchedDiode::crossing_signal(
+                            on, e.law_voltage(x_first, on), e.params());
+                        ++n_mode;
+                    }
+                    if (!first || n_mode < 2 || mixed) continue;
+                    // OFF -> ON stays off while s < 0; ON -> OFF
+                    // stays on while s > 0.
+                    // (`far` and `near` are macros in the Windows headers)
+                    const bool no_cross = dir > 0 ? s0 >= Real{0} : s0 <= Real{0};
+                    const Real t_g = no_cross ? a : interp_commutation_time(a, b, s0, s1);
+                    for (Size k = 0; k < ents.size(); ++k) {
+                        if (flips(k) && island_of(k) == r) cross_scratch[k] = t_g;
+                    }
+                    grouped = true;
+                }
+                if (grouped) {
+                    // the crossers the decided mode does not flip
+                    // are not events of this step
+                    t_d = b;
+                    for (Size j = 0; j < ents.size(); ++j) {
+                        if (cross_scratch[j] <= b && !flips(j)) {
+                            cross_scratch[j] = b + h;
+                        }
+                        t_d = std::min(t_d, cross_scratch[j]);
+                    }
+                }
+            }
+        };
+
+        // User-cancellation check (Phase: live scope). Lets a
+        // GUI / external watchdog stop the simulation early
+        // while preserving the partial trace.
+        auto step_cancelled = [&]() PULSIM_STEP_PHASE {
+            return should_continue && !should_continue();
+        };
+
+        auto step_begin = [&](Size k) PULSIM_STEP_PHASE {
+            const Real t = t_step = fixed_grid.at(k_off + k);
             t_reached = t;
-            const Real t_prev = opts.t_start +
-                                 static_cast<Real>(k - 1) * opts.dt;
+            k_reached = k;
+            const Real t_prev = t_prev_step = fixed_grid.at(k_off + k - 1);
+            // The heat the previous step queued, as this step's power.
+            if (lt) lt->advance(opts.dt);
 
             // Snapshot the state at t_prev for sub-step
             // commutation timing (Layer 5 V2.2) and state
             // correction (Layer 5 V3). Assignment into the hoisted
             // buffer — no per-step allocation.
             x_prev = x;
+            if (has_ideal_diode) {
+                const auto& es0 = diodes.entries();
+                commut_on_prev.resize(es0.size());
+                for (std::size_t j = 0; j < es0.size(); ++j) commut_on_prev[j] = es0[j].is_on;
+            }
 
             // State-aware observer fires BEFORE `switch_fn(t)`
             // so the user can update a Python-side PI / sampler /
             // comparator with `x_prev` and have `switch_fn(t)`
-            // read the new duty / mask.
-            if (step_observer) {
-                step_observer(t, x_prev);
+            // read the new duty / mask. Under the restart rule the
+            // gate is sampled at the step START (design D4); the
+            // observer keeps its (t_k, x_{k-1}) label, whose move to
+            // t_{k-1} belongs to fix-control-tick-semantics.
+            gate_t = restart_rule ? t_prev : t;
+            if (step_observer || step_observer_in) {
+                (has_ticks ? step_observer : step_observer_in)(t, x_prev);
+                // An observer (or a control tick) may mutate the
+                // schedule: its oracle answer is stale (review M3).
+                edge_from = std::numeric_limits<Real>::infinity();
+                edge_next = -std::numeric_limits<Real>::infinity();
+                // ... and so may its declared b_extra_fn jumps (review L6).
+                bj_from = std::numeric_limits<Real>::infinity();
+                bj_next = -std::numeric_limits<Real>::infinity();
             }
+            gate_memo_n = 0;
+            // ---- add-fixed-step-event-splitting: the step's events ----
+            // Gate edges from the schedule's oracle and built-in source
+            // jumps inside [t_prev + snap, t - snap), in time order. One
+            // before that is taken at t_prev (the gate is sampled at it;
+            // a source jump triggers the restart below), one after it at
+            // t (the next step's; a source jump is read at its left
+            // limit by this step's last solve).
+            n_ev = 0;
+            ev_overflow = false;
+            capture_first = false;   // keep the first solve (diode split)
+            if (split) {
+                src_end_at = std::numeric_limits<Real>::quiet_NaN();
+                auto push_ev = [&](Real e) {
+                    if (n_ev < kMaxStepEvents) {
+                        ev_t[n_ev++] = e;
+                    } else {
+                        ev_overflow = true;
+                    }
+                };
+                if (next_edge_fn) {
+                    // The oracle's answer stays valid until the step
+                    // passes it (an SPWM oracle bisects on every call).
+                    if (!(edge_from <= t_prev && t_prev < edge_next)) {
+                        edge_from = t_prev;
+                        edge_next = next_edge_fn(t_prev);
+                    }
+                    Real e = edge_next;
+                    if (e < t) {
+                        topology::SwitchStateMask gate_mask = gate_at(t_prev);
+                        for (Size q = 0; q < 4 * kMaxStepEvents && e < t; ++q) {
+                            if (e < t - snap) {
+                                // A no-op edge (same mask both sides) is
+                                // not an event.
+                                const auto& m = gate_at(e);
+                                if (!(m == gate_mask)) {
+                                    ++result.n_gate_events;
+                                    if (e < t_prev + snap) {
+                                        gate_t = e;
+                                    } else {
+                                        push_ev(e);
+                                    }
+                                    gate_mask = m;
+                                }
+                            } else {
+                                // taken by the sample at t (no gate read
+                                // here: it would be a counted switch_fn call)
+                                ++result.n_gate_events;
+                            }
+                            edge_from = e;
+                            e = next_edge_fn(e);
+                            edge_next = e;
+                        }
+                        ev_overflow = ev_overflow || e < t - snap;
+                    }
+                    // an edge exactly on the grid point t: the next step's
+                    // oracle query (strictly after t) skips it
+                    if (edge_next == t) ++result.n_gate_events;
+                }
+                if (has_jump_sources) {
+                    Real e = sources::next_source_jump_after(pool, graph, t_prev);
+                    for (Size q = 0; q < 4 * kMaxStepEvents && e < t; ++q) {
+                        if (e >= t - snap) {
+                            src_end_at = t;
+                            src_end_read = e;
+                        } else if (e >= t_prev + snap) {
+                            push_ev(e);
+                        }
+                        e = sources::next_source_jump_after(pool, graph, e);
+                    }
+                    ev_overflow = ev_overflow || e < t - snap;
+                }
+                if (has_b_jumps) {
+                    // Declared b_extra_fn jumps (review M4): the same
+                    // window; one within snap of t is taken at t and
+                    // restarts the next step.
+                    Real e = b_jump_after(t_prev);
+                    for (Size q = 0; q < 4 * kMaxStepEvents && e < t - snap; ++q) {
+                        if (e >= t_prev + snap) {
+                            push_ev(e);
+                        }
+                        e = b_jump_after(e);
+                    }
+                    ev_overflow = ev_overflow || e < t - snap;
+                }
+                std::sort(ev_t.begin(), ev_t.begin() + n_ev);
+                // Events closer than `snap` merge into the earlier one,
+                // which samples the gate at the cluster's last event (a
+                // dead-time pair < snap apart lands both edges). The
+                // unresolved count is of every step event merged here:
+                // gate edges, source and declared b_extra_fn jumps alike.
+                Size m = 0;
+                for (Size q = 0; q < n_ev; ++q) {
+                    if (m == 0 || ev_t[q] - ev_t[m - 1] >= snap) {
+                        ev_t[m] = ev_s[m] = ev_t[q];
+                        ++m;
+                    } else {
+                        ev_s[m - 1] = ev_t[q];
+                        ++result.n_gate_events_unresolved;
+                    }
+                }
+                n_ev = m;
+            }
+            gate_t0 = gate_t;
             // V3 snapshots — taken regardless of whether
             // correction fires (cheap; vectors are small per
             // dynamic-branch). Restored only if a commutation
             // event is detected AND
             // enable_substep_state_correction is true.
-            history.snapshot_into(history_snap);
-            coss_snap = coss_history.snapshot();
-            laur_snap = laur_history.snapshot();
-            pmsm_snap = pmsm_history.snapshot();
-            tail_snap = tail_history.snapshot();
-            sat_snap = sat_history.snapshot();
-            if (has_diodes) {
-                diodes.snapshot_on_bits_into(diodes_snap);
-            } else {
-                diodes_snap.clear();
+            if (may_roll_back) {
+                ++result.rollback_snapshots;
+                history.snapshot_into(history_snap);
+                hs.snapshot_into(hs_snap);
+                if (has_diodes) {
+                    diodes.snapshot_on_bits_into(diodes_snap);
+                } else {
+                    diodes_snap.clear();
+                }
             }
             // Pre-event mask: what mask we'd use BEFORE any
             // diode flip during this step. Captured before
             // event iteration runs.
-            topology::SwitchStateMask mask_pre = switch_fn(t);
-            if (has_diodes) {
-                mask_pre = combine_masks(
-                    mask_pre, diodes.current_diode_mask(),
-                    diode_owned);
+            mask_pre = gate_at(gate_t);
+            if (split && !next_edge_fn) {
+                // An opaque switch_fn: a gate change between two grid
+                // samples was not located (review M3).
+                // Counted only when the change happened INSIDE the
+                // previous step (the gate at t_prev - snap is already the
+                // new mask); an edge exactly on the grid point t_prev was
+                // taken where it is (review L4).
+                if (have_prev_gate && !(mask_pre == prev_gate) &&
+                    gate_at(t_prev - snap) == mask_pre) {
+                    ++result.unlocated_gate_steps;
+                }
+                prev_gate = mask_pre;
+                have_prev_gate = true;
             }
+            if (ev_overflow) {
+                ++result.split_event_overflows;
+            }
+            if (has_diodes) {
+                mask_pre = diodes.combine(mask_pre);
+            }
+        };  // step_begin
 
+        // run_restart and restart_lined are built once per run, not per step:
+        // step_take passes its run_event_iteration (as consistent_start takes it).
+        // One Alexander SDIRK(2,2) step of h from t_from (γ = 1 −
+        // 1/√2, L-stable, order 2). Both stages are backward-Euler-
+        // like solves of size γh — conductance C/(γh), i.e. the
+        // trapezoidal factor at 2γh — the second from the pseudo
+        // previous state x0* = x0 + ((1 − γ)/γ)(x1 − x0). EACH stage
+        // has its own diode event iteration (not atomic: a gate that
+        // opens an inductor's path is damped in stage 1 before any
+        // diode is asked to conduct). Stage times t_from + γh and
+        // t_from + h, the sources read once at each. The commit after
+        // stage 2 is the caller's (deferred past the freeze guard):
+        // commit_backward_euler(γh) from x0* refreshes the derivative
+        // slots with stage 2's own (x2 − x0*)/(γh).
+        //
+        // Stage-2 fallback: x0* carries stage 1's slope, which belongs
+        // to stage 1's diode mode. If stage 2's event iteration changes
+        // the mode, the new mode's solve starts from that slope: a
+        // rectifier at dt/τ = 10 then turns its diode off on stage 2's
+        // overshoot (25 V for a 20.7 V phase) and the OFF solve returns
+        // x0* itself, 37.2 V on a 24 V source. Such a stage 2 is re-tried
+        // as a backward-Euler step of (1 − γ)h from x1, the last
+        // physical state. If backward Euler keeps stage 1's mode, the
+        // flip was the SDIRK overshoot and the BE step is kept
+        // (`be_commit_h` tells the commit which step that was); else
+        // the mode change is real and the SDIRK stage 2 is restored bit
+        // for bit (a BE remainder there cost DCM buck 8× in accuracy).
+        //
+        // loc: δt_loc of the event at t_from (consistent_start)
+        auto run_restart = [&](auto& run_event_iteration, Real t_from, Real h, Real loc) {
+            const Real h_s = kGamma * h;
+            const Real dt_eq = Real{2} * h_s;
+            be_commit_h = h_s;
+            ln_pre = false;
+            if (sx.on) [[unlikely]] sx.begin(t_from, x);
+            accumulate_b_extra(t_from + h_s, dt_eq, true);
+            if (has_diodes) diodes.snapshot_on_bits_into(rs_bits0);
+            const Size edge_flips = loc < h_s ? decide_edge_mode(t_from + h_s, dt_eq) : 0;
+            run_event_iteration(t_from + h_s, dt_eq, true);
+            // stage 1 as solved (the mode decide_edge_mode and the settle left),
+            // before the probe's solves replace a Newton stage's factor
+            if (sx.on) [[unlikely]] {
+                sx.stage(0, step::psi_backward_euler_on(dt_eq), t_from + h_s, dt_eq);
+            }
+            Size iters_1 = iters;
+            if (edge_flips > 0) {
+                // the decision's flips are the stage's own (the impulse probe's
+                // widening, the window), unless the settle ended on the entry
+                // bits: a linearization's flip the converged state undid
+                diodes.snapshot_on_bits_into(edge_bits);
+                iters_1 = !flipped && edge_bits == rs_bits0 ? Size{1} : iters_1 + edge_flips;
+            }
+            bool breach_1 = flipped;
+            if (breach_1 && has_diodes && !last_solved_bits.empty()) {
+                diodes.restore_on_bits(last_solved_bits);
+            }
+            const bool impulsive =
+                consistent_start(run_event_iteration, t_from, h_s, dt_eq, loc, iters_1, breach_1);
+            if (impulsive && sx.on) [[unlikely]] {
+                // the histories moved to x0 + J (the jump's vector series, from
+                // the probe's stages) and stage 1 was solved again from there:
+                // dJ/dp is not carried
+                sx.s.refuse_step(t_from, "restarted from a state its event moved (an "
+                                 "impulsive event: the jump of the capacitor "
+                                 "voltages / inductor currents read from the "
+                                 "restart's probe has no derivative here)");
+            }
+            if (L) {                // stage 1, for the step's lines
+                // an impulsive start moved the histories to x0+: the lines
+                // start there (a window integral is the regular part; the
+                // jump is the reinit record's)
+                if (impulsive && L->v0.size() == history.entries().size()) {
+                    const auto& es = history.entries();
+                    for (Size k = 0; k < es.size(); ++k) L->v0[k] = es[k].v_prev;
+                }
+                if (ln_pre && L->v0.size() == ln_v0.size()) L->v0 = ln_v0;
+                L->x1 = ln_pre ? ln_x1 : x;
+                L->m1 = stamped_mask;
+                L->be_kept = false;
+            }
+            if (has_diodes) {
+                rs_x1 = x;
+                diodes.snapshot_on_bits_into(rs_bits);
+                if (!rs_first_valid) {   // the attempt's first stage: from t_prev
+                    rs_bits_first.assign(rs_bits.begin(), rs_bits.end());
+                    rs_first_valid = true;
+                }
+                history.snapshot_into(rs_hist);
+                hs.snapshot_into(rs_hs);   // keeps the capacity
+            }
+            const bool cycle_1 = mask_cycle;
+            constexpr Real c = (Real{1} - kGamma) / kGamma;
+            history.extrapolate_previous(x, c);
+            hs.extrapolate_previous(x, c);
+            accumulate_b_extra(t_from + h, dt_eq, true);
+            run_event_iteration(t_from + h, dt_eq, true);
+            const Size iters_2 = iters;
+            // A diode stage 1 conducts and stage 2 turns off, with no
+            // diode turning on: the overshoot mechanism (`on_to_off`
+            // also covers the undo below). A
+            // turn-on in stage 2 (e.g. round-off at a zero start,
+            // buck CCM at t = 0) keeps the SDIRK stage, unless it
+            // undoes stage 1's turn-off of a diode that conducted at
+            // the interval start: R(z) < 0 for z < -1/(1-2γ) flips the
+            // sign of a stiff residual (a transformer cut by its
+            // switch, g_off) and the flip forward-biases the diode
+            // again. Kept, the flyback trapped 0.04-0.12 A in its
+            // secondary at every switch-off (exact error 0.11, not
+            // converging with dt).
+            bool on_to_off = false;
+            if (has_diodes && iters_2 > 1) {
+                diodes.snapshot_on_bits_into(rs_bits2);
+                for (Size q = 0; q < rs_bits.size(); ++q) {
+                    if (!rs_bits[q] && rs_bits2[q] && !rs_bits0[q]) {
+                        on_to_off = false;
+                        break;
+                    }
+                    on_to_off = on_to_off || (rs_bits[q] != rs_bits2[q]);
+                }
+            }
+            if (on_to_off) {
+                // Stage 2 changed the mode. Re-take it as backward
+                // Euler from x1 under stage 1's bits; if that keeps
+                // stage 1's mode, the change was SDIRK's own overshoot
+                // (R(z) < 0 for h ≫ τ) and the backward-Euler step is
+                // kept. If backward Euler changes the mode too, the
+                // event is real and the SDIRK stage 2 stands: its
+                // x0* is accurate when the slopes are continuous
+                // (DCM turn-off: −2.4e-4 V at T/50 with backward
+                // Euler kept, +2.9e-5 V without).
+                ++result.stage2_retries;
+                rs_x2 = x;
+                const bool flipped_2 = flipped;
+                const bool cycle_2 = mask_cycle;
+                const auto stamped_2 = stamped_mask;
+                rs_solved2 = last_solved_bits;
+                auto histories_at_x0 = [&] {
+                    history.restore(rs_hist);
+                    hs.restore(rs_hs);
+                };
+                x = rs_x1;
+                diodes.restore_on_bits(rs_bits);
+                histories_at_x0();
+                mask_cycle = cycle_1;
+                const Real h_b = h - h_s;
+                // A re-try that fails (Newton, a singular factor at
+                // the new dt) falls back to the SDIRK stage 2, which
+                // had already succeeded.
+                bool keep_be = false;
+                try {
+                    commit_backward_euler(h_s);      // stage 1, as taken
+                    accumulate_b_extra(t_from + h, Real{2} * h_b, true);
+                    run_event_iteration(t_from + h, Real{2} * h_b, true);
+                    diodes.snapshot_on_bits_into(rs_bits_be);
+                    keep_be = rs_bits_be == rs_bits;
+                } catch (const pwl::NewtonRoundoffBudgetExceeded&) {
+                    throw;   // a run budget: never swallowed by a retry
+                } catch (const std::runtime_error&) {
+                    ++result.stage2_retry_failures;
+                }
+                if (keep_be) {
+                    ++result.stage2_be_kept;
+                    if (L) L->be_kept = true;
+                    be_commit_h = h_b;
+                } else {
+                    // Back to the SDIRK stage 2, bit for bit: the
+                    // histories at x0*, recomputed from x0 and x1.
+                    histories_at_x0();
+                    x = rs_x1;
+                    history.extrapolate_previous(x, c);
+                    hs.extrapolate_previous(x, c);
+                    x = rs_x2;
+                    diodes.restore_on_bits(rs_bits2);
+                    stamped_mask = stamped_2;
+                    last_solved_bits = rs_solved2;
+                    iters = iters_2;
+                    flipped = flipped_2;
+                    mask_cycle = cycle_2;
+                }
+                if (keep_be) iters += iters_2 - 1;
+                if (sx.on) [[unlikely]] {
+                    if (!keep_be) {
+                        sx.s.refuse_step(t_from + h, "an SDIRK step whose second "
+                                         "stage changed the diode mode (a "
+                                         "commutation not located in time)");
+                    }
+                    // stage 2 as taken: backward Euler of h_b from stage 1
+                    step::StagePsi pb{Real{1} / h_b, Real{0}, Real{0}, 1, {}, {}};
+                    pb.c_q[0] = Real{1};
+                    sx.stage(1, pb, t_from + h, Real{2} * h_b);
+                }
+            } else if (sx.on) [[unlikely]] {
+                sx.stage(1, step::psi_sdirk_stage2(dt_eq, c), t_from + h, dt_eq);
+            }
+            // A diode flip inside the step is a discontinuity of its
+            // own: the window covers this step and the next two.
+            if (iters_1 > 1 || iters_2 > 1) {
+                restart_left = std::max(restart_left, kRestartSteps - 1);
+            }
+            iters += iters_1 - 1;
+            flipped = flipped || breach_1;
+        };
+        // run_restart, and the step's line for it (StepLines): at the
+        // step start, its right limit; inside the step, the event's left
+        // limit (the sub-step that ended at a) and its right limit. The
+        // start of the line is 2·w1·X1 + (1 − 2·w1)·X2, w1 the stage-1
+        // weight (SDIRK 1 − γ; the backward-Euler re-take γ). A stage 2
+        // in another mode than stage 1 (F-4-4) is the same quadrature as
+        // two held pieces, each a solved state in its own mode: X1 over
+        // w1·h, then X2 (an extra row at a + w1·h, not an event).
+        auto restart_lined = [&](auto& run_event_iteration, Real a, Real h, Real loc) {
+            const bool inner = a != t_prev_step;
+            StepLines& lines = *L;   // restart steps exist under the rule only
+            if (lines.owner != t_step) {   // the step's first: no per-step reset
+                lines.clear();
+                lines.ok = true;
+                lines.owner = t_step;
+            }
+            const Size j = lines.n;
+            // F-4-4: the capacitor currents at the line points, for an
+            // in-loop recorder only (StepLines::c_*)
+            const auto& es = history.entries();
+            const bool caps = hook_step && !es.empty();
+            auto v_cap = [](const Vector& xv, const pwl::HistoryEntry& e) {
+                return stamping::read_node_voltage(xv, e.from) -
+                       stamping::read_node_voltage(xv, e.to);
+            };
+            if (inner) {
+                if (j < StepLines::kMax) {
+                    lines.t[j] = a;
+                    lines.left[j] = x;
+                    lines.m_left[j] = stamped_mask;
+                    lines.right_ok[j] = false;
+                    lines.n = j + 1;
+                    if (caps) {   // the sub-step that ended at a, committed
+                        lines.c_left[j].resize(es.size());
+                        for (Size k = 0; k < es.size(); ++k) {
+                            lines.c_left[j][k] = lines.end_own ? lines.c_end[k] : es[k].i_prev;
+                        }
+                    }
+                } else {
+                    lines.ok = false;
+                }
+            }
+            if (caps) {
+                lines.v0.resize(es.size());
+                for (Size k = 0; k < es.size(); ++k) lines.v0[k] = es[k].v_prev;
+            }
+            lines.m_a = stamped_mask;   // the mode the (sub)step starts in
+            lines.end_own = false;
+            run_restart(run_event_iteration, a, h, loc);
+            if (inner && j >= StepLines::kMax) return;
+            // shortcut: after a kept backward-Euler stage 2 (w1 = γ) the
+            // start lies between the stages, the quadrature's value but
+            // only a first-order right limit; record the extrapolation
+            // separately if a reader needs the value there
+            const Real w1 = lines.be_kept ? kGamma : Real{1} - kGamma;
+            const bool mixed = !(lines.m1 == stamped_mask);
+            const Real t_m = a + w1 * h;
+            // held pieces only when no device's stage-1 state is neither
+            // side's (off -> on -> off would read as an on/off pair the
+            // loss tracker never books)
+            bool one_way = mixed;
+            for (Size bit = 0; one_way && bit < lines.m1.size(); ++bit) {
+                const bool s1 = lines.m1.get(bit);
+                one_way = s1 == lines.m_a.get(bit) || s1 == stamped_mask.get(bit);
+            }
+            if (mixed && (!one_way || lines.n >= StepLines::kMax ||
+                          !(t_m > a && t_m < a + h))) {
+                // shortcut: after an ideal element's jump (ln_pre) these
+                // ends read the run's i_prev, which folds the jump in
+                // (needs a mixed stage 2 too); upgrade with F-W-1's
+                // lines-only stage 2
+                return;   // the step's ends
+            }
+            Vector& dst = inner ? lines.right[j] : lines.x_start;
+            if (mixed) {
+                dst = lines.x1;
+            } else {
+                dst = (Real{2} * w1) * lines.x1 + (Real{1} - Real{2} * w1) * x;
+            }
+            const auto& m_dst = mixed ? lines.m1 : stamped_mask;
+            if (inner) {
+                lines.m_right[j] = m_dst;
+                lines.right_ok[j] = true;
+            } else {
+                lines.m_start = m_dst;
+                lines.start = true;
+            }
+            const Size q = lines.n;   // the held pieces' row
+            if (mixed) {
+                lines.t[q] = t_m;
+                lines.left[q] = lines.x1;
+                lines.m_left[q] = lines.m1;
+                lines.right[q] = x;
+                lines.m_right[q] = stamped_mask;
+                lines.right_ok[q] = true;
+                lines.n = q + 1;
+            }
+            if (caps) {
+                // the stage currents as the solves enforced them: stage 1
+                // backward Euler of γh from v0, stage 2 the commit's
+                // (x2 − x0*)/(γh), or (x2 − x1)/h_b after a kept BE re-take
+                // (the histories hold x0* / x1 until the commit)
+                constexpr Real kC2 = (Real{1} - kGamma) / kGamma;
+                std::vector<Real>& c = inner ? lines.c_right[j] : lines.c_start;
+                c.resize(es.size());
+                if (ln_pre) {   // the (sub)step's end: the lines' stage 2, not i_prev
+                    lines.c_end.resize(es.size());
+                    for (Size k = 0; k < es.size(); ++k) lines.c_end[k] = es[k].i_prev;
+                    lines.end_own = true;
+                }
+                if (mixed) {
+                    lines.c_left[q].resize(es.size());
+                    lines.c_right[q].resize(es.size());
+                }
+                for (Size k = 0; k < es.size(); ++k) {
+                    const auto& e = es[k];
+                    if (e.kind != pwl::DevicePool::StoredKind::Capacitor) continue;
+                    const models::Capacitor::Params cp{e.C_or_L};
+                    const Real i1 = models::Capacitor::g_eq(Real{2} * (kGamma * h), cp) *
+                                    (v_cap(lines.x1, e) - lines.v0[k]);
+                    // ln_pre: stage 2's start from the lines' stage 1 (x0+*)
+                    const Real vb = !ln_pre ? e.v_prev
+                        : lines.be_kept ? v_cap(lines.x1, e)
+                        : lines.v0[k] + kC2 * (v_cap(lines.x1, e) - lines.v0[k]);
+                    const Real i2 = models::Capacitor::g_eq(Real{2} * be_commit_h, cp) *
+                                    (v_cap(x, e) - vb);
+                    if (ln_pre) lines.c_end[k] = i2;
+                    if (mixed) {
+                        c[k] = lines.c_left[q][k] = i1;
+                        lines.c_right[q][k] = i2;
+                    } else {
+                        c[k] = (Real{2} * w1) * i1 + (Real{1} - Real{2} * w1) * i2;
+                    }
+                }
+            }
+        };
+
+        auto step_take = [&]() PULSIM_STEP_PHASE {
+            const Real t = t_step;
+            const Real t_prev = t_prev_step;
             // Accumulate b_extra into the reused buffer (audit #6), in the
             // same left-to-right order as before so the result is
             // bit-identical: history, then the optional user fn, then only the
             // built-in source kinds the circuit contains. A null user fn and
             // absent source kinds contribute (and cost) nothing instead of
-            // allocating + adding a zero vector every step.
-            accumulate_b_extra(t, opts.dt);
+            // allocating + adding a zero vector every step. (Below, once
+            // the step is known not to restart: a restart step evaluates
+            // its sources at its own stage times only.)
 
             // 3. Event-iteration loop. Solve, update diode state,
             //    re-solve if any diode flipped. Stop when stable
@@ -911,14 +3443,28 @@ inline SimulationResult run_transient(
             // If `nl_refresh` was supplied, the inner solve uses
             // Newton (with the trap-companion `b_extra`); else
             // it's the cached linear solve.
-            Size iters = 0;
-            bool flipped = false;
-            bool mask_cycle = false;
+            iters = 0;
+            flipped = false;
+            mask_cycle = false;
             // Full mask copies (Phase 1: masks can exceed 64 bits; a
             // copy is 2 inline words for <=128 switches — still no
             // heap in the loop).
-            std::array<topology::SwitchStateMask, 64> masks_seen{};
-            Size n_masks_seen = 0;
+            masks_seen.reset();
+
+            // add-newton-roundoff-acceptance: a dynamic-path Newton
+            // solve that exhausts its budget at row roundoff is
+            // accepted and counted (DC and static paths: never).
+            // One object for the run: its counters are the run budget.
+            pwl::NewtonRoundoffAcceptance& newton_roundoff = newton_roundoff_run;
+            auto note_roundoff = [&]() {
+                if (!newton_roundoff.accepted) return;
+                ++result.newton_roundoff_accepts;
+                if (newton_roundoff.omega
+                    >= result.newton_roundoff_omega_max) {
+                    result.newton_roundoff_omega_max = newton_roundoff.omega;
+                    result.newton_roundoff_row = newton_roundoff.row;
+                }
+            };
 
             // One step of `for_dt` ending at `at_t`: solve, let the
             // PWL diodes re-decide from the result, re-solve until
@@ -927,7 +3473,31 @@ inline SimulationResult run_transient(
             // (v2.0 Phase 2, B.4) — the nominal `for_dt == opts.dt`
             // call still takes the cached factorization and is
             // bit-identical to before.
-            auto run_event_iteration = [&](Real at_t, Real for_dt) {
+            // `single`: one solve under the current bits, no re-decision
+            // (sub-step 1 of a diode split, whose bits are the pre-event
+            // ones by construction).
+            // The linear solve of a site under `mask` (the loop's own branches).
+            auto mode_solve = [&](const topology::SwitchStateMask& mask,
+                                  Real for_dt, bool be, Vector& out) {
+                if (restart_rule && (for_dt == restart_dt || be)) {
+                    const auto m0 = cache.metrics();
+                    cache.solve_at(mask, for_dt, b_extra, out);
+                    const auto m1 = cache.metrics();
+                    restart_factorizations += static_cast<Size>(
+                        (m1.event_builds - m0.event_builds) +
+                        (m1.event_refactors - m0.event_refactors));
+                } else if (for_dt == opts.dt && for_dt == cache.dt()) {
+                    cache.solve_segment(nominal_segment(mask), b_extra, out);
+                } else {
+                    cache.solve_at(mask, for_dt, b_extra, out);
+                }
+            };
+
+            auto run_event_iteration = [&](Real at_t, Real for_dt,
+                                           bool backward_euler = false,
+                                           bool single = false) {
+            // an earlier stage's cycle of this outer step: not this site's breach
+            const bool cycle_in = mask_cycle;
             // Phase 4 C.1 — EVERY solve tells the nonlinear
             // refresh which step it is taking. This is the single
             // point all of them pass through, including the
@@ -937,7 +3507,11 @@ inline SimulationResult run_transient(
             // variable but was written when it never moved; it
             // still refuses a variable step for the OTHER reason,
             // no rollback of its flux.)
-            refresh_dt = for_dt;
+            // A restart stage advances for_dt/2 (= γh) on the factor of
+            // for_dt (= 2γh); the devices are told the interval and the rule.
+            step_ctx = backward_euler ? step::BackwardEuler::on_factor(for_dt).ctx()
+                                      : step::Trapezoidal::stage(for_dt).ctx();
+            step_ctx.t = at_t;   // the external devices' ctx->t
             iters = 0;
             flipped = false;
             // NOT reset: a mask cycle in ANY sub-step of a retry is a
@@ -946,19 +3520,75 @@ inline SimulationResult run_transient(
             // `event_iteration_breaches` — and would let
             // `strict_event_iterations` be violated in silence, which
             // is the opposite of what that flag is for.
-            n_masks_seen = 0;
+            masks_seen.reset();
             // Diode on-bits consistent with the most recent solve
             // (captured BEFORE update_from_state advances them) —
             // restored on breach so x and the diode state agree
             // (adversarial-review finding P0-R1).
             last_solved_bits.clear();
+            loop_released.clear();
+            // add-complementarity-mode-selection: every non-single linear
+            // site is a decision site of the selector.
+            const bool mode_site = mode_ports.has_value() && !single &&
+                                   !nl_refresh_effective;
+            if (mode_site) mode_begin();
+            if (mode_site && opts.mode_selection == 2) {
+                const topology::SwitchStateMask gates =
+                    gate_at(restart_rule ? gate_t : at_t);
+                auto solve = [&](const topology::SwitchStateMask& m, Vector& out) {
+                    // the settle's structural pass before a mode's solve: a
+                    // floating node / source loop is refused by its name, not
+                    // as a singular factor (F-4-1: one classification)
+                    if (structure.active()) {
+                        (void)structure.check(m, for_dt > Real{0});
+                        result.mode_structure_checks = structure.checks_run();
+                    }
+                    mode_solve(m, for_dt, backward_euler, out);
+                };
+                if (capture_first) {
+                    // the diode split locates the old mode's crossing on its
+                    // own solve, as the settle's first round gives it
+                    mask_first = combine_masks(gates, diodes.current_diode_mask(),
+                                               diode_owned);
+                    solve(mask_first, x_first);
+                }
+                const bool changed = mode_lcp_site(
+                    at_t, mode_kind(for_dt, backward_euler), gates, for_dt,
+                    backward_euler, b_extra, solve, capture_first ? &x_first : nullptr);
+                // A changed mode re-arms the restart exactly as a settle
+                // flip does (callers read iters > 1).
+                iters = changed ? 2 : 1;
+                flipped = false;
+                return;
+            }
+            // The settle loop stays a do-while here: events::settle (or a
+            // counted variant) in this loop cost 1.0-1.8 % instructions per
+            // step (add-unified-event-queue DECISIONS 15).
             do {
-                auto mask = switch_fn(at_t);
+                auto mask = gate_at(restart_rule ? gate_t : at_t);
                 if (has_diodes) {
-                    const auto diode_mask =
-                        diodes.current_diode_mask();
-                    mask = combine_masks(mask, diode_mask,
-                                          diode_owned);
+                    mask = diodes.combine(mask);
+                }
+                bool released = false;
+                while (structure.active() && check_mode(mask, true, at_t)) {
+                    released = true;
+                    mask = diodes.combine(gate_at(restart_rule ? gate_t : at_t));
+                }
+                // A release back onto a mask already solved this step is the
+                // loop forward-biasing the diode: refuse rather than let the
+                // cycle detector turn it into a breach (review H1).
+                if (released && !nl_refresh_effective && masks_seen.seen(mask)) {
+                    const Index d = loop_released.back();
+                    throw UnsupportedError(
+                        "pwl", "ideal_voltage_loop",
+                        std::string(graph.branch_name(d)), "Diode",
+                        std::format(
+                            "engine 'pwl': at t = {} the ideal diode '{}' (R_on "
+                            "= 0) closes a loop of voltage sources and closed "
+                            "ideal elements (loop: {}) that forward-biases it "
+                            "(turned OFF, it turned back ON): its current is "
+                            "undefined. Give it R_on > 0.",
+                            at_t, graph.branch_name(d), loop_last));
                 }
                 // Phase-0 fix #9: a repeated mask within one step's
                 // event iteration is a CYCLE (mask A -> B -> A ...,
@@ -971,21 +3601,19 @@ inline SimulationResult run_transient(
                 // different iterate can legitimately converge
                 // (adversarial-review finding P0-R3); there the
                 // iteration budget alone bounds the cost.
-                if (!nl_refresh_effective) {
-                    for (Size ms = 0; ms < n_masks_seen; ++ms) {
-                        if (masks_seen[ms] == mask) {
-                            mask_cycle = true;
-                            break;
-                        }
-                    }
-                    if (mask_cycle) break;
-                    if (n_masks_seen < masks_seen.size()) {
-                        masks_seen[n_masks_seen++] = mask;
-                    }
+                // A cycle of THIS call (`masks_seen` is reset per call):
+                // `mask_cycle` stays set from an earlier stage or sub-step
+                // of the outer step, and breaking on it skipped this
+                // stage's solve (x stayed at the earlier stage's time,
+                // committed as this one).
+                if (!nl_refresh_effective && masks_seen.repeat(mask)) {
+                    mask_cycle = true;
+                    break;
                 }
                 if (nl_refresh_effective) {
-                    if (for_dt == opts.dt) {
-                        const auto& seg = cache.lookup(mask);
+                    if (for_dt == opts.dt && !newton_only_rows) {
+                        const auto& seg = nominal_segment(mask);
+                        sens_J_lin = &seg.J;
                         x = pwl::solve_with_newton_b_extra(
                             seg, nl_refresh_effective, graph, pool,
                             /*x_init=*/x, b_extra,
@@ -993,7 +3621,9 @@ inline SimulationResult run_transient(
                             opts.tol_newton_dx,
                             opts.tol_newton_res,
                             opts.enable_newton_line_search,
-                            opts.enable_newton_lm);
+                            opts.enable_newton_lm,
+                            &newton_ws, &newton_roundoff);
+                        note_roundoff();
                     } else {
                         // Off-nominal dt: assemble the companion
                         // system for this step size. No factorization
@@ -1005,6 +3635,7 @@ inline SimulationResult run_transient(
                             retry_seg.J, retry_seg.b_constant);
                         sparse::compress_in_place(retry_seg.J);
                         retry_seg.state_size = state_size;
+                        sens_J_lin = &retry_seg.J;
                         x = pwl::solve_with_newton_b_extra(
                             retry_seg, nl_refresh_effective, graph,
                             pool, /*x_init=*/x, b_extra,
@@ -1012,26 +3643,68 @@ inline SimulationResult run_transient(
                             opts.tol_newton_dx,
                             opts.tol_newton_res,
                             opts.enable_newton_line_search,
-                            opts.enable_newton_lm);
+                            opts.enable_newton_lm,
+                            &newton_ws, &newton_roundoff);
+                        note_roundoff();
                     }
                 } else {
                     // `solve_at` delegates to `solve` bit-identically
                     // when the dt matches, so the nominal path costs
                     // nothing extra.
-                    cache.solve_at(mask, for_dt, b_extra, x);
+                    // Every restart stage counts, the split's sub-interval
+                    // stages (dt_eq = 2γ·h_sub) included (review L8b).
+                    if (restart_rule && (for_dt == restart_dt || backward_euler)) {
+                        const auto m0 = cache.metrics();
+                        cache.solve_at(mask, for_dt, b_extra, x);
+                        const auto m1 = cache.metrics();
+                        restart_factorizations += static_cast<Size>(
+                            (m1.event_builds - m0.event_builds) +
+                            (m1.event_refactors - m0.event_refactors));
+                    } else if (for_dt == opts.dt && for_dt == cache.dt()) {
+                        // == solve_at's delegation to solve(mask, …)
+                        cache.solve_segment(nominal_segment(mask), b_extra, x);
+                    } else {
+                        cache.solve_at(mask, for_dt, b_extra, x);
+                    }
                 }
                 // The mask x was just solved under — what the
                 // stored sample records (a mask cycle breaks out
                 // BEFORE re-solving, so this stays the last solve).
                 stamped_mask = mask;
                 stamped_known = true;
+                if (capture_first && iters == 0) {
+                    x_first = x;
+                    mask_first = mask;
+                }
                 if (has_diodes) {
                     diodes.snapshot_on_bits_into(last_solved_bits);
                 }
-                flipped = has_diodes &&
-                          diodes.update_from_state(x);
+                flipped = !single && has_diodes && events::redecide(diodes, x);
                 ++iters;
             } while (flipped && iters < max_iters);
+            if (mode_site) {
+                const topology::SwitchStateMask gates =
+                    gate_at(restart_rule ? gate_t : at_t);
+                if (opts.mode_selection == 1) {
+                    mode_shadow_site(at_t, mode_kind(for_dt, backward_euler), gates,
+                                     for_dt, backward_euler, b_extra, iters, mask_cycle);
+                }
+                if (result.mode_guard.enabled) {
+                    ++result.mode_guard.checks;
+                    const bool breach = flipped || (mask_cycle && !cycle_in);
+                    if (breach) ++result.mode_guard.settle_caps;
+                    if (mask_cycle && !cycle_in) ++result.mode_guard.lcp.mask_cycles;
+                    result.mode_guard.lcp.settle_rounds_total += iters;
+                    if (breach &&
+                        mode_guard_site(at_t, gates, for_dt, backward_euler, b_extra,
+                                        [&](const topology::SwitchStateMask& m, Vector& out) {
+                                            mode_solve(m, for_dt, backward_euler, out);
+                                        })) {
+                        flipped = false;
+                        mask_cycle = cycle_in;   // an earlier stage's breach stays recorded
+                    }
+                }
+            }
             };  // run_event_iteration
 
             // --- The nominal attempt, then local step reduction ---
@@ -1051,11 +3724,277 @@ inline SimulationResult run_transient(
             // step; the retry's sub_dt when a step had to be
             // re-taken. Also distinguishes the corrected path — no
             // separate flag is needed.
-            Real committed_dt = opts.dt;
-            bool step_retried = false;
+            committed_dt = opts.dt;
+            step_retried = false;
             mask_cycle = false;    // per OUTER step, not per sub-step
+            // a gated device's record compares with the last OUTER step's
+            // stamp: restart stages and split sub-steps re-stamp in between
+            if (diodes.num_gated() > 0) gated_prev_stamp = stamped_mask;
+
+            // ---- discontinuity restart (add-discontinuity-restart-rule)
+            // Triggers: an unknown previous stamp, a mask that differs
+            // from the last committed one, a source jump in [t_prev, t),
+            // a declared b_extra_fn jump. (The first step and diode
+            // flips arm the window where they happen.)
+            // Each trigger (re-)arms the window; a restart step consumes
+            // one of it.
+            // With the split a built-in source jump inside the step is an
+            // event of its own; only one taken at t_prev (within snap
+            // either side) restarts the step.
+            // a gate edge at the step start (stamps its forced flips there):
+            // the gate bits changed, the diode bits read as committed
+            edge_restart_step =
+                restart_rule && stamped_known && has_ideal_diode &&
+                !(mask_pre == combine_masks(stamped_mask, diodes.current_diode_mask(),
+                                            diode_owned));
+            rs_first_valid = false;
+            if (restart_rule &&
+                (!stamped_known || !(mask_pre == stamped_mask) ||
+                 (has_jump_sources &&
+                  (split ? sources::source_jump_in(pool, graph, t_prev - snap,
+                                                   t_prev + snap)
+                         : sources::source_jump_in(pool, graph, t_prev, t))) ||
+                 (has_b_jumps &&
+                  (split ? b_jump_after(t_prev - snap) < t_prev + snap
+                         : b_jump_after(t_prev - left_by) < t - left_by)))) {
+                restart_left = kRestartSteps;
+                rs_trig_t = t_prev;
+                // without the split a built-in source / b_extra jump inside
+                // the step is solved from t_prev: δt_loc is its offset
+                // (a stage reads it only up to t_prev + γh)
+                rs_trig_loc = 0;
+                if (!split) {
+                    Real tj = t;
+                    if (has_jump_sources) {
+                        tj = std::min(tj, sources::next_source_jump_after(
+                                              pool, graph, t_prev - left_by));
+                    }
+                    if (has_b_jumps) tj = std::min(tj, b_jump_after(t_prev - left_by));
+                    if (tj < t) {
+                        rs_trig_loc = std::clamp(tj - t_prev, Real{0}, kGamma * opts.dt);
+                    }
+                }
+            }
+            restart = restart_left > 0;
+            if (restart) --restart_left;
+            // The final solve of this step was a restart stage, so the
+            // deferred commit below is a backward-Euler one (at γh).
+            committed_be = false;
+            be_commit_h = kGamma * opts.dt;   // set by run_restart
+            // (A split step accumulates per sub-interval: no discarded
+            // b_extra_fn call at (t, dt).)
+            if (!restart && n_ev == 0) {
+                accumulate_b_extra(t, opts.dt);
+            }
             try {
-                run_event_iteration(t, opts.dt);
+                if (split) {
+                    // ---- add-fixed-step-event-splitting (design D1, D3, D4) ----
+                    // The step as sub-intervals between the located events: the
+                    // first one trapezoidal (or an SDIRK step when the step
+                    // restarts), every later one an SDIRK step from its event. A
+                    // diode crossing inside the first, trapezoidal interval is
+                    // located from its first solve (pre-event bits) and split at
+                    // too. Intermediate commits are inline; the last is the
+                    // caller's (deferred past the freeze guard). Any split arms
+                    // the window for the next two grid steps explicitly: their
+                    // masks equal the post-event one, so no trigger would.
+                    auto commit_trap = [&](Real h) {
+                        history.update_from_state(x, h);
+                        hs.commit(x, h, pwl::TrBdf2Stage::Trapezoidal);
+                    };
+                    auto split_step = [&]() {
+                        split_events.clear();
+                        bool any_split = false;
+                        bool breach = false;
+                        Real a = t_prev;
+                        for (Size i = 0; i <= n_ev; ++i) {
+                            const bool last = i == n_ev;
+                            const Real b = last ? t : ev_t[i];
+                            // The whole step keeps opts.dt exactly (t - t_prev
+                            // is not, in floating point): the nominal factor.
+                            Real h = (i == 0 && last) ? opts.dt : b - a;
+                            bool be = i == 0 ? restart : true;
+                            if (i > 0) {
+                                gate_t = ev_s[i - 1];   // post side of the cluster's last edge
+                                any_split = true;
+                                if (sx.on) [[unlikely]] sx.gate_event(a, gate_t, !ev_overflow);
+                            }
+                            if (be) {
+                                // a scheduled event (merged within snap) or the step's
+                                // trigger: time events; a window step: not located
+                                restart_lined(run_event_iteration, a, h,
+                                            i > 0 ? ev_s[i - 1] - ev_t[i - 1]
+                                            : rs_trig_t == t_prev ? rs_trig_loc
+                                                                  : kGamma * h);
+                            } else {
+                                if (i > 0 || h != opts.dt) {
+                                    accumulate_b_extra(b, h);
+                                }   // else: accumulated at (t, dt) above
+                                if (sx.on) [[unlikely]] sx.begin(a, x);
+                                capture_first = has_diodes;
+                                run_event_iteration(b, h);
+                                capture_first = false;
+                                if (sx.on && iters == 1) [[unlikely]] {
+                                    sx.stage(0, step::psi_trapezoidal(h), b, h);
+                                }
+                                if (iters > 1) {
+                                    // D1: the crossing from x_prev and the first
+                                    // solve, both under the step's start bits
+                                    // (only interval 0 is trapezoidal: a == t_prev).
+                                    Real t_d = b;
+                                    const auto ents = diodes.entries();
+                                    cross_scratch.assign(ents.size(), b + h);
+                                    for (Size j = 0; j < ents.size(); ++j) {
+                                        const auto& e = ents[j];
+                                        const bool on = diodes_snap[j];
+                                        const Real v1 = e.law_voltage(x_first, on);
+                                        if (models::SwitchedDiode::decide(
+                                                on, v1, e.params()) == on) {
+                                            continue;
+                                        }
+                                        const Real v0 = e.law_voltage(x_prev, on);
+                                        // Already on the far side at the start:
+                                        // the crossing is at a (the rule alone).
+                                        cross_scratch[j] =
+                                            models::SwitchedDiode::decide(
+                                                on, v0, e.params()) != on
+                                            ? a
+                                            : interp_commutation_time(
+                                                  a, b,
+                                                  models::SwitchedDiode::crossing_signal(
+                                                      on, v0, e.params()),
+                                                  models::SwitchedDiode::crossing_signal(
+                                                      on, v1, e.params()));
+                                        t_d = std::min(t_d, cross_scratch[j]);
+                                    }
+                                    // F-3-1: the event is the commutation of the
+                                    // DECIDED post-event mode (the event iteration's
+                                    // final bits). Diodes it flips that touch the same
+                                    // FLOATING island — a node set joined by every
+                                    // branch but the OFF diodes, with no path to
+                                    // ground — share one signal, the sum of theirs:
+                                    // the island's common-mode potential is set by the
+                                    // OFF diodes' leakage alone, so each one's voltage
+                                    // is a leakage ratio (one ulp of C moved the first
+                                    // single crossing of a floating bridge by 1e-7 s)
+                                    // while the sum around the conducting path is the
+                                    // circuit's. Every other diode keeps its own
+                                    // crossing.
+                                    locate_islands(a, b, h, t_d);
+                                    // Back to the step start, then: the crossing
+                                    // at a (an SDIRK step, as the rule alone), at
+                                    // b (keep the pre-event solve, flip there) or
+                                    // inside (split).
+                                    x = x_prev;
+                                    history.restore(history_snap);
+                                    hs.restore(hs_snap);
+                                    diodes.restore_on_bits(diodes_snap);
+                                    mask_cycle = false;
+                                    // Post-event bits: the diodes that cross
+                                    // within snap of the first one flip.
+                                    post_event_bits = diodes_snap;
+                                    for (Size j = 0; j < ents.size(); ++j) {
+                                        if (cross_scratch[j] <= b &&
+                                            cross_scratch[j] - t_d < snap) {
+                                            post_event_bits[j] = !diodes_snap[j];
+                                            split_events.push_back(CommutationEvent{
+                                                .t_estimated = cross_scratch[j],
+                                                .branch_id = ents[j].branch_id,
+                                                .new_state = post_event_bits[j]});
+                                        }
+                                    }
+                                    if (t_d - a < snap) {
+                                        if (sx.on) [[unlikely]] sx.diode_events(a, h);
+                                        split_events.clear();
+                                        restart = true;
+                                        be = true;
+                                        restart_left = std::max(restart_left,
+                                                                kRestartSteps - 1);
+                                        restart_lined(run_event_iteration, a, h, snap);   // crossing within snap of a
+                                    } else if (b - t_d < snap) {
+                                        x = x_first;
+                                        stamped_mask = mask_first;
+                                        stamped_known = true;
+                                        if (sx.on) [[unlikely]] {
+                                            sx.stage(0, step::psi_trapezoidal(h), b, h);
+                                            sx.diode_events(b, h);
+                                        }
+                                        diodes.restore_on_bits(post_event_bits);
+                                        iters = 1;
+                                        flipped = false;
+                                        // The flip is at b: the window starts at
+                                        // the next interval (this step's, or the
+                                        // next grid step when b = t).
+                                        restart_left = std::max(
+                                            restart_left,
+                                            last ? kRestartSteps : kRestartSteps - 1);
+                                    } else {
+                                        const Real h1 = t_d - a;
+                                        accumulate_b_extra(t_d, h1);
+                                        run_event_iteration(t_d, h1, false, true);
+                                        if (sx.on) [[unlikely]] {
+                                            sx.stage(0, step::psi_trapezoidal(h1), t_d, h1);
+                                            sx.s.commit(t_d, false);
+                                            sx.diode_events(t_d, h1);
+                                        }
+                                        commit_trap(h1);
+                                        diodes.restore_on_bits(post_event_bits);
+                                        h = b - t_d;
+                                        restart_lined(run_event_iteration, t_d, h, snap);   // located to snap
+                                        be = true;
+                                        any_split = true;
+                                    }
+                                }
+                            }
+                            breach = breach || flipped;
+                            if (!last && sx.on) [[unlikely]] sx.s.commit(b, false);
+                            if (!last) {
+                                if (be) {
+                                    commit_backward_euler(be_commit_h);
+                                } else {
+                                    commit_trap(h);
+                                }
+                            } else {
+                                committed_dt = h;
+                                committed_be = be;
+                            }
+                            a = b;
+                        }
+                        if (any_split) {
+                            ++result.n_split_steps;
+                            // The event's step and the next two (the rule's window).
+                            restart_left = std::max(restart_left, kRestartSteps - 1);
+                        }
+                        flipped = breach || ev_overflow;
+                    };
+                    split_step();
+                } else {
+                if (!restart) {
+                    run_event_iteration(t, opts.dt);
+                    if (restart_rule && iters > 1) {
+                        // A diode flipped inside a trapezoidal step:
+                        // that is a discontinuity too. Back to the step
+                        // start, and re-take it as a restart step.
+                        x = x_prev;
+                        history.restore(history_snap);
+                        hs.restore(hs_snap);
+                        if (has_diodes) {
+                            diodes.restore_on_bits(diodes_snap);
+                        }
+                        mask_cycle = false;
+                        restart = true;
+                        restart_left = std::max(restart_left,
+                                                kRestartSteps - 1);
+                    }
+                }
+                if (restart) {
+                    restart_lined(run_event_iteration, t_prev, opts.dt,
+                                rs_trig_t == t_prev ? rs_trig_loc : kGamma * opts.dt);
+                    committed_be = true;
+                }
+                }   // !split
+            } catch (const pwl::NewtonRoundoffBudgetExceeded&) {
+                throw;   // a run budget: never retried at a smaller dt
             } catch (const std::runtime_error& nominal_failed) {
                 // NOTE the narrow catch. Everything the solver throws
                 // is a runtime_error; a foreign exception is not.
@@ -1093,14 +4032,28 @@ inline SimulationResult run_transient(
                     // the circuit rather than of the run.
                     x = x_prev;
                     history.restore(history_snap);
-                    coss_history.restore(coss_snap);
-                    laur_history.restore(laur_snap);
-                    pmsm_history.restore(pmsm_snap);
-                    tail_history.restore(tail_snap);
-                    sat_history.restore(sat_snap);
+                    hs.restore(hs_snap);
                     if (has_diodes) {
                         diodes.restore_on_bits(diodes_snap);
                     }
+                    // shortcut: the retry ignores events inside the step
+                    // (the gate keeps the step's start sample, as the
+                    // restart rule alone; a built-in source jump inside it
+                    // is read where the sub-steps fall and not restarted);
+                    // retries are rare.
+                    gate_t = gate_t0;
+                    capture_first = false;
+                    // shortcut: a retried step keeps no lines (its ends
+                    // only); retries are rare
+                    if (L) {
+                        L->clear();
+                        L->ok = false;
+                        L->owner = t_step;
+                    }
+                    split_events.clear();
+                    rs_first_valid = false;
+                    impulse_pending.clear();
+                    event_rl_t = std::numeric_limits<Real>::quiet_NaN();
 
                     const Size n_sub = Size{1} << h;
                     const Real sub_dt =
@@ -1109,13 +4062,33 @@ inline SimulationResult run_transient(
                     for (Size j = 0; j < n_sub; ++j) {
                         const Real t_sub =
                             t_prev + static_cast<Real>(j + 1) * sub_dt;
-                        accumulate_b_extra(t_sub, sub_dt);
+                        // Every sub-step of a restart step is an SDIRK
+                        // step of sub_dt (the factor of 2γ·sub_dt).
+                        const bool sub_restart = restart;
+                        if (!sub_restart) {
+                            accumulate_b_extra(t_sub, sub_dt);
+                        }
                         try {
-                            run_event_iteration(t_sub, sub_dt);
+                            if (sub_restart) {
+                                run_restart(run_event_iteration, t_sub - sub_dt, sub_dt,
+                                            j == 0 && rs_trig_t == t_prev
+                                                ? std::min(rs_trig_loc, kGamma * sub_dt)
+                                                : kGamma * sub_dt);
+                            } else {
+                                run_event_iteration(t_sub, sub_dt);
+                            }
+                        } catch (const pwl::NewtonRoundoffBudgetExceeded&) {
+                            throw;   // a run budget: never retried at a smaller dt
                         } catch (const std::runtime_error& sub_failed) {
                             why = sub_failed.what();
                             all_ok = false;
                             break;
+                        }
+                        // shortcut: a flip inside a trapezoidal sub-step is
+                        // not re-taken; the window restarts from the next
+                        // outer step (retries are rare).
+                        if (restart_rule && !sub_restart && iters > 1) {
+                            restart_left = kRestartSteps;
                         }
                         // Commit each sub-step before the next one
                         // reads the history — `compute_b_extra(dt)`,
@@ -1139,19 +4112,15 @@ inline SimulationResult run_transient(
                         // whole outer step at sub_dt. A deeper
                         // halving rolls all of them back together
                         // from `sat_snap`.
-                        if (j + 1 < n_sub) {
+                        if (j + 1 < n_sub && sub_restart) {
+                            commit_backward_euler(be_commit_h);
+                        } else if (j + 1 < n_sub) {
                             history.update_from_state(x, sub_dt);
-                            coss_history.update_from_state(x,
-                                                            sub_dt);
-                            laur_history.update_from_state(x,
-                                                            sub_dt);
-                            pmsm_history.update_from_state(x,
-                                                            sub_dt);
-                            tail_history.update_from_state(x,
-                                                            sub_dt);
-                            sat_history.update_from_state(x);
+                            hs.commit(x, sub_dt,
+                                      pwl::TrBdf2Stage::Trapezoidal);
                         } else {
                             committed_dt = sub_dt;
+                            committed_be = sub_restart;
                         }
                     }
                     if (all_ok) {
@@ -1203,7 +4172,29 @@ inline SimulationResult run_transient(
                             : ""));
                 }
             }
+            if (sens.on()) [[unlikely]] {
+                // the event and restart paths fed their stages where they
+                // were solved (and opened the step); a plain step is one
+                // trapezoidal stage of dt, opened here
+                if (step_retried || flipped || mask_cycle || (split && ev_overflow)) {
+                    sens.refuse_step(t, step_retried ? "retried at a smaller dt"
+                                     : (split && ev_overflow) ? "split at more events "
+                                       "than it locates"
+                                     : "left with an unsettled diode mode (an "
+                                       "event-iteration breach)");
+                }
+                if (!sens_inline) {
+                    sens_begin(t_prev, x_prev);
+                    sens_stage(0, step::psi_trapezoidal(opts.dt), t, opts.dt);
+                }
+                sens_inline = false;
+            }
+        };  // step_take
 
+        auto step_after_solve = [&]() PULSIM_STEP_PHASE {
+            const Real t = t_step;
+            const Real t_prev = t_prev_step;
+            const bool edge_restart = edge_restart_step;
             if (flipped || mask_cycle) {
                 if (opts.strict_event_iterations) {
                     // v2.0 Phase 1: name the diodes that were still
@@ -1254,16 +4245,55 @@ inline SimulationResult run_transient(
                      .cycle_detected = mask_cycle});
             }
 
-            // 4. Sub-step commutation timing (Layer 5 V2.2) +
-            //    state correction (Layer 5 V3).
-            //
-            // Detect zero-crossing events for diode signals
-            // and (if enabled) retroactively split the step
-            // into two sub-steps at the first detected
-            // event's t_est.
+            // 4. Commutation records (Layer 5 V2.2). With the event
+            //    split the diode crossings it located come first, at the
+            //    located time; every other diode whose watched signal
+            //    changed sign over the step gets the interpolation
+            //    between x_prev and x. (The V3 sub-step correction that
+            //    lived here solved Newton devices linearly and read the
+            //    crossing from the post-flip state; the split replaced
+            //    it: design D5.)
             step_events.clear();
+            if (split) {
+                step_events.assign(split_events.begin(), split_events.end());
+            }
             if (has_diodes) {
-                for (const auto& e : diodes.entries()) {
+                for (std::size_t j = 0; j < diodes.entries().size(); ++j) {
+                    const auto& e = diodes.entries()[j];
+                    if (split && std::any_of(
+                            split_events.begin(), split_events.end(),
+                            [&](const CommutationEvent& ev) {
+                                return ev.branch_id == e.branch_id;
+                            })) {
+                        continue;
+                    }
+                    if (e.gate != models::SwitchedDiode::Gate::None) {
+                        // A gate decides, not v - V_on: record the stamped
+                        // state's change, effective from the step start.
+                        const bool now = stamped_mask.get(e.switch_idx);
+                        if (now != gated_prev_stamp.get(e.switch_idx)) {
+                            step_events.push_back(CommutationEvent{
+                                .t_estimated = t_prev,
+                                .branch_id   = e.branch_id,
+                                .new_state   = now,
+                            });
+                        }
+                        continue;
+                    }
+                    if (has_ideal_diode && pool.is_branch_form(e.branch_id)) {
+                        // shortcut: stamped at the step end, not interpolated;
+                        // the event split locates it when it is on. A flip a
+                        // gate edge forced in the restart's first stage is
+                        // stamped at the edge (t_prev).
+                        if (static_cast<bool>(commut_on_prev[j]) != e.is_on) {
+                            const bool at_edge = edge_restart && rs_first_valid &&
+                                                 rs_bits_first[j] == e.is_on;
+                            step_events.push_back(CommutationEvent{
+                                .t_estimated = at_edge ? t_prev : t,
+                                .branch_id = e.branch_id, .new_state = e.is_on});
+                        }
+                        continue;
+                    }
                     const Real v_a_prev =
                         stamping::read_node_voltage(x_prev, e.from);
                     const Real v_k_prev =
@@ -1291,130 +4321,15 @@ inline SimulationResult run_transient(
                 }
             }
 
-            // Apply V3 sub-step correction if enabled AND an
-            // event was detected. V0 corrects only the FIRST
-            // event (sort to pick earliest if multiple).
-            // Minimum sub-step duration as a fraction of the
-            // main dt. Events landing within this fraction of
-            // either step boundary are NOT corrected — the
-            // trap-companion's `g_eq = 2C/dt` becomes
-            // ill-conditioned at tiny dt, and the boundary
-            // events offer no accuracy benefit anyway (the
-            // shorter sub-step is essentially a single point).
-            //
-            // 1% of dt is conservative: for dt = 200 µs that
-            // means events within the first/last 2 µs are
-            // skipped.
-            const Real substep_min_dt = opts.dt * Real{0.01};
-            // dt of the FINAL solve in this outer step, fed to the deferred
-            // trap-history commit below. Stays opts.dt on the normal path;
-            // becomes dt2 when sub-step correction splits the step (sub-step 1
-            // commits the dt1 half inline; the dt2 commit is deferred past the
-            // freeze guard). This also distinguishes the corrected path — no
-            // separate `corrected` flag is needed.
-            if (opts.enable_substep_state_correction &&
-                !step_retried && !step_events.empty()) {
-                // Find earliest event in the step.
-                Real t_est = step_events.front().t_estimated;
-                for (const auto& ev : step_events) {
-                    if (ev.t_estimated < t_est) {
-                        t_est = ev.t_estimated;
-                    }
-                }
-                const Real dt1 = t_est - t_prev;
-                const Real dt2 = opts.dt - dt1;
-                if (dt1 > substep_min_dt &&
-                    dt2 > substep_min_dt) {
-                    // Roll back to pre-step state.
-                    x = x_prev;
-                    history.restore(history_snap);
-                    coss_history.restore(coss_snap);
-                    laur_history.restore(laur_snap);
-                    pmsm_history.restore(pmsm_snap);
-                    tail_history.restore(tail_snap);
-                    sat_history.restore(sat_snap);
-                    if (has_diodes) {
-                        diodes.restore_on_bits(diodes_snap);
-                    }
-
-                    // Sub-step 1: pre-event mask, dt1.
-                    {
-                        // Accumulate the sub-step b_extra into the reused
-                        // outer buffer (audit #16), in the same order as
-                        // before — history, user fn, then present source kinds
-                        // — so the result is bit-identical. The outer
-                        // `b_extra` is free here: the main event-iteration
-                        // solve already consumed it this step.
-                        accumulate_b_extra(t_est, dt1);
-                        cache.solve_at(
-                            mask_pre, dt1, b_extra, x);
-                        history.update_from_state(x, dt1);
-                        coss_history.update_from_state(x, dt1);
-                        laur_history.update_from_state(x, dt1);
-                        pmsm_history.update_from_state(x, dt1);
-                        tail_history.update_from_state(x, dt1);
-                        if (has_saturable) {
-                            sat_history.update_from_state(x);
-                        }
-                    }
-
-                    // Apply commutation events directly from
-                    // V2.2's detection (don't rely on
-                    // `update_from_state` to re-decide — at the
-                    // exact zero-crossing both v_diode and
-                    // i_diode are near the threshold, and the
-                    // SwitchedDiode decision may keep the
-                    // pre-event state).
-                    if (has_diodes) {
-                        post_event_bits = diodes_snap;
-                        const auto entries = diodes.entries();
-                        for (const auto& ev : step_events) {
-                            for (Size i = 0;
-                                 i < entries.size(); ++i) {
-                                if (entries[i].branch_id ==
-                                    ev.branch_id) {
-                                    post_event_bits[i] =
-                                        ev.new_state;
-                                    break;
-                                }
-                            }
-                        }
-                        diodes.restore_on_bits(
-                            post_event_bits);
-                    }
-
-                    // Sub-step 2: post-event mask, dt2.
-                    {
-                        topology::SwitchStateMask mask_post =
-                            switch_fn(t);
-                        if (has_diodes) {
-                            mask_post = combine_masks(
-                                mask_post,
-                                diodes.current_diode_mask(),
-                                diode_owned);
-                        }
-                        // Same reused-buffer accumulation as sub-step 1
-                        // (audit #16), at time t with dt2.
-                        accumulate_b_extra(t, dt2);
-                        cache.solve_at(
-                            mask_post, dt2, b_extra, x);
-                        stamped_mask = mask_post;
-                        stamped_known = true;
-                        // History commit DEFERRED to after the freeze guard
-                        // (below): the guard must be able to snap an
-                        // unphysical i_L back BEFORE it is baked into the
-                        // trap history. Sub-step 1 already committed the dt1
-                        // half above; this records dt2 as the final commit dt.
-                        committed_dt = dt2;
-                    }
-                }
-            }
-
             // Record diagnostic events from this step.
             for (const auto& ev : step_events) {
                 result.commutation_events.push_back(ev);
             }
+        };  // step_after_solve
 
+        auto step_commit = [&]() PULSIM_STEP_PHASE {
+            const Real t = t_step;
+            const Real t_prev = t_prev_step;
             // 4b. Floating-inductor freeze guard (Layer 5 V5).
             //
             // When ``opts.inductor_freeze_di_max > 0``, walk every
@@ -1513,13 +4428,168 @@ inline SimulationResult run_transient(
             //    the trap history. `committed_dt` is opts.dt on the normal
             //    path and dt2 when sub-step correction split the step (whose
             //    sub-step 1 already committed the dt1 half above).
+            if (committed_be) {
+                commit_backward_euler(be_commit_h);
+            } else {
             history.update_from_state(x, committed_dt);
-            coss_history.update_from_state(x, committed_dt);
-            laur_history.update_from_state(x, committed_dt);
-            pmsm_history.update_from_state(x, committed_dt);
-            tail_history.update_from_state(x, committed_dt);
-            if (has_saturable) {
-                sat_history.update_from_state(x);
+            hs.commit(x, committed_dt, pwl::TrBdf2Stage::Trapezoidal);
+            }
+            if (restart) {
+                ++result.n_restart_steps;
+            }
+            // add-in-kernel-event-losses: the step is accepted; read its
+            // commutations and conduction energy (reading rule).
+            if (lt) lt->accept(t_prev, t, x, stamped_mask,
+                               L && L->owner == t && L->ok ? L : nullptr);
+            if (lines) lines->commit(t, x);   // the one write of the line past (D18)
+            if (sens.on()) [[unlikely]] sens.commit(t);
+        };  // step_commit
+
+        // Release group B: a step's lines into the result's event limits
+        // (`before`: the stored sample the step starts at).
+        auto record_lines = [&](Size before) {
+            const StepLines& lines = *L;
+            const Size nb = result.event_limit_switches;
+            auto put_mask = [&](const topology::SwitchStateMask& m,
+                                std::vector<std::uint8_t>& out) {
+                for (Size b = 0; b < nb; ++b) out.push_back(m.get(b) ? 1 : 0);
+            };
+            auto put_x = [](const Vector& v, std::vector<Real>& out) {
+                out.insert(out.end(), v.data(), v.data() + v.size());
+            };
+            if (lines.start) {
+                result.right_limit_index.push_back(before);
+                put_x(lines.x_start, result.right_limit_states);
+                put_mask(lines.m_start, result.right_limit_switch_bits);
+            }
+            for (Size j = 0; j < lines.n; ++j) {
+                result.inner_event_after.push_back(before);
+                result.inner_event_times.push_back(lines.t[j]);
+                put_x(lines.left[j], result.inner_event_left);
+                put_mask(lines.m_left[j], result.inner_event_left_bits);
+                if (lines.right_ok[j]) {
+                    put_x(lines.right[j], result.inner_event_right);
+                    put_mask(lines.m_right[j], result.inner_event_right_bits);
+                } else {
+                    result.inner_event_right.insert(
+                        result.inner_event_right.end(), lines.left[j].size(),
+                        std::numeric_limits<Real>::quiet_NaN());
+                    put_mask(lines.m_left[j], result.inner_event_right_bits);
+                }
+            }
+        };
+        // F-4-4: a step taken on lines to the in-loop recorder line by line
+        // (StepHooks::line), each point with its capacitor currents; the
+        // `on_step` functions see the whole step.
+        auto feed_lines = [&](Real t_prev, Real t) {
+            const StepLines& lines = *L;
+            hooks->step_fns(t_prev, x_prev, mask_start, t, x, stamped_mask);
+            auto cap = [](const std::vector<Real>& c) { return c.empty() ? nullptr : c.data(); };
+            Real ta = t_prev;
+            const Vector* xa = lines.start ? &lines.x_start : &x_prev;
+            const topology::SwitchStateMask* ma = lines.start ? &lines.m_start : &mask_start;
+            const Real* ca = lines.start ? cap(lines.c_start) : nullptr;
+            for (Size j = 0; j < lines.n; ++j) {
+                hooks->line(ta, *xa, *ma, lines.t[j], lines.left[j], lines.m_left[j], ca,
+                            cap(lines.c_left[j]));
+                ta = lines.t[j];
+                const bool r = lines.right_ok[j];
+                xa = r ? &lines.right[j] : &lines.left[j];
+                ma = r ? &lines.m_right[j] : &lines.m_left[j];
+                ca = cap(r ? lines.c_right[j] : lines.c_left[j]);
+            }
+            hooks->line(ta, *xa, *ma, t, x, stamped_mask, ca,
+                        lines.end_own ? cap(lines.c_end) : nullptr);
+        };
+        auto step_record = [&](Size k) PULSIM_STEP_PHASE {
+            const Real t = t_step;
+            const Real t_prev = t_prev_step;
+            if (diag) {
+                const bool src_jump = (has_pwm || has_pulse || has_iwave) &&
+                    sources::next_source_jump_after(pool, graph, t_prev) <= t;
+                const bool plain = !restart && !step_retried && n_ev == 0 &&
+                    committed_dt == opts.dt && !src_jump;
+                rd_run = !plain ? 0
+                    : (rd_run > 0 && stamped_mask == rd_prev_mask ? rd_run + 1
+                                                                  : 1);
+                rd_prev_mask = stamped_mask;
+                ++rd_steps;
+                if (rd_run < 3) {
+                    ++rd_unest;
+                }
+                const auto& ents = history.entries();
+                for (Size j = 0; j < ents.size(); ++j) {
+                    const auto& e = ents[j];
+                    const bool cap =
+                        e.kind == pwl::DevicePool::StoredKind::Capacitor;
+                    const Real f = (cap ? e.i_prev : e.v_prev) * rd_inv[j];
+                    const Real y = std::abs(cap ? e.v_prev : e.i_prev);
+                    rd_peak[j] = std::max(rd_peak[j], y);
+                    Real& kpk = rd_kind_peak[cap ? 0 : 1];
+                    kpk = std::max(kpk, y);
+                    if (rd_run >= 3) {
+                        // Normalised by the running peak, floored at 1e-3
+                        // of the peak of its kind (volts / amps; review
+                        // M5: a near-zero winding gave 1.3e5).
+                        const Real den = std::max(rd_peak[j],
+                                                  Real{1e-3} * kpk);
+                        const Real e_abs = opts.dt / Real{12} *
+                            std::abs(f - Real{2} * rd_f1[j] + rd_f2[j]);
+                        if (e_abs > rd_since_store * den && den > Real{0}) {
+                            const Real r = e_abs / den;
+                            rd_since_store = r;
+                            if (r > rd.lte_max) {
+                                rd.lte_max = r;
+                                rd.lte_branch = e.branch_id;
+                                rd.lte_time = t;
+                            }
+                        }
+                    }
+                    rd_f2[j] = rd_f1[j];
+                    rd_f1[j] = f;
+                }
+                const Real* xs = x.data();
+                const Real* xps = x_prev.data();
+                Real* dps = rd_dprev;
+                Real* pks = rd_xpeak;
+                const Size nx = static_cast<Size>(x.size());
+                for (Size u = 0; u < nx; ++u) {
+                    const Real d = xs[u] - xps[u];
+                    const Real ax = std::abs(xs[u]);
+                    pks[u] = ax > pks[u] ? ax : pks[u];
+                    const Real d_last = dps[u];
+                    dps[u] = d;
+                    if (d * d_last < Real{0}) [[unlikely]] {
+                        // Floor: 1e-3 of the entry's own peak (round-off
+                        // alternation of a state near zero is not ringing).
+                        const Real thr = std::max(
+                            Real{0.01} * std::max(ax, std::abs(xps[u])),
+                            Real{1e-3} * pks[u]);
+                        if (std::abs(d) > thr) {
+                            if (rd_cnt[u]++ == 0) {
+                                rd_t0[u] = t;
+                                rd_dmax[u] = 0;
+                            }
+                            rd_dmax[u] = std::max(rd_dmax[u], std::abs(d));
+                            if (rd_cnt[u] >= 4) {
+                                if (rd_open[u] == kRdNone) {
+                                    rd_open[u] = rd.ringing.size();
+                                    rd.ringing.push_back(
+                                        {.var = static_cast<Index>(u)});
+                                }
+                                auto& rec = rd.ringing[rd_open[u]];
+                                rec.t_start = rd_t0[u];
+                                rec.length = rd_cnt[u];
+                                rec.max_delta = rd_dmax[u];
+                            }
+                            continue;
+                        }
+                    }
+                    if (rd_cnt[u] != 0) [[unlikely]] {
+                        rd_cnt[u] = 0;
+                        rd_open[u] = kRdNone;
+                    }
+                }
             }
 
             // 6. Record. event_iteration_count = iters - 1 (the
@@ -1528,70 +4598,201 @@ inline SimulationResult run_transient(
             // Decimated recording (v2.0 Phase 1): uniform grid at
             // m·dt. Sample 0 (the IC, k = 0) is always recorded
             // above, keeping the parallel arrays aligned.
+            if (hook_ds) hooks->device_state(t, x, hs);   // #31: after the commit
+            if (hook_acc) hooks->accepted(t_prev, t, x, stamped_mask);
             if (k % opts.store_every == 0) {
                 result.times.push_back(t);
                 result.states.push_back(x);
                 result.event_iteration_count.push_back(iters - 1);
                 result.record_switch_state(stamped_mask);
+                // the step's lines (release group B), when its start is the
+                // sample before this one
+                if (L && L->owner == t && L->ok && !L->empty() && opts.store_every == 1 &&
+                    result.times.size() >= 2) [[unlikely]] {
+                    record_lines(result.times.size() - 2);
+                }
+                if (diag) {
+                    rd.lte.push_back(rd_since_store);
+                    rd_since_store = 0;
+                }
             }
+            // The restart's impulsive re-initialisations of this step
+            // (consistent_start), on the committed attempt only.
+            if (!impulse_pending.empty()) {
+                for (auto& r : impulse_pending) {
+                    r.sample = k % opts.store_every == 0
+                                   ? static_cast<long>(result.times.size()) - 1 : -1L;
+                    result.reinit_records.push_back(std::move(r));
+                }
+                impulse_pending.clear();
+                event_rl_t = std::numeric_limits<Real>::quiet_NaN();   // read above
+                if (lt) lt->impulses(result.reinit_records);   // booked to `cause`
+            }
+            // add-branch-form-ideal-switch D4 (task 5.1): a dependent mode
+            // entered this step was re-initialised by the SDIRK x3 restart;
+            // record the explicit projection from the step's start state.
+            // shortcut: x- is the state at the step start (with the event
+            // split, not the split instant); the record's t is t_prev.
+            if (structure.active()) {
+                const auto& now = structure.check(stamped_mask, true);
+                refuse_dependent(now, stamped_mask, t_prev);
+                reinit.record(structure, stamped_mask, x_prev, x, t_prev,
+                              k % opts.store_every == 0
+                                  ? static_cast<long>(result.times.size()) - 1
+                                  : -1L,
+                              opts.on_impulse_error, "pwl", result);
+                if (lt) lt->impulses(result.reinit_records);
+            }
+            if (hook_mask) {
+                if (hook_event && mask_start_known && !(stamped_mask == mask_start)) {
+                    hooks->event(t_prev, x_prev, mask_start, x, stamped_mask);
+                }
+                if (hook_step) {
+                    if (L && L->owner == t && L->ok && !L->empty() && hooks->takes_lines()) [[unlikely]] {
+                        feed_lines(t_prev, t);
+                    } else {
+                        hooks->step(t_prev, x_prev, mask_start, t, x, stamped_mask, hook_contig);
+                    }
+                    hook_contig = true;
+                }
+                mask_start = stamped_mask;   // the next step's start
+                mask_start_known = true;
+            }
+        };  // step_record
+
+        // The driver, the step skeleton: the loop's own phases in the
+        // skeleton's order and clock (the run's step k = 1 .. n_steps - 1;
+        // the clock's k0 = k_off puts them on the run's grid). It is one
+        // out-of-line function with the phases inlined into it
+        // (DECISIONS 14). The body is built HERE, outside the driver, so
+        // the driver reaches the phases through memory as the deleted loop
+        // did: built inside it, its references were nine values live
+        // across the loop that spilled (+0.8-1.4 % per step, DECISIONS 18).
+        auto body = step::index_phase_body(step_cancelled, step_begin, step_take,
+                                           step_after_solve, step_commit, step_record);
+        auto run_twin = [&]() PULSIM_STEP_DRIVER {
+            step::FixedController clock{.clock = {fixed_grid.t0, fixed_grid.dt, k_off},
+                                        .k = 1,
+                                        .n_steps = n_steps};
+            (void)step::run<step::Trapezoidal>(clock, body);
+        };
+        run_twin();
+        if (sens.on()) {
+            // an edge AT the last grid point under the restart rule (gates
+            // read at t_prev): no step follows to open it (sens_open)
+            const topology::SwitchStateMask g_last = gate_at(gate_t);
+            sens.edge_past_end(t_reached, g_last, gate_at(t_reached));
+            sens.finish(t_reached, x);
         }
+        if (hook_step) hooks->flush_steps();   // the step sink's batched steps
+        if (diag && rd_steps > 0) {
+            rd.unestimated_fraction =
+                static_cast<Real>(rd_unest) / static_cast<Real>(rd_steps);
+        }
+        if (diag && rd.lte.size() < result.times.size()) {
+            // The initial sample(s) carry no estimate.
+            rd.lte.insert(rd.lte.begin(),
+                          result.times.size() - rd.lte.size(), Real{0});
+        }
+        result.final_snapshot.restart_steps_left = restart_left;
+        result.n_restart_factorizations = restart_factorizations;
     } else {
         // ----------- STATIC PATH ----------------------------------------
         //
         // No dynamic devices → cache.solve gives the DC operating
         // point for the requested switch state. Diode iteration
         // still applies.
-        for (Size k = 0; k < n_steps; ++k) {
-            const Real t = opts.t_start +
-                            static_cast<Real>(k) * opts.dt;
+        if (sens.on()) {
+            throw UnsupportedError("pwl", "sensitivities", "", "",
+                "sensitivities: the circuit has no capacitor or inductor (the "
+                "static path): there is no step to differentiate.");
+        }
+        if (lt) {
+            throw UnsupportedError(
+                "pwl", "device_losses", pool.device_losses().front().device, "",
+                "device losses: the circuit has no capacitor or inductor, so "
+                "it runs on the static path, which reads no commutations (a "
+                "record-only port included); give it its dynamic devices or "
+                "the thermal network.");
+        }
+        // ---- slice 3c (DECISIONS 17): the static path's step, cut in place
+        // into four phases (begin, take, after_solve, record; nothing to
+        // commit: no history) that the skeleton calls. The first solve
+        // (k = 0) is the start sample, before the skeleton's steps, as the
+        // dynamic path's IC sample; the skeleton runs k = 1 .. n_steps - 1
+        // on the dynamic path's FixedController. The static path never
+        // polled cancellation, and still does not (the poll is `true`).
+        const Vector& b_extra_user = b_extra;
+        Real st_t = Real{0};
+        Real st_t_prev = Real{0};
+        Real st_gate_t = Real{0};
+        Size st_iters = 0;
+        bool st_flipped = false;
+        bool st_mask_cycle = false;
+        auto st_begin = [&](Size k) PULSIM_STEP_PHASE {
+            const Real t = fixed_grid.at(k_off + k);
+            st_t = t;
             t_reached = t;
+            k_reached = k;
             const Real t_prev = k > 0
-                ? (opts.t_start +
-                    static_cast<Real>(k - 1) * opts.dt)
+                ? fixed_grid.at(k_off + k - 1)
                 : opts.t_start;
+            st_t_prev = t_prev;
             // Sub-step bisection snapshot (Layer 5 V2.2). At
             // k=0 we don't have a prev step; just use the
             // current x as a degenerate snapshot — the
             // sign-change check will exclude it from events.
             x_prev = x;
+            if (has_ideal_diode) {
+                const auto& es0 = diodes.entries();
+                commut_on_prev.resize(es0.size());
+                for (std::size_t j = 0; j < es0.size(); ++j) commut_on_prev[j] = es0[j].is_on;
+            }
 
             // State-aware observer fires before switch_fn(t) so
             // discrete-time controllers can update.
-            if (step_observer) {
-                step_observer(t, x_prev);
+            if (step_observer || step_observer_in) {
+                (has_ticks ? step_observer : step_observer_in)(t, x_prev);
             }
+            gate_memo_n = 0;
 
             // Accumulate into the reused buffer (audit #6/#16): optional user
             // fn, then present built-in source kinds. No trap history on the
             // static path. Same summation order → bit-identical; absent kinds
             // and a null user fn cost nothing. `b_extra_user` aliases the
             // buffer so the solves below are unchanged.
+            // discontinuity_restart: the same sampling as the dynamic
+            // path — sample k reads the gate at t_{k-1} and the jumping
+            // sources at their left limit — so adding a capacitor does
+            // not shift the recorded mask by one sample. (k = 0: t.)
+            st_gate_t = restart_rule && k > 0 ? t_prev : t;
+            const Real src_left = k > 0 ? left_by : Real{0};
             b_extra.setZero();
             if (b_extra_fn) {
-                b_extra += b_extra_fn(t);
+                b_extra += b_extra_fn(k > 0 ? b_read_t(t) : t);
             }
-            if (has_pwm) {
-                sources::compute_pwm_b_extra(pool, graph, t, be_pwm);
-                b_extra += be_pwm;
+            add_source_rows(b_extra, t, t, src_left);
+            if (has_iwave) {
+                sources::compute_current_waveform_b_extra(pool, graph, t,
+                                                          be_iwave, src_left);
+                b_extra += be_iwave;
             }
-            if (has_sine) {
-                sources::compute_sine_b_extra(pool, graph, t, be_sine);
-                b_extra += be_sine;
-            }
-            if (has_pulse) {
-                sources::compute_pulse_b_extra(pool, graph, t, be_pulse);
-                b_extra += be_pulse;
-            }
-            const Vector& b_extra_user = b_extra;
 
-            Size iters = 0;
-            bool flipped = false;
-            bool mask_cycle = false;
+        };
+        auto st_take = [&]() PULSIM_STEP_PHASE {
+            const Real t = st_t;
+            step_ctx.t = t;   // the external devices' ctx->t (this path solves at t)
+            const Real gate_t = st_gate_t;
+            Size& iters = st_iters;
+            bool& flipped = st_flipped;
+            bool& mask_cycle = st_mask_cycle;
+            iters = 0;
+            flipped = false;
+            mask_cycle = false;
             // Full mask copies (Phase 1: masks can exceed 64 bits; a
             // copy is 2 inline words for <=128 switches — still no
             // heap in the loop).
-            std::array<topology::SwitchStateMask, 64> masks_seen{};
-            Size n_masks_seen = 0;
+            masks_seen.reset();
 
             // One step of `for_dt` ending at `at_t`: solve, let the
             // PWL diodes re-decide from the result, re-solve until
@@ -1611,13 +4812,21 @@ inline SimulationResult run_transient(
             // restored on breach so x and the diode state agree
             // (adversarial-review finding P0-R1).
             last_solved_bits.clear();
+            if (diodes.num_gated() > 0) gated_prev_stamp = stamped_mask;
+            const bool mode_site_s = mode_ports.has_value() && !nl_refresh_effective;
+            auto solve_s = [&](const topology::SwitchStateMask& m, Vector& out) {
+                cache.solve_segment(nominal_segment(m), b_extra_user, out);
+            };
+            if (mode_site_s) mode_begin();
+            if (mode_site_s && opts.mode_selection == 2) {
+                const topology::SwitchStateMask gates = gate_at(gate_t);
+                (void)mode_lcp_site(t, "static", gates, Real{0}, false, b_extra_user, solve_s);
+                iters = 1;
+            } else
             do {
-                auto mask = switch_fn(t);
+                auto mask = gate_at(gate_t);
                 if (has_diodes) {
-                    const auto diode_mask =
-                        diodes.current_diode_mask();
-                    mask = combine_masks(mask, diode_mask,
-                                          diode_owned);
+                    mask = diodes.combine(mask);
                 }
                 // Phase-0 fix #9: a repeated mask within one step's
                 // event iteration is a CYCLE (mask A -> B -> A ...,
@@ -1630,20 +4839,12 @@ inline SimulationResult run_transient(
                 // different iterate can legitimately converge
                 // (adversarial-review finding P0-R3); there the
                 // iteration budget alone bounds the cost.
-                if (!nl_refresh_effective) {
-                    for (Size ms = 0; ms < n_masks_seen; ++ms) {
-                        if (masks_seen[ms] == mask) {
-                            mask_cycle = true;
-                            break;
-                        }
-                    }
-                    if (mask_cycle) break;
-                    if (n_masks_seen < masks_seen.size()) {
-                        masks_seen[n_masks_seen++] = mask;
-                    }
+                if (!nl_refresh_effective && masks_seen.repeat(mask)) {
+                    mask_cycle = true;
+                    break;
                 }
                 if (nl_refresh_effective) {
-                    const auto& seg = cache.lookup(mask);
+                    const auto& seg = nominal_segment(mask);
                     x = pwl::solve_with_newton_b_extra(
                         seg, nl_refresh_effective, graph, pool,
                         /*x_init=*/x, b_extra_user,
@@ -1651,19 +4852,34 @@ inline SimulationResult run_transient(
                         opts.tol_newton_dx,
                         opts.tol_newton_res,
                         opts.enable_newton_line_search,
-                        opts.enable_newton_lm);
+                        opts.enable_newton_lm, &newton_ws);
                 } else {
-                    cache.solve(mask, b_extra_user, x);
+                    cache.solve_segment(nominal_segment(mask), b_extra_user, x);
                 }
                 stamped_mask = mask;
                 stamped_known = true;
                 if (has_diodes) {
                     diodes.snapshot_on_bits_into(last_solved_bits);
                 }
-                flipped = has_diodes &&
-                          diodes.update_from_state(x);
+                flipped = has_diodes && events::redecide(diodes, x);
                 ++iters;
             } while (flipped && iters < max_iters);
+            if (mode_site_s && opts.mode_selection != 2) {
+                const topology::SwitchStateMask gates = gate_at(gate_t);
+                if (opts.mode_selection == 1) {
+                    mode_shadow_site(t, "static", gates, Real{0}, false, b_extra_user,
+                                     iters, mask_cycle);
+                }
+                if (result.mode_guard.enabled) {
+                    ++result.mode_guard.checks;
+                    if (flipped || mask_cycle) ++result.mode_guard.settle_caps;
+                    if ((flipped || mask_cycle) &&
+                        mode_guard_site(t, gates, Real{0}, false, b_extra_user, solve_s)) {
+                        flipped = false;
+                        mask_cycle = false;
+                    }
+                }
+            }
 
             if (flipped || mask_cycle) {
                 if (opts.strict_event_iterations) {
@@ -1709,9 +4925,35 @@ inline SimulationResult run_transient(
                      .cycle_detected = mask_cycle});
             }
 
+        };
+        auto st_after = [&](Size k) PULSIM_STEP_PHASE {
+            const Real t = st_t;
+            const Real t_prev = st_t_prev;
             // Sub-step bisection on the static path too.
             if (has_diodes && k > 0) {
-                for (const auto& e : diodes.entries()) {
+                for (std::size_t j = 0; j < diodes.entries().size(); ++j) {
+                    const auto& e = diodes.entries()[j];
+                    if (e.gate != models::SwitchedDiode::Gate::None) {
+                        const bool now = stamped_mask.get(e.switch_idx);
+                        if (now != gated_prev_stamp.get(e.switch_idx)) {
+                            result.commutation_events.push_back(
+                                CommutationEvent{
+                                    .t_estimated = t_prev,
+                                    .branch_id   = e.branch_id,
+                                    .new_state   = now,
+                                });
+                        }
+                        continue;
+                    }
+                    if (has_ideal_diode && pool.is_branch_form(e.branch_id)) {
+                        // at s = 0 while ON: the crossing test never fires
+                        if (static_cast<bool>(commut_on_prev[j]) != e.is_on) {
+                            result.commutation_events.push_back(CommutationEvent{
+                                .t_estimated = t, .branch_id = e.branch_id,
+                                .new_state = e.is_on});
+                        }
+                        continue;
+                    }
                     const Real v_a_prev =
                         stamping::read_node_voltage(x_prev, e.from);
                     const Real v_k_prev =
@@ -1740,13 +4982,56 @@ inline SimulationResult run_transient(
                 }
             }
 
+        };
+        auto st_record = [&](Size k) PULSIM_STEP_PHASE {
+            const Real t = st_t;
+            const Real t_prev = st_t_prev;
+            const Size iters = st_iters;
+            // The static path's first solve (k = 0) is the start state.
+            if (hooks) {
+                if (k == 0) {
+                    hooks->start(x, stamped_mask, {&history, &hs, nullptr});
+                } else {
+                    hooks->accepted(t_prev, t, x, stamped_mask);
+                }
+            }
             if (k % opts.store_every == 0) {
                 result.times.push_back(t);
                 result.states.push_back(x);
                 result.event_iteration_count.push_back(iters - 1);
                 result.record_switch_state(stamped_mask);
             }
-        }
+        };
+        auto st_run_skeleton = [&]() PULSIM_STEP_PHASE {
+            if (n_steps == 0) return;
+            st_begin(0);
+            st_take();
+            st_after(0);
+            st_record(0);
+            auto sk_poll = []() PULSIM_STEP_PHASE { return true; };
+            auto sk_begin = [&](const step::StepFrame& f) PULSIM_STEP_PHASE {
+                st_begin(f.k);
+            };
+            auto sk_take = [&](const step::StepFrame&) PULSIM_STEP_PHASE {
+                st_take();
+                return true;   // a failed solve throws
+            };
+            auto sk_after = [&](step::StepFrame& f) PULSIM_STEP_PHASE {
+                st_after(f.k);
+                return true;
+            };
+            auto sk_commit = [](const step::StepFrame&) PULSIM_STEP_PHASE {};
+            auto sk_record = [&](const step::StepFrame& f) PULSIM_STEP_PHASE {
+                st_record(f.k);
+            };
+            auto body = step::phase_body(sk_poll, sk_begin, sk_take, sk_after,
+                                         sk_commit, sk_record);
+            step::FixedController clock{.clock = {fixed_grid.t0, fixed_grid.dt, k_off},
+                                        .k = 1,
+                                        .n_steps = n_steps};
+            (void)step::run<step::Trapezoidal>(clock, body);
+        };
+        st_run_skeleton();
     }
 
     }  // try
@@ -1759,12 +5044,18 @@ inline SimulationResult run_transient(
     catch (const SimulationAborted&) {
         throw;                       // already carries its payload
     }
+    catch (const pwl::NewtonRoundoffBudgetExceeded& e) {
+        if (lt) lt->write(result);
+        throw SimulationAborted(e.what(), std::move(result), t_reached,
+                                /*roundoff_budget=*/true);
+    }
     catch (const std::runtime_error& e) {
         // Narrow on purpose — see the note at the dt-retry above.
         // Everything the solver throws is a runtime_error; a Python
         // callback's exception is not, and re-labelling one as
         // SimulationAborted would destroy its type and traceback for
         // the sake of attaching a partial trace it never asked for.
+        if (lt) lt->write(result);
         throw SimulationAborted(e.what(), std::move(result),
                                  t_reached);
     }
@@ -1775,19 +5066,29 @@ inline SimulationResult run_transient(
     // reproduce the run).
     result.final_snapshot.t = t_reached;
     result.final_snapshot.x = x;
-    result.final_snapshot.history = history.to_flat();
-    result.final_snapshot.saturable_history = sat_history.to_flat();
-    result.final_snapshot.coss_history = coss_history.to_flat();
-    result.final_snapshot.lauritzen_history = laur_history.to_flat();
-    result.final_snapshot.igbt_tail_history = tail_history.to_flat();
-    result.final_snapshot.pmsm_history = pmsm_history.to_flat();
-    result.final_snapshot.diode_on =
-        has_diodes ? diodes.snapshot_on_bits() : std::vector<bool>{};
+    result.final_snapshot.grid_origin = t_origin;
+    result.final_snapshot.grid_step = k_off + k_reached;
+    result.final_snapshot.grid_dt = opts.dt;
+    hs.save(history, result.final_snapshot);
+    result.final_snapshot.mask =
+        has_diodes ? diodes.snapshot_mode_bits() : std::vector<bool>{};
     // The mask x was solved under (the record's last row when the
     // last step was stored), for a resume's row 0.
     result.final_snapshot.stamped_mask =
         stamped_known ? mask_bits(stamped_mask) : std::vector<bool>{};
+    if (has_ticks) {   // the tick sources are ids 0..n-1
+        for (std::uint32_t j = 0; j < ticks->rates.size(); ++j) {
+            result.final_snapshot.tick_origin.push_back(tick_queue.grid_origin(j));
+            result.final_snapshot.tick_next_k.push_back(tick_queue.next_k(j));
+        }
+    }
     result.final_snapshot.valid = true;
+    if (lt) result.final_snapshot.loss_state = lt->save();
+    if (lines) result.final_snapshot.line_state = lines->save();
+    result.newton = newton_ws.take_counters();
+    if (sens.on()) result.sensitivity = sens.take_trace();
+    if (lt) lt->write(result);
+    result.gate_mask_fn = nullptr;   // it reads this frame's diode state
 
     return result;
 }

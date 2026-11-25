@@ -18,32 +18,38 @@
 
 ## 1. Binding signature hygiene (`python/bindings.cpp`, bindings only)
 
-- [ ] 1.1 Forward-declare `py::class_<topology::Graph>`,
+- [x] 1.1 Forward-declare `py::class_<topology::Graph>`,
       `py::class_<pwl::DevicePool>`, `py::enum_<DevicePool::StoredKind>`,
       `py::class_<SimulationResult>` and `py::class_<SolverSnapshot>`
       before the members that return them. The members are
       `CircuitBuilder.graph`, `CircuitBuilder.pool`,
       `DevicePool.kind_of`, `find_implausible_voltage` and
       `SimulationResult.final_snapshot`. Define the methods afterwards.
-- [ ] 1.2 Replace `py::arg("options") = pwl::PreflightOptions{}`
+      (Done on `feat/core-bindings-closeout`: the five are declared at the top of `init_module` and chained at their old sites. `generate_stubs.py` reports C++ type names left only on the private `_design_batch` and `_run_simulation`; `test_stubs.py` passes, `--check` up to date.)
+- [x] 1.2 Replace `py::arg("options") = pwl::PreflightOptions{}`
       (`run_preflight`) and the `InputRef::from_const(0.0)` defaults
       (`CxxBlockChain.add_sum`, `add_inverse_clarke`) with `py::arg_v`
       carrying a readable description.
-- [ ] 1.3 Add `py::kw_only()` before the first required argument that
+      (Done: the `__doc__` signatures read `options: PreflightOptions = PreflightOptions()` and `c: CxxInputRef = CxxInputRef.const_value(0.0)`; `_pulsim.pyi` writes `= ...`, stubgen's form for a non-literal default, where it used to print a C++ repr. Evidence: `generate_stubs.py --check` up to date, `test_stubs.py`.)
+- [x] 1.3 Add `py::kw_only()` before the first required argument that
       follows a defaulted one in `CxxBlockChain.add_sum`,
       `add_inverse_clarke`, `add_pwm_generator`,
       `add_flux_mras_observer` and `add_sliding_mode_observer`. Grep the
       repo for positional callers (expected: none) and add a CHANGELOG
       line.
-- [ ] 1.4 Type every `= None` default on a callable or object parameter
+      (Done for `add_sum`, `add_inverse_clarke`, `add_flux_mras_observer`, `add_sliding_mode_observer`; `add_pwm_generator` was already keyword-only after `phase`. No positional callers in the repo; CHANGELOG "Bindings close-out" says BREAKING. Evidence: `test_control_graph_review_fixes.py`, `test_sensorless_cpp_adapters.py`, `test_yaml_chain_sensorless.py`; stub reports "keyword-only inserted: -".)
+- [x] 1.4 Type every `= None` default on a callable or object parameter
       as `std::optional<…>` or `py::object`, so the rendered signature
       is `Optional[...]`. Mypy's implicit-Optional errors on
       `run_transient`, `run_transient_bdf1` and their siblings must be
       gone.
-- [ ] 1.5 Reword the `add_mosfet` docstring. `V_F` is the body diode's
+      (Done: `std::optional<std::function>` / `std::optional<std::shared_ptr>` with `.value_or(nullptr)`, and `py::typing::Optional<SolverSnapshot>` for the DSED `resume`, so no snapshot is moved out of its Python object. The stub generator reports "implicit Optional fixed: 0"; a grep of `_pulsim.pyi` finds no `= None` on a non-Optional, non-Any type. mypy itself was not run: it is not installed in the stub venv.)
+- [x] 1.5 Reword the `add_mosfet` docstring. `V_F` is the body diode's
       commutation threshold; the on-state is `1/g_on` with no offset.
-- [ ] 1.6 Rebuild. Run ctest in `.scratch/build-ctest` and the full
+      (Premise gone: the diode-drop change made `V_F` a conduction drop, and the docstring now says so (`v_SD = V_F + i/1e3 S`). Evidence: `test_composite_diode_forward_drop.py::test_gate_off_body_diode_drops_V_F_plus_ohmic`, 23 passed.)
+- [x] 1.6 Rebuild. Run ctest in `.scratch/build-ctest` and the full
       Python suite.
+      (Reworded: no ctest target compiles `python/*.cpp`, so the check is the extension rebuild plus pytest. Rebuilt in `.scratch/build-ext`; the touched tests and the full suite are listed in the close-out report. ctest belongs to the integration batch, see 9.4.)
 
 ## 2. Stub generation and shipping
 
@@ -85,6 +91,7 @@
       that `unzip -l` lists `pulsim/py.typed`, `pulsim/_pulsim.pyi` and
       `pulsim/AI_GUIDE.md`. If any is missing, add an `install(FILES …)`
       rule. Delete the wheel tree afterwards.
+      (Still open on `feat/core-bindings-closeout`: no wheel was built. The full scikit-build-core compile is heavy on the shared Mac. The file mapping above stands.)
 - [x] 2.6 Add pinned `pybind11-stubgen` and `mypy` to the `dev` extra in
       `pyproject.toml`.
 
@@ -210,6 +217,7 @@
       leg, that installs `.[dev]` plus matplotlib. It runs
       `python scripts/generate_stubs.py --check` and the full pytest, so
       the `requires=matplotlib` blocks execute.
+      (Still open: the CI step needs a Linux stubgen run to compare against the committed macOS stub, and none can be run here.)
 - [x] 8.2 `.github/workflows/publish.yml`: extend `CIBW_TEST_COMMAND` to
       run `python -m pulsim.guide --path` and to assert that `py.typed`
       and `_pulsim.pyi` exist in the installed package.
@@ -222,8 +230,9 @@
 - [x] 9.1 Run `openspec validate add-ai-usage-guide --strict`.
 - [x] 9.2 Run the full Python suite: 0 failed (`--timeout=600`).
 - [x] 9.3 Run `ruff check python/ scripts/generate_stubs.py`: clean.
-- [ ] 9.4 Run ctest in `.scratch/build-ctest` after the binding changes:
+- [x] 9.4 Run ctest in `.scratch/build-ctest` after the binding changes: — CLOSED: seen on the PR head a90d84b8 (2026-11-22): ruff clean, ctest 1091/1091 (Eigen 5; 17 targets on Eigen 3.4.0), pytest 7079 passed with the one failure re-pinned and its files re-run, `openspec validate --all --strict` 79 passed, stubs `--check` up to date
       green.
+      (Still open: ctest runs in the integration batch, not on this branch. No ctest target compiles the binding sources, so 1.6 used the extension rebuild plus pytest.)
 - [x] 9.5 Delete the scratch venvs and wheel trees.
 
 ## 10. Naive-agent evaluation, round 1
@@ -401,11 +410,12 @@ reproduced every friction item.
       step starts inside. Trap-13 bridge: 2.3384 W over the run, 0.1358 W
       over 80-100 ms; cut into three windows at arbitrary instants, the
       energies add up to 2e-16 relative. Section 3.4 uses it.)
-- [ ] 12.5 `device_loss_summary`'s `i_rms` reads pulsed switch currents
+- [x] 12.5 `device_loss_summary`'s `i_rms` reads pulsed switch currents
       low on a fixed grid, like `time_rms` (1.6019 / 1.6074 / 1.6101 A at
       dt = 1e-7 / 5e-8 / 2.5e-8 against `sqrt(P_avg/R_on)` = 1.6129 A on
       the 11.6 buck); its `P_avg` is right.
-- [ ] 12.6 (Export part fixed on `fix/v2-b-loss-api`: the three
+      (Fixed on `feat/core-bindings-closeout`: `losses._branch_i2` integrates `i**2` exactly in each step, `(a²+ac+c²)/3` on a same-stamp step and the end-point trapezoid on a flip step, the same rule as the energy, so a switch's or PWL diode's `i_rms` and `P_avg` agree (Newton devices and inductors keep the sampled RMS; they have no stamp flips). Pulsed switch, closed form `I_on·sqrt(D)`: old 0.539248, new 0.542300, truth 0.542300 (rel 1e-15). Buck 48 -> 12 V, D = 0.25, 4 Ohm, 4-6 ms, `Q1` at dt = 1e-7 / 5e-8 / 2.5e-8: old 1.49502 / 1.50015 / 1.50270 A, new 1.50522 / 1.50524 / 1.50525 A, `sqrt(time_average(i**2))` 1.50524 / 1.50525 / 1.50525 A. Trap 14 and `docs/known-limitations.md` updated. Evidence: `test_device_loss_summary.py::test_switch_i_rms_counts_the_flip_step_as_the_energy_does`.)
+- [x] 12.6 (Export part fixed on `fix/v2-b-loss-api`: the three
       `pulsim.topology` result types are top-level and in `__all__`, and
       an unknown attribute names the version and, for an imported
       submodule's export, its home. The DSED refusal part is open.)
@@ -413,6 +423,7 @@ reproduced every friction item.
       exported at the top level; the DSED refusal for a floating neutral
       lists "floating capacitors" and "nonlinear devices" and points to
       `notes/DSED_BRIDGE_DESIGN.md`, which users cannot see.
+      (DSED part closed: the floating-neutral VSI now runs on `dsed` (2 ms, 317 samples; phase currents sum to 2e-14 A, `v_n` equals the phase mean to 3.4e-13 V of 600 V). The bridge fallback message no longer names stale causes or `notes/`; it points to `engine='pwl'` / `'trbdf2'` and `pulsim.exact_route`. Both stale `known-limitations.md` rows removed. Evidence: `test_vsi_freewheel_diodes.py::test_floating_neutral_vsi_runs_on_the_exact_engine`.)
 - [x] 12.7 `simulate(engine='dsed')` with no `switch_fn` warns that it
       will poll "this plain Python switch_fn". Done
       (fix/v2-b-pwm-dsed): no warning without a `switch_fn`. The same
@@ -425,7 +436,7 @@ reproduced every friction item.
       7.20 mW. The 0.14 % is the trapezoid mean over ~4 samples per
       period: the DSED waveform matches `pwl` pointwise (0.02 mV,
       1.7 mA), and `dt = 1e-7` reads 11.4899 V.
-- [ ] 12.8 With no dead time, `switch_specs` charges soft edges of a
+- [x] 12.8 With no dead time, `switch_specs` charges soft edges of a
       bidirectional PWL switch at the full bus (22.6 W against 11.3 W on
       the 3.7 VSI). Physically the complementary turn-on is the hard
       one; the soft turn-off should cost about 0. (Documented, not
@@ -433,6 +444,15 @@ reproduced every friction item.
       docstring gives the per-edge split, 20-40 ms on `INV__HSa`:
       reverse-current edges cost 0.17 + 0.14 mJ with 1 us dead time and
       120.6 + 99.9 mJ without, `P_sw_avg` 11.26 W against 22.63 W.)
+      (Still open on `feat/core-bindings-closeout`. The rule is `thermal::commutation_point`, shared by the in-kernel loss port, the period KPIs, the design kernel and the table path; `device_loss_summary` has its own copy. Zeroing soft reverse-current edges has to change all of them together and moves kernel numbers, which needs its own change with a closed-form truth per edge. The 11.3 W / 22.6 W split stays documented in the docstring and guide 3.7.)
+      (Fixed on `fix/core-commutation-edge-rule`, notes `fixes-12-8.md`.
+      `thermal::commutation_point(..., gated)`: a switch's edge whose
+      open-side v and closed-side i have opposite signs is soft (v = 0,
+      0 J); diodes never. One rule for the tracker, the period path, the
+      design batch and the table path. One leg against the closed form:
+      LS 45.14 W -> 0 (truth 0); VSI 3.7 `INV__HSa` 22.64 -> 11.61 W, leg
+      22.60 W against 22.65 W (half-cycle closed form). Dead-time numbers
+      unchanged. `test_commutation_edge_rule.py`.)
 - [x] 12.9 The missed-commutation warning of `res.i` repeats once per
       call site (Python's default filter keys on the caller's line), so
       a script that reads `res.i` of each diode in several places prints
@@ -479,7 +499,7 @@ reproduced every friction item.
       compares the gates with those the diodes were last decided under
       and re-settles (`n_gate_boundary_settles`): 0 violations on both
       tests, which now assert the warning is absent.
-- [ ] 12.13 A plain callable `switch_fn` (no `next_edge_after`) on
+- [x] 12.13 A plain callable `switch_fn` (no `next_edge_after`) on
       `engine='trbdf2'` steps over sub-step pulses and dead times with
       no warning (sync buck D = 0.03, 50 ns dead time: 0.169 V, QH on
       0.3 %, against 1.199 V / 2.5 % on `pwl`); `dsed` warns but still
@@ -488,6 +508,7 @@ reproduced every friction item.
       order (DSED probes the end of a poll window, then bisects), so a
       stateful `switch_fn` keyed on `int(t / T)` changing runs about
       10x too many updates; document or detect.
+      (Premise gone: 12.10's sub-step sampling lands these pulses on `trbdf2`: sync buck D = 0.03, 50 ns dead times now reads 1.1773 V against 1.1775 V on `pwl`. Truth in `test_trbdf2_robustness.py::test_opaque_sync_buck_lands_its_sub_step_pulses_and_dead_times`: 400 mask changes over 1 ms and QH closed `(D·T − t_d)/T` of the time, rel 1e-6. `dsed` still warns. Guide 3.2 now says which engine samples and that both call the `switch_fn` out of time order, so it must be a pure function of `t`; no detection was added.)
 - [ ] 12.14 `pulsim.schematic.render()` defaults to the pure-Python
       template / force-directed path since the `python_native` (ELK)
       default raised `AttributeError` on every 2.0 builder (0 of 25
@@ -495,11 +516,13 @@ reproduced every friction item.
       end to end with `elkjs` installed; 16 of the 25 examples match no
       template and get an overlapping force-directed sketch. Owned by the
       planned `narrow-schematic-renderer` change.
-- [ ] 12.15 `simulate(LoadedCircuit)` forwards only `t_start`, `t_end`,
+      (Still open. The `narrow-schematic-renderer` change never existed; the work belongs to `add-schematic-renderer-v2` (tasks 4.3 and 6.2). An end-to-end `elkjs` run needs a download not made here.)
+- [x] 12.15 `simulate(LoadedCircuit)` forwards only `t_start`, `t_end`,
       `dt`, `store_every`; the YAML's Newton tolerances and `integrator`
       stay on `loaded.options` unforwarded. The loader's key checks are
       local to `loader.hpp`; the planned `unify-device-schema` change
       rewrites that dispatch.
+      (Fixed on `feat/core-bindings-closeout`: `LoadedCircuit.simulation_keys` lists the YAML's `simulation:` keys in file order; `simulate` forwards `integrator`, `rtol`, `atol`, `dt_init`, the Newton tolerances and switches, and `max_event_iterations`, with precedence keyword > `solver=` > YAML (`res.plan` marks them `'yaml'`). A changed `options` field that is not a run key raises `OptionsError` instead of being dropped. A key the landing engine cannot honour (`rtol` on the fixed step, the Newton keys on `exact`) is not used and raises one `RuntimeWarning` naming it, so every file that ran still runs (review found the first cut raised on `docs/yaml-chain.md`'s own block); the loader's placeholders (`integrator: kernel`, `dt_init: 0`) and kernel-default values pass silently. RC closed form: the YAML `rtol` 1e-7 run is within 1e-5 of it, the 1e-2 run is not; a keyword wins. Evidence: `test_yaml_integrator_option.py` (`::test_simulate_loaded_circuit_forwards_the_integrator`, `::test_simulate_loaded_circuit_forwards_tolerances`, `::test_keys_the_landing_engine_cannot_honour_warn_and_run`, `::test_the_documented_simulation_block_runs_on_every_engine`, `::test_a_changed_options_field_without_a_yaml_key_is_refused`). Results move only for a YAML run on `trbdf2` / `exact` whose file sets these keys; one that sets none is byte-identical.)
 
 ## 13. Review round 3
 

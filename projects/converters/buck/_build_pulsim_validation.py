@@ -211,9 +211,10 @@ plt.show()
 
     cells.append(md(r"""
 The flat $v_o(t)$ trace sits on top of the analytical $V_o = D V_g$
-line, with a ~1% drop accounted for by the MOSFET $R_{on}$, body diode
-$V_F$, and freewheel diode $V_{th}$ — all real losses present in the
-Pulsim model but absent from the *ideal* analytical derivation.
+line, a few mV low: the MOSFET $R_{on} = 1$ mΩ and the freewheel diode's
+1 mΩ on-resistance ($g_{on} = 10^3$ S) carry the 5 A load. The diode's
+$V_{th} = 0.7$ V is its turn-on threshold, not a forward drop, so it
+costs nothing here (pass `V_f=` for a drop).
 
 ## 3. Switching-cycle close-up — verifying the ripple shape
 
@@ -312,18 +313,33 @@ step_mag = (duty1 - duty0) * params.V_g
 print(f"  L∞ error post-step          : {err * 1e3:.2f} mV")
 print(f"  Step magnitude (V_g · Δd)   : {step_mag * 1e3:.2f} mV")
 print(f"  Error / step ratio          : {err / step_mag * 100:.1f} %")
+
+# Most of that L∞ error is timing, not amplitude: the duty change acts
+# within the next switching period, so on the steep rising edge a few-µs
+# offset reads as tens of mV. Compare the extremes and the end value of
+# the switching-period average instead.
+n_T = int(round(1.0 / (params.f_sw * (t_v2[1] - t_v2[0]))))
+k0 = int(np.searchsorted(t_v2, t_step - 1e-12))
+n_per = (len(t_v2) - k0 - 1) // n_T
+v_avg = np.array([np.trapezoid(v_o_v2[k0 + i*n_T:k0 + (i+1)*n_T + 1],
+                               t_v2[k0 + i*n_T:k0 + (i+1)*n_T + 1]) * params.f_sw
+                  for i in range(n_per)])
+print(f"  Peak   (period average / predicted): {v_avg.max():.4f} V / {v_o_pred.max():.4f} V")
+print(f"  Final  (period average / predicted): {v_avg[-5:].mean():.4f} V / {v_o_pred[-1]:.4f} V")
 """))
 
     cells.append(md(r"""
-The two curves overlap inside one ripple amplitude. The transient
-shape — the resonant overshoot at $\omega_n = 1/\sqrt{LC}$ damped by
+The overshoot peak and the final value of the switching-period
+average match the small-signal prediction within a few mV; the larger
+L∞ figure comes from a sub-period timing offset on the steep edge, not
+from a wrong amplitude. The transient shape — the resonant overshoot at $\omega_n = 1/\sqrt{LC}$ damped by
 $\zeta = (1/2R)\sqrt{L/C}$ — is reproduced by both paths.
 
 ## Summary
 
 | Check | Pulsim | Analytical | Match |
 |---|---|---|---|
-| Steady-state $V_o$ | ~$V_o$ (within MOSFET + diode drops) | $D \cdot V_g$ | ✅ |
+| Steady-state $V_o$ | $D \cdot V_g$ minus a few mV ($R_{on}$, diode on-resistance) | $D \cdot V_g$ | ✅ |
 | Output ripple shape | triangle at $f_{sw}$ | triangle (Erickson 2.31) | ✅ |
 | 1% duty-step response | resonant overshoot + settle | $\mathcal{L}^{-1}\{G_{vd}\}$ | ✅ |
 

@@ -57,6 +57,7 @@
 
 #include "pulsim/models/jiles_atherton.hpp"
 #include "pulsim/models/saturable_inductor.hpp"
+#include "pulsim/device/device_state.hpp"
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/device_pool.hpp"
@@ -85,6 +86,8 @@ public:
         //! λ at the γ stage point; read only by the BDF2 stage, and
         //! only between the two stages of one step.
         Real  lambda_gamma = Real{0};
+        //! i_L at the γ stage point (the increment form reads it).
+        Real  i_gamma = Real{0};
         //! Jiles-Atherton step-start state (H_n, M_n), meaningful
         //! only when params.ja is set. Committed on accept; a
         //! rejected step never touches it (evaluations integrate
@@ -97,8 +100,72 @@ public:
         //! the two stages of one attempt like lambda_gamma does.
         models::JilesAthertonCore::State ja_gamma{};
         models::SaturableInductor::Params params;
+        //! An esdirk43 stage's base minus the step-start flux, ψ − λ(i_L_old),
+        //! built from increments (no cancellation): the increment form of
+        //! the backward-Euler stage subtracts it. 0 outside those stages.
+        Real  lambda_offset = Real{0};
     };
 
+    // ---- the stage form (βh, ψ) of integrator='esdirk43' ----
+    // One q row per device: q = λ, q̇ = V_L. A stage is backward Euler of
+    // βh from the base λ_old = ψ; the increment form reads λ(i) − ψ as
+    // Δλ(i, i_L_old) − (ψ − λ_old) with that offset carried exactly. The
+    // hysteretic law takes only TR-BDF2's SDIRK restart step (esdirk43
+    // refuses it: first order in the step on both integrators, DECISIONS 17).
+    [[nodiscard]] std::size_t stage_rows() const noexcept { return entries_.size(); }
+    void stage_start(Real hh, Real* q0, Real* hqd0) const {
+        for (const auto& e : entries_) {
+            *q0++ = e.lambda_old;
+            *hqd0++ = hh * e.V_L_old;
+        }
+    }
+    void stage_base(const Real* psi, const Real* dpsi) {
+        for (auto& e : entries_) {
+            e.lambda_old = *psi++;
+            e.lambda_offset = *dpsi++;
+        }
+    }
+    void stage_increment(const Vector& x, const Real* psi, Real* d) const {
+        for (const auto& e : entries_) {
+            const Real i = x[e.branch_var_id];
+            // the hysteretic law from the committed (H_n, M_n): both SDIRK
+            // restart stages integrate from it (see extrapolate_previous)
+            *d++ = e.params.ja
+                ? models::JilesAthertonCore::evaluate(*e.params.ja, e.ja_state, i).lambda - *psi
+                : e.params.table
+                ? models::SaturableInductor::flux(i, e.params) - *psi
+                : models::SaturableInductor::flux_increment(i, e.i_L_old, e.params)
+                      - e.lambda_offset;
+            ++psi;
+        }
+    }
+    void stage_clear() noexcept {
+        for (auto& e : entries_) e.lambda_offset = Real{0};
+    }
+    // ---- TR-BDF2's q rows (the error estimate) ----
+    /// λ − λ_n at γ and at the step end, by the law `commit` uses (the
+    /// hysteretic law from the stage-1 base (H_γ, M_γ)); the stateless
+    /// laws in increment form (no eps·|λ| cancellation).
+    void trbdf2_increments(const Vector& x1, Real* dqg, Real* dq1) const {
+        for (const auto& e : entries_) {
+            const Real i = x1[e.branch_var_id];
+            if (e.params.ja) {
+                *dq1++ = models::JilesAthertonCore::evaluate(*e.params.ja, e.ja_gamma, i).lambda
+                         - e.lambda_old;
+                *dqg++ = e.lambda_gamma - e.lambda_old;
+            } else if (e.params.table) {
+                *dq1++ = models::SaturableInductor::flux(i, e.params) - e.lambda_old;
+                *dqg++ = e.lambda_gamma - e.lambda_old;
+            } else {
+                *dq1++ = models::SaturableInductor::flux_increment(i, e.i_L_old, e.params);
+                *dqg++ = models::SaturableInductor::flux_increment(e.i_gamma, e.i_L_old, e.params);
+            }
+        }
+    }
+    /// atol_q / atol per row: the inductance at zero current (λ = L·i).
+    void q_scales(Real* s) const {
+        for (const auto& e : entries_) *s++ = std::abs(flux_and_inductance(e, Real{0}).second);
+    }
     /// The JA base state for a stage. The trapezoidal stage — and
     /// every fixed-engine solve, probe, landing and seed — integrates
     /// from the committed (H_n, M_n). The BDF2 stage integrates from
@@ -166,26 +233,48 @@ public:
         return flux_and_inductance(e, x[e.branch_var_id], stage).first;
     }
 
+    /// SDIRK restart: pseudo previous flux λ0 + c·(λ1 − λ0). For the
+    /// hysteretic law λ1 is evaluated from the committed (H_n, M_n) —
+    /// the base stage 2 integrates from as well (a reversal inside the
+    /// step is the O(h) loop-tip error TR-BDF2's stage-1 base avoids).
+    void extrapolate_previous(const Vector& x1, Real c) {
+        for (auto& e : entries_) {
+            const Real lam = e.params.ja
+                ? models::JilesAthertonCore::evaluate(
+                      *e.params.ja, e.ja_state, x1[e.branch_var_id]).lambda
+                : lambda_at(e, x1);
+            e.lambda_old += c * (lam - e.lambda_old);
+        }
+    }
+
     /// Snapshot λ at the γ stage point; the BDF2 history term reads
     /// it. Must run between the two stages of a step. For the
     /// hysteretic law it also captures (H_γ, M_γ) — from the same
     /// evaluation — as the base the BDF2 stage integrates from.
     void capture_gamma(const Vector& x_gamma) {
         for (auto& e : entries_) {
+            e.i_gamma = x_gamma[e.branch_var_id];
             if (e.params.ja) {
-                const auto ev = models::JilesAthertonCore::evaluate(
-                    *e.params.ja, e.ja_state, x_gamma[e.branch_var_id]);
-                e.lambda_gamma = ev.lambda;
-                e.ja_gamma.H = ev.H;
-                e.ja_gamma.M = ev.M;
-                e.ja_gamma.n_sub = e.ja_state.n_sub;
-                // The step's direction stays in force through both
-                // stages (it is per STEP, not per stage).
-                e.ja_gamma.delta_hint = e.ja_state.delta_hint;
+                capture_ja(e);
             } else {
                 e.lambda_gamma = lambda_at(e, x_gamma);
             }
         }
+    }
+
+    /// The hysteretic law's stage capture at `e.i_gamma` (λ_γ and the
+    /// (H_γ, M_γ) base of the BDF2 stage, from ONE evaluation). Shared by
+    /// both device paths.
+    static void capture_ja(Entry& e) {
+        const auto ev = models::JilesAthertonCore::evaluate(
+            *e.params.ja, e.ja_state, e.i_gamma);
+        e.lambda_gamma = ev.lambda;
+        e.ja_gamma.H = ev.H;
+        e.ja_gamma.M = ev.M;
+        e.ja_gamma.n_sub = e.ja_state.n_sub;
+        // The step's direction stays in force through both
+        // stages (it is per STEP, not per stage).
+        e.ja_gamma.delta_hint = e.ja_state.delta_hint;
     }
 
     /// Read the freshly-converged `x` and stash the new
@@ -206,34 +295,51 @@ public:
             // (H, M) reached at the converged current becomes the
             // next step's start.
             if (e.params.ja) {
-                // Commit from the SAME base the converged residual
-                // used — (H_n, M_n) after a trapezoidal solve,
-                // (H_γ, M_γ) after a BDF2 stage — or the committed
-                // λ would not be the λ the circuit was solved with.
-                const auto& base = ja_base(e, stage);
-                const auto ev = models::JilesAthertonCore::evaluate(
-                    *e.params.ja, base, e.i_L_old);
-                // The coming step's sub-step count comes from THIS
-                // step's whole field excursion (twice it, for
-                // headroom): fixed for the step so every evaluation
-                // inside it is one smooth function of the trial
-                // current.
-                const Real span = Real{2} * std::abs(ev.H - e.ja_state.H);
-                // Next step's direction = this step's actual leg (a
-                // zero leg keeps the current direction).
-                const Real leg = ev.H - e.ja_state.H;
-                e.ja_state.delta_hint =
-                    leg > Real{0} ? Real{1}
-                    : leg < Real{0} ? Real{-1} : e.ja_state.delta_hint;
-                e.ja_state.n_sub =
-                    models::JilesAthertonCore::substeps_for(*e.params.ja, span);
-                e.ja_state.H = ev.H;
-                e.ja_state.M = ev.M;
-                e.lambda_old = ev.lambda;
+                accept_ja(e, stage);
             } else {
                 e.lambda_old =
                     models::SaturableInductor::flux(e.i_L_old, e.params);
             }
+        }
+    }
+
+    /// The hysteretic law's accept (D2's `State::accept`): advance
+    /// (H, M), the branch direction and the sub-step count to the
+    /// converged `e.i_L_old`, and commit λ from the same evaluation.
+    /// Shared by both device paths.
+    static void accept_ja(Entry& e, TrBdf2Stage stage) {
+            // Commit from the SAME base the converged residual
+            // used — (H_n, M_n) after a trapezoidal solve,
+            // (H_γ, M_γ) after a BDF2 stage — or the committed
+            // λ would not be the λ the circuit was solved with.
+            const auto& base = ja_base(e, stage);
+            const auto ev = models::JilesAthertonCore::evaluate(
+                *e.params.ja, base, e.i_L_old);
+            // The coming step's sub-step count comes from THIS
+            // step's whole field excursion (twice it, for
+            // headroom): fixed for the step so every evaluation
+            // inside it is one smooth function of the trial
+            // current.
+            const Real span = Real{2} * std::abs(ev.H - e.ja_state.H);
+            // Next step's direction = this step's actual leg (a
+            // zero leg keeps the current direction).
+            const Real leg = ev.H - e.ja_state.H;
+            e.ja_state.delta_hint =
+                leg > Real{0} ? Real{1}
+                : leg < Real{0} ? Real{-1} : e.ja_state.delta_hint;
+            e.ja_state.n_sub =
+                models::JilesAthertonCore::substeps_for(*e.params.ja, span);
+            e.ja_state.H = ev.H;
+            e.ja_state.M = ev.M;
+            e.lambda_old = ev.lambda;
+    }
+
+    /// TR-BDF2 post-event refresh: the stored voltage becomes the
+    /// probe's `v_from − v_to`; (λ, i, H, M) are not touched.
+    void refresh_derivatives(const Vector& x_probe) {
+        for (auto& e : entries_) {
+            e.V_L_old = stamping::read_node_voltage(x_probe, e.from)
+                        - stamping::read_node_voltage(x_probe, e.to);
         }
     }
 
@@ -242,11 +348,39 @@ public:
     /// non-converging step at dt/2 after the history has already
     /// moved, and without this the retry would integrate from a
     /// state the circuit never reached.
-    [[nodiscard]] std::vector<Entry> snapshot() const { return entries_; }
-    void restore(const std::vector<Entry>& snap) { entries_ = snap; }
-
-    /// Number of reals per device in the flat layout.
+    // ---- device::StatefulKind (device/kind.hpp) ----
+    static constexpr device::StateBlock kBlock = device::StateBlock::SaturableInductor;
+    static constexpr DevicePool::StoredKind kStoredKind =
+        DevicePool::StoredKind::SaturableInductor;
     static constexpr Size kFlatPerDevice = 7;
+    /// Every real an entry carries from step to step, the snapshot's
+    /// (`to_flat` order) first, then the stage scratch: the in-run
+    /// rollback copies exactly these.
+    template <class E, class F> static void for_each_state(E& e, F&& f) {
+        f(e.lambda_old);
+        f(e.i_L_old);
+        f(e.V_L_old);
+        f(e.ja_state.H);
+        f(e.ja_state.M);
+        f(e.ja_state.delta_hint);
+        f(e.ja_state.n_sub);
+        f(e.lambda_gamma);
+        f(e.i_gamma);
+        f(e.ja_gamma.H);
+        f(e.ja_gamma.M);
+        f(e.ja_gamma.delta_hint);
+        f(e.ja_gamma.n_sub);
+    }
+    [[nodiscard]] std::vector<Entry>& mutable_entries() noexcept {
+        return entries_;
+    }
+    void commit(const Vector& x, Real /*h*/, TrBdf2Stage stage) {
+        update_from_state(x, stage);
+    }
+    /// The slot refresh reads the probe's voltage, not its step.
+    void refresh_derivatives(const Vector& x_probe, Real /*h*/) {
+        refresh_derivatives(x_probe);
+    }
 
     /// Flat state per device, for state export / resume: (λ, i, v)
     /// then the Jiles-Atherton state (H, M, branch direction,

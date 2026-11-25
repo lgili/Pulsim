@@ -103,9 +103,10 @@ def test_synchronous_rectification_shows_millivolts():
         assert v_sw == pytest.approx(-i_l * R_ON, rel=0.05), v_sw
         assert abs(v_sw * i_l) < 1.0          # was 544 W
 
-    # Gate OFF with a body diode is the diode's job, unchanged.
+    # Gate OFF with a body diode is the diode's job: its 0.7 V conduction
+    # drop plus i/g_on (was -i/g_on alone, ~-10 mV, before V_F was a drop).
     v_off, i_off = run(gate_on=False, with_body_diode=True)
-    assert -0.05 < v_off < 0.0
+    assert v_off == pytest.approx(-(0.7 + i_off / 1e3), abs=1e-6)
 
 
 def _i_gate(vds, vg):

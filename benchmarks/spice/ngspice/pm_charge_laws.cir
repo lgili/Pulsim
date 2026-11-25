@@ -1,0 +1,20 @@
+* add-power-mosfet-datasheet-device task 7.2 -- C_gd and C_ds sweeps
+* VDMOS with CGDMAX=1n CGDMIN=50p A=0.5 (C_gd, law of v_gd = -V_DS here)
+* and a body-diode junction CJO=2n VJ=2.5 M=0.5 (ngspice caps VJ at 2.5) (C_ds = CJO/(1+V_DS/VJ)^M
+* in reverse bias; ngspice linearises beyond FC*VJ = 1.25 V forward,
+* so V_DS = -2 and -5 are not junction-law points). Small-signal: i(Vg) = -jw C_gd, i(Vd) = -jw (C_gd + C_ds).
+.model MV VDMOS(VTO=3 KP=2.86 CGDMAX=1n CGDMIN=50p A=0.5 CGS=1n CJO=2n VJ=2.5 M=0.5 RG=0)
+M1 d g 0 MV
+Vd d 0 DC 0 AC 1
+Vg g 0 DC 0
+.control
+set numdgt=12
+foreach vd -5 -2 -1 0 1 2 5 20 100 400
+  alter Vd dc = $vd
+  ac lin 1 1k 1k
+  let cgd = -imag(i(Vg))/(2*pi*1k)
+  let ctot = -imag(i(Vd))/(2*pi*1k)
+  print cgd ctot
+end
+.endc
+.end

@@ -1,0 +1,296 @@
+{
+ "circuit": "circuits/switching/multilevel/cascaded_h_bridge_5level.yaml",
+ "form": "conductance",
+ "supported": true,
+ "observables": [
+  "V(out)"
+ ],
+ "dps": [
+  30,
+  60
+ ],
+ "wall_s": 0.1,
+ "events": [
+  {
+   "t": "0.0000500000000000000023960868",
+   "change": "S2_AH- S2_AL+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0001000000000000000047921736",
+   "change": "S1_AH- S1_AL+ S1_BH+ S1_BL- S2_BH+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0001000000000000000115684372",
+   "change": "S2_BL-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0001500000000000000071882604",
+   "change": "S2_BH-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.000150000000000000013964524",
+   "change": "S2_BL+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0002000000000000000095843472",
+   "change": "S1_AH+ S1_AL- S1_BH- S1_BL+ S2_AH+ S2_AL-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.000250000000000000011980434",
+   "change": "S2_AH- S2_AL+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0003000000000000000143765208",
+   "change": "S1_AH- S1_AL+ S1_BH+ S1_BL- S2_BH+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0003000000000000000211527844",
+   "change": "S2_BL-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0003500000000000000167726076",
+   "change": "S2_BH-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0003500000000000000235488712",
+   "change": "S2_BL+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0004000000000000000191686944",
+   "change": "S1_AH+ S1_AL- S1_BH- S1_BL+ S2_AH+ S2_AL-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0004500000000000000215647812",
+   "change": "S2_AH- S2_AL+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.000500000000000000023960868",
+   "change": "S1_AH- S1_AL+ S1_BH+ S1_BL- S2_BH+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0005000000000000000307371316",
+   "change": "S2_BL-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0005500000000000000263569548",
+   "change": "S2_BH-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0005500000000000000331332184",
+   "change": "S2_BL+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0006000000000000000287530416",
+   "change": "S1_AH+ S1_AL- S1_BH- S1_BL+ S2_AH+ S2_AL-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0006500000000000000311491284",
+   "change": "S2_AH- S2_AL+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0007000000000000000335452152",
+   "change": "S1_AH- S1_AL+ S1_BH+ S1_BL- S2_BH+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0007000000000000000403214788",
+   "change": "S2_BL-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.000750000000000000035941302",
+   "change": "S2_BH-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0007500000000000000427175656",
+   "change": "S2_BL+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0008000000000000000383373888",
+   "change": "S1_AH+ S1_AL- S1_BH- S1_BL+ S2_AH+ S2_AL-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0008500000000000000407334756",
+   "change": "S2_AH- S2_AL+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0009000000000000000431295624",
+   "change": "S1_AH- S1_AL+ S1_BH+ S1_BL- S2_BH+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.000900000000000000049905826",
+   "change": "S2_BL-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0009500000000000000455256492",
+   "change": "S2_BH-",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  },
+  {
+   "t": "0.0009500000000000000523019128",
+   "change": "S2_BL+",
+   "cause": "schedule",
+   "strict": 1,
+   "candidates": 1,
+   "consistent": 1
+  }
+ ],
+ "n_commutations": 29,
+ "n_events": 29,
+ "ambiguous": [],
+ "weak_only": 0,
+ "start_mode": "S1_AH+ S1_AL- S1_BH- S1_BL+ S2_AH+ S2_AL- S2_BH- S2_BL+",
+ "dc_start_modes": null,
+ "notes": [],
+ "jumps": [],
+ "impulsive_loss_J": "0.0",
+ "max_dae_residual": "5.8e-59",
+ "max_eigvec_cond": "1.0",
+ "windows": {
+  "full": {
+   "V(out)": {
+    "mean": "8.999340241128836941361002",
+    "rms": "13.41345727567793619997814",
+    "d_prec": "6.17e-31"
+   }
+  },
+  "last20": {
+   "V(out)": {
+    "mean": "8.999340241128836941361002",
+    "rms": "13.41345727567793619997814",
+    "d_prec": "6.17e-31"
+   }
+  }
+ },
+ "energy_J": {
+  "R_v1n": "0.0",
+  "R_link": "1.00735517082053e-7",
+  "Rload": "0.00503677585410264",
+  "S1_AH": "2.15900682204161e-7",
+  "S1_AL": "4.31776899967715e-7",
+  "S1_BH": "4.31776899967715e-7",
+  "S1_BL": "2.15900682204161e-7",
+  "S2_AH": "1.079999991e-7",
+  "S2_AL": "3.600000018e-8",
+  "S2_BH": "3.958229593614e-7",
+  "S2_BL": "2.51854623298367e-7",
+  "src:Vdc1": "0.00359913629654906",
+  "src:Vdc2": "0.00143982732581695"
+ },
+ "energy_balance_rel": "1.21e-61",
+ "precision_doubling_rel": "1.07e-31",
+ "event_time_diff_s": "0.0",
+ "u_stored_trace": 0.0,
+ "uniform_dt_floor": 0.02199157982450973,
+ "dt": 2e-07,
+ "stored_dt": 2.5e-08
+}

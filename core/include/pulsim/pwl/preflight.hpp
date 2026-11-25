@@ -69,7 +69,9 @@
 #include "pulsim/topology/graph.hpp"
 
 #include <format>
+#include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace pulsim::pwl {
@@ -88,6 +90,7 @@ struct PreflightFinding {
     std::vector<Index> component;        ///< every node in the subnet
     Real inserted_resistance = Real{0};  ///< 0 when reporting only
     std::string detail;                  ///< human-facing sentence
+    std::string domain = "electrical";   ///< the subnet's domain (ir::Circuit labels it)
 
     [[nodiscard]] bool was_fixed() const noexcept {
         return inserted_resistance > Real{0};
@@ -212,20 +215,60 @@ private:
     if (!pool.is_registered(branch.id)) {
         return true;
     }
+    // add-permeance-magnetic-domain: a permeance on a magnetic node is a
+    // DC path — the DC assembly writes flux conservation there, which
+    // determines the node (dc_assemble.hpp, `charge_rows`).
+    if (!pool.flux_nodes().empty()) {
+        const auto k = pool.kind_of(branch.id);
+        if ((k == SK::Capacitor || k == SK::NonlinearCapacitor) &&
+            (pool.is_flux_node(branch.from) || pool.is_flux_node(branch.to))) {
+            return true;
+        }
+    }
     switch (branch.kind) {
         case topology::BranchKind::PassiveLinear:
             return pool.kind_of(branch.id) != SK::Capacitor;
-        case topology::BranchKind::Source:
-            return pool.kind_of(branch.id) != SK::CurrentSource;
+        case topology::BranchKind::Source: {
+            // A current OUTPUT is no DC path (add-controlled-source-set).
+            const auto k = pool.kind_of(branch.id);
+            return k != SK::CurrentSource && k != SK::VCCS &&
+                   k != SK::CCCS && k != SK::SineCurrentSource &&
+                   k != SK::PulseCurrentSource && k != SK::PwlCurrentSource;
+        }
         case topology::BranchKind::Nonlinear:
             // A saturable inductor is a short at DC (v = dλ/dt = 0),
             // exactly like a linear one; the other Newton devices
             // are stamped open by the DC assembly and stay so here.
-            return pool.kind_of(branch.id) == SK::SaturableInductor;
+            // The MNA-native machines' stator rows are v − R·i − e = 0 at
+            // DC (dc_assemble, add-mna-native-machines D19): a path.
+            // The excess-loss conductance is c/√ε at zero flux rate and
+            // positive for every u (add-permeance-magnetic-domain 4.2).
+            return pool.kind_of(branch.id) == SK::SaturableInductor ||
+                   pool.kind_of(branch.id) == SK::PmsmMna ||
+                   pool.kind_of(branch.id) == SK::InductionMachineMna ||
+                   pool.kind_of(branch.id) == SK::ExcessLoss;
         case topology::BranchKind::Switch:
             return true;
     }
     return true;
+}
+
+/// A machine's speed / angle nodes are held and its rotor-flux nodes
+/// carry the steady rotor law in the DC system (dc_assemble, D19): each
+/// is defined at DC, as if tied to ground.
+[[nodiscard]] inline std::vector<std::pair<Index, Index>>
+machine_dc_ties(const DevicePool& pool) {
+    std::vector<std::pair<Index, Index>> out;
+    for (const auto& m : pool.pmsm_mna_machines()) {
+        out.emplace_back(m.omega_node, kGround);
+        out.emplace_back(m.theta_node, kGround);
+    }
+    for (const auto& m : pool.induction_machines()) {
+        out.emplace_back(m.omega_node, kGround);
+        out.emplace_back(m.rotor_node[0], kGround);
+        out.emplace_back(m.rotor_node[1], kGround);
+    }
+    return out;
 }
 
 /// Group nodes into components under `edge_ok`, then return one
@@ -234,12 +277,17 @@ private:
 /// deterministic and the report is reproducible.
 template <class EdgePredicate>
 [[nodiscard]] inline std::vector<std::vector<Index>>
-components_without_ground(const topology::Graph& graph, EdgePredicate edge_ok) {
+components_without_ground(
+    const topology::Graph& graph, EdgePredicate edge_ok,
+    const std::vector<std::pair<Index, Index>>& extra_ties = {}) {
     GroundUnionFind uf{graph.num_nodes()};
     for (Index b = 0; b < graph.num_branches(); ++b) {
         const auto& br = graph.branch(b);
         if (!edge_ok(br)) continue;
         uf.unite(uf.slot_of(br.from), uf.slot_of(br.to));
+    }
+    for (const auto& [a, b] : extra_ties) {
+        uf.unite(uf.slot_of(a), uf.slot_of(b));
     }
 
     // Bucket nodes by representative, skipping anything grounded.
@@ -274,6 +322,41 @@ components_without_ground(const topology::Graph& graph, EdgePredicate edge_ok) {
                         : std::format("node '{}'", name);
 }
 
+/// add-permeance-magnetic-domain: refuse a magnetic island (a galvanic
+/// component holding a magnetic node) that does not reach ground. The
+/// usual repair, a 1 GΩ tie, would be a magnetic resistance: a spurious
+/// loss and a trapped flux that decays. Throws `std::invalid_argument`
+/// naming the lowest-index flux node of the islands.
+inline void require_magnetic_reference(const topology::Graph& graph,
+                                       const DevicePool& pool) {
+    if (pool.flux_nodes().empty()) return;
+    std::vector<std::pair<Index, Index>> primary_ties;
+    for (Index b = 0; b < graph.num_branches(); ++b) {
+        if (pool.is_registered(b) &&
+            pool.kind_of(b) == DevicePool::StoredKind::IdealTransformer) {
+            primary_ties.push_back(pool.ideal_transformer_primary_nodes(b));
+        }
+    }
+    const auto isolated = detail::components_without_ground(
+        graph, [](const topology::Branch&) { return true; }, primary_ties);
+    // Name the lowest-index flux node: the order of a component's nodes (and
+    // of the components) is the traversal's and differed between platforms.
+    Index named = -1;
+    for (const auto& comp : isolated) {
+        for (const Index n : comp) {
+            if (pool.is_flux_node(n) && (named < 0 || n < named)) named = n;
+        }
+    }
+    if (named >= 0) {
+        throw std::invalid_argument(std::format(
+            "the magnetic network containing {} has no node tied to the "
+            "reference: connect one of its nodes to gnd (a winding does "
+            "not connect the electrical and magnetic sides galvanically). "
+            "Pulsim does not insert a tie resistor on a magnetic node: it "
+            "would be a spurious magnetic loss.", node_label(graph, named)));
+    }
+}
+
 /// Analyse `graph` / `pool` and report what would need regularizing.
 /// Pure — inserts nothing. `analyze_preflight` is what a caller uses
 /// to inspect a circuit; `CircuitBuilder::run_preflight` applies it.
@@ -281,11 +364,27 @@ components_without_ground(const topology::Graph& graph, EdgePredicate edge_ok) {
     const topology::Graph& graph,
     const DevicePool& pool,
     const PreflightOptions& opts = {}) {
+    require_magnetic_reference(graph, pool);
     PreflightReport report;
+
+    // An ideal transformer's primary is a pair of node references,
+    // not a graph branch, yet its constraint fixes v_p_from − v_p_to
+    // = v_s/n at DC and in every transient build. Without these ties
+    // a node reached only through a primary (a DC machine's speed
+    // node, add-mna-native-machines) was reported floating and given
+    // a needless 1 GΩ bleeder.
+    std::vector<std::pair<Index, Index>> primary_ties;
+    for (Index b = 0; b < graph.num_branches(); ++b) {
+        if (pool.is_registered(b) &&
+            pool.kind_of(b) == DevicePool::StoredKind::IdealTransformer) {
+            primary_ties.push_back(pool.ideal_transformer_primary_nodes(b));
+        }
+    }
 
     // ---- 1. Galvanically isolated subnets ------------------------
     const auto isolated = detail::components_without_ground(
-        graph, [](const topology::Branch&) { return true; });
+        graph, [](const topology::Branch&) { return true; },
+        primary_ties);
 
     for (const auto& comp : isolated) {
         if (comp.empty()) continue;
@@ -322,10 +421,12 @@ components_without_ground(const topology::Graph& graph, EdgePredicate edge_ok) {
     // singular while the report claimed they were fixed — see
     // `CircuitBuilder::run_preflight`, which iterates to a fixed
     // point instead.
+    auto dc_ties = primary_ties;
+    for (const auto& t : detail::machine_dc_ties(pool)) dc_ties.push_back(t);
     const auto dc_floating = detail::components_without_ground(
         graph, [&pool](const topology::Branch& br) {
             return detail::conducts_at_dc(pool, br);
-        });
+        }, dc_ties);
 
     // A component that is ALSO galvanically isolated is already
     // described by finding 1 at the same anchor; reporting the same

@@ -23,7 +23,12 @@ Supported elements (Phase E.10):
     outer ones; ``.GLOBAL`` nodes and ``0``/``gnd`` are not scoped.
   * `K` — coupled L (deferred — magnetics need more work)
   * `Q` / `J` — BJT / JFET (deferred)
-  * `.param` — parameter assignments (numeric only, no expressions)
+  * `.param` — parameter assignments; a ``{expression}`` value or element
+    value is evaluated (``{2*L}``, grammar of ``pulsim.Parameter``
+    expressions: no unit suffixes inside braces). Top-level ``.param``
+    lines become builder parameters, and a top-level R / L / C value
+    that names one (``{L}``, ``{2*L}``) is driven by it, so
+    ``circuit.with_params`` re-values the circuit.
   * `.model` / `.subckt` … `.ends` / `.global` / `.options DEFW DEFL`
   * `*` / `;` — comments
   * `.end` — terminator (ignored)
@@ -183,15 +188,39 @@ class _Scope(dict):
 _NUM_UNIT_RE = re.compile(r"^([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)([A-Za-z]*)$")
 
 
+_IDENT_RE = re.compile(r"(?<![\w.])[A-Za-z_]\w*(?!\w*\s*\()")
+
+
+def _spice_expr(text: str, names) -> str:
+    """``text`` with each parameter name spelled as in ``names`` (SPICE
+    names are case-insensitive; function names are left alone)."""
+    by_upper = {str(n).upper(): str(n) for n in names}
+    return _IDENT_RE.sub(lambda m: by_upper.get(m.group(0).upper(), m.group(0)), text)
+
+
+def _eval_brace(body: str, scope) -> float:
+    from . import _pulsim
+    keys = list(scope.keys()) if scope is not None else []
+    try:
+        return _pulsim._eval_expr(_spice_expr(body, keys), keys,
+                                  [float(scope[x]) for x in keys], "SPICE")
+    except ValueError as e:
+        if scope is not None and body.strip() not in scope and \
+                re.fullmatch(r"[A-Za-z_]\w*", body.strip()):
+            raise KeyError(f"undefined SPICE param {body.strip()!r}") from None
+        raise ValueError(f"SPICE value {{{body}}}: {e}") from None
+
+
 def _num(token: str, scope: Optional[Dict[str, float]]) -> float:
     """A SPICE number: engineering suffix, trailing unit letters
-    (``50ns``, ``10Vdc``), ``{param}``, or a bare parameter name."""
+    (``50ns``, ``10Vdc``), ``{param}`` / ``{expression}``, or a bare
+    parameter name."""
     s = str(token).strip()
     if s.startswith("{") and s.endswith("}"):
         name = s[1:-1].strip()
-        if scope is None or name not in scope:
-            raise KeyError(f"undefined SPICE param {name!r}")
-        return float(scope[name])
+        if scope is not None and name in scope:
+            return float(scope[name])
+        return _eval_brace(name, scope)
     if scope is not None and s in scope and not _NUM_UNIT_RE.match(s):
         return float(scope[s])
     try:
@@ -505,6 +534,7 @@ def parse_spice_netlist(text: str, *, return_models: bool = False):
     scope = _Scope()
     for k, v in params_raw:
         scope[k] = _num(v, scope)
+    scope.raw = list(params_raw)   # the top-level .param lines, as written
     for k, v in options.items():
         scope[f"__{k}__"] = _num(v, scope)
     models: Dict[str, SpiceModel] = {}
@@ -641,9 +671,11 @@ def _spice_diode(b, el: SpiceElement, nodes: List[str], notes: List[str],
         Ron = float(p.get("RON", 1.0))
         Roff = float(p.get("ROFF", 1.0 / 1e-12))
         Vfwd = float(p.get("VFWD", 0.0))
-        import pulsim as _v2
-        b.add_nonlinear_diode(d, nodes[0], nodes[1],
-                              _v2.IdealDiodeParams(V_F0=Vfwd, R_d=Ron / area, G_off=area / Roff))
+        # LTspice's model is an ideal switch with a series drop: on at
+        # v >= Vfwd, off at zero current, v = Vfwd + Ron*i while on. That
+        # is the PWL SwitchedDiode with V_f, not a smooth Newton diode.
+        b.add_diode(d, nodes[0], nodes[1], area / Ron, area / Roff,
+                    V_th=0.0, V_f=Vfwd)
         return
 
     unknown = sorted(k for k in p if k not in _DIODE_KNOWN)
@@ -693,7 +725,7 @@ def _spice_diode(b, el: SpiceElement, nodes: List[str], notes: List[str],
 
 
 def _spice_mosfet(b, el: SpiceElement, nodes: List[str], notes: List[str],
-                  drops: List[str]) -> None:
+                  drops: List[str], charge: str = "keep") -> None:
     d = el.designator
     if el.model_name is None:
         raise ValueError(
@@ -714,7 +746,7 @@ def _spice_mosfet(b, el: SpiceElement, nodes: List[str], notes: List[str],
     mult = float(inst.get("M", 1.0))
     p = mdl.params
     if mdl.type == "VDMOS":
-        _vdmos(b, el, d, drain, gate, source, inst, mult, mdl, notes, drops)
+        _vdmos(b, el, d, drain, gate, source, inst, mult, mdl, notes, drops, charge)
         return
     if mdl.type not in ("NMOS", "PMOS"):
         raise ValueError(f"{d}: model {mdl.name!r} is of type {mdl.type}, not NMOS/PMOS/VDMOS.")
@@ -799,10 +831,49 @@ def _spice_mosfet(b, el: SpiceElement, nodes: List[str], notes: List[str],
         notes.append(f"{d}: body diode from IS/JS ({I_S_body:.3g} A) built explicitly")
 
 
-def _vdmos(b, el, d, drain, gate, source, inst, mult, mdl, notes, drops) -> None:
+# T_M / TT for the Lauritzen body diode (task 3.4). SPICE TT is the
+# T_M -> 0 limit; against ngspice's TT diode (pm_diode_recovery.cir,
+# TT = 50 ns, 120 A/us) 0.01 gives I_rrm -0.09 %, Q_rr +0.11 %; 0.1 would
+# give -2.2 % in I_rrm. Smaller ratios gain < 0.1 % and stiffen the diode.
+_VDMOS_TM_OVER_TT = 0.01
+_VDMOS_CHARGE = ("CGS", "CGDMAX", "CGDMIN", "A", "CJO", "TT", "RG")
+
+
+def _vdmos(b, el, d, drain, gate, source, inst, mult, mdl, notes, drops,
+           charge: str = "keep") -> None:
     """LTspice's VDMOS: 'the DC model is the same as a level 1
     monolithic MOSFET except that the length and width default to
-    one so that transconductance can be directly specified'."""
+    one so that transconductance can be directly specified'.
+
+    With ``charge="keep"`` (default) a card carrying any of CGS, CGDMAX,
+    CGDMIN, A, CJO, TT or RG becomes ``add_power_mosfet``:
+
+    ===========================  ============================================
+    card                         Pulsim
+    ===========================  ============================================
+    KP, VTO, LAMBDA              channel K = KP/2·W/L·M, V_T, lambda_
+    RD                           R_d (``{d}.rd``)
+    RS                           series resistor ``{d}.rs`` (as before)
+    CGS                          C_gs (× M)
+    CGDMAX, CGDMIN, A            ``ChargeLaw.vdmos_cgd`` (× M; LTspice
+                                 defaults CGDMIN = 0, A = 1)
+    CJO, VJ, M                   C_ds ``ChargeLaw.junction`` (VJ 0.8, M 0.5
+                                 defaults; no FC linearisation)
+    TT                           Lauritzen body diode tau = TT,
+                                 T_M = 0.01·TT (ngspice TT recovery:
+                                 I_rrm -0.09 %, Q_rr +0.11 %)
+    RG                           R_g (/ M)
+    IS, N, RB, BV, RDS           body diode / resistors as before (BV is
+                                 dropped with a Lauritzen diode)
+    ===========================  ============================================
+
+    Absent capacitances are 0 (LTspice's defaults). NOTE: ngspice's
+    VDMOS defaults are not 0 (CGDMAX 2 nF, CGDMIN 20 pF, CGS 1.4 nF,
+    CJO 0.5 nF, measured with ``showmod``), so a card written for ngspice
+    that omits them simulates differently there. ``charge="drop"``
+    restores the ideal-gate Level-1 device of 2.0 and lists the charge
+    parameters as dropped.
+    """
     p = mdl.params
     if "pchan" in mdl.flags:
         raise ValueError(
@@ -820,29 +891,61 @@ def _vdmos(b, el, d, drain, gate, source, inst, mult, mdl, notes, drops) -> None
             "changes the triode-region law; the level-1 device has no such knob.")
     if "VTO" not in p or "KP" not in p:
         raise ValueError(f"{d}: VDMOS model {mdl.name!r} needs VTO and KP (has {sorted(p)}).")
+    if charge not in ("keep", "drop"):
+        raise ValueError(f"spice_to_builder: charge={charge!r}; expected 'keep' or 'drop'.")
+    keep = charge == "keep" and any(k in p for k in _VDMOS_CHARGE)
     W = float(inst.get("W", 1.0))
     L = float(inst.get("L", 1.0))
     K = float(p["KP"]) / 2.0 * W / L * mult
     RD = float(p.get("RD", 0.0)) / mult
     RS = float(p.get("RS", 0.0)) / mult
     RDS = float(p.get("RDS", 0.0))
-    if "RG" in p:
+    if "RG" in p and not keep:
         drops.append(f"{d}: RG={p['RG']:g} dropped: the gate is a node reference (ideal gate)")
     if any(k in p for k in ("SUBTHRES", "KSUBTHRES")):
         drops.append(f"{d}: subthreshold conduction (subthres/ksubthres) dropped")
     caps = sorted(k for k in p if k in ("CJO", "TT", "CGDMIN", "CGDMAX", "A", "CGS", "M", "VJ"))
-    if caps:
+    if caps and not keep:
         drops.append(f"{d}: {caps} (gate / junction charge, transit time) dropped: no switching "
                      "transient and no reverse recovery in the level-1 device")
-    dn, sn = drain, source
-    if RD > 0:
-        dn = f"{d}.d"
-        b.add_resistor(f"{d}.rd", drain, dn, RD)
-    if RS > 0:
-        sn = f"{d}.s"
-        b.add_resistor(f"{d}.rs", sn, source, RS)
-    b.add_mosfet_level1(d, dn, sn, gate, K=K, V_T=float(p["VTO"]),
-                        lambda_=float(p.get("LAMBDA", 0.0)), with_body_diode=False)
+    dn, sn = drain, (f"{d}.s" if RS > 0 else source)
+    if keep:
+        if RS > 0:
+            b.add_resistor(f"{d}.rs", sn, source, RS)
+        cgd_max = float(p.get("CGDMAX", 0.0)) * mult
+        cgd_min = float(p.get("CGDMIN", 0.0)) * mult
+        if ("CGDMAX" in p or "CGDMIN" in p) and not cgd_max > cgd_min:
+            raise ValueError(
+                f"{d}: VDMOS model {mdl.name!r} has CGDMAX={cgd_max:g} <= CGDMIN="
+                f"{cgd_min:g}; the gate-drain law needs CGDMAX > CGDMIN.")
+        import pulsim as _p
+        C_gd = (_p.ChargeLaw.vdmos_cgd(cgd_max, cgd_min, float(p.get("A", 1.0)))
+                if cgd_max > 0 else 0.0)
+        CJO = float(p.get("CJO", 0.0)) * mult
+        C_ds = (_p.ChargeLaw.junction(CJO, float(p.get("VJ", 0.8)), float(p.get("M", 0.5)))
+                if CJO > 0 else 0.0)
+        C_gs = float(p.get("CGS", 0.0)) * mult
+        R_g = float(p.get("RG", 0.0)) / mult
+        if R_g > 0 and C_gs == 0 and cgd_max == 0:
+            drops.append(f"{d}: RG={p['RG']:g} dropped: the card has no gate capacitance "
+                         "(CGS/CGDMAX), so a gate resistor would carry no current")
+            R_g = 0.0
+        b.add_power_mosfet(d, drain, sn, gate, K=K, V_T=float(p["VTO"]),
+                           lambda_=float(p.get("LAMBDA", 0.0)), R_d=RD,
+                           C_gs=C_gs, C_gd=C_gd, C_ds=C_ds, R_g=R_g)
+        if RD > 0:
+            dn = f"{d}.d"
+        kept = sorted(k for k in p if k in _VDMOS_CHARGE + ("VJ", "M"))
+        notes.append(f"{d}: VDMOS charge kept {kept} → add_power_mosfet (charge='drop' "
+                     "restores the ideal-gate level-1 device)")
+    else:  # the 2.0 device, built in the 2.0 order
+        if RD > 0:
+            dn = f"{d}.d"
+            b.add_resistor(f"{d}.rd", drain, dn, RD)
+        if RS > 0:
+            b.add_resistor(f"{d}.rs", sn, source, RS)
+        b.add_mosfet_level1(d, dn, sn, gate, K=K, V_T=float(p["VTO"]),
+                            lambda_=float(p.get("LAMBDA", 0.0)), with_body_diode=False)
     if RDS > 0:
         b.add_resistor(f"{d}.rds", dn, sn, RDS / mult)
     # The body diode the card describes (LTspice defaults: Is=1e-14, N=1).
@@ -850,6 +953,7 @@ def _vdmos(b, el, d, drain, gate, source, inst, mult, mdl, notes, drops) -> None
     n = float(p.get("N", 1.0))
     RB = float(p.get("RB", 0.0)) / mult
     BV = float(p.get("BV", 0.0))
+    TT = float(p.get("TT", 0.0)) if keep else 0.0
     BV_p = 0.0
     if BV > 0:
         IBV = float(p.get("IBV", 1e-3))
@@ -858,11 +962,19 @@ def _vdmos(b, el, d, drain, gate, source, inst, mult, mdl, notes, drops) -> None
     if RB > 0:
         an = f"{d}.b"
         b.add_resistor(f"{d}_body.rb", sn, an, RB)
-    b.add_shockley_diode(f"{d}_body", an, dn, I_S=I_S, n=n, BV=BV_p)
+    if TT > 0:
+        if BV > 0:
+            drops.append(f"{d}: BV={BV:g} dropped: the Lauritzen body diode (TT) has no breakdown")
+        b.add_lauritzen_diode(f"{d}_body", an, dn, I_S=I_S, n=n, tau=TT,
+                              T_M=_VDMOS_TM_OVER_TT * TT)
+        notes.append(f"{d}: body diode Lauritzen tau = TT = {TT:.3g} s, "
+                     f"T_M = {_VDMOS_TM_OVER_TT:g}·TT")
+    else:
+        b.add_shockley_diode(f"{d}_body", an, dn, I_S=I_S, n=n, BV=BV_p)
     notes.append(f"{d}: VDMOS → level-1 K = KP/2 = {K:.4g} A/V², body diode Is={I_S:.3g} A n={n:g}")
 
 
-def spice_to_builder(text_or_path, *, strict: bool = False) -> Any:
+def spice_to_builder(text_or_path, *, strict: bool = False, charge: str = "keep") -> Any:
     """Parse a SPICE netlist string OR file path and return a
     populated `pulsim.CircuitBuilder`.
 
@@ -874,7 +986,9 @@ def spice_to_builder(text_or_path, *, strict: bool = False) -> Any:
     the body diode the card gives) or refused by name; see the module
     docstring. Parameters that are dropped knowingly are listed in
     one summary warning; ``strict=True`` turns any drop into a
-    refusal.
+    refusal. ``charge="drop"`` builds a VDMOS card as the ideal-gate
+    Level-1 device even when it carries gate / junction charge (the
+    pre-2.1 behaviour; see ``_vdmos`` for the mapping).
     """
     if "\n" not in str(text_or_path):
         from pathlib import Path
@@ -890,6 +1004,43 @@ def spice_to_builder(text_or_path, *, strict: bool = False) -> Any:
     notes: List[str] = []
     drops: List[str] = []
 
+    # Top-level .param lines become builder parameters (a {...} value an
+    # expression over the earlier ones), in file order.
+    raw = list(getattr(params, "raw", ()))
+    names = [k for k, _ in raw]
+    seen = [k.upper() for k in names]
+    ir = {}
+    for k_, v_ in raw:
+        # A name assigned twice, or one the parameter grammar cannot
+        # spell, stays a plain number (its value is unchanged).
+        if seen.count(k_.upper()) > 1 or not re.fullmatch(r"[A-Za-z_]\w*", k_):
+            continue
+        v_ = str(v_).strip()
+        try:
+            ir[k_.upper()] = (b.param(k_, _spice_expr(v_[1:-1], names))
+                              if v_.startswith("{") and v_.endswith("}")
+                              else b.param(k_, float(params[k_])))
+        except ValueError:
+            # shortcut: an expression over a name kept as a number stays
+            # a number too (correct value, not re-valued by with_params).
+            ir[k_.upper()] = b.param(k_, float(params[k_]))
+
+    def _value(designator, tok0, scope, field):
+        """A top-level R / L / C value naming parameters: the parameter
+        itself ({L} or L), or a derived one ({2*L}) named <designator>:<field>."""
+        s = str(tok0).strip()
+        if scope is not params or not ir:
+            return _num(s, scope)
+        body = s[1:-1].strip() if s.startswith("{") and s.endswith("}") else s
+        if body.upper() in ir:
+            return ir[body.upper()]
+        if s.startswith("{"):
+            try:
+                return b.param(f"{designator}:{field}", _spice_expr(body, names))
+            except ValueError:
+                pass   # reads a name kept as a number: the value, as before
+        return _num(s, scope)
+
     for elem in elements:
         kind = elem.kind
         designator = elem.designator
@@ -900,15 +1051,18 @@ def spice_to_builder(text_or_path, *, strict: bool = False) -> Any:
         if kind == "R":
             if len(tok) < 1:
                 raise ValueError(f"{designator}: missing value")
-            b.add_resistor(designator, nodes[0], nodes[1], _num(tok[0], scope))
+            b.add_resistor(designator, nodes[0], nodes[1],
+                           _value(designator, tok[0], scope, "R"))
         elif kind == "C":
             if len(tok) < 1:
                 raise ValueError(f"{designator}: missing value")
-            b.add_capacitor(designator, nodes[0], nodes[1], _num(tok[0], scope))
+            b.add_capacitor(designator, nodes[0], nodes[1],
+                            _value(designator, tok[0], scope, "C"))
         elif kind == "L":
             if len(tok) < 1:
                 raise ValueError(f"{designator}: missing value")
-            b.add_inductor(designator, nodes[0], nodes[1], _num(tok[0], scope))
+            b.add_inductor(designator, nodes[0], nodes[1],
+                           _value(designator, tok[0], scope, "L"))
         elif kind == "V":
             spec = _parse_source_spec(tok, scope)
             if spec["kind"] == "dc":
@@ -930,11 +1084,13 @@ def spice_to_builder(text_or_path, *, strict: bool = False) -> Any:
             if spec["kind"] != "dc":
                 raise NotImplementedError(
                     "Time-varying current source from SPICE not yet supported by the importer")
-            b.add_current_source(designator, nodes[0], nodes[1], spec["value"])
+            # SPICE drives I from n+ through the source to n-, so it leaves at n-;
+            # add_current_source pushes I out of its FIRST node: swap them.
+            b.add_current_source(designator, nodes[1], nodes[0], spec["value"])
         elif kind == "D":
             _spice_diode(b, elem, nodes, notes, drops)
         elif kind == "M":
-            _spice_mosfet(b, elem, nodes, notes, drops)
+            _spice_mosfet(b, elem, nodes, notes, drops, charge=charge)
         elif kind == "X":
             raise ValueError(
                 f"{designator}: an unexpanded subcircuit instance survived "

@@ -16,6 +16,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 
 #include "pulsim/pwl/cache.hpp"
 #include "pulsim/pwl/device_pool.hpp"
@@ -186,6 +187,9 @@ TEST_CASE("RC half-wave: substep correction stays finite and bounded",
         .t_end   = t_end,
         .dt      = dt_coarse,
     };
+    // add-fixed-step-event-splitting: the split requires the restart
+    // rule; both runs carry it so the comparison isolates the split.
+    opts_off.discontinuity_restart = true;
     SimulationOptions opts_on = opts_off;
     opts_on.enable_substep_state_correction = true;
 
@@ -250,6 +254,7 @@ TEST_CASE("Substep correction records commutation events",
         .dt      = dt,
     };
     opts.enable_substep_state_correction = true;
+    opts.discontinuity_restart = true;
 
     auto result = run_transient(
         *rect.cache, rect.g, rect.pool, opts,
@@ -263,4 +268,74 @@ TEST_CASE("Substep correction records commutation events",
          << " commutation events");
     REQUIRE(result.commutation_events.size() >= 3);
     REQUIRE(result.commutation_events.size() <= 8);
+}
+
+// add-fixed-step-event-splitting, task 2.1 — the diode watcher reads the
+// step's FIRST solve (pre-event bits). A ramp source V(t) = V0 - k t
+// behind a diode into R: the diode current is linear in t and its zero
+// is t0 = V0 / k exactly, placed at 0.37 dt inside a step. A capacitor
+// across the source makes the run take the dynamic path.
+TEST_CASE("Event split locates a diode turn-off on a ramp to 1e-6 dt",
+          "[v2][layer5_v3][substep][event_split]") {
+    constexpr Real dt = 1e-6;
+    constexpr Real slope = 1e5;                 // V/s
+    constexpr Real t0 = (20.0 + 0.37) * dt;     // zero of V(t)
+    constexpr Real V0 = slope * t0;
+    Graph g;
+    DevicePool pool;
+    const Index n0 = g.add_node("n0");
+    const Index n1 = g.add_node("n1");
+    g.add_branch(n0, g.ground(), BranchKind::Source);
+    g.add_branch(n0, n1, BranchKind::Switch);
+    g.add_branch(n1, g.ground(), BranchKind::PassiveLinear);
+    g.add_branch(n0, g.ground(), BranchKind::PassiveLinear);
+    pool.add_voltage_source(0, {.V = 0.0});
+    pool.add_diode(1, 1e3, 1e-9, /*V_th=*/0.0);
+    pool.add_resistor(2, {.G = 1.0 / 10.0});
+    pool.add_capacitor(3, {.C = 1e-9});
+    PwlStateSpaceCache cache(g, pool);
+    cache.build(dt);
+    const Index src = pool.branch_var_id_for_source(0, g);
+    const auto n = static_cast<Eigen::Index>(pool.state_size(g));
+    const BExtraFn ramp = [src, n](Real t) {
+        Vector b = Vector::Zero(n);
+        b[src] = -(V0 - slope * t);
+        return b;
+    };
+    auto run = [&](bool split) {
+        SimulationOptions o{.t_start = 0.0, .t_end = 40 * dt, .dt = dt};
+        o.discontinuity_restart = true;
+        o.enable_substep_state_correction = split;
+        return run_transient(cache, g, pool, o,
+                             [](Real) { return SwitchStateMask(1); }, ramp);
+    };
+    auto find_off = [](const SimulationResult& r) {
+        for (const auto& e : r.commutation_events) {
+            if (!e.new_state) return e.t_estimated;
+        }
+        return Real{-1};
+    };
+    const auto on = run(true);
+    const Real t_split = find_off(on);
+    INFO("located " << t_split / dt << " dt, zero at " << t0 / dt << " dt");
+    REQUIRE(std::abs(t_split - t0) < 1e-6 * dt);
+    REQUIRE(on.n_split_steps >= 1);
+    // Without the split the estimate interpolates toward the post-flip
+    // state and lands at the step start, 0.37 dt early.
+    const Real t_rule = find_off(run(false));
+    REQUIRE(std::abs(t_rule - t0) > 0.3 * dt);
+}
+
+TEST_CASE("Event split without the restart rule is refused",
+          "[v2][layer5_v3][substep][event_split]") {
+    CoarseHalfWave rect(2e-4);
+    SimulationOptions o{.t_start = 0.0, .t_end = 1e-2, .dt = 2e-4};
+    o.enable_substep_state_correction = true;
+    REQUIRE_THROWS_WITH(
+        run_transient(*rect.cache, rect.g, rect.pool, o,
+                      &CoarseHalfWave::switch_fn,
+                      rect.make_sinusoidal_source()),
+        Catch::Matchers::ContainsSubstring("discontinuity_restart") &&
+        Catch::Matchers::ContainsSubstring(
+            "enable_substep_state_correction"));
 }

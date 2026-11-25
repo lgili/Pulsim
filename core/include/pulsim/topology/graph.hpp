@@ -96,6 +96,21 @@ public:
     Graph(Graph&&) noexcept = default;
     Graph& operator=(Graph&&) noexcept = default;
 
+    /// Deliberate deep copy (add-immutable-circuit-ir: an `ir::Circuit`
+    /// snapshots its builder). Copying stays explicit so the move-only
+    /// contract still catches accidental copies. The structural id is
+    /// computed here, so a clone handed to other threads is only read.
+    [[nodiscard]] Graph clone() const {
+        Graph g;
+        g.nodes_ = nodes_;
+        g.branches_ = branches_;
+        g.branch_names_ = branch_names_;
+        g.node_to_branches_ = node_to_branches_;
+        g.graph_id_ = id();
+        g.graph_id_cached_ = true;
+        return g;
+    }
+
     // ---- Build phase --------------------------------------------------------
 
     /// Append a node. Returns its (zero-based) index.

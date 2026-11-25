@@ -17,6 +17,14 @@ If you've used SPICE before, the mental model is similar but the implementation 
 - You're doing **RF / high-frequency PCB** simulations with distributed elements — Pulsim is lumped-only.
 - You need built-in convergence retries that mask physically dubious circuits — the kernel's Newton is principled but unforgiving; expect to think about your circuit.
 
+## New in 2.1
+
+New engines, devices and analyses behind options that default off, and
+many silent wrong answers corrected. Some 2.0 results move and some 2.0
+calls now raise a named error: read the
+[2.0 → 2.1 migration notes](migration-guide.md#from-20-to-21) and the
+[known limitations](known-limitations.md) before upgrading a study.
+
 ## Using Pulsim with AI assistants
 
 AI coding assistants were trained on Pulsim 1.x and on other simulators.
@@ -43,6 +51,7 @@ pulsim.guide` (also on the [AI assistants page](ai-guide.md)), and at the
 - [**Losses & junction temperature**](losses-and-thermal.md) — `device_loss_summary` + `device_thermal_summary`. Reads resistors, inductors (with optional Steinmetz / iGSE core loss), ideal switches (PSIM `E_on` / `E_off`), and switched diodes (`Q_rr` / `E_rr_ref`); pipes the per-device loss through a Foster network for `T_j(t)`.
 - [**`@fast_block`**](fast-block.md) — Pulsim's PSIM-`Custom C Block` / PLECS-`C-Script` workalike via Numba LLVM JIT. Write the control law in Python, get native-speed code without a C compiler in the user's PATH.
 - [**YAML composite devices + chain wiring**](yaml-chain.md) — `induction_motor` / `hysteretic_inductor` in `circuit:` plus `wire_chain_from_yaml(loaded, chain_spec)` for the control layer (IM mechanical, JA observer, SMO/MRAS sensorless).
+- [**Control graph: order, rates and delay**](control-graph.md) — in which order a `MixedDomainBlockChain` runs its blocks (algebraic loops are build errors), `Rate` groups with integer tick counters, and `compute_delay`; the migration note for chains that relied on insertion order.
 
 ## Where the source lives
 

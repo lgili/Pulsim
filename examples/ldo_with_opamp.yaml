@@ -51,8 +51,8 @@ circuit:
     # Modest gain (100) chosen to keep Newton step bounded
     # during cold start (V_fb=0 initially → high-gain op-amp
     # would demand kV-range gate drive). The closed loop's
-    # static-error is 1/(1 + gain · β) ≈ 3 %% with β = R2/(R1+R2);
-    # acceptable LDO precision for the demo.
+    # static error is ~1/(1 + gain · β) ≈ 3 % with β = R2/(R1+R2),
+    # plus V_GS/(1 + gain · β): V_out settles at 7.19 V, not 7.5 V.
     - type: op_amp_ideal
       name: U1
       in_pos: vref

@@ -89,6 +89,68 @@ struct PwlSegment {
 Move-only. The cache stores one segment per switch state in an
 `unordered_map<SwitchStateMask, PwlSegment>`.
 
+## Assembly template and shared analysis
+
+`update-linear-time-assembly` (tier 1). The cache owns a
+`SegmentAssembler` with one pattern template per assembly regime
+(dynamic `dt > 0`: `G` and `C` plus their union `J`; static `dt = 0`:
+`J`). The first assembly of a regime is a fresh, reserved assembly and
+becomes the template; every later mask copies the template, zeroes its
+values and stamps into existing entries, and `J = G + (1/dt)·C` is
+written through slot arrays onto the union pattern. Values are
+bit-identical to the fresh assembly (`+0.0 + v`, and Eigen's `a + 0` /
+`0 + b` per entry). A stamp outside the template is detected by the
+entry count and rebuilds it.
+
+The cache also keeps one `SymbolicAnalysis` per regime (column
+ordering, inverse, elimination tree, the pattern it belongs to). The
+first solver of a regime analyses and exports it; every later segment,
+event entry and the rank-1 solver adopts it after the index-array
+check. A mismatch analyses privately and counts a fallback.
+
+Counters in `CacheMetrics`: `structure_builds` (template builds,
+≤ 1 per regime), `symbolic_analyses` (≤ 1 per regime),
+`symbolic_fallbacks` (0 unless the circuit changed under the cache).
+Invalidation: templates and analyses live as long as the cache;
+`refactor_parametric` changes values only and keeps both; a new
+circuit gets a new cache.
+
+Event entries (`solve_at`, which TR-BDF2 uses for every stage) are
+bounded by the same byte budget as the segments, accounted separately,
+LRU (`event_evictions`). Each keeps its `J` and `G`/`C` scattered onto
+`J`'s pattern, so a new `dt` is an in-place `J[k] = G[k] + (1/dt)·C[k]`
+and a numeric `factorize` that reuses the LU's work vectors and L/U
+capacity: no allocation (`update-trbdf2-factor-reuse`, parts 1-2;
+details in `layer4-v7-multi-dt-cache.md`).
+
+Newton (`solve_with_newton_b_extra`) takes an optional
+`NewtonWorkspace*`; the engines pass one per run. It holds the combined
+Jacobian on the union pattern of `seg.J` and `J_nl` with slot arrays
+(`J[k] = L[k] + N[k]`, Eigen's per-entry sum), the hoisted residual and
+step vectors, and one direct solver analysed once per pattern: the
+in-house LU (`backend = Pulsim`, stage A2), refactorised in place. The
+refreshers zero `J_nl`'s values with `sparse::zero_keep_pattern` and
+stamp into existing entries, so after the first call an iteration
+allocates nothing (`test_zero_alloc`). Invalidation: the index arrays of
+both operands are compared after every refresh; any change rebuilds the
+slots and analyses again. Counters on the workspace: `solves`,
+`iterations`, `analyses`, `factorizations`, `lm_attempts` and the
+per-call `iterations_per_solve`; the engines move them into
+`SimulationResult.newton`. A call without a workspace (DC, continuation)
+uses a call-local one on `Eigen::SparseLU`.
+
+### Generation and the loop's last-segment memo
+
+`cache.generation()` (relaxed atomic) is bumped by `build`,
+`build_lazy`, every lazy insert (and the evictions before it),
+`build_one_segment` and a parametric refactor of a resident segment.
+`run_transient` keeps `{mask, const PwlSegment*, generation}` and
+reuses the pointer only while the generation is unchanged; a reuse
+still writes the LRU tick (`touch_segment`), so eviction order is the
+same as with a lookup per solve. `solve_segment(seg, b_extra, x)` is
+`solve(mask, …)` without the lookup. The memo lives in the loop, not
+in the cache: a cache is shared by GIL-released runs.
+
 ## V0 scope: static-only circuits
 
 Layer 4 V0 supports Resistor + VoltageSource + Switch. That covers:
