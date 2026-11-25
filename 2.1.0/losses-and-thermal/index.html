@@ -1,0 +1,2826 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Power-electronics circuit simulator — C++23 kernel with a Python-first API">
+      
+      
+      
+        <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/losses-and-thermal/">
+      
+      
+      
+      
+      <link rel="icon" href="../assets/images/pulsim-logo.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.5.50">
+    
+    
+      
+        <title>Losses & junction temperature - Pulsim</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.a40c8224.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../assets/stylesheets/extra.css">
+    
+      <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="blue-grey" data-md-color-accent="deep-orange">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#losses-junction-temperature" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Pulsim" class="md-header__button md-logo" aria-label="Pulsim" data-md-component="logo">
+      
+  <img src="../assets/images/pulsim-logo.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Pulsim
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Losses &amp; junction temperature
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="blue-grey" data-md-color-accent="deep-orange"  aria-hidden="true"  type="radio" name="__palette" id="__palette_0">
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="blue-grey" data-md-color-accent="deep-orange"  aria-hidden="true"  type="radio" name="__palette" id="__palette_1">
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      <label class="md-header__button md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+      </label>
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/lgili/Pulsim" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    lgili/Pulsim
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href=".." class="md-tabs__link">
+          
+  
+  User Guide
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../how-pulsim-works/" class="md-tabs__link">
+          
+  
+  How Pulsim Works
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../internals/" class="md-tabs__link">
+          
+  
+  Internals
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../build-system/" class="md-tabs__link">
+          
+  
+  Operations
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Pulsim" class="md-nav__button md-logo" aria-label="Pulsim" data-md-component="logo">
+      
+  <img src="../assets/images/pulsim-logo.svg" alt="logo">
+
+    </a>
+    Pulsim
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/lgili/Pulsim" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    lgili/Pulsim
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Home
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    User Guide
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            User Guide
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Home
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Getting Started
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ai-guide/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Using Pulsim with AI Assistants
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mental-model/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Mental Model
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../parameters/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Parameters and Value Updates
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../domains/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Node Domains
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/01-rc-charging/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 01 — RC Charging
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/02-buck-converter/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 02 — Buck Converter
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/03-flyback-isolated/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 03 — Isolated Flyback
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/04-3phase-vsi/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 04 — Three-Phase VSI
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/05-ldo-feedback/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 05 — LDO with Op-Amp
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/06-igbt-boost/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 06 — IGBT Boost
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/07-dc-machine/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 07 — DC Machine
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/08-design-optimisation/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 08 — Using Pulsim inside an optimiser
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/09-magnetic-networks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 09 — Magnetic networks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/10-power-mosfet-datasheet/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 10 — Datasheet to double pulse
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sensitivities/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Parameter Sensitivities
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../SOFT_SWITCHING/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Soft Switching (ZVS / ZCS probes)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../motors-induction/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Motors — Induction (Phase 2)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../motors-sensorless/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Motors — Sensorless Observers (Phase 2)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mmc/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Modular Multilevel Converters (MMC)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../loss-thermal/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Loss & Thermal Modelling
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../transmission-line/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Transmission Line (Bergeron)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../c-block/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Custom Code Blocks (C / C++ / Python)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../solvers/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Numerical Solvers (Phase 2)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api-reference/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    API Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../result-reference/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Result Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../device-reference/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Device Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../helpers/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    UX Helpers (discover, plot, monitor)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../gotchas/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Gotchas
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../known-limitations/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Known Limitations (2.1)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    How Pulsim Works
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            How Pulsim Works
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Overview
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/01-introduction/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    1 — Introduction (why SMPS is hard)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/02-mna-foundations/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    2 — MNA Foundations
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/03-trapezoidal-companion/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    3 — Trapezoidal Companion Discretisation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/04-pwl-state-space-cache/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    4 — PWL State-Space Cache
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/05-sparse-lu-foundations/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    5 — Sparse Direct LU Foundations
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/06-pulsim-sparse-lu/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    6 — PulsimSparseLuSolver
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/07-rank1-partial-refactor/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    7 — Path-Based Partial Refactorisation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/08-benchmarks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    8 — Benchmarks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/09-architecture-walkthrough/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    9 — Architecture Walkthrough
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/10-paper-figures-index/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    10 — Paper Figures Index
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/11-dsed-engine-overview/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    11 — DSED Engine Overview (Part II)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/12-dsed-state-space-extraction/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    12 — MNA → State-Space Extraction
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/13-dsed-dopri5-adaptive/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    13 — DOPRI5 + Adaptive PI + Event Scan
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/14-dsed-bdf2-and-dispatch/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    14 — BDF2 + Stiffness Dispatch
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/15-dsed-native-bindings/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    15 — Native Bindings (24× story)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/16-dsed-benchmarks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    16 — DSED Benchmarks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Internals
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            Internals
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internals/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Architecture (Layer-by-Layer)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internals/layer0-numeric-and-sparse/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 0 — Numeric + Sparse
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internals/layer1-topology-and-enumeration/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 1 — Topology + Enumeration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internals/layer2-ad-and-device-models/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 2 — AD + Device Models
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internals/layer2-v1-mosfet-igbt/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 2 V1 — MOSFET / IGBT
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internals/layer2-v2-transformer/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 2 V2 — Transformer
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internals/layer3-stamping-pipeline/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 3 — Stamping Pipeline
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internals/layer4-pwl-state-space-cache/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 4 — PWL State-Space Cache
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internals/layer4-v1-trapezoidal-companion/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 4 V1 — Trapezoidal Companion
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internals/layer10-benchmarks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 10 — Benchmarks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internals/run-planning/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    How a run is planned
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internals/mmc-arm-block/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    MMC Arm Block — design doc
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Operations
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            Operations
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../build-system/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Build System
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../performance-tuning/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Performance Tuning
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../troubleshooting/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Troubleshooting
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../migration-guide/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Migration Guide (2.0 → 2.1, legacy → 1.0)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../versioning-and-release/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Docs Versioning and Release
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-you-get-per-device" class="md-nav__link">
+    <span class="md-ellipsis">
+      What you get per device
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="What you get per device">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#steady-state-t_from-t_to" class="md-nav__link">
+    <span class="md-ellipsis">
+      Steady state: t_from / t_to
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#resistor" class="md-nav__link">
+    <span class="md-ellipsis">
+      Resistor
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#capacitor-esr-inductor-dcr-and-ac-resistance-ladder" class="md-nav__link">
+    <span class="md-ellipsis">
+      Capacitor ESR, inductor DCR and AC-resistance ladder
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#switch-psim-style-e_on-e_off" class="md-nav__link">
+    <span class="md-ellipsis">
+      Switch — PSIM-style E_on / E_off
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#diode-q_rr-or-e_rr_ref" class="md-nav__link">
+    <span class="md-ellipsis">
+      Diode — Q_rr or E_rr_ref
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#magnetic-core-loss" class="md-nav__link">
+    <span class="md-ellipsis">
+      Magnetic core loss
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Magnetic core loss">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#in-loop-core-loss-in-a-magnetic-network" class="md-nav__link">
+    <span class="md-ellipsis">
+      In-loop core loss in a magnetic network
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#junction-temperature-device_thermal_summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      Junction temperature — device_thermal_summary
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#event-losses-and-t_j-on-the-periodic-orbit-design-evaluator" class="md-nav__link">
+    <span class="md-ellipsis">
+      Event losses and T_j on the periodic orbit (design evaluator)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#event-losses-inside-the-transient-set_device_losses" class="md-nav__link">
+    <span class="md-ellipsis">
+      Event losses inside the transient (set_device_losses)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#device-level-switching-energy-add_power_mosfet" class="md-nav__link">
+    <span class="md-ellipsis">
+      Device-level switching energy — add_power_mosfet
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#whats-not-covered" class="md-nav__link">
+    <span class="md-ellipsis">
+      What's not covered
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#end-to-end-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      End-to-end example
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+  
+    <a href="https://github.com/lgili/Pulsim/edit/main/docs/losses-and-thermal.md" title="Edit this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+    
+      
+    
+    <a href="https://github.com/lgili/Pulsim/raw/main/docs/losses-and-thermal.md" title="View source of this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17 18c.56 0 1 .44 1 1s-.44 1-1 1-1-.44-1-1 .44-1 1-1m0-3c-2.73 0-5.06 1.66-6 4 .94 2.34 3.27 4 6 4s5.06-1.66 6-4c-.94-2.34-3.27-4-6-4m0 6.5a2.5 2.5 0 0 1-2.5-2.5 2.5 2.5 0 0 1 2.5-2.5 2.5 2.5 0 0 1 2.5 2.5 2.5 2.5 0 0 1-2.5 2.5M9.27 20H6V4h7v5h5v4.07c.7.08 1.36.25 2 .49V8l-6-6H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h4.5a8.2 8.2 0 0 1-1.23-2"/></svg>
+    </a>
+  
+
+
+<h1 id="losses-junction-temperature">Losses &amp; junction temperature<a class="headerlink" href="#losses-junction-temperature" title="Permanent link">&para;</a></h1>
+<p>Pulsim ships a <strong>PSIM-equivalent loss panel</strong> that walks every relevant
+branch of a simulation result and returns per-device dissipation
+metrics, plus a Foster-network helper that pipes those losses through a
+datasheet thermal impedance to produce <code>T_j(t)</code>. The whole pipeline is
+post-hoc — you run the electrical simulation once with the kernel, then
+call two pure-Python helpers on the result.</p>
+<blockquote>
+<p><strong>TL;DR</strong></p>
+<div class="highlight"><pre><span></span><code><span class="n">res</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">t_end</span><span class="o">=...</span><span class="p">,</span> <span class="n">dt</span><span class="o">=...</span><span class="p">,</span> <span class="n">switch_fn</span><span class="o">=</span><span class="n">pwm</span><span class="p">)</span>
+<span class="n">loss</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">device_loss_summary</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">res</span><span class="p">,</span> <span class="n">switch_fn</span><span class="o">=</span><span class="n">pwm</span><span class="p">,</span>
+                               <span class="n">switch_specs</span><span class="o">=</span><span class="p">{</span><span class="o">...</span><span class="p">},</span>
+                               <span class="n">diode_specs</span><span class="o">=</span><span class="p">{</span><span class="o">...</span><span class="p">},</span>
+                               <span class="n">core_loss_specs</span><span class="o">=</span><span class="p">{</span><span class="o">...</span><span class="p">})</span>
+<span class="n">therm</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">device_thermal_summary</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">res</span><span class="p">,</span>
+                                   <span class="n">thermal_specs</span><span class="o">=</span><span class="p">{</span>
+                                     <span class="s2">"M1"</span><span class="p">:</span> <span class="p">{</span><span class="s2">"stages"</span><span class="p">:</span> <span class="p">[</span><span class="n">FosterStage</span><span class="p">(</span><span class="o">...</span><span class="p">),</span> <span class="o">...</span><span class="p">],</span>
+                                            <span class="s2">"T_ambient_C"</span><span class="p">:</span> <span class="mf">40.0</span><span class="p">},</span>
+                                   <span class="p">},</span>
+                                   <span class="c1"># same loss kwargs forwarded:</span>
+                                   <span class="n">switch_fn</span><span class="o">=</span><span class="n">pwm</span><span class="p">,</span>
+                                   <span class="n">switch_specs</span><span class="o">=</span><span class="p">{</span><span class="o">...</span><span class="p">},</span>
+                                   <span class="n">diode_specs</span><span class="o">=</span><span class="p">{</span><span class="o">...</span><span class="p">})</span>
+</code></pre></div>
+</blockquote>
+<h2 id="what-you-get-per-device">What you get per device<a class="headerlink" href="#what-you-get-per-device" title="Permanent link">&para;</a></h2>
+<p><code>device_loss_summary</code> returns a list with one dict per branch it
+recognises. Common fields:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Where it appears</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>branch_id</code>, <code>kind</code>, <code>name</code></td>
+<td>int / str / str</td>
+<td>every device</td>
+</tr>
+<tr>
+<td><code>i_avg</code>, <code>i_rms</code>, <code>i_peak</code></td>
+<td>float</td>
+<td>every device</td>
+</tr>
+<tr>
+<td><code>P_avg</code>, <code>E_total</code></td>
+<td>float</td>
+<td>resistor / diode / switch</td>
+</tr>
+<tr>
+<td><code>duty_conducting</code></td>
+<td>float ∈ [0, 1]</td>
+<td>diode</td>
+</tr>
+<tr>
+<td><code>duty_closed</code></td>
+<td>float ∈ [0, 1]</td>
+<td>switch</td>
+</tr>
+<tr>
+<td><code>t_window_start</code>, <code>t_window_end</code></td>
+<td>float [s]</td>
+<td>every device</td>
+</tr>
+</tbody>
+</table>
+<p>A Shockley diode (<code>add_shockley_diode</code>, kind <code>shockley_diode</code>) gets
+<code>i_avg</code>, <code>i_rms</code>, <code>i_peak</code>, <code>P_avg</code> and <code>E_total</code> from the kernel's
+exponential law at the recorded <code>v_D</code> (the parameters are kept on the
+builder when the diode is added); <code>result.i()</code> returns the same current.
+Against a 1 mOhm sense resistor in series it agrees to 3e-12 A.</p>
+<h3 id="steady-state-t_from-t_to">Steady state: <code>t_from</code> / <code>t_to</code><a class="headerlink" href="#steady-state-t_from-t_to" title="Permanent link">&para;</a></h3>
+<p>Every figure covers the whole run, start-up included, unless you pass a
+window in seconds (both <code>device_loss_summary</code> and
+<code>device_thermal_summary</code>):</p>
+<div class="highlight"><pre><span></span><code><span class="n">rows</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">device_loss_summary</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">res</span><span class="p">,</span> <span class="n">conduction_specs</span><span class="o">=</span><span class="n">cond</span><span class="p">,</span> <span class="n">t_from</span><span class="o">=</span><span class="mf">0.08</span><span class="p">)</span>
+</code></pre></div>
+<p>On a 230 V bridge rectifier (0.1 Ω, 470 µF ‖ 1 kΩ, <code>t_end = 0.1</code> s) a
+diode's <code>V_f0 = 0.7, r_on = 0.02</code> conduction loss is 2.338 W over the
+run and 0.1358 W over 80–100 ms. A bound inside a step cuts that step's
+own model: the line of its current and, on a step that flips a switch or
+diode, the trapezoid of its end powers. Adjacent windows therefore add
+up to rounding wherever the cuts fall, a bound inside a flip step reads
+like either end of it, and a variable-step grid gives the same answer
+as a fine fixed one. Gate edges
+and diode turn-offs are found on the whole run and count when their step
+starts inside the window. The thermal summary still runs the Foster
+network from t = 0 (<code>T_j_trace</code> covers the run); its averages and peaks
+cover the window, and the constant switching offset is the window's
+<code>P_sw_avg</code>.</p>
+<p>Switch and diode states are not inferred. Every engine records, with
+each stored sample, the switch / diode mask it <strong>stamped</strong> for the solve
+that produced it (<code>result.switch_states</code>, one bool column per
+<code>builder.switch_index_of(name)</code>), so a switched branch's current is
+exactly <code>(g_on if closed else g_off) · v</code> (for an ON PWL diode with a
+forward drop, <code>g_on · (v − V_f)</code>). A PWL diode needs this: its ON
+state is <code>V_f + i/g_on</code>, so a diode carrying 48 A at <code>g_on = 1e3</code>
+sits at <code>V_f</code> + 48 mV — inside <code>V_f &lt; v_D &lt; V_th</code>, where the voltage
+alone cannot say whether it conducts. Its loss is <code>V_f·i + i²/g_on</code>, so
+<code>P_avg</code> already contains the drop: a <code>conduction_specs</code> <code>V_f0</code> for the
+same diode is a separate estimate, not an addition. The gated PWL
+devices (<code>add_igbt(reverse_blocking=True)</code>, <code>add_gto</code>, <code>add_thyristor</code>,
+<code>add_triac</code>) are diode rows with the same law: an IGBT's conduction loss
+is <code>V_ce0·I_avg + R_on·I_rms²</code> (10 A DC at <code>V_ce0 = 0.9 V</code>,
+<code>R_on = 10 mΩ</code>: 10.0 W; the bidirectional switch read 1.0 W). <code>switch_fn=</code> is only needed for a result built
+without the record (it is then re-evaluated, with a warning). Duties are
+time-weighted per step, so a variable-step grid does not bias them.</p>
+<p>Row <code>k</code> of the record is the mask in force over the step
+<code>(t[k-1], t[k]]</code>, and the sample's state is the solve under it. At a
+commutation the stored sample is therefore the state just BEFORE the
+switch flips (a TR-BDF2 landing, a DSED event), and the new mode appears
+from the next sample on. A sample 0 seeded with <code>initial_state</code> was not
+solved in the run (<code>result.switch_states_unsolved</code>): its recorded bits
+are the mask carried in, which say nothing about the solve that produced
+its state, so a switched branch has no defined current there.
+<code>result.i()</code> returns the first solved sample's value for a switch or
+diode on that row (a real current one step late, never a guessed
+<code>g_on·V</code>; every <code>i0=</code> / <code>c0=</code> run has such a row), and the loss
+and thermal summaries start at the first solved sample (one step less
+than the run on a fixed grid; every entry's <code>t_window_start</code> is then
+<code>t[1]</code>, and an energy or charge total leaves out <code>[t[0], t[1]]</code>). A <code>resume_from</code> sample 0 is the previous
+run's last sample and records the mask it was solved under
+(<code>SolverSnapshot.stamped_mask</code>); it is flagged only when the snapshot
+lacks that field (hand-built, or pickled before it existed).</p>
+<p>Time integrals (<code>i_avg</code>, <code>i_rms</code>, <code>P_avg</code>, <code>E_total</code>, the conduction
+model, the forward charge of a recovery) integrate each step as the line
+from its START to its end sample, exactly: <code>h·(a + c)/2</code> for a current,
+<code>h·(a² + a·c + c²)/3</code> for a square. The start of a step is the sample
+before it, except at a DSED event: the stored sample is the left limit
+there, and <code>engine='dsed'</code> also stores the right limit the next step
+starts from (<code>result.right_limit_index</code> / <code>right_limit_states</code> /
+<code>right_limit_switch_states</code>). Without it a freewheel diode's turn-on
+jump was drawn as a ramp over the whole next step, and a DCM boost
+diode's <code>i_avg</code> read 0.0234 A against 0.0535 A (−56 %), with no warning.
+The same right limit gives a switch's <code>E_on</code> its current AT the edge.
+Integrating <code>np.trapezoid(result.i(name), result.times)</code> yourself on a
+DSED result keeps that error (first order in the step); read the summary,
+or start each step from the right limit. A step whose two ends carry
+different conductances (a fixed-step or TR-BDF2 commutation step, which
+has no stored right limit) keeps the trapezoid of its two end powers.</p>
+<p>With <code>store_every &gt; 1</code> a recorded row is the mask of the LAST solve
+before the sample, not of the whole stored interval, so duties and
+integrals alias on a decimated grid (a buck switch's duty read 0.554
+instead of 0.500 at <code>store_every = 67</code>). Keep <code>store_every = 1</code> for loss
+work.</p>
+<p>PSIM-style datasheet annotations add:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>E_sw_total</code>, <code>P_sw_avg</code>, <code>n_turn_off_events</code>, <code>n_turn_off_events_dropped</code>, <code>E_sw_dropped</code>, <code>n_turn_off_events_capped</code>, <code>n_turn_off_events_unresolved</code>, <code>f_sw_estimate</code>, <code>t_rr</code></td>
+<td>diode + <code>diode_specs</code></td>
+</tr>
+<tr>
+<td><code>n_possible_chatter_gaps</code></td>
+<td>every diode (see below)</td>
+</tr>
+<tr>
+<td><code>t_window_start</code>, <code>t_window_end</code></td>
+<td>every entry: the window the statistics were taken over</td>
+</tr>
+<tr>
+<td><code>E_sw_on_total</code>, <code>E_sw_off_total</code>, <code>n_turn_on_events</code></td>
+<td>switch + <code>switch_specs</code></td>
+</tr>
+<tr>
+<td><code>P_core_avg</code>, <code>E_core_total</code>, <code>B_peak</code></td>
+<td>inductor + <code>core_loss_specs</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="resistor">Resistor<a class="headerlink" href="#resistor" title="Permanent link">&para;</a></h2>
+<p><code>P_avg = v_R² / R</code> reconstructed from node voltages. Zero new kwargs.</p>
+<div class="highlight"><pre><span></span><code><span class="n">b</span><span class="o">.</span><span class="n">add_resistor</span><span class="p">(</span><span class="s2">"R_load"</span><span class="p">,</span> <span class="s2">"vout"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">4.0</span><span class="p">)</span>
+<span class="n">res</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">t_end</span><span class="o">=</span><span class="mf">1e-3</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="mf">1e-5</span><span class="p">)</span>
+<span class="n">loss</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">device_loss_summary</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">res</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="nb">next</span><span class="p">(</span><span class="n">e</span> <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">loss</span> <span class="k">if</span> <span class="n">e</span><span class="p">[</span><span class="s2">"name"</span><span class="p">]</span> <span class="o">==</span> <span class="s2">"R_load"</span><span class="p">)[</span><span class="s2">"P_avg"</span><span class="p">])</span>
+</code></pre></div>
+<h2 id="capacitor-esr-inductor-dcr-and-ac-resistance-ladder">Capacitor ESR, inductor DCR and AC-resistance ladder<a class="headerlink" href="#capacitor-esr-inductor-dcr-and-ac-resistance-ladder" title="Permanent link">&para;</a></h2>
+<p><code>b.add_capacitor(..., esr=)</code> and <code>b.add_inductor(..., esr=)</code> add a series
+resistor named <code>{name}.esr</code>; its row in <code>device_loss_summary</code> is the
+<code>i²·esr</code> loss (1 A rms through 50 mΩ: 50.000 mW). An inductor built with
+<code>rac=p.passives.fit_rac_ladder(f, R_ac, L=...)</code> dissipates in <code>{name}.esr</code>
+(<code>R_dc</code>) and the cell resistors <code>{name}.rac_r{k}</code>, so every harmonic of
+the current is charged at its own <code>R_ac</code>: 1 A peak at 1 kHz plus 1 A
+peak at 100 kHz through <code>R_dc</code> = 10 mΩ and one 90 mΩ ∥ 143.24 nH cell
+dissipates 32.50 mW. ESR is one number: read it at the switching
+frequency.</p>
+<h2 id="switch-psim-style-e_on-e_off">Switch — PSIM-style E_on / E_off<a class="headerlink" href="#switch-psim-style-e_on-e_off" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="n">b</span><span class="o">.</span><span class="n">add_switch</span><span class="p">(</span><span class="s2">"M1"</span><span class="p">,</span> <span class="s2">"ds"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="n">g_on</span><span class="o">=</span><span class="mf">1e3</span><span class="p">,</span> <span class="n">g_off</span><span class="o">=</span><span class="mf">1e-9</span><span class="p">)</span>
+
+<span class="n">switch_specs</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"M1"</span><span class="p">:</span> <span class="p">{</span>
+    <span class="s2">"E_on_ref"</span><span class="p">:</span>  <span class="mf">120e-6</span><span class="p">,</span>    <span class="c1"># 120 µJ from datasheet</span>
+    <span class="s2">"E_off_ref"</span><span class="p">:</span> <span class="mf">180e-6</span><span class="p">,</span>
+    <span class="s2">"V_ref"</span><span class="p">:</span>     <span class="mf">48.0</span><span class="p">,</span>      <span class="c1"># datasheet test condition</span>
+    <span class="s2">"I_ref"</span><span class="p">:</span>     <span class="mf">10.0</span><span class="p">,</span>
+<span class="p">}}</span>
+<span class="n">loss</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">device_loss_summary</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">res</span><span class="p">,</span> <span class="n">switch_fn</span><span class="o">=</span><span class="n">pwm</span><span class="p">,</span>
+                                <span class="n">switch_specs</span><span class="o">=</span><span class="n">switch_specs</span><span class="p">)</span>
+</code></pre></div>
+<p>Pulsim detects turn-on / turn-off edges from your <code>switch_fn</code> mask and
+scales the datasheet energy linearly by the actual blocking voltage and
+load current at each edge:</p>
+<div class="highlight"><pre><span></span><code>E_on_event  = E_on_ref · (|V_blocking| / V_ref) · (|I_load| / I_ref)
+E_off_event = E_off_ref · ...
+</code></pre></div>
+<p>Honest errors: <code>V_ref</code> or <code>I_ref</code> ≤ 0 → <code>ValueError</code>. Unknown name in
+<code>switch_specs</code> → <code>KeyError</code>.</p>
+<h2 id="diode-q_rr-or-e_rr_ref">Diode — Q_rr or E_rr_ref<a class="headerlink" href="#diode-q_rr-or-e_rr_ref" title="Permanent link">&para;</a></h2>
+<p>Two equivalent entry points:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Raw recovery charge (hard-recovery diodes):</span>
+<span class="n">diode_specs</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"D1"</span><span class="p">:</span> <span class="p">{</span><span class="s2">"Q_rr"</span><span class="p">:</span> <span class="mf">50e-9</span><span class="p">}}</span>
+
+<span class="c1"># Datasheet energy + reference voltage (fast/soft recovery):</span>
+<span class="n">diode_specs</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"D1"</span><span class="p">:</span> <span class="p">{</span><span class="s2">"E_rr_ref"</span><span class="p">:</span> <span class="mf">30e-6</span><span class="p">,</span> <span class="s2">"V_R_ref"</span><span class="p">:</span> <span class="mf">600.0</span><span class="p">}}</span>
+
+<span class="c1"># Either form takes the recovery time (default 100 ns):</span>
+<span class="n">diode_specs</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"D1"</span><span class="p">:</span> <span class="p">{</span><span class="s2">"Q_rr"</span><span class="p">:</span> <span class="mf">50e-9</span><span class="p">,</span> <span class="s2">"t_rr"</span><span class="p">:</span> <span class="mf">35e-9</span><span class="p">}}</span>
+</code></pre></div>
+<p>A turn-off is the end of a conducting stretch of the diode's recorded
+state, at <code>t_off</code> (the end of its last conducting step). Pulsim reads
+the reverse voltage <code>V_R = max(−v_D, 0)</code> one recovery time later, at
+<code>t_off + t_rr</code> — a physical instant, the same on every engine and step
+size — and accumulates <code>E_rr = Q_rr · V_R</code> or
+<code>E_rr = E_rr_ref · (V_R / V_R_ref)</code>. <code>v_D</code> is read from the blocking
+samples paired into step midpoints, which cancels the fixed engine's
+trapezoidal alternation around a node held only by <code>g_off</code>. A
+hard-switched diode blocks its full voltage at once; a naturally
+commutated one (a line rectifier, a DCM turn-off) recovers against the
+little voltage that has built up after its current zero, so its <code>E_rr</code>
+is small — as it is in hardware.</p>
+<p>When the step that carries a turn-off is longer than <code>t_rr</code>, the grid
+cannot show how <code>v_D</code> rose inside it and <code>E_rr</code> depends on the step size.
+Those turn-offs are counted in <code>n_turn_off_events_unresolved</code> and a
+<code>RuntimeWarning</code> names the diode. The exception is a FORCED turn-off
+(another switch flips on the same step while the diode still carries
+current) whose blocking voltage is flat after the step: the voltage
+jumped at the turn-off, so the reading is the plateau. Use a step no
+longer than <code>t_rr</code> around the turn-offs (<code>engine='pwl'</code> with
+<code>dt &lt;= t_rr</code>, or a smaller <code>dt_max</code>), or pass the datasheet <code>t_rr</code>.</p>
+<p>Every recorded conduction stretch counts: turn-offs, <code>f_sw_estimate</code>,
+<code>Q_F</code> and <code>E_rr</code> are read from the record as the solver stamped it.
+That includes numerical chatter. The fixed engine produces it on a
+<code>V_th &gt; 0</code> diode with a capacitor across it (or in a tight loop with
+it): for <code>dt &gt; 2·τ</code>, <code>τ = C·(1/g_on + R_loop)</code>, the trapezoidal rule
+reflects each ON step from <code>+V_th</code> to about <code>−V_th</code>, the stamp drops to
+OFF, and the circuit recharges the capacitor to <code>V_th</code> within a few
+steps, over and over. A 100 kHz boost with 100 nF across D1 records 4580
+turn-offs at <code>dt = T/400</code> (15887 at <code>T/2000</code>) instead of 299; a 100 µF
+transformer rectifier (<code>τ = 0.5 µs</code>) records 360 instead of 5 at
+<code>dt = 2 µs</code>, with gaps of 40 to 187 steps.
+<code>n_possible_chatter_gaps</code> counts the gaps that look like it: the
+reflected ON step lasts one step, so a gap counts when at least two of
+the three runs around it (the conducting stretch before, the gap, the
+stretch after) last at most 2 steps, and no step average of <code>v_D</code> in it
+falls below <code>−2·V_th</code> (with a forward drop, <code>v_D − V_f</code> against
+<code>−2·(V_on − V_f)</code>). The gap length is not used: chatter gaps measured
+1 to 237 steps, and real short blocking intervals are as short (a
+100 kHz pulsed charger blocking 0.5 V: 5 steps at 1 µs, between
+conducting stretches of 5 steps, not reported). On the fixed-step engine
+a <code>RuntimeWarning</code> fires when they are at least half the turn-offs and
+cover 1 % or more of the conducting time; it says the gaps MAY be
+chatter and that, if they are, <code>n_turn_off_events</code>, <code>f_sw_estimate</code> and
+<code>E_sw_total</code> are inflated. A smaller <code>dt</code> removes the chatter only once it is about
+<code>2·τ</code> or less (a 1000 µF rectifier capacitor, <code>τ = 5 µs</code>: chatter at
+<code>dt &gt;= 16 µs</code>, none at <code>&lt;= 12 µs</code>); for a snubber directly across the
+diode <code>τ = C/g_on</code> is 1 ns per µF at <code>g_on = 1e3</code>, out of reach, and a
+smaller <code>dt</code> multiplies the gaps. To check, compare with
+<code>engine='trbdf2'</code> (or <code>engine='auto'</code> without <code>dt</code>; with <code>dt</code> it runs
+the fixed-step engine), which does not reflect this mode, and treat a
+disagreement as unresolved rather than taking either as the reference:
+TR-BDF2 has errors of its own on a stiff snubbed circuit (that same
+boost ends at 27.6 V on <code>'auto'</code> against 54.5 V on <code>'pwl'</code> at <code>T/400</code>
+and <code>T/4000</code>).</p>
+<p>Two guards keep immaterial conduction out, and both are reported:</p>
+<ul>
+<li>a stretch whose forward charge <code>Q_F</code> is below <code>1e-3</code> of the recovery
+  charge the spec asks for (<code>Q_rr</code> or <code>E_rr_ref / V_R_ref</code>) is not a
+  recovery
+  (<code>n_turn_off_events_dropped</code>; excluded from <code>n_turn_off_events</code>,
+  <code>f_sw_estimate</code> and the total) — the fixed engine's trapezoidal stiff
+  mode can turn a reverse-biased diode ON for single ~µA steps. With the
+  cap below, a dropped stretch could add at most 1e-3 of one event's
+  energy; <code>E_sw_dropped</code> reports what they would add together, and a
+  <code>RuntimeWarning</code> fires if that exceeds 1 % of <code>E_sw_total</code>. The test
+  is the stretch's own charge, not the run's peak current: a 4 kA
+  start-up inrush made the old <code>1e-3 · i_peak</code> rule drop all 237 light-
+  load recoveries of a boost (each above <code>Q_rr</code>), <code>E_sw</code> 4.9× and
+  <code>f_sw_estimate</code> 5× low. An <code>E_rr_curve</code> is judged on its own current
+  axis instead: a stretch whose peak forward current is below <code>1e-3</code> of
+  the curve's smallest tabulated positive current is dropped. (E_rr is
+  read off the same axis, at the current the diode carries when it is
+  cut off; the charge a curve asks for scales with that current, so a
+  curve through the origin would have asked a 36 µA chatter blip for
+  1e-12 C and counted all of them.) A spec without any recovery (counts
+  only) judges the peak forward current against <code>1e-3</code> of the median
+  peak of the stretches that reach <code>1e-3</code> of the run's peak current;</li>
+<li>no event recovers more than its own forward charge: <code>E_rr</code> is capped
+  at <code>Q_F · V_R</code> (<code>n_turn_off_events_capped</code>). Capped events usually
+  are one-step re-conductions from a ringing the grid does not resolve
+  (a snubber faster than <code>dt</code>), which also inflate <code>n_turn_off_events</code>
+  and <code>f_sw_estimate</code>, so a <code>RuntimeWarning</code> reports them.</li>
+</ul>
+<p>The <code>SwitchedDiode</code> kernel model has no physical recovery charge — this
+is a datasheet annotation pass, matching the LTspice "ideal-diode-with-Qrr"
+option and the PSIM diode loss panel.</p>
+<h2 id="magnetic-core-loss">Magnetic core loss<a class="headerlink" href="#magnetic-core-loss" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="n">core_loss_specs</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"L1"</span><span class="p">:</span> <span class="p">{</span>
+    <span class="s2">"material"</span><span class="p">:</span> <span class="s2">"N87"</span><span class="p">,</span>       <span class="c1"># built-in catalogue (or CoreMaterial obj)</span>
+    <span class="s2">"N_turns"</span><span class="p">:</span>  <span class="mi">20</span><span class="p">,</span>
+    <span class="s2">"A_core"</span><span class="p">:</span>   <span class="mf">1.0e-4</span><span class="p">,</span>      <span class="c1"># m²</span>
+    <span class="s2">"V_core"</span><span class="p">:</span>   <span class="mf">5.0e-6</span><span class="p">,</span>      <span class="c1"># m³</span>
+    <span class="s2">"use_igse"</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>        <span class="c1"># default; falls back to Steinmetz if trace</span>
+                              <span class="c1">#   is shorter than one period</span>
+<span class="p">}}</span>
+</code></pre></div>
+<p>Internally:</p>
+<ol>
+<li>Reconstruct <code>B(t) = L · i(t) / (N · A_core)</code> from the kernel state
+   trace.</li>
+<li>Apply iGSE (Venkatachalam 2002) or classic Steinmetz at the
+   FFT-estimated dominant frequency.</li>
+<li>Multiply by <code>V_core</code> to get watts.</li>
+</ol>
+<p>Inline <code>{"K": ..., "alpha": ..., "beta": ...}</code> is accepted in place of
+<code>material</code>. Non-positive <code>N_turns</code> / <code>A_core</code> / <code>V_core</code> → <code>ValueError</code>
+(no silent zeros).</p>
+<h3 id="in-loop-core-loss-in-a-magnetic-network">In-loop core loss in a magnetic network<a class="headerlink" href="#in-loop-core-loss-in-a-magnetic-network" title="Permanent link">&para;</a></h3>
+<p>The Steinmetz / iGSE estimate above runs after the transient: it reads
+<code>B(t)</code> from the trace and never changes the circuit. In a magnetic
+network (tutorial 09), <code>b.add_magnetic_resistance(name, a, b, R_m)</code>
+between two magnetic nodes dissipates <code>R_m·(dΦ/dt)²</code> inside the solve,
+so the loss damps the circuit. It is classical eddy loss
+(<code>P ∝ f²·B²</code>); <code>device_loss_summary</code> lists it with
+<code>kind="magnetic_resistance"</code>, <code>category="core_loss"</code> and its <code>R_m</code>.
+<code>b.add_excess_loss(name, a, b, c, eps)</code> adds Bertotti's excess loss,
+<code>F = c·u/(u² + eps²)^¼</code> for the flux rate <code>u</code> (<code>P ∝ (f·B)^1.5</code>); it is
+listed with <code>kind="excess_loss"</code>, <code>category="core_loss"</code>, <code>c</code> and <code>eps</code>.
+Under a sine flux rate of amplitude <code>Û</code> its loss is
+<code>c·Û^1.5·0.556418</code> (the mean of <code>|cos|^1.5</code>) less <code>(3/4)·(eps/Û)²</code> of
+it: <code>eps ≤ 1.15e-3·Û</code> keeps it within 1e-6. It does not feed a thermal
+node: the kernel's loss port belongs to switching devices (a junction);
+a core temperature is not modelled.</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Steinmetz / iGSE (post-hoc)</th>
+<th>magnetic elements (in loop)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>frequency law</td>
+<td><code>f^α·B^β</code>, fitted</td>
+<td>eddy <code>f²·B²</code>, excess <code>(f·B)^1.5</code>, JA loop</td>
+</tr>
+<tr>
+<td>changes the waveform</td>
+<td>no</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>hysteresis, excess loss</td>
+<td>inside the fit</td>
+<td><code>add_hysteretic_permeance</code>, <code>add_excess_loss</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>R_m</code> is fitted to a loss figure, not predicted; neither model is
+validated against measurement here.</p>
+<h2 id="junction-temperature-device_thermal_summary">Junction temperature — <code>device_thermal_summary</code><a class="headerlink" href="#junction-temperature-device_thermal_summary" title="Permanent link">&para;</a></h2>
+<p>Same kwargs as <code>device_loss_summary</code>, plus per-device Foster networks:</p>
+<div class="highlight"><pre><span></span><code><span class="n">foster_M1</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="n">p</span><span class="o">.</span><span class="n">FosterStage</span><span class="p">(</span><span class="n">R_th_K_per_W</span><span class="o">=</span><span class="mf">0.30</span><span class="p">,</span> <span class="n">tau_s</span><span class="o">=</span><span class="mf">2e-3</span><span class="p">),</span>   <span class="c1"># die-to-case</span>
+    <span class="n">p</span><span class="o">.</span><span class="n">FosterStage</span><span class="p">(</span><span class="n">R_th_K_per_W</span><span class="o">=</span><span class="mf">1.20</span><span class="p">,</span> <span class="n">tau_s</span><span class="o">=</span><span class="mf">80e-3</span><span class="p">),</span>  <span class="c1"># case-to-heatsink</span>
+<span class="p">]</span>
+
+<span class="n">therm</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">device_thermal_summary</span><span class="p">(</span>
+    <span class="n">b</span><span class="p">,</span> <span class="n">res</span><span class="p">,</span>
+    <span class="n">thermal_specs</span><span class="o">=</span><span class="p">{</span>
+        <span class="s2">"M1"</span><span class="p">:</span> <span class="p">{</span><span class="s2">"stages"</span><span class="p">:</span> <span class="n">foster_M1</span><span class="p">,</span> <span class="s2">"T_ambient_C"</span><span class="p">:</span> <span class="mf">40.0</span><span class="p">},</span>
+        <span class="s2">"D1"</span><span class="p">:</span> <span class="p">{</span><span class="s2">"stages"</span><span class="p">:</span> <span class="p">[</span><span class="n">p</span><span class="o">.</span><span class="n">FosterStage</span><span class="p">(</span><span class="n">R_th_K_per_W</span><span class="o">=</span><span class="mf">2.0</span><span class="p">,</span>
+                                            <span class="n">tau_s</span><span class="o">=</span><span class="mf">1e-3</span><span class="p">)]},</span>
+    <span class="p">},</span>
+    <span class="n">T_ambient_C</span><span class="o">=</span><span class="mf">25.0</span><span class="p">,</span>        <span class="c1"># fallback default</span>
+    <span class="c1"># everything below is forwarded into device_loss_summary:</span>
+    <span class="n">switch_fn</span><span class="o">=</span><span class="n">pwm</span><span class="p">,</span>
+    <span class="n">switch_specs</span><span class="o">=</span><span class="n">switch_specs</span><span class="p">,</span>
+    <span class="n">diode_specs</span><span class="o">=</span><span class="n">diode_specs</span><span class="p">,</span>
+    <span class="n">core_loss_specs</span><span class="o">=</span><span class="n">core_loss_specs</span><span class="p">,</span>
+<span class="p">)</span>
+</code></pre></div>
+<p>Per-device output:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>P_cond_avg</code></td>
+<td>Average conduction loss (W)</td>
+</tr>
+<tr>
+<td><code>P_sw_avg</code></td>
+<td>PSIM-style switching loss (W) — constant offset over the run</td>
+</tr>
+<tr>
+<td><code>P_core_avg</code></td>
+<td>Steinmetz / iGSE core loss (inductor only)</td>
+</tr>
+<tr>
+<td><code>P_total_avg</code></td>
+<td><code>P_cond_avg + P_sw_avg + P_core_avg</code></td>
+</tr>
+<tr>
+<td><code>T_j_trace</code></td>
+<td><code>np.ndarray</code> — full <code>T_j(t)</code> (°C): one value per <code>result.times</code> sample on <code>engine='pwl'</code> and <code>'dsed'</code> (DSED computes it with the step-start (right-limit) power inserted, so it agrees with <code>P_cond_avg</code>, and samples it back for every device), on a uniform resample of the run on <code>'trbdf2'</code> / <code>'auto'</code></td>
+</tr>
+<tr>
+<td><code>T_j_avg</code>, <code>T_j_peak</code></td>
+<td>scalars (°C); <code>T_j_avg</code> is a time average, on a variable grid over a linear resample of the power (−0.50 K of a 182 K rise on a DSED boost, +0.83 K on <code>'auto'</code>, against the exact single-stage value)</td>
+</tr>
+<tr>
+<td><code>T_ambient_C</code></td>
+<td>from spec or top-level default</td>
+</tr>
+<tr>
+<td><code>R_th_total</code></td>
+<td><code>Σ R_th_i</code> over the Foster stages (K/W)</td>
+</tr>
+<tr>
+<td><code>t_window_start</code>, <code>t_window_end</code></td>
+<td>the window the network ran over (from the first solved sample)</td>
+</tr>
+</tbody>
+</table>
+<p>The switching-loss and core-loss contributions are layered on the
+conduction trace as a <strong>constant offset</strong> (thermal time constants ≫
+nanosecond switching transitions, so the impulse energy is smeared
+across the cycle — standard PSIM convention).</p>
+<h2 id="event-losses-and-t_j-on-the-periodic-orbit-design-evaluator">Event losses and T_j on the periodic orbit (design evaluator)<a class="headerlink" href="#event-losses-and-t_j-on-the-periodic-orbit-design-evaluator" title="Permanent link">&para;</a></h2>
+<p>On the exact steady-state route (<code>pulsim.design.Evaluator</code>,
+<code>steady=SteadySpec(method="pss")</code>, engine <code>dsed</code>) the loss tables are
+read at every commutation of the steady period, from the period map's
+left and right limits at the event, by one rule:</p>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>Blocking voltage</th>
+<th>Current</th>
+<th>Temperature</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>turn-on</td>
+<td><code>|v(x⁻)|</code>, before</td>
+<td><code>|i(x⁺)|</code>, after</td>
+<td><code>T_j</code></td>
+</tr>
+<tr>
+<td>turn-off</td>
+<td><code>|v(x⁺)|</code>, after</td>
+<td><code>|i(x⁻)|</code>, before</td>
+<td><code>T_j</code></td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>Switches: <code>switch_specs={"Q1": {"E_on_table": LossTable, "E_off_table":
+  LossTable, "Tj": 125}}</code>. On a three-phase SPWM inverter (10 kHz, 1 µs
+  dead time, 600 V, 200 edges each way per 20 ms period) the kernel's
+  <code>E_on</code> / <code>E_off</code> equal <code>device_loss_summary</code>'s on a settled <code>dsed</code>
+  period within 1.8e-13 (test, tolerance 1e-9).</li>
+<li>Diodes: <code>switch_specs={"D1": {"E_off_table": LossTable, "Tj": 125}}</code>
+  is the recovery energy, read at each turn-off by the turn-off row
+  (<code>v</code> after, <code>i</code> before); it is the record's <code>recovery</code> loss. Its count
+  equals the diode's turn-off count in the period. This is the exact
+  route only: <code>device_loss_summary</code> refuses a diode in <code>switch_specs</code> by
+  name (it used to ignore it) and takes recovery through <code>diode_specs</code>.</li>
+<li>The junction: <code>ThermalSpec(r_th={"Q1": 2.5}, t_amb=40)</code> on this
+  route defaults to <code>mode="kernel"</code>: the orbit is fixed, <code>P(T_j)</code> is the
+  device's fixed loss plus its table energies over the period, and
+  <code>T_j = t_amb + r_th P(T_j)</code> is solved in C++ segment by segment
+  between the tables' <code>T_j</code> knots (exact where the tables are linear;
+  residual below 1e-9 K, <code>counters["thermal_residual"]</code>). It is the
+  smallest root above <code>t_amb</code>, where the physical iteration settles; no
+  root (<code>r_th dP/dT_j &gt;= 1</code>) is <code>infeasible</code> / <code>thermal_runaway</code>, with
+  the slope in the reason. <code>mode="fixed_point"</code> keeps the damped loop
+  (and <code>loss_at=</code>, <code>temperature_dependent=</code>); on the buck example's best
+  design (SYN-B, 60.5 kHz, r_th 3 K/W) <code>T_j(Q1)</code> is 43.27175 °C against
+  43.27162 °C, 1.3e-4 K apart (test: 0.1 K).</li>
+<li>Conduction: by default the circuit's own dissipation (the closed-form
+  period integrals). <code>ThermalSpec(conduction={"Q1": {"i": [...], "tj":
+  [...], "v_on": [[...]]}})</code> heats the junction with <code>V_on(|i|, T_j)·|i|</code>
+  over the on-state current instead, in closed form when the table is
+  linear in <code>i</code> (one or two current knots; more knots, a current that
+  changes sign, or a table clamped at 0 in range are refused by name).
+  It is reported as <code>p_cond_table.&lt;device&gt;</code>; the record's <code>conduction</code>
+  loss stays the circuit's, so the energy balance still closes.</li>
+</ul>
+<p>The tables in the tests and the examples are SYNTHETIC, as are the parts
+Pulsim ships (<code>allow_synthetic=True</code>); they illustrate the reading, not
+a device. Not covered: the event energy is not drawn from the circuit
+(the PWL switch is ideal, as in PLECS), and <code>T_j</code> does not feed back
+into the electrical solution in kernel mode.</p>
+<h2 id="event-losses-inside-the-transient-set_device_losses">Event losses inside the transient (<code>set_device_losses</code>)<a class="headerlink" href="#event-losses-inside-the-transient-set_device_losses" title="Permanent link">&para;</a></h2>
+<p>The summaries above are post-hoc: the run ends, then the tables are
+read. <code>CircuitBuilder.set_device_losses</code> reads them inside the time loop
+of <code>engine="pwl"</code> and deposits the heat into a node of a thermal network
+built in the same circuit (°C is a node voltage, W a current):</p>
+<div class="highlight"><pre><span></span><code><span class="n">b</span><span class="o">.</span><span class="n">add_voltage_source</span><span class="p">(</span><span class="s2">"Vamb"</span><span class="p">,</span> <span class="s2">"amb"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">40.0</span><span class="p">)</span>      <span class="c1"># ambient, °C</span>
+<span class="n">b</span><span class="o">.</span><span class="n">add_resistor</span><span class="p">(</span><span class="s2">"Rth"</span><span class="p">,</span> <span class="s2">"tj"</span><span class="p">,</span> <span class="s2">"amb"</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">)</span>               <span class="c1"># K/W</span>
+<span class="n">b</span><span class="o">.</span><span class="n">add_capacitor</span><span class="p">(</span><span class="s2">"Cth"</span><span class="p">,</span> <span class="s2">"tj"</span><span class="p">,</span> <span class="s2">"amb"</span><span class="p">,</span> <span class="mf">0.01</span><span class="p">)</span>             <span class="c1"># J/K</span>
+<span class="n">b</span><span class="o">.</span><span class="n">set_device_losses</span><span class="p">(</span><span class="s2">"Q1"</span><span class="p">,</span> <span class="n">junction</span><span class="o">=</span><span class="s2">"tj"</span><span class="p">,</span>              <span class="c1"># closed loop</span>
+                    <span class="n">E_on</span><span class="o">=</span><span class="n">LossTable</span><span class="p">(</span><span class="o">...</span><span class="p">),</span> <span class="n">E_off</span><span class="o">=</span><span class="n">LossTable</span><span class="p">(</span><span class="o">...</span><span class="p">),</span>
+                    <span class="n">V_on</span><span class="o">=</span><span class="n">ConductionTable</span><span class="p">(</span><span class="o">...</span><span class="p">),</span> <span class="n">conduction</span><span class="o">=</span><span class="s2">"table"</span><span class="p">)</span>
+<span class="n">res</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="mf">0.1</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="mf">1e-6</span><span class="p">,</span> <span class="n">switch_fn</span><span class="o">=</span><span class="n">pwm</span><span class="p">)</span>
+<span class="n">res</span><span class="o">.</span><span class="n">v</span><span class="p">(</span><span class="s2">"tj"</span><span class="p">)</span>                    <span class="c1"># junction temperature, °C</span>
+<span class="n">res</span><span class="o">.</span><span class="n">loss_events</span><span class="p">(</span><span class="s2">"Q1"</span><span class="p">)</span>          <span class="c1"># t, kind, v, i, Tj, E (structured array)</span>
+<span class="n">res</span><span class="o">.</span><span class="n">device_energy</span><span class="p">(</span><span class="s2">"Q1"</span><span class="p">)</span>        <span class="c1"># E_on, E_off, E_cond_electrical, E_cond_table, n_on, n_off</span>
+</code></pre></div>
+<ul>
+<li>Temperature: <code>junction="tj"</code> reads the tables at the junction node's
+  temperature before each event and heats that node (closed loop);
+  <code>Tj=125</code> reads at a fixed temperature, and with <code>heat_node="tj"</code> still
+  heats that node (open loop), without it only records.</li>
+<li>Reading rule: the table on the left of "Event losses on the periodic
+  orbit" below, the same function (<code>thermal::commutation_point</code>) on both
+  routes. On <code>pwl</code>, <code>x⁻</code> / <code>x⁺</code> are the samples before and after the
+  step that changed the mask, the samples <code>device_loss_summary</code> reads:
+  on a three-phase VSI at <code>Tj = 125</code> the kernel's <code>E_on</code> / <code>E_off</code> per
+  switch equal <code>device_loss_summary(switch_specs=...)</code> within 1e-9.
+  A diode's <code>E_off</code> is its recovery, read at each natural turn-off.</li>
+<li>Deposition: the heat of a step is a rectangular power over the next
+  step; the trapezoid rule's capacitor history passes half of it on, so
+  the network receives it over two steps (h/2 + h/2), exactly in sum
+  while every step is trapezoidal (the default). A backward-Euler /
+  SDIRK step (<code>discontinuity_restart=True</code>, a commutation split) keeps no
+  capacitor current, so at each switch between step kinds up to half a
+  step's heat can be lost or delivered twice while <code>heat_injected</code>
+  counts the full amount. Measured on the 10 kHz chopper of the tests
+  (20 ms, 1200 restart steps): the network's energy matches
+  <code>heat_injected</code> within 4e-10 (2.7e-13 without restarts).
+  Ten 1 mJ events into 0.01 J/K with no leak raise the junction
+  1.000 K (1e-6). <code>res.heat_injected + res.heat_pending</code> equals the
+  recorded event and conduction energy within 1e-12 (the last step's
+  heat is still pending when the run ends).</li>
+<li>Conduction: <code>conduction="electrical"</code> (default) heats with the device's
+  own electrical dissipation per step, as <code>device_loss_summary</code> reads it
+  (energy balance closes); <code>"table"</code> with <code>V_on(|i|, T_j)·|i|</code> over the
+  on-state ends of the step, trapezoidal. Both are reported.</li>
+<li><code>engine="trbdf2"</code> runs the same tracker: conduction with the
+  integrator's stage quadrature (TR-BDF2 weights <code>(w, w, d)</code> at
+  <code>(0, γh, h)</code>, SDIRK <code>(1-γs, γs)</code>, trapezoid on landings and probes), a
+  commutation from the engine's left and right limits at the landed
+  instant (the same reading rule and table call as <code>pwl</code>), and the heat as
+  a power over the next step, consumed in proportion to the committed
+  length (a landing keeps the rest owed).</li>
+<li>Impulsive re-initialisation (an ideal switch closing a capacitor loop,
+  opening a cut-set): the record's <code>dW</code> is booked to the device it names
+  (<code>cause</code>) as <code>device_energy(...)["E_impulse"]</code> and heats its junction;
+  that step's conduction is its end power only, as <code>device_loss_summary</code>
+  reads the pulse step.</li>
+<li>A resumed run (<code>resume_from=</code>) continues the tracker: the heat in flight,
+  the ledgers and the events travel in the snapshot (pickle field 17).</li>
+<li>Refusals by name (<code>UnsupportedError</code> / <code>ValueError</code>, naming the
+  device): <code>dsed</code> / <code>exact</code>, <code>bdf1</code>, and <code>auto</code> when it resolves to
+  <code>dsed</code>, refuse a circuit with a loss port; an unknown device, a device that is not a PWL switch or
+  diode, both or neither of <code>junction</code> / <code>Tj</code>, <code>conduction="table"</code>
+  without <code>V_on</code>, and a deposit node without a capacitor on it.</li>
+<li>YAML: a <code>losses:</code> block on a <code>switch</code>, <code>diode</code>, <code>mosfet</code>,
+  <code>mosfet_with_body_diode</code> or <code>igbt</code> (<code>junction</code>, <code>Tj</code>, <code>heat_node</code>,
+  <code>e_on</code>, <code>e_off</code>, <code>v_on</code>, <code>conduction</code>; unknown keys refused).</li>
+<li>Parts: <code>part.attach_losses(b, "Q1", T_amb=40)</code> builds the part's
+  Foster or Cauer chain from a node <code>Tj_Q1</code> and hands its tables over
+  unreduced (a PLECS XML part through <code>lib.import_plecs_xml</code>); a
+  synthetic part needs <code>allow_synthetic=True</code>.</li>
+</ul>
+<p>Not covered: the event energy is not drawn from the circuit (the PWL
+switch is ideal); <code>T_j</code> does not change <code>V_f</code> or <code>g_on</code>; a device that
+flips twice inside one outer step (a commutation split) records no
+event, since only the step's end masks are compared; a thermal
+capacitor to ground starts at 0 °C from a zero initial state, and the
+first events read that (tie the capacitors to the ambient node, as
+above, or start from a DC operating point).</p>
+<h2 id="device-level-switching-energy-add_power_mosfet">Device-level switching energy — <code>add_power_mosfet</code><a class="headerlink" href="#device-level-switching-energy-add_power_mosfet" title="Permanent link">&para;</a></h2>
+<p>To simulate the switching transient itself instead of annotating it,
+build the device with <code>CircuitBuilder.add_power_mosfet</code> (channel, C_gs,
+C_gd(v), C_ds(v), R_g, body diode) and measure it with
+<code>p.double_pulse_test(device_kwargs, V_dd=, I_load=, R_g_ext=, V_drive=,
+L_load=)</code>, which returns E_on, E_off, the Miller plateau, dv/dt, di/dt
+and I_rr as time-weighted integrals, starting from the off-state bias
+(an all-zero start turns the device on through C_gd before the gate
+command). Use <code>engine="trbdf2"</code>; on <code>pwl</code>
+the step must resolve the gate transient (0.2 ns for a 60 ns plateau).
+The datasheet fitters are in <code>pulsim.datasheet</code>. Losses of the
+composite are not in <code>device_loss_summary</code> yet (unified device
+interface).</p>
+<h2 id="whats-not-covered">What's <em>not</em> covered<a class="headerlink" href="#whats-not-covered" title="Permanent link">&para;</a></h2>
+<p>The kernel runs at fixed <code>dt</code>. We don't resolve sub-<code>dt</code> switching
+waveform shapes — the PSIM annotations capture the right <em>energy</em> per
+event, not the <em>instantaneous</em> voltage/current trajectory through the
+nanosecond transition. For waveform-level accuracy on a single
+switching edge, drop <code>dt</code> ≪ T_sw or use a sub-step Newton step.</p>
+<p>If you need a custom <code>E_on(I, T_j)</code> curve that doesn't fit the linear
+<code>*_specs</code> shape, fall back to a state-aware <code>step_observer</code> driving
+<code>LossAccumulator.add_sample(...)</code> + <code>add_switching_event(E_sw)</code> —
+documented in <code>KNOWN_LIMITATIONS.md</code>.</p>
+<h2 id="end-to-end-example">End-to-end example<a class="headerlink" href="#end-to-end-example" title="Permanent link">&para;</a></h2>
+<p><a href="https://github.com/lgili/Pulsim/blob/main/examples/scripts/run_device_loss_to_thermal.py"><code>examples/scripts/run_device_loss_to_thermal.py</code></a>
+ships a 130-line buck → losses → <code>T_j(t)</code> pipeline with an optional
+<code>--plot</code> flag that overlays the steady-state Foster asymptote.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+</div>
+      
+        <div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/lgili/Pulsim" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8M97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    <script id="__config" type="application/json">{"base": "..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.expand", "navigation.top", "navigation.footer", "navigation.instant", "navigation.tracking", "content.action.edit", "content.action.view", "content.code.copy", "content.code.annotate", "toc.follow"], "search": "../assets/javascripts/workers/search.f8cc74c7.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.60a45f97.min.js"></script>
+      
+        <script src="../assets/js/katex.js"></script>
+      
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+      
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"></script>
+      
+    
+  </body>
+</html>

@@ -1,0 +1,3836 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Power-electronics circuit simulator — C++23 kernel with a Python-first API">
+      
+      
+      
+        <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/known-limitations/">
+      
+      
+        <link rel="prev" href="../gotchas/">
+      
+      
+        <link rel="next" href="../how-pulsim-works/">
+      
+      
+      <link rel="icon" href="../assets/images/pulsim-logo.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.5.50">
+    
+    
+      
+        <title>Known Limitations (2.1) - Pulsim</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.a40c8224.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../assets/stylesheets/extra.css">
+    
+      <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="blue-grey" data-md-color-accent="deep-orange">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#known-limitations-of-pulsim-21" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Pulsim" class="md-header__button md-logo" aria-label="Pulsim" data-md-component="logo">
+      
+  <img src="../assets/images/pulsim-logo.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Pulsim
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Known Limitations (2.1)
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="blue-grey" data-md-color-accent="deep-orange"  aria-hidden="true"  type="radio" name="__palette" id="__palette_0">
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="blue-grey" data-md-color-accent="deep-orange"  aria-hidden="true"  type="radio" name="__palette" id="__palette_1">
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      <label class="md-header__button md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+      </label>
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/lgili/Pulsim" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    lgili/Pulsim
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href=".." class="md-tabs__link">
+          
+  
+  User Guide
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../how-pulsim-works/" class="md-tabs__link">
+          
+  
+  How Pulsim Works
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../internals/" class="md-tabs__link">
+          
+  
+  Internals
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../build-system/" class="md-tabs__link">
+          
+  
+  Operations
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Pulsim" class="md-nav__button md-logo" aria-label="Pulsim" data-md-component="logo">
+      
+  <img src="../assets/images/pulsim-logo.svg" alt="logo">
+
+    </a>
+    Pulsim
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/lgili/Pulsim" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    lgili/Pulsim
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Home
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  <span class="md-ellipsis">
+    User Guide
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            User Guide
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Home
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Getting Started
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ai-guide/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Using Pulsim with AI Assistants
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mental-model/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Mental Model
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../parameters/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Parameters and Value Updates
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../domains/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Node Domains
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/01-rc-charging/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 01 — RC Charging
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/02-buck-converter/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 02 — Buck Converter
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/03-flyback-isolated/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 03 — Isolated Flyback
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/04-3phase-vsi/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 04 — Three-Phase VSI
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/05-ldo-feedback/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 05 — LDO with Op-Amp
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/06-igbt-boost/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 06 — IGBT Boost
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/07-dc-machine/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 07 — DC Machine
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/08-design-optimisation/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 08 — Using Pulsim inside an optimiser
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/09-magnetic-networks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 09 — Magnetic networks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/10-power-mosfet-datasheet/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 10 — Datasheet to double pulse
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sensitivities/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Parameter Sensitivities
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../SOFT_SWITCHING/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Soft Switching (ZVS / ZCS probes)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../motors-induction/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Motors — Induction (Phase 2)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../motors-sensorless/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Motors — Sensorless Observers (Phase 2)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mmc/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Modular Multilevel Converters (MMC)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../loss-thermal/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Loss & Thermal Modelling
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../transmission-line/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Transmission Line (Bergeron)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../c-block/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Custom Code Blocks (C / C++ / Python)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../solvers/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Numerical Solvers (Phase 2)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api-reference/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    API Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../result-reference/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Result Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../device-reference/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Device Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../helpers/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    UX Helpers (discover, plot, monitor)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../gotchas/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Gotchas
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Known Limitations (2.1)
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  <span class="md-ellipsis">
+    Known Limitations (2.1)
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#opt-in-features-of-21-with-open-findings" class="md-nav__link">
+    <span class="md-ellipsis">
+      Opt-in features of 2.1 with open findings
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#on-default-options-nonlinear-output-capacitance-on-the-variable-step-engine" class="md-nav__link">
+    <span class="md-ellipsis">
+      On default options: nonlinear output capacitance on the variable-step engine
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#engine-capability-matrix" class="md-nav__link">
+    <span class="md-ellipsis">
+      Engine capability matrix
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#option-capability-matrix" class="md-nav__link">
+    <span class="md-ellipsis">
+      Option capability matrix
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#engines" class="md-nav__link">
+    <span class="md-ellipsis">
+      Engines
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ac-analysis" class="md-nav__link">
+    <span class="md-ellipsis">
+      AC analysis
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#periodic-steady-state" class="md-nav__link">
+    <span class="md-ellipsis">
+      Periodic steady state
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#design-evaluation-pulsimdesign" class="md-nav__link">
+    <span class="md-ellipsis">
+      Design evaluation (pulsim.design)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#event-losses-in-the-transient-set_device_losses" class="md-nav__link">
+    <span class="md-ellipsis">
+      Event losses in the transient (set_device_losses)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#node-domains" class="md-nav__link">
+    <span class="md-ellipsis">
+      Node domains
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#devices" class="md-nav__link">
+    <span class="md-ellipsis">
+      Devices
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#switching-helpers" class="md-nav__link">
+    <span class="md-ellipsis">
+      Switching helpers
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sources" class="md-nav__link">
+    <span class="md-ellipsis">
+      Sources
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#importers" class="md-nav__link">
+    <span class="md-ellipsis">
+      Importers
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#machines" class="md-nav__link">
+    <span class="md-ellipsis">
+      Machines
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#passives" class="md-nav__link">
+    <span class="md-ellipsis">
+      Passives
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#magnetic-networks" class="md-nav__link">
+    <span class="md-ellipsis">
+      Magnetic networks
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#found-by-the-examples-audit-2026-11-13" class="md-nav__link">
+    <span class="md-ellipsis">
+      Found by the examples audit (2026-11-13)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#older-entries" class="md-nav__link">
+    <span class="md-ellipsis">
+      Older entries
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    How Pulsim Works
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            How Pulsim Works
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Overview
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/01-introduction/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    1 — Introduction (why SMPS is hard)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/02-mna-foundations/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    2 — MNA Foundations
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/03-trapezoidal-companion/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    3 — Trapezoidal Companion Discretisation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/04-pwl-state-space-cache/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    4 — PWL State-Space Cache
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/05-sparse-lu-foundations/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    5 — Sparse Direct LU Foundations
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/06-pulsim-sparse-lu/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    6 — PulsimSparseLuSolver
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/07-rank1-partial-refactor/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    7 — Path-Based Partial Refactorisation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/08-benchmarks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    8 — Benchmarks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/09-architecture-walkthrough/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    9 — Architecture Walkthrough
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/10-paper-figures-index/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    10 — Paper Figures Index
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/11-dsed-engine-overview/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    11 — DSED Engine Overview (Part II)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/12-dsed-state-space-extraction/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    12 — MNA → State-Space Extraction
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/13-dsed-dopri5-adaptive/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    13 — DOPRI5 + Adaptive PI + Event Scan
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/14-dsed-bdf2-and-dispatch/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    14 — BDF2 + Stiffness Dispatch
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/15-dsed-native-bindings/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    15 — Native Bindings (24× story)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-pulsim-works/16-dsed-benchmarks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    16 — DSED Benchmarks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Internals
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            Internals
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internals/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Architecture (Layer-by-Layer)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internals/layer0-numeric-and-sparse/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 0 — Numeric + Sparse
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internals/layer1-topology-and-enumeration/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 1 — Topology + Enumeration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internals/layer2-ad-and-device-models/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 2 — AD + Device Models
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internals/layer2-v1-mosfet-igbt/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 2 V1 — MOSFET / IGBT
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internals/layer2-v2-transformer/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 2 V2 — Transformer
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internals/layer3-stamping-pipeline/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 3 — Stamping Pipeline
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internals/layer4-pwl-state-space-cache/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 4 — PWL State-Space Cache
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internals/layer4-v1-trapezoidal-companion/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 4 V1 — Trapezoidal Companion
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internals/layer10-benchmarks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 10 — Benchmarks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internals/run-planning/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    How a run is planned
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internals/mmc-arm-block/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    MMC Arm Block — design doc
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Operations
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            Operations
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../build-system/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Build System
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../performance-tuning/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Performance Tuning
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../troubleshooting/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Troubleshooting
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../migration-guide/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Migration Guide (2.0 → 2.1, legacy → 1.0)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../versioning-and-release/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Docs Versioning and Release
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#opt-in-features-of-21-with-open-findings" class="md-nav__link">
+    <span class="md-ellipsis">
+      Opt-in features of 2.1 with open findings
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#on-default-options-nonlinear-output-capacitance-on-the-variable-step-engine" class="md-nav__link">
+    <span class="md-ellipsis">
+      On default options: nonlinear output capacitance on the variable-step engine
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#engine-capability-matrix" class="md-nav__link">
+    <span class="md-ellipsis">
+      Engine capability matrix
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#option-capability-matrix" class="md-nav__link">
+    <span class="md-ellipsis">
+      Option capability matrix
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#engines" class="md-nav__link">
+    <span class="md-ellipsis">
+      Engines
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ac-analysis" class="md-nav__link">
+    <span class="md-ellipsis">
+      AC analysis
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#periodic-steady-state" class="md-nav__link">
+    <span class="md-ellipsis">
+      Periodic steady state
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#design-evaluation-pulsimdesign" class="md-nav__link">
+    <span class="md-ellipsis">
+      Design evaluation (pulsim.design)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#event-losses-in-the-transient-set_device_losses" class="md-nav__link">
+    <span class="md-ellipsis">
+      Event losses in the transient (set_device_losses)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#node-domains" class="md-nav__link">
+    <span class="md-ellipsis">
+      Node domains
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#devices" class="md-nav__link">
+    <span class="md-ellipsis">
+      Devices
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#switching-helpers" class="md-nav__link">
+    <span class="md-ellipsis">
+      Switching helpers
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sources" class="md-nav__link">
+    <span class="md-ellipsis">
+      Sources
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#importers" class="md-nav__link">
+    <span class="md-ellipsis">
+      Importers
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#machines" class="md-nav__link">
+    <span class="md-ellipsis">
+      Machines
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#passives" class="md-nav__link">
+    <span class="md-ellipsis">
+      Passives
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#magnetic-networks" class="md-nav__link">
+    <span class="md-ellipsis">
+      Magnetic networks
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#found-by-the-examples-audit-2026-11-13" class="md-nav__link">
+    <span class="md-ellipsis">
+      Found by the examples audit (2026-11-13)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#older-entries" class="md-nav__link">
+    <span class="md-ellipsis">
+      Older entries
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+  
+    <a href="https://github.com/lgili/Pulsim/edit/main/docs/known-limitations.md" title="Edit this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+    
+      
+    
+    <a href="https://github.com/lgili/Pulsim/raw/main/docs/known-limitations.md" title="View source of this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17 18c.56 0 1 .44 1 1s-.44 1-1 1-1-.44-1-1 .44-1 1-1m0-3c-2.73 0-5.06 1.66-6 4 .94 2.34 3.27 4 6 4s5.06-1.66 6-4c-.94-2.34-3.27-4-6-4m0 6.5a2.5 2.5 0 0 1-2.5-2.5 2.5 2.5 0 0 1 2.5-2.5 2.5 2.5 0 0 1 2.5 2.5 2.5 2.5 0 0 1-2.5 2.5M9.27 20H6V4h7v5h5v4.07c.7.08 1.36.25 2 .49V8l-6-6H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h4.5a8.2 8.2 0 0 1-1.23-2"/></svg>
+    </a>
+  
+
+
+<h1 id="known-limitations-of-pulsim-21">Known limitations of Pulsim 2.1<a class="headerlink" href="#known-limitations-of-pulsim-21" title="Permanent link">&para;</a></h1>
+<p>This page lists the defects and gaps that Pulsim 2.1 ships with (the
+rows written for 2.0 were re-checked on the 2.1 code base; the fixed
+ones are gone). Each row gives the
+measured effect and one workaround. Where a test pins the defect, the
+row names it. These tests are strict xfails, so the suite fails as soon
+as the defect is fixed and the row has to be updated.</p>
+<p>The usage traps are not repeated here. They are behaviour by design
+that returns a plausible wrong number: a diode <code>V_th</code> that is not a
+forward drop, <code>.mean()</code> on the variable-step grid, <code>SwitchStateMask(n)</code>
+taking a size, MOSFET bit numbering, undriven switches that close, a
+broad <code>except</code> around <code>simulate</code>. They are in the
+<a href="../ai-guide/#5-traps">AI usage guide, section 5</a> (<code>python -m
+pulsim.guide</code>). How to check a result is in its
+<a href="../ai-guide/#6-how-to-verify-a-result">section 6</a>. Newton failures and
+their messages are covered in <a href="../gotchas/">Gotchas</a>.</p>
+<h2 id="opt-in-features-of-21-with-open-findings">Opt-in features of 2.1 with open findings<a class="headerlink" href="#opt-in-features-of-21-with-open-findings" title="Permanent link">&para;</a></h2>
+<p>These options default off; with default options none of this is reached.
+The numbers are in the <code>Known limitations</code> part of the 2.1.0 entry of the
+<a href="https://github.com/lgili/Pulsim/blob/main/CHANGELOG.md">changelog</a>.</p>
+<ul>
+<li><strong>Restart rule</strong> (<code>discontinuity_restart=True</code>): the ideal-switch
+  flyback on the fixed engine gets worse under step refinement; an edge
+  off the <code>dt</code> grid stays first order without event splitting.</li>
+<li><strong>Event splitting</strong> (with the restart rule): a retried step is re-taken
+  without its interior events; an even number of edges of an opaque
+  <code>switch_fn</code> inside one step is not seen.</li>
+<li><strong>Exact engine output rule</strong> (<code>engine='exact', output_rtol=...</code>): a
+  thermal summary read from stored samples depends on the output grid.</li>
+<li><strong>Sensitivities</strong> are refused by name at a recorded cut-set jump (a
+  DCM buck on <code>pwl</code> with splitting that returned a number before).</li>
+<li><strong>Exact engine</strong>: twelve paralleled bridges are refused by name; the
+  phase-shifted full bridge does not run with device capacitances nor in
+  ideal form.</li>
+</ul>
+<h2 id="on-default-options-nonlinear-output-capacitance-on-the-variable-step-engine">On default options: nonlinear output capacitance on the variable-step engine<a class="headerlink" href="#on-default-options-nonlinear-output-capacitance-on-the-variable-step-engine" title="Permanent link">&para;</a></h2>
+<p>A MOSFET with a nonlinear output capacitance on <code>engine='trbdf2'</code> (and on
+<code>auto</code> without <code>dt</code>, which lands there): the conduction energy after a gate
+edge reads +3.91 % against its closed form (a Coss buck). Workaround: pass
+<code>dt</code> (fixed step), or check the energy with a step-size study.</p>
+<h2 id="engine-capability-matrix">Engine capability matrix<a class="headerlink" href="#engine-capability-matrix" title="Permanent link">&para;</a></h2>
+<p>Which engine simulates which device kind. This table is the kernel's
+(<code>pulsim.engine_capabilities()</code>); <code>test_engine_conformance.py</code> checks
+that it equals this page and that every "yes" agrees with <code>engine='pwl'</code>
+within 1 % of the observable's span and every "no" raises
+<code>pulsim.UnsupportedError</code> naming the engine and the branch. <code>ac_sweep</code> is
+the kernel AC sweep (<code>run_mna_sweep</code> with <code>freqs=</code>): a "yes" Newton kind is
+linearised at the DC operating point from its device law
+(<code>test_ac_linearize.py</code> checks each against its closed form and a
+small-signal transient). <code>NonlinearDiode</code> is retired: <code>add_nonlinear_diode</code> refuses
+unless called with <code>allow_non_passive=True</code>.</p>
+<!-- engine-capabilities:begin -->
+<table>
+<thead>
+<tr>
+<th>Kind</th>
+<th>Class</th>
+<th>pwl</th>
+<th>trbdf2</th>
+<th>dsed</th>
+<th>bdf1</th>
+<th>ac_sweep</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Resistor</td>
+<td>Linear</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>VoltageSource</td>
+<td>Source</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>Switch</td>
+<td>Switch</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>Capacitor</td>
+<td>Linear</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>Inductor</td>
+<td>Linear</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>Diode</td>
+<td>PwlDiode</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>NonlinearDiode</td>
+<td>NewtonStatic</td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+<td>no</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>CurrentSource</td>
+<td>Source</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>PWMVoltageSource</td>
+<td>Source</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>SineVoltageSource</td>
+<td>Source</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>PulseVoltageSource</td>
+<td>Source</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>MosfetLevel1</td>
+<td>NewtonStatic</td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+<td>no</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>IgbtLevel1</td>
+<td>NewtonStatic</td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+<td>no</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>VCVS</td>
+<td>Linear</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>SaturableInductor</td>
+<td>NewtonStateful</td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+<td>no</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>NonlinearCapacitor</td>
+<td>NewtonStateful</td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+<td>no</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>ShockleyDiode</td>
+<td>NewtonStatic</td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+<td>no</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>LauritzenDiode</td>
+<td>NewtonStateful</td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+<td>no</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>PmsmMna</td>
+<td>NewtonStateful</td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+<td>no</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>IdealTransformer</td>
+<td>Linear</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>VCCS</td>
+<td>Linear</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>CCCS</td>
+<td>Linear</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>CCVS</td>
+<td>Linear</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>Gyrator</td>
+<td>Linear</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>SineCurrentSource</td>
+<td>Source</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>PulseCurrentSource</td>
+<td>Source</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>PwlCurrentSource</td>
+<td>Source</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>InductionMachineMna</td>
+<td>NewtonStateful</td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+<td>no</td>
+<td>no</td>
+</tr>
+<tr>
+<td>ExternalDevice</td>
+<td>NewtonStateful</td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+<td>no</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>ExcessLoss</td>
+<td>NewtonStatic</td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+<td>no</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>TransmissionLine</td>
+<td>LinearDelay</td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+<td>no</td>
+<td>yes</td>
+</tr>
+</tbody>
+</table>
+<!-- engine-capabilities:end -->
+
+<h2 id="option-capability-matrix">Option capability matrix<a class="headerlink" href="#option-capability-matrix" title="Permanent link">&para;</a></h2>
+<p>Which engine honours which <code>simulate()</code> keyword. This table is the
+kernel's (<code>sim::kRunOptionTable</code>, <code>pulsim.option_capabilities()</code>);
+<code>test_simulation_object.py</code> checks that it equals this page and that
+every "refused" cell raises <code>pulsim.UnsupportedError</code> naming the engine
+and the keyword (<code>feature</code>) when the keyword is set to a value that asks
+for something (<code>None</code>, <code>False</code>, <code>store_every=1</code>, <code>max_dt_halvings=0</code>,
+<code>mode_selection='legacy'</code>, <code>control_tick='label'</code> ask for nothing). No
+engine accepts a keyword and ignores it. The defaults are
+<code>sim::Defaults</code> (<code>core/include/pulsim/sim/defaults.hpp</code>).</p>
+<!-- option-capabilities:begin -->
+<table>
+<thead>
+<tr>
+<th>Keyword</th>
+<th>pwl</th>
+<th>trbdf2</th>
+<th>exact (dsed)</th>
+<th>default</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>engine</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>'auto'</td>
+</tr>
+<tr>
+<td><code>rtol</code></td>
+<td>refused</td>
+<td>yes</td>
+<td>yes</td>
+<td>1e-5 (trbdf2), 1e-6 (exact)</td>
+</tr>
+<tr>
+<td><code>atol</code></td>
+<td>refused</td>
+<td>yes</td>
+<td>yes</td>
+<td>1e-8 (trbdf2), 1e-9 (exact)</td>
+</tr>
+<tr>
+<td><code>dt_init</code></td>
+<td>refused</td>
+<td>yes</td>
+<td>yes</td>
+<td>kernel's choice (trbdf2), 1e-9 (exact)</td>
+</tr>
+<tr>
+<td><code>integrator</code></td>
+<td>refused</td>
+<td>yes</td>
+<td>yes</td>
+<td>'auto' (exact), TR-BDF2 (trbdf2)</td>
+</tr>
+<tr>
+<td><code>stiffness_threshold</code></td>
+<td>refused</td>
+<td>refused</td>
+<td>yes</td>
+<td>10.0</td>
+</tr>
+<tr>
+<td><code>h_bdf2</code></td>
+<td>refused</td>
+<td>refused</td>
+<td>yes</td>
+<td>1e-6</td>
+</tr>
+<tr>
+<td><code>t_start</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>0.0</td>
+</tr>
+<tr>
+<td><code>switch_fn</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>None</td>
+</tr>
+<tr>
+<td><code>b_extra_fn</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>None</td>
+</tr>
+<tr>
+<td><code>step_observer</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>None</td>
+</tr>
+<tr>
+<td><code>start_from_dc_op</code></td>
+<td>yes</td>
+<td>refused</td>
+<td>refused</td>
+<td>False</td>
+</tr>
+<tr>
+<td><code>enable_nonlinear_refresh</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>refused</td>
+<td>None (stamp the Newton devices when there are any)</td>
+</tr>
+<tr>
+<td><code>max_newton_iterations</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>refused</td>
+<td>50</td>
+</tr>
+<tr>
+<td><code>max_event_iterations</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>refused</td>
+<td>16</td>
+</tr>
+<tr>
+<td><code>strict_event_iterations</code></td>
+<td>yes</td>
+<td>refused</td>
+<td>refused</td>
+<td>False</td>
+</tr>
+<tr>
+<td><code>max_dt_halvings</code></td>
+<td>yes</td>
+<td>refused</td>
+<td>refused</td>
+<td>6</td>
+</tr>
+<tr>
+<td><code>voltage_sanity_factor</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>100</td>
+</tr>
+<tr>
+<td><code>store_every</code></td>
+<td>yes</td>
+<td>refused</td>
+<td>refused</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>auto_regularize</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>True</td>
+</tr>
+<tr>
+<td><code>tol_newton_dx</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>refused</td>
+<td>1e-9</td>
+</tr>
+<tr>
+<td><code>tol_newton_res</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>refused</td>
+<td>1e-9</td>
+</tr>
+<tr>
+<td><code>enable_newton_line_search</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>refused</td>
+<td>False</td>
+</tr>
+<tr>
+<td><code>enable_newton_lm</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>refused</td>
+<td>False</td>
+</tr>
+<tr>
+<td><code>newton_roundoff_budget</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>refused</td>
+<td>130</td>
+</tr>
+<tr>
+<td><code>enable_substep_state_correction</code></td>
+<td>yes</td>
+<td>refused</td>
+<td>refused</td>
+<td>False</td>
+</tr>
+<tr>
+<td><code>discontinuity_restart</code></td>
+<td>yes</td>
+<td>refused</td>
+<td>refused</td>
+<td>False</td>
+</tr>
+<tr>
+<td><code>resolution_diagnostics</code></td>
+<td>yes</td>
+<td>refused</td>
+<td>refused</td>
+<td>False</td>
+</tr>
+<tr>
+<td><code>on_impulse</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>'record'</td>
+</tr>
+<tr>
+<td><code>inductor_freeze_di_max</code></td>
+<td>yes</td>
+<td>refused</td>
+<td>refused</td>
+<td>None (off)</td>
+</tr>
+<tr>
+<td><code>inductor_abs_clamp</code></td>
+<td>yes</td>
+<td>refused</td>
+<td>refused</td>
+<td>None (off)</td>
+</tr>
+<tr>
+<td><code>progress</code></td>
+<td>yes</td>
+<td>refused</td>
+<td>yes</td>
+<td>False</td>
+</tr>
+<tr>
+<td><code>initial_state</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>None (the circuit's ICs)</td>
+</tr>
+<tr>
+<td><code>should_continue</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>refused</td>
+<td>None</td>
+</tr>
+<tr>
+<td><code>closed_loops</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>None</td>
+</tr>
+<tr>
+<td><code>live_stream</code></td>
+<td>yes</td>
+<td>refused</td>
+<td>refused</td>
+<td>None</td>
+</tr>
+<tr>
+<td><code>mmc_arms</code></td>
+<td>yes</td>
+<td>refused</td>
+<td>refused</td>
+<td>None</td>
+</tr>
+<tr>
+<td><code>on_cache</code></td>
+<td>yes</td>
+<td>refused</td>
+<td>refused</td>
+<td>None</td>
+</tr>
+<tr>
+<td><code>controller_period</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>None</td>
+</tr>
+<tr>
+<td><code>resume_from</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>None</td>
+</tr>
+<tr>
+<td><code>solver</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>None</td>
+</tr>
+<tr>
+<td><code>sensitivities</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>None</td>
+</tr>
+<tr>
+<td><code>mode_selection</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>None ('legacy')</td>
+</tr>
+<tr>
+<td><code>allow_implicit_segments</code></td>
+<td>refused</td>
+<td>refused</td>
+<td>yes</td>
+<td>None</td>
+</tr>
+<tr>
+<td><code>output_rtol</code></td>
+<td>refused</td>
+<td>refused</td>
+<td>yes</td>
+<td>None (today's samples)</td>
+</tr>
+<tr>
+<td><code>undriven</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>None (each engine's own)</td>
+</tr>
+<tr>
+<td><code>recorders</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>None</td>
+</tr>
+<tr>
+<td><code>control_tick</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>'label'</td>
+</tr>
+<tr>
+<td><code>device_path</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>refused</td>
+<td>'legacy'</td>
+</tr>
+<tr>
+<td><code>t_end</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>required</td>
+</tr>
+<tr>
+<td><code>dt</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>None (pwl: required; trbdf2: kernel ceiling; exact: 1e-5)</td>
+</tr>
+</tbody>
+</table>
+<!-- option-capabilities:end -->
+
+<p>The charge laws <code>ChargeLaw.table</code> / <code>.vdmos_cgd</code> are the
+NonlinearCapacitor row. <code>add_power_mosfet</code> is a composite of the
+MosfetLevel1, Capacitor, NonlinearCapacitor, Resistor, Inductor and
+Shockley / Lauritzen diode rows: it runs on <code>pwl</code> and <code>trbdf2</code> and is
+refused on <code>dsed</code>, <code>bdf1</code> and the kernel AC sweep, naming the channel.</p>
+<p>The branch form of a switch or diode (<code>add_ideal_switch</code>,
+<code>add_diode(form='branch')</code>, YAML <code>form: branch</code>; opt-in) has its own
+column; "no" raises <code>UnsupportedError(feature='branch_form')</code>. A mode
+whose ideal elements (<code>R_on = 0</code> or <code>g_off = 0</code>) make a state dependent
+(an inductor cut-set, a capacitor loop) runs on <code>pwl</code> with
+<code>discontinuity_restart=True</code> and on <code>trbdf2</code> (always: three SDIRK(2,2)
+steps after the entry), and an impulsive entry is recorded in
+<code>res.reinit_records</code> (<code>on_impulse='error'</code> refuses it with
+<code>feature='impulse'</code>; on <code>dsed</code> a jump is recorded only above 1e-9 of the
+circuit's current or voltage scale, so a tiny cut in a circuit with a
+very large current scale is projected without a record); on <code>pwl</code> without the rule, and on <code>trbdf2</code> with a
+Coss, Lauritzen, IGBT-tail, PMSM or saturable-inductor history, it is
+refused with <code>feature='dependent_states'</code>; a node bounded only by open ideal elements with
+<code>g_off = 0</code> is refused with <code>feature='floating_node'</code>, a loop of closed
+ideal elements and voltage sources with <code>feature='ideal_voltage_loop'</code>.</p>
+<!-- branch-form-capabilities:begin -->
+<table>
+<thead>
+<tr>
+<th>Form</th>
+<th>pwl</th>
+<th>trbdf2</th>
+<th>dsed</th>
+<th>bdf1</th>
+<th>ac_sweep</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Switch</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>Diode</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+<td>yes</td>
+</tr>
+</tbody>
+</table>
+<!-- branch-form-capabilities:end -->
+
+<p>The gated PWL devices are a form of the Diode row with their own column
+(<code>add_igbt(reverse_blocking=True)</code> and <code>add_gto</code>: GateHeld;
+<code>add_thyristor</code> and <code>add_triac</code>: Latching); "no" raises
+<code>UnsupportedError(feature='gated_diode')</code>. Not modelled: turn-off time
+<code>t_q</code> and commutation failure, dv/dt and break-over firing, a latching
+current distinct from <code>I_H</code>, gate power, reverse recovery and switching
+energies. <code>I_H &gt; 0</code> chops an inductive current into <code>R_off</code> (a voltage
+<code>I_H·R_off</code> without a snubber).</p>
+<!-- gated-capabilities:begin -->
+<table>
+<thead>
+<tr>
+<th>Form</th>
+<th>pwl</th>
+<th>trbdf2</th>
+<th>dsed</th>
+<th>bdf1</th>
+<th>ac_sweep</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GateHeld</td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+<td>no</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>Latching</td>
+<td>yes</td>
+<td>yes</td>
+<td>no</td>
+<td>no</td>
+<td>yes</td>
+</tr>
+</tbody>
+</table>
+<!-- gated-capabilities:end -->
+
+<p>Circuit-level limits, also raised as <code>UnsupportedError</code> (with <code>feature</code>
+set): coupled inductors (<code>add_transformer</code>, <code>add_inductor_coupling</code>) on
+<code>dsed</code> and <code>bdf1</code>; PWL diodes with <code>integrator='bdf2'</code> on <code>dsed</code>;
+capacitor loops (parallel capacitors) on <code>dsed</code>; C blocks, an every-step
+<code>step_observer</code> (no <code>controller_period</code>), <code>device_path='interface'</code>,
+<code>start_from_dc_op</code>, <code>store_every</code>,
+<code>live_stream</code>, <code>max_dt_halvings</code>, <code>mmc_arms</code>, <code>on_cache</code>, the inductor
+guards, <code>enable_substep_state_correction</code> and <code>discontinuity_restart</code> on
+<code>dsed</code>; the fixed-step keywords (<code>discontinuity_restart</code> among them) on
+<code>trbdf2</code>; a control-graph <code>Rate</code> with a <code>compute_delay</code> time
+(<code>compute_delay</code>) on <code>trbdf2</code>; a <code>b_extra_fn.next_jump_after</code> declaration is read by <code>pwl</code>
+only (a no-op on <code>trbdf2</code> / <code>dsed</code>, which control the step on their own
+error estimate); <code>enable_nonlinear_refresh=False</code> with a smooth /
+Shockley diode, MOSFET or IGBT on every transient engine;
+<code>sensitivities=</code> on every engine but <code>dsed</code>, and on <code>dsed</code> a parameter
+that is not an R, L, C, DC-source value or the duty of a single-switch
+trailing-edge PWM (<code>sensitivity_parameter</code>; a dead-time pair's duty is
+refused), a time-varying source, a Newton device, an opaque gate or
+<code>b_extra_fn</code>, a mode without an exact propagator, an RK45 step, a
+grazing diode event (<code>grazing_event</code>), and a KPI window edge on a moving
+event where the signal jumps.</p>
+<h2 id="engines">Engines<a class="headerlink" href="#engines" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Limitation</th>
+<th>Measured</th>
+<th>Workaround</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong><code>dsed</code> can settle a zero-band diode into the wrong mode; two guards stop it being returned.</strong> The complementarity guard (default) judges each settled mode and repairs the wrong ones with the LCP; the stored-sample guard raises <code>DiodeModeInconsistentError</code> for what the kernel guard misses.</td>
+<td>Boost 12 V, 100 µH, 47 µF, 100 kHz, D = 0.5, V_th = 0 at 20 / 50 / 500 Ω: repaired (7 / 16 / 23 events), ends on trbdf2 rtol 1e-10. LC tank into a series diode with V_th = 0 (a double crossing inside one step): the kernel guard returns v = -5.18 V at 10 µs (trbdf2 9.50 V); the stored-sample guard raises.</td>
+<td><code>V_th = 1e-3</code> for the double crossing, or <code>pwl</code> / <code>trbdf2</code>.</td>
+</tr>
+<tr>
+<td><strong>The exact engine with the default mode selection loses a flyback's magnetising energy at every turn-off.</strong> At the gate-off the secondary diode's current is a state at 0, so the settle reads its voltage as 0 and keeps it OFF; the forward bias exists only inside the 1e-14 s <code>R_off</code> transient in which the coupling would carry the current over, and the guard's judge (horizons past that transient) confirms the mode. A default-path defect; <code>mode_selection='auto'</code> (the next defaults) does not have it. Pinned as a strict xfail: <code>test_release_findings_c.py::test_the_flyback_secondary_conducts_on_the_exact_engine[legacy]</code>; notes: <code>openspec/changes/update-number-changing-release/fixes/group-c.md</code> (F-3-3 side observation).</td>
+<td><code>_flyback(False, 1.0)</code> of <code>test_saturable_transformer.py</code> (100 kHz, D = 0.5, <code>engine='dsed'</code>, 1 ms): v_out over 0.8-1 ms is 0.000 V (also at <code>rtol=1e-9</code>); the primary current drops from 2.06 A to 1e-7 A at each gate-off. <code>mode_selection='auto'</code> gives 16.357 V; truth 16.365 V (the fixed engine with the restart rule at dt 10 / 5 / 2.5 ns, and the exact engine under <code>'auto'</code>).</td>
+<td><code>mode_selection='auto'</code> or <code>'lcp'</code> on the exact engine, or <code>engine='pwl'</code> with <code>dt</code> and <code>discontinuity_restart=True</code>.</td>
+</tr>
+<tr>
+<td><strong>Fixed-step controller ticks land on the <code>dt</code> grid.</strong> Source j ticks at <code>t_start + k*T_j</code> on both engines; <code>trbdf2</code> lands each instant, <code>pwl</code> delivers it at the first grid point at or after it.</td>
+<td><code>T = 2.5*dt</code> over 100 µs at <code>dt</code> = 1 µs: 40 ticks, each late by less than <code>dt</code> (<code>result.control_tick_jitter_max</code>), with a warning; <code>T &lt; dt</code> raises.</td>
+<td><code>dt = T/n</code>, or omit <code>dt</code> (<code>trbdf2</code>).</td>
+</tr>
+<tr>
+<td><strong>By default the fixed engine is first order after a discontinuity.</strong> The start (ICs included), every gate edge and every source jump leave a stale trapezoidal history (<code>v_prev</code>, <code>i_prev</code>). Guide trap 9; pinned by <code>test_first_step_order.py</code> and <code>test_fixed_step_discontinuity_order.py</code>.</td>
+<td>RL decay, R = 1 Ω, L = 1 mH, <code>i0</code> = 5 A: relative error at 5 τ 1.997e-3, 9.99e-4, 5.00e-4 at <code>dt</code> = 4, 2, 1 µs (order 1.00); with <code>discontinuity_restart=True</code> (three SDIRK(2,2) steps per discontinuity) 6.66e-6, order 2.00. Buck CCM <code>i_L</code> at T/50: 1.18e-2 A, 1.17e-7 A with the rule. An edge off the <code>dt</code> grid stays first order unless <code>enable_substep_state_correction=True</code> (needs the rule) splits the step at it: buck D = 0.4567 <code>v_C</code> at T/50 8.08e-2 V → 1.07e-6 V, order 2. An undeclared <code>b_extra_fn</code> jump stays first order either way. Sample 0 of <code>v(a)</code> reads 0 V either way; the consistent value is -5 V.</td>
+<td><code>discontinuity_restart=True</code> (gate sampled at the step start); keep edges on the grid.</td>
+</tr>
+<tr>
+<td><strong>Diode-mask chatter on the fixed engine.</strong> With PWL diodes and a Newton device in the same circuit, the diode mask is re-decided at every Newton iteration and no mask is self-consistent at a small step. Pinned by <code>test_newton_stall_and_mask_chatter.py</code>.</td>
+<td>PSFB with a saturable primary and a floating secondary. At <code>dt</code> = 20, 10, 5 and 2 ns it aborts near t = 1.5 µs, even split into 64 sub-steps. At 50 ns it runs. V_out = <code>v(vout) - v(rect_neg)</code>, averaged over 1.5-2 ms, is 6.771 V. With a linear primary it is 6.765 V at 50 ns and 6.938 V at 10 ns (6.937 V at 5 ns). So 50 ns reads 2.4 % low.</td>
+<td>Run at 50 ns and accept about 2.5 % low; check it against the linear-primary circuit at 10 ns. <code>add_shockley_diode</code> runs at 10 ns but changes the model: each junction drops about 0.7 V and a PWL diode drops none (trap 1). V_out falls to 5.785 V (-16.6 %). Use it only if you want that drop.</td>
+</tr>
+<tr>
+<td><strong>TR-BDF2 femtosecond landing step after a diode turn-off.</strong> Pinned by <code>test_trbdf2_stateful_with_diodes.py::test_no_kilovolt_artefact_on_the_internal_node</code>.</td>
+<td>L-D-RC rectifier, 20 V source, constant 111 µH. On TR-BDF2 the L-D node peaks at 1539 V on a 3e-14 s step; on <code>pwl</code> it peaks at 23.1 V. The output peak is the same on both: 19.640 V and 19.641 V.</td>
+<td>Do not take <code>max()</code> of internal nodes from a TR-BDF2 run. Check peaks on <code>engine='pwl'</code> with a <code>dt</code>.</td>
+</tr>
+<tr>
+<td><strong>A floating diode bridge has an undetermined common mode on TR-BDF2.</strong> A V_th = 0 bridge whose DC bus is tied to ground only through 1 MΩ has no defined common mode once every diode is off.</td>
+<td>325 V, 1 mH line, 470 µF, 100 Ω: v(dp) − v(dn) agrees with <code>pwl</code> (<code>dt = 1e-6</code>) to 0.017 V at rtol 1e-5, 0.007 V at 1e-6 and 0.0015 V at 1e-7, but v(dp) alone differs by up to 41 V, 265 V and 32 V. (It ground to <code>max_steps</code> at rtol 1e-6 and 1e-7 before the TR-BDF2 roundoff-floor fix.)</td>
+<td>Measure the bus as v(dp) − v(dn), or ground one DC rail.</td>
+</tr>
+<tr>
+<td><strong>TR-BDF2 can miss PWL-diode commutations.</strong> Guide trap 13.</td>
+<td>230 V rms bridge, 0.1 Ω, 470 µF, 1 kΩ. With <code>V_th = 0</code> it runs half-wave: 318.79 V and 12.91 V pp, against 322.06 V and 6.38 V pp with <code>dt=1e-6</code>. With <code>V_th = 0.7</code> and 1 mH of line, D2 and D4 are held OFF while forward-biased for one sample at 75.92 ms; V_dc is 321.80 V against 321.82 V. Snubbed boost (24 V, 220 µH, 50 kHz, D = 0.5, 1 nF across D1, 100 µF, 30 Ω), V_out over 2-3 ms: with <code>V_th = 0</code>, 24.64 V on <code>trbdf2</code> and <code>auto</code>, against 54.89 V with <code>dt = 1e-8</code>. With <code>V_th = 0.7</code> on <code>auto</code>, 56.18 V against 54.89 V (+2.3 %), and D1 is held ON while reverse-biased on 106 samples.</td>
+<td>Pass <code>dt</code>. Rerun with <code>dt</code> whenever <code>simulate</code> warns that a diode "rode its conduction boundary", or <code>res.i</code> warns that one was held "in a state its commutation rule forbids".</td>
+</tr>
+<tr>
+<td><strong>TR-BDF2 does not converge on a converter with no capacitance at its switch / rectifier nodes and a leakage inductance in series with a winding.</strong> Each OFF device in series with an inductance leaves a femtosecond mode, and the node between the leakage inductance and the winding carries only inductors, so its voltage is solved to round-off at the smallest steps. It shows as many forced-accept warnings and a result that does not settle as <code>rtol</code> tightens. Every forced accept is blamed on a current of the primary's inductor cut-set (<code>L_leak</code>, <code>T1.p</code>, <code>T1.s</code>), at a gate edge (h = 2e-14 s) or inside the 100 ns dead time that follows it (h = 2e-10 s, the body diodes' zero-current commutation), with the estimate 20 to 3000 times its tolerance: the femtosecond mode makes that current change within any step, so the error estimate is right and cannot be fixed there. Record: DECISIONS #21 of <code>update-trbdf2-post-event-restart</code>, DECISIONS 11 of <code>update-trbdf2-error-control</code>.</td>
+<td><code>examples/phase_shift_full_bridge.yaml</code>, V_out averaged over 1.8-2.0 ms (2026-11-19): 23.975, 23.991 and 23.964 V at <code>rtol</code> 1e-5, 1e-6 and 1e-8, with 2.3 k to 6.6 k forced accepts; <code>integrator='esdirk43'</code> gives 23.964, 23.966 and 23.961 V. <code>engine='exact'</code> gives 24.0661693 V.</td>
+<td>Model the devices' output / junction capacitance and the winding capacitance (with both, the run settles as <code>rtol</code> tightens), or use <code>engine='exact'</code>, which handles the capacitance-free circuit.</td>
+</tr>
+<tr>
+<td>The sliding-mode warning says <code>engine='auto'</code> even when <code>engine='trbdf2'</code> was requested.</td>
+<td>Seen on the <code>V_th = 0</code> bridge above.</td>
+<td>None needed: the warning describes the TR-BDF2 run.</td>
+</tr>
+<tr>
+<td><strong><code>trbdf2</code> and <code>auto</code> can crash the Python process.</strong></td>
+<td>The saturable-primary PSFB of the mask-chatter row, with no <code>dt</code>. With <code>t_end = 0.2 ms</code> it raises <code>SimulationAborted</code> at t = 0 (<code>h_min</code>). With <code>t_end = 2 ms</code> the process dies with a segmentation fault (exit code 139).</td>
+<td>Pass <code>dt</code>. Run variable-step jobs you cannot vet in a subprocess.</td>
+</tr>
+<tr>
+<td><strong>A rectifier whose DC side floats cannot start on <code>engine='auto'</code>.</strong> Guide trap 8.</td>
+<td>100 V bridge with the DC rails not connected to ground. It aborts with <code>factorize failed (numerically singular) ... (dt=6e-14) ... node dcn</code>. A 1 MΩ or 1 GΩ resistor from <code>dcn</code> to ground does not help.</td>
+<td>Ground one DC rail (92.83 V on TR-BDF2), or pass <code>dt</code> (92.54 V at <code>dt=1e-5</code>).</td>
+</tr>
+<tr>
+<td><strong>DSED polls a Python <code>switch_fn</code>, so it misses gate intervals shorter than the polling period.</strong> The poll runs every <code>dt_max/10</code> (1 µs on a 2 ms run). The warning calls this "correct but slower".</td>
+<td>48 V synchronous buck, 100 kHz, D = 0.4, 200 ns dead time, 50 Ω. With no <code>dt</code>, the body diodes are never ON in the record over 1-2 ms (31 % of the samples on <code>pwl</code>). V_out over that window is 19.73 V against 20.35 V on <code>pwl</code> (-3.1 %). With <code>dt=1e-7</code> DSED gives 20.350 V.</td>
+<td>Pass a <code>dt</code> of at most half the shortest gate interval, or use <code>engine='pwl'</code>.</td>
+</tr>
+<tr>
+<td><code>simulate(engine='dsed')</code> with no <code>switch_fn</code> warns that it will poll "this plain Python switch_fn".</td>
+<td>RC plus diode, no <code>switch_fn</code>: the run is correct but prints that warning.</td>
+<td>Ignore it.</td>
+</tr>
+<tr>
+<td><code>start_from_dc_op=True</code> works only on the fixed engine.</td>
+<td>Without <code>dt</code> it raises <code>ValueError: ... start_from_dc_op is a fixed-step entry point</code>.</td>
+<td>Pass <code>dt</code>.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="ac-analysis">AC analysis<a class="headerlink" href="#ac-analysis" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Limitation</th>
+<th>Measured</th>
+<th>Workaround</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>The kernel AC sweep (<code>run_mna_sweep</code> with <code>freqs=</code> and <code>v_in_branch_id=</code>) linearises at the DC operating point only the kinds marked <code>ac_sweep</code> in the table above.</strong> It covers R, L, C, coupled and multi-winding transformers, ideal transformers, VCVS, VCCS, CCCS, CCVS, gyrators, sources (waveform current sources add no AC excitation), switches / PWL diodes held at the <code>mask=</code> you pass, and the Newton devices (smooth, Shockley and Lauritzen diodes, level-1 MOSFET/IGBT with the tail, saturable inductor with the atan or table law, nonlinear capacitor, PMSM at rest, external devices) through their device law at the DC point of <code>mask</code>. Refused with <code>UnsupportedError</code> naming the device: the induction machine; a Jiles-Atherton inductor (no unique incremental inductance); a nonlinear permeance on a magnetic node (no DC point yet); a PMSM held at speed or not in torque balance (no equilibrium). Switches without <code>mask=</code> are refused too.</td>
+<td>Shockley diode at 1 A behind 1 Ω: <code>|H| = 0.0252</code> (it used to read 1, then was refused).</td>
+<td>Time domain: <code>run_ac_sweep</code>, <code>pulsim.fra.run_fra</code>, <code>frequency_response</code>, or <code>run_mna_sweep(..., use_kernel=False, dt=, t_end=)</code>.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="periodic-steady-state">Periodic steady state<a class="headerlink" href="#periodic-steady-state" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Limitation</th>
+<th>Measured</th>
+<th>Workaround</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A slow mode limits the orbit's accuracy to the map's rounding over one minus the Floquet radius.</td>
+<td>Zero-mean sine current into 1 µF ∥ 1 TΩ (Floquet radius 1 - 1e-9): v(0) = 0.15726 V against 0.159155 V.</td>
+<td>Add the real loss; check <code>floquet_radius</code>.</td>
+</tr>
+<tr>
+<td><code>engine='pwl'</code> / <code>'trbdf2'</code> shooting differentiates the map by finite differences (<code>n</code> period runs per Jacobian, Broyden updates between them), so it costs more runs than the exact stepper and has no orbit sensitivities (<code>sensitivities=</code> refused). <code>pwl</code> needs a gate edge at <code>t = 0</code> and <code>T/dt</code> an integer; <code>trbdf2</code> needs a schedule with <code>next_edge_after</code> and fixes the step ceiling at <code>dt</code> (default <code>T/100</code>); nonlinear devices are refused on both.</td>
+<td>DCM buck from zero: 12 period runs on <code>pwl</code> (6 on the exact stepper). Orbit vs the engine's own 4000-period transient: 1.2e-11 (<code>pwl</code>) and 2.6e-9 (<code>trbdf2</code>) of the state scale.</td>
+<td><code>engine='exact'</code> when the circuit is in its coverage.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="design-evaluation-pulsimdesign">Design evaluation (<code>pulsim.design</code>)<a class="headerlink" href="#design-evaluation-pulsimdesign" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Limitation</th>
+<th>Measured</th>
+<th>Workaround</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>The <code>pss</code> route's thread scaling needs the kernel batch: a circuit-form evaluator with declarative KPIs (<code>Kpi.*</code>, <code>Kpi.formula</code>) runs in one GIL-free call; a factory (<code>build=</code>), a callable KPI, <code>gradients=</code> or a thermal loop take the Python path (named in <code>counters["batch"]</code>).</td>
+<td>Buck Pareto, 4096 designs, load 15-19 on 10 cores: kernel batch 10022 / 21621 / 25369 evaluations/s on 1 / 4 / 8 threads; the Python thread path 3597 / 2286 / 2405.</td>
+<td><code>Evaluator(circuit=..., fields=..., schedule=...)</code> with <code>Kpi.formula</code>; else <code>backend="process"</code>.</td>
+</tr>
+<tr>
+<td><code>method="transient"</code> on the fixed-step <code>pwl</code> engine is first order at gate edges (the step ending at an edge takes the new mask at its end), and its KPIs with it; the energy balance closes on the engine's own trajectory, so it does not flag this.</td>
+<td>DCM buck at T/200: <code>p_out</code> 0.87 % low, T/800 0.083 % (probe <code>openspec/changes/add-design-optimization-workflow/probes/pin_quadrature.py</code>).</td>
+<td><code>method="pss"</code> (2e-7 at T/200), or <code>options={"discontinuity_restart": True}</code> (3.5e-6).</td>
+</tr>
+<tr>
+<td>A device whose power no loss model covers (Lauritzen diode, level-1 MOSFET/IGBT, controlled sources) refuses the efficiency.</td>
+<td>Buck with a Lauritzen diode: efficiency would read 0.99989 without the diode's 1.36 W of 28.4 W; it is <code>refused</code> (<code>feature="losses"</code>).</td>
+<td>Evaluate without <code>loads=</code> for the other KPIs, or use the PWL diode / switch.</td>
+</tr>
+<tr>
+<td><code>method="transient"</code> settles to the engine's own orbit.</td>
+<td>DCM buck on <code>trbdf2</code>: estimated distance 1.4e-10, true error 2.2e-5 (the engine's accuracy). A PWM voltage source on <code>trbdf2</code> never settles to 1e-6 (period noise 2.7e-4).</td>
+<td><code>method="pss"</code> (exact stepper), or a switch with a schedule instead of a PWM source.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="event-losses-in-the-transient-set_device_losses">Event losses in the transient (<code>set_device_losses</code>)<a class="headerlink" href="#event-losses-in-the-transient-set_device_losses" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Limitation</th>
+<th>Measured</th>
+<th>Workaround</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>engine="pwl"</code> and <code>engine="trbdf2"</code> read loss tables inside the run. <code>dsed</code> / <code>exact</code> reads them at a fixed <code>Tj=</code> (switching energy at each event, conduction as the exact ∫v·i of each mode, impulsive energy booked to the switch) runs the junction temperature loop (a <code>junction=</code> / <code>heat_node=</code> node: each step's heat as the network's exact response, each event's energy as an impulse; the reconstructed current of a branch the heat flows through at once, e.g. the ambient source's, excludes that heat current), and refuses by name a deposit node an algebraic node voltage reads instantly, a <code>V_on</code> conduction table, time-varying sources, and <code>integrator='bdf2'</code> (a <code>resume_from</code> continues the ledgers, field 17; a fresh <code>t_start</code> run books the zero-start run's ledgers with event times shifted by <code>t_start</code>); <code>bdf1</code> refuses every loss port (<code>UnsupportedError</code>, feature <code>device_losses</code>, the device).</td>
+<td>Conformance cell <code>test_device_losses_cell</code>.</td>
+<td><code>engine="pwl"</code> or <code>"trbdf2"</code>, or the post-hoc <code>device_loss_summary</code> / the periodic-orbit evaluator on the exact engine.</td>
+</tr>
+<tr>
+<td>The event energy is not drawn from the circuit: the PWL switch is ideal, the table energy only heats the junction.</td>
+<td>By design, as in PLECS and PSIM.</td>
+<td>Model the transition (<code>add_power_mosfet</code>) when the electrical side must see it.</td>
+</tr>
+<tr>
+<td><code>T_j</code> does not feed back into the device (<code>V_f</code>, <code>g_on</code> stay fixed).</td>
+<td>Task 4.1 (optional) not done.</td>
+<td>Re-run with <code>V_f</code> / <code>g_on</code> at the settled <code>T_j</code>.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="node-domains">Node domains<a class="headerlink" href="#node-domains" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Limitation</th>
+<th>Measured</th>
+<th>Workaround</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Result traces carry no unit. <code>Circuit.unit_of(node)</code> knows it (<code>degC</code> on a thermal node, <code>rad/s</code> / <code>rad</code> on a PMSM's speed / angle node); <code>SimulationResult</code> does not.</td>
+<td>—</td>
+<td><code>circuit.unit_of(name)</code> when labelling a plot.</td>
+</tr>
+<tr>
+<td>Only declared tags, PMSM speed/angle pins, the induction machine's speed pin and the magnetic (winding / permeance) pins set a domain. A DC machine's <code>omega_node</code>, the mechanical helpers and user-built mechanical networks stay electrical unless declared.</td>
+<td>DC machine with <code>omega_node</code> declared mechanical: <code>node_domain</code> reads <code>mechanical</code>, samples bit-identical to the untagged run.</td>
+<td><code>builder.node(name, "mechanical")</code> before <code>build()</code>.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="devices">Devices<a class="headerlink" href="#devices" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Limitation</th>
+<th>Measured</th>
+<th>Workaround</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>External devices (<code>add_external_device</code>) are refused by the exact engine (<code>dsed</code>) and <code>bdf1</code>.</strong> <code>dsed</code> propagates each topology mode in closed form and admits no Newton device; a law known only through <code>f</code>, <code>q</code> and their Jacobians at sampled points has no closed-form propagator. No sandbox: a model library is native code. Event functions (<code>n_events &gt; 0</code>) are refused: no engine locates an external zero crossing yet. A YAML <code>external_device</code> loads only a library listed in <code>allow_native_code=[...]</code>; inline <code>code:</code> is not accepted.</td>
+<td><code>UnsupportedError(kind='ExternalDevice')</code> on <code>dsed</code> / <code>bdf1</code>.</td>
+<td><code>pwl</code>, <code>trbdf2</code>, the DC operating point and the kernel AC sweep run it (<code>docs/external-devices.md</code>).</td>
+</tr>
+<tr>
+<td><strong><code>add_nonlinear_diode</code> is retired.</strong> Its law <code>logistic(κ(v − V_F0))·(v − V_F0)/R_d</code> sources power for <code>0 &lt; v &lt; V_F0</code>. It now raises <code>RetiredDeviceError</code> unless called with <code>allow_non_passive=True</code> (YAML: <code>allow_non_passive: true</code>).</td>
+<td>Default parameters, 0.636 V forced: −1.3923 A. 20 V / 1 kHz sine clamp through 10 Ω: <code>pwl</code> at <code>dt = 1 µs</code> aborts; <code>trbdf2</code> RMS 9.634 V against 10.01 V for the PWL and Shockley diodes.</td>
+<td><code>add_diode(..., V_f=)</code> or <code>add_shockley_diode</code>.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="switching-helpers">Switching helpers<a class="headerlink" href="#switching-helpers" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Limitation</th>
+<th>Measured</th>
+<th>Workaround</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong><code>make_pwm_switch_fn</code> edges jitter by one <code>dt</code> step.</strong> It compares a floating-point phase. Guide trap 10.</td>
+<td>100 kHz, D = 0.5, <code>dt = 1e-7</code>: 49, 50 or 51 on-steps per period, where 50 were asked. <code>make_dead_time_pwm_pair_fn</code> with 200 ns dead time gives the high side 48 or 49 on-steps, where 48 are expected.</td>
+<td>Make <code>D/f_sw</code> a whole number of steps and compute the PWM in steps (<code>grid_pwm</code>, guide 3.2), or split the steps at the edges: <code>discontinuity_restart=True, enable_substep_state_correction=True</code> (the helpers carry <code>next_edge_after</code>).</td>
+</tr>
+</tbody>
+</table>
+<h2 id="sources">Sources<a class="headerlink" href="#sources" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Limitation</th>
+<th>Measured</th>
+<th>Workaround</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>No behavioural sources.</strong> The controlled sources (<code>add_vcvs</code>, <code>add_vccs</code>, <code>add_cccs</code>, <code>add_ccvs</code>, <code>add_gyrator</code>) are linear with constant gains; there is no expression source (SPICE <code>B</code>, PSIM math block) and no polynomial or table-driven gain.</td>
+<td><code>spice_to_builder</code> refuses <code>B</code> sources.</td>
+<td>A nonlinear law of node voltages or branch currents: <code>b_extra_fn</code> or a closed loop.</td>
+</tr>
+<tr>
+<td><strong>The table source is a current source only.</strong> There is no PWL voltage source.</td>
+<td><code>add_pwl_current_source</code> exists; <code>add_pwl_voltage_source</code> does not.</td>
+<td>A voltage table: drive a 1 Ω load with the current table and use it through a VCVS (<code>add_vcvs</code>), or a <code>b_extra_fn</code>.</td>
+</tr>
+<tr>
+<td><strong>A controlled source on the fixed engine shows the engine's first-order start</strong> (guide trap 9), like any reactive circuit.</td>
+<td>Gyrator (g = 0.01 S) with 1 µF, 1 V through 10 Ω, <code>dt = 1e-6</code>: 63.19 mA at 1 ms against the exact 63.21 mA, error <code>dt/(2τ)</code>. An identical 10 mH inductor gives the same trace to 1e-9. <code>trbdf2</code> is within 1.5e-8, <code>dsed</code> within 1e-15.</td>
+<td>Halve <code>dt</code> and compare, or run without <code>dt</code>.</td>
+</tr>
+<tr>
+<td><code>dsed</code> runs all seven new kinds.</td>
+<td>A circuit with every controlled kind: <code>trbdf2</code> and <code>dsed</code> agree to 1e-7 after 10 µs. Sample 0 differs by design: <code>dsed</code> reports the consistent algebraic state, the other engines 0 V.</td>
+<td>None needed.</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Limitation</th>
+<th>Measured</th>
+<th>Workaround</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong><code>res.i()</code> and <code>device_loss_summary</code> do not cover the Lauritzen diode, the nonlinear capacitor, an IGBT with a tail or <code>add_power_mosfet</code>.</strong> Their current needs a stored charge the states do not give the law. The static Newton kinds (Shockley, smooth diode, level-1 MOSFET, level-1 IGBT without a tail) and the saturable inductor are covered: against a 1 mΩ sense resistor within 2e-12 of the peak current and 4e-13 in energy on <code>pwl</code> and <code>trbdf2</code>.</td>
+<td><code>res.i("X")</code> raises <code>NotImplementedError</code> naming the recipe.</td>
+<td>Put a 1 mΩ resistor in series and read <code>res.i</code> of the resistor (guide trap 1).</td>
+</tr>
+<tr>
+<td><strong><code>device_loss_summary</code> and <code>device_thermal_summary</code> have no time window.</strong> Both average the whole record, start-up included.</td>
+<td>Bridge of trap 13 (<code>V_th = 0.7</code>, <code>dt = 1e-6</code>, 0.1 s): the conduction model (<code>V_f0 = 0.7</code>, <code>r_on = 0.02</code>) on <code>BR__D1</code> reads 2.338 W over the run and 0.136 W over 80-100 ms (17.2x).</td>
+<td>Apply the model to <code>res.i(name)</code> with <code>p.time_average(t, ..., t_from=...)</code> (guide 3.4).</td>
+</tr>
+<tr>
+<td><strong><code>p.time_rms</code> reads pulsed currents low on a fixed grid.</strong> <code>time_rms</code> joins the samples with straight lines, so each hard edge becomes a one-step ramp. Guide trap 14.</td>
+<td>Buck 48 V to 12 V, D = 0.25, 100 kHz, 4 Ω. MOSFET RMS over 4-6 ms: 1.4905, 1.4956 and 1.4981 A at <code>dt</code> = 1e-7, 5e-8 and 2.5e-8, against 1.5007 A from <code>sqrt(time_average(i**2))</code> at all three. The <code>i_rms</code> that <code>device_loss_summary</code> gives a switch or a PWL diode integrates <code>i**2</code> exactly in each step (1.50522 A at <code>dt</code> = 1e-7, 4 Ω, 47 µF).</td>
+<td><code>np.sqrt(p.time_average(t, i**2, t_from=...))</code>.</td>
+</tr>
+<tr>
+<td><strong>The missed-commutation warning of <code>res.i</code> repeats once per call site.</strong> Python's default filter keys on the calling line.</td>
+<td>Six reads of one diode from four lines print it four times.</td>
+<td><code>warnings.filterwarnings("once", message=".*commutation rule forbids")</code> prints it once. It matches both the "OFF while forward-biased" and the "ON while reverse-biased" form.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="importers">Importers<a class="headerlink" href="#importers" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Limitation</th>
+<th>Measured</th>
+<th>Workaround</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong><code>add_power_mosfet</code> is a composite of Newton devices: no <code>res.i</code> of the device and no loss row.</strong> The generic readings cover the bare <code>mosfet_level1</code>, not this composite.</td>
+<td><code>res.i("Q1")</code> raises like <code>mosfet_level1</code>; <code>device_loss_summary</code> omits it.</td>
+<td><code>p.double_pulse_test</code> (sense resistor), or a 1 mΩ resistor in series.</td>
+</tr>
+<tr>
+<td><strong>The level-1 MOSFET has a negative slope near threshold.</strong> The triode polynomial at small or negative overdrive makes dI/dV_DS &lt; 0 at V_DS = 0 for V_OV in (≈ −0.72/κ, 0), and just past saturation onset (down to −0.040 S for K = 1.43, κ = 15); there <code>i·v</code> reaches −0.29 mW. The zero-voltage leak <code>α(1−β)·K·V_OV²</code> is gone since 2026-11-19: zero current at V_DS = 0, C¹ across it (add-unified-device-interface DECISIONS #44).</td>
+<td>K = 1.43, κ = 15: min dI/dV_DS −0.040 S; min i·v −0.29 mW at V_OV = −0.20 V, V_DS = −0.21 V.</td>
+<td>Drive the gate well past threshold (κ·V_OV ≫ 1), or raise <code>kappa</code>.</td>
+</tr>
+<tr>
+<td><strong><code>add_power_mosfet</code> non-goals:</strong> p-channel, live T_j inside the law (T_j is run-constant), drain inductance and package networks, avalanche, SiC/GaN effects, a table channel (constant-K Level-1 only), AC analysis.</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td><strong>A gate transient on <code>pwl</code> needs a step that resolves it.</strong></td>
+<td>The 400 V / 10 A double pulse with a 65 ns plateau: 7501 steps at <code>dt</code> = 0.2 ns; <code>trbdf2</code> takes about 1200.</td>
+<td><code>engine="trbdf2"</code>.</td>
+</tr>
+<tr>
+<td><strong>VDMOS import: absent capacitances are 0 (LTspice), not ngspice's defaults</strong> (CGDMAX 2 nF, CGDMIN 20 pF, CGS 1.4 nF, CJO 0.5 nF). CJO uses the junction law without SPICE's FC linearisation.</td>
+<td>-</td>
+<td>Write every charge parameter in the card; <code>charge="drop"</code> restores the ideal-gate device.</td>
+</tr>
+<tr>
+<td><strong><code>spice_to_builder</code> reads a subset of SPICE.</strong></td>
+<td><code>Q</code> (BJT) and <code>K</code> (coupled inductors) raise <code>NotImplementedError</code>. A <code>{...}</code> expression takes the parameter grammar (no unit suffixes inside the braces). <code>B</code> sources raise <code>ValueError</code>. <code>.subckt</code> is flattened correctly.</td>
+<td>Build those parts with <code>CircuitBuilder</code> (<code>add_transformer</code> for coupled inductors) or a YAML netlist.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="machines">Machines<a class="headerlink" href="#machines" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Limitation</th>
+<th>Measured</th>
+<th>Workaround</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Native machines: DC machine, PMSM and induction machine are solved in the matrix; the observers are not.</strong> <code>b.add_dc_machine</code>, <code>b.add_pmsm_mna</code>, <code>b.add_induction_machine_mna</code> are MNA-native on <code>pwl</code> and <code>trbdf2</code>; <code>p.add_pmsm</code>, <code>p.add_bldc</code>, <code>p.add_induction_motor</code> are explicit observers on <code>pwl</code> only (first order). The DC operating point holds a machine's speed and angle at <code>omega0</code> / <code>theta0</code> (no torque balance; a speed or angle node another device drives is refused by name); the PMSM and induction machine have no AC-sweep stamp; <code>dsed</code> refuses them (speed-dependent, not LTI between events). No machine model is validated against measurements: the tests check analytic limits of the equations and independent ODE integrations.</td>
+<td>DC motor observer, sine drive, speed error 13.6 % at <code>dt</code> = 100 µs (first order); <code>add_dc_machine</code> 0.48 % (second order). Induction machine free acceleration: 1.0e-5 of synchronous speed at 20 µs on <code>pwl</code> with <code>discontinuity_restart=True</code>.</td>
+<td>Use the native machines; halve <code>dt</code> to check an observer run. On <code>pwl</code> pass <code>discontinuity_restart=True</code> for a three-phase start (first order otherwise).</td>
+</tr>
+<tr>
+<td><strong>Flux-map PMSM: DC point only at rest, no YAML form, defined on its grid plus a 10 % band.</strong> <code>p.FluxMapDQ.from_tables</code> fits one co-energy spline to both flux tables (reciprocal by construction) and <code>b.add_pmsm_flux_map</code> stamps it on <code>pwl</code> and <code>trbdf2</code>. The held-mechanics DC point refuses <code>omega0 != 0</code> by name (the stator law is nonlinear in the current when spinning); <code>yaml.emit</code> refuses the map; the law is defined on the grid plus 10 % of each axis span (checked positive definite there; an accepted state outside is refused by name, Newton iterates pass through a smooth unmeasured extension). Reciprocity is judged from the tables' cross derivatives (central differences). The induction machine has no saturation.</td>
+<td>Synthetic cross-coupled map: reciprocity defect 0.19 % (reciprocal, 1 A grid), 9.1 % with λ_q × 1.1 (refused at the default 2 %).</td>
+<td>Tabulate the whole operating range; start a flux-map machine from zero state or at rest.</td>
+</tr>
+<tr>
+<td>No <code>components()</code> entry for a composite machine as a whole (its sub-elements are listed).</td>
+<td>—</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<h2 id="passives">Passives<a class="headerlink" href="#passives" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Limitation</th>
+<th>Measured</th>
+<th>Workaround</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>The π-section line overshoots an ideal step by 27 % at any section count.</strong> <code>b.add_transmission_line(model="pi")</code> (the default) is a lumped ladder. <code>model="bergeron"</code> is the exact travelling-wave line (<a href="../transmission-line/">Transmission line</a>).</td>
+<td>50 Ω, 100 ns, source-matched, open end: far-end peak 1.271 V with 50 sections (exact 1.000 V). With a 20 ns edge and <code>recommend_line_sections</code> (55) the peak is 1.046 V.</td>
+<td><code>model="bergeron"</code>.</td>
+</tr>
+<tr>
+<td><strong>Bergeron line: the variable step does not estimate the line's interpolation error.</strong> On <code>trbdf2</code> the step is capped at τ and set by the reactive states; a feature recorded at one end is landed a delay later at the other, but nothing refines a smooth wave below the step that first recorded it. <code>esdirk43</code>, the exact engine, dsed, bdf1 and <code>periodic_steady_state</code> refuse the line by name.</td>
+<td>A resistive circuit with a 100 ns line driven by a 3.3 MHz sine: 6.6 mV error on 0.5 V at any <code>rtol</code>.</td>
+<td>Set <code>dt=</code> (the step ceiling) to resolve the waves, or use <code>pwl</code> with τ a multiple of <code>dt</code>.</td>
+</tr>
+<tr>
+<td><strong><code>rac:</code> takes ladder cells only.</strong> YAML <code>transmission_line</code> is the Bergeron line (<code>model="pi"</code> is Python only). <code>rac: {R_dc, L_hf, R: [...], L: [...]}</code> is read; an <code>(f, R_ac)</code> curve is refused by name (fitting needs Python). <code>nonlinear_capacitor</code> takes <code>law:</code> or <code>dc_bias: {v, C}</code> (no residual check: <code>dc_bias</code> points become knots as given). Other unknown per-device keys of the older types are still ignored without a warning.</td>
+<td>—</td>
+<td>Fit with <code>p.passives.fit_rac_ladder</code> / <code>fit_mlcc_dc_bias</code> in Python and write the cells or the table.</td>
+</tr>
+<tr>
+<td>One ESR value (no frequency dependence), single-pair line (no coupled three-phase cable). The DC-bias capacitor is a Newton device (<code>pwl</code> / <code>trbdf2</code> and the AC sweep, linearised at the DC point; dsed and bdf1 refuse it by name) and integrates the small-signal curve: no hysteresis, no ageing, no temperature.</td>
+<td>—</td>
+<td>Read ESR at the switching frequency; fit <code>R_ac(f)</code> of windings with <code>fit_rac_ladder</code>; the MLCC curve with <code>fit_mlcc_dc_bias</code>.</td>
+</tr>
+<tr>
+<td><strong>ESL resonance on the fixed step.</strong> <code>esl</code> in series with <code>C</code> resonates at <code>1/(2π√(esl·C))</code>; a fixed step that does not resolve it rings at the Nyquist rate.</td>
+<td>—</td>
+<td><code>dt &lt;= 1/(20·f_res)</code>, or <code>engine="trbdf2"</code>.</td>
+</tr>
+<tr>
+<td><strong>A winding with an <code>rac=</code> ladder cannot be coupled.</strong> <code>add_inductor_coupling</code> refuses it with <code>UnsupportedError</code> (feature <code>rac</code>): coupling the main inductor alone would leave the cells' flux uncoupled.</td>
+<td>—</td>
+<td>Couple windings built with <code>esr=</code>, or use <code>add_transformer</code>.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="magnetic-networks">Magnetic networks<a class="headerlink" href="#magnetic-networks" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Limitation</th>
+<th>Measured</th>
+<th>Workaround</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>No fringing and no core-shape library.</strong> <code>add_air_gap</code> is <code>P = μ₀·A/l</code> on the given area; every section takes its own area, length and permeability. Shipped parameters are synthetic.</td>
+<td>—</td>
+<td>Enlarge the gap area by your fringing factor; enter the sections of the core yourself.</td>
+</tr>
+<tr>
+<td><strong>Rate-dependent loss is eddy loss only, and not validated against measurement.</strong> <code>add_magnetic_resistance</code> gives <code>R_m·(dΦ/dt)²</code>, <code>add_hysteretic_permeance</code> the Jiles-Atherton loop and <code>add_excess_loss</code> Bertotti's <code>c·sign(u)·|u|^½</code>, linear below the flux rate <code>eps</code> (sine loss (3/4)·(eps/Û)² below the square-root law; the exact engine refuses it by name). <code>fit_core_loss_elements</code> maps loss data to <code>R_m</code> and <code>c</code>; a fit is not a validation.</td>
+<td>—</td>
+<td><code>add_hysteretic_core_inductor</code> for one flux path; Steinmetz / iGSE after the run.</td>
+</tr>
+<tr>
+<td><strong>DC operating point: a saturable permeance on a node reached only through permeances is refused by name</strong> (its flux row needs the Newton DC refresh). Linear permeances get flux rows (per node, or per group joined by magnetic resistances and winding ports); the DC flux is solved from zero.</td>
+<td>—</td>
+<td>Start the transient from zero or from <code>initial_state=</code> (tutorial 09).</td>
+</tr>
+<tr>
+<td><code>set_initial</code> ignores a saturable permeance (it records capacitor and inductor values only), without a warning.</td>
+<td>—</td>
+<td>Write its MMF into <code>initial_state</code> at its node.</td>
+</tr>
+<tr>
+<td>A saturable permeance runs on <code>pwl</code> and <code>trbdf2</code> only; <code>dsed</code>, <code>bdf1</code> and the AC sweep refuse it by name.</td>
+<td>—</td>
+<td>Linear permeances run on every engine.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="found-by-the-examples-audit-2026-11-13">Found by the examples audit (2026-11-13)<a class="headerlink" href="#found-by-the-examples-audit-2026-11-13" title="Permanent link">&para;</a></h2>
+<p>Reproducers are in <code>probes/</code> (run them against the tree to re-measure);
+each example affected says so where it prints the number. Fixed since
+the audit (see the CHANGELOG): the <code>pseudo_trans</code> divergence,
+<code>run_transient_adaptive</code> reading low, the forward-Euler induction-motor
+flux and <code>run_ac_sweep</code> reading inside the start-up. The <code>b_extra</code> sign
+and the moving <code>branch_var_id_for_*</code> index are contracts, documented in
+<code>simulate</code> and <code>docs/api-reference.md</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Limitation</th>
+<th>Measured</th>
+<th>Workaround</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong><code>device_loss_summary</code>'s resistor <code>P_avg</code> is first order in <code>dt</code> on PWM currents</strong> (each edge becomes a one-step ramp in the stored samples; the switch <code>P_avg</code> is exact). Owner: <code>python/pulsim/losses.py</code>, <code>device_loss_summary</code> (line 1556). Probe: <code>probes/loss_resistor_first_order_edges.py</code>.</td>
+<td>R in series with a PWM switch: 1114.24 / 1121.77 / 1125.54 W at 50 / 100 / 200 steps per period against the exact 1129.30 W; M1 11.2926 W against 11.2930 W.</td>
+<td><code>p.time_average(t, R * i**2)</code> with <code>i</code> from <code>res.i</code>, or halve <code>dt</code>.</td>
+</tr>
+<tr>
+<td><strong><code>compute_bh_loop</code> can return a negative loop area (a negative core loss).</strong> A closed sine loop on the <code>permalloy</code> J-A set has ∮H dB &lt; 0 above ~300 A/m, and the <code>ferrite_n87</code> area shrinks as the drive rises into saturation. Owner: <code>python/pulsim/hysteresis.py</code>, <code>JilesAthertonModel.update</code>, the irreversible slope at line 336. Probe: <code>probes/ja_negative_loop_area.py</code>.</td>
+<td>permalloy 29.1 / −12.4 / −14.8 J/m³ at 100 / 300 / 1000 A/m; ferrite_n87 42.8 / 28.8 / 13.9 J/m³ at 300 / 1000 / 3000 A/m. The δ_M guard and a ≥ 0 clamp on the slope do not remove it.</td>
+<td>Check the sign of <code>energy_per_cycle_per_m3</code>, and that the J-A B matches the circuit's B (<code>run_psfb_ja_loss_analysis.py</code> does both).</td>
+</tr>
+<tr>
+<td><strong>Tightly coupled half bridge: <code>trbdf2</code> aborted and a coarse fixed step read low without warning</strong> (audit report). Owner: <code>core/include/pulsim/solver/trbdf2_transient.hpp</code>. Probe: <code>probes/half_bridge_tight_coupling.py</code>.</td>
+<td>Audit: <code>refactorize failed (numerically singular)</code> at h ≈ 5e-14 s for k = 0.999 / 0.99999; at k = 0.99999 <code>dt</code> = 2e-8 gave 4.17 V against 4.99 V at 1e-8. NOT reproduced on this tree with the project's half bridge (3 ms, mean over 2–3 ms): k = 0.99999 reads 4.869 / 4.870 V at <code>dt</code> = 2e-8 / 1e-8 and <code>trbdf2</code> runs (4.924 V); k = 0.999: 4.685 / 4.688 / 4.695 V. The configuration behind the audit's numbers was not recorded.</td>
+<td><code>engine='pwl'</code>; halve <code>dt</code> and compare.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="older-entries">Older entries<a class="headerlink" href="#older-entries" title="Permanent link">&para;</a></h2>
+<p><a href="https://github.com/lgili/Pulsim/blob/main/KNOWN_LIMITATIONS.md"><code>KNOWN_LIMITATIONS.md</code></a>
+at the repository root was written for 1.3. It covers the schematic
+renderer, MMC, M3C, the sparse LU and LiveScope, and it was not
+re-verified for this page. Its 2.0 engine section covers the
+<code>h_min</code> stall and the mask chatter above.</p>
+<p>The library follow-ups are tracked in
+<code>openspec/changes/add-ai-usage-guide/tasks.md</code>, section 12.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../gotchas/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Gotchas">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Gotchas
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../how-pulsim-works/" class="md-footer__link md-footer__link--next" aria-label="Next: Overview">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Overview
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+</div>
+      
+        <div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/lgili/Pulsim" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8M97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    <script id="__config" type="application/json">{"base": "..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.expand", "navigation.top", "navigation.footer", "navigation.instant", "navigation.tracking", "content.action.edit", "content.action.view", "content.code.copy", "content.code.annotate", "toc.follow"], "search": "../assets/javascripts/workers/search.f8cc74c7.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.60a45f97.min.js"></script>
+      
+        <script src="../assets/js/katex.js"></script>
+      
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+      
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"></script>
+      
+    
+  </body>
+</html>
