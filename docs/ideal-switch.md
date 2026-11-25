@@ -340,6 +340,14 @@ auto -> lcp, settle_rounds=0, reinit_records=0
 vout=8.9964 V, idle i_L_max=0.0 A
 ```
 
+`vout` is a measured value, not a closed form: the sample at `t = 20 T` of
+the periodic orbit (the run starts on it, `c0=8.996397`). The small-ripple
+DCM average `M = 2 / (1 + sqrt(1 + 4K/D^2)) = 0.375` (`K = 2L/(RT) = 0.4`)
+gives 9.0 V, the level it ripples around. `pytest
+python/tests/test_doc_snippets.py -k ideal-switch` re-runs this block and
+fails when a printed digit moves. `idle i_L_max=0.0 A` is exact: the inductor
+current is zero while both devices are off in DCM.
+
 ---
 
 ## 5. Gauge convention (floating islands bounded by OFF diodes)
@@ -392,14 +400,20 @@ b_ref.add_resistor("R", "p", "n", 100.0)
 r_ref = p.simulate(b_ref, t_end=40e-3, dt=2e-5, engine="pwl",
                    discontinuity_restart=True, mode_selection="lcp")
 v_bus = np.asarray(r_ref.v("p")) - np.asarray(r_ref.v("n"))
-print(f"V(p - n) at 40 ms = {v_bus[-1]:.2f} V")
+# Closed form: the bus follows the 100 V sine to the peak and past it until
+# the capacitor current reverses (tan(theta) = -w*R*C), then decays with R*C
+# to the zero crossing at 40 ms.
+w, RC = 2 * np.pi * 50.0, 100.0 * 100e-6
+theta = np.pi - np.arctan(w * RC)
+v_cf = 100.0 * np.sin(theta) * np.exp(-(np.pi - theta) / (w * RC))
+print(f"V(p - n) at 40 ms = {v_bus[-1]:.2f} V, closed form {v_cf:.2f} V")
 ```
 
 Expected output:
 
 ```text
 isolated g_off=0 bridge: floating_node Diode
-V(p - n) at 40 ms = 63.75 V
+V(p - n) at 40 ms = 63.75 V, closed form 63.75 V
 ```
 
 ---

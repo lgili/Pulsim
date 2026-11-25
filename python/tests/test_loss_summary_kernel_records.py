@@ -110,18 +110,43 @@ def test_device_loss_summary_windowing_on_kernel_events(engine):
     parts = [_loss_by_name(b, res, t_from=a, t_to=c)
              for a, c in zip(cuts[:-1], cuts[1:])]
 
+    # Truth: the gate schedule (100 kHz, D = 0.5, CCM; Q1 starts closed, no
+    # event at t = 0). Q1 turns on at (k+1)*T and off at k*T + T/2; D1 the
+    # other way round. The plain fixed-step engine samples switch_fn at the
+    # end of a step and applies it over that step, so its commutations (and
+    # i_L's kink) sit one dt earlier. An event belongs to a window by its
+    # scheduled instant: the cut at 100 us (Q1 on, D1 off) books that edge in
+    # the later window, on plain pwl (99.9 us) in the earlier one.
+    T = 1e-5
+    lag = 1e-7 if engine == "pwl" else 0.0
+    k = np.arange(20)
+    sched = {("Q1", "on"): (k + 1) * T - lag, ("Q1", "off"): k * T + T / 2 - lag,
+             ("D1", "on"): k * T + T / 2 - lag, ("D1", "off"): (k + 1) * T - lag}
     for n in names:
         ev = res.loss_events(n)
+        E_kind = {}
+        for kind in ("on", "off"):
+            sel = ev[ev["kind"] == kind]
+            sel = sel[np.argsort(sel["t"])]
+            s_k = sched[(n, kind)]
+            assert len(sel) == len(s_k), (n, kind)
+            assert np.abs(sel["t"] - s_k).max() < 1e-12, (n, kind)
+            E_kind[kind] = (s_k, sel["E"])
+        e_dev = res.device_energy(n)    # the kernel's own accumulator
+        assert math.fsum(E_kind["on"][1]) == pytest.approx(e_dev["E_on"], rel=1e-12)
+        assert math.fsum(E_kind["off"][1]) == pytest.approx(e_dev["E_off"], rel=1e-12)
         for a, c, part in zip(cuts[:-1], cuts[1:], parts):
             row = part[n]
-            sub = ev[(ev["t"] >= a) & (ev["t"] < c)]
-            e_on = math.fsum(sub["E"][sub["kind"] == "on"])
-            e_off = math.fsum(sub["E"][sub["kind"] == "off"])
-            assert row["n_turn_on_events"] == int(np.count_nonzero(sub["kind"] == "on"))
-            assert row["n_turn_off_events"] == int(np.count_nonzero(sub["kind"] == "off"))
-            assert row["E_sw_on_total"] == pytest.approx(e_on, rel=1e-12, abs=1e-30)
-            assert row["E_sw_off_total"] == pytest.approx(e_off, rel=1e-12, abs=1e-30)
-            assert row["P_sw_avg"] == pytest.approx((e_on + e_off) / (c - a), rel=1e-12, abs=1e-30)
+            exp = {}
+            for kind, (s_k, E) in E_kind.items():
+                inside = (s_k >= a) & (s_k < c)
+                exp[kind] = (int(np.count_nonzero(inside)), math.fsum(E[inside]))
+            assert row["n_turn_on_events"] == exp["on"][0], (n, a, c)
+            assert row["n_turn_off_events"] == exp["off"][0], (n, a, c)
+            assert row["E_sw_on_total"] == pytest.approx(exp["on"][1], rel=1e-12, abs=1e-30)
+            assert row["E_sw_off_total"] == pytest.approx(exp["off"][1], rel=1e-12, abs=1e-30)
+            assert row["P_sw_avg"] == pytest.approx(
+                (exp["on"][1] + exp["off"][1]) / (c - a), rel=1e-12, abs=1e-30)
 
         w = span_whole[n]
         assert sum(p_row[n]["n_turn_on_events"] for p_row in parts) == w["n_turn_on_events"]
