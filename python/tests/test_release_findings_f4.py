@@ -241,7 +241,8 @@ def test_f9_every_projection_of_the_parasitic_cluster_is_recorded():
     pm = np.asarray(og["projection_max_by_column"])
     assert pm[j[0]] == pytest.approx(0.313841, rel=2e-4)  # V(out)'s projected amplitude
     assert q["amplitude"] == pytest.approx(pm.max()) and q["amplitude"] >= pm[j[0]]
-    assert 0.3e-9 < q["tau"] < 3e-9                       # the cluster's ~1 ns mode
+    # the OFF mode's one state: L1 / (R1 + 1/g_off), read from the sine-augmented mode's eigenvalues
+    assert q["tau"] == pytest.approx(1e-3 / (10.0 + 1e6), rel=1e-9)
     off = _no_dt(case)
     assert "output_grid" not in (off.diagnostics or {})
 
