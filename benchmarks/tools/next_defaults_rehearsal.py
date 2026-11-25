@@ -336,12 +336,17 @@ def analytic_worker(unit, names, emit):
                 with rs.extra_kwargs(kw):
                     r = c.run(eng)
             ceil = rs.ANALYTIC[c.id].get(eng, {}).get("ceiling", 1e-3)
-            e = metrics.err_rms(np.asarray(r.times), c.observe(r), c.exact,
+            # the rule's promise is against the projected flow (DECISIONS 8)
+            og = (getattr(r, "diagnostics", None) or {}).get("output_grid") or {}
+            ref = metrics.projected_reference(c.exact, og.get("projections") or ())
+            if ref is not c.exact:
+                rec["n_projected"] = ref.n_applied
+            e = metrics.err_rms(np.asarray(r.times), c.observe(r), ref,
                                 abs_scale=c.abs_scale, exclude_t0=c.exclude_t0)
             rec.update(err_rms=e, outcome="agree" if e <= ceil else "disagree", tol=ceil, **_diag(r))
             rt = _rule_rtol(r)
             if rt:
-                rec["rule_ratio"] = metrics.rule_ratio(np.asarray(r.times), c.observe(r), c.exact, rtol=rt,
+                rec["rule_ratio"] = metrics.rule_ratio(np.asarray(r.times), c.observe(r), ref, rtol=rt,
                                                      atol=1e-9, exclude=dr.event_steps(r))
         except dr.REFUSAL as ex:
             rec.update(outcome="refused", message=f"{type(ex).__name__}: {ex}"[:300])

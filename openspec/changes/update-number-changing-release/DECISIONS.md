@@ -493,3 +493,20 @@ moves. The measure, the old one kept beside it, the tests and the triage are in
    step), F-SB-3 (a diode turn-off behind a sub-step transient: a right limit the truth does not
    have, no projection record), F-SB-4 (the split rule locates diode_rectifier's D1 turn-on
    0.227 h late).
+
+## 8. The rehearsal's analytic gate reads the projected flow (owner's delegate, 2026-11-25)
+
+- The output rule's promise is stated against the flow with the parasitic cluster projected at
+  events (the `simulate` docstring), and every projection is recorded
+  (`diagnostics['output_grid']['projections']`: `t`, `amplitude`, `column`, `tau`). So the
+  rehearsal's analytic gate (err_rms and `rule_ratio` of an analytic case) reads the PROJECTED
+  closed form: `metrics.projected_reference(case.exact, records)` removes, on each record's window
+  `(t, t + 40 tau]`, the closed form's own fast part `D exp(-(s - t)/tau)`.
+- Only `t` and `tau` come from the engine. `D` is the closed form's fast part (the closed form
+  minus its slow part, extrapolated linearly from `t + 40 tau` and `t + 80 tau`); a record whose
+  `tau` the closed form does not decay at (within 1e-3 at `t + tau`) is not applied, so the gate
+  never takes the engine's projected values as truth. One mode per instant; records past the cap
+  (1000) are not applied (those windows stay graded against the unprojected form).
+- F-X-7's sample 2 ps past each event stays. The engine does not change.
+- A run with no record is graded by `case.exact` itself (the same object): its cells are
+  byte-identical. A cell with records carries `n_projected`.

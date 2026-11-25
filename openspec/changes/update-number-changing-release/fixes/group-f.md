@@ -1432,3 +1432,26 @@ reviewer on 79330ab7..5613abbe (scoping + lazy root error came after the review)
 5. Clean up: `.scratch/build-e34ct` (Eigen 3.4.0 test tree), `.scratch/base527` +
    `.scratch/build-base527` (keep `.scratch/so_527e644d/` for cost reruns), `.scratch/f10/base`
    (537 MB of baseline dumps) once the orchestrator has read the logs.
+
+## Session 10 — the projected analytic gate, the cost gate, re-measures (logs in `.scratch/f10/`, prefix `S10_`)
+
+### Step 1 — the rehearsal's analytic gate reads the projected flow (DECISIONS 8)
+
+* `metrics.projected_reference(exact, records)` (benchmarks/tools/metrics.py): on each projection
+  record's window `(t, t + 40 tau]` the closed form minus its own fast part `D e^{-(s-t)/tau}`;
+  `D` from the closed form (minus its slow part extrapolated from `t + 40 tau`, `t + 80 tau`), a
+  record whose `tau` the closed form does not decay at is not applied; no applied record: the
+  closed form itself (same object). `analytic_worker` uses it for err_rms and `rule_ratio` and
+  writes `n_projected` only when a record applied.
+* hard_switched_rc, dsed, output_rtol 1e-5 (`hsrc3.py`): 5 records, 5 applied; err_rms
+  unprojected **0.0676** (control: still disagree), projected **1.31e-10** (ceiling 1e-6); the
+  projected form at +2 ps 0.00999900487 against the closed switch's settled value
+  100/10/(0.1 + 1000) = 0.00999900010 (4.8e-7 relative: the float time offset t − t_e at 5 µs
+  against tau = 1 ps); a record with 10 × tau: not applied; rule_ratio (events excluded) 0.99521,
+  unchanged; stored times monotone. Test `test_the_analytic_gate_reads_the_projected_flow`.
+* Rehearsal, every analytic unit's three rule cells re-measured by the worker (`ana_rerun.py`,
+  `S10_ana_rerun.log`, pre-run cache in `.scratch/f10/rehearsal_cells_pre_s10`): 81 cells, **78
+  identical** to the cache (wall_s ignored), the 3 others are hard_switched_rc (auto+next,
+  dsed:output_grid, dsed+next): disagree 0.0676 → **agree 1.31e-10**, `n_projected` 5. Circuit
+  cells: code path unchanged (circuit_worker not touched).
+* pytest test_exact_output_grid + test_next_defaults + test_benchmark_harness: 412 passed; ruff clean.

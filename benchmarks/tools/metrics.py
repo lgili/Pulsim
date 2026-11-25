@@ -110,6 +110,49 @@ def _rms(g, d2, exclude):
     return float(np.sqrt(seg[keep].sum() / window))
 
 
+PROJECTION_WINDOW_TAUS = 40.0   # the referee's SETTLE_TAUS
+
+
+def projected_reference(ref: Callable, projections=()) -> Callable:
+    """The closed form of the flow the output rule promises (DECISIONS 8): at each
+    projection the exact engine records under the rule (``diagnostics['output_grid']
+    ['projections']``: ``t``, ``tau``) the parasitic mode it settled is removed from
+    the closed form on ``(t, t + 40 tau]``: ``ref(s) - D exp(-(s - t)/tau)``.
+
+    Only ``t`` and ``tau`` come from the engine. ``D`` is the closed form's own fast
+    part, ``ref`` minus its slow part extrapolated linearly from ``t + 40 tau`` and
+    ``t + 80 tau``, read at ``t + tau/64``; a record whose ``tau`` the closed form
+    does not decay at (its fast part at ``t + tau`` not ``exp(-63/64)`` of that within
+    1e-3) is not applied, so the gate never reads the engine's projection as truth.
+    One mode per instant (the first record of an instant); no applicable record:
+    ``ref`` itself."""
+    recs = []
+    for p in projections:
+        t0, tau = float(p["t"]), float(p["tau"])
+        if not (tau > 0.0 and np.isfinite(tau)) or any(t0 == r[0] for r in recs):
+            continue
+        w = PROJECTION_WINDOW_TAUS * tau
+        s1, s2, a, b = (float(v) for v in ref(np.array([t0 + tau / 64, t0 + tau, t0 + w, t0 + 2 * w])))
+        slope = (b - a) / w   # the slow part: a + (s - t0 - w) * slope
+        f1 = s1 - (a + (tau / 64 - w) * slope)
+        f2 = s2 - (a + (tau - w) * slope)
+        if f1 == 0.0 or abs(f2 / f1 - np.exp(-63 / 64)) > 1e-3:
+            continue
+        recs.append((t0, tau, w, f1 * np.exp(1 / 64)))
+    if not recs:
+        return ref
+
+    def projected(t):
+        t = np.asarray(t, dtype=float)
+        out = np.array(ref(t), dtype=float)
+        for t0, tau, w, d in recs:
+            m = (t > t0) & (t <= t0 + w)
+            out[m] -= d * np.exp(-(t[m] - t0) / tau)
+        return out
+    projected.n_applied = len(recs)
+    return projected
+
+
 def err_rms_symmetric(a: tuple, b: tuple, *, abs_scale: float = 0.0, exclude=()) -> float:
     """:func:`err_rms` with neither trace the reference, for a DIAGNOSTIC:
     ``err_rms_symmetric(a, b) == err_rms_symmetric(b, a)`` bit for bit.
