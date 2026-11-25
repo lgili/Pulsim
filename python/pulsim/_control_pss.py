@@ -910,6 +910,28 @@ def _dummy_chain_for_spec(spec, overrides: dict[str, Any] | None = None):
     return c
 
 
+# The CxxBlockChain::dump_state layout this module parses (chain.hpp
+# serialize()). The last 4 bytes of the magic are its layout version: a
+# C++ change to the layout must bump it, and then every read here is
+# refused by name instead of mis-seeding x_ctrl silently.
+_STATE_MAGIC = 0x5053474300000001
+_COUNTERS_BYTES = 24        # n_evals, n_block_evals, n_calls (3 x u64)
+_GROUP_REC_BYTES = 33       # k, n_ticks (u64), pending_at (f64), pending
+#                             (bool), jitter_max (f64)
+
+
+def _layout(ok: bool, what: str) -> None:
+    """A named refusal (not ``assert``, which ``python -O`` removes) when
+    the bytes do not have the layout this module parses."""
+    if not ok:
+        raise unsupported(
+            _ANALYSIS, "controller_state_layout",
+            f"{_ANALYSIS}: the control graph's saved state does not have "
+            f"the byte layout this pulsim's Python side parses ({what}); "
+            "the C++ extension and the Python package are from different "
+            "builds. Rebuild / reinstall them together.")
+
+
 _STATE_SPECS: dict[str, tuple[str, ...]] = {
     "PIController": ("integrator_state", "_prev_error"),
     "PIDController": ("integrator_state", "derivative_state", "_prev_error"),
@@ -933,8 +955,17 @@ def _empty_chain_len() -> int:
 
         c = _k.CxxBlockChain()
         c.compile()
-        _EMPTY_CHAIN_LEN = len(c.dump_state(c.save_state()))
+        raw = c.dump_state(c.save_state())
+        _check_magic(raw)
+        _EMPTY_CHAIN_LEN = len(raw)
     return _EMPTY_CHAIN_LEN
+
+
+def _check_magic(raw: bytes) -> None:
+    _layout(len(raw) >= 16, f"{len(raw)} bytes, shorter than the header")
+    magic = struct.unpack_from("<Q", raw, 0)[0]
+    _layout(magic == _STATE_MAGIC,
+            f"layout tag {magic:#018x}, expected {_STATE_MAGIC:#018x}")
 
 
 def _dummy_dump_bytes(spec, overrides: dict[str, Any] | None = None) -> tuple[bytes, int]:
@@ -990,9 +1021,11 @@ def _probe_block_schema(spec) -> tuple[int, list[tuple[str, int, float]]]:
         diff = [i for i in range(dump_len) if d0[i] != d1[i]]
         # Last samples*8 bytes are buf[0..samples-1]
         buf_start = dump_len - 8 * samples
-        assert buf_start >= 8 and diff[-1] < dump_len, (buf_start, dump_len)
+        _layout(buf_start >= 8 and bool(diff) and diff[-1] < dump_len,
+                f"DelayBlock dump of {dump_len} bytes for {samples} samples")
         count = struct.unpack_from("<Q", d1, buf_start - 8)[0]
-        assert count == samples, (count, samples)
+        _layout(count == samples,
+                f"DelayBlock buffer length {count}, expected {samples}")
         fields = [(f"buf[{k}]", buf_start + 8 * k, init_v) for k in range(samples)]
         return dump_len, fields
 
@@ -1027,27 +1060,36 @@ def _probe_block_schema(spec) -> tuple[int, list[tuple[str, int, float]]]:
     return dump_len, fields
 
 
+def _count(raw: bytes, pos: int) -> int:
+    """A u64 element count at ``pos``, checked against the buffer (a wrong
+    offset reads garbage; it must not size an allocation)."""
+    _layout(pos + 8 <= len(raw), f"count at byte {pos} past the end ({len(raw)})")
+    n = struct.unpack_from("<Q", raw, pos)[0]
+    _layout(n <= len(raw), f"count {n} at byte {pos} exceeds the {len(raw)} bytes")
+    return n
+
+
 def _skip_tail_to_pub(raw: bytes, sig_count_pos: int) -> tuple[int, int, int]:
     """From ``sig_count_pos``, return ``(sig_data_pos, pub_data_pos, end_pos)``."""
     pos = sig_count_pos
-    n_sig = struct.unpack_from("<Q", raw, pos)[0]
+    n_sig = _count(raw, pos)
     sig_data_pos = pos + 8
     pos = sig_data_pos + 8 * n_sig
-    n_bk = struct.unpack_from("<Q", raw, pos)[0]
+    n_bk = _count(raw, pos)
     pos += 8 + 8 * n_bk
-    n_bv = struct.unpack_from("<Q", raw, pos)[0]
+    n_bv = _count(raw, pos)
     pos += 8 + 8 * n_bv
-    n_rec = struct.unpack_from("<Q", raw, pos)[0]
+    n_rec = _count(raw, pos)
     pos += 8
     for _ in range(n_rec):
-        cnt = struct.unpack_from("<Q", raw, pos)[0]
+        cnt = _count(raw, pos)
         pos += 8 + 8 * cnt
-    n_rt = struct.unpack_from("<Q", raw, pos)[0]
+    n_rt = _count(raw, pos)
     pos += 8 + 8 * n_rt
-    pos += 24  # n_evals, n_block_evals, n_calls
-    n_grp = struct.unpack_from("<Q", raw, pos)[0]
-    pos += 8 + 33 * n_grp  # k(8)+n_ticks(8)+pending_at(8)+pending(1)+jitter_max(8)
-    n_pub = struct.unpack_from("<Q", raw, pos)[0]
+    pos += _COUNTERS_BYTES
+    n_grp = _count(raw, pos)
+    pos += 8 + _GROUP_REC_BYTES * n_grp
+    n_pub = _count(raw, pos)
     pub_data_pos = pos + 8
     pos = pub_data_pos + 8 * n_pub
     return sig_data_pos, pub_data_pos, pos
@@ -1056,14 +1098,29 @@ def _skip_tail_to_pub(raw: bytes, sig_count_pos: int) -> tuple[int, int, int]:
 def _clean_template_bytes(cxx, chain) -> tuple[bytes, int, list[tuple[str, int, float]]]:
     """Build a clean ``dump_state`` template (zero ticks/calls/recordings)
     and return ``(template_bytes, sig_count_pos, block_state_slots)``."""
+    try:
+        return _parse_template(cxx, chain)
+    except struct.error as e:
+        _layout(False, f"the bytes end inside a field: {e}")
+        raise
+
+
+def _parse_template(cxx, chain):
     raw = cxx.dump_state(cxx.save_state())
+    _check_magic(raw)
+    n_blocks = struct.unpack_from("<Q", raw, 8)[0]
+    _layout(n_blocks == len(chain.blocks),
+            f"{n_blocks} blocks in the state, {len(chain.blocks)} in the graph")
     pos = 16  # magic(8) + n_blocks(8)
     out = bytearray(raw[:pos])
     slots: list[tuple[str, int, float]] = []
 
     for spec in chain.blocks:
-        name_len = struct.unpack_from("<Q", raw, pos)[0]
+        name_len = _count(raw, pos)
         name_bytes = raw[pos : pos + 8 + name_len]
+        _layout(name_len < 4096 and name_bytes[8:].decode("utf-8", "replace")
+                == str(spec.name),
+                f"block name at byte {pos} is not {spec.name!r}")
         out.extend(name_bytes)
         pos += 8 + name_len
 
@@ -1104,43 +1161,43 @@ def _clean_template_bytes(cxx, chain) -> tuple[bytes, int, list[tuple[str, int, 
     sig_count_pos_in_raw = pos
     sig_count_pos_in_out = len(out)
     # Parse tail of raw to copy sig, b_extra, zeroed recordings, zeroed groups, pub, zeroed horizon
-    n_sig = struct.unpack_from("<Q", raw, pos)[0]
+    n_sig = _count(raw, pos)
     out.extend(raw[pos : pos + 8 + 8 * n_sig])
     pos += 8 + 8 * n_sig
 
-    n_bk = struct.unpack_from("<Q", raw, pos)[0]
+    n_bk = _count(raw, pos)
     out.extend(raw[pos : pos + 8 + 8 * n_bk])
     pos += 8 + 8 * n_bk
-    n_bv = struct.unpack_from("<Q", raw, pos)[0]
+    n_bv = _count(raw, pos)
     out.extend(raw[pos : pos + 8 + 8 * n_bv])
     pos += 8 + 8 * n_bv
 
     # Clear recordings & recording_times while preserving recording channel count
-    n_rec = struct.unpack_from("<Q", raw, pos)[0]
+    n_rec = _count(raw, pos)
     pos += 8
     out.extend(struct.pack("<Q", n_rec))
     for _ in range(n_rec):
-        cnt = struct.unpack_from("<Q", raw, pos)[0]
+        cnt = _count(raw, pos)
         pos += 8 + 8 * cnt
         out.extend(struct.pack("<Q", 0))
-    n_rt = struct.unpack_from("<Q", raw, pos)[0]
+    n_rt = _count(raw, pos)
     pos += 8 + 8 * n_rt
     out.extend(struct.pack("<Q", 0))
 
     # Zero n_evals, n_block_evals, n_calls
-    pos += 24
+    pos += _COUNTERS_BYTES
     out.extend(struct.pack("<QQQ", 0, 0, 0))
 
     # Zero each group's runtime counters (k, n_ticks, pending_at, pending, jitter_max)
-    n_grp = struct.unpack_from("<Q", raw, pos)[0]
+    n_grp = _count(raw, pos)
     pos += 8
     out.extend(struct.pack("<Q", n_grp))
     for _ in range(n_grp):
         out.extend(struct.pack("<QQd?d", 0, 0, -math.inf, False, 0.0))
-        pos += 33
+        pos += _GROUP_REC_BYTES
 
     # Copy pub_
-    n_pub = struct.unpack_from("<Q", raw, pos)[0]
+    n_pub = _count(raw, pos)
     out.extend(raw[pos : pos + 8 + 8 * n_pub])
     pos += 8 + 8 * n_pub
 
@@ -1148,15 +1205,15 @@ def _clean_template_bytes(cxx, chain) -> tuple[bytes, int, list[tuple[str, int, 
     last_t, t0, solver_dt = struct.unpack_from("<ddd", raw, pos)
     pos += 24
     out.extend(struct.pack("<ddd", 0.0, 0.0, solver_dt))
-    n_q = struct.unpack_from("<Q", raw, pos)[0]
+    n_q = _count(raw, pos)
     pos += 8 + n_q
     out.extend(struct.pack("<Q", n_q))
     out.extend(b"\x00" * n_q)
     pos += 8 + 1  # horizon_t, has_horizon_x
-    n_hx = struct.unpack_from("<Q", raw, pos)[0]
+    n_hx = _count(raw, pos)
     pos += 8 + 8 * n_hx
     out.extend(struct.pack("<d?Q", 0.0, False, 0))
-    assert pos == len(raw), (pos, len(raw))
+    _layout(pos == len(raw), f"parsed {pos} of {len(raw)} bytes")
     _ = sig_count_pos_in_raw, last_t, t0
 
     return bytes(out), sig_count_pos_in_out, slots

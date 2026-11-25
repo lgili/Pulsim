@@ -742,3 +742,42 @@ def test_closed_loop_exact_sampled_model_is_refused_by_name():
         r.sampled_model(inputs=[("source", "Vin")], outputs=["v(out)"])
     assert ei.value.feature == "sampled_model"
     assert ei.value.kind == "closed_loop"
+
+
+# ---------------------------------------------------------------------------
+# 6. The controller-state byte layout is checked, not assumed
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("const,wrong,what", [
+    ("_GROUP_REC_BYTES", 32, "byte"),            # one byte short per group
+    ("_COUNTERS_BYTES", 16, "byte"),             # a counter dropped
+    ("_STATE_MAGIC", 0x5053474300000002, "layout tag"),   # another version
+])
+def test_wrong_layout_constant_is_refused_by_name(monkeypatch, const, wrong, what):
+    import pulsim._control_pss as cp
+
+    b = _buck()
+    lp = _pi_loop(b)
+    monkeypatch.setattr(cp, const, wrong)
+    monkeypatch.setattr(cp, "_EMPTY_CHAIN_LEN", None)
+    with pytest.raises(p.UnsupportedError) as ei:
+        p.periodic_steady_state(b, period=T, closed_loops=[lp])
+    assert ei.value.feature == "controller_state_layout"
+    assert what in str(ei.value)
+
+
+def test_layout_check_survives_python_O():
+    # the check is a raise, not an assert: `python -O` keeps it
+    import subprocess
+    import sys
+
+    code = (
+        "import pulsim._control_pss as cp, pulsim as p\n"
+        "try:\n"
+        "    cp._layout(False, 'x')\n"
+        "except p.UnsupportedError as e:\n"
+        "    print(e.feature)\n"
+    )
+    out = subprocess.run([sys.executable, "-O", "-c", code], capture_output=True,
+                         text=True, check=True)
+    assert out.stdout.strip() == "controller_state_layout"

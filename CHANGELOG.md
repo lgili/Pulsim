@@ -46,6 +46,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   state (a PWM object with `duty` / `f_sw`, a closure over a float or a
   list it does not change). 2.1.0 took a gate whose state moved as
   open-loop and solved for an orbit of a gate that was not periodic.
+- Closed-loop `periodic_steady_state` reads the control graph's state
+  bytes against a layout tag and bounds every count: a C++ extension and
+  Python package from different builds are refused with
+  `UnsupportedError(feature="controller_state_layout")` (an `assert`,
+  which `python -O` removes, was the only guard).
 - `simulate(resume_from=...)`, `sweep` and `monte_carlo` look inside
   tuples, frozensets and frozen dataclasses when deciding whether a
   controller's closure holds state: a list or array inside a tuple is now
