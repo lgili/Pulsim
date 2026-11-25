@@ -1280,3 +1280,33 @@ reviewer on 79330ab7..5613abbe (scoping + lazy root error came after the review)
   sample-count item only — it moves every rule-on sample count and was written on a tree 377
   commits old, without the projection or floor changes; the scheduler half was wrong (the
   per-target cap reset) and its author reverted it. Nothing taken.
+* FIXED (referee, found here) — S8's referee run (`.scratch/f9/S8_referee_100.jsonl`, never
+  written up) read **1e5 ×** on pwm_voltage_rc / pwm_voltage_rl_filter, on the PWM source's
+  stored column x[0] at 40 / 50 µs: the rule run stores the corner's two limits at
+  3.9999999999999976e-5 (0 V) and 3.9999999999999983e-5 (10 V), the reference's own sample
+  at 4e-5 is its LEFT limit (0 V), read inside the rule's post-jump line. A source corner is no
+  event, so EVENT_TOL never excluded it. Now reference instants within 1e-12 s of a jump of
+  either trace are not read (fa03bfcf): pwm_voltage_rc 0.9508 (V(out)), diode_half_wave_rl_load
+  0.9674 with 3 per-projection settle windows (`ratio_incl_settle` 2904 kept beside it).
+
+### Acceptance (tip fa03bfcf; .so built from it, LTO OFF; baseline = a build of 527e644d in `.scratch/build-base527`, .so saved in `.scratch/so_527e644d/`)
+
+* (a) rule OFF against the PR head (`.scratch/f10/base.sh`, `S9_ruleoff_compare.log`): goldens
+  ALL IDENTICAL; exact bit-identity 36/36 default + 36/36 shadow.
+  The exact dumps of every `python/tests/test_exact_*.py` (the same files on both sides: `git
+  diff 527e644d HEAD` is empty for them; `S9_ruleoff_exdump.log`): 312 passed both sides;
+  **rule-off calls 0 diffs**; 420/441 calls identical, the 21 others are rule-on runs (stored
+  samples: D-1's corners, F-X-7's 2 ps samples), 0 call-count mismatches.
+
+### Step 3 — test_boost_dcm_recovery_voltage_is_v_out_minus_v_in[auto] on this tip (`S9_boost_dcm.log`)
+
+* The default route (`auto`) runs trbdf2 on the PR line: 100 turn-offs after 2 ms, worst
+  0.20 % (V_R 33.6306 against 33.6989 V): PASSES. engine='exact' rule off: worst 2.9e-5: passes.
+* engine='exact', output_rtol 1e-5 (and 1e-7: identical): 99 of 100 turn-offs off by > 1 %,
+  worst **16.8 % (V_R 27.8714 against 33.4977 V at 2.98679 ms)**. NOT the engine: the test calls
+  the private reader `_diode_turn_offs(tr, t)` without `interpolable=True`, so it pairs the
+  rule's samples into step midpoints across the event's left limit and its 2 ps sample; with
+  `interpolable=True` — what `device_loss_summary` passes on a rule run (losses.py:2499,
+  `_rule_held`) — the same run reads worst 5.8e-6, 0 above 1 %. The release's parked reading
+  (39.49 against 34.30 V under the default rule) is this test-side call; the fix belongs in the
+  test (pass `interpolable` from the run's `output_grid` as the summary does), not in the engine.
