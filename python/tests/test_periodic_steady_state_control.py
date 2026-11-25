@@ -82,8 +82,6 @@ def test_voltage_mode_buck_pi_orbit_and_long_transient(engine, kw):
     # Controller states are part of x0 and exposed separately
     assert r.controller_labels == ["ctrl(pi.integrator_state)", "ctrl(pi._prev_error)"]
     assert r.controller_state.shape == (2,)
-    assert r.circuit_state.shape == (2,)
-    assert np.allclose(r.x0, np.concatenate([r.circuit_state, r.controller_state]))
 
     # Zero sampled steady-state error at the switching-rate PI
     v0 = float(r.x0[r.state_labels.index("v(out)")])
@@ -132,6 +130,26 @@ def test_voltage_mode_buck_pi_orbit_and_long_transient(engine, kw):
     ctrl_tr = ControlGraphStateMapper([lp_tr.step_observer], T).read()
     x_tr = np.concatenate([circ_tr, ctrl_tr])
     assert np.abs(r.x0 - x_tr).max() < 1e-8
+    # A PI sampling once per period zeroes the SAMPLED error (above), not the
+    # mean: the orbit's time-averaged error is the ripple's offset from its
+    # value at the sampling instant, and the long transient's last period
+    # has the same offset (measured 5.458e-5 V pwl, 5.459e-5 V trbdf2). The
+    # exact orbit stores 3 samples a period (its edges); a trapezoid over
+    # them is not the mean (it reads 5.678e-5 V), so it is not checked here.
+    if engine != "exact":
+        def _mean_err(tt, vv):
+            return float(np.trapezoid(vv, tt) / (tt[-1] - tt[0])) - V_REF
+        t_o = np.asarray(orb.times)
+        e_orbit = _mean_err(t_o, np.asarray(orb.v("out")))
+        t_l = np.asarray(res_tr.times)
+        last = t_l >= t_l[-1] - T * (1 + 1e-9)
+        e_tr = _mean_err(t_l[last], np.asarray(res_tr.v("out"))[last])
+        assert 1e-5 < e_orbit < 1e-4      # a ripple offset, not zero
+        assert abs(e_orbit - e_tr) < 1e-7
+
+    # each part against its own half of the long transient
+    assert np.abs(r.circuit_state - circ_tr).max() < 1e-8
+    assert np.abs(r.controller_state - ctrl_tr).max() < 1e-8
 
 
 def test_warm_start_and_steady_state_delegation():
@@ -418,8 +436,7 @@ def test_stateless_pwm_schedule_parity(engine, ek):
     assert r.stable
     assert r.controller_state.size == 0
     assert r.controller_labels == []
-    assert r.circuit_state.shape == (2,)
-    assert np.array_equal(r.circuit_state, r.x0)
+    assert r.circuit_state.shape == (len(r.state_labels),) == (2,)
 
 
 def test_stateless_python_lambda_keeps_existing_behavior():

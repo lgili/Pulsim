@@ -384,8 +384,10 @@ a source that follows a controller (`feature='closed_loop'`).
       `Ki = 100.0`; switching-rate sampled error `|v(out)[0] - V_ref|`; 6000-period
       settled transient comparison across `[i_L, v_C, integrator_state, prev_error]`):*
       - `exact`: 4 steps, 12 runs, `|v0 - V_ref| = 4.086e-14 V`
-        (`|mean - V_ref| = 5.678e-5 V` ripple offset at `C = 47 uF`, dropping to
-        `6.989e-9 V` at `C = 4700 uF`), `max|x0 - x_tr| = 3.554e-10`
+        (`|mean - V_ref| = 5.678e-5 V` was a trapezoid over the orbit's 3 stored
+        samples, not the mean; the time-averaged ripple offset is 5.458e-5 V on
+        `pwl` T/100 and 5.459e-5 V on `trbdf2`, equal to the long transient's —
+        correction 2026-11-25, task 7.2 reworded to assert the sampled error), `max|x0 - x_tr| = 3.554e-10`
         (`ctrl_diff = 1.765e-12`).
       - `pwl` (`dt = T/100`, `control_tick="state"`): 4 steps, 12 runs,
         `|v0 - V_ref| = 3.375e-14 V`, `max|x0 - x_tr| = 3.523e-10`
