@@ -1408,16 +1408,27 @@ reviewer on 79330ab7..5613abbe (scoping + lazy root error came after the review)
     projected flow (decision in force) and the projection is recorded, so no engine change here;
     but the rehearsal gate now reads this cell as wrong — for the orchestrator.
 
-### Session 9 — what is left (for the successor, if this session stops before the chain ends)
+* (h) full pytest on c20d61a1 (`S9_pytest_full_b.log`): **7219 passed, 137 skipped, 42
+  xfailed, 0 failed** (1978 s under the owner's Chrome load + the 2.1.0 chain). Ten-bridges walls
+  under that load: f67 214.9 s, fx1 [constant] 198.0 s, [python] 189.3 s (85 / 57 / 56 s on the
+  morning's quieter machine: load, not attributed to the code).
+* The C++ dsed tests were run on 9d6dc0c4 (152 / 41 469), not after 3058a87c (a one-line guard
+  in the adapter); Eigen 3.4.0 not re-run after 9d6dc0c4. Rule off: 9d6dc0c4 and 3058a87c
+  touch rule-on paths only (output_jump_ is set only under the rule; fast_cluster_tau runs only
+  from the rule's projection record); goldens / bit identity were not re-run on them.
 
-1. Read the chain's results (`.scratch/f10/S9_chain.log`, one line per item): the full pytest
-   (`S9_pytest_full.log`; the ten-bridges walls in its `--durations`), ruff, the referee
-   (`refsum.py S9_referee_100.jsonl`: none above 1 outside the per-projection windows, every
-   unit not comparable named), property 200 instants, `--truth` 6/6, events gate 100 same,
-   samples (three_phase_balanced_rl_load near 8 038?), ladder500 wall, the rehearsal render.
-2. The cost gate on active_clamp_forward (+0.89 %): attribute it (see (g)) or decide.
-3. test_diode_state_reconstruction's rule-on reading (step 3): pass `interpolable` in the test
+### Session 9 — what is left
+
+1. The rehearsal's analytic hard_switched_rc on dsed:output_grid (err_rms 0.0676, the 2 ps
+   sample of the projected flow against the unprojected closed form): decide whether the
+   rehearsal's analytic gate should read the projected flow, or F-X-7 should skip the sample
+   when the event was projected.
+2. The referee's 4 units with an unread ~2 ps line after a source corner, and
+   driven_lc_series_resonance's referee run ending without a line (not diagnosed: stopped after
+   > 15 min under load).
+3. The cost gate on active_clamp_forward (+0.89 %): attribute it (see (g)) or decide.
+4. test_diode_state_reconstruction's rule-on reading (step 3): pass `interpolable` in the test
    when the release flips the rule on (release branch work, not this line).
-4. Clean up: `.scratch/build-e34ct` (Eigen 3.4.0 test tree), `.scratch/base527` +
+5. Clean up: `.scratch/build-e34ct` (Eigen 3.4.0 test tree), `.scratch/base527` +
    `.scratch/build-base527` (keep `.scratch/so_527e644d/` for cost reruns), `.scratch/f10/base`
    (537 MB of baseline dumps) once the orchestrator has read the logs.
