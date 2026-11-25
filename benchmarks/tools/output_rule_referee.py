@@ -235,6 +235,15 @@ def referee(case, res, info, cols, rt, config: str = "auto+next") -> dict:
             if g.event_times is not None:
                 eg_all.append(np.asarray(g.event_times, dtype=float))
     tg = np.concatenate(tg_all)
+    xg_cat = np.concatenate(xg_all)
+    yg_cat = {c: np.concatenate(yg_all[c]) for c in cols}
+    # a seam of the window chain (the resumed window's first sample repeats the last one, every
+    # value bit-equal) is no jump: read as one, it hid every instant of a 2 ps line between two
+    # seams (ll03_rl_step's source corner at 100 ns, session 10)
+    seam = np.r_[False, (np.diff(tg) == 0) & (xg_cat[1:] == xg_cat[:-1]).all(axis=1)
+                 & np.all([yg_cat[c][1:] == yg_cat[c][:-1] for c in cols], axis=0)]
+    tg, xg_cat = tg[~seam], xg_cat[~seam]
+    yg_cat = {c: v[~seam] for c, v in yg_cat.items()}
     eg = np.unique(np.concatenate(eg_all)) if eg_all else np.zeros(0)
     if eg.size != ev.size or (ev.size and float(np.abs(eg - ev).max()) > EVENT_TOL):
         n = min(eg.size, ev.size)
@@ -262,7 +271,7 @@ def referee(case, res, info, cols, rt, config: str = "auto+next") -> dict:
     jumps = np.r_[_jumps(t), _jumps(tg)]
     evx = np.unique(np.r_[ev, jumps])
     for c in cols:
-        yg = np.concatenate(yg_all[c])
+        yg = yg_cat[c]
         # the range of the rule run's own (projected) trace: the unprojected reference's
         # parasitic excursions would widen the tolerance (session 9 reviewer)
         allv = np.asarray(ys[c], dtype=float)
@@ -282,7 +291,7 @@ def referee(case, res, info, cols, rt, config: str = "auto+next") -> dict:
         if r > worst:
             worst, where = r, (c, at)
     # every stored column, each against its own promise and floor
-    xs, xg = np.asarray(dr.with_right_limits(res).states, dtype=float), np.concatenate(xg_all)
+    xs, xg = np.asarray(dr.with_right_limits(res).states, dtype=float), xg_cat
     worst_x, n_x = None, 0
     # (a dt run of some circuits stores another column set: then only the observables are read, said so)
     if xs.shape == (t.size, xg.shape[1]) and (fl is None or len(fl) == xs.shape[1]):
@@ -297,7 +306,7 @@ def referee(case, res, info, cols, rt, config: str = "auto+next") -> dict:
                 worst, where = r, (f"x[{j}]", at)
     return dict(comparable=True, ratio=worst, at=where, ratio_incl_settle=worst_whole, settle_s=settle,
                 settle_windows=int(win.shape[0]), settle_fallback=fallback, ratio_stored_columns=worst_x, n_columns=n_x, n_lines=int(np.sum(np.diff(t) > 0)),
-                n_ref=int(tg.size), n_windows=len(tg_all), rtol=rt, per=per,
+                n_ref=int(tg.size), n_windows=len(tg_all), n_seams=int(seam.sum()), rtol=rt, per=per,
                 n_output_floored=og.get("n_output_floored"), output_floor_max=og.get("output_floor_max"),
                 wall_ref_s=round(time.perf_counter() - t0, 2))
 
