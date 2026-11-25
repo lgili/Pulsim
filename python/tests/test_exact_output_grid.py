@@ -293,3 +293,9 @@ def test_the_analytic_gate_reads_the_projected_flow():
     # a record whose tau the closed form does not decay at is not applied, nor is none
     assert metrics.projected_reference(c.exact, [dict(p, tau=10 * p["tau"]) for p in P]) is c.exact
     assert metrics.projected_reference(c.exact, ()) is c.exact
+    # the caller's parasitic bound: a record above it is not applied (rehearsal: 1e-6 of the span)
+    assert metrics.projected_reference(c.exact, P, tau_max=0.5 * P[0]["tau"]) is c.exact
+    assert metrics.projected_reference(c.exact, P, tau_max=1e-6 * c.t_end).n_applied == 5
+    # a duplicate record a few ulps later is the same mode: removed once
+    dup = P + [dict(P[0], t=float(np.nextafter(P[0]["t"], 1.0)))]
+    assert metrics.projected_reference(c.exact, dup).n_applied == 5

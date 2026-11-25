@@ -113,7 +113,7 @@ def _rms(g, d2, exclude):
 PROJECTION_WINDOW_TAUS = 40.0   # the referee's SETTLE_TAUS
 
 
-def projected_reference(ref: Callable, projections=()) -> Callable:
+def projected_reference(ref: Callable, projections=(), tau_max: float = np.inf) -> Callable:
     """The closed form of the flow the output rule promises (DECISIONS 8): at each
     projection the exact engine records under the rule (``diagnostics['output_grid']
     ['projections']``: ``t``, ``tau``) the parasitic mode it settled is removed from
@@ -122,23 +122,29 @@ def projected_reference(ref: Callable, projections=()) -> Callable:
     Only ``t`` and ``tau`` come from the engine. ``D`` is the closed form's own fast
     part, ``ref`` minus its slow part extrapolated linearly from ``t + 40 tau`` and
     ``t + 80 tau``, read at ``t + tau/64``; a record whose ``tau`` the closed form
-    does not decay at (its fast part at ``t + tau`` not ``exp(-63/64)`` of that within
-    1e-3) is not applied, so the gate never reads the engine's projection as truth.
-    One mode per instant (the first record of an instant); no applicable record:
+    does not decay at (its fast part at ``t + tau`` against the one at ``t + tau/64``,
+    the float offsets as stored, within 1e-3) is not applied, so the gate never reads
+    the engine's projection as truth; nor is a record whose ``tau`` is above
+    ``tau_max`` (the caller's own bound on a parasitic mode: an engine that projected
+    a resolved mode away is graded against the unprojected form). One mode per instant
+    (records within one ``tau`` of an applied one are skipped); no applicable record:
     ``ref`` itself."""
     recs = []
     for p in projections:
         t0, tau = float(p["t"]), float(p["tau"])
-        if not (tau > 0.0 and np.isfinite(tau)) or any(t0 == r[0] for r in recs):
+        if (not (0.0 < tau <= tau_max and np.isfinite(tau))
+                or any(abs(t0 - r[0]) <= max(tau, r[1]) for r in recs)):
             continue
         w = PROJECTION_WINDOW_TAUS * tau
-        s1, s2, a, b = (float(v) for v in ref(np.array([t0 + tau / 64, t0 + tau, t0 + w, t0 + 2 * w])))
-        slope = (b - a) / w   # the slow part: a + (s - t0 - w) * slope
-        f1 = s1 - (a + (tau / 64 - w) * slope)
-        f2 = s2 - (a + (tau - w) * slope)
-        if f1 == 0.0 or abs(f2 / f1 - np.exp(-63 / 64)) > 1e-3:
+        q = np.array([t0 + tau / 64, t0 + tau, t0 + w, t0 + 2 * w])
+        s1, s2, a, b = (float(v) for v in ref(q))
+        o1, o2, ow = q[0] - t0, q[1] - t0, q[2] - t0   # the offsets the closed form was read at
+        slope = (b - a) / (q[3] - q[2])   # the slow part: a + (s - t0 - ow) * slope
+        f1 = s1 - (a + (o1 - ow) * slope)
+        f2 = s2 - (a + (o2 - ow) * slope)
+        if not (o1 > 0 and o2 > o1) or f1 == 0.0 or abs(f2 / f1 - np.exp(-(o2 - o1) / tau)) > 1e-3:
             continue
-        recs.append((t0, tau, w, f1 * np.exp(1 / 64)))
+        recs.append((t0, tau, w, f1 * np.exp(o1 / tau)))
     if not recs:
         return ref
 

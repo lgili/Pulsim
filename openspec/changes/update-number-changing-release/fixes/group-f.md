@@ -1500,3 +1500,46 @@ reviewer on 79330ab7..5613abbe (scoping + lazy root error came after the review)
   this method's own spread (base alone: 1737.9 … 1766.6 M across rounds), so "under 0.5 %" is
   not resolved better than ±0.5 %. The cold first call is one sample per process and moves
   −5 % … +1 % on identical code paths: not a gate reading.
+
+### Step 3 — rule off against the PR head, on 821983a5 (`S10_ruleoff_compare.log`, `S10_ruleoff_exdump.log`)
+
+* `base.sh compare`: goldens **ALL IDENTICAL**; bit identity **36/36 default, 36/36 shadow**.
+  Its exact-dump part is vacuous (299 errors: the base tree's tests run against the tip's
+  package, "common=0" — also so in session 9's log); the dumps are read by `cmp_ex.sh` instead.
+* `cmp_ex.sh` (the tip's own `test_exact_*.py`, against the 527e644d dumps in `.scratch/f10/base`):
+  313 passed, 3 xfailed; **rule-off diffs 0**, rule-on diffs 21 (the same 21 as session 9: D-1's
+  corners, F-X-7's 2 ps samples), 0 call-count mismatches; 221 common tests (+1 new on the tip),
+  420/441 exact calls identical.
+
+### Step 5 — fresh reviewer (opus, medium, read only; diff 6fca24a4..821983a5, code only)
+
+* No correctness defect found. Areas reported clean: eigensolves (0×0 guarded; the exact
+  build's eigenvalues are those of D·A·D⁻¹ or the block-triangular augmented matrix: A's plus
+  ±iω; no stale entry), rule-off paths (all behind `output_rtol_ > 0`; `out_from` NaN), test
+  circularity (the analytic test grades against `_caploop_exact` with negative controls).
+* FIXED (metrics.py) — the gate's independence: only `t` and `tau` come from the engine, but an
+  engine that projected a RESOLVED mode away would pass, since the closed form does decay at
+  that tau. `projected_reference(..., tau_max=)`: the rehearsal passes 1e-6 of the case's span
+  (the engine's cluster is below 1e-6 of its resolved scale, ≤ the span), a record above it is
+  not applied. Also: records within one tau of an applied one are the same mode (two records a
+  few ulps apart were subtracted twice — fail-safe, but wrong); the decay check uses the float
+  offsets actually read (at t ≈ 1 s, tau/64 = 1 ps/64 is ~70 ulps). Tests added to
+  `test_the_analytic_gate_reads_the_projected_flow`.
+* LEFT (recorded) — scheduler.hpp ~698/737: with `store_every > 1` a deferred step start
+  (`output_pend_`) and a jump (`output_jump_`) can both be set; the 2 ps sample is pushed before
+  the deferred start is flushed: times would go back. Unreachable from `simulate()` (it turns the
+  rule off when `store_every != 1`, python/pulsim/__init__.py); only the private
+  `run_ped_native_builder(store_every=k, output_rtol=...)` reaches it. Fix when touched next:
+  flush `output_pend_` before the 2 ps sample, or refuse the pair in the binding.
+* LEFT — the referee's jump test is relative (64 ulps): two limits further apart than 64 ulps but
+  inside 2 ps (a corner at small t) would be read across — a false failure, never a false pass.
+* LEFT — `fast_cluster_tau`'s fallback EigenSolver (only where the exact build has no
+  eigenvalues) does not check `info()`; it affects only the reported tau.
+* After the review fixes (`S10_ana_rerun2.log`): the analytic rule cells again **78 identical**,
+  hard_switched_rc's three now **7.58e-14** (the float offsets read: was 1.31e-10); the test
+  passes; `hsrc3.py` unprojected 0.0676 (control unchanged).
+
+### Step 3 (cont.) — C++ dsed tests on 821983a5 (`S10_ctest_dsed.log`)
+
+* Eigen 5 (`.scratch/build-ctest`): **152 test cases / 41 469 assertions pass**. Eigen 3.4.0
+  (`.scratch/build-e34ct`, 200 eigen-3.4.0 refs in build.ninja): **152 / 41 469 pass**.

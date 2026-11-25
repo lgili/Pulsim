@@ -338,7 +338,9 @@ def analytic_worker(unit, names, emit):
             ceil = rs.ANALYTIC[c.id].get(eng, {}).get("ceiling", 1e-3)
             # the rule's promise is against the projected flow (DECISIONS 8)
             og = (getattr(r, "diagnostics", None) or {}).get("output_grid") or {}
-            ref = metrics.projected_reference(c.exact, og.get("projections") or ())
+            # a parasitic mode is below 1e-6 of the run's resolved scale (<= its span): the
+            # case's own bound, so a resolved mode the engine projected away is not removed
+            ref = metrics.projected_reference(c.exact, og.get("projections") or (), tau_max=1e-6 * c.t_end)
             if ref is not c.exact:
                 rec["n_projected"] = ref.n_applied
             e = metrics.err_rms(np.asarray(r.times), c.observe(r), ref,
