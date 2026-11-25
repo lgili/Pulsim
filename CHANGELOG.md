@@ -49,6 +49,39 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   that print the exception's class name (design evaluations) show
   `SingularError:` where they showed `SimulationAborted:`.
 
+### The exact engine's output rule: promise, projections, referee (release findings F-4, F-8, F-9, F-X-7, F-Y-3)
+
+Everything below applies only with `output_rtol` set (`engine='exact'`, no
+`dt`, `store_every` or recorders); the default (`output_rtol=None`) keeps
+2.1.0's samples. Reference: `docs/solvers.md`, "The exact engine's output
+rule".
+
+- **The promise covers every stored column**, not only the states: node
+  voltages and branch currents are held to
+  `max(output_rtol * range, atol, floor)`, `range` being the column's range
+  so far. No column is promised below its own rounding floor; a column
+  certified constant at that floor is counted in
+  `diagnostics['output_grid']` (`n_output_floored`, `output_floor_max`,
+  `output_floor_by_column`) and no longer cuts the samples.
+- **A source corner (pulse / PWM edge) is always a stored sample**, and after
+  an event that changed the mode or a source's piece the solution 2 ps later
+  is stored too, with the stored times kept ordered (F-X-7): plain
+  interpolation draws a node voltage's jump as a jump, not a ramp.
+- **Projections are recorded.** The promised "exact solution" is the flow
+  with the parasitic cluster (modes faster than 1e-6 of the run's time
+  scale) settled at each event; every such projection is reported in
+  `diagnostics['output_grid']` (`n_projections`,
+  `projection_max_by_column`, `projections`: the first 1000 as
+  `{t, amplitude, column, tau}`).
+- **Recorders under the rule** read a window's min / max inside an exact
+  step from its closed form where one exists; elsewhere the step ends are
+  kept and counted (`res.recorder_feed['closed_form']['n_extrema_ends']`).
+- **Evidence tooling.** `benchmarks/tools/output_rule_referee.py` checks the
+  promise on the benchmark set at every instant of every stored line;
+  `metrics.projected_reference` is the closed form with each recorded
+  projection removed; `benchmarks/tools/output_rule_property.py` checks the
+  promise at random instants against the same route run on a `dt` grid.
+
 ## [2.1.0] - 2026-11-25
 
 2.1.0 brings new engines, devices and analyses behind new options that
