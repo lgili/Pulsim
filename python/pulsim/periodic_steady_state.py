@@ -1423,12 +1423,14 @@ def _solve_closed_loop_exact(builder, period, switch_fn, closed_loops,
     from ._control_state import suppress_sweep_points
     from ._transient_shooting import solve
 
+    solved = False   # any failure (KeyboardInterrupt too) restores the caller's controller state
     try:
         x0, M, mu, history, _full, residual, vrun, err_est = solve(
             m, x, rtol=rtol, max_period_runs=max_period_runs, n_relax=n_relax)
-    except BaseException:
-        m.mapper.restore_original()
-        raise
+        solved = True
+    finally:
+        if not solved:
+            m.mapper.restore_original()
 
     # Seed the converged controller initial state cleanly
     x_ctrl_star = x0[m.n_circuit:].copy()

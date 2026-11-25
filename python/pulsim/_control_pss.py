@@ -222,7 +222,8 @@ def _resolve_observer(builder, obj, *, allow_compile: bool = True):
             if obs is not None and getattr(obs, "_cxx_chain", None) is obj._cxx_chain:
                 return obs
         if not allow_compile:
-            raise ValueError(
+            from . import _options_error
+            raise _options_error("step_observer",
                 "periodic_steady_state: MixedDomainBlockChain has not been "
                 "compiled; call chain.make_step_observer(builder) or pass "
                 "the circuit builder."
@@ -245,7 +246,8 @@ def normalize_control_args(
 
     if control is not None:
         if closed_loops is not None or step_observer is not None:
-            raise ValueError(
+            from . import _options_error
+            raise _options_error("control",
                 "periodic_steady_state: pass control= OR closed_loops= / "
                 "step_observer=, not both."
             )
@@ -609,7 +611,8 @@ def _dummy_chain_for_spec(spec, overrides: dict[str, Any] | None = None):
     elif kind == "PythonBlock":
         c.add_python_block(lambda *a: 0.0, [], ["o0"], with_state=False)
     else:
-        raise ValueError(f"unsupported control block kind {kind!r}")
+        from . import _options_error
+        raise _options_error("kind", f"unsupported control block kind {kind!r}")
     c.name_last("b", kind)
     c.compile()
     return c

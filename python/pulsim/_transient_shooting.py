@@ -533,12 +533,14 @@ def periodic_steady_state_on(builder, *, period, switch_fn, engine, dt,
     if x.shape != (n,):
         raise _err(f"start_from has {x.size} entries; the state has {n} "
                    f"({m.labels}).")
+    solved = False   # any failure (KeyboardInterrupt too) restores the caller's controller state
     try:
         x0, M, mu, history, full, residual, vrun, err_est = solve(
             m, x, rtol=rtol, max_period_runs=max_period_runs, n_relax=n_relax)
-    except BaseException:
-        m.mapper.restore_original()
-        raise
+        solved = True
+    finally:
+        if not solved:
+            m.mapper.restore_original()
     x_ctrl_star = x0[m.n_circuit:].copy()
     if m.n_ctrl > 0:
         m.mapper.seed(x_ctrl_star)
