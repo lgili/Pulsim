@@ -400,9 +400,11 @@ and re-verified on 527e644d).
   `res.loss_events(name)` over the half-open window `[t_from, t_to)` (adjacent windows
   partition the events; a resumed run's inherited events fall outside its window),
   summed with `math.fsum`. It does so with or without `switch_specs` / `diode_specs`:
-  passing both never double-counts. One exception: a port with neither an `E_on` nor
-  an `E_off` table (`DeviceLossRecord.has_e_on` / `has_e_off`, new, false) honours the
-  caller's post-hoc spec. A zero-valued table or a ZVS edge keeps the kernel's 0 J.
+  passing both never double-counts, and the ignored spec warns (named device). A port
+  with neither an `E_on` nor an `E_off` table (`DeviceLossRecord.has_e_on` /
+  `has_e_off`, new, false) leaves the device to the post-hoc path: the caller's spec
+  if given, else no switching keys (never a 0 J that nothing measured). A zero-valued
+  table or a ZVS edge keeps the kernel's 0 J.
 - `device_thermal_summary` takes `P_sw_avg` from `device_loss_summary`, so it follows.
 - Evidence: `test_loss_summary_kernel_records.py` (28 cases): fixed-`Tj` parity with
   the post-hoc path on a twin circuit within 1e-9 (pwl, pwl + restart rule, dsed) and
