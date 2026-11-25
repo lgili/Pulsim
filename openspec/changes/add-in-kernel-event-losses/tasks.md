@@ -30,7 +30,7 @@
 - [ ] 4.2 Test: two paralleled devices with unequal `R_th` share current unequally with feedback on and equally with it off
 
 ## 5. Python summaries read kernel records
-- [ ] 5.1 `device_loss_summary` and `device_thermal_summary` use `res.loss_events` when present; identical output at fixed `Tj` (regression on the existing loss tests)
+- [x] 5.1 `device_loss_summary` and `device_thermal_summary` use `res.loss_events` when present; identical output at fixed `Tj` (regression on the existing loss tests) — seen 2026-11-25 on 527e644d + this port (DECISIONS 18): at fixed `Tj` the summary read from the kernel records equals the post-hoc `switch_specs` path on a twin circuit without a port within 1e-9 on pwl, pwl with `discontinuity_restart=True` and dsed, 1e-5 on trbdf2 (whole run and a window; both summaries); the 22 existing loss / thermal test files pass unchanged (292 tests); a 1e-6 error injected into the kernel read fails 15 of the 28 new tests
 
 ## 6. Documentation
 - [x] 6.1 `docs/losses-and-thermal.md` (online versus post-hoc, the reading rule table, the energy-balance note), `AI_GUIDE.md` (which path to use, `Tj` versus `junction`), `docs/known-limitations.md` and `KNOWN_LIMITATIONS.md` (event energy is not drawn from the circuit; Newton devices excluded), `CHANGELOG.md`
