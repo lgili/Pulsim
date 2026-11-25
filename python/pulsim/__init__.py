@@ -2759,14 +2759,38 @@ def simulate(
         recorders, the exact engine returns every event instant (both
         limits where the state jumps) and between events samples spaced so
         that, between events, linear interpolation of the returned samples
-        is within ``max(output_rtol * range, atol)`` of the exact solution
-        for every STATE (``range``: the state's range so far, at least 1e-3
-        of its peak; ``atol``: the run's absolute tolerance, one scalar for
-        every state, default 1e-9 — an absolute floor, so a state near 0 is
-        held to ``atol``, not to rounding; an observable that is a difference
-        of large states gets that absolute error, not ``output_rtol`` of
-        itself). The
-        samples are read from the exact steps the run takes without the rule
+        is within ``max(output_rtol * range, atol, floor)`` of the exact
+        solution at every instant, for every STORED COLUMN — the states and
+        the recovered node voltages and branch currents (``range``: that
+        column's range over the run so far, through the end of the exact
+        step that holds the line, at least 1e-3 of its peak; ``atol``: the
+        run's absolute tolerance, one scalar, default 1e-9 — an absolute
+        floor, so a column near 0 is held to ``atol``, not to rounding;
+        ``floor``: the column's rounding floor, ``16·eps·Σ|terms|`` of its
+        evaluation from the modal state). No column is promised below its
+        own rounding floor: a column whose chord bound only fits through its
+        floor is certified constant up to rounding at that floor, does not
+        cut the samples, and is counted
+        (``diagnostics['output_grid']``: ``n_output_floored`` rule calls,
+        ``output_floor_max``, ``output_floor_by_column`` per stored column).
+        The sample at an event is its left limit; after an event that
+        changed the mode or a source's piece the solution 2 ps later is a
+        sample too, so plain interpolation of ``res.times`` draws a jump of
+        a node voltage as a jump (over those 2 ps: the one line outside the
+        promise), not as a ramp to the next sample.
+        "Exact solution" here is the flow WITH the parasitic cluster
+        projected at each event: modes whose time constant is below 1e-6 of
+        the run's resolved time scale are settled at the event instant (the
+        run without the rule lets them decay over their few time constants).
+        Every such projection is recorded (``diagnostics['output_grid']``:
+        ``n_projections``, ``projection_max_by_column``, and ``projections``,
+        the first 1000 as ``{t, amplitude, column, tau}``: the largest
+        projected amplitude, its stored column and the cluster's slowest time
+        constant). Recorders on such a run read a window's min / max inside a
+        step from its closed form where one exists (a constant plus one damped
+        sinusoid or at most two real exponentials), else at the step ends,
+        counted (``res.recorder_feed['closed_form']['n_extrema_ends']``).
+        The samples are read from the exact steps the run takes without the rule
         (``n_exact_steps`` counts steps, the samples are ``n_output_samples``;
         a step end that the chord from the last stored sample already covers
         is not stored, so a slow or constant stretch keeps few samples);

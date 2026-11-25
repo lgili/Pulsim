@@ -81,6 +81,7 @@
 #include <complex>
 #include <limits>
 #include <map>
+#include <numbers>
 #include <memory>
 #include <span>
 #include <stdexcept>
@@ -316,6 +317,61 @@ public:
                 }
             }
         }
+    }
+
+    /// The extremes of a degree-1 probe g over the piece [s0, s0 + L] of the step,
+    /// strictly inside it (release finding F-Y-3: a window read at the step ends missed
+    /// an LC peak, 19.836 V against 19.898 V). y(s) = Re Σ α_i e^{μ_i s} (modal form,
+    /// u·κ ≤ the bar); dropping the constant (μ = 0) and terms below 64u·Σ|α|, the
+    /// stationary points have a closed form when what is left is
+    ///   one real mode or none        none inside (monotone);
+    ///   two real modes               e^{(μ1−μ2)s} = −α2μ2 / (α1μ1): at most one;
+    ///   one conjugate pair (σ ± jω)  y' ∝ e^{σs} cos(ωs + φ), φ = arg(αμ):
+    ///                                s_k = (π/2 − φ + kπ)/ω, the first and last two
+    ///                                (|y − c| is monotone in k: e^{σ s_k}).
+    /// Each candidate is the full modal sum at it. out = {min, s_min, max, s_max} (NaN
+    /// where no interior point), relative to s0. False: no closed form (the caller keeps
+    /// the step ends and counts it).
+    bool extremum(std::size_t g, Real s0, Real L, Real* out) {
+        constexpr Real nan = std::numeric_limits<Real>::quiet_NaN();
+        out[0] = out[1] = out[2] = out[3] = nan;
+        if (deg_[g] < 0 || deg_[g] > 1 || !modal_ok_(1) || !(L > 0)) return false;
+        const Eigen::VectorXcd a = r_[g].cwiseProduct(z_.cwiseProduct((e_.mu * s0).array().exp().matrix()));
+        const Real tot = a.cwiseAbs().sum();
+        std::vector<Index> live;
+        for (Index i = 0; i < a.size(); ++i)
+            if (e_.mu[i] != seg::Cplx{0} && std::abs(a[i]) > 64 * std::numeric_limits<Real>::epsilon() * tot)
+                live.push_back(i);
+        const auto y_at = [&](Real s) {
+            return a.cwiseProduct((e_.mu * s).array().exp().matrix()).sum().real();
+        };
+        const auto take = [&](Real s) {
+            if (!(s > 0 && s < L)) return;
+            const Real y = y_at(s);
+            if (!(y >= out[0])) { out[0] = y; out[1] = s; }
+            if (!(y <= out[2])) { out[2] = y; out[3] = s; }
+        };
+        const auto real_mode = [&](Index i) { return e_.mu[i].imag() == 0; };
+        if (live.size() <= 1 && (live.empty() || real_mode(live[0]))) return true;
+        if (live.size() == 2 && real_mode(live[0]) && real_mode(live[1])) {
+            const Real m1 = e_.mu[live[0]].real(), m2 = e_.mu[live[1]].real();
+            const Real r = -(a[live[1]].real() * m2) / (a[live[0]].real() * m1);
+            if (r > 0 && m1 != m2) take(std::log(r) / (m1 - m2));
+            return true;
+        }
+        if (live.size() == 2 && e_.mu[live[0]] == std::conj(e_.mu[live[1]])) {
+            const Index i = e_.mu[live[0]].imag() > 0 ? live[0] : live[1];
+            const Real w = e_.mu[i].imag();
+            const Real phi = std::arg(a[i] * e_.mu[i]);
+            constexpr Real pi = std::numbers::pi_v<Real>;
+            // the first k with s_k > 0, and the last with s_k < L
+            const Real k0 = std::floor((phi - pi / 2) / pi) + 1;
+            const Real k1 = std::floor((w * L + phi - pi / 2) / pi);
+            for (Real k : {k0, k0 + 1, k1 - 1, k1})
+                if (k >= k0 && k <= k1) take((pi / 2 - phi + k * pi) / w);
+            return true;
+        }
+        return false;
     }
 
     [[nodiscard]] const detail::PeriodMode& mode() const noexcept { return e_; }
@@ -726,6 +782,31 @@ public:
         }
     }
 
+    /// The interior extremes of a closed piece (SegmentMode::extremum), only when
+    /// enabled (the output rule's runs: its steps are long; off, nothing moves).
+    bool extrema(Size rec, Size p, Real lo, Real hi, Real* out) noexcept override {
+        if (!extrema_on_ || sm_ == nullptr) return false;
+        const std::size_t g = base_.at(rec) + p;
+        bool ok = false;
+        try {
+            ok = ok_[g] && stamp_[g] == step_ && sm_->extremum(g, lo - t0_, hi - lo, out);
+        } catch (const std::exception&) {
+            ok = false;
+        }
+        if (!ok) {   // the step ends stay the piece's min / max: counted, never silent
+            ++n_ext_ends_;
+            return false;
+        }
+        ++n_ext_closed_;
+        if (!std::isnan(out[1])) out[1] += lo;
+        if (!std::isnan(out[3])) out[3] += lo;
+        return true;
+    }
+    void set_extrema(bool on) noexcept { extrema_on_ = on; }
+    /// Pieces whose interior extremes are the closed form's / only the step ends'.
+    [[nodiscard]] Size n_extrema_closed() const noexcept { return n_ext_closed_; }
+    [[nodiscard]] Size n_extrema_ends() const noexcept { return n_ext_ends_; }
+
     [[nodiscard]] Size n_closed() const noexcept { return n_closed_; }
     [[nodiscard]] Size n_line() const noexcept { return n_line_; }
     [[nodiscard]] const std::string& why() const noexcept { return why_; }
@@ -768,7 +849,8 @@ private:
     std::vector<char> ok_;
     std::vector<std::array<Real, 4>> full_;
     std::vector<const char*> pwhy_;
-    Size n_closed_ = 0, n_line_ = 0;
+    Size n_closed_ = 0, n_line_ = 0, n_ext_closed_ = 0, n_ext_ends_ = 0;
+    bool extrema_on_ = false;
     std::string why_;
 
     std::size_t add_(PeriodObservable o) {

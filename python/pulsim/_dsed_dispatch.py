@@ -506,6 +506,27 @@ def _result_from_native(native_res, t_start: float):
         og = {k: int(native_res[k]) for k in ("n_output_capped", "n_output_unbounded")}
         # the rule's samples: read from a step's start, not steps (n_exact_steps)
         og["n_output_samples"] = int(native_res.get("n_output_samples", 0))
+        # rows certified "constant up to rounding" at their rounding floor (never silent):
+        # the chords that needed it, the largest floor, and per stored column its largest
+        # floor (the recovered vector is the tail of the bounded rows; 0: never floored)
+        og["n_output_floored"] = int(native_res.get("n_output_floored", 0))
+        fr = np.asarray(native_res.get("output_floor_row", []), dtype=float)
+        og["output_floor_max"] = float(fr.max()) if fr.size else 0.0
+        ncol = res.states.shape[1] if getattr(res, "has_full_states", False) else 0
+        og["output_floor_by_column"] = (fr[-ncol:] if fr.size >= ncol > 0
+                                        else np.zeros(ncol))
+        # every projection of the parasitic cluster at an event (never silent): the count,
+        # per stored column the largest amplitude it moved, and the records (instant,
+        # largest amplitude, its column, the cluster's slowest time constant; capped)
+        og["n_projections"] = int(native_res.get("n_projections", 0))
+        pm = np.asarray(native_res.get("projection_max_row", []), dtype=float)
+        og["projection_max_by_column"] = (pm[-ncol:] if pm.size >= ncol > 0
+                                          else np.zeros(ncol))
+        og["projections"] = [
+            {"t": t + t_start, "amplitude": a, "tau": tau,
+             # a row of the recovered vector that is not a stored column: None
+             "column": (int(r) - (pm.size - ncol)) if 0 < ncol and int(r) >= pm.size - ncol else None}
+            for t, a, r, tau in native_res.get("projection_records", [])]
         tb = native_res["output_budget_t"]
         og["output_budget_t"] = None if tb != tb else tb + t_start   # NaN: not spent
         res.diagnostics["output_grid"] = og

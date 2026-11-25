@@ -524,8 +524,15 @@ public:
         // the output rule's state is per run: a resumed run rebuilds it (its
         // state range restarts at the snapshot instant), nothing is carried
         output_lo_.resize(0);
-        output_count_ = output_events_ = n_output_capped_ = n_output_unbounded_ = 0;
-        output_pend_ = false;
+        output_ylo_.resize(0);
+        output_count_ = output_events_ = n_output_capped_ = n_output_unbounded_ = n_output_floored_ = 0;
+        output_floor_row_.resize(0);
+        output_pend_ = output_jump_ = false;
+        n_projections_ = 0;
+        projection_max_.resize(0);
+        projections_.clear();
+        proj_pending_ = false;
+        proj_t_ = std::numeric_limits<Real>::quiet_NaN();
         output_total_ = 0;
         output_budget_t_ = std::numeric_limits<Real>::quiet_NaN();
         if (resume == nullptr) {
@@ -663,7 +670,9 @@ public:
                     if (out_steps) h_ex = output_step_(t, x, h_ex, result.n_events, t_target);
                     // no sliver step short of the edge (scheduler_auto.hpp)
                     if (h_ex < t_target - t && near_time(t + h_ex, t_target)) {
-                        h_ex = t_target - t;
+                        // a rule-cut step is not stretched past its bound: halve the rest
+                        h_ex = out_steps && output_certified_
+                                   ? std::min(h_ex, Real{0.5} * (t_target - t)) : t_target - t;
                     }
                     const MaskT mask_before = system_.current_mask();
                     advance_(t, x, h_ex, x_new_);
@@ -679,6 +688,27 @@ public:
                     // last stored sample covers this step too nothing is stored; else that
                     // start is stored first. out_defer: the step's end is covered (certified).
                     bool out_defer = false;
+                    // F-X-7: the sample stored at an event is its LEFT limit, so a recovered
+                    // row that jumps there (a bridge's bus, 132.6 -> 173.1 V) was drawn as a
+                    // ramp to the next stored sample, 4 us away. Under the rule the flow just
+                    // past the event (2 ps: the shortest step near_time tells apart) is a
+                    // sample too; a step too short to hold it keeps its end.
+                    bool out_keep_end = false;
+                    Real out_from = std::numeric_limits<Real>::quiet_NaN();   // the rule's chords start past it
+                    if (output_rtol_ > Real{0} && output_jump_) {
+                        output_jump_ = false;
+                        const Real te = t + Real{2} * std::max(Real{1e-12},
+                            Real{8} * std::numeric_limits<Real>::epsilon() * std::abs(t));
+                        const Real t1 = evt ? evt->t_event : t + h_ex;
+                        out_keep_end = !(te < t1) || near_time(te, t1);
+                        if (!out_keep_end) {
+                            advance_(t, x, te - t, output_x_);
+                            const MaskT m = system_.current_mask();
+                            ped_push_sample(result, te, output_x_, m, m, nullptr);
+                            ++result.n_output_samples;
+                            out_from = te;
+                        }
+                    }
                     if (output_rtol_ > Real{0} && !out_steps) {
                         const Real t1 = evt ? evt->t_event : t + h_ex;
                         if (output_pend_) {
@@ -693,13 +723,24 @@ public:
                                     advance_(ts, result.states.back(), t1 - ts, output_end_);
                                     out_defer = ((x_new_ - output_end_).cwiseAbs().array()
                                                  <= Real{1e-3} * output_tol_.array()).all();
+                                    // and on the recovered rows (a high-impedance node reads
+                                    // the gap times its impedance)
+                                    if constexpr (requires { system_.recover_from_state(); })
+                                        if (out_defer && output_work_.ty.size()
+                                                             == system_.recover_from_state().rows())
+                                            out_defer = ((system_.recover_from_state() * (x_new_ - output_end_))
+                                                             .cwiseAbs().array()
+                                                         <= (Real{1e-3} * output_work_.ty)
+                                                                .cwiseMax(output_work_.tyf).array()).all();
                                 }
                             }
                             if (!out_defer) output_flush_(t, x, result);
                         }
                         if (!out_defer)
-                            out_defer = push_output_samples_(t, x, t1, result.n_events, t_target, result)
+                            out_defer = push_output_samples_(t, x, t1, result.n_events, t_target, result,
+                                                             out_from)
                                         && !evt;
+                        if (out_keep_end) out_defer = false;
                     }
                     bool out_transparent = !evt;   // the end's fire (if any) moved nothing
                     // An event at the very end of the step fires too:
@@ -733,7 +774,8 @@ public:
                             // nothing: the chord across it stays one LTI piece (F-X-4)
                             out_transparent = on_edge && !at_corner && !ticked
                                               && system_.current_mask() == mask_before
-                                              && (x.array() == x_pre_event.array()).all();
+                                              && (x.array() == x_pre_event.array()).all()
+                                              && !(out_defer && corner_at_(t));
                             plan_fast_samples_(
                                 t, (on_edge && at_corner)
                                        || !(system_.current_mask() == mask_before));
@@ -765,6 +807,7 @@ public:
             }
 
             if (output_pend_) output_flush_(t, x, result);   // a numeric step stores its own ends
+            output_jump_ = false;
             // 3. Snapshot k1 BEFORE step (needed for Hermite backtrack
             // when a predicate fires inside the step).
             const bool need_pred_scan = (predictor_.size() > 0);
@@ -1073,6 +1116,11 @@ public:
     [[nodiscard]] Real output_budget_t() const noexcept { return output_budget_t_; }
     [[nodiscard]] std::size_t n_output_capped() const noexcept { return n_output_capped_; }
     [[nodiscard]] std::size_t n_output_unbounded() const noexcept { return n_output_unbounded_; }
+    /// The rule calls whose chord was certified only through a row's rounding floor
+    /// (that row is constant up to rounding at the floor), and per bounded row (the
+    /// augmented state, then the recovered vector) the largest floor so used (0: none).
+    [[nodiscard]] std::size_t n_output_floored() const noexcept { return n_output_floored_; }
+    [[nodiscard]] const Vector& output_floor_row() const noexcept { return output_floor_row_; }
 
     // Test hooks: the step cap (default 10M) and the settle's round cap
     // (default 64). A small cap reaches the give-up deterministically on
@@ -1673,6 +1721,7 @@ private:
     /// harness's interpolated measure read it 3 % of the span off while
     /// every sample was exact. Extra samples only; no state is touched.
     void plan_fast_samples_(Real t_e, bool changed) {
+        if (changed && output_rtol_ > Real{0}) output_jump_ = true;
         if constexpr (requires { system_.exact_fast_samples(t_e, Real{}, fast_t_); }) {
             if (!changed) return;   // a dropped same-mask edge keeps the plan
             fast_k_ = 0;
@@ -1703,6 +1752,7 @@ private:
     }
 
     void project_(Real t, Vector& x) {
+        if (output_rtol_ > Real{0}) proj_xin_ = x;   // note_projection_: a chain or a restart
         // dependent states first, whatever the event projection says: an
         // inconsistent state is not a state of the mode (DECISIONS,
         // dependent states)
@@ -1721,6 +1771,19 @@ private:
                     thr = Real{1} / (kParasiticFraction * resolved_scale_(t));
             }
             if constexpr (requires { system_.project_slow(t, x, thr); }) {
+                if constexpr (requires(Vector& y) { system_.recover_full_into(t, x, y);
+                                                     system_.recover_from_state();
+                                                     system_.fast_cluster_tau(thr); }) {
+                    if (output_rtol_ > Real{0}) {   // every projection under the rule (any step)
+                        proj_y0_.resize(system_.recover_from_state().rows());
+                        system_.recover_full_into(t, x, proj_y0_);
+                        system_.project_slow(t, x, thr);
+                        proj_y1_.resize(proj_y0_.size());
+                        system_.recover_full_into(t, x, proj_y1_);
+                        note_projection_(t, x, thr);
+                        return;
+                    }
+                }
                 system_.project_slow(t, x, thr);
             } else {
                 x = project_onto_slow_manifold(
@@ -1757,6 +1820,7 @@ private:
         // admissible mode is refused by the loop's name: that loop is the cause
         rejected_loop_.reset();
         last_select_ray_ = false;
+        commit_projection_();   // the previous event's projection record (rule on only)
         try {
             decide_modes_impl_(t, x, mask, gates_prev, prev_bits, rec, result);
         } catch (const UnsupportedError& e) {
@@ -3535,10 +3599,12 @@ private:
     Real output_atol_ = Real{0};
     std::size_t output_cap_ = 0, output_count_ = 0, output_events_ = 0;
     Real output_target_ = Real{0};   // the interval's next time event
-    std::size_t n_output_capped_ = 0, n_output_unbounded_ = 0;
+    std::size_t n_output_capped_ = 0, n_output_unbounded_ = 0, n_output_floored_ = 0;
+    Vector output_floor_row_;   // per bounded row (state, then recovered): the largest floor used
     std::size_t output_budget_ = 0, output_total_ = 0;   // cut steps allowed / taken in the run
     Real output_budget_t_ = std::numeric_limits<Real>::quiet_NaN();
     Vector output_lo_, output_hi_, output_tol_, output_end_;   // range of each state so far
+    Vector output_y_, output_ylo_, output_yhi_;   // the stored (recovered) vector: its range so far
     ChordWork output_work_;
 
     /// The exact step from (t, x) cut by the output rule (exact_chord_step).
@@ -3564,6 +3630,29 @@ private:
             }
             output_lo_ = output_lo_.cwiseMin(x);
             output_hi_ = output_hi_.cwiseMax(x);
+            // the stored samples are the RECOVERED vector (node voltages, branch currents:
+            // y = R·x + R_b·b(t)), so the promise is on each of its rows too; a node behind a
+            // high impedance reads a state's error times that impedance (F4: V(sw) of a buck
+            // whose switch and diode are both off, 1/(2e-4 S) × I(L)'s error = 596 × its tolerance)
+            constexpr bool kRows = requires(Vector& y) {
+                system_.recover_full_into(t, x, y);
+                system_.recover_from_state();
+            };
+            auto widen_y = [&](Real ty, const Vector& xy) {
+                if constexpr (kRows) {
+                    output_y_.resize(system_.recover_from_state().rows());
+                    system_.recover_full_into(ty, xy, output_y_);
+                    if (output_ylo_.size() != output_y_.size()) {
+                        output_ylo_ = output_y_;
+                        output_yhi_ = output_y_;
+                    }
+                    output_ylo_ = output_ylo_.cwiseMin(output_y_);
+                    output_yhi_ = output_yhi_.cwiseMax(output_y_);
+                } else {
+                    (void)ty; (void)xy;
+                }
+            };
+            widen_y(t, x);
             // relative to each state's range so far (a ripple on a large DC level
             // is what a plot reads; at least 1e-3 of its peak), with the run's atol
             // as an ABSOLUTE floor (F-X-3): a state sitting at ~0 V is held to atol,
@@ -3574,6 +3663,11 @@ private:
                                    .cwiseMax(Real{1e-3} * output_hi_.cwiseAbs().cwiseMax(output_lo_.cwiseAbs()))
                                * output_rtol_)
                                   .cwiseMax(Vector::Constant(x.size(), output_atol_));
+                if constexpr (kRows)
+                    output_work_.ty = ((output_yhi_ - output_ylo_)
+                                           .cwiseMax(Real{1e-3} * output_yhi_.cwiseAbs().cwiseMax(output_ylo_.cwiseAbs()))
+                                       * output_rtol_)
+                                          .cwiseMax(Vector::Constant(output_ylo_.size(), output_atol_));
             };
             set_tol();
             bool bounded = true;
@@ -3584,6 +3678,7 @@ private:
                 advance_(t, x, h, output_end_);
                 output_lo_ = output_lo_.cwiseMin(output_end_);
                 output_hi_ = output_hi_.cwiseMax(output_end_);
+                widen_y(t + h, output_end_);
                 set_tol();
                 d = system_.exact_output_step(t, x, output_tol_, output_rtol_, h, bounded, output_work_);
             }
@@ -3592,6 +3687,12 @@ private:
                 return h;
             }
             output_certified_ = true;
+            // rows certified only through their rounding floor (never silent: counted)
+            if (const Vector& fu = output_work_.fu; (fu.array() > Real{0}).any()) {
+                if (output_floor_row_.size() != fu.size()) output_floor_row_.setZero(fu.size());
+                output_floor_row_ = output_floor_row_.cwiseMax(fu);
+                ++n_output_floored_;
+            }
             if (!(d < h)) return h;
             if (!count) return d;
             ++output_total_;
@@ -3603,9 +3704,91 @@ private:
         (void)t; (void)x; (void)n_events; (void)t_target;
         return h;
     }
+public:
+    /// One projected event under the output rule: the instant, the largest projected
+    /// amplitude over the recovered vector (|y before − y after| in the settled mode), the
+    /// row it is on, and the projected cluster's slowest time constant.
+    struct ProjectionRecord {
+        Real t = 0, amplitude = 0, tau = 0;
+        std::size_t row = 0;
+    };
+    static constexpr std::size_t kProjectionRecordCap = 1000;
+    /// Projected events (rule on only; the pending one at the last instant included).
+    [[nodiscard]] std::size_t n_projections() const noexcept {
+        return n_projections_ + (proj_pending_ ? 1 : 0);
+    }
+    /// Per recovered row, the largest amplitude any projection moved it by.
+    [[nodiscard]] Vector projection_max() const {
+        Vector m = projection_max_;
+        if (proj_pending_) m = m.size() == proj_amp_.size() ? Vector(m.cwiseMax(proj_amp_)) : proj_amp_;
+        return m;
+    }
+    /// The records, the first kProjectionRecordCap of them.
+    [[nodiscard]] std::vector<ProjectionRecord> projection_records() const {
+        std::vector<ProjectionRecord> r = projections_;
+        if (proj_pending_ && r.size() < kProjectionRecordCap) r.push_back(pending_record_());
+        return r;
+    }
+
+private:
+    std::size_t n_projections_ = 0;
+    Vector projection_max_, proj_amp_, proj_y0_, proj_y1_, proj_xin_, proj_xout_;
+    std::vector<ProjectionRecord> projections_;
+    bool proj_pending_ = false;
+    Real proj_t_ = std::numeric_limits<Real>::quiet_NaN(), proj_tau_ = 0;
+
+    [[nodiscard]] ProjectionRecord pending_record_() const {
+        Eigen::Index row = 0;
+        const Real a = proj_amp_.size() ? proj_amp_.maxCoeff(&row) : Real{0};
+        return {proj_t_, a, proj_tau_, static_cast<std::size_t>(row)};
+    }
+    void commit_projection_() {
+        if (!proj_pending_) return;
+        proj_pending_ = false;
+        ++n_projections_;
+        projection_max_ = projection_max_.size() == proj_amp_.size()
+                              ? Vector(projection_max_.cwiseMax(proj_amp_)) : proj_amp_;
+        if (projections_.size() < kProjectionRecordCap) projections_.push_back(pending_record_());
+    }
+    /// project_ under the rule, after project_slow (proj_y0_ → proj_y1_). Every settle
+    /// round of one event projects: a round that projects the previous round's result
+    /// adds its amplitude (an upper bound over the chain); a round restarted from the held
+    /// state replaces the event's record (its earlier rounds are not physics). Each event's
+    /// decision starts a new record (decide_modes_ commits the last), so two events at one
+    /// instant keep two.
+    void note_projection_(Real t, const Vector& x, Real thr) {
+        const Vector d = (proj_y1_ - proj_y0_).cwiseAbs();
+        const bool chain = proj_pending_ && t == proj_t_ && proj_xin_.size() == proj_xout_.size()
+                           && proj_xin_ == proj_xout_;
+        if (!(proj_pending_ && t == proj_t_)) commit_projection_();
+        proj_xout_ = x;
+        if (chain && proj_amp_.size() == d.size()) {
+            proj_amp_ += d;
+        } else {
+            proj_amp_ = d;
+            proj_tau_ = 0;
+        }
+        proj_tau_ = std::max(proj_tau_, system_.fast_cluster_tau(thr));
+        proj_t_ = t;
+        proj_pending_ = d.size() > 0 && proj_amp_.maxCoeff() > Real{0};
+    }
+
     Vector output_x_;   // push_output_samples_: the sample being read
     bool output_certified_ = false;   // output_step_: the bound decided its step
     bool output_pend_ = false;   // the current step start is an end not stored (F-X-4)
+    bool output_jump_ = false;   // the last stored sample is an event's left limit (F-X-7)
+    /// A source corner at the landing `t` (the corner the step aimed at, pending in the
+    /// queue): a kink of the output, so the rule never defers it. A gate poll a few
+    /// ulps short of the corner lands it with at_corner false (diode clamp, 2.52 ms:
+    /// poll 2.5199999999999966e-3, corner 2.52e-3; the chord ran across it 9.64x).
+    [[nodiscard]] bool corner_at_(Real t) const {
+        if constexpr (requires { system_.next_source_corner_after(Real{0}); }) {
+            const Real c = queue_.pending(corner_src_);
+            return std::isfinite(c) && near_time(t, c);   // near_time(t, inf) is true
+        }
+        (void)t;
+        return false;
+    }
     void output_flush_(Real t, const Vector& x, PEDResult<MaskT>& result) {
         const MaskT m = system_.current_mask();
         ped_push_sample(result, t, x, m, m, nullptr);
@@ -3620,17 +3803,27 @@ private:
     /// mode's basis each, 6.6e-8 A on ten bridges at 1e-5, 2.1e-6 A at 1e-8).
     /// True when the last chord (to t1) was certified by the bound (not the
     /// cap / budget / an unbounded mode): only then may t1 go unstored (F-X-4).
+    /// t_from: a sample already stored inside the step (F-X-7's, 2 ps past an event):
+    /// the chords start there, so no sample lands before it (stored times stay ordered).
     bool push_output_samples_(Real t0, const Vector& x0, Real t1, std::size_t n_events,
-                              Real t_target, PEDResult<MaskT>& result) {
+                              Real t_target, PEDResult<MaskT>& result,
+                              Real t_from = std::numeric_limits<Real>::quiet_NaN()) {
         const MaskT mask = system_.current_mask();
         Real tau = t0;
         output_x_ = x0;
+        if (t_from > t0) {
+            tau = t_from;
+            advance_(t0, x0, tau - t0, output_x_);
+        }
         for (;;) {
             const Real h = t1 - tau;
             const Real d = output_step_(tau, output_x_, h, n_events, t_target);
             // no sample a sliver short of the step's end (the end is a sample)
-            if (!(d < h) || near_time(tau + d, t1)) return output_certified_ && !(d < h);
-            tau += d;
+            if (!(d < h)) return output_certified_;
+            // ... nor a chord stretched past the bound to reach it (near_time's 1e-12 s
+            // floor is 0.7 % of a 1.5e-10 s chord: ll06's ring read 1.007 × the
+            // tolerance): halve the rest instead, each half within d
+            tau += near_time(tau + d, t1) ? std::min(d, Real{0.5} * h) : d;
             advance_(t0, x0, tau - t0, output_x_);
             ped_push_sample(result, tau, output_x_, mask, mask, nullptr);
             ++result.n_output_samples;

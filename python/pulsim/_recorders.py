@@ -630,6 +630,11 @@ def exact_closed_form(report: dict) -> None:
         plan.closed_form = {"n_closed": int(report["n_closed"]),
                             "n_line": int(report["n_line"]),
                             "why": str(report["why"])}
+        # window min / max inside a step (F-Y-3, the output rule's runs only): pieces with
+        # the closed form's interior extremes / with the step ends only (counted)
+        for k in ("n_extrema_closed", "n_extrema_ends"):
+            if k in report:
+                plan.closed_form[k] = int(report[k])
 
 
 def attach_loop_feed(sim, engine: str) -> None:

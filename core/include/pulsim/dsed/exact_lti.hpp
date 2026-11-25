@@ -95,6 +95,12 @@ struct ExactLTI {
     mutable std::vector<Eigen::Index> chord_order;
     mutable Vector chord_s;
     mutable Real chord_rho = Real{0};   // max |λ_k|
+    // The rows the rule bounds, in modal form: P = O·V for an output map O
+    // (the adapter: [I; R] — the state and its recovered vector); empty: P = V.
+    mutable DenseMatrix chord_P_re, chord_P_im;
+    // |O|·|V| (complex moduli): each row's evaluation magnitude per mode, its rounding
+    // floor's weights (empty: |P| = chord_vabs, exact when P = V)
+    mutable DenseMatrix chord_M;
     // The event scan's certificate (PEDSimulator::locate_event_exact_): per armed
     // predicate (index), its modal row q_k = c·V_k, built on first use (empty: not yet).
     mutable std::vector<Eigen::VectorXcd> scan_q;
@@ -106,6 +112,8 @@ struct ExactLTI {
 struct ChordWork {
     Vector xa, ta, c0, c1, v, s;            // the adapter's augmented state / sources
     Vector cr, ci, a;                       // V⁻¹c (re, im); |z̈_k| (decaying / zero modes)
+    Vector ty, tyf, te;                     // tolerance of each recovered row (empty: none); its rounding floor; the effective tol
+    Vector fu;                              // per bounded row: the floor the last step's certification needed (0: none)
     Vector gB, gC, gD;                      // the growing modes' terms at one probe
     Vector eb;                              // the bound at one probe
     std::vector<Eigen::Index> grow;         // modes with Re λ > 0
@@ -835,9 +843,14 @@ inline constexpr Real kSettleTau = Real{40};
     bounded = e.valid && e.tier == 1;
     if (!bounded || !(h > Real{0})) return h;
     const auto n = x.size();
+    // the bounded rows: the state, or the caller's output map (chord_P, rows = tol's)
+    const bool rows_p = e.chord_P_re.rows() > 0;
+    const DenseMatrix& Pre = rows_p ? e.chord_P_re : e.V_re;
+    const DenseMatrix& Pim = rows_p ? e.chord_P_im : e.V_im;
+    const auto r = Pre.rows();
     constexpr Real kInf = std::numeric_limits<Real>::infinity();
-    if (e.chord_vabs.rows() != n) {   // per mode, once
-        e.chord_vabs = e.V_re.binaryExpr(e.V_im, [](Real a, Real b) { return std::hypot(a, b); });
+    if (e.chord_vabs.rows() != r || e.chord_s.size() != n) {   // per mode (and row map), once
+        e.chord_vabs = Pre.binaryExpr(Pim, [](Real a, Real b) { return std::hypot(a, b); });
         Vector s(n);
         for (Eigen::Index k = 0; k < n; ++k) {
             const Real r = std::abs(e.lambda[k]);
@@ -878,12 +891,12 @@ inline constexpr Real kSettleTau = Real{40};
         w.a[k] = grows ? Real{0} : std::abs(w.zdd[k]);
     }
     // column i = the split F = chord_order[0, i): S / B / C / A0 as in the bound above
-    w.S.resize(n, n + 1);
-    w.B.resize(n, n + 1);
-    w.C.resize(n, n + 1);
-    w.A0.resize(n, n + 1);
-    w.D.resize(n, n + 1);
-    w.A1.resize(n, n + 1);
+    w.S.resize(r, n + 1);
+    w.B.resize(r, n + 1);
+    w.C.resize(r, n + 1);
+    w.A0.resize(r, n + 1);
+    w.D.resize(r, n + 1);
+    w.A1.resize(r, n + 1);
     w.S.col(0).setZero();
     w.B.col(n).setZero();
     w.C.col(n).setZero();
@@ -896,8 +909,8 @@ inline constexpr Real kSettleTau = Real{40};
         w.B.col(q) = w.B.col(q + 1) + e.chord_vabs.col(k) * w.a[k];
         w.C.col(q) = w.C.col(q + 1) + e.chord_vabs.col(k) * (w.a[k] * std::abs(e.lambda[k]));
         w.D.col(q) = w.D.col(q + 1) + e.chord_vabs.col(k) * (w.a[k] * std::norm(e.lambda[k]));
-        w.A0.col(q) = w.A0.col(q + 1) + e.V_re.col(k) * w.zdd[k].real() - e.V_im.col(k) * w.zdd[k].imag();
-        w.A1.col(q) = w.A1.col(q + 1) + e.V_re.col(k) * zl.real() - e.V_im.col(k) * zl.imag();
+        w.A0.col(q) = w.A0.col(q + 1) + Pre.col(k) * w.zdd[k].real() - Pim.col(k) * w.zdd[k].imag();
+        w.A1.col(q) = w.A1.col(q + 1) + Pre.col(k) * zl.real() - Pim.col(k) * zl.imag();
     }
     Eigen::Index n_sat = 0;   // modes with a finite s_k (only they can join F)
     while (n_sat < n && e.chord_s[n_sat] < kInf) ++n_sat;
@@ -920,9 +933,9 @@ inline constexpr Real kSettleTau = Real{40};
                        .matrix();
             return true;
         }
-        w.gB.setZero(n);
-        w.gC.setZero(n);
-        w.gD.setZero(n);
+        w.gB.setZero(r);
+        w.gC.setZero(r);
+        w.gD.setZero(r);
         for (const Eigen::Index k : w.grow) {   // always in S (s_k = ∞)
             const Real m = std::abs(w.zdd[k]) * std::exp(e.lambda[k].real() * d);
             if (!std::isfinite(m)) return false;
@@ -938,16 +951,45 @@ inline constexpr Real kSettleTau = Real{40};
                    .matrix();
         return true;
     };
+    // No row is promised below its own rounding floor: its evaluation from the modal
+    // state, 16·u·Σ_i |O_ji| Σ_k |V_ik||z_k| (chord_M = |O|·|V|; |V| itself when P = V),
+    // i.e. ε·Σ|terms| of the recovery y = O·(V·z). Tolerance = max(tol, floor). A row
+    // whose bound only fits through its floor is certified constant up to rounding at
+    // that floor (w.fu, counted by the caller). The old floor Σ_k |P_jk||z_k| took P after
+    // its cancellation: ten paralleled bridges carry a 1.5e11 /s mode at 1e-13 (the state's
+    // own rounding) on a node behind 1/g_off = 3.9e8 Ω, 7.6e-5 V against a 4e-9 tolerance,
+    // and every interval hit the sample cap (group F session 7, D-2).
+    const DenseMatrix& M = e.chord_M.rows() == r ? e.chord_M : e.chord_vabs;
+    w.cr = (e.z_re.array().square() + e.z_im.array().square()).sqrt().matrix();
+    w.fu.noalias() = M * w.cr;
+    w.fu *= Real{16} * kExactRoundoff;
+    w.te = tol.cwiseMax(w.fu);
+    if (rows_p && r > n) w.tyf = w.fu.tail(r - n);
+    else w.tyf.resize(0);
+    const Eigen::Map<const Vector> tol_e(w.te.data(), r);
     // whether step d satisfies the bound for every component
-    auto fits = [&](Real d) { return bound(d) && (w.eb.array() <= tol.array()).all(); };
-    if (fits(h)) return h;
+    auto fits = [&](Real d) { return bound(d) && (w.eb.array() <= tol_e.array()).all(); };
+    // w.fu: each row's floor where the bound at the step taken needed it, else 0
+    auto floored = [&] {
+        w.fu = (w.eb.array() > tol.array()).select(w.fu, Real{0});
+    };
+    if (fits(h)) {
+        floored();
+        return h;
+    }
     // bisect in log d; lo always fits, so the result is a bound whatever the split does
     Real lo = h * Real{1e-12}, hi = h;
-    if (!fits(lo)) return lo;
+    if (!fits(lo)) {   // not even 1e-12·h fits: no bound (counted as unbounded)
+        bounded = false;
+        w.fu.setZero();
+        return h;
+    }
     for (int it = 0; it < 60 && hi > lo * Real{1.01}; ++it) {
         const Real mid = std::sqrt(lo * hi);
         (fits(mid) ? lo : hi) = mid;
     }
+    bound(lo);
+    floored();
     return lo;
 }
 
