@@ -1324,3 +1324,14 @@ reviewer on 79330ab7..5613abbe (scoping + lazy root error came after the review)
   → `S9_rehearsal_run.log`, rendered into `S9_NEXT_DEFAULTS_REHEARSAL.md` (not the tracked file).
 * openspec `validate --all --strict`: 79 passed, 0 failed (`S9_openspec.log`); stubs `--check`: up
   to date (`S9_stubs.log`).
+* (g) rule-off cost, tip vs a build of 527e644d, both LTO OFF (`S9_cost.log`). Four standard
+  cases, instructions per accepted step, min of 3 rounds: buck_pwl 3025.8 vs 3023.6 (+0.07 %),
+  vsi_pwl 4687.5 vs 4696.4 (−0.19 %), buck_trbdf2 11113.7 vs 11121.0 (−0.07 %), bridge_trbdf2
+  12878.9 vs 12864.6 (+0.11 %): within 0.5 %. Five exact-engine cases (instructions per run, min
+  of 6 interleaved): buck_ccm −4.49 %, bridge3 −0.04 %, **active_clamp_forward +0.89 %**,
+  forward_converter −6.67 %, boost_pfc_open_loop −2.29 %. The 0.5 % gate FAILS on
+  active_clamp_forward. Not attributed: this session's rule-off work is one bool test per event
+  decision and per projection (and a virtual call per closed recorder piece, no recorders here);
+  the spread (−6.7 % … +0.9 %) on identical results looks like code layout of the branch's
+  larger scheduler (sessions 4–8 included: the base is the PR head, not this session's start).
+  To attribute it: build fd1765ab+merge (cbe1430f) and compare the three.
