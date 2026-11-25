@@ -276,7 +276,7 @@ def compose_control(builder, closed_loops, step_observer, controller_period,
     plan = ControlPlan(switch_fn=switch_fn)
     gates = [loop.switch_fn for loop in loops if loop.switch_fn is not None]
     if gates:
-        if switch_fn is not None:
+        if switch_fn is not None and not any(switch_fn is g for g in gates):
             gates.append(switch_fn)
         plan.switch_fn = (gates[0] if len(gates) == 1 else
                           make_combined_switch_fn(

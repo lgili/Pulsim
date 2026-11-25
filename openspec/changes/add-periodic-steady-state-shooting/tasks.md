@@ -66,8 +66,8 @@ grid inside the loop wait for the loop freeze to lift.
 - [ ] 6.3 Tests: peak-current-mode buck of the table — multipliers −1.267293 and 0.998949 within 1e-5, `stable = False`, and with `I_ref` lowered to give D < 0.5 `stable = True`; with saltation disabled in the test harness the multipliers are 0.9993 ± 0.0146j (the regression this guards); a rectifier with `V_th = V_f + 1e-3` has `M` equal to a finite difference of the map within 1e-6
 
 ## 7. Controller states (needs `add-compiled-control-graph`)
-- [ ] 7.1 Controller states of the control graph in `x₀`; refusal for Python closures with hidden state
-- [ ] 7.2 Tests: voltage-mode buck with a PI at the switching rate — the orbit has zero mean error within 1e-9 and equals a long transient within 1e-8
+- [x] 7.1 Controller states of the control graph in `x₀`; refusal for Python closures with hidden state — ported from gemini/wip-2026-11-24 78d06266 + dd72a62e; seen 2026-11-25 on 527e644d: `test_periodic_steady_state_control.py` passes (controller states in `x0` on exact, pwl, trbdf2; hidden-state closures, `PythonBlock` callbacks and stateful callables refused by name); every existing PSS / shooting / sensitivity / steady-state call is byte-identical to 527e644d (sensdump 837 calls, pss_dump 2 orbits)
+- [ ] 7.2 7.2 Tests: voltage-mode buck with a PI at the switching rate — the orbit has zero mean error within 1e-9 and equals a long transient within 1e-8 — OPEN (2026-11-25): the ported test shows the SAMPLED error |v(0) − V_ref| < 1e-9 (4.1e-14 V on exact) and the orbit equal to a 6000-period transient within 1e-8 on exact, pwl and trbdf2; the time-averaged error of that orbit is 5.68e-5 V (the ripple's offset at the sampling instant), not < 1e-9. A PI sampling once per period regulates the sample, not the mean: the box needs either a mean-regulating loop or its wording changed by decision
 
 ## 8. Docs and verification
 - [x] 8.1 Steady-state guide (true state, section, what a multiplier outside the unit circle means), Bode guide, AI_GUIDE, CHANGELOG with the before/after numbers
