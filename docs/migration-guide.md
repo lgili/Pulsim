@@ -95,7 +95,78 @@ DeprecationWarning
 
 ### Results that move
 
-<!-- MEASURED-TABLE -->
+Seen 2026-11-25 on
+this branch against a build of tag v2.0.0 (macOS arm64, same compiler). Two sets,
+each run unchanged on both versions with `simulate()`'s default options:
+
+* every benchmark netlist of v2.0.0's `benchmarks/circuits` that both versions
+  load — 104 of 126, read by `benchmarks/tools/v1_reader.py` (2.0 shipped no
+  reader), with the netlist's `dt` (so `engine='auto'` lands on `pwl`);
+  quantity: the time-weighted mean of the benchmark's declared observable;
+* every v2.0.0 example script (`examples/scripts`), stdout compared.
+
+Of 99 observables, 47 differ by more than 1e-6 relative (36 by more than 1e-3,
+26 by more than 1 %). Where the benchmark has its own baseline (26 rows), 2.1
+is nearer it in 23; in the other 3 both versions are 4 V or more away, so that
+baseline does not describe the netlist as read (no regression signal). Rows
+marked shoot-through: 2.0 drew 1 kA or more through a switch (the switch masks
+were checked identical on `synchronous_buck`); not yet traced to one entry.
+
+The rows above 1 % (the full table is in the changelog's 2.1.0 *Changed*):
+
+| Circuit (`benchmarks/circuits/`) | Quantity | 2.0.0 | 2.1.0 | Rel. | Against the benchmark's baseline | Explained by |
+|---|---|---|---|---|---|---|
+| thermal/long_run_drift_buck.yaml | mean V(out) | 4.75094 | 11.9869 | 6.0e-01 | 2.1 nearer ref 11.9868; error 7.24 → 0.000142 | 2.0 drew 2.4e+03 A through a switch (shoot-through); 2.1 does not — not traced to one entry |
+| switching/isolated/dual_active_bridge.yaml | mean V(out) | -6.20319 | -10.3262 | 4.0e-01 | 2.0 nearer ref 5.31576; error 11.5 → 15.6 | 2.0 drew 4.8e+03 A through a switch (shoot-through); 2.1 does not — not traced to one entry |
+| switching/boost/cascaded_boost_buck.yaml | mean V(out) | 5.8282 | 9.44043 | 3.8e-01 | 2.1 nearer ref 11.3487; error 5.52 → 1.91 | not traced to one entry |
+| magnetics/half_bridge_transformer_dc.yaml | mean V(out) | 5.42476 | 4.3543 | 2.0e-01 | 2.1 nearer ref 4.22729; error 1.2 → 0.127 | 2.0 drew 2.4e+04 A through a switch (shoot-through); 2.1 does not — not traced to one entry |
+| switching/multilevel/npc_three_level_halfbridge.yaml | mean V(n_lo) | 41.4404 | 35.5616 | 1.4e-01 | 2.1 nearer ref 34.1238; error 7.32 → 1.44 | 2.0 drew 5.6e+04 A through a switch (shoot-through); 2.1 does not — not traced to one entry |
+| switching/boost/synchronous_boost.yaml | mean V(out) | 15.5875 | 17.8563 | 1.3e-01 | 2.1 nearer ref 17.8546; error 2.27 → 0.00173 | not traced to one entry |
+| switching/isolated/synchronous_flyback.yaml | mean V(out) | -14.4634 | -15.543 | 7.0e-02 | no baseline | not traced to one entry |
+| stress/stiff_rc_high_freq_switching.yaml | mean V(out) | 11.3398 | 11.9731 | 5.3e-02 | 2.1 nearer ref 11.9786; error 0.639 → 0.00557 | 2.0 drew 2.4e+03 A through a switch (shoot-through); 2.1 does not — not traced to one entry |
+| switching/buck/cascaded_buck_buck.yaml | mean V(out) | 6.07937 | 6.39914 | 5.0e-02 | no baseline | 2.0 drew 2.4e+03 A through a switch (shoot-through); 2.1 does not — not traced to one entry |
+| stress/periodic_rc_pwm.yaml | mean V(out) | 1.39954 | 1.46493 | 4.5e-02 | 2.1 nearer ref 2.46191; error 1.06 → 0.997 | not traced to one entry |
+| switching/boost/boost_pfc_open_loop.yaml | mean V(out) | 46.3807 | 48.3155 | 4.0e-02 | 2.1 nearer ref 47.3531; error 0.972 → 0.962 | not traced to one entry |
+| switching/isolated/forward_converter.yaml | mean V(out) | 11.2004 | 11.607 | 3.5e-02 | no baseline | not traced to one entry |
+| switching/inverter/half_bridge_inverter_lc.yaml | mean V(load) | 12.2919 | 11.8652 | 3.5e-02 | 2.1 nearer ref 11.8664; error 0.426 → 0.00113 | 2.0 drew 1.2e+04 A through a switch (shoot-through); 2.1 does not — not traced to one entry |
+| switching/multilevel/flying_capacitor_3level.yaml | mean V(out) | 12.3075 | 11.9824 | 2.6e-02 | 2.1 nearer ref 11.9888; error 0.319 → 0.00645 | 2.0 drew 1.2e+03 A through a switch (shoot-through); 2.1 does not — not traced to one entry |
+| three_phase/interleaved_buck_3ph.yaml | mean V(out) | 6.47245 | 6.62523 | 2.3e-02 | 2.1 nearer ref 43.0579; error 36.6 → 36.4 | not traced to one entry |
+| switching/buck/triple_sync_buck.yaml | mean V(out_b) | 11.3455 | 11.0925 | 2.2e-02 | no baseline | 2.0 drew 4.8e+03 A through a switch (shoot-through); 2.1 does not — not traced to one entry |
+| switching/buck/synchronous_buck.yaml | mean V(out) | 11.3455 | 11.0925 | 2.2e-02 | no baseline | 2.0 drew 2.4e+03 A through a switch (shoot-through); 2.1 does not — not traced to one entry |
+| switching/buck_boost/bidirectional_buck_boost.yaml | mean V(out) | 11.3404 | 11.0935 | 2.2e-02 | no baseline | 2.0 drew 2.4e+03 A through a switch (shoot-through); 2.1 does not — not traced to one entry |
+| switching/buck/buck_with_current_sense.yaml | mean V(out) | 11.3347 | 11.0938 | 2.1e-02 | no baseline | 2.0 drew 2.4e+03 A through a switch (shoot-through); 2.1 does not — not traced to one entry |
+| switching/buck/ll06_buck_vcswitch.yaml | mean V(out) | 23.2926 | 23.7919 | 2.1e-02 | no baseline | not traced to one entry |
+| switching/inverter/half_bridge_inverter.yaml | mean V(load) | 11.7357 | 11.5307 | 1.8e-02 | no baseline | 2.0 drew 2.4e+03 A through a switch (shoot-through); 2.1 does not — not traced to one entry |
+| switching/inverter/half_bridge_lc_filter.yaml | mean V(out) | 11.1898 | 11.3845 | 1.7e-02 | 2.1 nearer ref 11.3842; error 0.194 → 0.000279 | 2.0 drew 2.4e+03 A through a switch (shoot-through); 2.1 does not — not traced to one entry |
+| switching/basic/pwm_voltage_rc.yaml | mean V(out) | 3.26242 | 3.20856 | 1.7e-02 | no baseline | not traced to one entry |
+| switching/buck/ll08_buck_mosfet.yaml | mean V(out) | 5.07002 | 5.14011 | 1.4e-02 | no baseline | Level-1 MOSFET: diode `V_F` 0.5 → 0.7 V as a drop; no channel current at V_DS = 0 (Changed) |
+| switching/buck/buck_mosfet_nonlinear.yaml | mean V(out) | 5.07002 | 5.14011 | 1.4e-02 | 2.1 nearer ref 20.0711; error 15 → 14.9 | Level-1 MOSFET: diode `V_F` 0.5 → 0.7 V as a drop; no channel current at V_DS = 0 (Changed) |
+| switching/buck/high_freq_gan_buck.yaml | mean V(out) | 11.8483 | 11.9901 | 1.2e-02 | 2.1 nearer ref 11.9903; error 0.142 → 0.00019 | 2.0 drew 2.4e+03 A through a switch (shoot-through); 2.1 does not — not traced to one entry |
+
+| 2.0.0 example script (run unchanged) | Quantity | 2.0.0 | 2.1.0 | Explained by |
+|---|---|---|---|---|
+| `run_buck_closed_loop_chain.py` | exit | runs | `ControlGraphBuildError`: `SetpointBlock` has no kernel implementation | Python evaluator of chains removed (Changed) |
+| `run_foc_motor_drive.py` | exit | runs | `ControlGraphBuildError`: `RotorAngle` has no kernel implementation | same |
+| `run_dc_motor_speed.py`, `run_pmsm_foc.py` | exit | runs | `AttributeError`: `MixedDomainBlockChain` has no `channels` | same |
+| `run_buck.py`, `run_flyback.py`, `run_half_wave_rectifier.py`, `run_rlc_step_response.py`, `run_common_source_amplifier.py` | exit | `TypeError: 'module' object is not callable` | runs | 2.0 example breakage fixed |
+| `run_thermal_buck.py` | T_j rise | 13.79 K | 15.19 K | `add_foster_network` was a Cauer ladder (Fixed) |
+| `run_adaptive_rl_settle.py` | max \|i − i_an\| | 2.044e-02 A | 5.000e-04 A | TR-BDF2 error control (toward the closed form) |
+| `run_ac_sweep_rc.py` | max error vs analytic | 0.005 dB / 0.694° | 0.003 dB / 0.338° | toward the analytic answer; not traced to one entry |
+| `run_im_direct_online_start.py` | \|ψ_r\| | 0.9841 Wb | 0.9551 Wb | induction machine model (deprecated `add_induction_motor`); not traced |
+| `run_im_ifoc_closed_loop.py` | i_d / i_q (targets 8 / 6 A) | 8.294 / 8.690 A | 9.005 / 7.507 A | same |
+| `run_im_vf_open_loop.py` | ω_final, \|ψ_r\| | 157.07 rad/s, 0.9839 Wb | 157.13 rad/s, 0.9548 Wb | same |
+| `run_psfb_ja_loss_analysis.py` | i_peak; permalloy loss | 7.493 A; 2692.6 W | 7.872 A; 24.43 W | J-A model; not traced (the 2.1 script uses another core) |
+| `run_psfb_hysteretic_inloop.py` | i_peak; final M | 2.481 A; −306.2 A/m | 2.466 A; −185.2 A/m | not traced |
+| `run_phase_shift_full_bridge.py` | V_out DC | 15.04 V | 15.22 V | not traced |
+| `run_buck_with_helper.py` | V_out; duty | 4.9980 V; 0.4001 | 4.9997 V; 0.3818 | control chain order / kernel block laws (Changed) |
+| `run_buck_chain_logged.py` | v_out; duty | 12.017 V; 0.506 | 12.005 V; 0.496 | same |
+| `run_device_loss_to_thermal.py` | R_line loss | 1129.301 W | 1114.244 W | not traced |
+| `run_boost_saturable_closed_loop.py` | mean V_out; i_L max | 22.98 V; 125.712 A | 23.00 V; 127.573 A | not traced |
+| `run_buck_closed_loop.py` | max V_out in transient | 19.060 V | 19.096 V | not traced |
+| `run_ac_sweep_buck.py` | \|H\| at 100 Hz | 22.9586 | 22.9253 | not traced |
+| `run_auto_tune_buck.py` | \|G\| at 2 kHz; Kp | 57.928; 0.00725 | 57.854; 0.00728 | not traced |
+| `run_pwm_chopper_realistic_mosfet.py` | V_drain mean | 5.34 V | 5.32 V | not traced |
+| `run_boost_closed_loop.py`, `run_pfc_boost_closed_loop.py`, `run_adversarial_sweep.py` | printed values | — | last-digit changes (≤ 0.1 %) | — |
 
 ### PWL diode forward drop (PSIM `V_f`)
 
@@ -149,8 +220,10 @@ print(f"2.1 diode (V_th=0, V_f=0.7): v_SD = {body_diode_drop(0.0, 0.7):.3f} V")
 
 `MixedDomainBlockChain.make_step_observer(use_kernel=False)` raises
 `DeprecationWarning` as an exception (a warnings filter does not silence
-it): the Python evaluator of a chain is gone. Wrap custom Python code in
-`pulsim.PythonBlock(fn)`.
+it): the Python evaluator of a chain is gone. A chain is compiled to the
+kernel: `chain.channels` no longer exists, and a block with no kernel law
+(`SetpointBlock`, `RotorAngle`, ...) raises `ControlGraphBuildError` when
+the run starts. Wrap custom Python code in `pulsim.PythonBlock(fn)`.
 
 ### Default-path results to re-check
 
