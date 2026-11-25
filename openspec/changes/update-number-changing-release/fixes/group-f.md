@@ -1543,3 +1543,27 @@ reviewer on 79330ab7..5613abbe (scoping + lazy root error came after the review)
 
 * Eigen 5 (`.scratch/build-ctest`): **152 test cases / 41 469 assertions pass**. Eigen 3.4.0
   (`.scratch/build-e34ct`, 200 eigen-3.4.0 refs in build.ninja): **152 / 41 469 pass**.
+
+### Step 4 — the referee's holes
+
+* The four "~2 ps line unread" units (`refhole.py`, `S10_refhole*.log`): not the event tolerance
+  alone. The reference is a chain of windows that tile the run at stored instants; each resumed
+  window's first sample repeats the previous window's last one (every value bit-equal), and the
+  jump test (70526766: a pair within 64 ulps) read that seam as a jump and skipped ±1 ps around
+  it. F-X-7's 2 ps line after a source corner lies between two seams (ll03_rl_step: the pulse's
+  ramp ends at 100 ns; seams at 9.9999999999999995e-08 and 1.00002e-07; the rule run has NO event
+  there, `event_times` empty), so all of it was skipped. Fixed (**a72d3d26**): bit-equal seam
+  duplicates are dropped before the jump test (`n_seams` in the row). Now comparable:
+  ll02_rc_pulse_charge **0.99849**, ll03_rl_step **0.99261**, ll04_rlc_underdamped **0.98732**,
+  snubber_rc **0.93168**.
+* driven_lc_series_resonance (run alone, `/usr/bin/time -l`, 40 min alarm, `S10_dlc.err`): the
+  referee process grew to a **17.9 GB peak footprint** (455 GB virtual) in 8 minutes; system
+  memory pressure went to 4 (critical) and the process was stopped by PID (rc 143). The plan
+  (`dlc_plan.py`): 80 743 rule samples → 648 reference windows, **1.96e7 planned reference
+  instants** (40 000 per window), 5 state columns; the exact engine's dt runs store more than the
+  plan (gate polls) and every window's states and observables are kept until the end. This is
+  the session-9 "process ended without a line": the OS killed it (no Python error is written on
+  SIGKILL). Not fixed: reading it needs a streaming referee (each window graded and dropped) —
+  recorded as a referee limit; the unit is excluded from the 100-unit run (it would freeze the
+  machine). Also seen: its shortest stored line is 6.5e-16 s (above 64 ulps at t ≈ 1e-2 s, so
+  read as a line; its window gets dt = 1e-16 s).
