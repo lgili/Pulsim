@@ -1338,6 +1338,28 @@ reviewer on 79330ab7..5613abbe (scoping + lazy root error came after the review)
 * (h) the exact-engine test files + test_release_findings_f4 (`S9_pytest_exact.log`): **327 passed,
   3 xfailed**.
 
+* (h) full pytest on 6fca24a4 (`S9_pytest_full.log`, 618 s): **3 failed, 7215 passed, 137
+  skipped, 42 xfailed**; ruff: all checks passed. Ten-bridges walls: f67 85.3 s, fx1 [constant]
+  56.9 s, [python] 56.5 s. The three failures, all rule-on, all pass on the PR head 527e644d
+  (`S9_3fail_at_527.log`) and fail on 6fca24a4 (`S9_3fail_at_tip.log`):
+  * `test_dcdc_engine_matches_orbit[buck_R10-dsed]` (output_rtol 1e-6): **a defect of F-X-7**
+    (b78d5a01). Its 2 ps sample was pushed before the step's chord samples, which still started
+    at the event, so the rule stored the event's fast mode at +0.37, +0.74 … ps AFTER the +2 ps
+    sample: t[1823] < t[1822] by 1.63e-12 s, once per period (4 of 8081 samples), and
+    time_average refused the trace. Fixed in **9d6dc0c4**: the chords start at the stored 2 ps
+    sample (still evaluated from the step's start). All 25 orbit cells pass.
+  * `test_f54_exact_two_limit_trace_closes_the_bridge_charge`,
+    `test_f62_exact_time_average_of_the_two_limit_trace_is_the_summary`: their control assertion
+    ("the left limits alone miss the turn-on jump") is what F-X-7 changed on purpose: the flow
+    2 ps past each turn-on is stored (12 of 12 bridge events, `f54why.py`), so the stored trace
+    closes the charge to 3.5e-6 (was −1.2e-3) and reads the summary's i_avg within 4.3e-9 (was
+    −0.21 %). The controls now assert that (9d6dc0c4).
+  * After 9d6dc0c4: exact files + f4 + release_findings_b + textbook **389 passed, 6 xfailed**
+    (`S9_pytest_fx7order.log`); ruff clean. The full pytest was NOT re-run on 9d6dc0c4.
+* The chain was stopped by PID at the referee's 4th unit (its readings were of the pre-fix
+  .so) and restarted on 9d6dc0c4 as `chain_rest.sh` (dsed ctest on Eigen 5, then (c)(e)(f),
+  then (d)); progress in `S9_chain.log` after the "REST start" line.
+
 ### Session 9 — what is left (for the successor, if this session stops before the chain ends)
 
 1. Read the chain's results (`.scratch/f10/S9_chain.log`, one line per item): the full pytest
