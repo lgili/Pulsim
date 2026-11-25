@@ -134,6 +134,7 @@ nav:
       - 'Tutorial 09 — Magnetic networks': tutorials/09-magnetic-networks.md
       - 'Tutorial 10 — Datasheet to double pulse': tutorials/10-power-mosfet-datasheet.md
       - 'Tutorial 11 — Electrothermal PLECS buck': tutorials/11-electrothermal-plecs-buck.md
+      - 'Ideal Switch & Diode Complementarity': ideal-switch.md
       - 'Parameter Sensitivities': sensitivities.md
       - 'Soft Switching (ZVS / ZCS probes)': SOFT_SWITCHING.md
       - 'Motors — Induction (Phase 2)': motors-induction.md

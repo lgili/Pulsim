@@ -90,6 +90,7 @@ DOC_FILES = [
     REPO_ROOT / "python" / "pulsim" / "AI_GUIDE.md",
     REPO_ROOT / "README.md",
     REPO_ROOT / "docs" / "getting-started.md",
+    REPO_ROOT / "docs" / "ideal-switch.md",
     *sorted((REPO_ROOT / "docs" / "tutorials").glob("*.md")),
 ]
 BUDGET_ROWS = 2_900_000  # measured 2,175,414 rows on 77ce4a28: 33 % margin
