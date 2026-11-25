@@ -251,6 +251,12 @@ def referee(case, res, info, cols, rt, config: str = "auto+next") -> dict:
         t_last = max((q["t"] for q in pr), default=-np.inf)
         win += [(e, e + settle) for e in ev if e > t_last]
     win = np.asarray(win, dtype=float).reshape(-1, 2)
+    # a source corner is no event, but both runs store a jump there (its two limits a few ulps
+    # apart, the rule run's corner landed ulps from the reference's): reference instants within
+    # EVENT_TOL of a jump of either trace are not read (pwm_voltage_rc's PWM source column read
+    # 1e5 x at 40 us: the reference's left limit against the rule's right one)
+    jumps = np.r_[t[:-1][np.diff(t) <= 2 * EVENT_TOL], tg[:-1][np.diff(tg) <= 2 * EVENT_TOL]]
+    evx = np.unique(np.r_[ev, jumps])
     for c in cols:
         yg = np.concatenate(yg_all[c])
         # the range of the rule run's own (projected) trace: the unprojected reference's
@@ -259,15 +265,15 @@ def referee(case, res, info, cols, rt, config: str = "auto+next") -> dict:
         rng = max(float(np.ptp(allv)), 1e-3 * float(np.abs(allv).max()))
         floor = _column_floor(res, c, fl)
         tol = max(rt * rng, ATOL, floor)
-        r, at = lines_ratio(t, ys[c], tg, yg, tol, events=ev, windows=win)
-        whole = lines_ratio(t, ys[c], tg, yg, tol, events=ev)[0]
+        r, at = lines_ratio(t, ys[c], tg, yg, tol, events=evx, windows=win)
+        whole = lines_ratio(t, ys[c], tg, yg, tol, events=evx)[0]
         worst_whole = max(worst_whole, whole)
         # also against the range SO FAR through the line's end sample: stricter than the
         # engine's own (which goes on to the end of the exact step holding the line, a step
         # the stored trace does not show), so above 1 early in a run without a violation
         per[c] = dict(ratio=r, floor=floor, tol=tol,
                       ratio_incl_settle=whole,
-                      ratio_range_so_far=lines_ratio(t, ys[c], tg, yg, promise(ys[c], rt, floor), events=ev,
+                      ratio_range_so_far=lines_ratio(t, ys[c], tg, yg, promise(ys[c], rt, floor), events=evx,
                                                      windows=win)[0])
         if r > worst:
             worst, where = r, (c, at)
@@ -281,7 +287,7 @@ def referee(case, res, info, cols, rt, config: str = "auto+next") -> dict:
             both = xs[:, j]
             r, at = lines_ratio(t, xs[:, j], tg, xg[:, j],
                                 max(rt * max(float(np.ptp(both)), 1e-3 * float(np.abs(both).max())), ATOL,
-                                    float(fl[j]) if fl is not None else 0.0), events=ev, windows=win)
+                                    float(fl[j]) if fl is not None else 0.0), events=evx, windows=win)
             worst_x = max(worst_x, r)
             if r > worst:
                 worst, where = r, (f"x[{j}]", at)
