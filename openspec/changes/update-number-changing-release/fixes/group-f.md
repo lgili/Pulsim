@@ -1360,6 +1360,26 @@ reviewer on 79330ab7..5613abbe (scoping + lazy root error came after the review)
   .so) and restarted on 9d6dc0c4 as `chain_rest.sh` (dsed ctest on Eigen 5, then (c)(e)(f),
   then (d)); progress in `S9_chain.log` after the "REST start" line.
 
+* `chain_rest.sh` on 9d6dc0c4: dsed ctest Eigen 5 **152 / 41 469 pass**. Then two more
+  defects found by its readings:
+  * **SIGSEGV under the rule on stateless circuits** (session 9's projection record):
+    `fast_cluster_tau` ran an EigenSolver of a 0×0 A (back_to_back_diodes_sine: a sine, R, two
+    diodes; also transformer_step_up, driven_lc_series_resonance in the referee; the rehearsal's
+    "worker exit -11" cells: back_to_back_diodes_sine, transformer_step_up, analytic halfwave_r,
+    ideal_transformer, vcvs_gain2). Samples / property / events gate stopped at unit 4 of 100.
+    Fixed in **3058a87c** (no state: no cluster), test
+    `test_f9_a_stateless_circuit_runs_under_the_rule`; f4 file 11 passed.
+  * **The referee refused 45 of 100 units** on 9d6dc0c4 (6 on the session 8 run,
+    `.scratch/f9/S8_referee_100.jsonl`): fa03bfcf counted every pair ≤ 2 ps apart of either trace
+    as a jump and skipped instants within 1 ps of it, so a reference grid finer than 2 ps read
+    nothing ("N line(s) without a reference instant"). A jump is now a pair within 64 ulps
+    (**70526766**): rlc_step 0.9646, pwm_voltage_rc 0.9508, pwm_voltage_rl_filter 0.9929,
+    boost_classic 0.9997, stiff_two_timescale_rc 0.9454 (`.scratch/f10/refdbg/`). Of the 55
+    comparable units on the refused run: above 1: none; incl. settle: diode_half_wave_rl_load
+    2904 (the projected cluster, inside its window).
+* `chain_rest2.sh` (3058a87c): referee on the 3 dead units, samples, property 100×200,
+  `--truth`, events gate, the rehearsal. Then the referee on all 100 again (70526766).
+
 ### Session 9 — what is left (for the successor, if this session stops before the chain ends)
 
 1. Read the chain's results (`.scratch/f10/S9_chain.log`, one line per item): the full pytest
