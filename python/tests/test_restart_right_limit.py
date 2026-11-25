@@ -620,3 +620,60 @@ def test_a_row_whose_mode_holds_at_the_right_limit_books_the_turn_on(split):
     assert float(np.asarray(v.i("D"))[j + 1]) == pytest.approx(i_e, rel=1e-3)
     (ev,) = [ev for ev in r.loss_events("D") if ev["kind"] == "on"]
     assert ev["E"] == pytest.approx(1e-3 * 0.1 * i_e / 100.0, rel=2e-3)
+
+
+@pytest.mark.parametrize("split", [False, True])
+def test_a_gated_device_the_row_re_decides_keeps_its_gate(split):
+    """Review of F1 (1): the row's re-decision must not read a gated device's gate from a
+    stamped conduction bit. Ca (100 pF, ~1 V from V1 through 1 kOhm) on node a; at T_E S
+    (1 mOhm) ties a to -10 V and Q's gate turns on. At t_e+ v_a ~ 1 V (Ca continuous) is
+    forward across Q above V_ce0 = 0.5 V with the gate on: Q conducts. Truth (closed form):
+    i_Q = (v_a - 0.5)/1 mOhm ~ 500 A in the row (v_a: Ca's DC value)."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V1", "p1", "gnd", 1.0)
+    b.add_resistor("Ra", "p1", "a", 1e3)
+    b.add_capacitor("Ca", "a", "gnd", 100e-12, 1.0)
+    b.add_voltage_source("Vn", "neg", "gnd", -10.0)
+    b.add_switch("S", "a", "neg", 1e3, 1e-9)
+    b.add_igbt("Q", "a", "gnd", 1e-3, 1e9, V_ce0=0.5, reverse_blocking=True)
+    ns, ks, kq = b.graph.num_switches, b.switch_index_of("S"), b.switch_index_of("Q")
+
+    def fn(t):
+        m = p.SwitchStateMask(ns)
+        m.set(ks, t >= T_E)
+        m.set(kq, t >= T_E)
+        return m
+    r = _quiet(p.simulate, b, t_end=3e-6, dt=DT, switch_fn=fn,
+               enable_substep_state_correction=split, **RULE)
+    v, t, kk = _limits(r)
+    (j,) = [j for j in kk if t[j] > 0]
+    # Ca's DC value behind Ra against S's and Q's OFF leakage (1e-9 S each; RaCa = 0.1 us)
+    va = (1.0 / 1e3 - 10.0 * 1e-9) / (1.0 / 1e3 + 2e-9)
+    assert float(np.asarray(v.v("a"))[j + 1]) == pytest.approx(va, rel=1e-6)
+    assert float(np.asarray(v.i("Q"))[j + 1]) == pytest.approx((va - 0.5) / 1e-3, rel=1e-6)
+
+
+@pytest.mark.parametrize("co", [100e-12, 1e-9, 10e-9, 100e-9])
+def test_a_diode_riding_its_boundary_at_the_row_keeps_the_row(co):
+    """Review of F1 (2): at t = 0 (zero state, S closed) v_sw = 0 (Co continuous) and the
+    V_th = 0 diode D sits on its boundary (v_D = 0, i_D = 0): either mode holds, the
+    re-decision must not chatter on round-off and drop the row. Truth: a row at t = 0 with
+    v_sw = 0 and i_D = 0 (to the leakage)."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "vin", "gnd", 10.0)
+    b.add_ideal_switch("S", "vin", "sw", 1e-3, 1e-9)
+    b.add_diode("D", "gnd", "sw", 1e3, 1e-9)
+    b.add_inductor("L", "sw", "o", 10e-6)
+    b.add_resistor("R", "o", "gnd", 1.0)
+    b.add_capacitor("Co", "sw", "gnd", co, 0.0)
+    k, ns = b.switch_index_of("S"), b.graph.num_switches
+
+    def fn(t):
+        m = p.SwitchStateMask(ns)
+        m.set(k, t < T_E)
+        return m
+    r = _quiet(p.simulate, b, t_end=3e-6, dt=DT, switch_fn=fn, **RULE)
+    v, t, kk = _limits(r)
+    (j,) = [j for j in kk if t[j] == 0.0]
+    assert abs(float(np.asarray(v.v("sw"))[j + 1])) <= 1e-12
+    assert abs(float(np.asarray(v.i("D"))[j + 1])) <= 1e-6

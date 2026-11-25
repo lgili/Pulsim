@@ -3333,18 +3333,34 @@ inline SimulationResult run_transient(
                     // F1: the row's mode must hold at t_e+. Stage 1's decision is
                     // the step's, not the instant's (a freewheel diode stage 1
                     // holds ON is reverse-biased at t_e+ while a node capacitor
-                    // still holds the voltage): re-decide the diodes on the row
-                    // and re-solve in that mode until it holds. A mode that never
-                    // settles is not published (the ledger would book from it)
+                    // still holds the voltage): while a diode sits on the side
+                    // its rule leaves, beyond the noise band (a V_th = 0 diode
+                    // riding its boundary at round-off is held), re-decide on the
+                    // row and re-solve in that mode. A mode that never settles is
+                    // not published (the ledger would book from it).
                     if (has_diodes) {   // (the bits go back to rs_bits on exit)
                         bool held = false;
-                        for (int round = 0; round < 4; ++round) {
-                            if (!events::redecide(diodes, x)) {
+                        for (int round = 0;; ++round) {
+                            bool flip = false;
+                            const Size nd = diodes.entries().size();
+                            for (Size j = 0; j < nd && !flip; ++j) {
+                                const Real sg = events::crossing_signal(diodes, j, x);
+                                flip = events::forbidden(diodes, j, sg) &&
+                                       std::abs(sg) > events::held_tolerance(diodes, j, x);
+                            }
+                            if (!flip) {
                                 held = true;
                                 break;
                             }
+                            if (round == 4) break;
+                            (void)events::redecide(diodes, x);
                             bits_moved = true;
-                            if (lin) stamped_mask = diodes.combine(stamped_s);
+                            // the stamped mask's diode bits only: combine() would
+                            // re-read a gated device's gate from a stamped bit
+                            if (lin) {
+                                stamped_mask = stamped_s.overlay(diodes.current_diode_mask(),
+                                                                 diode_owned);
+                            }
                             conv = pinned(eps);   // stage 1's slope is the old mode's
                             out = x;
                             m_out = stamped_mask;
