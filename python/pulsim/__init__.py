@@ -5569,7 +5569,7 @@ def _auto_attach_motor_traces(
 # no separate Python-side params class — pass v_dc,
 # v_amplitude, frequency, phase as keyword args.
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"
 
 
 def get_include() -> str:
