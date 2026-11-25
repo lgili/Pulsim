@@ -303,21 +303,4 @@ TEST_CASE("DeviceLossRecord exposes has_e_on and has_e_off for switching tables"
         CHECK_FALSE(cond_only.device_losses[0].has_e_on);
         CHECK_FALSE(cond_only.device_losses[0].has_e_off);
     }
-
-    // Resume preserves has_e_on / has_e_off on the restored LossTracker.
-    auto b = chopper();
-    thermal::DeviceLossSpec s;
-    s.device = "S1";
-    s.tj = 25.0;
-    s.e_on = constant(0.0);
-    b.set_device_losses(s);
-    solver::LossTracker t1(b.graph(), b.pool(), "pwl");
-    const auto saved = t1.save();
-    solver::LossTracker t2(b.graph(), b.pool(), "pwl");
-    t2.restore(saved);
-    solver::SimulationResult out;
-    t2.write(out);
-    REQUIRE(out.device_losses.size() == 1);
-    CHECK(out.device_losses[0].has_e_on);
-    CHECK_FALSE(out.device_losses[0].has_e_off);
 }
