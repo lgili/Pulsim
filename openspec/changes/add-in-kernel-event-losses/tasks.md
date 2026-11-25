@@ -34,7 +34,7 @@
 
 ## 6. Documentation
 - [x] 6.1 `docs/losses-and-thermal.md` (online versus post-hoc, the reading rule table, the energy-balance note), `AI_GUIDE.md` (which path to use, `Tj` versus `junction`), `docs/known-limitations.md` and `KNOWN_LIMITATIONS.md` (event energy is not drawn from the circuit; Newton devices excluded), `CHANGELOG.md`
-- [ ] 6.2 Tutorial: PLECS XML → closed-loop T_j on a buck
+- [x] 6.2 Tutorial: PLECS XML → closed-loop T_j on a buck — `docs/tutorials/11-electrothermal-plecs-buck.md` (synthetic XML inline; ported from gemini/wip-2026-11-24 edf6efc9 without its electrical-feedback claims, since 4.1 is open); seen 2026-11-25 on 527e644d: every block runs in `test_doc_snippets` (junction 20 K above ambient, closed-loop energies above the frozen-`Tj` run, heat ledger = recorded energy within 1e-12)
 
 ## 7. Verification
 - [x] 7.1 `ruff check`, `pytest`, `ctest`, `openspec validate --all --strict`, stub check
