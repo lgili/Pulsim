@@ -12,15 +12,15 @@ graded against the trbdf2 reference is a SELF-CONSISTENCY check (default vs rtol
 is graded. Every configuration has its own `known:` freeze; a frozen `disagree`
 fails when its err_rms grows past 2x the frozen `known_err:`.
 
-## Differential matrix (111 circuits)
+## Differential matrix (112 circuits)
 
 | configuration | agree | disagree | error | refused | unverified |
 |---|---:|---:|---:|---:|---:|
-| pwl | 81 | 29 | 1 | 0 | 0 |
-| pwl+restart | 99 | 11 | 1 | 0 | 0 |
-| pwl+split | 102 | 8 | 1 | 0 | 0 |
-| trbdf2 | 108 | 2 | 1 | 0 | 0 |
-| dsed | 102 | 0 | 0 | 9 | 0 |
+| pwl | 82 | 29 | 1 | 0 | 0 |
+| pwl+restart | 100 | 11 | 1 | 0 | 0 |
+| pwl+split | 103 | 8 | 1 | 0 | 0 |
+| trbdf2 | 109 | 2 | 1 | 0 | 0 |
+| dsed | 103 | 0 | 0 | 9 | 0 |
 
 ### Fixed engine: restart rule and split (circuits where any of the three does not agree)
 
@@ -231,6 +231,7 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | switching/buck/sync_buck_500khz.yaml | 0.00167 | 3.76e-06 | 3.76e-06 | 1.71e-05 | 1.98e-06 |
 | switching/buck/synchronous_buck.yaml | 0.00132 | 1.06e-06 | 1.06e-06 | 3.14e-06 | 1.35e-06 |
 | switching/buck/textbook_erickson_buck_ccm.yaml | 0.000771 | 1.76e-06 | 4.21e-07 | 9.87e-06 | 4.3e-07 |
+| switching/buck/textbook_erickson_buck_ccm_r5.yaml | 0.0014 | 7.53e-06 | 8.05e-06 | 1.08e-05 | 5.43e-07 |
 | switching/buck/triple_sync_buck.yaml | 0.00132 | 1.04e-06 | 1.04e-06 | 3.18e-06 | 1.3e-06 |
 | switching/buck_boost/bidirectional_buck_boost.yaml | 0.00132 | 1.06e-06 | 1.06e-06 | 3.15e-06 | 1.34e-06 |
 | switching/buck_boost/buck_boost.yaml | 0.00072 | 9.16e-07 | 6.37e-07 | 7.97e-06 | 1.06e-06 |
