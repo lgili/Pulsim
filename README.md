@@ -18,7 +18,7 @@
 [![C++23](https://img.shields.io/badge/C%2B%2B-23-00599c?logo=cplusplus&logoColor=white)](https://en.cppreference.com/w/cpp/23)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Citation](https://img.shields.io/badge/cite-CITATION.cff-orange.svg)](CITATION.cff)
-[![v2.0.0 release](https://img.shields.io/badge/release-v2.0.0-success.svg)](CHANGELOG.md)
+[![v2.1.0 release](https://img.shields.io/badge/release-v2.1.0-success.svg)](CHANGELOG.md)
 
 [**Docs**](https://lgili.github.io/Pulsim/) ·
 [**Tutorials**](docs/tutorials/) ·
@@ -259,6 +259,28 @@ publish [`llms.txt`](docs/llms.txt), an index for tools that read one.
 
 ---
 
+## What's new in v2.1
+
+Pulsim 2.1.0 changes no option default. What it adds sits behind options
+that default off:
+
+* the **exact engine**'s losses, recorders, sensitivities and output rule
+  (`engine='exact'`, `output_rtol=`);
+* a fourth-order L-stable integrator on the variable-step engine
+  (`integrator='esdirk43'`);
+* **ideal switches and diodes** in branch form (`form='branch'`) and
+  complementarity mode selection (`mode_selection='lcp'`);
+* **external devices** through a stable C ABI (`pulsim.add_external_device`,
+  `pulsim.xdev`), new devices (thyristor family, MNA-native machines,
+  permeance magnetics, Bergeron line, datasheet power MOSFET), periodic
+  steady state, sensitivities and in-loop recorders.
+
+It also corrects a long list of silent wrong answers, so **some 2.0
+numbers move with default options**, and a few 2.0 calls now raise a named
+error. Before upgrading a study whose numbers you have recorded, read the
+[2.0 → 2.1 migration notes](docs/migration-guide.md#from-20-to-21) and the
+2.1.0 entry of [`CHANGELOG.md`](CHANGELOG.md).
+
 ## What's new in v2.0
 
 Pulsim 2.0.0 (2026-09-08) is a **breaking** release. Its rule
@@ -368,6 +390,7 @@ them is on the roadmap.
 | v1.6.0 | AC-sweep symbolic-reuse: amortise `analyze` across all frequencies | not shipped — still open (v1.6–v1.8 shipped other work, see CHANGELOG) |
 | v1.7.0 | BTF block-triangular ordering — composes with path-union for an extra ~2× on wide multi-bit transitions | not shipped — still open (v1.6–v1.8 shipped other work, see CHANGELOG) |
 | **v2.0.0** | Breaking: `engine='auto'` routing, devices that refuse instead of guessing — see [What's new in v2.0](#whats-new-in-v20) | ✅ released 2026-09-08 |
+| **v2.1.0** | Opt-in exact-engine features, `esdirk43`, ideal switches, external devices, new devices; silent wrong answers fixed — see [What's new in v2.1](#whats-new-in-v21) | release candidate |
 
 ---
 
@@ -379,7 +402,7 @@ If you use Pulsim in academic work, please cite:
 @software{pulsim,
   author  = {Gili, Luiz Carlos},
   title   = {Pulsim: A piecewise-linear state-space simulator for switched-mode power electronics},
-  version = {2.0.0},
+  version = {2.1.0},
   url     = {https://github.com/lgili/Pulsim},
   year    = {2026},
 }

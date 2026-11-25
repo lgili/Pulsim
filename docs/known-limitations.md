@@ -1,8 +1,8 @@
-# Known limitations of Pulsim 2.0
+# Known limitations of Pulsim 2.1
 
-This page lists the defects and gaps that Pulsim 2.0 ships with. Each
-one was reproduced on the 2.0 code base, including the unreleased fixes
-listed under `[Unreleased]` in the changelog. Each row gives the
+This page lists the defects and gaps that Pulsim 2.1 ships with (the
+rows written for 2.0 were re-checked on the 2.1 code base; the fixed
+ones are gone). Each row gives the
 measured effect and one workaround. Where a test pins the defect, the
 row names it. These tests are strict xfails, so the suite fails as soon
 as the defect is fixed and the row has to be updated.
@@ -16,6 +16,28 @@ broad `except` around `simulate`. They are in the
 pulsim.guide`). How to check a result is in its
 [section 6](ai-guide.md#6-how-to-verify-a-result). Newton failures and
 their messages are covered in [Gotchas](gotchas.md).
+
+## Opt-in features of 2.1 with open findings
+
+These options default off; with default options none of this is reached.
+The numbers are in the `Known limitations` part of the 2.1.0 entry of the
+[changelog](https://github.com/lgili/Pulsim/blob/main/CHANGELOG.md).
+
+* **Restart rule** (`discontinuity_restart=True`): the ideal-switch
+  flyback on the fixed engine gets worse under step refinement; an edge
+  off the `dt` grid stays first order without event splitting.
+* **Event splitting** (with the restart rule): a retried step is re-taken
+  without its interior events; an even number of edges of an opaque
+  `switch_fn` inside one step is not seen.
+* **Exact engine output rule** (`engine='exact', output_rtol=...`): a
+  thermal summary read from stored samples depends on the output grid.
+* **Variable-step engine, nonlinear output capacitance**: the conduction
+  energy after a gate edge reads +3.8 %.
+* **Sensitivities** are refused by name at a recorded cut-set jump (a
+  DCM buck on `pwl` with splitting that returned a number before).
+* **Exact engine**: twelve paralleled bridges are refused by name; the
+  phase-shifted full bridge does not run with device capacitances nor in
+  ideal form.
 
 ## Engine capability matrix
 
