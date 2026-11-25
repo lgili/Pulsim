@@ -649,3 +649,65 @@
     engine's capability refusal, `engine='auto'` names `'auto'`. Blast radius
     of the profile with the two `PLAN` entries:
     `update-number-changing-release` DECISIONS section 3.
+
+28. **Group 8 / 9.2 (typed errors, run diagnostics; feat/core-kernel-errors).**
+    - **`errors.py` after all (overrides 10's "no re-export module").** The
+      kernel's classes are still created by the extension (the translators
+      name them at throw time); `pulsim/errors.py` is their one Python home
+      (re-exports them, defines `NameNotFoundError`, moved there from
+      `__init__.py` with `__module__ = "pulsim"`, and the `options_error` /
+      `netlist_error` builders). `pulsim.errors.X is pulsim.X`.
+    - **`NetlistError`** (`std::invalid_argument` + mix-in; Python
+      `PulsimError`, `ValueError`; `.device`, `.node`): raised where the
+      circuit itself is wrong and simulate() reaches it — the magnetic
+      network with no reference (preflight), a pin on the wrong domain
+      (`ir::Circuit`), a tie on a missing node (`with_ties`). The builder's
+      119 `invalid_argument` throws are not converted (build time, not
+      simulate()'s path; design D5 orders them after it).
+    - **`NameNotFoundError` is NOT re-based under `NetlistError`** (design
+      D5's table): that would add `ValueError` to a `KeyError`, and 58
+      `except ValueError` handlers in the package would then catch a failed
+      name lookup they let through today. It stays `KeyError` +
+      `PulsimError`.
+    - **`SingularError`** (`std::runtime_error` + mix-in) is thrown at the
+      18 singular-matrix sites of `pwl/cache.hpp`, `dc_strategy.hpp`,
+      `dc_assemble.hpp`, `pseudo_transient.hpp`, `solver/bdf1.hpp` (not the
+      four of `trbdf2_transient.hpp`: another track's file). The engines'
+      catch blocks wrap it in `SimulationAborted` unchanged; the
+      `SimulationAborted` constructor records `singular()` from the
+      exception in flight (`singular_in_flight()`), so no engine catch block
+      is edited. Python: `pulsim.SingularError(SimulationAborted)`, raised
+      only for a wrapped abort. A raw `SingularError` (no engine wrap, e.g.
+      a DC operating point alone) keeps pybind's `RuntimeError`: as a
+      `SimulationAborted` it would be caught by `periodic.py`'s
+      `except ConvergenceError` and reported as "not converged".
+    - **8.2's scope = simulate()'s own layer:** the `_SIMULATE_BODY`
+      functions, `_resolve_loaded_circuit`, `_dsed_dispatch.
+      _validate_engine_kwargs` / `run_dsed_from_builder`'s entry checks,
+      `_control_plan._check_fixed_periods` (`test_simulate_path_raises_
+      are_typed`; one allowed `RuntimeError`: a broken install). 32
+      `raise ValueError` became `OptionsError` (`.option`) or
+      `UnsupportedError`; the reserved `integrator=` keeps
+      `NotImplementedError` via `_UnsupportedNotImplemented`; the
+      variable-step route refusal is `UnsupportedError` like its sibling.
+      Not converted: the DSED bridge's internal errors (`_builder_bridge`:
+      control flow of the bridge fallbacks) and the analysis modules.
+    - **Broad handlers:** the 13 of `__init__.py` are typed catches; none
+      catches `ValueError` + `RuntimeError` together except the lookups
+      that wrap a pool accessor (`IndexError`, `ValueError`, `TypeError`:
+      std::out_of_range / invalid_argument of a wrong device kind), and no
+      refusal is raised inside those. The post-run voltage checks and the
+      trace attachment no longer catch `ValueError` / `RuntimeError`.
+    - **Diagnostics (8.3): recorded as emitted, not emitted from the
+      result.** Design D6's `_emit_diagnostics(result)` (warn once per
+      diagnostic at the end) would move every warning's attributed line to
+      one site, change their order against exceptions, and lose those of an
+      aborted run. Instead `_plan.emit(code, message, category, stacklevel)`
+      warns at the same site with `stacklevel + 1` (same frame, same
+      `__warningregistry__`) and appends `Diagnostic(code, message,
+      category)` to the run's list (a `ContextVar`, set and reset by
+      `simulate()`; nested runs and threads keep their own). The list lands
+      on `result.diagnostics["messages"]` (a tuple; the existing dict keeps
+      its keys). Routed: the 24 `warnings.warn` sites of `__init__.py`
+      (test: none left). Not routed: other modules' warnings
+      (`_dsed_dispatch`, `_control_plan`, analysis modules).

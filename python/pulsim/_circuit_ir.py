@@ -220,8 +220,12 @@ def control_decls(builder) -> list:
     lists a builder instance still carries. A C block's step function and
     its wiring are opaque: its content hash covers its name, its input and
     output COUNTS and its rate only."""
+    blocks = getattr(builder, "_c_blocks", None)
+    driven = getattr(builder, "_graph_driven", None)
+    if not (blocks or driven):   # the common case: simulate() asks 4 times a call
+        return []
     out = []
-    for i, h in enumerate(getattr(builder, "_c_blocks", None) or ()):
+    for i, h in enumerate(blocks or ()):
         # A duck-typed block may lack these; the engines' refusals must
         # still see it, so missing fields hash as absent, not raise.
         name = str(getattr(h, "name", f"c_block{i}"))
@@ -230,7 +234,7 @@ def control_decls(builder) -> list:
             f"c_block|{name}|{getattr(h, 'n_in', None)}|"
             f"{getattr(h, 'n_out', None)}|"
             f"{None if dt is None else repr(float(dt))}"), h))
-    for name in getattr(builder, "_graph_driven", None) or ():
+    for name in driven or ():
         out.append((str(name), "graph_driven",
                     _fnv64(f"graph_driven|{name}"), None))
     return out

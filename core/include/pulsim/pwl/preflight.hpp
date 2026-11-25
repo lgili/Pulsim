@@ -65,6 +65,7 @@
 // layering violation.
 
 #include "pulsim/numeric/types.hpp"
+#include "pulsim/sim/error.hpp"   // NetlistError
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/topology/graph.hpp"
 
@@ -348,7 +349,7 @@ inline void require_magnetic_reference(const topology::Graph& graph,
         }
     }
     if (named >= 0) {
-        throw std::invalid_argument(std::format(
+        throw NetlistError("", std::string{graph.node(named).name}, std::format(
             "the magnetic network containing {} has no node tied to the "
             "reference: connect one of its nodes to gnd (a winding does "
             "not connect the electrical and magnetic sides galvanically). "

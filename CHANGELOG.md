@@ -6,6 +6,49 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Typed errors and run diagnostics (add-kernel-simulation-object, group 8)
+
+- **One base class.** Every error pulsim raises on purpose is a
+  `pulsim.PulsimError`; each keeps the standard base it had, so existing
+  `except ValueError` / `RuntimeError` / `KeyError` code is unaffected.
+  New: `pulsim.NetlistError` (a `ValueError`; `.device`, `.node`) for a
+  circuit that is wrong in itself (a pin on the wrong domain, a magnetic
+  network with no reference, a tie on a missing node), and
+  `pulsim.SingularError` (a `SimulationAborted`) when a fixed-step
+  transient step meets a singular matrix (also after its dt-halving
+  retries; the variable-step engine still reports a plain
+  `SimulationAborted`). The classes live in `pulsim.errors` (also
+  `pulsim.<Class>`). Reference: `docs/errors.md`.
+- **`simulate()`'s own refusals are typed.** Its planning and validation
+  raise `OptionsError` (`.option` names the keyword) or `UnsupportedError`
+  instead of a bare `ValueError` / `NotImplementedError`; the messages are
+  unchanged and both stay subclasses of what was raised before (the
+  reserved `integrator=` on `'pwl'` is still a `NotImplementedError`).
+- **Narrower handlers.** The 13 `except Exception` handlers of
+  `pulsim/__init__.py` (name lookups, the post-run voltage check, trace
+  attachment) catch only the errors they were written for; a refusal
+  raised inside them now reaches the caller.
+- **`result.diagnostics["messages"]`.** The warnings a `simulate()` call
+  emits are kept on its result, in order, as records `(code, message,
+  category)`; the warnings themselves (category, text, attributed line)
+  are unchanged. For PulsimGUI: the message panel can read this tuple,
+  and its `BackendRefusal` can catch `pulsim.PulsimError`.
+- **Kernel object.** `pulsim.Simulation(..., engine='exact')` names the
+  first device the exact engine cannot run (`UnsupportedError.device`)
+  before refusing the engine as a whole.
+- **Behaviour that follows from the types (louder, never quieter).**
+  The variable-step route refusal (`engine='auto'` without `dt` on a
+  circuit only the fixed step runs) and the reserved `integrator=` on
+  `'pwl'` are now `UnsupportedError`s, so `sweep()` / `monte_carlo()`
+  propagate them instead of recording each point as failed, design
+  evaluations record them as `"refused"`, and the steady-state
+  capability check reports them as a refusal. A `NetlistError` also
+  propagates out of `sweep()` (it holds for every point) and is no longer
+  retried on the exact engine's fallback bridge. The post-run voltage
+  check and trace attachment still never fail a finished run. Records
+  that print the exception's class name (design evaluations) show
+  `SingularError:` where they showed `SimulationAborted:`.
+
 ## [2.1.0] - 2026-11-25
 
 2.1.0 brings new engines, devices and analyses behind new options that

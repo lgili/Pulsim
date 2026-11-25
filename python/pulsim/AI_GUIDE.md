@@ -616,10 +616,11 @@ dt = 5e-06: i_L(tau) error -7.61e-07 A
 
 ### 6.4 When `simulate` raises
 
-The message names the device, node or option involved (trap 12). If
-you change engine to get past a refusal, confirm the answer with 6.2.
-Typical refusals: a singular matrix (a floating node), a Newton
-abort (trap 5), a part file without provenance, a mismatched snapshot.
+Each is a `p.PulsimError` (trap 12). Bad input: `p.OptionsError`
+(`.option`), `p.UnsupportedError` (`.engine`, `.feature`, `.device`),
+`p.NetlistError` (`.device`, `.node`). Dead run: `p.SimulationAborted`
+(`.partial`); `p.SingularError`: a floating node. Warnings also go to
+`result.diagnostics["messages"]`. Recheck: 6.2.
 
 ## 7. Coming from Pulsim 1.x or pre-1.0
 
@@ -658,5 +659,5 @@ with the checks in its section 6 before reporting it.
 - `docs/api-reference.md`, `docs/gotchas.md`, `docs/troubleshooting.md`,
   `docs/losses-and-thermal.md`, `docs/loss-thermal.md`,
   `docs/mental-model.md`, `docs/how-pulsim-works/`.
-- `CHANGELOG.md`: what changed and why.
+- `CHANGELOG.md`: what changed.
 - Changing `simulate()`: put it in the plan (`docs/internals/run-planning.md`).
