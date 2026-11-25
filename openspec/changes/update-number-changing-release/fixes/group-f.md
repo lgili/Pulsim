@@ -1310,3 +1310,17 @@ reviewer on 79330ab7..5613abbe (scoping + lazy root error came after the review)
   `_rule_held`) — the same run reads worst 5.8e-6, 0 above 1 %. The release's parked reading
   (39.49 against 34.30 V under the default rule) is this test-side call; the fix belongs in the
   test (pass `interpolable` from the run's `output_grid` as the summary does), not in the engine.
+* (b) `pulsim_core_dsed_tests` (`S9_ctest_dsed.log`): Eigen 5 (`.scratch/build-ctest`) **152 test
+  cases / 41 469 assertions pass**; Eigen 3.4.0 (`.scratch/build-e34ct`, new, 200 eigen-3.4.0
+  include refs in its build.ninja) **152 / 41 469 pass**.
+* The rest of the acceptance runs as ONE sequential chain, `.scratch/f10/chain_all.sh` (started
+  09:38, PID 45028; progress lines in `S9_chain.log`, one per item): (g) cost → `S9_cost.log`;
+  (h) exact-engine files + test_release_findings_f4 → `S9_pytest_exact.log`, ONE full pytest
+  (`--timeout=900 --durations=40`, the ten-bridges walls are in its durations) →
+  `S9_pytest_full.log`, ruff → `S9_ruff.log`; (c)(e)(f) `chain_s9.sh` → `S9_referee_100.jsonl`
+  (summarise with `refsum.py`), `S9_samples.jsonl`, `S9_property_100x200.jsonl`,
+  `S9_property_truth_6.jsonl`, `S9_events_gate.log`, `S9_ladder500.log`; (d) the rehearsal
+  (rule cells dropped from `.scratch/rehearsal`, backup in `.scratch/f10/rehearsal_backup_pre_s9`)
+  → `S9_rehearsal_run.log`, rendered into `S9_NEXT_DEFAULTS_REHEARSAL.md` (not the tracked file).
+* openspec `validate --all --strict`: 79 passed, 0 failed (`S9_openspec.log`); stubs `--check`: up
+  to date (`S9_stubs.log`).
