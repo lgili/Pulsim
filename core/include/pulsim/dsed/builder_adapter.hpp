@@ -788,6 +788,7 @@ public:
         ensure_current_resolved_();
         ensure_exact_built_(*current_entry_);
         const LTIEntry& e = *current_entry_;
+        if (e.A.rows() == 0) return Real{0};   // no state (a resistive clipper): EigenSolver of 0x0 segfaults
         Eigen::VectorXcd lam = e.exact.lambda;
         if (lam.size() != e.A.rows()) lam = Eigen::EigenSolver<DenseMatrix>(e.A, false).eigenvalues();
         Real slow = std::numeric_limits<Real>::infinity();

@@ -206,6 +206,22 @@ def test_fx7_a_jump_of_an_output_is_stored_on_both_sides():
             assert e.max() <= 1.001 * tol, (rt, j, e.max(), tol)
 
 
+def test_f9_a_stateless_circuit_runs_under_the_rule():
+    """The projection record's time scale on a circuit with no state (a sine into a
+    resistor and two diodes) segfaulted in an eigensolve of the empty A."""
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("Vac", "in", "gnd", v_dc=0.0, v_amplitude=5.0,
+                              frequency=50.0, phase=0.0)
+    b.add_resistor("R1", "in", "out", 100.0)
+    b.add_diode("Dp", "out", "gnd", 200.0, 1e-6)
+    b.add_diode("Dn", "gnd", "out", 200.0, 1e-6)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(b, 0.02, engine="exact", output_rtol=1e-5)
+    r_on = 1 / 200.0   # the conducting diode against R1: the clip is the divider at the peak
+    assert np.abs(np.asarray(r.v("out"))).max() == pytest.approx(5.0 * r_on / (100.0 + r_on), rel=0.05)
+
+
 def test_f9_every_projection_of_the_parasitic_cluster_is_recorded():
     """Session 9 (the projection record): under the rule each event's projection of the
     parasitic cluster is recorded in diagnostics['output_grid'] -- the count, per stored
