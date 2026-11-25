@@ -1455,3 +1455,48 @@ reviewer on 79330ab7..5613abbe (scoping + lazy root error came after the review)
   dsed:output_grid, dsed+next): disagree 0.0676 → **agree 1.31e-10**, `n_projected` 5. Circuit
   cells: code path unchanged (circuit_worker not touched).
 * pytest test_exact_output_grid + test_next_defaults + test_benchmark_harness: 412 passed; ruff clean.
+
+### Step 2 — the cost gate (rule off; both sides LTO OFF; base = `.scratch/base527` with the saved 527e644d .so)
+
+* Method changed for the five exact-engine cases: session 9 read the whole PROCESS's
+  `instructions retired` minus an import-only process (one cold run each; `cost.sh`). That
+  reading is noisy: re-run as-is (`cost1.sh`, `S10_cost_acf1.log`) active_clamp_forward read tip
+  799.1 / 750.6 / 749.0 / 773.7 M against base 760.5 / 746.4 / 744.9 / 747.2 M (±3 % per process).
+  Now `instr_ex.py`: `ri_instructions` (libproc) around `simulate()` in the process, min of 3
+  calls after a warm-up — the same method as the four standard cases' `instr1.py` — plus the
+  whole call (case load, DC start, simulate) and the cold first call, reported beside it.
+* Attribution (`S10_cost_mid.log`): a third build, cbe1430f (sessions 4–8 + the PR head; its
+  dsed headers + dsed_bindings.cpp put into `.scratch/base527`, built incrementally, .so saved in
+  `.scratch/so_cbe1430f/`, the base tree's sources and .so restored to 527e644d afterwards).
+  Simulate only, min of 3 rounds: buck_ccm tip 1747.18 M / cbe1430f 1744.86 M / base 1741.86 M
+  (+0.31 % / +0.17 %); active_clamp_forward 572.90 / 573.07 / 571.91 M (+0.17 % / +0.20 %).
+  The third round ran ~1 % higher on all three builds (the count includes kernel-mode
+  instructions: machine load moves it). No change is attributable above that noise; the
+  session-9 +0.89 % does not reproduce. Every rule-off path added since 527e644d is a
+  branch on `output_rtol_` (read through the diff); no allocation or eigensolve runs with the
+  rule off.
+* The projection record's eigensolve (rule on only): `fast_cluster_tau` ran a dense
+  EigenSolver per projection when the mode had sines; now it reads the exact build's
+  eigenvalues (once per mode; the augmented ones are A's plus ±iω) (**821983a5**). Its tau on
+  diode_half_wave_rl_load is now tested against L/(R + 1/g_off) = 9.99990e-10 s to 1e-9.
+  Rule-on cost there (6 projections): 1320.4 / 1327.8 M vs 1326.7 / 1326.9 M before
+  (`S10_cost_tau_ruleon.log`): no measurable change at that count.
+* Final cost table on 821983a5 (`S10_cost_std.log`, `S10_cost_ex_final.log`, summary
+  `costsum.py`), min of 3 interleaved rounds:
+
+  | case | tip vs 527e644d |
+  |---|---|
+  | buck_pwl (per step) | +0.20 % |
+  | vsi_pwl | +0.12 % |
+  | buck_trbdf2 | −0.19 % |
+  | bridge_trbdf2 | −0.13 % |
+  | buck_ccm (exact, simulate / whole call / cold) | +0.46 % / +0.46 % / +0.79 % |
+  | bridge3 | +0.11 % / +0.11 % / +0.16 % |
+  | active_clamp_forward | +0.26 % / +0.23 % / +1.17 % |
+  | forward_converter | −0.04 % / −0.01 % / −5.23 % |
+  | boost_pfc_open_loop | +0.31 % / +0.30 % / −0.02 % |
+
+  The 0.5 % gate holds on the warm counts (the standard method). buck_ccm at +0.46 % is inside
+  this method's own spread (base alone: 1737.9 … 1766.6 M across rounds), so "under 0.5 %" is
+  not resolved better than ±0.5 %. The cold first call is one sample per process and moves
+  −5 % … +1 % on identical code paths: not a gate reading.
