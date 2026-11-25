@@ -6,7 +6,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [2.1.0] - 2026-11-XX
+## [2.1.0] - 2026-11-25
 
 2.1.0 brings new engines, devices and analyses behind new options that
 default off, and a long list of silent wrong answers corrected. The defaults
