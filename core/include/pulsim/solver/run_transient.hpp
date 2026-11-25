@@ -932,6 +932,9 @@ inline SimulationResult run_transient(
         bool vf0 = false, pure = false, at_b = false, off = false;
         std::vector<bool> bits;
     } rl_loc;
+    // event_right_limit's pin (Anderson): buffers sized once per run
+    Vector rlp_u, rlp_r, rlp_g, rlp_r0, rlp_g0, rlp_sc, rlp_rs, rlp_gam, rlp_ua;
+    DenseMatrix rlp_dr, rlp_dg;
     pwl::StatefulHistories::Snapshot rl_hs;
     // The OFF state's leakage conductance in total (conductance-form
     // switches and diodes): the restart rule's current resolution
@@ -3180,7 +3183,7 @@ inline SimulationResult run_transient(
                 // map is affine in a linear mode: exact after one difference
                 // per fast mode). Returns whether every pinned state met its
                 // target.
-                auto pinned = [&](Real e) -> bool {
+                auto pinned = [&](Real e, bool predict = false) -> bool {
                     rl_hw = rl_hist;
                     history.restore(rl_hw);
                     for (Size k = 0; k < n_nc; ++k) (*ncw)[k].q_prev = rl_ncq[k];
@@ -3200,8 +3203,12 @@ inline SimulationResult run_transient(
                     for (Size k = 0; k < n_sl; ++k) s_f = std::max(s_f, std::abs(rl_slq[k]));
                     constexpr Index kDepth = 6;
                     constexpr Size kPasses = 24;
-                    Vector u(m), r(m), g(m), r0(m), g0(m), sc(m);
-                    DenseMatrix dr(m, kDepth), dg(m, kDepth);
+                    // run-scope buffers: no allocation per event once sized
+                    Vector& u = rlp_u; Vector& r = rlp_r; Vector& g = rlp_g;
+                    Vector& r0 = rlp_r0; Vector& g0 = rlp_g0; Vector& sc = rlp_sc;
+                    DenseMatrix& dr = rlp_dr; DenseMatrix& dg = rlp_dg;
+                    u.resize(m); r.resize(m); g.resize(m); r0.resize(m); g0.resize(m); sc.resize(m);
+                    dr.resize(m, kDepth); dg.resize(m, kDepth);
                     Index nh = 0;
                     auto target = [&](Index i) -> Real {
                         const auto q = static_cast<Size>(i);
@@ -3209,6 +3216,22 @@ inline SimulationResult run_transient(
                                : q < n_pin + n_nc ? rl_ncq[q - n_pin] : rl_slq[q - n_pin - n_nc];
                     };
                     for (Index i = 0; i < m; ++i) u[i] = target(i);
+                    // the first pin predicted from stage 1's slope (states continuous
+                    // at t_from): u = target − ε·(x1 − x0)/γh; a slow state then lands
+                    // within the tolerance in the first solve (one solve per
+                    // event, not two — the restart line's cost, item 1)
+                    if (predict) {
+                        for (Size q = 0; q < n_pin; ++q) {
+                            const Size k = rl_pin[q];
+                            const auto& en = ents[k];
+                            const Real s1 = en.kind == pwl::DevicePool::StoredKind::Capacitor
+                                ? stamping::read_node_voltage(rl_x1, en.from) - stamping::read_node_voltage(rl_x1, en.to)
+                                : rl_x1[en.inductor_branch_var_id];
+                            u[static_cast<Index>(q)] -= e * (s1 - rl_hist[slot(k)]) / h_s;
+                            rl_hw[slot(k)] = u[static_cast<Index>(q)];
+                        }
+                        history.restore(rl_hw);
+                    }
                     bool conv = m == 0;
                     for (Size pass = 0; pass < kPasses; ++pass) {
                         solve_eps(e);
@@ -3252,11 +3275,13 @@ inline SimulationResult run_transient(
                         g0 = g;
                         u = g;
                         if (nh > 0) {
-                            Vector rs(m);
+                            Vector& rs = rlp_rs;
+                            rs.resize(m);
                             for (Index i = 0; i < m; ++i) rs[i] = r[i] / (sc[i] > Real{0} ? sc[i] : Real{1});
-                            const Vector gam = dr.leftCols(nh).colPivHouseholderQr().solve(rs);
-                            const Vector ua = g - dg.leftCols(nh) * gam;
-                            if (ua.allFinite()) u = ua;
+                            rlp_gam = dr.leftCols(nh).colPivHouseholderQr().solve(rs);
+                            rlp_rs.noalias() = dg.leftCols(nh) * rlp_gam;   // (rs is spent)
+                            rlp_ua = g - rlp_rs;
+                            if (rlp_ua.allFinite()) u = rlp_ua;
                         }
                         for (Size q = 0; q < n_pin; ++q) rl_hw[slot(rl_pin[q])] = u[static_cast<Index>(q)];
                         for (Size k = 0; k < n_nc; ++k) (*ncw)[k].q_prev = u[static_cast<Index>(n_pin + k)];
@@ -3288,7 +3313,7 @@ inline SimulationResult run_transient(
                     out = x;
                     count = count || !conv;
                 } else {
-                    const bool conv = pinned(eps);
+                    const bool conv = pinned(eps, !ip_jump && !ip_moved);
                     out = x;
                     count = count || !conv;
                     // the mode must hold at t_e+ (it is read, never changed)
