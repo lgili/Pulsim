@@ -1,0 +1,2583 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Power-electronics circuit simulator — C++23 kernel with a Python-first API">
+      
+      
+      
+        <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/tutorials/08-design-optimisation/">
+      
+      
+        <link rel="prev" href="../07-dc-machine/">
+      
+      
+        <link rel="next" href="../09-magnetic-networks/">
+      
+      
+      <link rel="icon" href="../../assets/images/pulsim-logo.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.5.50">
+    
+    
+      
+        <title>Tutorial 08 — Using Pulsim inside an optimiser - Pulsim</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.a40c8224.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/extra.css">
+    
+      <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="blue-grey" data-md-color-accent="deep-orange">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#tutorial-08-using-pulsim-inside-an-optimiser" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Pulsim" class="md-header__button md-logo" aria-label="Pulsim" data-md-component="logo">
+      
+  <img src="../../assets/images/pulsim-logo.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Pulsim
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Tutorial 08 — Using Pulsim inside an optimiser
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="blue-grey" data-md-color-accent="deep-orange"  aria-hidden="true"  type="radio" name="__palette" id="__palette_0">
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="blue-grey" data-md-color-accent="deep-orange"  aria-hidden="true"  type="radio" name="__palette" id="__palette_1">
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      <label class="md-header__button md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+      </label>
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/lgili/Pulsim" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    lgili/Pulsim
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../.." class="md-tabs__link">
+          
+  
+  User Guide
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../how-pulsim-works/" class="md-tabs__link">
+          
+  
+  How Pulsim Works
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../internals/" class="md-tabs__link">
+          
+  
+  Internals
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../build-system/" class="md-tabs__link">
+          
+  
+  Operations
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Pulsim" class="md-nav__button md-logo" aria-label="Pulsim" data-md-component="logo">
+      
+  <img src="../../assets/images/pulsim-logo.svg" alt="logo">
+
+    </a>
+    Pulsim
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/lgili/Pulsim" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    lgili/Pulsim
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Home
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  <span class="md-ellipsis">
+    User Guide
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            User Guide
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Home
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Getting Started
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ai-guide/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Using Pulsim with AI Assistants
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../mental-model/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Mental Model
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../parameters/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Parameters and Value Updates
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../domains/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Node Domains
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../01-rc-charging/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 01 — RC Charging
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../02-buck-converter/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 02 — Buck Converter
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../03-flyback-isolated/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 03 — Isolated Flyback
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../04-3phase-vsi/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 04 — Three-Phase VSI
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../05-ldo-feedback/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 05 — LDO with Op-Amp
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../06-igbt-boost/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 06 — IGBT Boost
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../07-dc-machine/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 07 — DC Machine
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Tutorial 08 — Using Pulsim inside an optimiser
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 08 — Using Pulsim inside an optimiser
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-the-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      1. The contract
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-four-statuses-never-a-default-number" class="md-nav__link">
+    <span class="md-ellipsis">
+      2. Four statuses, never a default number
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-steady-state-junction-temperature-batches" class="md-nav__link">
+    <span class="md-ellipsis">
+      3. Steady state, junction temperature, batches
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-why-derivative-free" class="md-nav__link">
+    <span class="md-ellipsis">
+      4. Why derivative-free
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-the-worked-example-and-its-parts" class="md-nav__link">
+    <span class="md-ellipsis">
+      5. The worked example and its parts
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-which-path-runs-when" class="md-nav__link">
+    <span class="md-ellipsis">
+      6. Which path runs when
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-with-gradients-a-boosts-l-and-c" class="md-nav__link">
+    <span class="md-ellipsis">
+      7. With gradients: a boost's L and C
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../09-magnetic-networks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 09 — Magnetic networks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../10-power-mosfet-datasheet/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 10 — Datasheet to double pulse
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sensitivities/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Parameter Sensitivities
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../SOFT_SWITCHING/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Soft Switching (ZVS / ZCS probes)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../motors-induction/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Motors — Induction (Phase 2)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../motors-sensorless/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Motors — Sensorless Observers (Phase 2)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../mmc/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Modular Multilevel Converters (MMC)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../loss-thermal/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Loss & Thermal Modelling
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../transmission-line/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Transmission Line (Bergeron)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../c-block/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Custom Code Blocks (C / C++ / Python)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../solvers/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Numerical Solvers (Phase 2)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api-reference/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    API Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../result-reference/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Result Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../device-reference/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Device Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../helpers/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    UX Helpers (discover, plot, monitor)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../gotchas/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Gotchas
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../known-limitations/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Known Limitations (2.1)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    How Pulsim Works
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            How Pulsim Works
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-pulsim-works/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Overview
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-pulsim-works/01-introduction/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    1 — Introduction (why SMPS is hard)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-pulsim-works/02-mna-foundations/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    2 — MNA Foundations
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-pulsim-works/03-trapezoidal-companion/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    3 — Trapezoidal Companion Discretisation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-pulsim-works/04-pwl-state-space-cache/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    4 — PWL State-Space Cache
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-pulsim-works/05-sparse-lu-foundations/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    5 — Sparse Direct LU Foundations
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-pulsim-works/06-pulsim-sparse-lu/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    6 — PulsimSparseLuSolver
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-pulsim-works/07-rank1-partial-refactor/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    7 — Path-Based Partial Refactorisation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-pulsim-works/08-benchmarks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    8 — Benchmarks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-pulsim-works/09-architecture-walkthrough/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    9 — Architecture Walkthrough
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-pulsim-works/10-paper-figures-index/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    10 — Paper Figures Index
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-pulsim-works/11-dsed-engine-overview/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    11 — DSED Engine Overview (Part II)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-pulsim-works/12-dsed-state-space-extraction/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    12 — MNA → State-Space Extraction
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-pulsim-works/13-dsed-dopri5-adaptive/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    13 — DOPRI5 + Adaptive PI + Event Scan
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-pulsim-works/14-dsed-bdf2-and-dispatch/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    14 — BDF2 + Stiffness Dispatch
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-pulsim-works/15-dsed-native-bindings/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    15 — Native Bindings (24× story)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-pulsim-works/16-dsed-benchmarks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    16 — DSED Benchmarks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Internals
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            Internals
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Architecture (Layer-by-Layer)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer0-numeric-and-sparse/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 0 — Numeric + Sparse
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer1-topology-and-enumeration/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 1 — Topology + Enumeration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer2-ad-and-device-models/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 2 — AD + Device Models
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer2-v1-mosfet-igbt/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 2 V1 — MOSFET / IGBT
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer2-v2-transformer/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 2 V2 — Transformer
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer3-stamping-pipeline/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 3 — Stamping Pipeline
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer4-pwl-state-space-cache/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 4 — PWL State-Space Cache
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer4-v1-trapezoidal-companion/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 4 V1 — Trapezoidal Companion
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/layer10-benchmarks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Layer 10 — Benchmarks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/run-planning/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    How a run is planned
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../internals/mmc-arm-block/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    MMC Arm Block — design doc
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Operations
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            Operations
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../build-system/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Build System
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../performance-tuning/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Performance Tuning
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../troubleshooting/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Troubleshooting
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../migration-guide/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Migration Guide (2.0 → 2.1, legacy → 1.0)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../versioning-and-release/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Docs Versioning and Release
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-the-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      1. The contract
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-four-statuses-never-a-default-number" class="md-nav__link">
+    <span class="md-ellipsis">
+      2. Four statuses, never a default number
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-steady-state-junction-temperature-batches" class="md-nav__link">
+    <span class="md-ellipsis">
+      3. Steady state, junction temperature, batches
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-why-derivative-free" class="md-nav__link">
+    <span class="md-ellipsis">
+      4. Why derivative-free
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-the-worked-example-and-its-parts" class="md-nav__link">
+    <span class="md-ellipsis">
+      5. The worked example and its parts
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-which-path-runs-when" class="md-nav__link">
+    <span class="md-ellipsis">
+      6. Which path runs when
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-with-gradients-a-boosts-l-and-c" class="md-nav__link">
+    <span class="md-ellipsis">
+      7. With gradients: a boost's L and C
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+  
+    <a href="https://github.com/lgili/Pulsim/edit/main/docs/tutorials/08-design-optimisation.md" title="Edit this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+    
+      
+    
+    <a href="https://github.com/lgili/Pulsim/raw/main/docs/tutorials/08-design-optimisation.md" title="View source of this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17 18c.56 0 1 .44 1 1s-.44 1-1 1-1-.44-1-1 .44-1 1-1m0-3c-2.73 0-5.06 1.66-6 4 .94 2.34 3.27 4 6 4s5.06-1.66 6-4c-.94-2.34-3.27-4-6-4m0 6.5a2.5 2.5 0 0 1-2.5-2.5 2.5 2.5 0 0 1 2.5-2.5 2.5 2.5 0 0 1 2.5 2.5 2.5 2.5 0 0 1-2.5 2.5M9.27 20H6V4h7v5h5v4.07c.7.08 1.36.25 2 .49V8l-6-6H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h4.5a8.2 8.2 0 0 1-1.23-2"/></svg>
+    </a>
+  
+
+
+<h1 id="tutorial-08-using-pulsim-inside-an-optimiser">Tutorial 08 — Using Pulsim inside an optimiser<a class="headerlink" href="#tutorial-08-using-pulsim-inside-an-optimiser" title="Permanent link">&para;</a></h1>
+<p>An optimiser calls <code>f(design)</code> thousands of times. It needs the same
+answer for the same input, a finite answer or an explicit failure, and
+a cost per call it can budget. <code>pulsim.design.Evaluator</code> is that
+contract around your own <code>build(design)</code> function.</p>
+<h2 id="1-the-contract">1. The contract<a class="headerlink" href="#1-the-contract" title="Permanent link">&para;</a></h2>
+<p><code>build(design)</code> returns the circuit and its gate schedule. The
+evaluator reaches the periodic steady state, takes every KPI on ONE
+steady period with time-weighted integrals (never a plain <code>.mean()</code> of
+samples), and returns an immutable <code>EvaluationRecord</code>.</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pulsim</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">p</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pulsim.design</span><span class="w"> </span><span class="kn">import</span> <span class="n">Evaluator</span><span class="p">,</span> <span class="n">SteadySpec</span><span class="p">,</span> <span class="n">as_objectives</span><span class="p">,</span> <span class="n">as_constraints</span>
+
+<span class="n">T</span> <span class="o">=</span> <span class="mf">1e-5</span>          <span class="c1"># 100 kHz</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">build</span><span class="p">(</span><span class="n">d</span><span class="p">):</span>
+    <span class="n">b</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">CircuitBuilder</span><span class="p">()</span>
+    <span class="n">b</span><span class="o">.</span><span class="n">add_voltage_source</span><span class="p">(</span><span class="s2">"Vin"</span><span class="p">,</span> <span class="s2">"vin"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">24.0</span><span class="p">)</span>
+    <span class="n">b</span><span class="o">.</span><span class="n">add_switch</span><span class="p">(</span><span class="s2">"S"</span><span class="p">,</span> <span class="s2">"vin"</span><span class="p">,</span> <span class="s2">"sw"</span><span class="p">,</span> <span class="mf">1e3</span><span class="p">,</span> <span class="mf">1e-9</span><span class="p">)</span>
+    <span class="n">b</span><span class="o">.</span><span class="n">add_diode</span><span class="p">(</span><span class="s2">"D1"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="s2">"sw"</span><span class="p">,</span> <span class="mf">1e3</span><span class="p">,</span> <span class="mf">1e-9</span><span class="p">)</span>
+    <span class="n">b</span><span class="o">.</span><span class="n">add_inductor</span><span class="p">(</span><span class="s2">"L"</span><span class="p">,</span> <span class="s2">"sw"</span><span class="p">,</span> <span class="s2">"x"</span><span class="p">,</span> <span class="n">d</span><span class="p">[</span><span class="s2">"L"</span><span class="p">])</span>
+    <span class="n">b</span><span class="o">.</span><span class="n">add_resistor</span><span class="p">(</span><span class="s2">"RLs"</span><span class="p">,</span> <span class="s2">"x"</span><span class="p">,</span> <span class="s2">"vout"</span><span class="p">,</span> <span class="mf">0.01</span><span class="p">)</span>
+    <span class="n">b</span><span class="o">.</span><span class="n">add_capacitor</span><span class="p">(</span><span class="s2">"C"</span><span class="p">,</span> <span class="s2">"vout"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="n">d</span><span class="p">[</span><span class="s2">"C"</span><span class="p">])</span>
+    <span class="n">b</span><span class="o">.</span><span class="n">add_resistor</span><span class="p">(</span><span class="s2">"RL"</span><span class="p">,</span> <span class="s2">"vout"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">)</span>
+    <span class="n">pwm</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">make_pwm_switch_fn</span><span class="p">(</span><span class="mi">1</span> <span class="o">/</span> <span class="n">T</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">,</span> <span class="n">b</span><span class="o">.</span><span class="n">switch_index_of</span><span class="p">(</span><span class="s2">"S"</span><span class="p">),</span>
+                               <span class="n">b</span><span class="o">.</span><span class="n">graph</span><span class="o">.</span><span class="n">num_switches</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">b</span><span class="p">,</span> <span class="n">pwm</span>
+
+<span class="n">ev</span> <span class="o">=</span> <span class="n">Evaluator</span><span class="p">(</span><span class="n">build</span><span class="p">,</span> <span class="n">period</span><span class="o">=</span><span class="n">T</span><span class="p">,</span> <span class="n">loads</span><span class="o">=</span><span class="p">(</span><span class="s2">"RL"</span><span class="p">,),</span> <span class="n">output</span><span class="o">=</span><span class="s2">"vout"</span><span class="p">,</span>
+               <span class="n">constraints</span><span class="o">=</span><span class="p">{</span><span class="s2">"ripple_v"</span><span class="p">:</span> <span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="mf">0.12</span><span class="p">)})</span>
+<span class="n">rec</span> <span class="o">=</span> <span class="n">ev</span><span class="o">.</span><span class="n">evaluate</span><span class="p">({</span><span class="s2">"L"</span><span class="p">:</span> <span class="mf">100e-6</span><span class="p">,</span> <span class="s2">"C"</span><span class="p">:</span> <span class="mf">47e-6</span><span class="p">})</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">rec</span><span class="o">.</span><span class="n">status</span><span class="p">,</span> <span class="n">rec</span><span class="o">.</span><span class="n">counters</span><span class="p">[</span><span class="s2">"steady_method"</span><span class="p">])</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"efficiency </span><span class="si">{</span><span class="n">rec</span><span class="o">.</span><span class="n">kpis</span><span class="p">[</span><span class="s1">'efficiency'</span><span class="p">]</span><span class="si">:</span><span class="s2">.6f</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"ripple     </span><span class="si">{</span><span class="n">rec</span><span class="o">.</span><span class="n">kpis</span><span class="p">[</span><span class="s1">'ripple_v'</span><span class="p">]</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mf">1e3</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2"> mV"</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"losses     </span><span class="si">{</span><span class="nb">sorted</span><span class="p">(</span><span class="n">rec</span><span class="o">.</span><span class="n">losses</span><span class="p">)</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code>ok pss
+efficiency 0.989117
+ripple     15.9588 mV
+losses     ['D1', 'RLs', 'S']
+</code></pre></div>
+<p>The efficiency and the ripple agree with a matrix-exponential
+reference of the same orbit to 2e-12 and 6e-11 relative, and the total
+loss to 8e-15 (<code>python/tests/test_design_evaluation.py</code>). The record also carries the
+design, a SHA-256 <code>design_id</code>, the per-device losses by category, the
+route and solver counters, and the provenance (version, extension
+hash, options digest), and <code>counters["energy_residual"]</code> (2e-13 here)
+with <code>counters["p_table"]</code>, the datasheet losses outside that balance
+(observation; the guard fails a record above 1e-8).</p>
+<h2 id="2-four-statuses-never-a-default-number">2. Four statuses, never a default number<a class="headerlink" href="#2-four-statuses-never-a-default-number" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>status</th>
+<th>when</th>
+<th>what the record carries</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ok</code></td>
+<td>steady period reached, every bound met</td>
+<td>KPIs, violations all 0</td>
+</tr>
+<tr>
+<td><code>infeasible</code></td>
+<td>a bound exceeded, or a thermal runaway</td>
+<td>KPIs and <code>violations[name]</code> in the KPI's unit (runaway: no KPIs)</td>
+</tr>
+<tr>
+<td><code>refused</code></td>
+<td><code>pulsim.UnsupportedError</code> anywhere</td>
+<td><code>refusal = (engine, feature, device, kind)</code>, no KPIs</td>
+</tr>
+<tr>
+<td><code>failed</code></td>
+<td>an engine's non-convergence, <code>not_settled</code>, a non-finite KPI, <code>energy_balance</code> (P_in ≠ ΣP + dE/T beyond the route's tolerance)</td>
+<td><code>reason</code>, counters, no KPIs</td>
+</tr>
+</tbody>
+</table>
+<p>Any other exception propagates: it is a bug, not a design outcome. One
+is raised on purpose: <code>pulsim.design.PeriodicityError</code>, when a plain
+<code>dsed</code> period started from a kernel orbit does not return to it (a
+defect of the period map, checked once per topology and event
+pattern, so it stops the whole batch rather than failing some records). Do
+not wrap <code>evaluate</code> in a broad <code>except</code>; that is how refusals became
+silent wrong answers in a GUI.</p>
+<div class="highlight"><pre><span></span><code><span class="n">small_c</span> <span class="o">=</span> <span class="n">ev</span><span class="o">.</span><span class="n">evaluate</span><span class="p">({</span><span class="s2">"L"</span><span class="p">:</span> <span class="mf">100e-6</span><span class="p">,</span> <span class="s2">"C"</span><span class="p">:</span> <span class="mf">4.8e-6</span><span class="p">})</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">small_c</span><span class="o">.</span><span class="n">status</span><span class="p">,</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">small_c</span><span class="o">.</span><span class="n">violations</span><span class="p">[</span><span class="s1">'ripple_v'</span><span class="p">]</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mf">1e3</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> mV over"</span><span class="p">)</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">shockley</span><span class="p">(</span><span class="n">d</span><span class="p">):</span>
+    <span class="n">b</span><span class="p">,</span> <span class="n">pwm</span> <span class="o">=</span> <span class="n">build</span><span class="p">(</span><span class="n">d</span><span class="p">)</span>
+    <span class="n">b</span><span class="o">.</span><span class="n">add_shockley_diode</span><span class="p">(</span><span class="s2">"D2"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="s2">"sw"</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">b</span><span class="p">,</span> <span class="n">pwm</span>
+
+<span class="n">refused</span> <span class="o">=</span> <span class="n">Evaluator</span><span class="p">(</span><span class="n">shockley</span><span class="p">,</span> <span class="n">period</span><span class="o">=</span><span class="n">T</span><span class="p">,</span> <span class="n">loads</span><span class="o">=</span><span class="p">(</span><span class="s2">"RL"</span><span class="p">,),</span>
+                    <span class="n">engine</span><span class="o">=</span><span class="s2">"dsed"</span><span class="p">)</span><span class="o">.</span><span class="n">evaluate</span><span class="p">({</span><span class="s2">"L"</span><span class="p">:</span> <span class="mf">100e-6</span><span class="p">,</span> <span class="s2">"C"</span><span class="p">:</span> <span class="mf">47e-6</span><span class="p">})</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">refused</span><span class="o">.</span><span class="n">status</span><span class="p">,</span> <span class="n">refused</span><span class="o">.</span><span class="n">refusal</span><span class="p">)</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code>infeasible 30.40 mV over
+refused ('dsed', '', 'D2', 'ShockleyDiode')
+</code></pre></div>
+<p>For an optimiser, map records to vectors. <code>refused</code> and <code>failed</code> get
+<code>penalty</code> in every component; count them, never read the penalty as a
+value:</p>
+<div class="highlight"><pre><span></span><code><span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="p">(</span><span class="n">rec</span><span class="p">,</span> <span class="n">small_c</span><span class="p">,</span> <span class="n">refused</span><span class="p">):</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">status</span><span class="p">,</span> <span class="n">as_objectives</span><span class="p">(</span><span class="n">r</span><span class="p">,</span> <span class="p">[</span><span class="s2">"efficiency"</span><span class="p">,</span> <span class="s2">"ripple_v"</span><span class="p">],</span>
+                                  <span class="n">maximise</span><span class="o">=</span><span class="p">[</span><span class="s2">"efficiency"</span><span class="p">],</span> <span class="n">penalty</span><span class="o">=</span><span class="mf">1e30</span><span class="p">),</span>
+          <span class="n">as_constraints</span><span class="p">(</span><span class="n">r</span><span class="p">,</span> <span class="p">[</span><span class="s2">"ripple_v"</span><span class="p">],</span> <span class="n">penalty</span><span class="o">=</span><span class="mf">1e30</span><span class="p">))</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code>ok [-0.98911739  0.01595878] [0.]
+infeasible [-0.98911759  0.15040419] [0.03040419]
+refused [1.e+30 1.e+30] [1.e+30]
+</code></pre></div>
+<h2 id="3-steady-state-junction-temperature-batches">3. Steady state, junction temperature, batches<a class="headerlink" href="#3-steady-state-junction-temperature-batches" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>SteadySpec(method="pss")</code> is Newton shooting on the exact stepper
+  (<code>pulsim.periodic_steady_state</code>), or, with <code>engine="pwl"</code> (and
+  <code>options={"dt": T/100}</code>) or <code>engine="trbdf2"</code>, on that engine's own
+  period runs (<code>counters["route"] == "pss/pwl"</code>; about twice the period
+  runs, no <code>gradients=</code>); <code>"transient"</code> simulates until the
+  estimated distance to the orbit is below <code>tol</code> (else <code>failed</code>,
+  <code>not_settled</code>); <code>"auto"</code> (default) takes <code>pss</code> when its applicability
+  check accepts the circuit and the transient otherwise, and says so in
+  <code>counters["steady_method"]</code>. A <code>pss</code> failure is <code>failed</code>, never a
+  silent transient.</li>
+<li><code>ThermalSpec(r_th={"S": 2.0}, t_amb=40)</code> closes <code>T_j</code>. On the exact
+  <code>pss</code> route it is solved in the kernel (<code>mode="kernel"</code>, the default
+  there): the switching tables are re-read at every commutation of the
+  fixed orbit and <code>T_j = t_amb + r_th P(T_j)</code> is solved exactly
+  (residual &lt; 1e-9 K), a runaway (<code>r_th dP/dT_j &gt;= 1</code>) being
+  <code>infeasible</code>. Elsewhere, or with <code>loss_at=</code> / <code>temperature_dependent=</code>,
+  it is a damped fixed point (<code>mode="fixed_point"</code>, within 0.1 K); the
+  circuit is re-simulated only when <code>temperature_dependent=True</code> (then
+  <code>build</code> reads <code>design["_T_j"]</code>). See <code>docs/losses-and-thermal.md</code>.</li>
+<li><code>Evaluator(circuit=base, fields={"L": "L.L", "C": "C.C"},
+  schedule=lambda d: make_pwm_switch_fn(d["f_sw"], ...), ...)</code> instead
+  of <code>build=</code>: one immutable <code>pulsim.Circuit</code> (<code>builder.build()</code>)
+  shared by every evaluation and thread, a design being <code>with_params</code> /
+  <code>with_value</code> of it (targets: a <code>builder.param</code> name or
+  <code>"&lt;component&gt;.&lt;field&gt;"</code>). Same records as the factory form; no
+  rebuild, one symbolic analysis per batch, the state labels and KPI
+  observables resolved once (about 0.16 ms per buck design).</li>
+<li><code>ev.evaluate_many(designs, workers=8)</code> keeps the input order and gives
+  the same records on 1 or 8 threads. With the circuit form, the <code>pss</code>
+  route and declarative KPIs and bounds, it is the KERNEL BATCH: every
+  design -- derivation, orbit, integrals, losses, KPIs, constraints,
+  status -- in one kernel call on 8 native threads with the GIL
+  released; records equal <code>ev.evaluate(d)</code>'s bit for bit. Section 6
+  says which path runs when, with measured rates.</li>
+<li>For processes the evaluator must pickle. Name KPIs and bounds as data:
+  <code>kpis={"i_pk": Kpi.i_peak("L")}</code>, <code>Kpi.efficiency()</code>,
+  <code>Kpi.ripple("vout")</code>, <code>Kpi.mean("vout")</code>, <code>Kpi.i_rms("L")</code>,
+  <code>Kpi.formula("vol", "3e-4 * (L * i_peak.L * i_rms.L) ** 0.75")</code>
+  (arithmetic over KPIs, design variables and <code>loss.&lt;device&gt;</code>),
+  <code>constraints=[Constraint.max("ripple_v", 0.05)]</code>; give the circuit form
+  a module-level factory, <code>circuit=functools.partial(build_circuit,
+  part)</code>, which each worker calls once. Lambdas still work on threads;
+  on processes the first part that does not pickle is refused by name
+  (<code>UnsupportedError</code>) before any worker starts.</li>
+</ul>
+<h2 id="4-why-derivative-free">4. Why derivative-free<a class="headerlink" href="#4-why-derivative-free" title="Permanent link">&para;</a></h2>
+<p>Central finite differences of <code>dv_C(40 T)/dL</code> on a DCM buck, relative
+error at relative steps 1e-6 … 1e-2 (<code>add-parameter-sensitivities</code>):</p>
+<table>
+<thead>
+<tr>
+<th>engine</th>
+<th>relative error</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>pwl</code>, dt = T/100</td>
+<td>−9.3, −9.5, −12.9, +2.0, −0.46</td>
+</tr>
+<tr>
+<td><code>pwl</code>, dt = T/400</td>
+<td>+9.1, +9.1, +2.6, −0.040, +0.041</td>
+</tr>
+<tr>
+<td><code>trbdf2</code>, default tolerances</td>
+<td>−1.1e-4 … +2.9e-3</td>
+</tr>
+</tbody>
+</table>
+<p>The fixed engine puts each diode commutation on its grid, so an
+event-dependent KPI is a staircase in the parameters and its gradient
+is noise. The evaluator offers no finite differences; use a
+derivative-free optimiser (NSGA-II, CMA-ES, a Latin-hypercube sample).</p>
+<h2 id="5-the-worked-example-and-its-parts">5. The worked example and its parts<a class="headerlink" href="#5-the-worked-example-and-its-parts" title="Permanent link">&para;</a></h2>
+<p><code>examples/optimization/buck_pareto.py</code> sweeps a synchronous 48 V →
+12 V buck over <code>f_sw</code>, <code>L</code>, <code>C</code> and a choice of two MOSFETs, and
+prints the efficiency-against-volume front (pymoo's NSGA-II when it is
+installed, <code>pip install pymoo</code>; otherwise a Latin-hypercube sample and
+a numpy non-dominated filter). <strong>Its two MOSFETs are synthetic
+illustrations and its volume law is illustrative</strong>: the front is an
+observation of that model, not a design result. Pulsim's shipped parts
+are synthetic too (<code>pulsim.lib.part</code> refuses them unless
+<code>allow_synthetic=True</code>); for real numbers import the vendor's PLECS
+thermal file with <code>pulsim.lib.import_plecs_xml</code>.</p>
+<h2 id="6-which-path-runs-when">6. Which path runs when<a class="headerlink" href="#6-which-path-runs-when" title="Permanent link">&para;</a></h2>
+<p><code>evaluate_many(designs, workers=n, backend=None)</code> picks, per evaluator
+and then per design (<code>ev.last_batch</code> counts both; a Python-path record
+names its reason in <code>counters["batch"]</code>):</p>
+<table>
+<thead>
+<tr>
+<th>path</th>
+<th>when</th>
+<th>Python per design</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>kernel batch</td>
+<td>circuit form, <code>SteadySpec("pss")</code> or <code>"auto"</code> on the exact engine, KPIs <code>Kpi.*</code> / <code>Kpi.formula</code>, constraints, switch loss tables at a numeric <code>Tj</code>, native schedule (<code>make_pwm_switch_fn</code> &amp; co.)</td>
+<td>none in the evaluation (the <code>period</code> / <code>schedule</code> factories are called once per design before it; the record is built after it)</td>
+</tr>
+<tr>
+<td>Python path, named</td>
+<td>a callable KPI, the factory form, a thermal loop, <code>gradients=</code>, a variable that moves a value the observables read; or a design the kernel did not finish (orbit not converged, energy balance, non-finite KPI, a refusal), re-run so its <code>failed</code> / <code>refused</code> record is the Python path's</td>
+<td>all of it</td>
+</tr>
+<tr>
+<td><code>backend="thread"</code></td>
+<td>asked for</td>
+<td>all of it; threads only overlap the GIL-free orbit</td>
+</tr>
+<tr>
+<td><code>backend="process"</code></td>
+<td>asked for; the evaluator must pickle</td>
+<td>all of it, in parallel workers (about 0.3 s start-up each)</td>
+</tr>
+</tbody>
+</table>
+<p>Measured on the buck example's designs (4096, both parts, evaluator
+reused, best of 5 interleaved; a 10-core Mac with a load average of
+15-19 from other builds -- an OBSERVATION of that machine, not a
+guarantee):</p>
+<table>
+<thead>
+<tr>
+<th>evaluations/s</th>
+<th>1</th>
+<th>2</th>
+<th>4</th>
+<th>8 workers</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>kernel batch (default)</td>
+<td>10022</td>
+<td>15502</td>
+<td>21621</td>
+<td>25369</td>
+</tr>
+<tr>
+<td>Python path, threads</td>
+<td>3597</td>
+<td>2391</td>
+<td>2286</td>
+<td>2405</td>
+</tr>
+</tbody>
+</table>
+<p>The kernel call alone goes from 10246 to 49721 designs/s on 1 to 8
+threads; building the records in Python (about 20 us each) is what
+remains serial.</p>
+<h2 id="7-with-gradients-a-boosts-l-and-c">7. With gradients: a boost's L and C<a class="headerlink" href="#7-with-gradients-a-boosts-l-and-c" title="Permanent link">&para;</a></h2>
+<p>Section 4's staircase is the fixed engine's. On the exact route the
+orbit sensitivities give d(KPI)/d(value) without a finite difference
+(<code>Evaluator(gradients={"L": "L.L", "C": "C.C"})</code>, <code>record.grads</code>), and
+<code>pulsim.value_and_grad</code> turns a <code>values -&gt; (cost, gradient)</code> function
+into what <code>scipy.optimize.minimize(jac=True)</code> takes.
+<code>examples/optimization/boost_gradient.py</code> sizes a 12 V → 24 V boost
+(100 kHz, ideal devices, 10 mΩ DCR) for 50 mV output ripple and 0.6 A
+inductor ripple at the smallest L and C:</p>
+<table>
+<thead>
+<tr>
+<th>path</th>
+<th>when</th>
+<th>result (OBSERVATION, the machine of section 6)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>L-BFGS-B with exact gradients</td>
+<td>scipy importable</td>
+<td>L = 99.73 µH, C = 119.57 µF after 20 evaluations; ripple 50.06 mV, 0.600 A</td>
+</tr>
+<tr>
+<td>8 × 8 log grid on the kernel batch</td>
+<td>no scipy, or <code>--grid</code></td>
+<td>64 of 64 in the kernel; best L = 125.85 µH, C = 153.70 µF; ripple 38.95 mV, 0.476 A</td>
+</tr>
+</tbody>
+</table>
+<p>Tested (<code>python/tests/test_example_boost_gradient.py</code>): the gradient at
+the start equals a central difference within 1e-6; the optimiser
+lowers the cost and meets both ripple targets within 5 %; the grid runs
+entirely in the kernel and its records equal the Python path's. A
+record with gradients runs on the Python path (section 6). Observed:
+the grid's 64 evaluations stop 22 % from the targets, the 20 gradient
+steps within 0.2 %.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../07-dc-machine/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Tutorial 07 — DC Machine">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Tutorial 07 — DC Machine
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../09-magnetic-networks/" class="md-footer__link md-footer__link--next" aria-label="Next: Tutorial 09 — Magnetic networks">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Tutorial 09 — Magnetic networks
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+</div>
+      
+        <div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/lgili/Pulsim" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8M97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    <script id="__config" type="application/json">{"base": "../..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.expand", "navigation.top", "navigation.footer", "navigation.instant", "navigation.tracking", "content.action.edit", "content.action.view", "content.code.copy", "content.code.annotate", "toc.follow"], "search": "../../assets/javascripts/workers/search.f8cc74c7.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.60a45f97.min.js"></script>
+      
+        <script src="../../assets/js/katex.js"></script>
+      
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+      
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"></script>
+      
+    
+  </body>
+</html>

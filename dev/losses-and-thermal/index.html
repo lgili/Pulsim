@@ -497,6 +497,48 @@
   
   
     <li class="md-nav__item">
+      <a href="../parameters/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Parameters and Value Updates
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../domains/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Node Domains
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../tutorials/01-rc-charging/" class="md-nav__link">
         
   
@@ -623,6 +665,132 @@
   
   
     <li class="md-nav__item">
+      <a href="../tutorials/07-dc-machine/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 07 — DC Machine
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/08-design-optimisation/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 08 — Using Pulsim inside an optimiser
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/09-magnetic-networks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 09 — Magnetic networks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/10-power-mosfet-datasheet/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 10 — Datasheet to double pulse
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sensitivities/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Parameter Sensitivities
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../SOFT_SWITCHING/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Soft Switching (ZVS / ZCS probes)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../motors-induction/" class="md-nav__link">
         
   
@@ -707,6 +875,27 @@
   
   
     <li class="md-nav__item">
+      <a href="../transmission-line/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Transmission Line (Bergeron)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../c-block/" class="md-nav__link">
         
   
@@ -770,6 +959,48 @@
   
   
     <li class="md-nav__item">
+      <a href="../result-reference/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Result Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../device-reference/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Device Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../helpers/" class="md-nav__link">
         
   
@@ -816,7 +1047,7 @@
         
   
   <span class="md-ellipsis">
-    Known Limitations (2.0)
+    Known Limitations (2.1)
   </span>
   
 
@@ -1498,6 +1729,27 @@
   
   
     <li class="md-nav__item">
+      <a href="../internals/run-planning/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    How a run is planned
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../internals/mmc-arm-block/" class="md-nav__link">
         
   
@@ -1635,7 +1887,7 @@
         
   
   <span class="md-ellipsis">
-    Migration Guide (legacy → 1.0)
+    Migration Guide (2.0 → 2.1, legacy → 1.0)
   </span>
   
 
@@ -1733,6 +1985,15 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#capacitor-esr-inductor-dcr-and-ac-resistance-ladder" class="md-nav__link">
+    <span class="md-ellipsis">
+      Capacitor ESR, inductor DCR and AC-resistance ladder
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#switch-psim-style-e_on-e_off" class="md-nav__link">
     <span class="md-ellipsis">
       Switch — PSIM-style E_on / E_off
@@ -1757,12 +2018,54 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Magnetic core loss">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#in-loop-core-loss-in-a-magnetic-network" class="md-nav__link">
+    <span class="md-ellipsis">
+      In-loop core loss in a magnetic network
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
   <a href="#junction-temperature-device_thermal_summary" class="md-nav__link">
     <span class="md-ellipsis">
       Junction temperature — device_thermal_summary
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#event-losses-and-t_j-on-the-periodic-orbit-design-evaluator" class="md-nav__link">
+    <span class="md-ellipsis">
+      Event losses and T_j on the periodic orbit (design evaluator)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#event-losses-inside-the-transient-set_device_losses" class="md-nav__link">
+    <span class="md-ellipsis">
+      Event losses inside the transient (set_device_losses)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#device-level-switching-energy-add_power_mosfet" class="md-nav__link">
+    <span class="md-ellipsis">
+      Device-level switching energy — add_power_mosfet
     </span>
   </a>
   
@@ -1920,7 +2223,11 @@ state is <code>V_f + i/g_on</code>, so a diode carrying 48 A at <code>g_on = 1e3
 sits at <code>V_f</code> + 48 mV — inside <code>V_f &lt; v_D &lt; V_th</code>, where the voltage
 alone cannot say whether it conducts. Its loss is <code>V_f·i + i²/g_on</code>, so
 <code>P_avg</code> already contains the drop: a <code>conduction_specs</code> <code>V_f0</code> for the
-same diode is a separate estimate, not an addition. <code>switch_fn=</code> is only needed for a result built
+same diode is a separate estimate, not an addition. The gated PWL
+devices (<code>add_igbt(reverse_blocking=True)</code>, <code>add_gto</code>, <code>add_thyristor</code>,
+<code>add_triac</code>) are diode rows with the same law: an IGBT's conduction loss
+is <code>V_ce0·I_avg + R_on·I_rms²</code> (10 A DC at <code>V_ce0 = 0.9 V</code>,
+<code>R_on = 10 mΩ</code>: 10.0 W; the bidirectional switch read 1.0 W). <code>switch_fn=</code> is only needed for a result built
 without the record (it is then re-evaluated, with a warning). Duties are
 time-weighted per step, so a variable-step grid does not bias them.</p>
 <p>Row <code>k</code> of the record is the mask in force over the step
@@ -1999,6 +2306,16 @@ work.</p>
 <span class="n">loss</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">device_loss_summary</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">res</span><span class="p">)</span>
 <span class="nb">print</span><span class="p">(</span><span class="nb">next</span><span class="p">(</span><span class="n">e</span> <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">loss</span> <span class="k">if</span> <span class="n">e</span><span class="p">[</span><span class="s2">"name"</span><span class="p">]</span> <span class="o">==</span> <span class="s2">"R_load"</span><span class="p">)[</span><span class="s2">"P_avg"</span><span class="p">])</span>
 </code></pre></div>
+<h2 id="capacitor-esr-inductor-dcr-and-ac-resistance-ladder">Capacitor ESR, inductor DCR and AC-resistance ladder<a class="headerlink" href="#capacitor-esr-inductor-dcr-and-ac-resistance-ladder" title="Permanent link">&para;</a></h2>
+<p><code>b.add_capacitor(..., esr=)</code> and <code>b.add_inductor(..., esr=)</code> add a series
+resistor named <code>{name}.esr</code>; its row in <code>device_loss_summary</code> is the
+<code>i²·esr</code> loss (1 A rms through 50 mΩ: 50.000 mW). An inductor built with
+<code>rac=p.passives.fit_rac_ladder(f, R_ac, L=...)</code> dissipates in <code>{name}.esr</code>
+(<code>R_dc</code>) and the cell resistors <code>{name}.rac_r{k}</code>, so every harmonic of
+the current is charged at its own <code>R_ac</code>: 1 A peak at 1 kHz plus 1 A
+peak at 100 kHz through <code>R_dc</code> = 10 mΩ and one 90 mΩ ∥ 143.24 nH cell
+dissipates 32.50 mW. ESR is one number: read it at the switching
+frequency.</p>
 <h2 id="switch-psim-style-e_on-e_off">Switch — PSIM-style E_on / E_off<a class="headerlink" href="#switch-psim-style-e_on-e_off" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><span class="n">b</span><span class="o">.</span><span class="n">add_switch</span><span class="p">(</span><span class="s2">"M1"</span><span class="p">,</span> <span class="s2">"ds"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="n">g_on</span><span class="o">=</span><span class="mf">1e3</span><span class="p">,</span> <span class="n">g_off</span><span class="o">=</span><span class="mf">1e-9</span><span class="p">)</span>
 
@@ -2138,6 +2455,50 @@ option and the PSIM diode loss panel.</p>
 <p>Inline <code>{"K": ..., "alpha": ..., "beta": ...}</code> is accepted in place of
 <code>material</code>. Non-positive <code>N_turns</code> / <code>A_core</code> / <code>V_core</code> → <code>ValueError</code>
 (no silent zeros).</p>
+<h3 id="in-loop-core-loss-in-a-magnetic-network">In-loop core loss in a magnetic network<a class="headerlink" href="#in-loop-core-loss-in-a-magnetic-network" title="Permanent link">&para;</a></h3>
+<p>The Steinmetz / iGSE estimate above runs after the transient: it reads
+<code>B(t)</code> from the trace and never changes the circuit. In a magnetic
+network (tutorial 09), <code>b.add_magnetic_resistance(name, a, b, R_m)</code>
+between two magnetic nodes dissipates <code>R_m·(dΦ/dt)²</code> inside the solve,
+so the loss damps the circuit. It is classical eddy loss
+(<code>P ∝ f²·B²</code>); <code>device_loss_summary</code> lists it with
+<code>kind="magnetic_resistance"</code>, <code>category="core_loss"</code> and its <code>R_m</code>.
+<code>b.add_excess_loss(name, a, b, c, eps)</code> adds Bertotti's excess loss,
+<code>F = c·u/(u² + eps²)^¼</code> for the flux rate <code>u</code> (<code>P ∝ (f·B)^1.5</code>); it is
+listed with <code>kind="excess_loss"</code>, <code>category="core_loss"</code>, <code>c</code> and <code>eps</code>.
+Under a sine flux rate of amplitude <code>Û</code> its loss is
+<code>c·Û^1.5·0.556418</code> (the mean of <code>|cos|^1.5</code>) less <code>(3/4)·(eps/Û)²</code> of
+it: <code>eps ≤ 1.15e-3·Û</code> keeps it within 1e-6. It does not feed a thermal
+node: the kernel's loss port belongs to switching devices (a junction);
+a core temperature is not modelled.</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Steinmetz / iGSE (post-hoc)</th>
+<th>magnetic elements (in loop)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>frequency law</td>
+<td><code>f^α·B^β</code>, fitted</td>
+<td>eddy <code>f²·B²</code>, excess <code>(f·B)^1.5</code>, JA loop</td>
+</tr>
+<tr>
+<td>changes the waveform</td>
+<td>no</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>hysteresis, excess loss</td>
+<td>inside the fit</td>
+<td><code>add_hysteretic_permeance</code>, <code>add_excess_loss</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>R_m</code> is fitted to a loss figure, not predicted; neither model is
+validated against measurement here.</p>
 <h2 id="junction-temperature-device_thermal_summary">Junction temperature — <code>device_thermal_summary</code><a class="headerlink" href="#junction-temperature-device_thermal_summary" title="Permanent link">&para;</a></h2>
 <p>Same kwargs as <code>device_loss_summary</code>, plus per-device Foster networks:</p>
 <div class="highlight"><pre><span></span><code><span class="n">foster_M1</span> <span class="o">=</span> <span class="p">[</span>
@@ -2211,6 +2572,166 @@ option and the PSIM diode loss panel.</p>
 conduction trace as a <strong>constant offset</strong> (thermal time constants ≫
 nanosecond switching transitions, so the impulse energy is smeared
 across the cycle — standard PSIM convention).</p>
+<h2 id="event-losses-and-t_j-on-the-periodic-orbit-design-evaluator">Event losses and T_j on the periodic orbit (design evaluator)<a class="headerlink" href="#event-losses-and-t_j-on-the-periodic-orbit-design-evaluator" title="Permanent link">&para;</a></h2>
+<p>On the exact steady-state route (<code>pulsim.design.Evaluator</code>,
+<code>steady=SteadySpec(method="pss")</code>, engine <code>dsed</code>) the loss tables are
+read at every commutation of the steady period, from the period map's
+left and right limits at the event, by one rule:</p>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>Blocking voltage</th>
+<th>Current</th>
+<th>Temperature</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>turn-on</td>
+<td><code>|v(x⁻)|</code>, before</td>
+<td><code>|i(x⁺)|</code>, after</td>
+<td><code>T_j</code></td>
+</tr>
+<tr>
+<td>turn-off</td>
+<td><code>|v(x⁺)|</code>, after</td>
+<td><code>|i(x⁻)|</code>, before</td>
+<td><code>T_j</code></td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>Switches: <code>switch_specs={"Q1": {"E_on_table": LossTable, "E_off_table":
+  LossTable, "Tj": 125}}</code>. On a three-phase SPWM inverter (10 kHz, 1 µs
+  dead time, 600 V, 200 edges each way per 20 ms period) the kernel's
+  <code>E_on</code> / <code>E_off</code> equal <code>device_loss_summary</code>'s on a settled <code>dsed</code>
+  period within 1.8e-13 (test, tolerance 1e-9).</li>
+<li>Diodes: <code>switch_specs={"D1": {"E_off_table": LossTable, "Tj": 125}}</code>
+  is the recovery energy, read at each turn-off by the turn-off row
+  (<code>v</code> after, <code>i</code> before); it is the record's <code>recovery</code> loss. Its count
+  equals the diode's turn-off count in the period. This is the exact
+  route only: <code>device_loss_summary</code> refuses a diode in <code>switch_specs</code> by
+  name (it used to ignore it) and takes recovery through <code>diode_specs</code>.</li>
+<li>The junction: <code>ThermalSpec(r_th={"Q1": 2.5}, t_amb=40)</code> on this
+  route defaults to <code>mode="kernel"</code>: the orbit is fixed, <code>P(T_j)</code> is the
+  device's fixed loss plus its table energies over the period, and
+  <code>T_j = t_amb + r_th P(T_j)</code> is solved in C++ segment by segment
+  between the tables' <code>T_j</code> knots (exact where the tables are linear;
+  residual below 1e-9 K, <code>counters["thermal_residual"]</code>). It is the
+  smallest root above <code>t_amb</code>, where the physical iteration settles; no
+  root (<code>r_th dP/dT_j &gt;= 1</code>) is <code>infeasible</code> / <code>thermal_runaway</code>, with
+  the slope in the reason. <code>mode="fixed_point"</code> keeps the damped loop
+  (and <code>loss_at=</code>, <code>temperature_dependent=</code>); on the buck example's best
+  design (SYN-B, 60.5 kHz, r_th 3 K/W) <code>T_j(Q1)</code> is 43.27175 °C against
+  43.27162 °C, 1.3e-4 K apart (test: 0.1 K).</li>
+<li>Conduction: by default the circuit's own dissipation (the closed-form
+  period integrals). <code>ThermalSpec(conduction={"Q1": {"i": [...], "tj":
+  [...], "v_on": [[...]]}})</code> heats the junction with <code>V_on(|i|, T_j)·|i|</code>
+  over the on-state current instead, in closed form when the table is
+  linear in <code>i</code> (one or two current knots; more knots, a current that
+  changes sign, or a table clamped at 0 in range are refused by name).
+  It is reported as <code>p_cond_table.&lt;device&gt;</code>; the record's <code>conduction</code>
+  loss stays the circuit's, so the energy balance still closes.</li>
+</ul>
+<p>The tables in the tests and the examples are SYNTHETIC, as are the parts
+Pulsim ships (<code>allow_synthetic=True</code>); they illustrate the reading, not
+a device. Not covered: the event energy is not drawn from the circuit
+(the PWL switch is ideal, as in PLECS), and <code>T_j</code> does not feed back
+into the electrical solution in kernel mode.</p>
+<h2 id="event-losses-inside-the-transient-set_device_losses">Event losses inside the transient (<code>set_device_losses</code>)<a class="headerlink" href="#event-losses-inside-the-transient-set_device_losses" title="Permanent link">&para;</a></h2>
+<p>The summaries above are post-hoc: the run ends, then the tables are
+read. <code>CircuitBuilder.set_device_losses</code> reads them inside the time loop
+of <code>engine="pwl"</code> and deposits the heat into a node of a thermal network
+built in the same circuit (°C is a node voltage, W a current):</p>
+<div class="highlight"><pre><span></span><code><span class="n">b</span><span class="o">.</span><span class="n">add_voltage_source</span><span class="p">(</span><span class="s2">"Vamb"</span><span class="p">,</span> <span class="s2">"amb"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">40.0</span><span class="p">)</span>      <span class="c1"># ambient, °C</span>
+<span class="n">b</span><span class="o">.</span><span class="n">add_resistor</span><span class="p">(</span><span class="s2">"Rth"</span><span class="p">,</span> <span class="s2">"tj"</span><span class="p">,</span> <span class="s2">"amb"</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">)</span>               <span class="c1"># K/W</span>
+<span class="n">b</span><span class="o">.</span><span class="n">add_capacitor</span><span class="p">(</span><span class="s2">"Cth"</span><span class="p">,</span> <span class="s2">"tj"</span><span class="p">,</span> <span class="s2">"amb"</span><span class="p">,</span> <span class="mf">0.01</span><span class="p">)</span>             <span class="c1"># J/K</span>
+<span class="n">b</span><span class="o">.</span><span class="n">set_device_losses</span><span class="p">(</span><span class="s2">"Q1"</span><span class="p">,</span> <span class="n">junction</span><span class="o">=</span><span class="s2">"tj"</span><span class="p">,</span>              <span class="c1"># closed loop</span>
+                    <span class="n">E_on</span><span class="o">=</span><span class="n">LossTable</span><span class="p">(</span><span class="o">...</span><span class="p">),</span> <span class="n">E_off</span><span class="o">=</span><span class="n">LossTable</span><span class="p">(</span><span class="o">...</span><span class="p">),</span>
+                    <span class="n">V_on</span><span class="o">=</span><span class="n">ConductionTable</span><span class="p">(</span><span class="o">...</span><span class="p">),</span> <span class="n">conduction</span><span class="o">=</span><span class="s2">"table"</span><span class="p">)</span>
+<span class="n">res</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="mf">0.1</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="mf">1e-6</span><span class="p">,</span> <span class="n">switch_fn</span><span class="o">=</span><span class="n">pwm</span><span class="p">)</span>
+<span class="n">res</span><span class="o">.</span><span class="n">v</span><span class="p">(</span><span class="s2">"tj"</span><span class="p">)</span>                    <span class="c1"># junction temperature, °C</span>
+<span class="n">res</span><span class="o">.</span><span class="n">loss_events</span><span class="p">(</span><span class="s2">"Q1"</span><span class="p">)</span>          <span class="c1"># t, kind, v, i, Tj, E (structured array)</span>
+<span class="n">res</span><span class="o">.</span><span class="n">device_energy</span><span class="p">(</span><span class="s2">"Q1"</span><span class="p">)</span>        <span class="c1"># E_on, E_off, E_cond_electrical, E_cond_table, n_on, n_off</span>
+</code></pre></div>
+<ul>
+<li>Temperature: <code>junction="tj"</code> reads the tables at the junction node's
+  temperature before each event and heats that node (closed loop);
+  <code>Tj=125</code> reads at a fixed temperature, and with <code>heat_node="tj"</code> still
+  heats that node (open loop), without it only records.</li>
+<li>Reading rule: the table on the left of "Event losses on the periodic
+  orbit" below, the same function (<code>thermal::commutation_point</code>) on both
+  routes. On <code>pwl</code>, <code>x⁻</code> / <code>x⁺</code> are the samples before and after the
+  step that changed the mask, the samples <code>device_loss_summary</code> reads:
+  on a three-phase VSI at <code>Tj = 125</code> the kernel's <code>E_on</code> / <code>E_off</code> per
+  switch equal <code>device_loss_summary(switch_specs=...)</code> within 1e-9.
+  A diode's <code>E_off</code> is its recovery, read at each natural turn-off.</li>
+<li>Deposition: the heat of a step is a rectangular power over the next
+  step; the trapezoid rule's capacitor history passes half of it on, so
+  the network receives it over two steps (h/2 + h/2), exactly in sum
+  while every step is trapezoidal (the default). A backward-Euler /
+  SDIRK step (<code>discontinuity_restart=True</code>, a commutation split) keeps no
+  capacitor current, so at each switch between step kinds up to half a
+  step's heat can be lost or delivered twice while <code>heat_injected</code>
+  counts the full amount. Measured on the 10 kHz chopper of the tests
+  (20 ms, 1200 restart steps): the network's energy matches
+  <code>heat_injected</code> within 4e-10 (2.7e-13 without restarts).
+  Ten 1 mJ events into 0.01 J/K with no leak raise the junction
+  1.000 K (1e-6). <code>res.heat_injected + res.heat_pending</code> equals the
+  recorded event and conduction energy within 1e-12 (the last step's
+  heat is still pending when the run ends).</li>
+<li>Conduction: <code>conduction="electrical"</code> (default) heats with the device's
+  own electrical dissipation per step, as <code>device_loss_summary</code> reads it
+  (energy balance closes); <code>"table"</code> with <code>V_on(|i|, T_j)·|i|</code> over the
+  on-state ends of the step, trapezoidal. Both are reported.</li>
+<li><code>engine="trbdf2"</code> runs the same tracker: conduction with the
+  integrator's stage quadrature (TR-BDF2 weights <code>(w, w, d)</code> at
+  <code>(0, γh, h)</code>, SDIRK <code>(1-γs, γs)</code>, trapezoid on landings and probes), a
+  commutation from the engine's left and right limits at the landed
+  instant (the same reading rule and table call as <code>pwl</code>), and the heat as
+  a power over the next step, consumed in proportion to the committed
+  length (a landing keeps the rest owed).</li>
+<li>Impulsive re-initialisation (an ideal switch closing a capacitor loop,
+  opening a cut-set): the record's <code>dW</code> is booked to the device it names
+  (<code>cause</code>) as <code>device_energy(...)["E_impulse"]</code> and heats its junction;
+  that step's conduction is its end power only, as <code>device_loss_summary</code>
+  reads the pulse step.</li>
+<li>A resumed run (<code>resume_from=</code>) continues the tracker: the heat in flight,
+  the ledgers and the events travel in the snapshot (pickle field 17).</li>
+<li>Refusals by name (<code>UnsupportedError</code> / <code>ValueError</code>, naming the
+  device): <code>dsed</code> / <code>exact</code>, <code>bdf1</code>, and <code>auto</code> when it resolves to
+  <code>dsed</code>, refuse a circuit with a loss port; an unknown device, a device that is not a PWL switch or
+  diode, both or neither of <code>junction</code> / <code>Tj</code>, <code>conduction="table"</code>
+  without <code>V_on</code>, and a deposit node without a capacitor on it.</li>
+<li>YAML: a <code>losses:</code> block on a <code>switch</code>, <code>diode</code>, <code>mosfet</code>,
+  <code>mosfet_with_body_diode</code> or <code>igbt</code> (<code>junction</code>, <code>Tj</code>, <code>heat_node</code>,
+  <code>e_on</code>, <code>e_off</code>, <code>v_on</code>, <code>conduction</code>; unknown keys refused).</li>
+<li>Parts: <code>part.attach_losses(b, "Q1", T_amb=40)</code> builds the part's
+  Foster or Cauer chain from a node <code>Tj_Q1</code> and hands its tables over
+  unreduced (a PLECS XML part through <code>lib.import_plecs_xml</code>); a
+  synthetic part needs <code>allow_synthetic=True</code>.</li>
+</ul>
+<p>Not covered: the event energy is not drawn from the circuit (the PWL
+switch is ideal); <code>T_j</code> does not change <code>V_f</code> or <code>g_on</code>; a device that
+flips twice inside one outer step (a commutation split) records no
+event, since only the step's end masks are compared; a thermal
+capacitor to ground starts at 0 °C from a zero initial state, and the
+first events read that (tie the capacitors to the ambient node, as
+above, or start from a DC operating point).</p>
+<h2 id="device-level-switching-energy-add_power_mosfet">Device-level switching energy — <code>add_power_mosfet</code><a class="headerlink" href="#device-level-switching-energy-add_power_mosfet" title="Permanent link">&para;</a></h2>
+<p>To simulate the switching transient itself instead of annotating it,
+build the device with <code>CircuitBuilder.add_power_mosfet</code> (channel, C_gs,
+C_gd(v), C_ds(v), R_g, body diode) and measure it with
+<code>p.double_pulse_test(device_kwargs, V_dd=, I_load=, R_g_ext=, V_drive=,
+L_load=)</code>, which returns E_on, E_off, the Miller plateau, dv/dt, di/dt
+and I_rr as time-weighted integrals, starting from the off-state bias
+(an all-zero start turns the device on through C_gd before the gate
+command). Use <code>engine="trbdf2"</code>; on <code>pwl</code>
+the step must resolve the gate transient (0.2 ns for a 60 ns plateau).
+The datasheet fitters are in <code>pulsim.datasheet</code>. Losses of the
+composite are not in <code>device_loss_summary</code> yet (unified device
+interface).</p>
 <h2 id="whats-not-covered">What's <em>not</em> covered<a class="headerlink" href="#whats-not-covered" title="Permanent link">&para;</a></h2>
 <p>The kernel runs at fixed <code>dt</code>. We don't resolve sub-<code>dt</code> switching
 waveform shapes — the PSIM annotations capture the right <em>energy</em> per

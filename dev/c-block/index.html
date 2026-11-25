@@ -13,7 +13,7 @@
         <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/c-block/">
       
       
-        <link rel="prev" href="../loss-thermal/">
+        <link rel="prev" href="../transmission-line/">
       
       
         <link rel="next" href="../solvers/">
@@ -506,6 +506,48 @@
   
   
     <li class="md-nav__item">
+      <a href="../parameters/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Parameters and Value Updates
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../domains/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Node Domains
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../tutorials/01-rc-charging/" class="md-nav__link">
         
   
@@ -632,6 +674,132 @@
   
   
     <li class="md-nav__item">
+      <a href="../tutorials/07-dc-machine/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 07 — DC Machine
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/08-design-optimisation/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 08 — Using Pulsim inside an optimiser
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/09-magnetic-networks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 09 — Magnetic networks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/10-power-mosfet-datasheet/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 10 — Datasheet to double pulse
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sensitivities/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Parameter Sensitivities
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../SOFT_SWITCHING/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Soft Switching (ZVS / ZCS probes)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../motors-induction/" class="md-nav__link">
         
   
@@ -700,6 +868,27 @@
   
   <span class="md-ellipsis">
     Loss & Thermal Modelling
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../transmission-line/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Transmission Line (Bergeron)
   </span>
   
 
@@ -1002,6 +1191,48 @@
   
   
     <li class="md-nav__item">
+      <a href="../result-reference/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Result Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../device-reference/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Device Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../helpers/" class="md-nav__link">
         
   
@@ -1048,7 +1279,7 @@
         
   
   <span class="md-ellipsis">
-    Known Limitations (2.0)
+    Known Limitations (2.1)
   </span>
   
 
@@ -1730,6 +1961,27 @@
   
   
     <li class="md-nav__item">
+      <a href="../internals/run-planning/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    How a run is planned
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../internals/mmc-arm-block/" class="md-nav__link">
         
   
@@ -1867,7 +2119,7 @@
         
   
   <span class="md-ellipsis">
-    Migration Guide (legacy → 1.0)
+    Migration Guide (2.0 → 2.1, legacy → 1.0)
   </span>
   
 
@@ -2295,7 +2547,15 @@ length-<code>M</code> sequence.</p>
 <p><code>code</code> is the <strong>body</strong> of the step function. In scope: <code>in</code>, <code>out</code>,
 <code>n_in</code>, <code>n_out</code>, <code>t</code>, <code>dt</code>, <code>state</code>. Pulsim wraps it in the ABI,
 compiles it once with the system compiler, and caches the result (keyed
-by source + flags), so repeat runs don't recompile.</p>
+by source + flags), so repeat runs don't recompile. The cache is per user
+(<code>pulsim._native_cache</code>): <code>~/Library/Caches/pulsim/cblock</code> (macOS),
+<code>$XDG_CACHE_HOME</code> or <code>~/.cache/pulsim/cblock</code> (Linux),
+<code>%LOCALAPPDATA%\pulsim\cblock</code> (Windows), mode 0700. A cached library
+another user owns, that others can write, or that is a symlink is deleted
+and rebuilt, never loaded; a cache directory that is not yours and private
+is refused. A C block is sampled, explicit code (ZOH outputs); an implicit
+device the Newton solver iterates on is an external device
+(<code>docs/external-devices.md</code>).</p>
 <div class="highlight"><pre><span></span><code><span class="c1"># C</span>
 <span class="n">p</span><span class="o">.</span><span class="n">add_c_block</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">inputs</span><span class="o">=</span><span class="p">[(</span><span class="s2">"v"</span><span class="p">,</span> <span class="s2">"vout"</span><span class="p">)],</span> <span class="n">outputs</span><span class="o">=</span><span class="p">[(</span><span class="s2">"v"</span><span class="p">,</span> <span class="s2">"ctrl"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">)],</span>
               <span class="n">dt</span><span class="o">=</span><span class="mf">1e-4</span><span class="p">,</span> <span class="n">lang</span><span class="o">=</span><span class="s2">"c"</span><span class="p">,</span> <span class="n">code</span><span class="o">=</span><span class="s2">"out[0] = 0.5 * in[0];"</span><span class="p">)</span>
@@ -2414,7 +2674,7 @@ name-mangled.</p>
 </tbody>
 </table>
 <p>Outputs are injected through Pulsim's <code>b_extra</code> path, which is part of
-the fixed-step (<strong>PWL</strong>) engine — see <a href="#engines-and-limits">Engines</a>.</p>
+the <code>pwl</code> and <code>trbdf2</code> engines — see <a href="#engines-and-limits">Engines</a>.</p>
 <hr />
 <h2 id="sample-time-zoh-and-the-one-sample-delay">Sample time, ZOH, and the one-sample delay<a class="headerlink" href="#sample-time-zoh-and-the-one-sample-delay" title="Permanent link">&para;</a></h2>
 <p><code>dt</code> is the block's <strong>own</strong> rate, independent of the simulation step.
@@ -2458,6 +2718,12 @@ exactly how a discrete controller sees a continuous plant.</p>
 </tr>
 </tbody>
 </table>
+<p>Every <code>simulate()</code> without <code>resume_from=</code> starts each block over: the
+Python <code>state</code> dict goes back to the one passed to <code>add_c_block</code>, and a
+compiled block's <code>term</code> (if any) then <code>init</code> (if any) run again, with
+<code>*state</code> set to <code>NULL</code> in between. A library with no <code>init</code> that
+allocates lazily needs a <code>term</code>, or each run leaks that allocation;
+a <code>static</code> variable outside <code>*state</code> is never reset.</p>
 <hr />
 <h2 id="from-yaml">From YAML<a class="headerlink" href="#from-yaml" title="Permanent link">&para;</a></h2>
 <p>Declare blocks declaratively and wire them after loading the circuit:</p>
@@ -2565,10 +2831,14 @@ together.</p>
 <hr />
 <h2 id="engines-and-limits">Engines and limits<a class="headerlink" href="#engines-and-limits" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Outputs require the PWL engine</strong> (<code>engine="pwl"</code>, the default) — they
-  are injected via <code>b_extra</code>, which the variable-step DSED engine does
-  not consume. A block with <strong>inputs only</strong> (logging, an observer, a
-  software trip) also runs under <code>engine="dsed"</code>.</li>
+<li><strong>Engines.</strong> <code>pwl</code> (the default) runs a block in label time: the tick
+  at <code>kT</code> samples the state of the step before and holds from there
+  (docs/control-graph.md). <code>engine="trbdf2"</code> lands its steps on the
+  block's ticks: it samples <code>v(kT)</code> and holds from <code>kT</code> (the state-time
+  law), and agrees with <code>pwl</code> as <code>dt -&gt; 0</code>. <code>engine="auto"</code> keeps routing
+  a circuit with C blocks to <code>pwl</code>. The exact strategy
+  (<code>engine="exact"</code> / <code>"dsed"</code>) refuses C blocks by name
+  (<code>UnsupportedError</code>, feature <code>c_blocks</code>): it has no <code>b_extra</code> input.</li>
 <li>One-sample (ZOH) feedback delay; no algebraic feedthrough.</li>
 <li>Inline compilation needs a system C/C++ compiler; without one, use a
   precompiled <code>lib=</code>.</li>
@@ -2581,7 +2851,7 @@ together.</p>
   firings.</li>
 <li>Compiled <code>lib=</code> / <code>code=</code> blocks are one C call per block step; numpy
   buffers are passed by pointer (no copy).</li>
-<li>The inline cache means a given source compiles once per machine.</li>
+<li>The inline cache means a given source compiles once per user and machine.</li>
 </ul>
 <hr />
 <h2 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h2>
@@ -2618,8 +2888,8 @@ together.</p>
 <td>block <code>dt</code> below the sim step — raise it</td>
 </tr>
 <tr>
-<td>outputs ignored under <code>engine="dsed"</code></td>
-<td>outputs are PWL-only; use <code>engine="pwl"</code></td>
+<td><code>UnsupportedError ... c_blocks</code> under <code>engine="exact"</code> / <code>"dsed"</code></td>
+<td>use <code>engine="pwl"</code> or <code>"trbdf2"</code></td>
 </tr>
 </tbody>
 </table>
@@ -2669,7 +2939,7 @@ together.</p>
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href="../loss-thermal/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Loss &amp; Thermal Modelling">
+          <a href="../transmission-line/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Transmission Line (Bergeron)">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -2679,7 +2949,7 @@ together.</p>
                 Previous
               </span>
               <div class="md-ellipsis">
-                Loss & Thermal Modelling
+                Transmission Line (Bergeron)
               </div>
             </div>
           </a>

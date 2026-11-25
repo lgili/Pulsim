@@ -497,6 +497,48 @@
   
   
     <li class="md-nav__item">
+      <a href="../parameters/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Parameters and Value Updates
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../domains/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Node Domains
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../tutorials/01-rc-charging/" class="md-nav__link">
         
   
@@ -623,6 +665,132 @@
   
   
     <li class="md-nav__item">
+      <a href="../tutorials/07-dc-machine/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 07 — DC Machine
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/08-design-optimisation/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 08 — Using Pulsim inside an optimiser
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/09-magnetic-networks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 09 — Magnetic networks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/10-power-mosfet-datasheet/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 10 — Datasheet to double pulse
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sensitivities/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Parameter Sensitivities
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../SOFT_SWITCHING/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Soft Switching (ZVS / ZCS probes)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../motors-induction/" class="md-nav__link">
         
   
@@ -707,6 +875,27 @@
   
   
     <li class="md-nav__item">
+      <a href="../transmission-line/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Transmission Line (Bergeron)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../c-block/" class="md-nav__link">
         
   
@@ -770,6 +959,48 @@
   
   
     <li class="md-nav__item">
+      <a href="../result-reference/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Result Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../device-reference/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Device Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../helpers/" class="md-nav__link">
         
   
@@ -816,7 +1047,7 @@
         
   
   <span class="md-ellipsis">
-    Known Limitations (2.0)
+    Known Limitations (2.1)
   </span>
   
 
@@ -1498,6 +1729,27 @@
   
   
     <li class="md-nav__item">
+      <a href="../internals/run-planning/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    How a run is planned
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../internals/mmc-arm-block/" class="md-nav__link">
         
   
@@ -1635,7 +1887,7 @@
         
   
   <span class="md-ellipsis">
-    Migration Guide (legacy → 1.0)
+    Migration Guide (2.0 → 2.1, legacy → 1.0)
   </span>
   
 
@@ -2011,24 +2263,20 @@ options:</p>
 <span class="w">  </span><span class="nt">dt_init</span><span class="p">:</span><span class="w">     </span><span class="l l-Scalar l-Scalar-Plain">0.0</span>
 </code></pre></div>
 <p>The loader puts the parsed values on <code>loaded.options</code>
-(a <code>SimulationOptions</code> instance). You can forward them into
-<code>simulate()</code>:</p>
+(a <code>SimulationOptions</code> instance) and lists the keys the file sets in
+<code>loaded.simulation_keys</code>. <code>pulsim.simulate(loaded)</code> forwards each of
+them as the keyword of the same name; a keyword you pass, then
+<code>solver=</code>, wins:</p>
 <div class="highlight"><pre><span></span><code><span class="n">loaded</span> <span class="o">=</span> <span class="n">pulsim</span><span class="o">.</span><span class="n">load_yaml_file</span><span class="p">(</span><span class="s2">"buck.yaml"</span><span class="p">)</span>
-<span class="n">res</span> <span class="o">=</span> <span class="n">pulsim</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span>
-    <span class="n">loaded</span><span class="o">.</span><span class="n">builder</span><span class="p">,</span>
-    <span class="n">t_end</span><span class="o">=</span><span class="n">loaded</span><span class="o">.</span><span class="n">options</span><span class="o">.</span><span class="n">t_end</span><span class="p">,</span>
-    <span class="n">dt</span><span class="o">=</span><span class="n">loaded</span><span class="o">.</span><span class="n">options</span><span class="o">.</span><span class="n">dt</span><span class="p">,</span>
-    <span class="n">integrator</span><span class="o">=</span><span class="n">loaded</span><span class="o">.</span><span class="n">options</span><span class="o">.</span><span class="n">integrator</span><span class="p">,</span>
-    <span class="n">rtol</span><span class="o">=</span><span class="n">loaded</span><span class="o">.</span><span class="n">options</span><span class="o">.</span><span class="n">rtol</span><span class="p">,</span>
-    <span class="n">atol</span><span class="o">=</span><span class="n">loaded</span><span class="o">.</span><span class="n">options</span><span class="o">.</span><span class="n">atol</span><span class="p">,</span>
-    <span class="n">dt_init</span><span class="o">=</span><span class="n">loaded</span><span class="o">.</span><span class="n">options</span><span class="o">.</span><span class="n">dt_init</span><span class="p">,</span>
-<span class="p">)</span>
+<span class="n">res</span> <span class="o">=</span> <span class="n">pulsim</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">loaded</span><span class="p">)</span>                    <span class="c1"># the file's keys</span>
+<span class="n">res</span> <span class="o">=</span> <span class="n">pulsim</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">loaded</span><span class="p">,</span> <span class="n">engine</span><span class="o">=</span><span class="s2">"trbdf2"</span><span class="p">)</span>   <span class="c1"># rtol / atol used here</span>
 </code></pre></div>
-<p><strong>Today</strong> only <code>integrator="kernel"</code> (default) actually runs;
-<code>"dopri5"</code> and <code>"radau"</code> raise a clear <code>NotImplementedError</code> with
-a pointer to the v1.6 cache refactor. The schema is wired so YAML
-files stay forward-compatible. See <a href="../solvers/">solvers.md</a> for
-the detailed rationale.</p>
+<p>A key the engine the run lands on cannot honour (<code>rtol</code> on the fixed
+step, the Newton keys on the exact engine) is not used and raises one
+<code>RuntimeWarning</code> naming it. <code>integrator: kernel</code> and <code>dt_init: 0</code> are
+the loader's placeholders and ask nothing. <code>"dopri5"</code> and <code>"radau"</code>
+are refused by the engine that takes an integrator. See
+<a href="../solvers/">solvers.md</a> for the detailed rationale.</p>
 <h2 id="end-to-end-example">End-to-end example<a class="headerlink" href="#end-to-end-example" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><span class="c1"># 1. Load the topology + simulation options.</span>
 <span class="n">loaded</span> <span class="o">=</span> <span class="n">pulsim</span><span class="o">.</span><span class="n">load_yaml_file</span><span class="p">(</span><span class="s2">"examples/induction_motor_dol.yaml"</span><span class="p">)</span>

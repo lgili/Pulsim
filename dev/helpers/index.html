@@ -13,7 +13,7 @@
         <link rel="canonical" href="https://lgili.github.io/Pulsim/latest/helpers/">
       
       
-        <link rel="prev" href="../api-reference/">
+        <link rel="prev" href="../device-reference/">
       
       
         <link rel="next" href="../gotchas/">
@@ -506,6 +506,48 @@
   
   
     <li class="md-nav__item">
+      <a href="../parameters/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Parameters and Value Updates
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../domains/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Node Domains
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../tutorials/01-rc-charging/" class="md-nav__link">
         
   
@@ -632,6 +674,132 @@
   
   
     <li class="md-nav__item">
+      <a href="../tutorials/07-dc-machine/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 07 — DC Machine
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/08-design-optimisation/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 08 — Using Pulsim inside an optimiser
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/09-magnetic-networks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 09 — Magnetic networks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/10-power-mosfet-datasheet/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 10 — Datasheet to double pulse
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sensitivities/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Parameter Sensitivities
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../SOFT_SWITCHING/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Soft Switching (ZVS / ZCS probes)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../motors-induction/" class="md-nav__link">
         
   
@@ -716,6 +884,27 @@
   
   
     <li class="md-nav__item">
+      <a href="../transmission-line/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Transmission Line (Bergeron)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../c-block/" class="md-nav__link">
         
   
@@ -763,6 +952,48 @@
   
   <span class="md-ellipsis">
     API Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../result-reference/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Result Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../device-reference/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Device Reference
   </span>
   
 
@@ -1078,7 +1309,7 @@
         
   
   <span class="md-ellipsis">
-    Known Limitations (2.0)
+    Known Limitations (2.1)
   </span>
   
 
@@ -1760,6 +1991,27 @@
   
   
     <li class="md-nav__item">
+      <a href="../internals/run-planning/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    How a run is planned
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../internals/mmc-arm-block/" class="md-nav__link">
         
   
@@ -1897,7 +2149,7 @@
         
   
   <span class="md-ellipsis">
-    Migration Guide (legacy → 1.0)
+    Migration Guide (2.0 → 2.1, legacy → 1.0)
   </span>
   
 
@@ -2385,7 +2637,7 @@ call:</p>
 <div class="highlight"><pre><span></span><code><span class="n">pi</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">PIController</span><span class="p">(</span><span class="n">Kp</span><span class="o">=</span><span class="mf">0.08</span><span class="p">,</span> <span class="n">Ki</span><span class="o">=</span><span class="mf">40.0</span><span class="p">,</span> <span class="n">output_min</span><span class="o">=</span><span class="mf">0.05</span><span class="p">,</span> <span class="n">output_max</span><span class="o">=</span><span class="mf">0.95</span><span class="p">)</span>
 <span class="n">loop</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">bind_pi_to_switch</span><span class="p">(</span>
     <span class="n">b</span><span class="p">,</span> <span class="n">pi</span><span class="o">=</span><span class="n">pi</span><span class="p">,</span>
-    <span class="n">measured</span><span class="o">=</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span><span class="p">[</span><span class="n">b</span><span class="o">.</span><span class="n">node_id_of</span><span class="p">(</span><span class="s2">"vout"</span><span class="p">)],</span>
+    <span class="n">measured</span><span class="o">=</span><span class="s2">"vout"</span><span class="p">,</span>
     <span class="n">setpoint</span><span class="o">=</span><span class="mf">5.0</span><span class="p">,</span>
     <span class="n">switch</span><span class="o">=</span><span class="s2">"Q1"</span><span class="p">,</span>        <span class="c1"># name or int index</span>
     <span class="n">freq</span><span class="o">=</span><span class="mf">10e3</span><span class="p">,</span>
@@ -2419,6 +2671,13 @@ composes the switch_fn manually with both bits.</p>
 <span class="n">b</span><span class="o">.</span><span class="n">aliases</span><span class="p">()</span>                <span class="c1"># {"vin": ("node", "net_42")}</span>
 <span class="n">res</span><span class="o">.</span><span class="n">v</span><span class="p">(</span><span class="s2">"vin"</span><span class="p">)</span> <span class="o">==</span> <span class="n">res</span><span class="o">.</span><span class="n">v</span><span class="p">(</span><span class="s2">"net_42"</span><span class="p">)</span>   <span class="c1"># alias resolves transparently</span>
 </code></pre></div>
+<p>The aliases ride in the circuit, so a GUI that saves the circuit as
+YAML gets its labels back on load:</p>
+<div class="highlight"><pre><span></span><code><span class="n">text</span> <span class="o">=</span> <span class="n">b</span><span class="o">.</span><span class="n">build</span><span class="p">()</span><span class="o">.</span><span class="n">to_yaml</span><span class="p">()</span>   <span class="c1"># an `aliases:` list next to the devices</span>
+<span class="n">c</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">Circuit</span><span class="o">.</span><span class="n">from_yaml</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+<span class="n">c</span><span class="o">.</span><span class="n">aliases</span><span class="p">()</span>                  <span class="c1"># {"vin": ("node", "net_42")}</span>
+<span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">t_end</span><span class="o">=</span><span class="mf">1e-3</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="mf">1e-6</span><span class="p">)</span><span class="o">.</span><span class="n">v</span><span class="p">(</span><span class="s2">"vin"</span><span class="p">)</span>
+</code></pre></div>
 <p><strong>Cancellation</strong> via <code>should_continue=</code> on every long-running entry
 point:</p>
 <div class="highlight"><pre><span></span><code><span class="n">cancel_event</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">Event</span><span class="p">()</span>
@@ -2433,9 +2692,12 @@ point:</p>
 <span class="n">x_dc</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">compute_dc_op</span><span class="p">(</span><span class="n">b</span><span class="p">,</span>
                          <span class="n">should_continue</span><span class="o">=</span><span class="k">lambda</span><span class="p">:</span> <span class="ow">not</span> <span class="n">cancel_event</span><span class="o">.</span><span class="n">is_set</span><span class="p">())</span>
 </code></pre></div>
-<p>All raise <code>pulsim.Cancelled(RuntimeError)</code> with a typed
-<code>.where</code> and <code>.point_index</code> attribute pinpointing where the
-cancellation fired.</p>
+<p><code>simulate</code> stops and returns the trace up to the cancel
+(<code>res.times[-1] &lt; t_end</code>). The analyses (<code>compute_dc_op</code>,
+<code>compute_temperature</code>, <code>run_ac_sweep</code>, <code>run_mna_sweep</code>) raise
+<code>pulsim.Cancelled(RuntimeError)</code> with a typed <code>.where</code> and
+<code>.point_index</code> attribute pinpointing where the cancellation fired; they
+return no partial result. A callback that raises propagates.</p>
 <hr />
 <h2 id="6-v15-migration-status-examples-notebooks">6. v1.5 migration status — examples + notebooks<a class="headerlink" href="#6-v15-migration-status-examples-notebooks" title="Permanent link">&para;</a></h2>
 <h3 id="scripts-examplesscripts-migrated">Scripts (<code>examples/scripts/</code>) — migrated<a class="headerlink" href="#scripts-examplesscripts-migrated" title="Permanent link">&para;</a></h3>
@@ -2527,7 +2789,7 @@ modernisation" change.</p>
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href="../api-reference/" class="md-footer__link md-footer__link--prev" aria-label="Previous: API Reference">
+          <a href="../device-reference/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Device Reference">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -2537,7 +2799,7 @@ modernisation" change.</p>
                 Previous
               </span>
               <div class="md-ellipsis">
-                API Reference
+                Device Reference
               </div>
             </div>
           </a>

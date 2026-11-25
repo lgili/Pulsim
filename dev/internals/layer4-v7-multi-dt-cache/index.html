@@ -497,6 +497,48 @@
   
   
     <li class="md-nav__item">
+      <a href="../../parameters/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Parameters and Value Updates
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../domains/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Node Domains
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../tutorials/01-rc-charging/" class="md-nav__link">
         
   
@@ -623,6 +665,132 @@
   
   
     <li class="md-nav__item">
+      <a href="../../tutorials/07-dc-machine/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 07 — DC Machine
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/08-design-optimisation/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 08 — Using Pulsim inside an optimiser
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/09-magnetic-networks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 09 — Magnetic networks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/10-power-mosfet-datasheet/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 10 — Datasheet to double pulse
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sensitivities/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Parameter Sensitivities
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../SOFT_SWITCHING/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Soft Switching (ZVS / ZCS probes)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../motors-induction/" class="md-nav__link">
         
   
@@ -707,6 +875,27 @@
   
   
     <li class="md-nav__item">
+      <a href="../../transmission-line/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Transmission Line (Bergeron)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../c-block/" class="md-nav__link">
         
   
@@ -770,6 +959,48 @@
   
   
     <li class="md-nav__item">
+      <a href="../../result-reference/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Result Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../device-reference/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Device Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../helpers/" class="md-nav__link">
         
   
@@ -816,7 +1047,7 @@
         
   
   <span class="md-ellipsis">
-    Known Limitations (2.0)
+    Known Limitations (2.1)
   </span>
   
 
@@ -1498,6 +1729,27 @@
   
   
     <li class="md-nav__item">
+      <a href="../run-planning/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    How a run is planned
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../mmc-arm-block/" class="md-nav__link">
         
   
@@ -1635,7 +1887,7 @@
         
   
   <span class="md-ellipsis">
-    Migration Guide (legacy → 1.0)
+    Migration Guide (2.0 → 2.1, legacy → 1.0)
   </span>
   
 
@@ -1824,14 +2076,24 @@ auxiliary map keyed by <em>exact Real dt</em> of per-mask segments — one
 fully analyzed + factorized segment per <code>(mask, dt)</code> pair,
 forever. Sub-step event correction produces an essentially unique
 dt per commutation, so that map grew without bound. Now each
-recently-evented mask owns ONE <strong>event solver</strong> (small LRU,
-<code>kMaxEventEntries = 8</code>) storing the mask's <code>(G, C, b)</code> split; a dt
-change recombines <code>J = G + (1/dt)·C</code> and runs a numeric
-<code>factorize()</code> on the entry's single symbolic analysis (the
+recently-evented mask owns ONE <strong>event solver</strong> storing the mask's
+<code>(G, C, b)</code> split; a dt change recombines <code>J = G + (1/dt)·C</code> and runs a
+numeric <code>factorize()</code> on the entry's single symbolic analysis (the
 sparsity pattern is dt-invariant). No dt-keyed storage exists.
 <code>num_alt_dt_values()</code> / <code>num_alt_segments_at(dt)</code> keep their
-signatures but now report over the ≤ 8 resident entries' <em>current</em>
-dt values. <code>refactor_parametric</code> drops the entries (their split is
+signatures but report over the resident entries' <em>current</em> dt values.</p>
+<p><strong>update-trbdf2-factor-reuse (parts 1-2).</strong> The table used to hold 8
+entries; the three-phase VSI visits 87 masks, so TR-BDF2 rebuilt
+entries 3,198 times in a 20 ms run. It is now bounded by the segment
+byte budget (<code>set_segment_budget_bytes</code>, default 1 GiB), accounted
+separately from the segment table, LRU, evicted only after everything
+that can throw (<code>CacheMetrics.event_evictions</code>). Each entry keeps its
+<code>J</code> and the split scattered onto <code>J</code>'s pattern (<code>+0.0</code> where an operand
+has no entry), so a new dt writes <code>J[k] = G[k] + (1/dt)·C[k]</code> in place —
+the per-entry arithmetic of Eigen's <code>G + (1/dt)·C</code> — and the in-house
+LU keeps its factorisation work vectors and L/U capacity: a refactor of
+a resident entry allocates nothing. A factor is a pure function of
+<code>(mask, dt)</code>, so which entries are resident never changes a result. <code>refactor_parametric</code> drops the entries (their split is
 a snapshot of the pool's parameters).</p>
 <h2 id="why-not-sherman-morrison">Why not Sherman-Morrison<a class="headerlink" href="#why-not-sherman-morrison" title="Permanent link">&para;</a></h2>
 <p>The original V7-as-Sherman-Morrison idea would build factors
@@ -1852,8 +2114,8 @@ different angle:
   dt)</code> is pure factor reuse (<code>event_hits</code>).</li>
 <li>The commutation pattern (pre/post masks at fresh dts every
   event) holds steady at 2 entries with zero growth.</li>
-<li>Entries are LRU-bounded at <code>kMaxEventEntries</code>; evicted masks
-  rebuild transparently and match a fresh cache at 1e-12.</li>
+<li>Entries are LRU-bounded by the byte budget; under a tight budget
+  evicted masks rebuild and give the bits of an unlimited table.</li>
 <li>The refactor path matches a from-scratch build at the same dt
   on a dynamic RLC circuit (1e-12).</li>
 <li>A numerically singular refactorize ERASES the entry (a stale

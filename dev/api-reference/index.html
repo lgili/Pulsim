@@ -16,7 +16,7 @@
         <link rel="prev" href="../solvers/">
       
       
-        <link rel="next" href="../helpers/">
+        <link rel="next" href="../result-reference/">
       
       
       <link rel="icon" href="../assets/images/pulsim-logo.svg">
@@ -506,6 +506,48 @@
   
   
     <li class="md-nav__item">
+      <a href="../parameters/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Parameters and Value Updates
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../domains/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Node Domains
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../tutorials/01-rc-charging/" class="md-nav__link">
         
   
@@ -632,6 +674,132 @@
   
   
     <li class="md-nav__item">
+      <a href="../tutorials/07-dc-machine/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 07 — DC Machine
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/08-design-optimisation/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 08 — Using Pulsim inside an optimiser
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/09-magnetic-networks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 09 — Magnetic networks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/10-power-mosfet-datasheet/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 10 — Datasheet to double pulse
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sensitivities/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Parameter Sensitivities
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../SOFT_SWITCHING/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Soft Switching (ZVS / ZCS probes)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../motors-induction/" class="md-nav__link">
         
   
@@ -700,6 +868,27 @@
   
   <span class="md-ellipsis">
     Loss & Thermal Modelling
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../transmission-line/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Transmission Line (Bergeron)
   </span>
   
 
@@ -816,6 +1005,15 @@
   <a href="#simulatebuilder-t_end-dt-kwargs" class="md-nav__link">
     <span class="md-ellipsis">
       simulate(builder, t_end, dt, **kwargs)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#simulationcircuit-options-the-kernel-run-object" class="md-nav__link">
+    <span class="md-ellipsis">
+      Simulation(circuit, options) — the kernel run object
     </span>
   </a>
   
@@ -975,6 +1173,30 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Statistics over a result (time-weighted)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#kernel-recorders-simulaterecorders" class="md-nav__link">
+    <span class="md-ellipsis">
+      Kernel recorders (simulate(recorders=...))
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#parameter-sweeps-sweep-monte_carlo" class="md-nav__link">
+    <span class="md-ellipsis">
+      Parameter sweeps — sweep / monte_carlo
+    </span>
+  </a>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1005,6 +1227,15 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#periodic-steady-state-periodic_steady_stateb-period-switch_fnnone-start_fromnone" class="md-nav__link">
+    <span class="md-ellipsis">
+      Periodic steady state — periodic_steady_state(b, *, period, switch_fn=None, start_from=None)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#spice-import-spice_to_buildertext_or_path-strictfalse" class="md-nav__link">
     <span class="md-ellipsis">
       SPICE import — spice_to_builder(text_or_path, *, strict=False)
@@ -1026,6 +1257,48 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../result-reference/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Result Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../device-reference/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Device Reference
+  </span>
+  
+
+      </a>
     </li>
   
 
@@ -1084,7 +1357,7 @@
         
   
   <span class="md-ellipsis">
-    Known Limitations (2.0)
+    Known Limitations (2.1)
   </span>
   
 
@@ -1766,6 +2039,27 @@
   
   
     <li class="md-nav__item">
+      <a href="../internals/run-planning/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    How a run is planned
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../internals/mmc-arm-block/" class="md-nav__link">
         
   
@@ -1903,7 +2197,7 @@
         
   
   <span class="md-ellipsis">
-    Migration Guide (legacy → 1.0)
+    Migration Guide (2.0 → 2.1, legacy → 1.0)
   </span>
   
 
@@ -1980,6 +2274,15 @@
   <a href="#simulatebuilder-t_end-dt-kwargs" class="md-nav__link">
     <span class="md-ellipsis">
       simulate(builder, t_end, dt, **kwargs)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#simulationcircuit-options-the-kernel-run-object" class="md-nav__link">
+    <span class="md-ellipsis">
+      Simulation(circuit, options) — the kernel run object
     </span>
   </a>
   
@@ -2139,6 +2442,30 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Statistics over a result (time-weighted)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#kernel-recorders-simulaterecorders" class="md-nav__link">
+    <span class="md-ellipsis">
+      Kernel recorders (simulate(recorders=...))
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#parameter-sweeps-sweep-monte_carlo" class="md-nav__link">
+    <span class="md-ellipsis">
+      Parameter sweeps — sweep / monte_carlo
+    </span>
+  </a>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2163,6 +2490,15 @@
   <a href="#resuming-a-run-solversnapshot-simulateresume_from" class="md-nav__link">
     <span class="md-ellipsis">
       Resuming a run — SolverSnapshot / simulate(resume_from=...)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#periodic-steady-state-periodic_steady_stateb-period-switch_fnnone-start_fromnone" class="md-nav__link">
+    <span class="md-ellipsis">
+      Periodic steady state — periodic_steady_state(b, *, period, switch_fn=None, start_from=None)
     </span>
   </a>
   
@@ -2246,7 +2582,7 @@
   <span class="o">.</span><span class="n">add_multi_winding_transformer</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>   <span class="c1"># N windings, no ceiling</span>
   <span class="o">.</span><span class="n">add_saturable_transformer_n</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>     <span class="c1"># N secondaries on one gapped core</span>
   <span class="o">.</span><span class="n">add_diode</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
-  <span class="o">.</span><span class="n">add_nonlinear_diode</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+  <span class="o">.</span><span class="n">add_shockley_diode</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
   <span class="o">.</span><span class="n">add_switch</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
   <span class="o">.</span><span class="n">add_mosfet</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
   <span class="o">.</span><span class="n">add_mosfet_with_body_diode</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
@@ -2254,6 +2590,9 @@
   <span class="o">.</span><span class="n">add_igbt</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
   <span class="o">.</span><span class="n">add_igbt_level1</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
   <span class="o">.</span><span class="n">add_vcvs</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+  <span class="o">.</span><span class="n">add_vccs</span><span class="p">(</span><span class="o">...</span><span class="p">)</span> <span class="o">/</span> <span class="o">.</span><span class="n">add_cccs</span><span class="p">(</span><span class="o">...</span><span class="p">)</span> <span class="o">/</span> <span class="o">.</span><span class="n">add_ccvs</span><span class="p">(</span><span class="o">...</span><span class="p">)</span> <span class="o">/</span> <span class="o">.</span><span class="n">add_gyrator</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+  <span class="o">.</span><span class="n">add_sine_current_source</span><span class="p">(</span><span class="o">...</span><span class="p">)</span> <span class="o">/</span> <span class="o">.</span><span class="n">add_pulse_current_source</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+  <span class="o">.</span><span class="n">add_pwl_current_source</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>        <span class="c1"># table i(t)</span>
 
 <span class="c1"># Topology / device handles.</span>
 <span class="n">p</span><span class="o">.</span><span class="n">Graph</span><span class="p">,</span> <span class="n">p</span><span class="o">.</span><span class="n">DevicePool</span><span class="p">,</span> <span class="n">p</span><span class="o">.</span><span class="n">SwitchStateMask</span>
@@ -2322,7 +2661,7 @@
 <td><code>b_extra_fn</code></td>
 <td><code>Callable[[float], list[float]]</code></td>
 <td><code>None</code></td>
-<td>Per-step constant residual extras.</td>
+<td>Per-step addend to the residual F = J·x + b. An entry e on a voltage source's row gives v(+) − v(−) = V − e (write −v to add v); on a node row it draws a current e out of the node. Index rows with <code>pool.branch_var_id_for_source(id, graph)</code> / <code>node_id_of</code> AFTER the last <code>add_*</code>: a branch row is <code>num_nodes + k</code> and moves when a node is added.</td>
 </tr>
 <tr>
 <td><code>start_from_dc_op</code></td>
@@ -2333,8 +2672,8 @@
 <tr>
 <td><code>enable_nonlinear_refresh</code></td>
 <td><code>bool</code> or <code>None</code></td>
-<td>auto-detect</td>
-<td>Force-enable Newton refresh. <code>None</code> = auto via <code>pool.has_nonlinear_devices()</code>.</td>
+<td><code>None</code></td>
+<td><code>None</code>: the kernel stamps the Newton devices when the circuit has any. <code>True</code> forces the static chain. <code>False</code> on a circuit with a smooth / Shockley diode, MOSFET or IGBT raises <code>UnsupportedError</code> (it used to simulate them as open circuits).</td>
 </tr>
 <tr>
 <td><code>max_newton_iterations</code></td>
@@ -2348,8 +2687,32 @@
 <td><code>None</code> (engine default)</td>
 <td>Event-iteration cap.</td>
 </tr>
+<tr>
+<td><code>allow_implicit_segments</code></td>
+<td><code>bool</code> or <code>None</code></td>
+<td><code>None</code></td>
+<td><code>engine='exact'</code> only. A segment the exact kernel cannot step raises <code>UnsupportedError('dsed', feature)</code> with <code>feature</code> the failed rule (<code>'source'</code>: a <code>b_extra_fn</code>; <code>'cost'</code>: a stiff, near-defective mode; <code>'extraction'</code>: the extractor rejected the circuit) unless <code>True</code>, which integrates it numerically. Refused by name on other engines.</td>
+</tr>
+<tr>
+<td><code>engine</code></td>
+<td><code>str</code></td>
+<td><code>'auto'</code></td>
+<td><code>'auto'</code>, <code>'pwl'</code>, <code>'trbdf2'</code> or <code>'exact'</code>. <code>'exact'</code> is the canonical name of the event-driven exact engine and <code>'dsed'</code> its alias: one engine, bit-identical runs; <code>result.engine_used</code> and every refusal's <code>engine</code> field read <code>'dsed'</code> (the capability-table column) until the default flip.</td>
+</tr>
 </tbody>
 </table>
+<p><code>pulsim.exact_route(builder, t_end, switch_fn=None, **kw)</code> runs the
+circuit on <code>engine='exact'</code> and classifies every mask it visits as
+exact-eligible or not (add-exact-propagator-strategy D11, report only —
+<code>'auto'</code> does not read it): <code>{"exact": bool, "reason": ..., "segments":
+[{"mask", "exact", "reason", "device", "kind", "detail", "tier",
+"n_segments"}, ...]}</code>. Reasons: <code>'device'</code> (a device with no linear / PWL
+law, named), <code>'source'</code> (a user <code>b_extra_fn</code>; sine, PWM and pulse sources are exact),
+<code>'extraction'</code> (coupled inductors, a capacitor loop, an inductor
+cut-set), <code>'cost'</code> (the mask's propagator outside its accuracy tiers).
+The same rows ride on every exact run as <code>result.exact["segments"]</code>, with
+<code>result.exact["auto_would_route"]</code>: <code>True</code> when every visited mask was
+exact (what <code>'auto'</code> would route to exact; report only, read by nothing).</p>
 <p>Returns a <code>SimulationResult</code> with parallel arrays:
 - <code>result.times</code> — <code>list[float]</code>. With a fixed <code>dt</code>: length <code>floor((t_end − t_start) / dt) + 1</code>, or that divided by <code>store_every</code> (rounded up) when decimation is on. Without one the grid is <strong>variable-step</strong> and the spacing is not uniform — average with <a href="#statistics-over-a-result-time-weighted">the time-weighted helpers</a>, not <code>.mean()</code>.
 - <code>result.states</code> — read-only <code>numpy.ndarray</code> of shape
@@ -2367,6 +2730,35 @@ step. The solver still integrates at <code>dt</code>; the recorded grid stays
 strictly uniform at <code>m · dt</code> (so FFT / harmonic analysis on the
 result remains valid), and memory drops by the same factor.
 <code>opts.expected_sample_count()</code> reports what a run will store.</p>
+<p>Every keyword is checked against the engine the run lands on before
+anything is solved: honoured, or refused with <code>UnsupportedError</code>
+(<code>feature</code> = the keyword). <code>pulsim.option_capabilities()</code> returns the
+option x engine table (<a href="../known-limitations/#option-capability-matrix">known limitations</a>).
+Every pulsim error derives from <code>pulsim.PulsimError</code> and keeps its
+standard base (<code>ValueError</code>, <code>RuntimeError</code>, <code>KeyError</code>).</p>
+<h2 id="simulationcircuit-options-the-kernel-run-object"><code>Simulation(circuit, options)</code> — the kernel run object<a class="headerlink" href="#simulationcircuit-options-the-kernel-run-object" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pulsim</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">p</span>
+<span class="n">c</span> <span class="o">=</span> <span class="n">b</span><span class="o">.</span><span class="n">build</span><span class="p">()</span>               <span class="c1"># b: a CircuitBuilder; c: an immutable pulsim.Circuit</span>
+<span class="n">sim</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">Simulation</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">p</span><span class="o">.</span><span class="n">RunOptions</span><span class="p">(</span><span class="n">t_end</span><span class="o">=</span><span class="mf">2e-4</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="mf">2e-7</span><span class="p">,</span> <span class="n">engine</span><span class="o">=</span><span class="s2">"pwl"</span><span class="p">))</span>
+<span class="n">sim</span><span class="o">.</span><span class="n">set_switch_fn</span><span class="p">(</span><span class="n">p</span><span class="o">.</span><span class="n">make_pwm_switch_fn</span><span class="p">(</span><span class="mf">50e3</span><span class="p">,</span> <span class="mf">0.4</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span>
+<span class="n">first</span> <span class="o">=</span> <span class="n">sim</span><span class="o">.</span><span class="n">run_until</span><span class="p">(</span><span class="mf">1e-4</span><span class="p">)</span>                    <span class="c1"># split run ...</span>
+<span class="n">rest</span> <span class="o">=</span> <span class="n">sim</span><span class="o">.</span><span class="n">run</span><span class="p">()</span>                               <span class="c1"># ... equals one run</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">sim</span><span class="o">.</span><span class="n">plan</span><span class="p">,</span> <span class="n">sim</span><span class="o">.</span><span class="n">diagnostics</span><span class="p">)</span>
+</code></pre></div>
+<p>The constructor plans the run: preflight ties on its own copy (the
+caller's circuit is unchanged), routing (<code>plan['engine']</code>,
+<code>plan['route_reasons']</code>), the option and device refusals. <code>RunOptions</code>
+fields are the <code>simulate()</code> keywords; <code>None</code> means "not set" and the
+default comes from one kernel table (<code>sim::Defaults</code>). Attachments:
+<code>set_switch_fn</code>, <code>add_tick(period, fn, offset=0.0)</code>, <code>set_source_term</code>,
+<code>set_step_observer</code> and <code>set_tick_before</code> (<code>pwl</code>), <code>set_live_ring</code>,
+<code>set_cancel</code>, <code>set_initial_state</code>; <code>cache</code> is the run's PWL cache (built
+on first use); <code>snapshot()</code> / <code>restore()</code> continue a run exactly.
+Engines <code>'pwl'</code> and <code>'trbdf2'</code> — <code>simulate()</code> itself runs them through
+this object; <code>'exact'</code> is refused, and so are C blocks unless
+<code>controls_composed=True</code> says the attachments drive them (use
+<code>simulate()</code>, which composes them). Invalid values raise
+<code>pulsim.OptionsError</code> (<code>.option</code>).</p>
 <h2 id="circuitbuilder"><code>CircuitBuilder</code><a class="headerlink" href="#circuitbuilder" title="Permanent link">&para;</a></h2>
 <p>Top-level fluent builder. Stores a <code>Graph</code> (topology) + <code>DevicePool</code> (per-device parameters) + an internal node-name → node-id map.</p>
 <h3 id="node-accessors">Node accessors<a class="headerlink" href="#node-accessors" title="Permanent link">&para;</a></h3>
@@ -2439,8 +2831,50 @@ result remains valid), and memory drops by the same factor.
 <td><code>add_vcvs</code></td>
 <td><code>(name, in_pos, in_neg, out_pos, out_neg, gain)</code></td>
 </tr>
+<tr>
+<td><code>add_vccs</code></td>
+<td><code>(name, in_pos, in_neg, n_pos, n_neg, gm)</code> — <code>gm·(V(in_pos) − V(in_neg))</code> leaves at <code>n_pos</code></td>
+</tr>
+<tr>
+<td><code>add_cccs</code></td>
+<td><code>(name, control, n_pos, n_neg, gain)</code> — <code>gain·i(control)</code> leaves at <code>n_pos</code></td>
+</tr>
+<tr>
+<td><code>add_ccvs</code></td>
+<td><code>(name, control, out_pos, out_neg, rm)</code> — <code>V(out_pos) − V(out_neg) = rm·i(control)</code></td>
+</tr>
+<tr>
+<td><code>add_gyrator</code></td>
+<td><code>(name, p1_pos, p1_neg, p2_pos, p2_neg, g)</code> — <code>i1 = g·v2</code>, <code>i2 = −g·v1</code>, both into the <code>_pos</code> terminals; a <code>C</code> on one port is <code>C/g²</code> of inductance on the other</td>
+</tr>
+<tr>
+<td><code>add_sine_current_source</code></td>
+<td><code>(name, n_pos, n_neg, i_dc, i_amplitude, frequency, phase=0)</code></td>
+</tr>
+<tr>
+<td><code>add_pulse_current_source</code></td>
+<td><code>(name, n_pos, n_neg, i_initial, i_pulsed, t_start, pulse_width, period=0, rise_time=0, fall_time=0)</code></td>
+</tr>
+<tr>
+<td><code>add_pwl_current_source</code></td>
+<td><code>(name, n_pos, n_neg, t, i, periodic=False)</code> — linear between knots, <code>i[0]</code> before <code>t[0]</code>, <code>i[-1]</code> after (or repeated with period <code>t[-1] − t[0]</code>)</td>
+</tr>
 </tbody>
 </table>
+<p>Every current source (DC, sine, pulse, table, <code>vccs</code>, <code>cccs</code>) drives a
+positive value OUT of <code>n_pos</code> into the circuit: 10 mA into 1 kΩ from
+<code>n_pos</code> to ground reads +10 V, and <code>res.i</code> of the source reads +10 mA.
+<code>control</code> names a branch added earlier that carries a current unknown:
+a voltage source of any kind (a 0 V one is the usual sense element), an
+inductor, a VCVS, a CCVS or an ideal-transformer secondary; the current
+is positive from that branch's first node to its second. <code>res.i</code> covers
+the new kinds; <code>res.i(gyrator, port=1)</code> gives port 1 (port 2 by default).
+A <code>ccvs</code> is a voltage source: <code>res.i</code> is its branch current, positive
+from <code>out_pos</code> through it to <code>out_neg</code>.</p>
+<p>All seven run on <code>pwl</code>, <code>trbdf2</code>, <code>dsed</code> and the DC operating point (a
+waveform source at its <code>t = 0</code> value); the AC sweep takes the four
+controlled ones, and the waveform current sources, being independent,
+add no AC excitation. <code>trbdf2</code> lands on table knots and pulse corners.</p>
 <h3 id="passive-devices">Passive devices<a class="headerlink" href="#passive-devices" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
@@ -2523,7 +2957,7 @@ result remains valid), and memory drops by the same factor.
 </tr>
 <tr>
 <td><code>add_nonlinear_diode</code></td>
-<td><code>(name, anode, cathode, params: IdealDiodeParams)</code></td>
+<td><strong>retired</strong> — raises <code>RetiredDeviceError</code>: its law sources power for <code>0 &lt; v &lt; V_F0</code> (−1.39 A out of the anode at +0.636 V). Use <code>add_diode(..., V_f=)</code> or <code>add_shockley_diode</code>. <code>allow_non_passive=True</code> builds the legacy device (test fixtures only); YAML <code>type: nonlinear_diode</code> needs <code>allow_non_passive: true</code></td>
 </tr>
 </tbody>
 </table>
@@ -2538,15 +2972,15 @@ result remains valid), and memory drops by the same factor.
 <tbody>
 <tr>
 <td><code>add_mosfet</code></td>
-<td><code>(name, drain, source, R_on=1e-3, R_off=1e9, body_diode=True, V_F=0.7)</code> — linear switch model PLUS an anti-parallel body diode <code>&lt;name&gt;_body</code>, ON by default. Both are switching branches, so each <code>add_mosfet</code> takes <strong>two</strong> bits of the <code>SwitchStateMask</code>; use <code>builder.switch_index_of(name)</code></td>
+<td><code>(name, drain, source, R_on=1e-3, R_off=1e9, body_diode=True, V_F=0.7)</code> — linear switch model PLUS an anti-parallel body diode <code>&lt;name&gt;_body</code>, ON by default; <code>V_F</code> is its conduction drop (<code>v_SD = V_F + i/1e3 S</code>). Both are switching branches, so each <code>add_mosfet</code> takes <strong>two</strong> bits of the <code>SwitchStateMask</code>; use <code>builder.switch_index_of(name)</code></td>
 </tr>
 <tr>
 <td><code>add_mosfet_with_body_diode</code></td>
-<td><code>(name, drain, source, R_on=1e-3, R_off=1e9, V_F=0.7, g_on_diode=1e3, g_off_diode=1e-9)</code></td>
+<td><code>(name, drain, source, R_on=1e-3, R_off=1e9, V_F=0.7, g_on_diode=1e3, g_off_diode=1e-9)</code> — <code>V_F</code> is the body diode's conduction drop (<code>v_SD = V_F + i/g_on_diode</code>)</td>
 </tr>
 <tr>
 <td><code>add_mosfet_level1</code></td>
-<td><code>(name, drain, source, gate, K, V_T, lambda_=0.02, kappa=15.0, with_body_diode=True)</code></td>
+<td><code>(name, drain, source, gate, K, V_T, lambda_=0.02, kappa=15.0, with_body_diode=True, V_F=0.7)</code> — <code>V_F</code> is the body diode's conduction drop</td>
 </tr>
 <tr>
 <td><code>add_igbt</code></td>
@@ -2554,7 +2988,7 @@ result remains valid), and memory drops by the same factor.
 </tr>
 <tr>
 <td><code>add_igbt_level1</code></td>
-<td><code>(name, collector, emitter, gate, V_CE_sat=1.5, R_CE_sat=0.05, V_T=5.0, kappa=10.0, v_knee=0.01, with_fwd=False, tau_tail=0.0, k_tail=0.0)</code></td>
+<td><code>(name, collector, emitter, gate, V_CE_sat=1.5, R_CE_sat=0.05, V_T=5.0, kappa=10.0, v_knee=0.01, with_fwd=False, tau_tail=0.0, k_tail=0.0, V_F=0.7)</code> — <code>V_F</code> is the freewheeling diode's conduction drop</td>
 </tr>
 </tbody>
 </table>
@@ -2572,7 +3006,12 @@ result remains valid), and memory drops by the same factor.
 <tr>
 <td><code>has_nonlinear_devices()</code></td>
 <td><code>bool</code></td>
-<td>Auto-detect by <code>simulate()</code>.</td>
+<td>Alias of <code>requires_newton()</code>: any kind the capability table (<code>pulsim.engine_capabilities()</code>) marks NewtonStatic / NewtonStateful.</td>
+</tr>
+<tr>
+<td><code>requires_static_refresh()</code></td>
+<td><code>bool</code></td>
+<td>Any smooth / Shockley diode, MOSFET or IGBT (the kernel then builds the static Newton chain).</td>
 </tr>
 </tbody>
 </table>
@@ -2613,7 +3052,25 @@ detection.</p>
 - <code>result.states</code> — read-only 2-D <code>numpy.ndarray</code>, shape
   <code>(num_steps, state_size)</code> (zero-copy view)
 - <code>result.commutation_events</code> — list[CommutationEvent] (event-detection details)
-- <code>result.num_steps()</code> — int</p>
+- <code>result.num_steps()</code> — int
+- <code>result.step_loop_python_callbacks</code> — tuple naming the Python callables
+  <code>simulate()</code> put in the step loop (<code>"switch_fn"</code>, <code>"b_extra_fn"</code>,
+  <code>"step_observer"</code>, <code>"should_continue"</code>, <code>"closed_loops"</code>); <code>()</code> when the
+  loop ran fully native (e.g. a <code>make_pwm_switch_fn</code> schedule)
+- <code>result.control_tick_counts</code> / <code>result.control_tick_jitter_max</code> — ticks
+  delivered per controller source, and the largest lateness on the <code>dt</code>
+  grid
+- <code>result.n_restart_steps</code> / <code>result.n_restart_factorizations</code> — SDIRK
+  restart steps taken and the factorisations they caused, with
+  <code>discontinuity_restart=True</code> (0 otherwise)
+- <code>result.newton</code> — <code>NewtonCounters</code> of the run's Newton workspace
+  (<code>pwl</code> / <code>trbdf2</code>): <code>solves</code>, <code>iterations</code>, <code>analyses</code>,
+  <code>factorizations</code>, <code>partial_refactors</code>, <code>lm_attempts</code> and
+  <code>iterations_per_solve</code> (the iteration count of every Newton call)
+- <code>result.newton_roundoff_accepts</code> / <code>result.newton_roundoff_omega_max</code> /
+  <code>result.newton_roundoff_row</code> — transient Newton solves accepted at row
+  roundoff (row-wise backward error ≤ 8 eps) instead of aborting, the
+  worst backward error and its MNA row (DC never accepts)</p>
 <h2 id="statistics-over-a-result-time-weighted">Statistics over a result (time-weighted)<a class="headerlink" href="#statistics-over-a-result-time-weighted" title="Permanent link">&para;</a></h2>
 <p><code>result.times</code> is uniform only when you passed <code>dt</code>. Without one
 (<code>engine='auto'</code>, the default, picks TR-BDF2) and on <code>engine='trbdf2'</code> /
@@ -2641,14 +3098,14 @@ average output over 2–3 ms:</p>
 </tr>
 <tr>
 <td><code>trbdf2</code>, <code>dt=4e-6</code> (ceiling)</td>
-<td style="text-align: right;">1775</td>
-<td style="text-align: right;"><strong>3.0408 V</strong></td>
+<td style="text-align: right;">1270</td>
+<td style="text-align: right;"><strong>3.9677 V</strong></td>
 <td style="text-align: right;">6.3298 V</td>
 </tr>
 <tr>
 <td><code>auto</code>, no <code>dt</code></td>
-<td style="text-align: right;">1297</td>
-<td style="text-align: right;"><strong>5.0070 V</strong></td>
+<td style="text-align: right;">1432</td>
+<td style="text-align: right;"><strong>4.5746 V</strong></td>
 <td style="text-align: right;">6.3300 V</td>
 </tr>
 </tbody>
@@ -2709,12 +3166,92 @@ average output over 2–3 ms:</p>
   NaN/inf inside the window. <code>steady_state_stats</code> also requires
   exactly one of <code>t_from=</code> / <code>last=</code>: averaging from <code>t = 0</code> would
   fold the start-up transient into a "steady-state" figure.</li>
-<li><code>steady_state_stats(result, "name")</code> looks the name up as a node
+</ul>
+<h3 id="kernel-recorders-simulaterecorders">Kernel recorders (<code>simulate(recorders=...)</code>)<a class="headerlink" href="#kernel-recorders-simulaterecorders" title="Permanent link">&para;</a></h3>
+<p>The same arithmetic, computed by the kernel for probe expressions, per
+declared window and per period, with both limits at events:</p>
+<div class="highlight"><pre><span></span><code><span class="n">rec</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">Recorder</span><span class="p">(</span><span class="s2">"bus"</span><span class="p">,</span> <span class="p">[</span><span class="s2">"v(dp) - v(dn)"</span><span class="p">,</span> <span class="s2">"v(dp,dn)*i(RL)"</span><span class="p">],</span>
+                 <span class="n">keep</span><span class="o">=</span><span class="s2">"none"</span><span class="p">,</span>                  <span class="c1"># 'every' | 'decimate' (every=n) | 'none'</span>
+                 <span class="n">windows</span><span class="o">=</span><span class="p">[(</span><span class="mf">30e-3</span><span class="p">,</span> <span class="mf">40e-3</span><span class="p">)],</span>     <span class="c1"># clipped exactly</span>
+                 <span class="n">period</span><span class="o">=</span><span class="mf">20e-3</span><span class="p">,</span> <span class="n">offset</span><span class="o">=</span><span class="mf">0.0</span><span class="p">)</span>     <span class="c1"># complete periods only</span>
+<span class="n">res</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">t_end</span><span class="o">=</span><span class="mf">40e-3</span><span class="p">,</span> <span class="n">recorders</span><span class="o">=</span><span class="p">[</span><span class="n">rec</span><span class="p">])</span>
+<span class="n">r</span> <span class="o">=</span> <span class="n">res</span><span class="o">.</span><span class="n">recorded</span><span class="p">[</span><span class="s2">"bus"</span><span class="p">]</span>
+<span class="n">r</span><span class="o">.</span><span class="n">windows</span><span class="p">[</span><span class="s2">"v(dp) - v(dn)"</span><span class="p">][</span><span class="s2">"avg"</span><span class="p">]</span>   <span class="c1"># also integral, rms, min, t_min, max, t_max, t0, t1</span>
+<span class="n">r</span><span class="o">.</span><span class="n">periods</span><span class="p">[</span><span class="s2">"v(dp) - v(dn)"</span><span class="p">][</span><span class="s2">"rms"</span><span class="p">]</span>
+<span class="n">r</span><span class="o">.</span><span class="n">event_t</span><span class="p">,</span> <span class="n">r</span><span class="o">.</span><span class="n">event_left</span><span class="p">[</span><span class="o">...</span><span class="p">],</span> <span class="n">r</span><span class="o">.</span><span class="n">event_right</span><span class="p">[</span><span class="o">...</span><span class="p">]</span>   <span class="c1"># both limits at each event</span>
+<span class="n">r</span><span class="o">.</span><span class="n">event_resolution</span><span class="p">,</span> <span class="n">r</span><span class="o">.</span><span class="n">event_t_right</span>                <span class="c1"># 'exact' | 'settled' | 'within_dt'</span>
+<span class="n">r</span><span class="o">.</span><span class="n">feeding</span><span class="p">,</span> <span class="n">res</span><span class="o">.</span><span class="n">recorder_feed</span>                       <span class="c1"># 'in-loop' | 'stored-arrays'</span>
+</code></pre></div>
+<ul>
+<li>A window that starts exactly on an event starts from the right limit,
+  one that ends on an event ends on the left limit, and min / max see
+  both limits of events inside it.</li>
+<li>An impulse (an ideal switch closing a capacitor onto a source, a
+  restart's jump) is a Dirac: <code>integral</code> is the regular part on every
+  engine, and the jump is reported by <code>res.reinit_records</code> (charge or
+  flux <code>lambda_</code>, energy <code>dW</code>), counted in a window that contains its
+  instant or starts at it.</li>
+<li>Event rows say how the right value was obtained (<code>event_resolution</code>):
+  <code>'exact'</code> — the exact engine's right limit at the instant; <code>'settled'</code>
+  — trbdf2's settled post-event state at the instant (the next line starts
+  from it); <code>'within_dt'</code> — a bracket: the left limit at <code>event_t</code>, the
+  end of the first step under the new mode at <code>event_t_right</code> (pwl always,
+  trbdf2 where its settle did not report). No right limit is invented.</li>
+<li>RMS integrates the line between samples exactly, <code>h(a² + ab + b²)/3</code>;
+  a product probe is linear between its own samples, as
+  <code>time_average</code> of the product trace is. EXCEPT in the exact engine's
+  loop: there each step's integral and RMS are the closed form of its mode
+  (exact for the trajectory, the same at any <code>dt</code> / <code>output_rtol</code>; a probe
+  that is a polynomial of degree ≤ 2 in its readings; sine, pulse, PWM and
+  table sources included: they are states of the mode). A piece with no
+  closed form (another probe, a user <code>b_extra_fn</code>) is the line and warns;
+  <code>res.recorder_feed["closed_form"]</code> counts both. min / max are the values
+  at the samples and window edges.</li>
+<li><code>res.avg</code> / <code>res.rms</code> / <code>res.integral</code> and the stored-array pass are the
+  line between STORED samples: exact for the fixed engine's rule, O(h²)
+  otherwise — <code>engine='exact'</code> without <code>dt</code> stores one sample per 10 µs
+  (1e-4 off on a buck's window average). Use an in-loop recorder there.</li>
+<li><strong>Feeding mode per engine</strong> (<code>r.feeding</code>, <code>res.recorder_feed</code>):</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>engine</th>
+<th>mode</th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>pwl</code>, <code>trbdf2</code></td>
+<td><code>'in-loop'</code></td>
+<td>fed from the engine's step hooks while it runs: every accepted step, whatever <code>store_every</code> keeps</td>
+</tr>
+<tr>
+<td><code>exact</code> (event-driven integrator: diodes, loss ports, controllers, <code>integrator='rk45'</code>)</td>
+<td><code>'in-loop'</code></td>
+<td>fed from its step hooks: full MNA states, event rows at their exact instants (resolution <code>'exact'</code>); not with the junction temperature loop or a fresh <code>t_start</code> run</td>
+</tr>
+<tr>
+<td><code>exact</code> (<code>integrator='auto'</code> / <code>'bdf2'</code>)</td>
+<td><code>'stored-arrays'</code></td>
+<td>a pass over the stored result (its stored right limits are exact)</td>
+</tr>
+</tbody>
+</table>
+<p>In-loop readings are functions of the state alone: <code>v()</code>, <code>i()</code> of an
+  inductor / voltage source / branch-form switch or diode / resistor, and
+  <code>p()</code> of those; any other reading, and runs that bypass the kernel
+  Simulation object, use the stored-array pass (<code>res.recorder_feed["why"]</code>).
+  <code>store_every &gt; 1</code> works with in-loop recorders (statistics equal the
+  full run's) and is refused by name otherwise; <code>resume_from</code> continues the
+  record from the snapshot's recorder state.
+  <code>keep="decimate"</code> keeps fewer rows with statistics from every step.
+- <code>steady_state_stats(result, "name")</code> looks the name up as a node
   (<code>result.v</code>) and as a branch (<code>result.i</code>); a name that is both raises
   and asks for <code>kind='v'</code> / <code>kind='i'</code>. An array must be sampled on
   <code>result.times</code>; for a signal with its own time base (observer logs,
-  <code>result.signal(...)</code>), call <code>time_average(t_sig, y_sig, ...)</code>.</li>
-</ul>
+  <code>result.signal(...)</code>), call <code>time_average(t_sig, y_sig, ...)</code>.</p>
 <p>Choose a window that spans a whole number of switching (or line)
 periods; a fractional period biases the mean by up to half the ripple.</p>
 <p><code>min</code> / <code>max</code> need no weighting, but on a variable grid they include
@@ -2723,6 +3260,31 @@ explicit <code>dt</code> the grid is uniform and <code>.mean()</code> agrees wit
 <code>time_average</code> to about four significant digits (the difference is the
 half weight the trapezoid gives the two end samples) — the helpers are
 still the form that keeps working when the <code>dt</code> is dropped.</p>
+<h2 id="parameter-sweeps-sweep-monte_carlo">Parameter sweeps — <code>sweep</code> / <code>monte_carlo</code><a class="headerlink" href="#parameter-sweeps-sweep-monte_carlo" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="n">out</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">sweep</span><span class="p">(</span><span class="n">builder_factory</span><span class="p">,</span> <span class="n">params</span><span class="o">=</span><span class="p">{</span><span class="s2">"R"</span><span class="p">:</span> <span class="p">[</span><span class="mi">5</span><span class="p">,</span> <span class="mi">10</span><span class="p">,</span> <span class="mi">20</span><span class="p">]},</span> <span class="n">kpi_fn</span><span class="o">=</span><span class="n">kpi</span><span class="p">,</span>
+              <span class="n">parallel</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">n_workers</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span> <span class="n">backend</span><span class="o">=</span><span class="s2">"auto"</span><span class="p">,</span>
+              <span class="n">t_end</span><span class="o">=</span><span class="mf">1e-3</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="mf">1e-7</span><span class="p">,</span> <span class="n">switch_fn</span><span class="o">=</span><span class="n">pwm</span><span class="p">)</span>
+<span class="n">out</span><span class="o">.</span><span class="n">kpis</span><span class="p">[</span><span class="s2">"v_out"</span><span class="p">];</span> <span class="n">out</span><span class="o">.</span><span class="n">failed</span><span class="p">;</span> <span class="n">out</span><span class="o">.</span><span class="n">backend</span>   <span class="c1"># "serial" | "thread" | "process"</span>
+</code></pre></div>
+<p><code>backend</code> applies when <code>parallel=True</code>:</p>
+<ul>
+<li><code>"auto"</code> (default) runs the first job in the calling thread and reads
+  its <code>res.step_loop_python_callbacks</code>. Empty (native schedule) → the
+  other jobs run on a thread pool; the kernel releases the GIL, so they
+  run in parallel. Any Python callable → a process pool, since
+  threads would serialise on the GIL.</li>
+<li><code>"thread"</code> forces threads. <code>builder_factory</code> and <code>kpi_fn</code> then run
+  concurrently in one interpreter: they must not share mutable state.
+  Closures work (nothing is pickled).</li>
+<li><code>"process"</code> forces processes (the model before 2.1): every argument
+  must pickle, which the native schedules from <code>make_pwm_switch_fn</code> and
+  friends do not.</li>
+</ul>
+<p>Results are in job order and equal the serial run on every backend. A
+job that raises is recorded in <code>out.failed</code> as <code>(index, message)</code> on the
+serial and thread backends; the process backend raises. A run without a
+<code>switch_fn</code> still installs a Python default mask today, so it reports
+<code>("switch_fn",)</code> and <code>"auto"</code> keeps processes for it.</p>
 <h2 id="yaml-loader">YAML loader<a class="headerlink" href="#yaml-loader" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><span class="n">loaded</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">load_yaml_file</span><span class="p">(</span><span class="s2">"examples/buck.yaml"</span><span class="p">)</span>
 <span class="c1"># or</span>
@@ -2748,12 +3310,25 @@ still the form that keeps working when the <code>dt</code> is dropped.</p>
 <span class="n">res</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">loaded</span><span class="p">)</span>    <span class="c1"># t_end / dt from the file; keywords override</span>
 </code></pre></div>
 <p><code>simulate(loaded)</code> takes <code>t_end</code>, <code>dt</code> (when the file sets one),
-<code>t_start</code> and <code>store_every</code> from the <code>simulation:</code> block; any keyword
-you pass wins. The other <code>simulation:</code> fields (Newton tolerances,
-<code>integrator</code>, ...) stay on <code>loaded.options</code> for you to forward. A
+<code>t_start</code> and <code>store_every</code> from the <code>simulation:</code> block, and every
+other key the file sets (<code>loaded.simulation_keys</code>: Newton tolerances and
+caps, <code>integrator</code>, <code>rtol</code>, <code>atol</code>, <code>dt_init</code>) as the keyword of the same
+name; a keyword you pass, then <code>solver=</code>, wins. A key the engine the run
+lands on cannot honour is not used and raises one <code>RuntimeWarning</code>. A
 <code>LoadedCircuit</code> with no top-level <code>simulation:</code> block (or no <code>t_end</code> in
 it) is refused with a <code>ValueError</code> naming the file, unless you pass
 <code>t_end=</code>.</p>
+<p>Controlled and waveform-current-source types: <code>vccs</code> (<code>in_pos</code>,
+<code>in_neg</code>, <code>from</code>, <code>to</code>, <code>gm</code>), <code>ccvs</code> (<code>control</code>, <code>out_pos</code>, <code>out_neg</code>,
+<code>rm</code>), <code>cccs</code> (<code>control</code>, <code>from</code>, <code>to</code>, <code>gain</code>), <code>gyrator</code> (<code>p1_pos</code>,
+<code>p1_neg</code>, <code>p2_pos</code>, <code>p2_neg</code>, <code>g</code>), <code>sine_current_source</code> (<code>from</code>, <code>to</code>,
+<code>i_dc</code>, <code>i_amplitude</code>, <code>frequency</code>, <code>phase</code>), <code>pulse_current_source</code>
+(<code>from</code>, <code>to</code>, <code>i_initial</code>, <code>i_pulsed</code>, <code>t_start</code>, <code>pulse_width</code>,
+<code>period</code>, <code>rise_time</code>, <code>fall_time</code>), <code>pwl_current_source</code> (<code>from</code>, <code>to</code>,
+<code>t</code> and <code>i</code> lists, or <code>file:</code> a two-column comma- or space-separated
+table relative to the working directory, <code>#</code> comments allowed;
+<code>periodic</code>). These types are strict: an unknown key is an error naming
+the device.</p>
 <p>The YAML describes the circuit and run settings only — build any gate
 drive yourself (e.g. <code>make_pwm_switch_fn</code>) and pass it as <code>switch_fn=</code>.</p>
 <p>Key checks. The loader accepts only <code>circuit:</code> and <code>simulation:</code> at the
@@ -2801,25 +3376,62 @@ ignored and the file loaded with <code>t_end = dt = 0</code>). A
 <span class="n">second</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">t_end</span><span class="o">=</span><span class="mf">5e-3</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="mf">2e-7</span><span class="p">,</span> <span class="n">resume_from</span><span class="o">=</span><span class="n">first</span><span class="o">.</span><span class="n">final_snapshot</span><span class="p">)</span>
 </code></pre></div>
 <p><code>result.final_snapshot</code> carries the whole state at the end of a run:
-the MNA vector <code>x</code>, the linear trapezoidal companion <code>history</code>, the
-solver-owned <code>diode_on</code> bits, and one named field per stateful device
-kind — <code>saturable_history</code> (7 reals per saturable, gapped-core or
-hysteretic-core inductor, and per saturable-transformer magnetising
-branch: λ, i, v, then the Jiles-Atherton H, M, branch direction and
-sub-step count), <code>coss_history</code> (3), <code>lauritzen_history</code> (2),
-<code>igbt_tail_history</code> (2), <code>pmsm_history</code> (9 per machine). Snapshots
-pickle.</p>
+the MNA vector <code>x</code>, every device state in one flat vector <code>dev_state</code>,
+its layout <code>dev_layout</code> (instance count per block; the block names are
+<code>SolverSnapshot.dev_layout_names</code>: <code>linear_companion</code>,
+<code>saturable_inductor</code>, <code>nonlinear_capacitor</code>, <code>lauritzen_diode</code>,
+<code>igbt_tail</code>, <code>pmsm_mna</code>) and <code>layout_signature</code>, and the solver-owned
+mode bits <code>mask</code> (which switched diodes conduct). A fixed-step snapshot
+also carries its time grid (<code>grid_origin</code>, <code>grid_step</code>, <code>grid_dt</code>).
+Snapshots pickle (version 4); version-3 pickles and those written by
+Pulsim 2.0 still load and resume (on a restarted grid, see below).</p>
+<p>The 2.0 fields remain as views of the blocks (soft-deprecated: no
+warning yet; to be removed after one release): <code>history</code>
+(2 reals per linear L / C), <code>saturable_history</code> (7 per saturable,
+gapped-core or hysteretic-core inductor and per saturable-transformer
+magnetising branch: λ, i, v, then the Jiles-Atherton H, M, branch
+direction and sub-step count), <code>coss_history</code> (3), <code>lauritzen_history</code>
+(2), <code>igbt_tail_history</code> (2), <code>pmsm_history</code> (9 per machine), and
+<code>diode_on</code> (= <code>mask</code>). Writing a view turns the snapshot into a
+2.0-style payload that a resume converts field by field.</p>
 <ul>
-<li><code>engine='pwl'</code> resumes <strong>exactly</strong>: a two-segment run reproduces the
-  continuous one to machine precision.</li>
+<li><code>engine='pwl'</code>: a two-segment run with the same <code>dt</code> is the continuous
+  run bit for bit (states, times and final device state), split between
+  gate edges or exactly on one: the resumed run continues the snapshot's
+  time grid. A snapshot without a grid (version 3, 2.0, hand-built, or
+  TR-BDF2's) restarts the grid at its <code>t</code>, and an edge can then land one
+  rounding apart (within 1e-11 of each state's scale, measured 8e-12).</li>
 <li><code>engine='trbdf2'</code> / <code>'auto'</code> fills a snapshot and resumes from one to
   the run's own tolerance — the step controller's state (last accepted
   <code>h</code>, the LTE history) is not carried, so the resumed segment restarts
-  from <code>h_init</code>. A TR-BDF2 snapshot resumes exactly on the fixed engine.</li>
-<li><code>engine='dsed'</code> has no snapshot of its own and refuses <code>resume_from=</code>
-  by name.</li>
-<li>An invalid snapshot, or one whose device histories do not match the
-  circuit, is refused by name rather than resumed from zero. Builder
+  from <code>h_init</code>. A TR-BDF2 snapshot resumes on the fixed engine (from its
+  <code>x</code>, device state and mode bits), except one taken where the TR-BDF2
+  run ended exactly on a gate edge (<code>post_edge_derivatives</code> is True): its
+  <code>x</code> is the pre-edge solve but its device derivatives are already the
+  post-edge ones, and the fixed engine refuses it by name (started from
+  that pair it rang and aborted at the next edge). TR-BDF2 resumes from
+  it.</li>
+<li><code>engine='dsed'</code> (<code>'exact'</code>) writes a snapshot on its event-driven
+  integrator (the one diodes, loss ports and controllers use) and on the
+  default <code>'auto'</code> integrator of a diode-free circuit (its own payload,
+  first value 101: a resume continues on <code>'auto'</code>, and another integrator
+  or control ticks with it are refused by name; <code>'bdf2'</code> writes none):
+  the reduced state, the mode and the schedule position travel in the
+  controller block with kind 3 (no new pickle field), the loss tracker's
+  state in field 17, the control ticks' grid in fields 15-16. A resume at
+  an instant the uninterrupted run also stops at (a gate edge, a located
+  event, a control tick) continues it bit for bit on one machine; a split
+  mid-interval takes another step grid until the next gate edge, so the
+  two agree to rounding. <code>t_end</code> is absolute and <code>t_start</code> must be 0 or the
+  snapshot's <code>t</code>. A pwl / trbdf2 snapshot resumes on it where its full
+  state is one state of its stamped mode (the modes are decided at <code>t</code> as
+  at a start); its snapshot is refused by name on pwl and trbdf2 (no
+  companion history to continue from). An in-loop recorder's state
+  (field 18) is continued on the event-driven integrator.</li>
+<li>An invalid snapshot, or one whose device layout does not match the
+  circuit, is refused by name (the first block that differs) rather
+  than resumed from zero. A snapshot without a layout (2.0 pickle,
+  hand-built, or a named field written) is checked per history by size. Builder
   initial conditions (<code>i0=</code>, <code>c0=</code>) are not applied when resuming: the
   snapshot is the state.</li>
 </ul>
@@ -2827,10 +3439,90 @@ pickle.</p>
 one-period map is affine only while every dynamic device is a linear
 capacitor or inductor. Settle with a transient run and use its
 <code>final_snapshot</code> instead.</p>
+<h2 id="periodic-steady-state-periodic_steady_stateb-period-switch_fnnone-start_fromnone">Periodic steady state — <code>periodic_steady_state(b, *, period, switch_fn=None, start_from=None)</code><a class="headerlink" href="#periodic-steady-state-periodic_steady_stateb-period-switch_fnnone-start_fromnone" title="Permanent link">&para;</a></h2>
+<p>Newton shooting on the <strong>true state</strong> <code>x0</code> (capacitor voltages and
+inductor currents, the dsed reduced state, labels in
+<code>r.state_labels</code>) at the section <code>t = 0</code> — the rising edge of the
+zero-phase built-in PWM helpers. Each Newton step is one period of
+the dsed exact stepper with every event located in time, and the
+Jacobian is the monodromy <code>M = Φ_K·S_K·…·S_1·Φ_0</code> (flow Jacobians
+<code>e^{A h}</code> and saltation matrices), so the commutation pattern may
+change between iterations and DCM works. The audit's DCM buck (24 V,
+100 µH, 47 µF, 50 Ω, D = 0.3) converges from zero in 5 map
+evaluations plus one verification period to <code>v_C = 8.99624708729 V</code>
+(50-digit reference 8.99624708728943).</p>
+<div class="highlight"><pre><span></span><code><span class="n">sf</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">make_pwm_switch_fn</span><span class="p">(</span><span class="mf">100e3</span><span class="p">,</span> <span class="mf">0.3</span><span class="p">,</span> <span class="n">b</span><span class="o">.</span><span class="n">switch_index_of</span><span class="p">(</span><span class="s2">"S"</span><span class="p">),</span> <span class="n">b</span><span class="o">.</span><span class="n">graph</span><span class="o">.</span><span class="n">num_switches</span><span class="p">)</span>
+<span class="n">r</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">periodic_steady_state</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">period</span><span class="o">=</span><span class="mf">1e-5</span><span class="p">,</span> <span class="n">switch_fn</span><span class="o">=</span><span class="n">sf</span><span class="p">)</span>
+<span class="n">r</span><span class="o">.</span><span class="n">x0</span><span class="p">,</span> <span class="n">r</span><span class="o">.</span><span class="n">state_labels</span><span class="p">,</span> <span class="n">r</span><span class="o">.</span><span class="n">orbit</span>        <span class="c1"># state at t=0; one period (simulate result)</span>
+<span class="n">r</span><span class="o">.</span><span class="n">multipliers</span><span class="p">,</span> <span class="n">r</span><span class="o">.</span><span class="n">stable</span>              <span class="c1"># Floquet multipliers; max|mu| &lt; 1</span>
+<span class="n">r</span><span class="o">.</span><span class="n">pattern</span>                            <span class="c1"># [(event, instant/T)] at the orbit</span>
+<span class="n">r</span><span class="o">.</span><span class="n">n_period_runs</span><span class="p">,</span> <span class="n">r</span><span class="o">.</span><span class="n">residual_history</span>  <span class="c1"># the cost meter, Newton residuals</span>
+<span class="n">r</span><span class="o">.</span><span class="n">orbit_error_estimate</span>               <span class="c1"># max|(I - M)^-1 (P(x0) - x0)|</span>
+<span class="n">sm</span> <span class="o">=</span> <span class="n">r</span><span class="o">.</span><span class="n">sampled_model</span><span class="p">(</span><span class="n">inputs</span><span class="o">=</span><span class="p">[(</span><span class="s2">"duty"</span><span class="p">,</span> <span class="s2">"S"</span><span class="p">)],</span> <span class="n">outputs</span><span class="o">=</span><span class="p">[</span><span class="s2">"vout"</span><span class="p">])</span>
+<span class="n">sm</span><span class="o">.</span><span class="n">response</span><span class="p">([</span><span class="mf">0.0</span><span class="p">])</span>                   <span class="c1"># H(z=1): d v_out / d D = 23.09 V</span>
+</code></pre></div>
+<ul>
+<li>
+<p><strong>Tolerance.</strong> <code>rtol</code> (default 1e-9) bounds the ORBIT ERROR, not
+  the residual: Newton stops when every component of <code>G = P(x0) − x0</code>
+  and of the error estimate <code>(I − M)⁻¹·G</code> (the next correction) is
+  within <code>rtol·(scale_i + |x0_i|)</code>. With a slow multiplier the error
+  is <code>|G|/(1 − |μ|)</code>: on a DCM boost (|μ| = 0.99894) a residual of
+  1.1e-9 V is 1.07e-6 V of state. The estimate includes the map's
+  rounding floor <code>|(I − M)⁻¹|·(u·scale)</code> (u the double-precision unit
+  roundoff): a residual that happens to be exactly 0 does not make
+  the orbit exact. When the map's rounding, amplified
+  by <code>1/(1 − |μ|)</code>, keeps the estimate above <code>rtol</code>, the solve raises
+  <code>ConvergenceError</code> (loosen <code>rtol</code>) instead of returning an orbit it
+  cannot vouch for.</p>
+</li>
+<li>
+<p><strong>Other engines.</strong> <code>engine="pwl", dt=T/100</code> (a gate edge at
+  <code>t = 0</code>, <code>T/dt</code> an integer) or <code>engine="trbdf2"</code> (step ceiling <code>dt</code>,
+  default <code>T/100</code>) shoot with that engine's own period runs — the fixed
+  engine with its restart rule — and <code>M</code> by finite differences with
+  Broyden updates: the orbit is the one that engine's transient
+  reaches (DCM buck: 12 period runs on <code>pwl</code>, 1.2e-11 of the state
+  scale from a 4000-period transient). <code>r.full_state</code> resumes a
+  transient; <code>sensitivities=</code> and nonlinear devices are refused.
+  <code>run_periodic_shooting</code> / <code>run_harmonic_balance</code> are deprecated
+  delegates of it.</p>
+</li>
+<li><strong>Multipliers.</strong> <code>stable = max|μ| &lt; 1</code>. An orbit with a multiplier
+  outside the unit circle is returned with <code>stable=False</code>, and
+  <code>r.unstable_multipliers</code> names each one: −1 side <code>flip
+  (period-doubling)</code>, +1 side <code>fold</code>, complex <code>Neimark-Sacker</code>. A
+  multiplier on the unit circle (a lossless LC loop, a floating
+  capacitor) is refused: the orbit is not isolated, and the error
+  names the states involved.</li>
+<li><strong>Resume</strong> with <code>simulate(..., engine='dsed', initial_state=r.x0)</code>.</li>
+<li><strong>Small-signal model.</strong> <code>sampled_model(inputs, outputs)</code> returns
+  <code>x[k+1] = A x[k] + B u[k]</code>, <code>y = C x + D u</code> with <code>A = M</code> and <code>B =
+  ∂P/∂u</code> from the same propagators: <code>("duty", switch)</code> moves the
+  switch's turn-off edges by <code>T</code> per unit, <code>("source", name)</code> is a DC
+  source's value. Outputs are state labels, inductor names or node
+  names sampled at <code>t = 0</code>. <code>response(f)</code> is <code>H(e^{j2πfT})</code>, valid
+  below <code>1/(2T)</code>.</li>
+<li><strong>Covered</strong> (slice 1): linear R, L, C, controlled switches, PWL
+  diodes, DC sources, sine sources whose period divides <code>period</code>,
+  gate schedules that name their edges (<code>make_pwm_switch_fn</code> &amp; co.,
+  <code>NativePwm2Switch</code>, <code>NativeMultiMaskPwm</code>, a callable with
+  <code>next_edge_after</code>). <strong>Refused by name</strong>: an opaque Python
+  <code>switch_fn</code>, a schedule or source not periodic in <code>period</code>, PWM or
+  pulse voltage sources, nonlinear and stateful devices, a grazing
+  event, a marginal multiplier, an exhausted budget
+  (<code>max_period_runs=60</code>, with the residual history, last pattern and
+  last multipliers).</li>
+<li><code>steady_state(...)</code> and <code>frequency_response(...)</code> <strong>without <code>dt</code></strong>
+  run on this solver (<code>frequency_response</code> takes <code>B</code> as a central
+  difference of the true-state map in <code>u</code>); with <code>dt</code> they keep the
+  fixed-engine companion-history solve, which raises "no periodic
+  orbit found" in DCM.</li>
+</ul>
 <h2 id="spice-import-spice_to_buildertext_or_path-strictfalse">SPICE import — <code>spice_to_builder(text_or_path, *, strict=False)</code><a class="headerlink" href="#spice-import-spice_to_buildertext_or_path-strictfalse" title="Permanent link">&para;</a></h2>
 <p><code>.MODEL</code> cards are applied: <code>D(IS N RS BV IBV)</code> → <code>add_shockley_diode</code>
 with RS as a series resistor (BV mapped to the kernel's knee at IBV),
-LTspice <code>D(Ron Roff Vfwd)</code> → <code>add_nonlinear_diode</code>, LEVEL-1 <code>NMOS</code>
+LTspice <code>D(Ron Roff Vfwd)</code> → <code>add_diode(g_on = area/Ron, g_off = area/Roff, V_th = 0, V_f = Vfwd)</code>, LEVEL-1 <code>NMOS</code>
 → <code>add_mosfet_level1(K = KP·W_eff/(2·L_eff)·M, V_T = VTO, λ = LAMBDA)</code>
 with RD/RS series resistors and an explicit body diode when the card
 gives IS/JS, LTspice <code>VDMOS</code> → the same with K = KP/2, Rds, and the
@@ -2929,13 +3621,13 @@ knobs) are listed in one warning; <code>strict=True</code> makes them refusals.<
         
         
           
-          <a href="../helpers/" class="md-footer__link md-footer__link--next" aria-label="Next: UX Helpers (discover, plot, monitor)">
+          <a href="../result-reference/" class="md-footer__link md-footer__link--next" aria-label="Next: Result Reference">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                UX Helpers (discover, plot, monitor)
+                Result Reference
               </div>
             </div>
             <div class="md-footer__button md-icon">

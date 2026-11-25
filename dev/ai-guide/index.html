@@ -738,6 +738,48 @@
   
   
     <li class="md-nav__item">
+      <a href="../parameters/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Parameters and Value Updates
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../domains/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Node Domains
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../tutorials/01-rc-charging/" class="md-nav__link">
         
   
@@ -864,6 +906,132 @@
   
   
     <li class="md-nav__item">
+      <a href="../tutorials/07-dc-machine/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 07 — DC Machine
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/08-design-optimisation/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 08 — Using Pulsim inside an optimiser
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/09-magnetic-networks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 09 — Magnetic networks
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/10-power-mosfet-datasheet/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 10 — Datasheet to double pulse
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sensitivities/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Parameter Sensitivities
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../SOFT_SWITCHING/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Soft Switching (ZVS / ZCS probes)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../motors-induction/" class="md-nav__link">
         
   
@@ -948,6 +1116,27 @@
   
   
     <li class="md-nav__item">
+      <a href="../transmission-line/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Transmission Line (Bergeron)
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../c-block/" class="md-nav__link">
         
   
@@ -1011,6 +1200,48 @@
   
   
     <li class="md-nav__item">
+      <a href="../result-reference/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Result Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../device-reference/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Device Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../helpers/" class="md-nav__link">
         
   
@@ -1057,7 +1288,7 @@
         
   
   <span class="md-ellipsis">
-    Known Limitations (2.0)
+    Known Limitations (2.1)
   </span>
   
 
@@ -1739,6 +1970,27 @@
   
   
     <li class="md-nav__item">
+      <a href="../internals/run-planning/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    How a run is planned
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../internals/mmc-arm-block/" class="md-nav__link">
         
   
@@ -1876,7 +2128,7 @@
         
   
   <span class="md-ellipsis">
-    Migration Guide (legacy → 1.0)
+    Migration Guide (2.0 → 2.1, legacy → 1.0)
   </span>
   
 
@@ -2167,14 +2419,8 @@
 the package (`python -m pulsim.guide`). Edit that file, not this one. -->
 
 <h1 id="pulsim-2x-usage-guide-for-ai-coding-assistants">Pulsim 2.x usage guide (for AI coding assistants)<a class="headerlink" href="#pulsim-2x-usage-guide-for-ai-coding-assistants" title="Permanent link">&para;</a></h1>
-<p>This file ships inside the <code>pulsim</code> package and describes the version it
-ships with. <code>python -m pulsim.guide</code> prints it with the installed version
-on the first line; <code>pulsim.ai_guide()</code> returns the same text. When this
-guide and your memory of Pulsim disagree, the guide wins: models are
-trained on Pulsim 1.x and on other simulators, and Pulsim 2 changed
-behaviour without changing many names. Every <code>python</code> block below is
-executed by the test suite, and every printed number is the one it
-prints.</p>
+<p><code>pulsim.ai_guide()</code> returns this text. It beats your memory: Pulsim 2 changed behaviour but kept most 1.x names. Every
+<code>python</code> block runs in the test suite; printed numbers are its output.</p>
 <p>Short version:</p>
 <ul>
 <li>Build with <code>p.CircuitBuilder()</code>, run with <code>p.simulate(b, t_end, dt=None)</code>,
@@ -2183,55 +2429,54 @@ prints.</p>
   gate edge on the <code>dt</code> grid (3.2). Without <code>dt</code> the default
   <code>engine='auto'</code> usually picks the variable-step TR-BDF2.</li>
 <li>Never <code>.mean()</code> a waveform. Use <code>p.steady_state_stats</code>, <code>p.time_average</code>,
-  <code>p.time_rms</code> or <code>np.trapezoid</code>. RMS of a switched (pulsed) current on
-  a fixed grid: <code>np.sqrt(p.time_average(t, i**2))</code> (trap 14).</li>
+  <code>p.time_rms</code> or <code>np.trapezoid</code>; pulsed-current RMS: trap 14.</li>
 <li>Switch bits come from <code>b.switch_index_of(name)</code>; mask size from
   <code>b.graph.num_switches</code>. <code>p.SwitchStateMask(n)</code> is a SIZE.</li>
 <li>PWL diode <code>V_th</code> is a turn-on threshold; <code>V_f</code> is the forward drop.
   Without <code>dt</code>, rerun with <code>dt</code> on any <code>simulate</code> warning (trap 13).</li>
-<li>Loss and thermal summaries average the WHOLE run, start-up included
-  (3.4).</li>
-<li>Check every result physically (section 6) before reporting it.</li>
+<li>Loss and thermal summaries average the WHOLE run, start-up too (3.4).</li>
+<li><code>run_mna_sweep(freqs=)</code> linearises at the DC point (switches at <code>mask=</code>).</li>
+<li>Check every result physically (6) before reporting it.</li>
 <li>A Pulsim exception is a refusal with a reason. Read it; do not catch
   it, and do not loosen <code>tol_newton_dx</code> / <code>tol_newton_res</code> to get past it.</li>
 </ul>
 <h2 id="1-ask-the-installed-package-first">1. Ask the installed package first<a class="headerlink" href="#1-ask-the-installed-package-first" title="Permanent link">&para;</a></h2>
 <ul>
 <li><code>python -m pulsim.guide</code> (this text) and <code>python -m pulsim.guide --path</code>.</li>
-<li>The native classes are pybind11 builtins: <code>inspect.signature</code> fails on
-  them. The real signature is the first line of <code>__doc__</code>, and the
-  package ships type stubs (<code>pulsim/_pulsim.pyi</code>, PEP 561) that IDEs and
-  mypy read.</li>
+<li>Native classes are pybind11 builtins (<code>inspect.signature</code> fails): read
+  <code>__doc__</code> or the stubs (<code>pulsim/_pulsim.pyi</code>).</li>
 <li><code>p.catalog()</code> lists every builder method and helper by category;
   <code>p.example("buck")</code> prints a runnable snippet (<code>"rc"</code>, <code>"boost"</code>,
   <code>"yaml"</code>, <code>"bode"</code>, ...).</li>
 <li><code>res.v(name)</code> / <code>res.i(name)</code> with a misspelled name raise
-  <code>p.NameNotFoundError</code> with close matches. An attribute that does not
-  exist on <code>pulsim</code> raises <code>AttributeError</code>, with a migration hint for
-  retired 1.x names.</li>
+  <code>p.NameNotFoundError</code> with close matches. A missing <code>pulsim</code> attribute
+  raises <code>AttributeError</code> with a 1.x migration hint.</li>
 </ul>
 <div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pulsim</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">p</span>
 
-<span class="nb">print</span><span class="p">(</span><span class="n">p</span><span class="o">.</span><span class="n">CircuitBuilder</span><span class="o">.</span><span class="n">add_sine_voltage_source</span><span class="o">.</span><span class="vm">__doc__</span><span class="o">.</span><span class="n">splitlines</span><span class="p">()[</span><span class="mi">0</span><span class="p">])</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">p</span><span class="o">.</span><span class="n">CircuitBuilder</span><span class="o">.</span><span class="n">add_current_source</span><span class="o">.</span><span class="vm">__doc__</span><span class="o">.</span><span class="n">splitlines</span><span class="p">()[</span><span class="mi">0</span><span class="p">])</span>
 </code></pre></div>
-<div class="highlight"><pre><span></span><code>add_sine_voltage_source(self: pulsim._pulsim.CircuitBuilder, name: str, n_pos: str, n_neg: str, v_dc: typing.SupportsFloat | typing.SupportsIndex, v_amplitude: typing.SupportsFloat | typing.SupportsIndex, frequency: typing.SupportsFloat | typing.SupportsIndex, phase: typing.SupportsFloat | typing.SupportsIndex = 0.0) -&gt; pulsim._pulsim.CircuitBuilder
+<div class="highlight"><pre><span></span><code>add_current_source(self: pulsim._pulsim.CircuitBuilder, name: str, n_pos: str, n_neg: str, I: typing.SupportsFloat | typing.SupportsIndex) -&gt; pulsim._pulsim.CircuitBuilder
 </code></pre></div>
-<p><code>typing.SupportsFloat | typing.SupportsIndex</code> is pybind11's spelling of
-<code>float</code> (the stub writes <code>float</code>). <code>v_dc</code> comes before <code>v_amplitude</code>, and
-<code>phase</code> is in radians.</p>
+<p>That union is pybind11's <code>float</code>, as in the stub.</p>
 <h2 id="2-mental-model">2. Mental model<a class="headerlink" href="#2-mental-model" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Netlist by name.</strong> Nodes are strings; <code>"gnd"</code>, <code>"GND"</code> and <code>"0"</code> are
-  ground. Every <code>b.add_*</code> call adds a branch between two nodes; the
-  first argument is the branch name used later by <code>res.i(name)</code>.
-  Pulsim assembles a modified nodal analysis (MNA) system from them.</li>
+  ground. Each <code>b.add_*</code> adds a branch; its first argument is the name
+  <code>res.i(name)</code> takes.</li>
 <li><strong>Piecewise-linear switching.</strong> <code>add_switch</code>, <code>add_mosfet</code>, <code>add_igbt</code>
-  and <code>add_diode</code> are two-state branches: a conductance <code>g_on</code> (or
-  <code>1/R_on</code>) when on, <code>g_off</code> when off; only <code>add_diode(V_f=)</code> adds a
-  series drop, while on. Each one owns a bit in the switch-state mask. Controlled
-  switches follow <code>switch_fn(t) -&gt; SwitchStateMask</code>; diodes commutate
-  on their own. Smooth devices (<code>add_shockley_diode</code>, <code>add_mosfet_level1</code>,
-  saturable magnetics) are nonlinear and are solved with Newton.</li>
+  and <code>add_diode</code> are two-state branches: conductance <code>g_on</code> (or
+  <code>1/R_on</code>) on, <code>g_off</code> off; <code>add_diode(V_f=)</code> adds a series drop
+  while on. Each owns a switch-mask bit. Controlled switches follow
+  <code>switch_fn(t) -&gt; SwitchStateMask</code> (none: <code>undriven='refuse'|'open'|
+  'closed'</code>); diodes self-commutate. Smooth
+  devices (<code>add_shockley_diode</code>, <code>add_mosfet_level1</code>,
+  <code>add_power_mosfet</code>, saturable magnetics) are solved with Newton;
+  <code>add_nonlinear_diode</code> is retired. Gate transients:
+  <code>p.double_pulse_test</code>, trbdf2 or <code>dt</code> &lt;= 0.2 ns.</li>
+<li><strong>Shared flux</strong> (one path: <code>add_saturable_transformer</code>): <code>add_winding</code>
+  (F=N*i), <code>add_permeance</code>, <code>add_air_gap</code>, <code>add_saturable_permeance</code>,
+  <code>add_magnetic_resistance</code>; node = MMF. Tie each island to gnd.</li>
 <li><strong>Engines</strong> (<code>p.simulate(..., engine=...)</code>):</li>
 </ul>
 <table>
@@ -2259,20 +2504,22 @@ prints.</p>
 <td>accuracy on smooth or diode-commutated circuits</td>
 </tr>
 <tr>
-<td><code>'dsed'</code></td>
-<td>variable, event-driven; refuses Newton devices and floating subnets (reference a star neutral with 1 MOhm)</td>
+<td><code>'exact'</code> (alias <code>'dsed'</code>)</td>
+<td>variable, event-driven; refuses Newton devices and floating subnets (tie a star neutral, 1 MOhm)</td>
 <td>cross-checks of PWL circuits</td>
 </tr>
 </tbody>
 </table>
 <ul>
 <li><code>res.engine_used</code> says which engine ran; <code>res.engine_route_reason</code>
-  says why, when <code>auto</code> did not take the variable-step engine.</li>
-<li><strong>Pass <code>dt</code></strong> when a <code>switch_fn</code> drives the circuit, when you need a
-  uniform grid, or when you compare runs bit for bit. Every on-time
-  must be a whole number of steps, and every edge on the grid (3.2).</li>
+  says why <code>auto</code> routed to <code>pwl</code>.</li>
+<li><strong>Pass <code>dt</code></strong> when a <code>switch_fn</code> drives the circuit, for a uniform
+  grid, or to compare runs bit for bit. Every on-time must be a whole
+  number of steps, every edge on the grid (3.2).</li>
 <li><strong>Omit <code>dt</code></strong> for passive, source-driven and diode-commutated
-  circuits (trap 13), and as the second engine in a cross-check.</li>
+  circuits (trap 13), and as the second engine in a cross-check.
+  Step ceiling <code>min(span/1000, period/20)</code>; <code>rtol</code> bounds the true
+  local error. Refusals: <code>p.option_capabilities()</code>.</li>
 </ul>
 <h2 id="3-canonical-examples">3. Canonical examples<a class="headerlink" href="#3-canonical-examples" title="Permanent link">&para;</a></h2>
 <h3 id="31-rc-step-the-minimal-script">3.1 RC step: the minimal script<a class="headerlink" href="#31-rc-step-the-minimal-script" title="Permanent link">&para;</a></h3>
@@ -2293,20 +2540,20 @@ prints.</p>
 </code></pre></div>
 <h3 id="32-buck-converter-with-a-pwm-switch_fn">3.2 Buck converter with a PWM <code>switch_fn</code><a class="headerlink" href="#32-buck-converter-with-a-pwm-switch_fn" title="Permanent link">&para;</a></h3>
 <p>A <code>switch_fn</code> maps <code>t</code> to a <code>SwitchStateMask</code>. On the fixed-step engine
-gate edges can only fall on the <code>dt</code> grid, so make the on-time a whole
-number of steps (trap 10):</p>
+gate edges fall on the <code>dt</code> grid (unless split), so make the on-time a
+whole number of steps (trap 10):</p>
 <div class="highlight"><pre><span></span><code><span class="n">DT</span> <span class="o">=</span> <span class="mf">1e-7</span>
 
 <span class="n">b</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">CircuitBuilder</span><span class="p">()</span>
 <span class="n">b</span><span class="o">.</span><span class="n">add_voltage_source</span><span class="p">(</span><span class="s2">"Vin"</span><span class="p">,</span> <span class="s2">"vin"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">24.0</span><span class="p">)</span>
-<span class="n">b</span><span class="o">.</span><span class="n">add_mosfet</span><span class="p">(</span><span class="s2">"Q1"</span><span class="p">,</span> <span class="s2">"vin"</span><span class="p">,</span> <span class="s2">"sw"</span><span class="p">)</span>              <span class="c1"># also adds diode "Q1_body"</span>
-<span class="n">b</span><span class="o">.</span><span class="n">add_diode</span><span class="p">(</span><span class="s2">"D1"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="s2">"sw"</span><span class="p">,</span> <span class="mf">1e3</span><span class="p">,</span> <span class="mf">1e-9</span><span class="p">)</span>    <span class="c1"># g_on, g_off; V_th = 0</span>
+<span class="n">b</span><span class="o">.</span><span class="n">add_mosfet</span><span class="p">(</span><span class="s2">"Q1"</span><span class="p">,</span> <span class="s2">"vin"</span><span class="p">,</span> <span class="s2">"sw"</span><span class="p">)</span>            <span class="c1"># also adds diode "Q1_body"</span>
+<span class="n">b</span><span class="o">.</span><span class="n">add_diode</span><span class="p">(</span><span class="s2">"D1"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="s2">"sw"</span><span class="p">,</span> <span class="mf">1e3</span><span class="p">,</span> <span class="mf">1e-9</span><span class="p">)</span>  <span class="c1"># g_on, g_off; V_th = 0</span>
 <span class="n">b</span><span class="o">.</span><span class="n">add_inductor</span><span class="p">(</span><span class="s2">"L"</span><span class="p">,</span> <span class="s2">"sw"</span><span class="p">,</span> <span class="s2">"vout"</span><span class="p">,</span> <span class="mf">100e-6</span><span class="p">)</span>
 <span class="n">b</span><span class="o">.</span><span class="n">add_capacitor</span><span class="p">(</span><span class="s2">"C"</span><span class="p">,</span> <span class="s2">"vout"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">47e-6</span><span class="p">)</span>
 <span class="n">b</span><span class="o">.</span><span class="n">add_resistor</span><span class="p">(</span><span class="s2">"RL"</span><span class="p">,</span> <span class="s2">"vout"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">10.0</span><span class="p">)</span>
 
-<span class="n">q1</span> <span class="o">=</span> <span class="n">b</span><span class="o">.</span><span class="n">switch_index_of</span><span class="p">(</span><span class="s2">"Q1"</span><span class="p">)</span>                 <span class="c1"># never count bits by hand</span>
-<span class="n">n_sw</span> <span class="o">=</span> <span class="n">b</span><span class="o">.</span><span class="n">graph</span><span class="o">.</span><span class="n">num_switches</span>                  <span class="c1"># Q1, Q1_body, D1 -&gt; 3</span>
+<span class="n">q1</span> <span class="o">=</span> <span class="n">b</span><span class="o">.</span><span class="n">switch_index_of</span><span class="p">(</span><span class="s2">"Q1"</span><span class="p">)</span>               <span class="c1"># never count bits by hand</span>
+<span class="n">n_sw</span> <span class="o">=</span> <span class="n">b</span><span class="o">.</span><span class="n">graph</span><span class="o">.</span><span class="n">num_switches</span>                <span class="c1"># Q1, Q1_body, D1 -&gt; 3</span>
 <span class="n">pwm</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">make_pwm_switch_fn</span><span class="p">(</span><span class="mf">100e3</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">,</span> <span class="n">q1</span><span class="p">,</span> <span class="n">n_sw</span><span class="p">)</span>   <span class="c1"># f, D, bit, size</span>
 
 <span class="n">res</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">t_end</span><span class="o">=</span><span class="mf">10e-3</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="n">DT</span><span class="p">,</span> <span class="n">switch_fn</span><span class="o">=</span><span class="n">pwm</span><span class="p">)</span>
@@ -2330,13 +2577,12 @@ takes effect at that point, so the on-time is the same in every period:</p>
 <div class="highlight"><pre><span></span><code>on-steps per period: [50]
 </code></pre></div>
 <p>For a half bridge, <code>p.make_dead_time_pwm_pair_fn</code> drives the high- and
-low-side bits with a dead time; for a three-phase bridge see 3.7. The
-helpers also name their edges (<code>pwm.next_edge_after(t)</code>), so the
-variable-step engines land on them. A plain callable has no edges:
-<code>trbdf2</code> can step over a short pulse or dead time silently (D = 0.03:
-0.17 V vs 1.20 V) and <code>dsed</code> bisects only changes it sees at its
-<code>dt_max / 10</code> polls (and warns). Use a helper or pass <code>dt</code>. Both call
-it out of time order: keep it a pure function of <code>t</code>.</p>
+low-side bits with a dead time; for a three-phase bridge see 3.7.
+Helpers name their edges (<code>pwm.next_edge_after(t)</code>); variable-step
+engines land on them. A plain callable has none: <code>trbdf2</code> samples it
+(trap 13); <code>dsed</code> bisects only changes seen at its <code>dt_max / 10</code> polls
+(and warns). Use a helper or pass <code>dt</code>. Both call it out of time
+order: keep it a pure function of <code>t</code>.</p>
 <h3 id="33-bridge-rectifier-from-pulsimtopology">3.3 Bridge rectifier from <code>pulsim.topology</code><a class="headerlink" href="#33-bridge-rectifier-from-pulsimtopology" title="Permanent link">&para;</a></h3>
 <p>Topology helpers are module-level functions that take the builder first
 and keyword-only node names. The diodes are named <code>&lt;name&gt;__D1</code> ...
@@ -2355,23 +2601,23 @@ and keyword-only node names. The diodes are named <code>&lt;name&gt;__D1</code> 
 </code></pre></div>
 <div class="highlight"><pre><span></span><code>['BR__D1', 'BR__D2', 'BR__D3', 'BR__D4']; V_dc = 92.83 V [trbdf2]
 </code></pre></div>
-<p>It may warn that a step was accepted above tolerance at an event. Run
-the balance of 6.1 before you use any diode current from it.</p>
+<p>It may warn of a step accepted above tolerance at an event; run the
+balance of 6.1 before using any diode current from it.</p>
 <h3 id="34-losses-and-junction-temperature">3.4 Losses and junction temperature<a class="headerlink" href="#34-losses-and-junction-temperature" title="Permanent link">&para;</a></h3>
 <p><code>p.device_loss_summary</code> returns one dict per branch. Switching
 energies come from <code>switch_specs</code>: each gate edge costs
 <code>E_ref * (|V_blk| / V_ref) * (|I| / I_ref)</code>, with <code>V_blk</code> measured across
 the open switch (before a turn-on, after a turn-off) and <code>I</code> through the
-closed one, so a soft edge costs what its measured voltage says (3.7).
+closed one (a soft edge is cheap, 3.7).
 An offset-plus-slope conduction model <code>V_f0*|i| + r_on*i^2</code> comes from
 <code>conduction_specs</code>. <code>p.device_thermal_summary</code> adds a Foster network per
 device (<code>p.FosterStage(R_th_K_per_W, tau_s)</code>). Both cover the WHOLE
 record unless you pass <code>t_from=</code> / <code>t_to=</code> (seconds; bounds interpolated
-on any grid, edges counted when they start inside): on the bridge of
-trap 13 (<code>t_end = 0.1 s</code>, <code>V_f0 = 0.7</code>, <code>r_on = 0.02</code>) the run's diode
-conduction loss is 17x its 80-100 ms value. <code>T_j_trace</code> starts at
-<code>T_ambient_C</code> at t = 0 and settles only after several of the largest
-<code>tau</code>; <code>T_j_avg</code> / <code>T_j_peak</code> cover the window.</p>
+on any grid, edges counted when they start inside; trap 13's whole run
+reads 17x the 80-100 ms diode loss). <code>T_j_trace</code> starts at <code>T_ambient_C</code>
+and settles after a few of the largest <code>tau</code>.
+In-run (pwl, trbdf2): <code>b.set_device_losses("Q1", junction="tj", E_on=, E_off=)</code>
+heats <code>tj</code> (a capacitor on it) per edge; <code>Tj=125</code>: fixed.</p>
 <div class="highlight"><pre><span></span><code><span class="n">b</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">CircuitBuilder</span><span class="p">()</span>
 <span class="n">b</span><span class="o">.</span><span class="n">add_voltage_source</span><span class="p">(</span><span class="s2">"Vin"</span><span class="p">,</span> <span class="s2">"vin"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">24.0</span><span class="p">)</span>
 <span class="n">b</span><span class="o">.</span><span class="n">add_mosfet</span><span class="p">(</span><span class="s2">"Q1"</span><span class="p">,</span> <span class="s2">"vin"</span><span class="p">,</span> <span class="s2">"sw"</span><span class="p">,</span> <span class="n">R_on</span><span class="o">=</span><span class="mf">0.05</span><span class="p">)</span>
@@ -2418,10 +2664,10 @@ turn-off, with <code>V_R</code> read one <code>t_rr</code> (default 100 ns) afte
 <div class="highlight"><pre><span></span><code>P_rr = 0.988 W, 500 turn-offs (10 uJ * 100 kHz = 1 W at V_R = 24 V)
 </code></pre></div>
 <h3 id="35-yaml-netlist">3.5 YAML netlist<a class="headerlink" href="#35-yaml-netlist" title="Permanent link">&para;</a></h3>
-<p><code>p.load_yaml_*</code> return a <code>LoadedCircuit</code> (<code>.builder</code>, <code>.options</code>,
-<code>.switch_names</code>). <code>simulation:</code> must be top-level (nested: refused);
-<code>p.simulate(lc)</code> takes t_end/dt from it. The gate drive is not in the
-YAML: pass a <code>switch_fn</code>.</p>
+<p><code>p.load_yaml_*</code> return a <code>LoadedCircuit</code> (<code>.builder</code>, <code>.options</code>).
+<code>simulation:</code> is top-level; <code>p.simulate(lc)</code> takes t_end/dt from it.
+No gate drive in YAML: pass a <code>switch_fn</code>.
+<code>c.to_yaml()</code> / <code>p.Circuit.from_yaml(t)</code>: exact round trip (pickle).</p>
 <div class="highlight"><pre><span></span><code><span class="n">lc</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">load_yaml_string</span><span class="p">(</span><span class="s2">"""</span>
 <span class="s2">circuit:</span>
 <span class="s2">  devices:</span>
@@ -2439,8 +2685,7 @@ YAML: pass a <code>switch_fn</code>.</p>
 </code></pre></div>
 <h3 id="36-parameter-sweep">3.6 Parameter sweep<a class="headerlink" href="#36-parameter-sweep" title="Permanent link">&para;</a></h3>
 <p><code>p.sweep</code> calls a builder factory per point (Cartesian product of
-<code>params</code>), forwards <code>**simulate_kwargs</code> to every run, and calls
-<code>kpi_fn(res, params)</code>.</p>
+<code>params</code>), forwards <code>**simulate_kwargs</code>, calls <code>kpi_fn(res, params)</code>.</p>
 <div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">make_buck</span><span class="p">(</span><span class="n">R_load</span><span class="p">):</span>
     <span class="n">b</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">CircuitBuilder</span><span class="p">()</span>
     <span class="n">b</span><span class="o">.</span><span class="n">add_voltage_source</span><span class="p">(</span><span class="s2">"Vin"</span><span class="p">,</span> <span class="s2">"vin"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">24.0</span><span class="p">)</span>
@@ -2465,10 +2710,14 @@ YAML: pass a <code>switch_fn</code>.</p>
 R_load =  10.0 ohm -&gt; V_out = 12.00 V
 R_load = 100.0 ohm -&gt; V_out = 15.79 V
 </code></pre></div>
-<p>At 100 ohm the inductor current reaches zero each cycle (discontinuous
-conduction), so <code>V_out</code> rises above <code>D * V_in</code>. That is physics, not an
-error. For R/L/C-only sweeps on one topology, <code>p.sweep_path_aware</code>
-reuses the factorisation across points.</p>
+<p>At 100 ohm the buck is in DCM, so <code>V_out</code> &gt; <code>D * V_in</code>. <code>p.sweep_path_aware</code> reuses the factorisation for R/L/C-only
+sweeps; <code>parallel=True</code> runs on threads when the step loop is native.
+For optimisers, <code>p.design</code>: <code>Evaluator(build, period=T,
+loads=("RL",), output="vout").evaluate(d)</code>, <code>build(d) -&gt; (b, switch_fn)</code>.
+Read <code>rec.kpis</code> only for status <code>ok</code>/<code>infeasible</code>; <code>refused</code>/<code>failed</code>
+carry <code>rec.reason</code> and no number. Exact gradients (dsed only):
+<code>r = p.simulate(..., engine="dsed", sensitivities=["L.L", "S.duty"])</code>,
+<code>v, g = r.kpi("vout", "avg")</code>; other engines refuse.</p>
 <h3 id="37-three-phase-inverter-with-sinusoidal-pwm">3.7 Three-phase inverter with sinusoidal PWM<a class="headerlink" href="#37-three-phase-inverter-with-sinusoidal-pwm" title="Permanent link">&para;</a></h3>
 <p><code>add_three_phase_vsi</code> returns <code>switch_indices</code> in the order
 <code>p.ThreePhaseLegIndices</code> takes them (HSa, LSa, HSb, LSb, HSc, LSc);
@@ -2505,32 +2754,34 @@ ideal V_LL1 = sqrt(3/8) * m * V_dc = 293.9 V
 </code></pre></div>
 <p>The dead time costs <code>4/pi * V_dc * t_d * f_sw * sqrt(3/2)</code> = 9.4 V of
 <code>V_LL1</code>; <code>P_dc &lt; 0</code> is the source sign convention (section 4). In the
-dead time the antiparallel PWL diode takes the freewheel current and
-drops <code>V_f + i / g_on</code> (0.7 V + 0.05 ohm); once <code>HSa</code> is gated on, the
-switch takes it all and the diode turns off at zero current: it never
-shares (printed above). <code>switch_specs</code>
-on <code>HSa</code> (<code>E_on_ref</code> 4 mJ, <code>E_off_ref</code> 3.5 mJ at 600 V, 50 A) gives
-11.3 W with the dead time (soft edges see only the diode's drop: about 0 J)
-and 22.6 W without (soft edges block 600 V and are charged like hard
-ones, on top of <code>INV__LSa</code>'s own hard edges). Model the dead time.</p>
+dead time the freewheel diode carries the current (drop <code>V_f + i / g_on</code>);
+once <code>HSa</code> is on, the switch takes it all and the diode never shares
+(printed above). <code>switch_specs</code> on <code>HSa</code> (4 / 3.5 mJ at 600 V, 50 A)
+give 11.3 W with the dead time and 11.6 W without: an edge whose <code>v</code> and
+<code>i</code> readings have opposite signs is soft (0 J), the complementary edge
+is hard.</p>
 <h2 id="4-exact-signatures-of-the-most-used-calls">4. Exact signatures of the most used calls<a class="headerlink" href="#4-exact-signatures-of-the-most-used-calls" title="Permanent link">&para;</a></h2>
-<p><code>b</code> is a <code>CircuitBuilder</code>, <code>res</code> a <code>SimulationResult</code>. These lines are
-checked against the installed package by the test suite. <code>...</code> marks
-further keyword-only options; see <code>help()</code>.</p>
+<p><code>b</code> is a <code>CircuitBuilder</code>, <code>res</code> a <code>SimulationResult</code>; the test suite
+checks these lines. <code>...</code> marks more keyword-only options (<code>help()</code>).</p>
 <div class="highlight"><pre><span></span><code>p.CircuitBuilder()
 b.add_resistor(name, n_pos, n_neg, R_ohms)
-b.add_capacitor(name, n_pos, n_neg, C_farads, c0=None)
-b.add_inductor(name, n_pos, n_neg, L_henries, i0=None)
+b.add_capacitor(name, n_pos, n_neg, C_farads, c0=None, ...)
+b.add_inductor(name, n_pos, n_neg, L_henries, i0=None, ...)
 b.add_voltage_source(name, n_pos, n_neg, V)
 b.add_current_source(name, n_pos, n_neg, I)
 b.add_sine_voltage_source(name, n_pos, n_neg, v_dc, v_amplitude, frequency, phase=0.0)
 b.add_pulse_voltage_source(name, n_pos, n_neg, v_initial, v_pulsed, t_start, pulse_width, period=0.0, rise_time=0.0, fall_time=0.0)
 b.add_pwm_voltage_source(name, n_pos, n_neg, v_high, v_low, frequency, duty, phase=0.0)
-b.add_diode(name, anode, cathode, g_on, g_off, V_th=0.0, V_f=0.0)
+b.add_pwl_current_source(name, n_pos, n_neg, t, i, periodic=False)
+b.add_vccs(name, in_pos, in_neg, n_pos, n_neg, gm)
+b.add_cccs(name, control, n_pos, n_neg, gain)
+b.add_ccvs(name, control, out_pos, out_neg, rm)
+b.add_gyrator(name, p1_pos, p1_neg, p2_pos, p2_neg, g)
+b.add_diode(name, anode, cathode, g_on=None, g_off=None, V_th=0.0, V_f=0.0, ...)
 b.add_shockley_diode(name, anode, cathode, I_S=1e-12, n=1.0, V_T=0.025852, G_min=1e-12, BV=0.0)
-b.add_switch(name, n_pos, n_neg, g_on, g_off)
-b.add_mosfet(name, drain, source, R_on=0.001, R_off=1000000000.0, body_diode=True, V_F=0.7)
-b.add_igbt(name, collector, emitter, R_on=0.01, R_off=1000000000.0)
+b.add_switch(name, n_pos, n_neg, g_on=None, g_off=None, ...)
+b.add_mosfet(name, drain, source, R_on=0.001, R_off=1e9, body_diode=True, V_F=0.7, ...)
+b.add_igbt(name, collector, emitter, R_on=0.01, R_off=1e9, ...)
 b.add_transformer(name, p_from, p_to, s_from, s_to, L_p, L_s, k=1.0)
 b.node_id_of(name)
 b.switch_index_of(name)
@@ -2541,34 +2792,43 @@ p.make_three_phase_spwm_fn(carrier_frequency, modulation_frequency, modulation_i
 p.ThreePhaseLegIndices(hs_a, ls_a, hs_b, ls_b, hs_c, ls_c)
 p.simulate(builder, t_end=None, dt=None, *, engine='auto', rtol=None, atol=None, ...)
 res.v(name, t=None)
-res.i(name, t=None)
+res.i(name, t=None, *, port=None)
 p.steady_state_stats(result, what, *, t_from=None, t_to=None, last=None, kind=None)
+p.periodic_steady_state(builder, *, period, switch_fn=None, start_from=None, ...)
 p.time_average(t, y, t_from=None, t_to=None)
 p.time_rms(t, y, t_from=None, t_to=None)
-p.add_bridge_rectifier(builder, name, *, ac_a, ac_b, dc_pos, dc_neg, g_on=1000.0, g_off=1e-09, V_th=0.7, V_f=0.0)
-p.add_three_phase_vsi(builder, name, *, vdc_pos, vdc_neg, out_a, out_b, out_c, R_on=0.001, R_off=1000000000.0, with_freewheel_diodes=True, V_f=0.7, R_d=0.05, V_th=0.0)
-p.load_yaml_string(yaml_text)
-p.load_yaml_file(path)
-p.sweep(builder_factory, *, params, kpi_fn, parallel=False, n_workers=None, verbose=True, **simulate_kwargs)
+p.add_bridge_rectifier(builder, name, *, ac_a, ac_b, dc_pos, dc_neg, g_on=1000.0, g_off=1e-09, V_th=0.7, V_f=0.0, ...)
+p.add_three_phase_vsi(builder, name, *, vdc_pos, vdc_neg, out_a, out_b, out_c, R_on=0.001, R_off=1000000000.0, with_freewheel_diodes=True, V_f=0.7, R_d=0.05, V_th=0.0, ...)
+p.load_yaml_string(yaml_text, *, allow_native_code=None)
+p.load_yaml_file(path, *, allow_native_code=None)
+p.sweep(builder_factory, *, params, kpi_fn, parallel=False, n_workers=None, backend='auto', verbose=True, **simulate_kwargs)
 p.device_loss_summary(builder, result, *, switch_fn=None, core_loss_specs=None, diode_specs=None, switch_specs=None, conduction_specs=None, t_from=None, t_to=None)
-p.device_thermal_summary(builder, result, *, thermal_specs, T_ambient_C=25.0, switch_fn=None, switch_specs=None, diode_specs=None, core_loss_specs=None, conduction_specs=None, t_from=None, t_to=None)
+p.device_thermal_summary(builder, result, *, thermal_specs, T_ambient_C=25.0, switch_fn=None, ...)
 p.scope(builder, result, *, signals=None, title=None, save=None, stack=True, show=False, tight_lw=False)
 </code></pre></div>
 <p>Notes: <code>res.i(name)</code> is positive from a device's first node to its
 second, through it: <code>add_mosfet</code> drain to source, <code>&lt;name&gt;_body</code> source
 to drain, VSI diode <code>INV__Dha</code> from <code>out_a</code> to <code>vdc_pos</code>. So
 <code>res.i(&lt;voltage source&gt;)</code> is negative when it delivers power (1 V into
-1 ohm reads -1 A). <code>add_current_source</code> drives <code>I</code> OUT of <code>n_pos</code> into
-the circuit, and <code>res.i</code> of it reads <code>I</code>. <code>t</code> in <code>res.v(name, t)</code> is a
+1 ohm reads -1 A). <code>add_sine_current_source</code> / <code>add_pulse_current_source</code>
+take the voltage versions' arguments, <code>v_</code> renamed <code>i_</code>. Current sources
+(also pwl, <code>vccs</code>, <code>cccs</code>) drive OUT of <code>n_pos</code>; <code>res.i</code> reads that.
+<code>control</code> names an earlier branch with a current unknown.
+Gyrator: <code>i1 = g*v2</code>, <code>i2 = -g*v1</code> into <code>p1_pos</code>/<code>p2_pos</code>;
+<code>port=1</code> reads <code>i1</code>. <code>t</code> in <code>res.v(name, t)</code> is a
 sample INDEX; at a time, use <code>np.interp(t, res.times, res.v(name))</code>.
 A ground name gives zeros. <code>phase</code> of the two PWM helpers and <code>carrier_phase</code>
 are time shifts in SECONDS (<code>t - phase</code>); <code>modulation_phase</code> and the
 <code>phase</code> of <code>add_sine_voltage_source</code> are radians.
-<code>add_capacitor(c0=)</code> / <code>add_inductor(i0=)</code> set initial conditions.
-Other <code>simulate</code> keywords you may need: <code>switch_fn</code>, <code>t_start</code>,
-<code>store_every</code>, <code>auto_regularize</code>, <code>progress</code>.</p>
+<code>add_capacitor(c0=, esr=, esl=)</code> / <code>add_inductor(i0=, esr=, c_par=, rac=)</code>:
+datasheet ESR, ESL, C_par; fixed step <code>dt &lt;= 1/(20*f_res)</code>. MLCC bias:
+<code>passives.fit_mlcc_dc_bias</code>. Lines: <code>model='bergeron'</code> is exact;
+<code>model='pi'</code> needs <code>recommend_line_sections</code>.
+Other <code>simulate</code> keywords: <code>switch_fn</code>, <code>t_start</code>, <code>store_every</code>,
+<code>auto_regularize</code>, <code>progress</code>. Measure cost by counts, not time:
+<code>res.stats.n_factorizations</code> etc. (0 if unreported), <code>res.counters</code> (pwl).</p>
 <h2 id="5-traps">5. Traps<a class="headerlink" href="#5-traps" title="Permanent link">&para;</a></h2>
-<p>Each row was measured on this version. The fix column is what to write.</p>
+<p>Measured on this version; the last column is the fix.</p>
 <table>
 <thead>
 <tr>
@@ -2581,15 +2841,15 @@ Other <code>simulate</code> keywords you may need: <code>switch_fn</code>, <code
 <tbody>
 <tr>
 <td>1</td>
-<td><code>V_th</code> of <code>add_diode</code> / <code>add_bridge_rectifier</code>, or <code>add_mosfet(V_F=)</code> (body diode), is a forward drop</td>
-<td>It is the turn-on threshold. On-state is <code>V_f + I/g_on</code>: 10 A into <code>g_on = 20 S</code> gives 0.500 V for <code>V_th = 0</code> and <code>0.7</code> alike, 1.200 V with <code>V_f = 0.7</code>. <code>add_three_phase_vsi(V_f=)</code> IS a drop</td>
-<td>Pass <code>V_f</code> (PSIM's diode drop; losses include <code>V_f*I</code>), or <code>b.add_shockley_diode</code> for an exponential law. Never also a <code>conduction_specs</code> <code>V_f0</code></td>
+<td><code>V_th</code> of <code>add_diode</code> / <code>add_bridge_rectifier</code> is a forward drop</td>
+<td>It is the turn-on threshold. On-state is <code>V_f + I/g_on</code>: 10 A into <code>g_on = 20 S</code> gives 0.500 V for <code>V_th = 0</code> and <code>0.7</code> alike, 1.200 V with <code>V_f = 0.7</code>. <code>add_three_phase_vsi(V_f=)</code> and the MOSFET/IGBT diode <code>V_F</code> ARE drops</td>
+<td>Pass <code>V_f</code> (losses include <code>V_f*I</code>), or <code>b.add_shockley_diode</code>. Never also a <code>conduction_specs</code> <code>V_f0</code></td>
 </tr>
 <tr>
 <td>2</td>
 <td><code>v.mean()</code> over a result is the average</td>
-<td>The default grid is variable-step and clusters at events. On the rectifier of 6.2 <code>.mean()</code> reads 5.007 V against 6.330 V (-21 %)</td>
-<td><code>p.steady_state_stats</code>, <code>p.time_average</code>, <code>p.time_rms</code>, <code>np.trapezoid(y, t) / (t[-1] - t[0])</code></td>
+<td>The default grid is variable-step, clustered at events. Rectifier of 6.2: <code>.mean()</code> 4.607 V vs 6.330 V (-27 %)</td>
+<td><code>p.steady_state_stats</code>, <code>p.time_average</code>, <code>p.time_rms</code>, <code>np.trapezoid(y, t) / (t[-1] - t[0])</code>; exact engine (10 us chords): <code>p.Recorder(windows=)</code></td>
 </tr>
 <tr>
 <td>3</td>
@@ -2606,62 +2866,74 @@ Other <code>simulate</code> keywords you may need: <code>switch_fn</code>, <code
 <tr>
 <td>5</td>
 <td>Loosening <code>tol_newton_dx</code> / <code>tol_newton_res</code> fixes a Newton abort</td>
-<td>Both are absolute on purpose. On a snubbed flyback, <code>tol_newton_dx=1e-5, tol_newton_res=1e-4</code> let <code>auto</code> finish at 3.53 V; the fixed engine gives 15.31 V. No error, no warning</td>
-<td>Keep the defaults; read the abort; run <code>engine='pwl'</code> with a <code>dt</code>; fix gate edges, body diodes, initial state</td>
+<td>Both are absolute on purpose. Snubbed flyback, <code>tol_newton_dx=1e-5, tol_newton_res=1e-4</code>: <code>auto</code> 3.53 V, fixed engine 15.31 V, silently</td>
+<td>Keep the defaults; read the abort; run <code>engine='pwl'</code> with <code>dt</code>; fix gate edges, body diodes, initial state</td>
 </tr>
 <tr>
 <td>6</td>
 <td><code>p.scope</code> is a module</td>
-<td><code>p.scope(b, res, signals=[...])</code> is the plotting function (needs matplotlib)</td>
-<td><code>from pulsim.scope import LiveScope</code> (needs pyqtgraph); <code>import pulsim.scope as m</code> gives you the function</td>
+<td><code>p.scope(b, res, signals=[...])</code> plots (matplotlib)</td>
+<td><code>from pulsim.scope import LiveScope</code> (needs pyqtgraph); <code>import pulsim.scope as m</code> gives the function</td>
 </tr>
 <tr>
 <td>7</td>
 <td>Tie an isolated secondary or a floating neutral to ground with a tiny resistor</td>
-<td>A milliohm tie is a galvanic bond. On the VSI of Tutorial 04 a 1 mOhm neutral-to-rail tie drove 58.8 A of DC through every phase (0.0 A floating or with 1 MOhm)</td>
-<td>Leave it to <code>auto_regularize</code> (default on): it ties each floating subnet with 1 GOhm and warns. Your own tie: 1 MOhm or larger</td>
+<td>A milliohm tie is a galvanic bond. Tutorial 04's VSI: a 1 mOhm neutral-to-rail tie drove 58.8 A DC per phase</td>
+<td>Leave it to <code>auto_regularize</code> (default on): the run's copy gets 1 GOhm per floating subnet (<code>res.plan.ties</code>). Own tie: &gt;= 1 MOhm</td>
 </tr>
 <tr>
 <td>8</td>
 <td><code>res.v</code> of a floating DC rail is the DC voltage</td>
-<td>It is to ground. A bridge with <code>ac_b="gnd"</code>, load across <code>dp</code>/<code>dn</code>: <code>v("dp")</code> spans -0.7..325.0 V, <code>v("dn")</code> -325.0..0.7 V; <code>dp - dn</code> averages 321.85 V on both engines. Without <code>dt</code> it warns the rails "reach the rest of the circuit only through switches/diodes"; with 10 mF: 323.94 V, 324.51 V with <code>dt</code></td>
+<td>It is to ground. Bridge with <code>ac_b="gnd"</code>, load across <code>dp</code>/<code>dn</code>: <code>v("dp")</code> spans -0.7..325.0 V, <code>v("dn")</code> -325.0..0.7 V; <code>dp - dn</code> averages 321.85 V</td>
 <td><code>res.v("dp") - res.v("dn")</code>, or ground one DC rail (3.3)</td>
 </tr>
 <tr>
 <td>9</td>
-<td>A fixed-step run is second order from t = 0</td>
-<td>It starts from an inconsistent state and is first order globally, ICs included: RL decay with <code>i0=1</code>, error at 1 ms 1.85e-3 at <code>dt=1e-5</code>, 0.92e-3 at <code>5e-6</code>; sample 0 of node voltages reads 0 V</td>
-<td>Halve <code>dt</code> and compare (6.3); discard the start-up; or omit <code>dt</code></td>
+<td>A fixed-step run is second order</td>
+<td>A gate edge, source jump or IC start leaves stale history: 1st order, ringing. RL i0=1: 1.85e-3 at dt=1e-5, 0.92e-3 at 5e-6</td>
+<td><code>discontinuity_restart=True</code> (6.3): gate read at step start; jumping <code>b_extra_fn</code> needs <code>.next_jump_after</code>; jumps: <code>reinit_records</code>, not in windows. Sample 0 reads 0 V</td>
 </tr>
 <tr>
 <td>10</td>
 <td>Any <code>dt</code> works with PWM</td>
-<td>Gate edges land on the <code>dt</code> grid. Buck D = 0.25 at 100 kHz with <code>make_pwm_switch_fn</code>: 6.24 V with <code>dt=2e-7</code> (on-time 12.5 steps, run as 13), 6.00 V with <code>dt=1e-7</code></td>
-<td>Make <code>D/f_sw</code> a whole number of steps; the helpers then hold it exactly (3.2)</td>
+<td>Gate edges land on the <code>dt</code> grid unless split. Buck D = 0.25, 100 kHz, <code>make_pwm_switch_fn</code>: 6.24 V at <code>dt=2e-7</code> (12.5 steps run as 13), 6.00 V at <code>1e-7</code></td>
+<td>Whole-step <code>D/f_sw</code> (3.2), or 6.3 + <code>enable_substep_state_correction=True</code>: helper edges are split, order 2</td>
 </tr>
 <tr>
 <td>11</td>
 <td>Omitting <code>switch_fn</code> leaves switches open</td>
-<td>With <code>dt</code>, undriven controlled switches are ALL CLOSED and <code>simulate</code> only warns: the buck of 3.2 runs at D = 1 and settles at 24.0 V, not 12 V; without <code>dt</code>, <code>auto</code> refuses</td>
-<td>Always pass <code>switch_fn</code> when the circuit has controlled switches</td>
+<td>With <code>dt</code>, undriven controlled switches are ALL CLOSED, <code>simulate</code> only warns: the buck of 3.2 runs at D = 1, settles at 24.0 V, not 12 V; without <code>dt</code>, <code>auto</code> refuses</td>
+<td>Always pass <code>switch_fn</code> with controlled switches</td>
 </tr>
 <tr>
 <td>12</td>
 <td><code>except Exception:</code> around <code>simulate</code> keeps a script robust</td>
-<td>Pulsim 2 refuses instead of guessing (unsupported model, invalid snapshot, singular circuit). A broad except turns that into a silent wrong answer</td>
-<td>Let it raise; read the message, it names the device and the fix</td>
+<td>A broad except turns a refusal into a silent wrong answer</td>
+<td>Let it raise, or catch <code>p.PulsimError</code> (<code>.engine</code>, <code>.feature</code>)</td>
 </tr>
 <tr>
 <td>13</td>
 <td>A warning from a run without <code>dt</code> is noise</td>
-<td>It names what TR-BDF2 could not guarantee: a diode that "rode its conduction boundary" or was held in a state "its commutation rule forbids" (a missed commutation; named, and <code>res.i</code> repeats it), a <code>switch_fn</code> pulse narrower than its sampling. No warning is no proof: a one-shot <code>switch_fn</code> pulse under a quarter of the step ceiling (<code>dt</code>, else at most <code>t_end/1000</code>) can be skipped silently (2 us in 20 ms: 11 of 20 phases). <code>dsed</code> can refuse a zero-current turn-on of a <code>V_th &lt;= V_f</code> diode</td>
-<td>Rerun with <code>dt</code> and compare (6.2); <code>dt</code> at most 4x the narrowest pulse; <code>dsed</code>: <code>V_th = V_f + 1e-3</code></td>
+<td>It names what TR-BDF2 could not guarantee (a diode on its conduction boundary, a pulse narrower than its sampling). Silence is no proof: a one-shot pulse under a quarter of the step ceiling (<code>dt</code>, else <code>t_end/1000</code>) can be skipped</td>
+<td>Rerun with <code>dt</code>, compare (6.2); <code>dt</code> &lt;= 4x the narrowest pulse</td>
 </tr>
 <tr>
 <td>14</td>
 <td><code>p.time_rms</code> (and <code>.rms</code>) of a switched current is exact on a fixed grid</td>
-<td>It joins samples with lines, so each hard edge is a one-step ramp: low by about <code>h / (3 t_on)</code> in <code>i^2</code>. Buck MOSFET (48 to 12 V, D = 0.25, 100 kHz): 1.4942 / 1.4993 / 1.5019 A at <code>dt</code> = 1e-7 / 5e-8 / 2.5e-8, analytic 1.5044 A. Same for <code>device_loss_summary</code>'s <code>i_rms</code> (not its <code>P_avg</code>)</td>
-<td><code>np.sqrt(p.time_average(t, i**2, t_from=...))</code>: 1.5044 A at all three. Keep <code>time_rms</code> for smooth or variable-grid traces; halve <code>dt</code> to check</td>
+<td>Each edge is a one-step ramp: low by about <code>h / (3 t_on)</code> in <code>i^2</code>. Buck MOSFET (D = 0.25): 1.4942 / 1.4993 / 1.5019 A at <code>dt</code> = 1e-7 / 5e-8 / 2.5e-8, exact 1.5044 A. A switch or PWL diode's <code>i_rms</code> in <code>device_loss_summary</code> is exact</td>
+<td><code>np.sqrt(p.time_average(t, i**2, t_from=...))</code>: 1.5044 A at all three</td>
+</tr>
+<tr>
+<td>15</td>
+<td>Controllers run each step, chains in insertion order</td>
+<td>Ticks at <code>t_start + k*T</code>, <code>ceil(span/T)</code> times. A chain runs in graph order; a loop with no <code>DelayBlock</code>, an unported block, a stateful block with no <code>p.Rate(T)</code> raise <code>ControlGraphBuildError</code></td>
+<td><code>controller_period=</code> or <code>p.Rate</code>; custom code: <code>p.PythonBlock(fn)</code></td>
+</tr>
+<tr>
+<td>16</td>
+<td>No <code>ResolutionWarning</code> means resolved</td>
+<td>Opt-in (<code>resolution_diagnostics=True</code>); estimates, not bounds</td>
+<td>Halve <code>dt</code> (6.3)</td>
 </tr>
 </tbody>
 </table>
@@ -2696,9 +2968,9 @@ SwitchStateMask(1): 1 bit, bit 0 on: False
 otherwise (a reversed source, an open switch, a floating node).</p>
 <h3 id="61-charge-and-energy-balance-from-independent-branches">6.1 Charge and energy balance from independent branches<a class="headerlink" href="#61-charge-and-energy-balance-from-independent-branches" title="Permanent link">&para;</a></h3>
 <p>KCL holds over time: the charge a source delivers must reappear in the
-branches it feeds. Compare branches that are computed independently.
-On the rectifier of 3.3, every coulomb from the AC source must flow
-through the diodes and end up in <code>RL</code> or <code>C</code>:</p>
+branches it feeds, each computed independently. On the rectifier of 3.3
+every coulomb from the AC source flows through the diodes into <code>RL</code> or
+<code>C</code>:</p>
 <div class="highlight"><pre><span></span><code><span class="n">t</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">rect</span><span class="o">.</span><span class="n">times</span><span class="p">)</span>
 <span class="n">q_src</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">trapezoid</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">rect</span><span class="o">.</span><span class="n">i</span><span class="p">(</span><span class="s2">"Vac"</span><span class="p">)),</span> <span class="n">t</span><span class="p">)</span>
 <span class="n">q_load</span> <span class="o">=</span> <span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">trapezoid</span><span class="p">(</span><span class="n">rect</span><span class="o">.</span><span class="n">i</span><span class="p">(</span><span class="s2">"RL"</span><span class="p">),</span> <span class="n">t</span><span class="p">)</span>
@@ -2745,19 +3017,19 @@ and compare time-weighted statistics, never sample means:</p>
           <span class="sa">f</span><span class="s2">"sample mean </span><span class="si">{</span><span class="n">v</span><span class="p">[</span><span class="n">t</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="mf">2e-3</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> V"</span><span class="p">)</span>
 </code></pre></div>
 <div class="highlight"><pre><span></span><code>pwl    time-weighted 6.331 V, sample mean 6.330 V
-trbdf2 time-weighted 6.330 V, sample mean 5.007 V
+trbdf2 time-weighted 6.330 V, sample mean 4.607 V
 </code></pre></div>
 <p>The engines agree; the sample mean on the variable grid does not.
 When two engines disagree, check the metric before blaming an engine.
-Compare ripple and RMS too: the buck of 3.2 reads 11.999 V on both
-engines, but 16.8 mV pp with <code>dt</code> and 15.4 mV without (analytic
-16.0 mV): <code>min</code>, <code>max</code> and <code>ripple_pp</code> are sample extremes, and the
-variable grid (about 20 samples per period here) misses the peaks.
-Read ripple from a fixed-<code>dt</code> run, or <code>np.interp</code> onto a uniform grid
-first.</p>
+Compare ripple too: the buck of 3.2 reads 11.999 V on both engines but
+16.8 mV pp with <code>dt</code> and 15.4 mV without (analytic 16.0 mV): <code>min</code>,
+<code>max</code> and <code>ripple_pp</code> are sample extremes, which the variable grid
+(about 20 samples per period) misses. Read ripple from a fixed-<code>dt</code>
+run, or <code>np.interp</code> onto a uniform grid.</p>
 <h3 id="63-step-size-convergence">6.3 Step-size convergence<a class="headerlink" href="#63-step-size-convergence" title="Permanent link">&para;</a></h3>
-<p>Halve <code>dt</code> and rerun. A figure that moves by more than you need is not
-converged. The fixed engine is first order from the start (trap 9):</p>
+<p>Opt in, read <code>res.resolution</code>: <code>lte_max</code> (step truncation over the peak;
+warns above 1e-2), <code>ringing</code> (Nyquist runs). Then halve <code>dt</code>, rerun. A figure that moves more than you need is not
+converged. The fixed engine is first order unless it restarts (trap 9):</p>
 <div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">rl</span><span class="p">():</span>
     <span class="n">b</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">CircuitBuilder</span><span class="p">()</span>
     <span class="n">b</span><span class="o">.</span><span class="n">add_inductor</span><span class="p">(</span><span class="s2">"L"</span><span class="p">,</span> <span class="s2">"a"</span><span class="p">,</span> <span class="s2">"gnd"</span><span class="p">,</span> <span class="mf">1e-3</span><span class="p">,</span> <span class="n">i0</span><span class="o">=</span><span class="mf">1.0</span><span class="p">)</span>
@@ -2765,12 +3037,12 @@ converged. The fixed engine is first order from the start (trap 9):</p>
     <span class="k">return</span> <span class="n">b</span>
 
 <span class="k">for</span> <span class="n">dt</span> <span class="ow">in</span> <span class="p">(</span><span class="mf">1e-5</span><span class="p">,</span> <span class="mf">5e-6</span><span class="p">):</span>
-    <span class="n">r</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">rl</span><span class="p">(),</span> <span class="n">t_end</span><span class="o">=</span><span class="mf">2e-3</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="n">dt</span><span class="p">)</span>
+    <span class="n">r</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">simulate</span><span class="p">(</span><span class="n">rl</span><span class="p">(),</span> <span class="n">t_end</span><span class="o">=</span><span class="mf">2e-3</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="n">dt</span><span class="p">,</span> <span class="n">discontinuity_restart</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
     <span class="n">err</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">interp</span><span class="p">(</span><span class="mf">1e-3</span><span class="p">,</span> <span class="n">r</span><span class="o">.</span><span class="n">times</span><span class="p">,</span> <span class="n">r</span><span class="o">.</span><span class="n">i</span><span class="p">(</span><span class="s2">"L"</span><span class="p">))</span> <span class="o">-</span> <span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
     <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"dt = </span><span class="si">{</span><span class="n">dt</span><span class="si">:</span><span class="s2">.0e</span><span class="si">}</span><span class="s2">: i_L(tau) error </span><span class="si">{</span><span class="n">err</span><span class="si">:</span><span class="s2">.2e</span><span class="si">}</span><span class="s2"> A"</span><span class="p">)</span>
 </code></pre></div>
-<div class="highlight"><pre><span></span><code>dt = 1e-05: i_L(tau) error 1.85e-03 A
-dt = 5e-06: i_L(tau) error 9.21e-04 A
+<div class="highlight"><pre><span></span><code>dt = 1e-05: i_L(tau) error -3.02e-06 A
+dt = 5e-06: i_L(tau) error -7.61e-07 A
 </code></pre></div>
 <h3 id="64-when-simulate-raises">6.4 When <code>simulate</code> raises<a class="headerlink" href="#64-when-simulate-raises" title="Permanent link">&para;</a></h3>
 <p>The message names the device, node or option involved (trap 12). If
@@ -2778,10 +3050,9 @@ you change engine to get past a refusal, confirm the answer with 6.2.
 Typical refusals: a singular matrix (a floating node), a Newton
 abort (trap 5), a part file without provenance, a mismatched snapshot.</p>
 <h2 id="7-coming-from-pulsim-1x-or-pre-10">7. Coming from Pulsim 1.x or pre-1.0<a class="headerlink" href="#7-coming-from-pulsim-1x-or-pre-10" title="Permanent link">&para;</a></h2>
-<p>Retired names still raise <code>AttributeError</code> with a hint (for example
+<p>Retired names raise <code>AttributeError</code> with a hint (e.g.
 <code>Circuit</code>, <code>Simulator</code>, <code>YamlParser</code>, <code>Preset</code>, <code>PulseParams</code> from
-pre-1.0; the <code>v2</code> sub-namespace of 0.10). The 2.0 changes that keep
-names but change results:</p>
+pre-1.0; the <code>v2</code> sub-namespace of 0.10). Same names, new results:</p>
 <table>
 <thead>
 <tr>
@@ -2812,7 +3083,7 @@ names but change results:</p>
 </tr>
 <tr>
 <td>an IGBT conducted in reverse</td>
-<td><code>b.add_igbt_level1</code> blocks it (<code>with_fwd=True</code> adds the freewheel diode). The PWL <code>b.add_igbt</code> is still a bidirectional switch: gated on, -10 A gives -0.1 V</td>
+<td><code>b.add_igbt(..., V_ce0=0.9, reverse_blocking=True)</code> blocks it; unset it is the old two-way switch (FutureWarning). SCR: <code>b.add_thyristor</code></td>
 </tr>
 <tr>
 <td><code>add_three_phase_vsi</code> built six bare switches</td>
@@ -2823,8 +3094,12 @@ names but change results:</p>
 <td>the inductor is solved inside Newton; drop the observer, whose factory now raises</td>
 </tr>
 <tr>
-<td><code>p.add_pmsm</code> (observer, one average L)</td>
-<td>still there; <code>b.add_pmsm_mna</code> stamps the machine with full saliency</td>
+<td><code>p.add_pmsm</code>/<code>add_bldc</code>/<code>add_induction_motor</code> (observers)</td>
+<td>native: <code>b.add_pmsm_mna</code>, <code>b.add_bldc_mna</code>, <code>b.add_induction_machine_mna</code></td>
+</tr>
+<tr>
+<td><code>p.add_dc_motor</code> (observer)</td>
+<td>deprecated; <code>b.add_dc_machine</code></td>
 </tr>
 <tr>
 <td>parts in <code>pulsim.lib</code> resolved by part number</td>
@@ -2840,15 +3115,13 @@ names but change results:</p>
 with the checks in its section 6 before reporting it.
 </code></pre></div>
 <h2 id="9-where-to-read-more">9. Where to read more<a class="headerlink" href="#9-where-to-read-more" title="Permanent link">&para;</a></h2>
-<p>Paths are relative to the repository root; the documentation site
-mirrors <code>docs/</code>.</p>
 <ul>
-<li><code>docs/getting-started.md</code>; <code>docs/tutorials/01-rc-charging.md</code> ...
-  <code>06-igbt-boost.md</code> (executed, end-to-end converters).</li>
+<li><code>docs/getting-started.md</code>, <code>docs/tutorials/</code>.</li>
 <li><code>docs/api-reference.md</code>, <code>docs/gotchas.md</code>, <code>docs/troubleshooting.md</code>,
-  <code>docs/losses-and-thermal.md</code> (how each loss is computed),
-  <code>docs/loss-thermal.md</code>, <code>docs/mental-model.md</code>, <code>docs/how-pulsim-works/</code>.</li>
-<li><code>CHANGELOG.md</code>: what changed in each release and why.</li>
+  <code>docs/losses-and-thermal.md</code>, <code>docs/loss-thermal.md</code>,
+  <code>docs/mental-model.md</code>, <code>docs/how-pulsim-works/</code>.</li>
+<li><code>CHANGELOG.md</code>: what changed and why.</li>
+<li>Changing <code>simulate()</code>: put it in the plan (<code>docs/internals/run-planning.md</code>).</li>
 </ul>
 
 
