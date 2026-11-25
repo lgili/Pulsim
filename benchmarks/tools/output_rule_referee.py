@@ -255,7 +255,11 @@ def referee(case, res, info, cols, rt, config: str = "auto+next") -> dict:
     # apart, the rule run's corner landed ulps from the reference's): reference instants within
     # EVENT_TOL of a jump of either trace are not read (pwm_voltage_rc's PWM source column read
     # 1e5 x at 40 us: the reference's left limit against the rule's right one)
-    jumps = np.r_[t[:-1][np.diff(t) <= 2 * EVENT_TOL], tg[:-1][np.diff(tg) <= 2 * EVENT_TOL]]
+    # 1 mantissa: a few-ulp pair is a jump; a fine reference grid (dt <= 2 ps) or the rule's
+    # 2 ps sample past an event is not (it hid every instant of rlc_step's first 28 ps)
+    def _jumps(s):
+        return s[:-1][np.diff(s) <= np.maximum(64 * np.finfo(float).eps * np.abs(s[:-1]), 1e-300)]
+    jumps = np.r_[_jumps(t), _jumps(tg)]
     evx = np.unique(np.r_[ev, jumps])
     for c in cols:
         yg = np.concatenate(yg_all[c])
