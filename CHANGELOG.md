@@ -14,8 +14,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   New: `pulsim.NetlistError` (a `ValueError`; `.device`, `.node`) for a
   circuit that is wrong in itself (a pin on the wrong domain, a magnetic
   network with no reference, a tie on a missing node), and
-  `pulsim.SingularError` (a `SimulationAborted`) when a transient step
-  meets a singular matrix. The classes live in `pulsim.errors` (also
+  `pulsim.SingularError` (a `SimulationAborted`) when a fixed-step
+  transient step meets a singular matrix (also after its dt-halving
+  retries; the variable-step engine still reports a plain
+  `SimulationAborted`). The classes live in `pulsim.errors` (also
   `pulsim.<Class>`). Reference: `docs/errors.md`.
 - **`simulate()`'s own refusals are typed.** Its planning and validation
   raise `OptionsError` (`.option` names the keyword) or `UnsupportedError`
@@ -34,6 +36,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Kernel object.** `pulsim.Simulation(..., engine='exact')` names the
   first device the exact engine cannot run (`UnsupportedError.device`)
   before refusing the engine as a whole.
+- **Behaviour that follows from the types (louder, never quieter).**
+  The variable-step route refusal (`engine='auto'` without `dt` on a
+  circuit only the fixed step runs) and the reserved `integrator=` on
+  `'pwl'` are now `UnsupportedError`s, so `sweep()` / `monte_carlo()`
+  propagate them instead of recording each point as failed, design
+  evaluations record them as `"refused"`, and the steady-state
+  capability check reports them as a refusal. A `NetlistError` also
+  propagates out of `sweep()` (it holds for every point) and is no longer
+  retried on the exact engine's fallback bridge. The post-run voltage
+  check and trace attachment still never fail a finished run.
 
 ### Evidence: the exact scoreboard's measure, in three parts
 

@@ -3314,7 +3314,9 @@ def _route(
                 _k._require_supported(builder.graph, builder.pool, "trbdf2")
             except UnsupportedError as e:
                 if e.feature in ("branch_form", "dependent_states"):
-                    _route_reasons = [*_route_reasons, str(e)]
+                    _why = _Blocker(str(e))   # the refusal names the feature
+                    _why.feature = e.feature
+                    _route_reasons = [*_route_reasons, _why]
             if dt is not None and dt > 0:
                 _route_reasons = _route_reasons or [
                     "an explicit dt was given, which requests a "
@@ -5342,7 +5344,7 @@ def _auto_check_voltage_sanity(res, builder, factor):
                 builder.graph, builder.pool,
                 list(_np.asarray(res.times, dtype=float)),
                 _np.asarray(res.states, dtype=float), f)
-    except (AttributeError, TypeError, IndexError):  # pragma: no cover — never break a good run
+    except (AttributeError, TypeError, IndexError, ValueError, RuntimeError):  # pragma: no cover — never break a good run (no refusal is raised in here)
         return
     if volt is not None and volt.node >= 0:
         res._implausible_voltage = volt
@@ -5369,7 +5371,7 @@ def _check_right_limit_voltage(res, builder, factor):
             builder.graph, builder.pool,
             list(_np.asarray(res.times, dtype=float)[_np.asarray(rl, dtype=int)]),
             _np.asarray(res.right_limit_states, dtype=float), f)
-    except (AttributeError, TypeError, IndexError):  # pragma: no cover — never break a good run
+    except (AttributeError, TypeError, IndexError, ValueError, RuntimeError):  # pragma: no cover — never break a good run (no refusal is raised in here)
         return
     if volt is not None and volt.node >= 0:
         res._implausible_voltage = volt
@@ -5537,7 +5539,8 @@ def _auto_attach_motor_traces(
     # uses, keeping `res.signal("M1.omega")` uniform across the two.
     try:
         _attach_native_machine_traces(result, builder)
-    except (AttributeError, KeyError, IndexError, TypeError):  # never break a finished result
+    except (AttributeError, KeyError, IndexError, TypeError, ValueError,
+            RuntimeError):  # never break a finished result (it reads traces only)
         pass
 
 

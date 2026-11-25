@@ -38,7 +38,6 @@ from __future__ import annotations
 
 import bisect as _bisect
 import re
-import warnings
 
 import numpy as _np
 from dataclasses import dataclass
@@ -53,7 +52,8 @@ from ._pulsim import (  # type: ignore[import-not-found]
 )
 from ._pulsim import run_option_defaults as _run_option_defaults  # type: ignore[import-not-found]
 from ._refusal import _UnsupportedNotImplemented, unsupported
-from .errors import OptionsError
+from ._plan import emit as _emit
+from .errors import NetlistError, OptionsError
 from .errors import options_error as _options_error
 
 
@@ -510,14 +510,14 @@ def _result_from_native(native_res, t_start: float):
         og["output_budget_t"] = None if tb != tb else tb + t_start   # NaN: not spent
         res.diagnostics["output_grid"] = og
         if og["output_budget_t"] is not None:
-            warnings.warn(
+            _emit("output_budget",
                 f"simulate(engine='exact', output_rtol=...): the run's output sample budget "
                 f"ran out at t = {og['output_budget_t']:.6g} s; from there the samples are the "
                 "default grid and linear interpolation between them is NOT within output_rtol "
                 "(diagnostics['output_grid']['output_budget_t']). Raise output_rtol, or pass dt.",
                 RuntimeWarning, stacklevel=4)
         if og["n_output_capped"] or og["n_output_unbounded"]:
-            warnings.warn(
+            _emit("output_cap",
                 f"simulate(engine='exact', output_rtol=...): the output grid's sample cap "
                 f"bit in {og['n_output_capped']} interval(s) and {og['n_output_unbounded']} "
                 "step(s) had no diagonalising basis to bound: linear interpolation between "
@@ -1068,7 +1068,7 @@ def run_dsed_from_builder(
     # mask (no switch_fn given) is constant: nothing to warn about.
     if opts.switch_fn is not None and not _has_edge_oracle(sf):
         poll = opts.dt_max / 10
-        warnings.warn(
+        _emit("unlocated_edges",
             "simulate(engine='dsed'): this switch_fn has no "
             "next_edge_after(t), so the scheduler samples it every "
             f"{poll:.3g} s (= dt_max/10) and bisects each change it "
@@ -1329,7 +1329,8 @@ def run_dsed_from_builder(
             if mode_auto is not None:
                 res.diagnostics["mode_selection_auto"] = mode_auto
             return res
-        except (UnsupportedError, _InconsistentInitialState, ConvergenceError):
+        except (UnsupportedError, _InconsistentInitialState, ConvergenceError,
+                NetlistError):
             # A refusal is an answer, not a reason to try the next
             # bridge (which would run the circuit without the device);
             # so is a give-up of the run the native adapter accepted

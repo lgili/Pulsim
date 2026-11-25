@@ -300,7 +300,7 @@ public:
             if (r.error().kind == CacheError::Kind::MaskNotBuilt) {
                 throw std::out_of_range(r.error().what());
             }
-            throw std::runtime_error(r.error().what());
+            throw SingularError(r.error().what());   // the two singular kinds
         }
         return **r;
     }
@@ -2459,6 +2459,9 @@ private:
         const topology::SwitchStateMask& mask, Real dt) {
         auto r = try_make_segment(mask, dt);
         if (!r) {
+            if (r.error().kind != CacheError::Kind::MaskNotBuilt) {
+                throw SingularError(r.error().what());
+            }
             throw std::runtime_error(r.error().what());
         }
         return std::move(*r);

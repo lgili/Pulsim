@@ -40,8 +40,10 @@ Catch by class, never with `except Exception`: a broad handler turns a
 refusal into a silent wrong answer. A GUI that reports refusals can catch
 `p.PulsimError` and show `str(e)`; everything else is a bug to surface.
 
-A `SingularError` is raised when a transient step meets a singular
-matrix. The same failure outside a transient (a DC operating point on its
+A `SingularError` is raised when a fixed-step transient step meets a
+singular matrix, also after its dt-halving retries (the variable-step
+engine still reports a plain `SimulationAborted` with the same kind of
+message). The same failure outside a transient (a DC operating point on its
 own) stays a plain `RuntimeError` with the same message, so a
 `ConvergenceError` handler does not start catching topology defects.
 

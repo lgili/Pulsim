@@ -4015,6 +4015,7 @@ inline SimulationResult run_transient(
                     throw;
                 }
                 std::string why = nominal_failed.what();
+                bool why_singular = singular_in_flight();   // -> SingularError below
                 // `Size{1} << h` is undefined for h >= 64 and
                 // pointless long before that: 2^25 sub-steps of one
                 // outer step is not a recovery, it is a hang. The
@@ -4081,6 +4082,7 @@ inline SimulationResult run_transient(
                             throw;   // a run budget: never retried at a smaller dt
                         } catch (const std::runtime_error& sub_failed) {
                             why = sub_failed.what();
+                            why_singular = singular_in_flight();
                             all_ok = false;
                             break;
                         }
@@ -4143,7 +4145,7 @@ inline SimulationResult run_transient(
                     const bool newton_failed =
                         why.find("solve_with_newton")
                         != std::string::npos;
-                    throw std::runtime_error(std::format(
+                    std::string failure = std::format(
                         "run_transient: the step ending at t = {} "
                         "could not be taken, even split into {} "
                         "sub-steps of {:.3e} s (dt/{}). Last failure: "
@@ -4169,7 +4171,10 @@ inline SimulationResult run_transient(
                               "and runs at 50 ns), or smooth Shockley "
                               "junctions (add_shockley_diode) for "
                               "those diodes."
-                            : ""));
+                            : "");
+                    // a singular matrix stays typed through the retries
+                    if (why_singular) throw SingularError(failure);
+                    throw std::runtime_error(failure);
                 }
             }
             if (sens.on()) [[unlikely]] {

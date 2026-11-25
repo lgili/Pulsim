@@ -298,3 +298,29 @@ TEST_CASE("netlist and singular errors are PulsimErrors with their std base",
     }
     REQUIRE_FALSE(solver::SimulationAborted("other", {}, 0.5).singular());
 }
+
+TEST_CASE("a singular step aborts as singular through the engine's wrap",
+          "[sim][errors]") {
+    // Two voltage sources in parallel: every step matrix is singular. With
+    // and without the dt-halving retries the abort reports singular().
+    builder::CircuitBuilder b;
+    b.add_voltage_source("V1", "a", "gnd", 1.0);
+    b.add_voltage_source("V2", "a", "gnd", 2.0);
+    b.add_resistor("R", "a", "gnd", 1.0);
+    const auto circuit = ir::Circuit::from_builder(b);
+    for (const Size halvings : {Size{0}, Size{3}}) {
+        sim::RunOptions o;
+        o.engine = sim::EngineChoice::Pwl;
+        o.t_end = 1e-5;
+        o.dt = 1e-7;
+        o.max_dt_halvings = halvings;
+        sim::Simulation s{circuit, o};
+        try {
+            (void)s.run();
+            FAIL("no abort");
+        } catch (const solver::SimulationAborted& e) {
+            REQUIRE(e.singular());
+            REQUIRE(std::string(e.what()).find("singular") != std::string::npos);
+        }
+    }
+}

@@ -143,6 +143,81 @@ def test_errors_module_builders():
     assert (p.NetlistError.device, p.NetlistError.node) == ("", "")
 
 
+def _magnetic_without_reference():
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "in", "gnd", 1.0)
+    b.add_resistor("R", "in", "a", 1.0)
+    b.add_winding("W", "a", "gnd", "m1", "m2", 10)
+    b.add_permeance("P", "m1", "m2", 1e-6)
+    return b
+
+
+def test_netlist_errors_come_from_the_kernel_typed():
+    """NetlistError through the translator: the preflight's magnetic
+    reference check (simulate()) and a tie on a missing node."""
+    with pytest.raises(ValueError) as e:      # the old catch still works
+        p.simulate(_magnetic_without_reference(), 1e-5, dt=1e-7)
+    assert isinstance(e.value, p.NetlistError)
+    assert (e.value.device, e.value.node) == ("", "m1")
+    c = _buck().build()
+    with pytest.raises(p.NetlistError) as e:
+        c.with_ties([("Tbad", 999, 1.0)])
+    assert e.value.device == "Tbad" and "999" in str(e.value)
+
+
+@pytest.mark.parametrize("halvings", [0, None])
+def test_a_singular_step_is_a_singular_error(halvings):
+    """Two voltage sources in parallel: the step matrix is singular. The
+    run aborts with SingularError (a SimulationAborted carrying the partial
+    run), with or without the dt-halving retries in between."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V1", "a", "gnd", 1.0)
+    b.add_voltage_source("V2", "a", "gnd", 2.0)
+    b.add_resistor("R", "a", "gnd", 1.0)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        with pytest.raises(p.SimulationAborted) as e:
+            p.simulate(b, 1e-5, dt=1e-7, engine="pwl", max_dt_halvings=halvings)
+    assert isinstance(e.value, p.SingularError), type(e.value)
+    assert e.value.partial is not None
+    assert "singular" in str(e.value)
+
+
+def _line_of(fn, needle):
+    import inspect
+    src, first = inspect.getsourcelines(fn)
+    return first + next(i for i, ln in enumerate(src) if needle in ln)
+
+
+def _undriven_switch():
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "in", "gnd", 1.0)
+    b.add_switch("S", "in", "o", 1e3, 1e-9)
+    b.add_resistor("R", "o", "gnd", 1.0)
+    return b
+
+
+def test_routed_warnings_name_the_callers_line():
+    """Three sites at three stack depths (_plan_run, a helper of it, the
+    undriven policy's own stacklevel argument): each warning is attributed
+    to the line of the simulate() call, and kept on the result."""
+    def run():
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            r1 = p.simulate(_buck(), 1e-5, dt=1e-7, switch_fn=_SW, enable_nonlinear_refresh=True)  # A
+            r2 = p.simulate(_buck(), 1e-5, dt=1e-7, switch_fn=_SW, max_newton_iterations=0)  # B
+            r3 = p.simulate(_undriven_switch(), 1e-6, dt=1e-7, engine="pwl")  # C
+        return w, (r1, r2, r3)
+    w, rs = run()
+    for tag, r in zip("ABC", rs):
+        line = _line_of(run, f"# {tag}")
+        mine = [x for x in w if x.lineno == line]
+        assert mine and all(x.filename == __file__ for x in mine), tag
+        kept = r.diagnostics["messages"]
+        assert [(d.category, d.message) for d in kept] == [
+            (x.category, str(x.message)) for x in mine], tag
+
+
 def test_a_run_keeps_the_warnings_it_emitted():
     """8.3: result.diagnostics['messages'] holds each warning the run
     emitted (category, text), and the warning still names the caller's
