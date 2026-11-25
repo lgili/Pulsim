@@ -24,6 +24,8 @@ import pytest
 
 import pulsim as p
 
+from ._release_defaults import RELEASE
+
 mp.mp.dps = 30
 DT = 1e-8
 V1 = 100.0
@@ -51,12 +53,13 @@ def _w(name, v, nl):
     return mp.quad(lambda u: u * c(u), [0, v])
 
 
-def _island(R2, nl, split):
+def _island(R2, nl, split, release=False):
+    fk = dict(form="branch") if release else {}   # the release default's switch form
     b = p.CircuitBuilder()
     b.add_pulse_voltage_source("Vs", "vs", "gnd", 0.0, V1, 0.0, 1.0, 0.0, 1e-7, 0.0)
     b.add_resistor("Rs", "vs", "a", 10.0)
-    b.add_switch("Ssrc", "a", "n1", 1e3, 1e-12)
-    b.add_switch("S", "n1", "n2", 1e3, 1e-12)
+    b.add_switch("Ssrc", "a", "n1", 1e3, 1e-12, **fk)
+    b.add_switch("S", "n1", "n2", 1e3, 1e-12, **fk)
     b.add_resistor("R2", "n2", "n3", R2)
     for n, (c0, v0, m) in LAWS.items():
         if nl:
@@ -73,8 +76,11 @@ def _island(R2, nl, split):
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        return p.simulate(b, t_end=3e-6, dt=DT, switch_fn=fn, engine="pwl",
-                          discontinuity_restart=True, enable_substep_state_correction=split)
+        kw = dict(engine="pwl", discontinuity_restart=True)
+        if release:
+            kw = dict(RELEASE)
+        return p.simulate(b, t_end=3e-6, dt=DT, switch_fn=fn,
+                          **{**kw, "enable_substep_state_correction": split})
 
 
 @pytest.mark.parametrize("split", [False, True])
@@ -84,7 +90,22 @@ def test_an_island_of_two_fast_modes_keeps_its_charge(R2, nl, split):
     """R2 = 0.05 / 0.4 / 0.8 Ohm: tau2 = R2 * 0.75 nF = 37.5 ps .. 0.6 ns << gamma*dt = 2.9 ns,
     both modes fast. R2 -> 0 (1 uOhm): one mode, C2 || C3. R2 -> inf (1 GOhm, tau2 = 0.75 s):
     one mode, C3 untouched (it stays at 0 V over the run)."""
-    r = _island(R2, nl, split)
+    _check_island(R2, nl, split)
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "OPEN, release finding F-Y-5 (measured here 2026-11-25, release defaults explicit): the "
+    "island's charge over the event's step moves by 1.7205e-17 C of 1.0e-7 C (bound 1e-19 + "
+    "the 1e-18 C leak), with and without the split; the conductance form holds"))
+@pytest.mark.parametrize("split", [False, True])
+def test_f_y_5_the_island_keeps_its_charge_under_the_release_defaults(split):
+    """Release finding F-Y-5 with the release defaults passed explicitly (branch-form
+    switches, mode_selection='auto', ...): the one-mode island (R2 = 1 uOhm), linear."""
+    _check_island(1e-6, False, split, release=True)
+
+
+def _check_island(R2, nl, split, release=False):
+    r = _island(R2, nl, split, release)
     t = np.asarray(r.times)
     vs = {n: np.asarray(r.v(NODE[n])) for n in LAWS}
     kb = int(np.searchsorted(t, T_CLOSE - 1e-15))   # the stored sample at 2 us: the left limit
@@ -221,13 +242,28 @@ def test_a_jump_whose_stage_1_also_turns_a_diode_is_recorded():
     at 0 V, Dl n -> gnd with V_f 0.7 V, 1 mOhm). In the start mode (Dl off) the two share in
     tau = 0.9 ps — a jump of that mode — and then Dl clamps both at its drop: stage 1 turns
     Dl on, the event is still an impulse. The record carries C1 and C2."""
+    _check_stage_1_diode(False)
+
+
+@pytest.mark.xfail(strict=True, raises=p.UnsupportedError, reason=(
+    "OPEN, release finding F-Y-6 (measured here 2026-11-25, release defaults explicit): "
+    "mode_selection='auto' refuses at t = 2.002928932e-06 s, 'no conduction state of the "
+    "diodes (Dl) is consistent (secondary ray)' (stage 1 after the jump); legacy records it"))
+def test_f_y_6_a_jump_whose_stage_1_turns_a_diode_under_the_release_defaults():
+    """Release finding F-Y-6 with the release defaults passed explicitly (branch-form
+    switches and diode, mode_selection='auto', ...): the same circuit, the same truth."""
+    _check_stage_1_diode(True)
+
+
+def _check_stage_1_diode(release):
+    fk = dict(form="branch") if release else {}
     b = p.CircuitBuilder()
     b.add_voltage_source("V", "vs", "gnd", 5.0)
-    b.add_switch("Sc", "vs", "m", 1e3, 1e-12)
+    b.add_switch("Sc", "vs", "m", 1e3, 1e-12, **fk)
     b.add_capacitor("C1", "m", "gnd", 1e-8)
-    b.add_switch("S", "m", "n", 1e3, 1e-12)
+    b.add_switch("S", "m", "n", 1e3, 1e-12, **fk)
     b.add_capacitor("C2", "n", "gnd", 1e-9)
-    b.add_diode("Dl", "n", "gnd", 1e3, 1e-9, 0.0, 0.7)
+    b.add_diode("Dl", "n", "gnd", 1e3, 1e-9, 0.0, 0.7, **fk)
     ns, kc, ks = b.graph.num_switches, b.switch_index_of("Sc"), b.switch_index_of("S")
 
     def fn(t):
@@ -238,8 +274,8 @@ def test_a_jump_whose_stage_1_also_turns_a_diode_is_recorded():
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        r = p.simulate(b, t_end=3e-6, dt=DT, switch_fn=fn, engine="pwl",
-                       discontinuity_restart=True)
+        kw = dict(RELEASE) if release else dict(engine="pwl", discontinuity_restart=True)
+        r = p.simulate(b, t_end=3e-6, dt=DT, switch_fn=fn, **kw)
     recs = [x for x in r.reinit_records if x.t == pytest.approx(T_CLOSE)]
     assert len(recs) == 1 and "C1" in recs[0].states, list(r.reinit_records)
     t = np.asarray(r.times)

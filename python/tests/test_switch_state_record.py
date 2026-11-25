@@ -1006,7 +1006,7 @@ def test_line_rectifier_recovery_is_negligible_on_every_grid():
     assert not m_auto or any("longer than t_rr" in m for m in m_auto)
 
 
-def _snubbed_dcm_boost(V_th: float = 0.7):
+def _snubbed_dcm_boost(V_th: float = 0.7, form=None):
     """The DCM boost (500 Ω) with an RC snubber across the switch node
     and 10 nH in series with D1: its L1–Cs ring after each natural
     turn-off is what a window counted in steps read differently on
@@ -1014,8 +1014,9 @@ def _snubbed_dcm_boost(V_th: float = 0.7):
     b = p.CircuitBuilder()
     b.add_voltage_source("Vin", "vin", "gnd", 12.0)
     b.add_inductor("L1", "vin", "sw", 100e-6)
-    b.add_switch("Q1", "sw", "gnd", g_on=100.0, g_off=1e-9)
-    b.add_diode("D1", "sw", "x", 1e3, 1e-9, V_th=V_th)
+    fk = dict(form=form) if form else {}
+    b.add_switch("Q1", "sw", "gnd", g_on=100.0, g_off=1e-9, **fk)
+    b.add_diode("D1", "sw", "x", 1e3, 1e-9, V_th=V_th, **fk)
     b.add_inductor("Ld", "x", "out", 10e-9)
     b.add_resistor("Rs", "sw", "sm", 10.0)
     b.add_capacitor("Cs", "sm", "x", 1e-9)
@@ -1040,6 +1041,21 @@ def _snubbed_report(div):
         r = _run(b, 2e-3, "pwl", dt=T / div, switch_fn=pwm)
     s, _, msgs = _report(b, r, [], diode_specs={"D1": {"Q_rr": 100e-9}})
     return _entry(s, "D1"), msgs
+
+
+def test_f_y_9_the_recovery_reference_run_keeps_the_diode_law_under_the_release_defaults():
+    """Release finding F-Y-9 with the release defaults passed explicitly (split, restart,
+    mode_selection='auto', branch-form switch and diode): the snubbed DCM boost at
+    dt = T/1000 holds D1 OFF only where it is not forward-biased above V_th (the law; the
+    summary warns of any sample that breaks it)."""
+    from ._release_defaults import RELEASE
+
+    b, pwm, T = _snubbed_dcm_boost(form="branch")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(b, 2e-3, switch_fn=pwm, **{**RELEASE, "dt": T / 1000})
+    _, _, msgs = _report(b, r, [], diode_specs={"D1": {"Q_rr": 100e-9}})
+    assert not msgs, msgs
 
 
 def test_recovery_energy_does_not_follow_the_step_size():
