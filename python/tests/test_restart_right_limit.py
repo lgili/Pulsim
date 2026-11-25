@@ -558,11 +558,6 @@ def test_an_ideal_jump_beside_a_fast_rc_keeps_the_charge_in_the_row():
     assert abs(np.asarray(v.v("d"))[j + 1]) <= 1e-6
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "OPEN (fresh review 2026-11-25, F1): the right-limit row keeps stage 1's diode mode when "
-    "that mode does not hold at t_e+ (counted as a fallback, published anyway): the row has "
-    "D ON with v_sw = 9.998 V, i_D = -9998.19 A, and the in-kernel ledger books D's turn-on "
-    "from it, E = 9.996e-3 J against E_on(10 V, 1.814 A) = 1.814e-6 J (bilinear table)"))
 @pytest.mark.parametrize("split", [False, True])
 def test_a_row_whose_mode_does_not_hold_at_the_right_limit_books_no_loss(split):
     """10 V -ideal S (1 mOhm)- sw; D gnd->sw; L 10 uH sw->o; R 1 ohm; Co 100 pF at sw. S
@@ -579,10 +574,10 @@ def test_a_row_whose_mode_does_not_hold_at_the_right_limit_books_no_loss(split):
     tab = p.LossTable(v_axis=[0.0, 100.0], i_axis=[0.0, 100.0], tj_axis=[25.0],
                       energy=np.array([[[0.0], [0.0]], [[0.0], [1e-3]]]))
     b.set_device_losses("D", Tj=25.0, E_on=tab, E_off=tab)
-    k = b.switch_index_of("S")
+    k, ns = b.switch_index_of("S"), b.graph.num_switches   # S and D: two bits
 
     def fn(t):
-        m = p.SwitchStateMask(1)
+        m = p.SwitchStateMask(ns)
         m.set(k, t < T_E)
         return m
     r = _quiet(p.simulate, b, t_end=3e-6, dt=DT, switch_fn=fn,
@@ -592,4 +587,36 @@ def test_a_row_whose_mode_does_not_hold_at_the_right_limit_books_no_loss(split):
         assert float(np.asarray(v.i("D"))[j + 1]) >= -1e-6
     i_l = float(np.max(np.abs(np.asarray(r.i("L")))))
     bound = 1e-3 * (10.0 / 100.0) * (i_l / 100.0)
-    assert all(ev[-1] <= 2 * bound for ev in r.loss_events("D") if ev[0] == "on")
+    assert all(ev["E"] <= 2 * bound for ev in r.loss_events("D") if ev["kind"] == "on")
+
+
+@pytest.mark.parametrize("split", [False, True])
+def test_a_row_whose_mode_holds_at_the_right_limit_books_the_turn_on(split):
+    """Control for the test above (the fix must not pass by booking nothing): the same
+    circuit without Co. At t_e+ the inductor current has only D: D's ON mode holds,
+    i_D = i_L(t_e) (continuous), and D blocked v_D = -10 V before. Truth: the RL rise
+    i_L = 10/1.001·(1 − e^{−t/τ}), τ = L/(R + 1 mOhm), at the row's instant (pwl's
+    trapezoid at dt = τ/20: O((dt/τ)²)), and E_on = 1e-3·(10/100)·(i_L/100) (bilinear)."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "vin", "gnd", 10.0)
+    b.add_ideal_switch("S", "vin", "sw", 1e-3, 1e-9)
+    b.add_diode("D", "gnd", "sw", 1e3, 1e-9)
+    b.add_inductor("L", "sw", "o", 10e-6)
+    b.add_resistor("R", "o", "gnd", 1.0)
+    tab = p.LossTable(v_axis=[0.0, 100.0], i_axis=[0.0, 100.0], tj_axis=[25.0],
+                      energy=np.array([[[0.0], [0.0]], [[0.0], [1e-3]]]))
+    b.set_device_losses("D", Tj=25.0, E_on=tab, E_off=tab)
+    k, ns = b.switch_index_of("S"), b.graph.num_switches
+
+    def fn(t):
+        m = p.SwitchStateMask(ns)
+        m.set(k, t < T_E)
+        return m
+    r = _quiet(p.simulate, b, t_end=3e-6, dt=DT, switch_fn=fn,
+               enable_substep_state_correction=split, **RULE)
+    v, t, kk = _limits(r)
+    (j,) = [j for j in kk if t[j] > 0]
+    i_e = 10.0 / 1.001 * (1.0 - np.exp(-t[j] * 1.001 / 10e-6))
+    assert float(np.asarray(v.i("D"))[j + 1]) == pytest.approx(i_e, rel=1e-3)
+    (ev,) = [ev for ev in r.loss_events("D") if ev["kind"] == "on"]
+    assert ev["E"] == pytest.approx(1e-3 * 0.1 * i_e / 100.0, rel=2e-3)

@@ -2972,8 +2972,9 @@ inline SimulationResult run_transient(
         //    ideal element's constraint moves them (the probe's structural
         //    jump). No solve decides them.
         //  - every other unknown: ONE consistent solve in the mode the step
-        //    used (stage 1's: the restart's decision; nothing is forced or
-        //    re-decided here) with the states pinned to those values. It is
+        //    used (stage 1's: the restart's decision), re-solved in the diode
+        //    mode that holds at t_e+ where stage 1's does not (F1; never
+        //    settled: no row), with the states pinned to those values. It is
         //    a backward-Euler solve of a fixed ε_run = 1e-3·γ·dt (one factor
         //    per mode, cached: an event in a mode seen before is solves only)
         //    whose histories are corrected until its states land on the
@@ -3119,7 +3120,7 @@ inline SimulationResult run_transient(
                 history.compute_b_extra_backward_euler(e, rl_h);
                 b_extra = rl_bs + rl_h;
                 if (lin) {
-                    cache.solve_at(stamped_s, Real{2} * e, b_extra, x);
+                    cache.solve_at(stamped_mask, Real{2} * e, b_extra, x);
                 } else {
                     x = rl_x1;
                     rei(t_from + e, Real{2} * e, true, true);
@@ -3137,6 +3138,7 @@ inline SimulationResult run_transient(
                 return 2 * k + (ents[k].kind == pwl::DevicePool::StoredKind::Capacitor ? 0 : 1);
             };
             int ok = 1;
+            bool unheld = false;   // no diode mode holds at t_e+ (F1)
             const Size rf_s = restart_factorizations;
             struct AuxEvents {   // the run's event factors stay put, on any exit
                 const decltype(cache)& c;
@@ -3313,15 +3315,31 @@ inline SimulationResult run_transient(
                     out = x;
                     count = count || !conv;
                 } else {
-                    const bool conv = pinned(eps, !ip_jump && !ip_moved);
+                    bool conv = pinned(eps, !ip_jump && !ip_moved);
                     out = x;
-                    count = count || !conv;
-                    // the mode must hold at t_e+ (it is read, never changed)
+                    // F1: the row's mode must hold at t_e+. Stage 1's decision is
+                    // the step's, not the instant's (a freewheel diode stage 1
+                    // holds ON is reverse-biased at t_e+ while a node capacitor
+                    // still holds the voltage): re-decide the diodes on the row
+                    // and re-solve in that mode until it holds. A mode that never
+                    // settles is not published (the ledger would book from it)
                     if (has_diodes) {
                         diodes.snapshot_on_bits_into(rl_dec);
-                        if (events::redecide(diodes, x)) count = true;
+                        bool held = false;
+                        for (int round = 0; round < 4; ++round) {
+                            if (!events::redecide(diodes, x)) {
+                                held = true;
+                                break;
+                            }
+                            if (lin) stamped_mask = diodes.combine(stamped_s);
+                            conv = pinned(eps);   // stage 1's slope is the old mode's
+                            out = x;
+                            m_out = stamped_mask;
+                        }
+                        if (!held) unheld = true;
                         diodes.restore_on_bits(rl_dec);
                     }
+                    count = count || !conv;
                 }
             } catch (const std::runtime_error&) {
                 ok = 0;   // no right limit recorded; the run goes on
@@ -3331,7 +3349,8 @@ inline SimulationResult run_transient(
             aux_events.reset();
             restart_factorizations = rf_s;
             if (ok && !out.allFinite()) ok = 0;
-            if (ok && count) ++result.n_right_limit_fallbacks;
+            if (ok && (count || unheld)) ++result.n_right_limit_fallbacks;
+            if (unheld) ok = 0;
             history.restore(rl_hcur);
             if (!lin) {
                 hs.restore(rl_hs);
