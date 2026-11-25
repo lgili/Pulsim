@@ -45,7 +45,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   capability check reports them as a refusal. A `NetlistError` also
   propagates out of `sweep()` (it holds for every point) and is no longer
   retried on the exact engine's fallback bridge. The post-run voltage
-  check and trace attachment still never fail a finished run.
+  check and trace attachment still never fail a finished run. Records
+  that print the exception's class name (design evaluations) show
+  `SingularError:` where they showed `SimulationAborted:`.
 
 ### Evidence: the exact scoreboard's measure, in three parts
 

@@ -61,32 +61,39 @@ unchanged.
 - [ ] 7.2 Oracle: 1.2 passes; goldens bit-identical; fixed overhead not above 0.2
   - Done: 1.2 passes; goldens bit-identical. Open: the overhead clause (pwl 2480 -> 3538 bytecodes per call, 34.4 -> 49.1 us; DECISIONS 23).
   - Overhead (DECISIONS 25): same counter and `.so`, pre-Stage A / Stage A / now: pwl 2551 / 3609 / 2834, trbdf2 3380 / 4413 / 3683, dsed 3993 / 5051 / 4348 bytecodes per call; RC wall pwl 43.1 / 57.4 / 43.3 us (same `.so`, interleaved best-of). NamedTuple records built with `tuple.__new__`, positional plan calls (no `locals()`), lazy diagnostics, hoisted imports. Still open: +283 (pwl) is the layout's own cost (five calls, the plan built and read back). Local-only ratchet `test_simulate_overhead.py`.
+  - Stage B (2026-11-25, same counter): pwl 2886 -> 2877, trbdf2 3712 -> 3707 (typed errors and the run diagnostics cost nothing per call; `control_decls` returns early). Still above pre-Stage A (2551 / 3380), so the overhead clause stays open.
 - [x] 7.3 Docs: `docs/internals` page "how a run is planned"; update the owner note's rule in `AI_GUIDE.md` ("put it in the plan")
 
 ## 8. Stage B — typed errors and diagnostics in Python
-- [ ] 8.1 `python/pulsim/errors.py`: `PulsimError`, `NetlistError`, `OptionsError`, `ConvergenceError`, `SingularError`; the Phase 0 `UnsupportedError`, `SimulationAborted`, `Cancelled` and `NameNotFoundError` re-based under `PulsimError`; exported from `pulsim`
-  - Done: `PulsimError`, `OptionsError`; `UnsupportedError`, `ConvergenceError` / `SimulationAborted`, `Cancelled`, `NameNotFoundError` re-based; exported. Open: `NetlistError`, `SingularError`, `errors.py` (DECISIONS 10).
-- [ ] 8.2 Convert every raise reachable from `simulate()`; replace the 13 broad handlers in `__init__.py` by typed catches or remove them
-- [ ] 8.3 `result.diagnostics`; `_emit_diagnostics`; route the 14 `warnings.warn` sites in `__init__.py` through it
-- [ ] 8.4 Oracle: suite green without editing any `pytest.raises` / `pytest.warns`; ratchets hold; a test per class asserts `feature`, `engine`, `device` on `UnsupportedError`
-- [ ] 8.5 Docs: error reference page; `AI_GUIDE.md` error section; stubs; CHANGELOG; note for PulsimGUI (`BackendRefusal` can catch `PulsimError`)
+- [x] 8.1 `python/pulsim/errors.py`: `PulsimError`, `NetlistError`, `OptionsError`, `ConvergenceError`, `SingularError`; the Phase 0 `UnsupportedError`, `SimulationAborted`, `Cancelled` and `NameNotFoundError` re-based under `PulsimError`; exported from `pulsim`
+  - Done: `PulsimError`, `OptionsError`; `UnsupportedError`, `ConvergenceError` / `SimulationAborted`, `Cancelled`, `NameNotFoundError` re-based; exported. Stage B (DECISIONS 28): `errors.py` is the one Python home; `NetlistError` (`ValueError`; `.device`, `.node`) and `SingularError` (`SimulationAborted`) from the kernel; `NameNotFoundError` keeps `KeyError` and is not a `NetlistError`. Test: `test_typed_errors.py`.
+- [x] 8.2 Convert every raise reachable from `simulate()`; replace the 13 broad handlers in `__init__.py` by typed catches or remove them
+  - Done: simulate()'s planning, validation and dispatch (`__init__.py`, `_dsed_dispatch.py`, `_control_plan.py`) raise only pulsim classes (AST test `test_simulate_path_raises_are_typed`); the 13 handlers are typed tuples. Ratchet: `raise ValueError` 561 -> 529, broad handlers 90 -> 77. Kernel throws: 18 singular sites -> `SingularError`, 3 netlist sites -> `NetlistError`. Scope (DECISIONS 28): raises of the device-adding builder API and the analysis modules stay as they are.
+- [x] 8.3 `result.diagnostics`; `_emit_diagnostics`; route the 14 `warnings.warn` sites in `__init__.py` through it
+  - Done: all 24 `__init__.py` sites (and those of `_dsed_dispatch.py`, `_control_plan.py`) call `_plan.emit`, which records `Diagnostic(code, message, category)` in a per-run context variable and warns with the same category, text and stacklevel; `simulate()` attaches the tuple as `result.diagnostics["messages"]` (DECISIONS 28: recorded as emitted, no final `_emit_diagnostics` pass).
+- [x] 8.4 Oracle: suite green without editing any `pytest.raises` / `pytest.warns`; ratchets hold; a test per class asserts `feature`, `engine`, `device` on `UnsupportedError`
+  - Seen 2026-11-25: full pytest 7221 passed, 0 failed, no `pytest.raises` / `pytest.warns` edited (only `test_simulation_object.py` ratchet lines and the new `test_typed_errors.py` changed); ratchets `raise ValueError` <= 529, broad handlers <= 77; warning set of the 186 warning-test files identical to the base (197 records); goldens and the byte compares identical.
+- [x] 8.5 Docs: error reference page; `AI_GUIDE.md` error section; stubs; CHANGELOG; note for PulsimGUI (`BackendRefusal` can catch `PulsimError`)
+  - `docs/errors.md` (mkdocs nav "Error Reference", `--strict` builds); `AI_GUIDE.md` 6.4; stubs regenerated (`--check` up to date); CHANGELOG `[Unreleased]` with the PulsimGUI note.
 
 ## 9. Stage B — options and errors in the kernel
 - [x] 9.1 `core/include/pulsim/sim/options.hpp`: `RunOptions` and its parts; one defaults table; `to_simulation_options`, `to_trbdf2_options`
-- [ ] 9.2 `core/include/pulsim/sim/error.hpp` (the `PulsimError` mix-in; each class keeps its `std` base; `solver/unsupported.hpp` of Phase 0 gains the mix-in), `diagnostic.hpp`; pybind translators to the Python classes of 8.1
-  - Done: `sim/error.hpp` `PulsimError` mix-in on `UnsupportedError`, `sim::OptionsError`, `SimulationAborted`, `ConvergenceFailure`, `Cancelled`; translators to `pulsim.PulsimError` subclasses; `sim/diagnostic.hpp`. Open: `NetlistError` / `SingularError` (DECISIONS 10).
+- [x] 9.2 `core/include/pulsim/sim/error.hpp` (the `PulsimError` mix-in; each class keeps its `std` base; `solver/unsupported.hpp` of Phase 0 gains the mix-in), `diagnostic.hpp`; pybind translators to the Python classes of 8.1
+  - Done: `sim/error.hpp` `PulsimError` mix-in on `UnsupportedError`, `sim::OptionsError`, `SimulationAborted`, `ConvergenceFailure`, `Cancelled`; translators to `pulsim.PulsimError` subclasses; `sim/diagnostic.hpp`. Stage B: `NetlistError : std::invalid_argument` and `SingularError : std::runtime_error`; `SimulationAborted::singular()` records a singular cause, and the translator raises `pulsim.SingularError` for it (an unwrapped `SingularError` stays `RuntimeError`).
 - [ ] 9.3 Remove the sentinels (`max_newton_iterations=0` warns for one release) and the four recorded-only fields of `SimulationOptions` (**BREAKING**)
-  - Done: no sentinel in `RunOptions`, `simulate()` (`max_newton_iterations=0` warns) or the raw TR-BDF2 binding. Open: the four recorded-only `SimulationOptions` fields (the YAML loader stores them there; they need a home on `LoadedCircuit` first).
+  - Done (deprecation half): no sentinel in `RunOptions`, `simulate()` (`max_newton_iterations=0` warns) or the raw TR-BDF2 binding. The removal (the sentinel and the recorded-only fields) belongs to the number-changing release. Open: the four recorded-only `SimulationOptions` fields (the YAML loader stores them there; they need a home on `LoadedCircuit` first).
 - [x] 9.4 Raw TR-BDF2 binding defaults follow the table (**BREAKING**); CHANGELOG migration note
 - [x] 9.5 Oracle: goldens bit-identical through `simulate()`; a test asserts every default in the Python signature, the YAML loader and the kernel comes from the one table
 
 ## 10. Stage B — the Simulation facade
 - [x] 10.1 `core/include/pulsim/sim/simulation.hpp`: `Circuit` view, `RunPlan`, `Simulation` (constructor plans; `run`, `run_until`, `snapshot`, `restore`, `diagnostics`, attachments)
 - [x] 10.2 The facade builds the device stamps, the cache and the default mask policy and calls the existing drivers
-- [ ] 10.3 C++ tests (no Python): buck with a Shockley diode matches the Python result bit for bit; an unsupported device on `ExactStep` throws `UnsupportedError` naming device and engine; `run_until` + `snapshot` + `restore` reproduces a continuous fixed-step run exactly
-  - Done: the Shockley buck bit-for-bit test and the split-run test. Open: the `ExactStep` device refusal (the facade refuses the exact engine as a whole, DECISIONS 7; no device kind is refused by pwl or trbdf2).
+- [x] 10.3 C++ tests (no Python): buck with a Shockley diode matches the Python result bit for bit; an unsupported device on `ExactStep` throws `UnsupportedError` naming device and engine; `run_until` + `snapshot` + `restore` reproduces a continuous fixed-step run exactly
+  - Done: the Shockley buck bit-for-bit test and the split-run test; `Simulation` with the exact engine now names the first device it cannot run (`UnsupportedError` with `engine` "dsed", `device`, `kind`) before refusing the engine as a whole (test "the exact engine's refusal names the device and the engine").
 - [x] 10.4 Binding `pulsim.Simulation`, `pulsim.RunOptions`; stubs
-- [ ] 10.5 Oracle: the conformance matrix run through `Simulation` equals the matrix run through `simulate()`; zero-alloc tests green
+- [x] 10.5 Oracle: the conformance matrix run through `Simulation` equals the matrix run through `simulate()`; zero-alloc tests green
+  - Seen 2026-11-25: full pytest 7221 passed (0 failed); ctest 1094/1094 (zero-alloc tests included).
+  - `test_conformance_matrix_through_the_object_equals_simulate[pwl|trbdf2]` (`test_simulation_object.py`): every cell of `test_engine_conformance.CELLS` gives the same arrays (or the same refusal) through `Simulation` and through `simulate()`.
 
 ## 11. Stage B — simulate() on the facade
 - [ ] 11.1 `simulate()` builds `RunOptions` and calls `Simulation` for runs with no Python callback; then for every run through `add_gate` / `add_tick` / `add_source_term` adapters
