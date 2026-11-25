@@ -1567,3 +1567,35 @@ reviewer on 79330ab7..5613abbe (scoping + lazy root error came after the review)
   recorded as a referee limit; the unit is excluded from the 100-unit run (it would freeze the
   machine). Also seen: its shortest stored line is 6.5e-16 s (above 64 ulps at t ≈ 1e-2 s, so
   read as a line; its window gets dt = 1e-16 s).
+* Referee on a72d3d26 over the 100 units minus driven_lc (`S10_referee_99.jsonl`, `refsum.py`):
+  **99 ran, 93 comparable, above 1: none**, worst 0.99991 (high_q_rlc_ringdown x[3]); incl.
+  settle: diode_half_wave_rl_load 2904 (the projected 1 ns cluster, inside its window);
+  settle_fallback 0; the four former holes comparable (seams dropped: 4 / 5 / 11 / 5). Not
+  comparable (6): events differ 4 (half_bridge_transformer_dc 373 vs 262, active_clamp_forward
+  674 vs 675, flyback_converter 296 vs 200, forward_converter 404 vs 381), boost_pfc_open_loop
+  DiodeModeInconsistentError, three_phase_balanced_rl_load no floor mapping for I(L_a) — the same
+  six as session 9. Peaks of 2.8–3.5 GB RSS per unit were seen (diode_rectifier,
+  rlc_series_resonant), memory pressure 2 at times, never 4.
+* stubs `--check` (with the engine-robustness venv, which has pybind11-stubgen): up to date
+  (`S10_stubs.log`); openspec `validate --all --strict`: 79 passed, 0 failed (`S10_openspec.log`).
+
+### Step 6 — final tip (C++ and Python of a72d3d26; docs after)
+
+* Full pytest (`S10_pytest_full.log`, 610 s): **7220 passed, 137 skipped, 42 xfailed, 0 failed**.
+  ruff (`python/ benchmarks/`): all checks passed. stubs and openspec: above.
+* Cleaned: `.scratch/build-e34ct`, `.scratch/base527`, `.scratch/build-base527`, `.scratch/f10/base`
+  (rm -rf on those paths only; base527's `build/python/pulsim` was a symlink, its target kept).
+  Kept: `.scratch/so_527e644d/`, `.scratch/so_cbe1430f/`, `.scratch/so_pre_tau/` (the .so files
+  for cost reruns; a base tree must be rebuilt to re-run the rule-off identity or the dsed
+  tests on Eigen 3.4.0).
+
+### Session 10 — not run / left
+
+* NOT run: the strict-xfail `--runxfail` sweep; the property / samples / events-gate /
+  rehearsal (circuit cells) chains on the final tip (the C++ changed since session 9 only in
+  `fast_cluster_tau`, rule on); the referee on driven_lc_series_resonance (its 17.9 GB footprint).
+* Left: the streaming referee (driven_lc); the `store_every > 1` + rule ordering hole in the
+  private binding (Step 5); the referee's 64-ulp jump test at small t; the cost gate's
+  resolution (±0.5 % in-process noise on buck_ccm, +0.46 % measured); test_diode_state_reconstruction
+  (`interpolable` in the test, release branch); the 4 "events differ" referee units and
+  boost_pfc_open_loop's DiodeModeInconsistentError under the rule's referee route.
