@@ -29,7 +29,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `[t_from, t_to)` instead of re-estimating them from the samples. A
   `switch_specs` / `diode_specs` entry for such a device is ignored with a
   `UserWarning`. Circuits without `set_device_losses`, and conduction-only
-  ports, are unchanged.
+  ports, are unchanged. `device_thermal_summary` follows: such a device
+  without a `switch_specs` entry gets the kernel's `P_sw_avg` (it was 0),
+  so its `T_j` rises.
+- **Refusal (BREAKING for some open-loop gates):** `periodic_steady_state`
+  (and `steady_state(dt=None)` and the other analyses that call it)
+  refuses with
+  `UnsupportedError(feature="hidden_controller_state")` an open-loop
+  `switch_fn` that may hold state: a callable object with a `__dict__`
+  (even one whose `__call__` only reads it), a function attribute, or a
+  closure / global over a list, dict, writeable array or plain object.
+  2.1.0 took such a gate as open-loop. Pass `make_pwm_switch_fn`, a
+  `SwitchSchedule`, or a function over immutable values.
+- `simulate(resume_from=...)`, `sweep` and `monte_carlo` look inside
+  tuples, frozensets and frozen dataclasses when deciding whether a
+  controller's closure holds state: a list or array inside a tuple is now
+  refused by name (it was let through and continued from run to run), and
+  a frozen dataclass of immutable fields is now accepted (it was refused).
+- After a closed-loop `periodic_steady_state` succeeds, the caller's
+  control graph is left at the orbit's controller state with its tick
+  counters and recordings cleared (on failure it is restored).
+- `steady_state(dt=None)` forwards `closed_loops`, `step_observer`,
+  `controller_period` and `control` to `periodic_steady_state` (2.1.0
+  raised `ValueError` on any simulate keyword without `dt`).
 
 ## [2.1.0] - 2026-11-25
 

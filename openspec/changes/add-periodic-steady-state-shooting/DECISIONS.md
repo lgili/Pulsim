@@ -399,6 +399,14 @@ a source that follows a controller (`feature='closed_loop'`).
 Port note (2026-11-25): entry 23 came from another tool (gemini/wip-2026-11-24
 78d06266 + dd72a62e) and was re-verified on 527e644d: its tests pass, every
 existing PSS / shooting / sensitivity call is byte-identical, and the exact
-orbit's sampled error 4.1e-14 V / time-averaged error 5.68e-5 V were measured
-again. Task 7.2 stays open: its "zero mean error within 1e-9" is not what a
-once-per-period PI regulates.
+orbit's sampled error 4.1e-14 V was measured again. Task 7.2 was reworded
+and closed 2026-11-25: its "zero mean error within 1e-9" is not what a
+once-per-period PI regulates; the test asserts the sampled error, the orbit
+against the long transient, and the mean error as the ripple offset (the
+"5.68e-5 V" quoted before was a trapezoid over the exact orbit's 3 samples).
+Open-loop note: `check_hidden_controller_state` also runs on open-loop
+`switch_fn` gates, so a callable object with a `__dict__`, a function
+attribute or a closure over mutable state is refused even without a
+controller (2.1.0 took it as open-loop) — listed under Changed in the
+CHANGELOG. On success the caller's control graph is left seeded at the
+orbit's controller state (tick counters and recordings cleared).

@@ -79,12 +79,8 @@ def test_device_loss_summary_reads_kernel_events_across_engines(engine):
         assert row["E_sw_off_total"] == pytest.approx(e["E_off"], rel=1e-12)
         assert row["E_sw_total"] == pytest.approx(e["E_on"] + e["E_off"], rel=1e-12)
         assert row["P_sw_avg"] == pytest.approx((e["E_on"] + e["E_off"]) / span, rel=1e-12)
-        expected_fsw = (
-            float(e["n_off"]) / span
-            if row["kind"] == "diode"
-            else float(e["n_on"] + e["n_off"]) / (2.0 * span)
-        )
-        assert row["f_sw_estimate"] == pytest.approx(expected_fsw, rel=1e-12)
+        # 20 gate periods in the span: 20 commutation cycles for both devices
+        assert row["f_sw_estimate"] == pytest.approx(20.0 / span, rel=1e-12)
 
 
 @pytest.mark.parametrize("engine", ["pwl", "trbdf2", "dsed"])
