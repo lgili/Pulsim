@@ -117,6 +117,14 @@ def test_f8_the_referee_fails_a_line_it_cannot_read():
         F.lines_ratio(t, np.array([0.0, np.nan, 1.0]), np.array([0.5, 1.5]), np.array([0.5, 1.0]), 1e-3)
     r, at = F.lines_ratio(t, y, np.array([0.5, 1.5]), np.array([0.5, 1.0 + 2e-3]), 1e-3)
     assert r == pytest.approx(2.0) and at == 1.5
+    # session 9: a settle window is per projected event; reading nothing is not a pass
+    w = np.array([[1.0, 1.6]])
+    r, at = F.lines_ratio(t, y, np.array([0.5, 1.5]), np.array([0.5, 1.0 + 2e-3]), 1e-3,
+                          events=np.array([1.0]), windows=w)
+    assert r == pytest.approx(0.0) and at == 0.5     # the instant inside the window is read apart
+    with pytest.raises(F.RefereeError, match="no reference instant read"):
+        F.lines_ratio(t, y, np.array([1.5]), np.array([1.0]), 1e-3, events=np.array([0.0, 1.0]),
+                      windows=np.array([[0.0, 1.0], [1.0, 2.0]]))
 
 
 def test_f8_ten_bridges_rows_at_rounding_do_not_cut_the_samples():
@@ -254,5 +262,5 @@ def test_fy3_a_window_max_inside_one_exact_step_is_the_trajectory_peak():
     assert cf["n_extrema_closed"] >= 1 and cf["n_extrema_ends"] == 0, cf
     # the rule off keeps the step ends (byte-identical to the PR head), counted nowhere
     wo = {k: float(np.asarray(v)[0]) for k, v in off.recorded["r"].windows["v(c)"].items()}
-    assert off.recorder_feed["closed_form"]["n_extrema_closed"] == 0
+    assert "n_extrema_closed" not in off.recorder_feed["closed_form"]
     assert wo["max"] <= peak and vmin2 > 0

@@ -506,7 +506,9 @@ def _result_from_native(native_res, t_start: float):
         og["projection_max_by_column"] = (pm[-ncol:] if pm.size >= ncol > 0
                                           else np.zeros(ncol))
         og["projections"] = [
-            {"t": t + t_start, "amplitude": a, "column": (int(r) - (pm.size - ncol)) if ncol else None, "tau": tau}
+            {"t": t + t_start, "amplitude": a, "tau": tau,
+             # a row of the recovered vector that is not a stored column: None
+             "column": (int(r) - (pm.size - ncol)) if 0 < ncol and int(r) >= pm.size - ncol else None}
             for t, a, r, tau in native_res.get("projection_records", [])]
         tb = native_res["output_budget_t"]
         og["output_budget_t"] = None if tb != tb else tb + t_start   # NaN: not spent

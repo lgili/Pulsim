@@ -53,13 +53,28 @@ ATOL = 1e-9
 # where the rule-off reference still shows that decay (diode_half_wave_rl_load: 0.31 V over
 # ~7 ns). Reference instants inside that window are read separately (``ratio_incl_settle``).
 SETTLE = 4e-5
+# Since session 9 the window is per projected event, from the engine's projection record
+# (diagnostics['output_grid']['projections']): [t, t + SETTLE_TAUS * tau], tau the projected
+# cluster's slowest time constant; an event with no record has no window. Past the record's cap
+# (1000) the old run-span window is used and the row says so (``settle_fallback``).
+SETTLE_TAUS = 40.0
 
 
 class RefereeError(Exception):
     """The harness could not read the flow on every line (a failure, not a pass)."""
 
 
-def lines_ratio(t, y, tg, yg, tol, *, events=(), settle=0.0):
+def _in_windows(tq, windows):
+    """tq inside any [a, b] of ``windows`` (an (n, 2) array)."""
+    w = np.asarray(windows, dtype=float).reshape(-1, 2)
+    if not w.size:
+        return np.zeros(np.shape(tq), bool)
+    w = w[np.argsort(w[:, 0])]
+    k = np.searchsorted(w[:, 0], tq, side="right") - 1
+    return (k >= 0) & (tq <= np.maximum.accumulate(w[:, 1])[np.clip(k, 0, None)])
+
+
+def lines_ratio(t, y, tg, yg, tol, *, events=(), settle=0.0, windows=None):
     """Worst ``|line(tg) - yg| / tol`` over the stored lines of (t, y), read at every
     reference instant ``tg`` strictly inside a line. Raises RefereeError when a line of
     non-zero length holds no reference instant, or on a NaN."""
@@ -82,7 +97,9 @@ def lines_ratio(t, y, tg, yg, tol, *, events=(), settle=0.0):
             near |= np.abs(tg - ev[kk]) <= EVENT_TOL
         # the rule's event projection settles the parasitic cluster at once; the rule-off
         # reference lets it decay: instants inside that window are not the same flow
-        if settle > 0:
+        if windows is not None:
+            near |= _in_windows(tg, windows)
+        elif settle > 0:
             d = tg - ev[np.clip(k - 1, 0, ev.size - 1)]
             near |= (d >= 0) & (d <= settle)
         inside &= ~near
@@ -90,7 +107,9 @@ def lines_ratio(t, y, tg, yg, tol, *, events=(), settle=0.0):
     hit[j[inside]] = True
     # a line too short to hold an instant away from an event (a jump's ulp step) is not a line
     short = (t[keep + 1] - t[keep]) <= 2 * EVENT_TOL
-    if settle > 0 and ev.size:   # a line that starts inside a settle window may hold no instant outside it
+    if windows is not None:   # a line that starts inside a settle window may hold no instant outside it
+        short |= _in_windows(t[keep], windows)
+    elif settle > 0 and ev.size:
         ka = np.clip(np.searchsorted(ev, t[keep], side="right") - 1, 0, ev.size - 1)
         short |= (t[keep] >= ev[ka]) & (t[keep] <= ev[ka] + settle)
     missing = keep[~hit[keep] & ~short]
@@ -101,8 +120,8 @@ def lines_ratio(t, y, tg, yg, tol, *, events=(), settle=0.0):
     jj = j[inside]
     lin = y[jj] + (y[jj + 1] - y[jj]) * (tg[inside] - t[jj]) / (t[jj + 1] - t[jj])
     e = np.abs(lin - yg[inside]) / tol[jj + 1]
-    if not e.size:
-        return 0.0, None
+    if not e.size:   # nothing read is not a pass
+        raise RefereeError("no reference instant read on any line")
     q = int(np.argmax(e))
     return float(e[q]), float(tg[inside][q])
 
@@ -224,13 +243,23 @@ def referee(case, res, info, cols, rt, config: str = "auto+next") -> dict:
     fl = og.get("output_floor_by_column")
     worst, where, per, worst_whole = 0.0, None, {}, 0.0
     settle = SETTLE * float(t[-1] - t[0])
+    # the settle windows: one per projected event, from the engine's record
+    pr = og.get("projections") or []
+    win = [(q["t"], q["t"] + SETTLE_TAUS * q["tau"]) for q in pr]
+    fallback = int(og.get("n_projections") or 0) > len(pr)
+    if fallback:   # past the record's cap: the run-span window for the later events
+        t_last = max((q["t"] for q in pr), default=-np.inf)
+        win += [(e, e + settle) for e in ev if e > t_last]
+    win = np.asarray(win, dtype=float).reshape(-1, 2)
     for c in cols:
         yg = np.concatenate(yg_all[c])
-        allv = np.r_[ys[c], yg]
+        # the range of the rule run's own (projected) trace: the unprojected reference's
+        # parasitic excursions would widen the tolerance (session 9 reviewer)
+        allv = np.asarray(ys[c], dtype=float)
         rng = max(float(np.ptp(allv)), 1e-3 * float(np.abs(allv).max()))
         floor = _column_floor(res, c, fl)
         tol = max(rt * rng, ATOL, floor)
-        r, at = lines_ratio(t, ys[c], tg, yg, tol, events=ev, settle=settle)
+        r, at = lines_ratio(t, ys[c], tg, yg, tol, events=ev, windows=win)
         whole = lines_ratio(t, ys[c], tg, yg, tol, events=ev)[0]
         worst_whole = max(worst_whole, whole)
         # also against the range SO FAR through the line's end sample: stricter than the
@@ -239,7 +268,7 @@ def referee(case, res, info, cols, rt, config: str = "auto+next") -> dict:
         per[c] = dict(ratio=r, floor=floor, tol=tol,
                       ratio_incl_settle=whole,
                       ratio_range_so_far=lines_ratio(t, ys[c], tg, yg, promise(ys[c], rt, floor), events=ev,
-                                                     settle=settle)[0])
+                                                     windows=win)[0])
         if r > worst:
             worst, where = r, (c, at)
     # every stored column, each against its own promise and floor
@@ -249,14 +278,15 @@ def referee(case, res, info, cols, rt, config: str = "auto+next") -> dict:
     if xs.shape == (t.size, xg.shape[1]) and (fl is None or len(fl) == xs.shape[1]):
         worst_x, n_x = 0.0, int(xs.shape[1])
         for j in range(n_x):
-            both = np.r_[xs[:, j], xg[:, j]]
+            both = xs[:, j]
             r, at = lines_ratio(t, xs[:, j], tg, xg[:, j],
                                 max(rt * max(float(np.ptp(both)), 1e-3 * float(np.abs(both).max())), ATOL,
-                                    float(fl[j]) if fl is not None else 0.0), events=ev, settle=settle)
+                                    float(fl[j]) if fl is not None else 0.0), events=ev, windows=win)
             worst_x = max(worst_x, r)
             if r > worst:
                 worst, where = r, (f"x[{j}]", at)
-    return dict(comparable=True, ratio=worst, at=where, ratio_incl_settle=worst_whole, settle_s=settle, ratio_stored_columns=worst_x, n_columns=n_x, n_lines=int(np.sum(np.diff(t) > 0)),
+    return dict(comparable=True, ratio=worst, at=where, ratio_incl_settle=worst_whole, settle_s=settle,
+                settle_windows=int(win.shape[0]), settle_fallback=fallback, ratio_stored_columns=worst_x, n_columns=n_x, n_lines=int(np.sum(np.diff(t) > 0)),
                 n_ref=int(tg.size), n_windows=len(tg_all), rtol=rt, per=per,
                 n_output_floored=og.get("n_output_floored"), output_floor_max=og.get("output_floor_max"),
                 wall_ref_s=round(time.perf_counter() - t0, 2))

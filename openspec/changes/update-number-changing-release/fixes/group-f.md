@@ -1245,3 +1245,38 @@ reviewer on 79330ab7..5613abbe (scoping + lazy root error came after the review)
   output_rtol 1e-5 **max 19.897853 / min 7.034291** (320 pieces, all closed); rule off
   19.836086 / 7.045884 (= the release's reading, unchanged); trbdf2 rtol 1e-10 19.897835 /
   7.034297 (its own step ends, so below the trajectory's max).
+
+### Session 9 reviewer (fresh context, opus medium, read only; diff 527e644d..306efc60) — fixed / left
+
+* FIXED — rule-off diagnostics keys: `recorder_feed['closed_form']` gained `n_extrema_closed` /
+  `n_extrema_ends` (0) on every exact run with recorders; now emitted only under the rule (test:
+  the rule-off run has no such key).
+* FIXED — a projection under the rule on a step with no exact propagator (rk45 mode) was not
+  recorded: every rule-on `project_slow` now records. Each event's decision commits the
+  previous record (`decide_modes_`), so a restart inside one settle replaces only its own
+  event's record, and two events at one instant keep two.
+* FIXED — a projection row that is not a stored column reads `column: None` (was a negative
+  index).
+* FIXED (referee) — the settle window was 4e-5 of the run span after EVERY event (a 100 kHz,
+  0.25 s run would read nothing and pass with ratio 0): now one window per projected event,
+  [t, t + 40·tau] from the projection record; events without a record have none; past the
+  record's cap (1000) the old window for the later events, flagged `settle_fallback`. Reading
+  no instant raises (no vacuous pass). The tolerance's range is the rule run's own (projected)
+  trace, not widened by the unprojected reference's parasitic excursion.
+* LEFT (stated) — the verdict uses the run's range, not the range so far through the end of the
+  exact step holding the line (the promise's); `ratio_range_so_far` (stricter: through the
+  line's end sample) stays reported beside it. An exact judge needs the engine's per-line
+  tolerance exported: not done.
+* LEFT — `fast_cluster_tau` runs a dense eigensolve per projection when the mode has sine
+  sources (rule-on cost only).
+* Checked clean by the reviewer: the interior-extremum formula (2000 random damped pairs with a
+  constant and an offset against a 1e5-point grid: 0 missed), the two-real-mode root, the
+  dropped small terms' bound, every other rule-off path (no bit can change).
+  Verdict: it attacked the chord collapse on stiff decaying modes (the ten-bridges / ladder
+  symptom). This branch already covers the measured cases by D-2 / D-3 (a row at its rounding
+  floor certified constant, counted: ten bridges 409 600 capped samples → 926, balanced neutral
+  2 100 001 → 5 290) and F-X-3 (atol as an absolute floor); the per-mode cap is a valid,
+  tighter bound (|e^{λτ} − chord| ≤ 1 real / 2 complex for Re λ ≤ 0) worth a later look as a
+  sample-count item only — it moves every rule-on sample count and was written on a tree 377
+  commits old, without the projection or floor changes; the scheduler half was wrong (the
+  per-target cap reset) and its author reverted it. Nothing taken.

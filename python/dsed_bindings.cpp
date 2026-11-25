@@ -1696,8 +1696,10 @@ void init_module(py::module_& m) {
                 cf["n_closed"] = seg_src->n_closed();
                 cf["n_line"] = seg_src->n_line();
                 cf["why"] = seg_src->why();
-                cf["n_extrema_closed"] = seg_src->n_extrema_closed();
-                cf["n_extrema_ends"] = seg_src->n_extrema_ends();
+                if (output_rtol > Real{0}) {   // rule off: the PR head's keys only
+                    cf["n_extrema_closed"] = seg_src->n_extrema_closed();
+                    cf["n_extrema_ends"] = seg_src->n_extrema_ends();
+                }
                 d["recorder_closed_form"] = cf;
             }
             if (!tick_cbs.empty()) d["control_tick_counts"] = sim.tick_counts();
@@ -1913,8 +1915,6 @@ void init_module(py::module_& m) {
                 cf["n_closed"] = seg_src->n_closed();
                 cf["n_line"] = seg_src->n_line();
                 cf["why"] = seg_src->why();
-                cf["n_extrema_closed"] = seg_src->n_extrema_closed();
-                cf["n_extrema_ends"] = seg_src->n_extrema_ends();
                 d["recorder_closed_form"] = cf;
             }
             {   // the end instant as a snapshot (field 14 kind Exact, AutoResumeState)

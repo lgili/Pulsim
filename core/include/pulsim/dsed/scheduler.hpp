@@ -1771,7 +1771,7 @@ private:
                 if constexpr (requires(Vector& y) { system_.recover_full_into(t, x, y);
                                                      system_.recover_from_state();
                                                      system_.fast_cluster_tau(thr); }) {
-                    if (output_rtol_ > Real{0} && system_.has_exact_step()) {
+                    if (output_rtol_ > Real{0}) {   // every projection under the rule (any step)
                         proj_y0_.resize(system_.recover_from_state().rows());
                         system_.recover_full_into(t, x, proj_y0_);
                         system_.project_slow(t, x, thr);
@@ -1817,6 +1817,7 @@ private:
         // admissible mode is refused by the loop's name: that loop is the cause
         rejected_loop_.reset();
         last_select_ray_ = false;
+        commit_projection_();   // the previous event's projection record (rule on only)
         try {
             decide_modes_impl_(t, x, mask, gates_prev, prev_bits, rec, result);
         } catch (const UnsupportedError& e) {
@@ -3747,9 +3748,11 @@ private:
         if (projections_.size() < kProjectionRecordCap) projections_.push_back(pending_record_());
     }
     /// project_ under the rule, after project_slow (proj_y0_ → proj_y1_). Every settle
-    /// round at one instant projects: a round that projects the previous round's result
+    /// round of one event projects: a round that projects the previous round's result
     /// adds its amplitude (an upper bound over the chain); a round restarted from the held
-    /// state replaces the instant's record (its earlier rounds are not physics).
+    /// state replaces the event's record (its earlier rounds are not physics). Each event's
+    /// decision starts a new record (decide_modes_ commits the last), so two events at one
+    /// instant keep two.
     void note_projection_(Real t, const Vector& x, Real thr) {
         const Vector d = (proj_y1_ - proj_y0_).cwiseAbs();
         const bool chain = proj_pending_ && t == proj_t_ && proj_xin_.size() == proj_xout_.size()
