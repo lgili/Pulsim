@@ -498,6 +498,16 @@ def _result_from_native(native_res, t_start: float):
         ncol = res.states.shape[1] if getattr(res, "has_full_states", False) else 0
         og["output_floor_by_column"] = (fr[-ncol:] if fr.size >= ncol > 0
                                         else np.zeros(ncol))
+        # every projection of the parasitic cluster at an event (never silent): the count,
+        # per stored column the largest amplitude it moved, and the records (instant,
+        # largest amplitude, its column, the cluster's slowest time constant; capped)
+        og["n_projections"] = int(native_res.get("n_projections", 0))
+        pm = np.asarray(native_res.get("projection_max_row", []), dtype=float)
+        og["projection_max_by_column"] = (pm[-ncol:] if pm.size >= ncol > 0
+                                          else np.zeros(ncol))
+        og["projections"] = [
+            {"t": t + t_start, "amplitude": a, "column": (int(r) - (pm.size - ncol)) if ncol else None, "tau": tau}
+            for t, a, r, tau in native_res.get("projection_records", [])]
         tb = native_res["output_budget_t"]
         og["output_budget_t"] = None if tb != tb else tb + t_start   # NaN: not spent
         res.diagnostics["output_grid"] = og

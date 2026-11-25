@@ -1195,3 +1195,53 @@ rule-on boost_pfc 7.36e-10 → 2.95e-12; this revert restores that C++ exactly.
 Verified on 738acf8f: full pytest 6246 passed / 110 skipped / 12 xfailed; `-m reference` 383 passed;
 C++ dsed tests (Eigen 5) green; ruff check clean. Not run: Eigen 3.4.0, g++, full ctest, a second
 reviewer on 79330ab7..5613abbe (scoping + lazy root error came after the review).
+
+## Session 9 — the projection record, F-Y-3, the acceptance (logs in `.scratch/f10/`, prefix `S9_`)
+
+* Merge of origin/feat/core-integration 527e644d (sensitivities through events): cbe1430f,
+  `--no-ff`, no conflict (no dsed header touched by it; `_pulsim.pyi` did not conflict).
+* Truth for the projection record (`.scratch/f10/hw_truth.py`, mpmath `exact_truth.solve`, no
+  pulsim; `S9_hw_truth.log`): diode_half_wave_rl_load turns D1 off at 10.0999171950244 ms;
+  V(out) just after it −0.313847548 V, then −0.28398 V at +0.1 ns, −0.11546 V at +1 ns,
+  −2.05e-5 V at +10 ns, −6.27970e-6 V at +20 ns and −6.27968e-6 V at +40 ns: one ~1.0 ns mode,
+  projected amplitude 0.31384127 V (the predecessor's 0.31384 confirmed; its settled value
+  −3.1e-6 V is the engine's, the truth's is −6.28e-6 V).
+* The other tool's dsed commits (origin/gemini/wip-2026-11-24, read only, not taken):
+  4cbab009 replaced `exact_chord_step`'s bound by a per-mode cap for decaying modes
+  (|V_jk z̈_k| / |λ_k|², ×2 for a complex pair: a stiff mode with a tiny residual no longer
+  collapses the chord to rounding) plus a "peeled" cancellation set, and stopped a no-edge gate
+  poll from resetting the per-interval sample cap; 0c9172e0 reverted the scheduler half only.
+
+### Step 1 — the projection record (rule on only)
+
+* `project_` (scheduler.hpp), under the rule: the recovered vector before and after
+  `project_slow` in the settled mode; `note_projection_` keeps one record per instant (a settle
+  round restarted from the held state replaces it; a round that re-projects the previous round's
+  result adds its amplitude, an upper bound over the chain), the cluster's slowest time constant
+  from `fast_cluster_tau` (builder_adapter.hpp: 1/min(−Re λ) over Re λ < −threshold). Committed
+  when a projection at another instant comes, or read pending at the end.
+  `diagnostics['output_grid']`: `n_projections`, `projection_max_by_column`, `projections` (first
+  1000: `t`, `amplitude`, `column`, `tau`). Rule off: nothing computed (one `if` on `output_rtol_`).
+* diode_half_wave_rl_load at output_rtol 1e-5: the record at 10.099917195024 ms, largest
+  amplitude 0.3138476 V on the column of V(n_l) (the R–L midpoint), V(out)'s column
+  0.31384 V (truth 0.31384127 V, within 2e-4), tau 9.9999e-10 s (truth: the ~1.0 ns mode).
+  Test `test_f9_every_projection_of_the_parasitic_cluster_is_recorded`.
+
+### Step 2 — F-Y-3, a window's min / max inside an exact step (rule on only)
+
+* `SegmentMode::extremum` (segment_integrals.hpp): a degree-1 probe in the modal form,
+  y(s) = Re Σ α_i e^{μ_i s}; past the constant and terms below 64u·Σ|α|, the stationary points
+  are closed form for one real mode (none), two real modes (one root) or one conjugate pair
+  (s_k = (π/2 − φ + kπ)/ω, first and last two). Else the step ends stay and the piece is COUNTED
+  (`recorder_feed['closed_form']['n_extrema_ends']`; `n_extrema_closed` the others). The recorder
+  asks the source (`SegmentSource::extrema`, default: none) after a closed piece; the exact
+  engine's source answers only when the run has the rule on (`set_extrema`), so rule off is
+  unchanged.
+* Series RLC from rest (10 V, 2 Ω, 1 mH, 1 µF; `S9_fy3_rlc.log`): rule on max 19.053844735147337 V
+  at 9.9395592885069e-5 s against the closed form 19.053844735147347 at 9.9395592885069e-5
+  (−5.6e-16 relative); rule off (step ends) 19.053136 (−3.7e-5). Test
+  `test_fy3_a_window_max_inside_one_exact_step_is_the_trajectory_peak`.
+* The release's buck (`S9_fy3_buck.log`, test_tstart_time_base `_buck`, window [0.5, 0.9] ms):
+  output_rtol 1e-5 **max 19.897853 / min 7.034291** (320 pieces, all closed); rule off
+  19.836086 / 7.045884 (= the release's reading, unchanged); trbdf2 rtol 1e-10 19.897835 /
+  7.034297 (its own step ends, so below the trajectory's max).

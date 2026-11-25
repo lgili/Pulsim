@@ -782,6 +782,20 @@ public:
                                        fast_threshold);
     }
 
+    /// The slowest time constant of the cluster project_slow removes
+    /// (modes with Re λ < −fast_threshold): 1 / min(−Re λ); 0 when none.
+    [[nodiscard]] Real fast_cluster_tau(Real fast_threshold) const {
+        ensure_current_resolved_();
+        ensure_exact_built_(*current_entry_);
+        const LTIEntry& e = *current_entry_;
+        Eigen::VectorXcd lam = e.exact.lambda;
+        if (lam.size() != e.A.rows()) lam = Eigen::EigenSolver<DenseMatrix>(e.A, false).eigenvalues();
+        Real slow = std::numeric_limits<Real>::infinity();
+        for (Eigen::Index i = 0; i < lam.size(); ++i)
+            if (lam[i].real() < -fast_threshold) slow = std::min(slow, -lam[i].real());
+        return std::isfinite(slow) ? Real{1} / slow : Real{0};
+    }
+
     /// Dependent states: project x onto the current mode's constraint
     /// K·x = k, weighted by the energy matrix E (C / L):
     ///   x⁺ = x − E⁻¹Kᵀλ,  λ = (K E⁻¹ Kᵀ)⁻¹ (K x − k),

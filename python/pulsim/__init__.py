@@ -2818,6 +2818,14 @@ def simulate(
         projected at each event: modes whose time constant is below 1e-6 of
         the run's resolved time scale are settled at the event instant (the
         run without the rule lets them decay over their few time constants).
+        Every such projection is recorded (``diagnostics['output_grid']``:
+        ``n_projections``, ``projection_max_by_column``, and ``projections``,
+        the first 1000 as ``{t, amplitude, column, tau}``: the largest
+        projected amplitude, its stored column and the cluster's slowest time
+        constant). Recorders on such a run read a window's min / max inside a
+        step from its closed form where one exists (a constant plus one damped
+        sinusoid or at most two real exponentials), else at the step ends,
+        counted (``res.recorder_feed['closed_form']['n_extrema_ends']``).
         The samples are read from the exact steps the run takes without the rule
         (``n_exact_steps`` counts steps, the samples are ``n_output_samples``;
         a step end that the chord from the last stored sample already covers

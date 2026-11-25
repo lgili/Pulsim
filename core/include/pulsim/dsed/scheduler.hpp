@@ -528,6 +528,11 @@ public:
         output_count_ = output_events_ = n_output_capped_ = n_output_unbounded_ = n_output_floored_ = 0;
         output_floor_row_.resize(0);
         output_pend_ = output_jump_ = false;
+        n_projections_ = 0;
+        projection_max_.resize(0);
+        projections_.clear();
+        proj_pending_ = false;
+        proj_t_ = std::numeric_limits<Real>::quiet_NaN();
         output_total_ = 0;
         output_budget_t_ = std::numeric_limits<Real>::quiet_NaN();
         if (resume == nullptr) {
@@ -1744,6 +1749,7 @@ private:
     }
 
     void project_(Real t, Vector& x) {
+        if (output_rtol_ > Real{0}) proj_xin_ = x;   // note_projection_: a chain or a restart
         // dependent states first, whatever the event projection says: an
         // inconsistent state is not a state of the mode (DECISIONS,
         // dependent states)
@@ -1762,6 +1768,19 @@ private:
                     thr = Real{1} / (kParasiticFraction * resolved_scale_(t));
             }
             if constexpr (requires { system_.project_slow(t, x, thr); }) {
+                if constexpr (requires(Vector& y) { system_.recover_full_into(t, x, y);
+                                                     system_.recover_from_state();
+                                                     system_.fast_cluster_tau(thr); }) {
+                    if (output_rtol_ > Real{0} && system_.has_exact_step()) {
+                        proj_y0_.resize(system_.recover_from_state().rows());
+                        system_.recover_full_into(t, x, proj_y0_);
+                        system_.project_slow(t, x, thr);
+                        proj_y1_.resize(proj_y0_.size());
+                        system_.recover_full_into(t, x, proj_y1_);
+                        note_projection_(t, x, thr);
+                        return;
+                    }
+                }
                 system_.project_slow(t, x, thr);
             } else {
                 x = project_onto_slow_manifold(
@@ -3681,6 +3700,73 @@ private:
         (void)t; (void)x; (void)n_events; (void)t_target;
         return h;
     }
+public:
+    /// One projected event under the output rule: the instant, the largest projected
+    /// amplitude over the recovered vector (|y before − y after| in the settled mode), the
+    /// row it is on, and the projected cluster's slowest time constant.
+    struct ProjectionRecord {
+        Real t = 0, amplitude = 0, tau = 0;
+        std::size_t row = 0;
+    };
+    static constexpr std::size_t kProjectionRecordCap = 1000;
+    /// Projected events (rule on only; the pending one at the last instant included).
+    [[nodiscard]] std::size_t n_projections() const noexcept {
+        return n_projections_ + (proj_pending_ ? 1 : 0);
+    }
+    /// Per recovered row, the largest amplitude any projection moved it by.
+    [[nodiscard]] Vector projection_max() const {
+        Vector m = projection_max_;
+        if (proj_pending_) m = m.size() == proj_amp_.size() ? Vector(m.cwiseMax(proj_amp_)) : proj_amp_;
+        return m;
+    }
+    /// The records, the first kProjectionRecordCap of them.
+    [[nodiscard]] std::vector<ProjectionRecord> projection_records() const {
+        std::vector<ProjectionRecord> r = projections_;
+        if (proj_pending_ && r.size() < kProjectionRecordCap) r.push_back(pending_record_());
+        return r;
+    }
+
+private:
+    std::size_t n_projections_ = 0;
+    Vector projection_max_, proj_amp_, proj_y0_, proj_y1_, proj_xin_, proj_xout_;
+    std::vector<ProjectionRecord> projections_;
+    bool proj_pending_ = false;
+    Real proj_t_ = std::numeric_limits<Real>::quiet_NaN(), proj_tau_ = 0;
+
+    [[nodiscard]] ProjectionRecord pending_record_() const {
+        Eigen::Index row = 0;
+        const Real a = proj_amp_.size() ? proj_amp_.maxCoeff(&row) : Real{0};
+        return {proj_t_, a, proj_tau_, static_cast<std::size_t>(row)};
+    }
+    void commit_projection_() {
+        if (!proj_pending_) return;
+        proj_pending_ = false;
+        ++n_projections_;
+        projection_max_ = projection_max_.size() == proj_amp_.size()
+                              ? Vector(projection_max_.cwiseMax(proj_amp_)) : proj_amp_;
+        if (projections_.size() < kProjectionRecordCap) projections_.push_back(pending_record_());
+    }
+    /// project_ under the rule, after project_slow (proj_y0_ → proj_y1_). Every settle
+    /// round at one instant projects: a round that projects the previous round's result
+    /// adds its amplitude (an upper bound over the chain); a round restarted from the held
+    /// state replaces the instant's record (its earlier rounds are not physics).
+    void note_projection_(Real t, const Vector& x, Real thr) {
+        const Vector d = (proj_y1_ - proj_y0_).cwiseAbs();
+        const bool chain = proj_pending_ && t == proj_t_ && proj_xin_.size() == proj_xout_.size()
+                           && proj_xin_ == proj_xout_;
+        if (!(proj_pending_ && t == proj_t_)) commit_projection_();
+        proj_xout_ = x;
+        if (chain && proj_amp_.size() == d.size()) {
+            proj_amp_ += d;
+        } else {
+            proj_amp_ = d;
+            proj_tau_ = 0;
+        }
+        proj_tau_ = std::max(proj_tau_, system_.fast_cluster_tau(thr));
+        proj_t_ = t;
+        proj_pending_ = d.size() > 0 && proj_amp_.maxCoeff() > Real{0};
+    }
+
     Vector output_x_;   // push_output_samples_: the sample being read
     bool output_certified_ = false;   // output_step_: the bound decided its step
     bool output_pend_ = false;   // the current step start is an end not stored (F-X-4)

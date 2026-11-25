@@ -196,3 +196,63 @@ def test_fx7_a_jump_of_an_output_is_stored_on_both_sides():
             tol = max(rt * rng, 1e-9, float(og["output_floor_by_column"][j]))
             e = np.abs(np.interp(t_off[away], t, X[:, j]) - Xo[away, j])
             assert e.max() <= 1.001 * tol, (rt, j, e.max(), tol)
+
+
+def test_f9_every_projection_of_the_parasitic_cluster_is_recorded():
+    """Session 9 (the projection record): under the rule each event's projection of the
+    parasitic cluster is recorded in diagnostics['output_grid'] -- the count, per stored
+    column the largest projected amplitude, the records. diode_half_wave_rl_load: at the
+    turn-off 10.0999172 ms the mpmath truth (benchmarks/tools/exact_truth.py,
+    .scratch/f10/hw_truth.py) reads V(out) = -0.3138475 V just after the event, settling to
+    -6.28e-6 V through a ~1 ns mode: amplitude 0.313841 V. The rule-off run carries no record."""
+    case = v1_reader.load(ROOT / "benchmarks" / "circuits/diodes/diode_half_wave_rl_load.yaml")
+    r = _no_dt(case, output_rtol=1e-5)
+    og = r.diagnostics["output_grid"]
+    recs = [q for q in og["projections"] if abs(q["t"] - 10.0999172e-3) < 1e-9]
+    assert og["n_projections"] >= len(og["projections"]) >= 1 and len(recs) == 1, og["projections"][:6]
+    q = recs[0]
+    st, vout = np.asarray(r.states), np.asarray(v1_reader.observable(r, "V(out)"))
+    j = [k for k in range(st.shape[1]) if np.array_equal(st[:, k], vout)]
+    assert len(j) == 1
+    pm = np.asarray(og["projection_max_by_column"])
+    assert pm[j[0]] == pytest.approx(0.313841, rel=2e-4)  # V(out)'s projected amplitude
+    assert q["amplitude"] == pytest.approx(pm.max()) and q["amplitude"] >= pm[j[0]]
+    assert 0.3e-9 < q["tau"] < 3e-9                       # the cluster's ~1 ns mode
+    off = _no_dt(case)
+    assert "output_grid" not in (off.diagnostics or {})
+
+
+def test_fy3_a_window_max_inside_one_exact_step_is_the_trajectory_peak():
+    """F-Y-3: the in-loop recorder on the exact engine read a window's min / max at the
+    step ends only (19.836 V against 19.898 V on the release's buck). Under the rule the
+    closed form gives the interior extremes. Series RLC from rest, step 10 V, 1 us exact
+    steps (dt_max / 10, no gate): v_C peaks at t_p = pi/w_d with 10 (1 + exp(-zeta pi / sqrt(1 - zeta^2)))."""
+    import math
+    R, L, C, V = 2.0, 1e-3, 1e-6, 10.0
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "in", "gnd", V)
+    b.add_resistor("R", "in", "a", R)
+    b.add_inductor("L", "a", "c", L)
+    b.add_capacitor("C", "c", "gnd", C)
+    w0 = 1 / math.sqrt(L * C)
+    z = R / 2 * math.sqrt(C / L)
+    wd = w0 * math.sqrt(1 - z * z)
+    tp = math.pi / wd
+    peak = V * (1 + math.exp(-z * math.pi / math.sqrt(1 - z * z)))
+    vmin2 = V * (1 - math.exp(-2 * z * math.pi / math.sqrt(1 - z * z)))   # the trough at 2 t_p
+    t_end = 2.5 * tp
+    rec = [p.Recorder("r", ["v(c)"], windows=[(0.0, t_end)])]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        on = p.simulate(b, t_end, engine="exact", output_rtol=1e-5, recorders=rec)
+        off = p.simulate(b, t_end, engine="exact", recorders=rec)
+    w = {k: float(np.asarray(v)[0]) for k, v in on.recorded["r"].windows["v(c)"].items()}
+    assert w["max"] == pytest.approx(peak, rel=1e-9)       # the step ends miss it by ~1e-3 V
+    assert w["t_max"] == pytest.approx(tp, rel=1e-6)
+    assert w["min"] == pytest.approx(0.0, abs=1e-9)        # from rest: the start
+    cf = on.recorder_feed["closed_form"]
+    assert cf["n_extrema_closed"] >= 1 and cf["n_extrema_ends"] == 0, cf
+    # the rule off keeps the step ends (byte-identical to the PR head), counted nowhere
+    wo = {k: float(np.asarray(v)[0]) for k, v in off.recorded["r"].windows["v(c)"].items()}
+    assert off.recorder_feed["closed_form"]["n_extrema_closed"] == 0
+    assert wo["max"] <= peak and vmin2 > 0

@@ -248,7 +248,14 @@ promise does not cover) and not as a ramp to the next sample. The
 projected at each event: modes whose time constant is below 1e-6 of the
 run's resolved time scale are settled at the event instant (the rule-off
 run lets them decay; a diode turn-off's ~1 ns mode read 0.31 V apart for
-a few ns). Where the
+a few ns). Every projection is recorded in `diagnostics['output_grid']`:
+`n_projections`, `projection_max_by_column` (per stored column the largest
+amplitude a projection moved it by) and `projections` (the first 1000:
+instant `t`, largest `amplitude`, its `column`, the cluster's slowest time
+constant `tau`). Recorders on such a run read a window's min / max inside
+each exact step from its closed form where one exists (a constant plus one
+damped sinusoid or at most two real exponentials); elsewhere the step ends
+are kept and counted (`res.recorder_feed['closed_form']['n_extrema_ends']`). Where the
 4096-sample cap per interval, a mode without a diagonalising basis, or
 the run's 2e6-sample budget suspends the promise, the diagnostics say
 so and the run warns. `benchmarks/tools/output_rule_referee.py` checks

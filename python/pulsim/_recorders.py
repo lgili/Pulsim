@@ -629,7 +629,11 @@ def exact_closed_form(report: dict) -> None:
     if plan is not None and isinstance(plan.sim, ExactFeedSlot):
         plan.closed_form = {"n_closed": int(report["n_closed"]),
                             "n_line": int(report["n_line"]),
-                            "why": str(report["why"])}
+                            "why": str(report["why"]),
+                            # window min / max inside a step (F-Y-3, the output rule's runs):
+                            # pieces with the closed form's interior extremes / the step ends only
+                            "n_extrema_closed": int(report.get("n_extrema_closed", 0)),
+                            "n_extrema_ends": int(report.get("n_extrema_ends", 0))}
 
 
 def attach_loop_feed(sim, engine: str) -> None:

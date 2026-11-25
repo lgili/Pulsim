@@ -122,6 +122,12 @@ struct SegmentSource {
     virtual ~SegmentSource() = default;
     virtual bool piece(Size rec, Size p, Real ta, Real tb, Real ya, Real yb, Real lo, Real hi,
                        Real* out) noexcept = 0;
+    /// After a piece() that returned true, the same probe's extremes strictly inside
+    /// [lo, hi]: out = {min, t_min, max, t_max} (NaN: no interior extremum). False: none
+    /// given (min / max stay the values at the ends).
+    virtual bool extrema(Size /*rec*/, Size /*p*/, Real /*lo*/, Real /*hi*/, Real* /*out*/) noexcept {
+        return false;
+    }
 };
 
 class Recorder {
@@ -703,6 +709,11 @@ private:
                 w.sq3 += (la * la + la * lb + lb * lb) * (hi - lo);
             } else {
                 w.sq3 += 3 * cf[1];
+            }
+            // the trajectory's extremes inside the piece, where the source has them (F-Y-3)
+            if (Real ex[4]; seg_->extrema(seg_rec_, p, lo, hi, ex)) {
+                if (ex[0] < w.min) { w.min = ex[0]; w.t_min = ex[1]; }
+                if (ex[2] > w.max) { w.max = ex[2]; w.t_max = ex[3]; }
             }
         } else {
             a = lo == ta ? ya : lerp(ta, ya, tb, yb, lo);
