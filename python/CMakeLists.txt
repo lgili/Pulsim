@@ -154,6 +154,14 @@ foreach(_pulsim_file IN LISTS _pulsim_pkg_files)
     )
 endforeach()
 
+# Mirror the stable external-device C header into the build-tree package so
+# `PYTHONPATH=build/python` matches the installed wheel for `pulsim.get_include()`.
+configure_file(
+    ${PROJECT_SOURCE_DIR}/core/include/pulsim/xdev/pulsim_xdev.h
+    ${CMAKE_BINARY_DIR}/python/pulsim/include/pulsim/xdev/pulsim_xdev.h
+    COPYONLY
+)
+
 # =============================================================================
 # Install targets
 # =============================================================================
