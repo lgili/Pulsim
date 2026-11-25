@@ -922,7 +922,7 @@ inline SimulationResult run_transient(
     std::vector<Size> rl_pin;
     std::vector<std::pair<Size, Real>> rl_dep_x;
     std::vector<Index> rl_dep;
-    std::vector<bool> rl_bits, rl_lsb, rl_dec;
+    std::vector<bool> rl_bits, rl_lsb;
     // a LOCATED diode crossing (split_step): its time, the post-event bits,
     // whether only V_f = 0 diodes flip (vf0) and nothing else coincides
     // (pure), and whether it was landed on the step end b (at_b). One
@@ -3032,7 +3032,8 @@ inline SimulationResult run_transient(
             // a linear mode: the solves are the cached factor's alone (no
             // event machinery runs, nothing else to put back)
             const bool lin = !nl_refresh_effective;
-            if (has_diodes) diodes.snapshot_on_bits_into(rl_bits);
+            // stage 1's bits: the caller's rs_bits (taken just before this call)
+            bool bits_moved = !lin;   // a nonlinear mode's solves run the settle
             if (!lin) {
                 rl_lsb = last_solved_bits;
                 hs.snapshot_into(rl_hs);
@@ -3064,15 +3065,21 @@ inline SimulationResult run_transient(
             // b_extra_fn keeps its t1 value, as in consistent_start)
             const Real t1 = t_from + h_s;
             const Real src1 = t1 == src_end_at ? src_end_read : t1;
-            history.compute_b_extra_backward_euler(h_s, rl_h);
-            rl_b = rl_b0 - rl_h;
-            rl_h.setZero(rl_b.size());
-            add_source_rows(rl_h, src1, t1, left_by);
-            rl_b -= rl_h;
-            if (has_iwave) {
-                sources::compute_current_waveform_b_extra(pool, graph, src1, be_iwave,
-                                                          left_by);
-                rl_b -= be_iwave;
+            // a linear stage-1 b_extra with no b_extra_fn / heat / line part is
+            // its history and sources alone: that remainder is zero (cost, item 1)
+            if (b_extra_fn || lt || lines || !lin) {
+                history.compute_b_extra_backward_euler(h_s, rl_h);
+                rl_b = rl_b0 - rl_h;
+                rl_h.setZero(rl_b.size());
+                add_source_rows(rl_h, src1, t1, left_by);
+                rl_b -= rl_h;
+                if (has_iwave) {
+                    sources::compute_current_waveform_b_extra(pool, graph, src1, be_iwave,
+                                                              left_by);
+                    rl_b -= be_iwave;
+                }
+            } else {
+                rl_b.setZero(rl_b0.size());
             }
             const auto& ents = history.entries();
             // the probe carried states (x0 + d): the right limit starts from
@@ -3187,7 +3194,7 @@ inline SimulationResult run_transient(
                 // target.
                 auto pinned = [&](Real e, bool predict = false) -> bool {
                     rl_hw = rl_hist;
-                    history.restore(rl_hw);
+                    if (!predict) history.restore(rl_hw);   // (predict restores its own)
                     for (Size k = 0; k < n_nc; ++k) (*ncw)[k].q_prev = rl_ncq[k];
                     for (Size k = 0; k < n_sl; ++k) (*slw)[k].lambda_old = rl_slq[k];
                     rl_pin.clear();
@@ -3280,9 +3287,15 @@ inline SimulationResult run_transient(
                             Vector& rs = rlp_rs;
                             rs.resize(m);
                             for (Index i = 0; i < m; ++i) rs[i] = r[i] / (sc[i] > Real{0} ? sc[i] : Real{1});
-                            rlp_gam = dr.leftCols(nh).colPivHouseholderQr().solve(rs);
-                            rlp_rs.noalias() = dg.leftCols(nh) * rlp_gam;   // (rs is spent)
-                            rlp_ua = g - rlp_rs;
+                            if (nh == 1) {   // one difference: the least-squares scalar, no QR
+                                const Real dd = dr.col(0).squaredNorm();
+                                const Real gm = dd > Real{0} ? dr.col(0).dot(rs) / dd : Real{0};
+                                rlp_ua = g - gm * dg.col(0);
+                            } else {
+                                rlp_gam = dr.leftCols(nh).colPivHouseholderQr().solve(rs);
+                                rlp_rs.noalias() = dg.leftCols(nh) * rlp_gam;   // (rs is spent)
+                                rlp_ua = g - rlp_rs;
+                            }
                             if (rlp_ua.allFinite()) u = rlp_ua;
                         }
                         for (Size q = 0; q < n_pin; ++q) rl_hw[slot(rl_pin[q])] = u[static_cast<Index>(q)];
@@ -3323,21 +3336,20 @@ inline SimulationResult run_transient(
                     // still holds the voltage): re-decide the diodes on the row
                     // and re-solve in that mode until it holds. A mode that never
                     // settles is not published (the ledger would book from it)
-                    if (has_diodes) {
-                        diodes.snapshot_on_bits_into(rl_dec);
+                    if (has_diodes) {   // (the bits go back to rs_bits on exit)
                         bool held = false;
                         for (int round = 0; round < 4; ++round) {
                             if (!events::redecide(diodes, x)) {
                                 held = true;
                                 break;
                             }
+                            bits_moved = true;
                             if (lin) stamped_mask = diodes.combine(stamped_s);
                             conv = pinned(eps);   // stage 1's slope is the old mode's
                             out = x;
                             m_out = stamped_mask;
                         }
                         if (!held) unheld = true;
-                        diodes.restore_on_bits(rl_dec);
                     }
                     count = count || !conv;
                 }
@@ -3362,7 +3374,7 @@ inline SimulationResult run_transient(
             flipped = flipped_s;
             mask_cycle = cycle_s;
             stamped_mask = stamped_s;
-            if (has_diodes) diodes.restore_on_bits(rl_bits);
+            if (has_diodes && bits_moved) diodes.restore_on_bits(rs_bits);
             newton_roundoff_run = nr_s;
             result.newton_roundoff_accepts = nr_n;
             result.newton_roundoff_omega_max = nr_w;
@@ -3880,6 +3892,7 @@ inline SimulationResult run_transient(
                 L->x1 = ln_pre ? ln_x1 : x;
                 L->m1 = stamped_mask;
                 L->be_kept = false;
+                if (has_diodes) diodes.snapshot_on_bits_into(rs_bits);   // (event_right_limit's too)
                 // F-SB-1: the right limit, only where something happens
                 // (the caller's event, a probed jump)
                 const int rl = event_right_limit(run_event_iteration, t_from, h_s, loc,
@@ -3904,7 +3917,7 @@ inline SimulationResult run_transient(
             }
             if (has_diodes) {
                 rs_x1 = x;
-                diodes.snapshot_on_bits_into(rs_bits);
+                if (!L) diodes.snapshot_on_bits_into(rs_bits);   // (with L: taken above)
                 if (!rs_first_valid) {   // the attempt's first stage: from t_prev
                     rs_bits_first.assign(rs_bits.begin(), rs_bits.end());
                     rs_first_valid = true;
