@@ -703,6 +703,26 @@ sm.response([0.0])                   # H(z=1): d v_out / d D = 23.09 V
   transient; `sensitivities=` and nonlinear devices are refused.
   `run_periodic_shooting` / `run_harmonic_balance` are deprecated
   delegates of it.
+* **Gate state.** An open-loop `switch_fn` may hold state it only
+  reads (a PWM object with `duty` and `f_sw` attributes, a closure over
+  a float). Before the solve the gate is evaluated at 257 points over
+  `[0, T]` and along its `next_edge_after` edges, and everything it can
+  reach (its attributes and slots, function attributes, closure cells,
+  defaults, the globals and module attributes its code names, its
+  class's attributes; numbers and arrays by value, lists, dicts and
+  objects by identity and contents) is compared before and after. A
+  change is refused with `UnsupportedError(feature=
+  "hidden_controller_state")` naming the first path that changed, e.g.
+  `'switch_fn.n_calls' changed`; so is a reachable value with no visible
+  state and no `__eq__` (a `random.Random`, a NumPy `Generator`, an
+  iterator), named `uncomparable state at ...`, and a gate the probe
+  cannot call. Not measured: state that only moves outside the first
+  period (a gate that changes itself at `t > T`), the internals of
+  pulsim, NumPy, SciPy, the standard library and installed packages
+  (their functions and classes are taken as stateless; the user's
+  instances of their classes are measured). A controller that should
+  move belongs in a compiled control graph (`closed_loops=`,
+  `control=`), whose state is part of `x0`.
 * **Multipliers.** `stable = max|μ| < 1`. An orbit with a multiplier
   outside the unit circle is returned with `stable=False`, and
   `r.unstable_multipliers` names each one: −1 side `flip

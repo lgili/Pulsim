@@ -307,8 +307,10 @@ class _StatefulSwitch:
     def __init__(self, n, k):
         self.n, self.k = n, k
         self.duty = 0.5
+        self.calls = 0
 
     def __call__(self, t):
+        self.calls += 1                 # state that moves on every call
         m = p.SwitchStateMask(self.n)
         m.set(self.k, (t / T) % 1.0 < self.duty)
         return m
@@ -338,13 +340,13 @@ def _hidden_state_cases(b):
     # 3. Stateful callable object as step_observer
     obj_obs = _StatefulObserver()
 
-    # 4. Switch closure over mutable list
-    duty_box = [0.5]
+    # 4. Switch closure over a list it appends to
+    calls_log = []
 
     def list_sw(t):
         m = p.SwitchStateMask(n)
-        duty_box[0] = 0.5
-        m.set(k, (t / T) % 1.0 < duty_box[0])
+        calls_log.append(t)
+        m.set(k, (t / T) % 1.0 < 0.5)
         return m
 
     # 5. Stateful callable switch object
@@ -419,6 +421,126 @@ def test_hidden_controller_state_is_refused_by_name(engine, ek, case):
         "periodic_steady_state",
         "hidden_controller_state",
     )
+
+
+# ---------------------------------------------------------------------------
+# 3b. Open-loop gate state: refused when it MOVES, accepted when only read
+# ---------------------------------------------------------------------------
+
+class _ReadOnlyPwm:
+    """A PWM gate object holding its duty and frequency, which it only reads."""
+
+    def __init__(self, n, k, duty, f_sw):
+        self.n, self.k, self.duty, self.f_sw = n, k, duty, f_sw
+
+    def __call__(self, t):
+        m = p.SwitchStateMask(self.n)
+        ph = t * self.f_sw
+        m.set(self.k, bool(ph - np.floor(ph) < self.duty))
+        return m
+
+    def next_edge_after(self, t):
+        ts = 1.0 / self.f_sw
+        c = np.floor(t / ts)
+        for e in (c * ts + self.duty * ts, (c + 1) * ts, (c + 1) * ts + self.duty * ts):
+            if e > t * (1 + 1e-15) + 1e-18:
+                return float(e)
+
+
+class _CountingPwm(_ReadOnlyPwm):
+    def __call__(self, t):
+        self.n_calls += 1
+        return super().__call__(t)
+
+
+def test_read_only_gate_object_is_accepted_and_its_orbit_is_the_transients():
+    b = _buck()
+    n, k = b.graph.num_switches, b.switch_index_of("Q")
+    gate = _ReadOnlyPwm(n, k, 0.4, 1.0 / T)
+    r = p.periodic_steady_state(b, period=T, switch_fn=gate, engine="exact")
+    assert r.stable
+    assert (gate.duty, gate.f_sw) == (0.4, 1.0 / T)
+    # truth 1: the same schedule from the C++ helper (an independent gate)
+    sf = p.make_pwm_switch_fn(1.0 / T, 0.4, k, n)
+    r_ref = p.periodic_steady_state(_buck(), period=T, switch_fn=sf, engine="exact")
+    assert np.abs(r.x0 - r_ref.x0).max() < 1e-12
+    # truth 2: a long trbdf2 transient driven by the object itself (an
+    # independent engine; 2000 periods = 42 decay constants 2RC; measured
+    # agreement 4e-8)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        tr = p.simulate(_buck(), 2000 * T, engine="trbdf2", rtol=1e-10,
+                        atol=1e-13, switch_fn=gate)
+    x_tr = {"v(out)": float(np.asarray(tr.v("out"))[-1]),
+            "i(L)": float(np.asarray(tr.i("L"))[-1])}
+    for lbl, v in zip(r.state_labels, r.x0):
+        assert abs(v - x_tr[lbl]) < 1e-6, lbl
+    # the fixed and the trbdf2 shooting take it as well
+    for eng, ek in (("pwl", {"dt": T / 100}), ("trbdf2", {})):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            assert p.periodic_steady_state(_buck(), period=T, switch_fn=gate,
+                                           engine=eng, **ek).stable
+
+
+@pytest.mark.parametrize("engine,ek", [("exact", {}), ("pwl", {"dt": T / 100})])
+def test_gate_object_with_a_counter_is_refused_naming_it(engine, ek):
+    b = _buck()
+    gate = _CountingPwm(b.graph.num_switches, b.switch_index_of("Q"), 0.4, 1.0 / T)
+    gate.n_calls = 0
+    with pytest.raises(p.UnsupportedError) as ei:
+        p.periodic_steady_state(b, period=T, switch_fn=gate, engine=engine, **ek)
+    assert ei.value.feature == "hidden_controller_state"
+    assert "'switch_fn.n_calls' changed" in str(ei.value)
+
+
+def test_closure_appending_to_a_list_is_refused_naming_it():
+    b = _buck()
+    sf = p.make_pwm_switch_fn(1.0 / T, 0.4, b.switch_index_of("Q"), b.graph.num_switches)
+    seen = []
+
+    def gate(t):
+        seen.append(t)
+        return sf(t)
+
+    with pytest.raises(p.UnsupportedError) as ei:
+        p.periodic_steady_state(b, period=T, switch_fn=gate, engine="pwl", dt=T / 100)
+    assert ei.value.feature == "hidden_controller_state"
+    assert "'switch_fn.<closure seen>' changed" in str(ei.value)
+
+
+def test_closure_reading_a_float_is_accepted():
+    b = _buck()
+    n, k = b.graph.num_switches, b.switch_index_of("Q")
+    duty = 0.4
+
+    def gate(t):
+        m = p.SwitchStateMask(n)
+        ph = t / T
+        m.set(k, bool(ph - np.floor(ph) < duty))
+        return m
+
+    r = p.periodic_steady_state(b, period=T, switch_fn=gate, engine="pwl", dt=T / 100)
+    sf = p.make_pwm_switch_fn(1.0 / T, 0.4, k, n)
+    r_ref = p.periodic_steady_state(_buck(), period=T, switch_fn=sf, engine="pwl", dt=T / 100)
+    # truth: the C++ schedule of the same duty on the same engine
+    assert r.stable and np.abs(r.x0 - r_ref.x0).max() < 1e-12
+
+
+def test_gate_over_an_opaque_object_is_refused_naming_it():
+    import random
+
+    b = _buck()
+    sf = p.make_pwm_switch_fn(1.0 / T, 0.4, b.switch_index_of("Q"), b.graph.num_switches)
+    rng = random.Random(1)
+
+    def gate(t):
+        rng.random()
+        return sf(t)
+
+    with pytest.raises(p.UnsupportedError) as ei:
+        p.periodic_steady_state(b, period=T, switch_fn=gate, engine="pwl", dt=T / 100)
+    assert "uncomparable state at switch_fn.<closure rng>" in str(ei.value)
 
 
 # ---------------------------------------------------------------------------

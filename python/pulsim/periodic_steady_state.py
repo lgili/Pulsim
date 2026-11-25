@@ -1184,7 +1184,7 @@ def _pss_refusal(builder, period, switch_fn=None, engine="exact",
                 switch_fn=switch_fn, closed_loops=closed_loops,
                 step_observer=step_observer,
                 refuse_closed_loop_fn=None if (closed_loops or step_observer)
-                else _refuse_closed_loop)
+                else _refuse_closed_loop, period=float(period))
             if closed_loops or step_observer is not None:
                 _ClosedLoopExactMap(
                     builder, float(period), switch_fn, closed_loops,
@@ -1550,7 +1550,8 @@ def periodic_steady_state(builder, *, period: float, switch_fn=None,
     check_hidden_controller_state(
         switch_fn=switch_fn, closed_loops=closed_loops,
         step_observer=step_observer,
-        refuse_closed_loop_fn=None if has_ctrl else _refuse_closed_loop)
+        refuse_closed_loop_fn=None if has_ctrl else _refuse_closed_loop,
+        period=float(period))
     if engine not in ("exact", "dsed"):
         if engine not in ("pwl", "trbdf2"):
             raise _err(f"engine must be 'exact', 'dsed', 'pwl' or "

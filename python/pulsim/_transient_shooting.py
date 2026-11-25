@@ -78,7 +78,8 @@ class TransientMap:
         check_hidden_controller_state(
             switch_fn=switch_fn, closed_loops=closed_loops,
             step_observer=step_observer,
-            refuse_closed_loop_fn=None if has_ctrl else _refuse_closed_loop)
+            refuse_closed_loop_fn=None if has_ctrl else _refuse_closed_loop,
+            period=self.T)
         self.user_sf = switch_fn
         self.user_loops = closed_loops
         self.user_obs = step_observer

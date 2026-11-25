@@ -32,15 +32,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   ports, are unchanged. `device_thermal_summary` follows: such a device
   without a `switch_specs` entry gets the kernel's `P_sw_avg` (it was 0),
   so its `T_j` rises.
-- **Refusal (BREAKING for some open-loop gates):** `periodic_steady_state`
-  (and `steady_state(dt=None)` and the other analyses that call it)
-  refuses with
+- **Refusal:** `periodic_steady_state` (and `steady_state(dt=None)` and
+  the other analyses that call it) refuses with
   `UnsupportedError(feature="hidden_controller_state")` an open-loop
-  `switch_fn` that may hold state: a callable object with a `__dict__`
-  (even one whose `__call__` only reads it), a function attribute, or a
-  closure / global over a list, dict, writeable array or plain object.
-  2.1.0 took such a gate as open-loop. Pass `make_pwm_switch_fn`, a
-  `SwitchSchedule`, or a function over immutable values.
+  `switch_fn` whose state MOVES: before the solve the gate is evaluated
+  over one period and everything it reaches (attributes, function
+  attributes, closure cells, defaults, the globals it names, its class's
+  attributes) is compared before and after; the message names the first
+  path that changed (`'switch_fn.n_calls' changed`). Also refused, by
+  name: a reachable value with no visible state and no `__eq__` (a
+  `random.Random`, a NumPy `Generator`, an iterator) and a gate the
+  probe cannot call. Accepted as in 2.1.0: a gate that only reads its
+  state (a PWM object with `duty` / `f_sw`, a closure over a float or a
+  list it does not change). 2.1.0 took a gate whose state moved as
+  open-loop and solved for an orbit of a gate that was not periodic.
 - `simulate(resume_from=...)`, `sweep` and `monte_carlo` look inside
   tuples, frozensets and frozen dataclasses when deciding whether a
   controller's closure holds state: a list or array inside a tuple is now

@@ -13,6 +13,7 @@ Refuses any plain Python closure, stateful user object, or opaque
 
 from __future__ import annotations
 
+import copy
 import dis
 import math
 import struct
@@ -314,6 +315,7 @@ def check_hidden_controller_state(
     step_observer=None,
     analysis: str = _ANALYSIS,
     refuse_closed_loop_fn=None,
+    period: float | None = None,
 ) -> None:
     """Refuse hidden Python controller state across switch_fn / observers / loops.
 
@@ -360,8 +362,298 @@ def check_hidden_controller_state(
         if refuse_closed_loop_fn is not None:
             refuse_closed_loop_fn(switch_fn)
         r = _hidden_state_reason(switch_fn)
+        if r and period is not None:
+            # state that exists is not refused, state that moves is
+            r = _gate_state_moves(switch_fn, float(period))
         if r:
             raise _unsup_hidden("switch_fn", r, analysis=analysis)
+
+
+# ---------------------------------------------------------------------------
+# Measured gate state: snapshot what the gate can reach, run it over one
+# period, refuse by name what changed.
+# ---------------------------------------------------------------------------
+
+_HEAPTYPE = 1 << 9          # Py_TPFLAGS_HEAPTYPE: a class defined in Python
+_VALUE_TYPES = (type(None), bool, int, str, bytes, range, type(Ellipsis))
+
+
+class _Opaque(Exception):
+    pass
+
+
+_IMMUTABLETYPE = 1 << 8     # set on C types (static and most heap ones)
+
+
+def _pure_python(cls) -> bool:
+    """Every class in the MRO is a class statement: no C-level state can
+    hide behind the instance's ``__dict__`` / slots."""
+    n_slots = 0
+    for c in reversed(cls.__mro__):
+        if c is object:
+            continue
+        if not c.__flags__ & _HEAPTYPE or c.__flags__ & _IMMUTABLETYPE:
+            return False
+        sl = c.__dict__.get("__slots__", ())
+        n_slots += len((sl,) if isinstance(sl, str) else sl)
+        # a C base (a mutable heap type such as _random.Random) adds a
+        # layout no slot accounts for; 16 = dict + weakref pointers
+        if c.__basicsize__ > object.__basicsize__ + 8 * n_slots + 16:
+            return False
+        meta = type(c)
+        # shortcut: binding metaclasses named here; another binding
+        # generator with mutable heap types would read as Python
+        if (meta.__module__ or "").split(".")[0] in ("pybind11_builtins",
+                                                     "nanobind", "sip",
+                                                     "shiboken6", "Boost"):
+            return False
+    return True
+
+
+def _library(v) -> bool:
+    """Code (a function or class) of pulsim, the standard library or an
+    installed package: taken as stateless, its data is not walked."""
+    import sys
+    mod = (getattr(v, "__module__", None) or "") if isinstance(
+        v, (type, types.FunctionType)) else ""
+    if mod.split(".")[0] in ("pulsim", "numpy", "scipy"):
+        return True
+    code = getattr(v, "__code__", None)
+    fname = getattr(code, "co_filename", "") or ""
+    if not fname and isinstance(v, type):
+        m = sys.modules.get(mod)
+        fname = getattr(m, "__file__", "") or ""
+    return "site-packages" in fname or (
+        bool(fname) and fname.startswith(sys.base_prefix))
+
+
+def _code_names(code, gl: set, at: set) -> None:
+    for ins in dis.get_instructions(code):
+        if ins.opname in ("LOAD_GLOBAL", "LOAD_NAME", "STORE_GLOBAL",
+                          "DELETE_GLOBAL", "STORE_NAME"):
+            gl.add(ins.argval)
+        elif ins.opname in ("LOAD_ATTR", "STORE_ATTR", "DELETE_ATTR",
+                            "LOAD_METHOD"):
+            at.add(ins.argval)
+    for c in code.co_consts:
+        if isinstance(c, types.CodeType):
+            _code_names(c, gl, at)
+
+
+def _fn_roots(fn, path: str, out: dict, seen: set) -> None:
+    """Snapshot what a Python function can reach: closure cells, function
+    attributes, defaults, and the globals (and module attributes) its code
+    names."""
+    code = fn.__code__
+    for name, cell in zip(code.co_freevars, fn.__closure__ or ()):
+        p_ = f"{path}.<closure {name}>"
+        if _has(cell):
+            _snap(cell.cell_contents, p_, out, seen)
+        else:
+            out[p_] = ("empty",)
+    for k, v in (getattr(fn, "__dict__", None) or {}).items():
+        if not str(k).startswith("_pulsim"):
+            _snap(v, f"{path}.{k}", out, seen)
+    for i, v in enumerate(fn.__defaults__ or ()):
+        _snap(v, f"{path}.<default {i}>", out, seen)
+    for k, v in (fn.__kwdefaults__ or {}).items():
+        _snap(v, f"{path}.<default {k}>", out, seen)
+    gl: set = set()
+    at: set = set()
+    _code_names(code, gl, at)
+    g = fn.__globals__
+    for name in sorted(gl, key=str):
+        p_ = f"{path}.<global {name}>"
+        if name not in g:
+            out[p_] = ("missing",)
+            continue
+        _snap(g[name], p_, out, seen)
+        _mod_attrs(g[name], at, p_, out, seen, 0)
+
+
+def _mod_attrs(mod, at: set, path: str, out: dict, seen: set, depth: int):
+    # a module's attributes the code names (`cfg.duty`, `np.random.rand`)
+    if not isinstance(mod, types.ModuleType) or depth > 3:
+        return
+    for a in sorted(at, key=str):
+        if hasattr(mod, a):
+            v = getattr(mod, a)
+            _snap(v, f"{path}.{a}", out, seen)
+            _mod_attrs(v, at, f"{path}.{a}", out, seen, depth + 1)
+
+
+def _snap(v, path: str, out: dict, seen: set) -> None:
+    """Flatten ``v`` into ``out[path] = comparable leaf``. Plain data and
+    arrays compare by value, mutable containers and objects by identity and
+    contents; a value with no visible state and no ``__eq__`` raises
+    :class:`_Opaque` naming the path."""
+    if isinstance(v, _VALUE_TYPES):
+        out[path] = (type(v), v)
+        return
+    if isinstance(v, (float, complex)):
+        out[path] = (type(v), repr(v))              # NaN == NaN by repr
+        return
+    if isinstance(v, np.generic):
+        out[path] = ("np", v.dtype.str, v.tobytes())
+        return
+    if isinstance(v, np.ndarray):
+        if v.dtype.hasobject:
+            out[path] = ("nd", v.shape)
+            for i, e in enumerate(v.ravel()):
+                _snap(e, f"{path}[{i}]", out, seen)
+        else:
+            out[path] = ("nd", v.dtype.str, v.shape, v.tobytes())
+        return
+    if isinstance(v, types.ModuleType):
+        out[path] = ("mod", id(v))
+        return
+    tmod = (v.__module__ if isinstance(v, type) else type(v).__module__) or ""
+    if str(tmod).startswith("pulsim._pulsim"):
+        out[path] = ("kernel", id(v))   # C++ objects: not Python state
+        return
+    if id(v) in seen:
+        out[path] = ("seen", id(v))
+        return
+    if isinstance(v, (tuple, frozenset)) and type(v) in (tuple, frozenset):
+        seen.add(id(v))
+        items = sorted(v, key=repr) if isinstance(v, frozenset) else v
+        out[path] = (type(v), len(v))
+        for i, e in enumerate(items):
+            _snap(e, f"{path}[{i}]", out, seen)
+        return
+    if isinstance(v, (set, frozenset)):
+        seen.add(id(v))
+        out[path] = ("set", id(v), frozenset(v))
+        return
+    if isinstance(v, (list, bytearray)) or type(v).__name__ == "deque":
+        seen.add(id(v))
+        out[path] = ("list", id(v), len(v))
+        for i, e in enumerate(v):
+            _snap(e, f"{path}[{i}]", out, seen)
+        return
+    if isinstance(v, dict):
+        seen.add(id(v))
+        out[path] = ("dict", id(v), tuple(repr(k) for k in v))
+        for k, e in v.items():
+            _snap(e, f"{path}[{k!r}]", out, seen)
+        return
+    if isinstance(v, types.FunctionType):
+        seen.add(id(v))
+        out[path] = ("fn", id(v))
+        if not _library(v):
+            _fn_roots(v, path, out, seen)
+        return
+    if isinstance(v, types.MethodType):
+        out[path] = ("method", id(v.__func__))
+        _snap(v.__self__, f"{path}.__self__", out, seen)
+        _snap(v.__func__, f"{path}.__func__", out, seen)
+        return
+    if isinstance(v, partial):
+        seen.add(id(v))
+        out[path] = ("partial", id(v))
+        _snap(v.func, f"{path}.func", out, seen)
+        _snap(v.args, f"{path}.args", out, seen)
+        _snap(dict(v.keywords), f"{path}.keywords", out, seen)
+        return
+    if isinstance(v, (types.BuiltinFunctionType, types.BuiltinMethodType,
+                      types.MethodWrapperType)):
+        s = getattr(v, "__self__", None)
+        out[path] = ("builtin", id(v))
+        if s is not None and not isinstance(s, (types.ModuleType, type)):
+            _snap(s, f"{path}.__self__", out, seen)  # e.g. an RNG's method
+        return
+    if isinstance(v, type):
+        seen.add(id(v))
+        out[path] = ("class", id(v))
+        if _library(v) or not v.__flags__ & _HEAPTYPE:
+            return
+        for c in v.__mro__:
+            if c is object or not c.__flags__ & _HEAPTYPE:
+                continue
+            for k, a in c.__dict__.items():
+                if k.startswith("__") and k.endswith("__") and k != "__call__":
+                    continue
+                if isinstance(a, (staticmethod, classmethod)):
+                    a = a.__func__
+                if isinstance(a, (property, types.MemberDescriptorType,
+                                  types.GetSetDescriptorType)):
+                    continue
+                _snap(a, f"{path}.{k}", out, seen)
+        return
+    cls = type(v)
+    if _pure_python(cls):
+        seen.add(id(v))
+        out[path] = ("obj", id(v), id(cls))
+        for k, a in (getattr(v, "__dict__", None) or {}).items():
+            _snap(a, f"{path}.{k}", out, seen)
+        for c in cls.__mro__:
+            sl = c.__dict__.get("__slots__", ())
+            for s in (sl,) if isinstance(sl, str) else sl:
+                if s not in ("__dict__", "__weakref__") and hasattr(v, s):
+                    _snap(getattr(v, s), f"{path}.{s}", out, seen)
+        _snap(cls, f"type({path})", out, seen)
+        return
+    if callable(v) and (cls.__module__ or "").split(".")[0] in (
+            "numpy", "scipy", "builtins"):
+        out[path] = ("callable", id(v))      # a ufunc, a C function object
+        return
+    if cls.__eq__ is not object.__eq__:
+        try:
+            out[path] = ("eq", copy.deepcopy(v))
+            return
+        except Exception:
+            pass
+    raise _Opaque(f"{path} ({cls.__name__}: no visible state and no __eq__)")
+
+
+def _gate_snapshot(sf) -> dict:
+    out: dict = {}
+    _snap(sf, "switch_fn", out, set())
+    return out
+
+
+def _leaf_equal(a, b) -> bool:
+    try:
+        return bool(a == b)
+    except Exception:
+        return False
+
+
+def _gate_state_moves(sf, T: float) -> str:
+    """Reason string when the gate's reachable state changes while it is
+    evaluated over one period ``[0, T]`` (or cannot be compared), else ''."""
+    try:
+        before = _gate_snapshot(sf)
+    except _Opaque as e:
+        return f"uncomparable state at {e}"
+    try:
+        for k in range(257):
+            sf(T * k / 256)
+        nea = getattr(sf, "next_edge_after", None)
+        if callable(nea):
+            t, n = 0.0, 0
+            while n < 10000:
+                t2 = nea(t)
+                if t2 is None or not (t2 > t) or t2 > T:
+                    break
+                sf(t2)
+                t, n = t2, n + 1
+    except Exception as e:  # a gate that cannot be probed is not measured
+        return (f"its state could not be measured: evaluating it over one "
+                f"period raised {type(e).__name__}: {e}")
+    try:
+        after = _gate_snapshot(sf)
+    except _Opaque as e:
+        return f"uncomparable state at {e}"
+    moved = [k for k in after if k not in before
+             or not _leaf_equal(before[k], after[k])]
+    moved += [k for k in before if k not in after]
+    if not moved:
+        return ""
+    moved.sort(key=lambda k: (k.count(".") + k.count("["), k))
+    more = f" and {len(moved) - 1} more" if len(moved) > 1 else ""
+    return (f"its state moved while it was evaluated over one period: "
+            f"{moved[0]!r} changed{more}")
 
 
 def _check_graph_blocks_inspectable(obs, *, analysis: str = _ANALYSIS) -> None:
