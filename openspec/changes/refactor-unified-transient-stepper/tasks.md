@@ -15,7 +15,7 @@ at equal times or time-weighted measures, never sample means.
   - Open: `add-unified-event-queue` sections 5 and 8 are open (2 done); the harness change is 23/33. The slices ran on the integration tree instead
 - [ ] 0.2 Record on `main`: goldens; TR-BDF2 step sequences of the harness; counter gate values; ns/step for audit rows 1–3 and 5–9; extension build time
   - Open: baselines were recorded per slice at each slice's base commit on the integration tree (DECISIONS 2), never on `main`; ns/step rows and build time not recorded
-- [ ] 0.3 Owner decision on `add-adaptive-runge-kutta-solvers` (design Open Question 1)
+- [x] 0.3 Owner decision on `add-adaptive-runge-kutta-solvers` (design Open Question 1) — DECIDED 2026-11-23 (the project's decisions are the orchestrator's): the in-kernel coupling of DOPRI5 / Radau is not built; ESDIRK4(3) on the stepper is the high-order method; the Python integrators are deprecated then deleted by 11.2 (see `add-adaptive-runge-kutta-solvers/tasks.md`, Resolution)
   - Open: no owner decision recorded here
 
 ## 1. Extract the source accumulation

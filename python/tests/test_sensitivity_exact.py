@@ -342,7 +342,23 @@ def test_orbit_costs_one_more_period_run(orbit):
 # Refusals (by name, typed)
 # ---------------------------------------------------------------------
 
-@pytest.mark.parametrize("engine", ["pwl", "trbdf2", "auto"])
+def test_trbdf2_buck_against_the_exact_path():
+    """Group 6 (6.3): the DCM buck's turn-off (an interpolated landing) is
+    carried on trbdf2; at rtol 1e-10 it agrees with the exact engine."""
+    def run(engine, **kw):
+        b = _buck()
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            return p.simulate(b, 2 * T, engine=engine, switch_fn=_pwm(b),
+                              sensitivities=["L.L"], **kw)
+    got = float(run("trbdf2", rtol=1e-10, atol=1e-13).sens("vout", "L.L")[-1])
+    want = float(run("dsed").sens("vout", "L.L")[-1])
+    assert got == pytest.approx(want, rel=1e-5)
+
+
+# pwl carries fixed gate edges and their zero-time cascades since group 6
+# (test_sensitivity_events.py); its unlocated diode events are refused there.
+@pytest.mark.parametrize("engine", ["auto"])
 def test_other_engines_refuse_sensitivities(engine):
     b = _buck()
     kw = {"dt": T / 100} if engine == "pwl" else {}
