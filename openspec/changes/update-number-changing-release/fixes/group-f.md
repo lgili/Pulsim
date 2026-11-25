@@ -1335,3 +1335,19 @@ reviewer on 79330ab7..5613abbe (scoping + lazy root error came after the review)
   the spread (−6.7 % … +0.9 %) on identical results looks like code layout of the branch's
   larger scheduler (sessions 4–8 included: the base is the PR head, not this session's start).
   To attribute it: build fd1765ab+merge (cbe1430f) and compare the three.
+* (h) the exact-engine test files + test_release_findings_f4 (`S9_pytest_exact.log`): **327 passed,
+  3 xfailed**.
+
+### Session 9 — what is left (for the successor, if this session stops before the chain ends)
+
+1. Read the chain's results (`.scratch/f10/S9_chain.log`, one line per item): the full pytest
+   (`S9_pytest_full.log`; the ten-bridges walls in its `--durations`), ruff, the referee
+   (`refsum.py S9_referee_100.jsonl`: none above 1 outside the per-projection windows, every
+   unit not comparable named), property 200 instants, `--truth` 6/6, events gate 100 same,
+   samples (three_phase_balanced_rl_load near 8 038?), ladder500 wall, the rehearsal render.
+2. The cost gate on active_clamp_forward (+0.89 %): attribute it (see (g)) or decide.
+3. test_diode_state_reconstruction's rule-on reading (step 3): pass `interpolable` in the test
+   when the release flips the rule on (release branch work, not this line).
+4. Clean up: `.scratch/build-e34ct` (Eigen 3.4.0 test tree), `.scratch/base527` +
+   `.scratch/build-base527` (keep `.scratch/so_527e644d/` for cost reruns), `.scratch/f10/base`
+   (537 MB of baseline dumps) once the orchestrator has read the logs.
