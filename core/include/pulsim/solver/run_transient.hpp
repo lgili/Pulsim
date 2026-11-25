@@ -3146,6 +3146,7 @@ inline SimulationResult run_transient(
             };
             int ok = 1;
             bool unheld = false;   // no diode mode holds at t_e+ (F1)
+            bool redecided = false;   // a re-decided mode's solve ran (it may throw)
             const Size rf_s = restart_factorizations;
             struct AuxEvents {   // the run's event factors stay put, on any exit
                 const decltype(cache)& c;
@@ -3307,6 +3308,63 @@ inline SimulationResult run_transient(
                     }
                     return conv;
                 };
+                // F1: the row's mode must hold at t_e+. Stage 1's decision is
+                // the step's, not the instant's (a freewheel diode stage 1
+                // holds ON is reverse-biased at t_e+ while a node capacitor
+                // still holds the voltage, or after an ideal element's jump
+                // lifts its node): while a diode sits on the side its rule
+                // leaves, beyond the noise band (a V_th = 0 diode riding its
+                // boundary at round-off is held), re-decide on the row and
+                // re-solve at ε in that mode. A mode that never settles is not
+                // published (the ledger would book from it). `again` re-solves
+                // the row in the current mode and returns its convergence.
+                // `imp` (an ideal jump): the jump's own solve, whose 1/ε currents
+                // show the impulse's direction through each diode — an ideal
+                // freewheel diode ON at t_e− that the jump drives backwards
+                // reads its regular forward current after the jump (review:
+                // row 0 V with D ON for the 9.52 V share).
+                auto hold_mode = [&](auto&& again, bool& conv, const Vector* imp) {
+                    if (!has_diodes) return;   // (the bits go back to rs_bits on exit)
+                    for (int round = 0;; ++round) {
+                        // an unconverged pin is no state to re-decide from (it is
+                        // counted already; review: a diverged Anderson row beside
+                        // a current source flipped D on garbage)
+                        if (!conv) return;
+                        const Size nd = diodes.entries().size();
+                        auto flips = [&](const Vector& y) {
+                            for (Size j = 0; j < nd; ++j) {
+                                const Real sg = events::crossing_signal(diodes, j, y);
+                                if (events::forbidden(diodes, j, sg) &&
+                                    std::abs(sg) > events::held_tolerance(diodes, j, y)) {
+                                    return true;
+                                }
+                            }
+                            return false;
+                        };
+                        const Vector* at = imp && flips(*imp) ? imp : flips(x) ? &x : nullptr;
+                        if (!at) return;
+                        if (round == 4) break;
+                        (void)events::redecide(diodes, *at);
+                        bits_moved = true;
+                        redecided = true;
+                        // the stamped mask's diode bits only: combine() would
+                        // re-read a gated device's gate from a stamped bit
+                        if (lin) {
+                            stamped_mask = stamped_s.overlay(diodes.current_diode_mask(),
+                                                             diode_owned);
+                            // the structural pass the settle runs on a new mode
+                            // (rei's own path runs it): an ideal diode the
+                            // re-decision closed into a loop has no row
+                            if (structure.active() &&
+                                !structure.check(stamped_mask, true).loop_diodes.empty()) {
+                                break;
+                            }
+                        }
+                        conv = again();
+                        m_out = stamped_mask;
+                    }
+                    unheld = true;
+                };
                 if (elim) {
                     // An ideal element's jump, in two consistent solves (the
                     // three-ε extrapolation left O((ε/τ)²): 4.5 % of the charge
@@ -3317,67 +3375,49 @@ inline SimulationResult run_transient(
                     // dependent ones at those values, at the regular ε: the
                     // algebraic unknowns of t_e+ without the jump's 1/ε
                     // current (equal corrections keep the loop's rates equal).
-                    bool conv = pinned(Real{1e-9} * h_s);
-                    for (Size k = 0; k < ents.size(); ++k) {
-                        if (!is_dep(k)) continue;
-                        rl_hist[slot(k)] = state_of(k);
-                        if (conv) rl_dep_x.emplace_back(slot(k), rl_hist[slot(k)]);   // for stage 2
-                    }
-                    rl_dep.clear();
-                    conv = pinned(Real{1e-3} * kGamma * opts.dt) && conv;
-                    out = x;
+                    // Both solves are the mode's (a diode ON at 1 mΩ beside the
+                    // loop drains it during (1)): a re-decided mode redoes both
+                    // from x0 (rare: an ideal jump; the copies are its own).
+                    const auto dep0 = rl_dep;
+                    const auto hist0 = rl_hist;
+                    const Size dx0 = rl_dep_x.size();
+                    auto elim_solve = [&]() -> bool {
+                        rl_dep = dep0;
+                        rl_hist = hist0;
+                        rl_dep_x.resize(dx0);
+                        bool c = pinned(Real{1e-9} * h_s);
+                        rl_xa = x;   // the jump's solve (hold_mode reads its impulse)
+                        for (Size k = 0; k < ents.size(); ++k) {
+                            if (!is_dep(k)) continue;
+                            rl_hist[slot(k)] = state_of(k);
+                            if (c) rl_dep_x.emplace_back(slot(k), rl_hist[slot(k)]);   // for stage 2
+                        }
+                        rl_dep.clear();
+                        c = pinned(Real{1e-3} * kGamma * opts.dt) && c;
+                        out = x;
+                        return c;
+                    };
+                    bool conv = elim_solve();
+                    hold_mode(elim_solve, conv, &rl_xa);
                     count = count || !conv;
                 } else {
                     bool conv = pinned(eps, !ip_jump && !ip_moved);
                     out = x;
-                    // F1: the row's mode must hold at t_e+. Stage 1's decision is
-                    // the step's, not the instant's (a freewheel diode stage 1
-                    // holds ON is reverse-biased at t_e+ while a node capacitor
-                    // still holds the voltage): while a diode sits on the side
-                    // its rule leaves, beyond the noise band (a V_th = 0 diode
-                    // riding its boundary at round-off is held), re-decide on the
-                    // row and re-solve in that mode. A mode that never settles is
-                    // not published (the ledger would book from it).
-                    if (has_diodes) {   // (the bits go back to rs_bits on exit)
-                        bool held = false;
-                        for (int round = 0;; ++round) {
-                            bool flip = false;
-                            const Size nd = diodes.entries().size();
-                            for (Size j = 0; j < nd && !flip; ++j) {
-                                const Real sg = events::crossing_signal(diodes, j, x);
-                                flip = events::forbidden(diodes, j, sg) &&
-                                       std::abs(sg) > events::held_tolerance(diodes, j, x);
-                            }
-                            if (!flip) {
-                                held = true;
-                                break;
-                            }
-                            if (round == 4) break;
-                            (void)events::redecide(diodes, x);
-                            bits_moved = true;
-                            // the stamped mask's diode bits only: combine() would
-                            // re-read a gated device's gate from a stamped bit
-                            if (lin) {
-                                stamped_mask = stamped_s.overlay(diodes.current_diode_mask(),
-                                                                 diode_owned);
-                            }
-                            conv = pinned(eps);   // stage 1's slope is the old mode's
-                            out = x;
-                            m_out = stamped_mask;
-                        }
-                        if (!held) unheld = true;
-                    }
+                    // stage 1's slope is the old mode's: no prediction
+                    hold_mode([&] { const bool c = pinned(eps); out = x; return c; }, conv, nullptr);
                     count = count || !conv;
                 }
             } catch (const std::runtime_error&) {
                 ok = 0;   // no right limit recorded; the run goes on
+                unheld = unheld || redecided;   // counted: the mode did not settle
             } catch (const std::invalid_argument&) {
                 ok = 0;   // a refusal (UnsupportedError) of the ε mode
+                unheld = unheld || redecided;
             }
             aux_events.reset();
             restart_factorizations = rf_s;
             if (ok && !out.allFinite()) ok = 0;
-            if (ok && (count || unheld)) ++result.n_right_limit_fallbacks;
+            if ((ok && count) || unheld) ++result.n_right_limit_fallbacks;
             if (unheld) ok = 0;
             history.restore(rl_hcur);
             if (!lin) {
@@ -3935,7 +3975,7 @@ inline SimulationResult run_transient(
                 rs_x1 = x;
                 if (!L) diodes.snapshot_on_bits_into(rs_bits);   // (with L: taken above)
                 if (!rs_first_valid) {   // the attempt's first stage: from t_prev
-                    rs_bits_first.assign(rs_bits.begin(), rs_bits.end());
+                    rs_bits_first = rs_bits;   // (word copy; assign() walks bits)
                     rs_first_valid = true;
                 }
                 history.snapshot_into(rs_hist);

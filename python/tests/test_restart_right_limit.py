@@ -677,3 +677,69 @@ def test_a_diode_riding_its_boundary_at_the_row_keeps_the_row(co):
     (j,) = [j for j in kk if t[j] == 0.0]
     assert abs(float(np.asarray(v.v("sw"))[j + 1])) <= 1e-12
     assert abs(float(np.asarray(v.i("D"))[j + 1])) <= 1e-6
+
+
+def _jump_into_freewheel(d_kind):
+    """C1 1 nF (10 V) -ideal S- c; C2 50 pF at c; D gnd->c freewheels L (10 A) into 1 mOhm;
+    S closes at T_E. d_kind: "diode" (1 mOhm conductance diode), "ideal" (branch form,
+    R_on = 0), "resistor" (a plain 1 mOhm resistor in D's place)."""
+    b = p.CircuitBuilder()
+    b.add_capacitor("C1", "a", "gnd", 1e-9, 10.0)
+    b.add_ideal_switch("S", "a", "c", 0.0, 0.0)
+    b.add_capacitor("C2", "c", "gnd", 50e-12, 0.0)
+    if d_kind == "diode":
+        b.add_diode("D", "gnd", "c", 1e3, 1e-9)
+    elif d_kind == "ideal":
+        b.add_diode("D", "gnd", "c", None, 1e-9, form="branch", R_on=0.0)
+    else:
+        b.add_resistor("D", "gnd", "c", 1e-3)
+    b.add_inductor("L", "c", "o", 10e-6, 10.0)
+    b.add_resistor("R", "o", "gnd", 1e-3)
+    k, ns = b.switch_index_of("S"), b.graph.num_switches
+
+    def fn(t):
+        m = p.SwitchStateMask(ns)
+        m.set(k, t >= T_E)
+        return m
+    return b, fn
+
+
+@pytest.mark.parametrize("split", [False, True])
+@pytest.mark.parametrize("d_kind", ["diode", "ideal"])
+def test_an_ideal_jump_whose_row_mode_does_not_hold_re_decides(d_kind, split):
+    """Review of F1 (a), the ideal-jump branch (circuit: _jump_into_freewheel). The ideal
+    loop shares the charge, v_c+ = (C1 v_a- + C2 v_c-)/(C1 + C2) = 9.52 V (closed form, from
+    the left values): D is reverse-biased at t_e+ (i_D = leakage). Control: D conducts the
+    inductor's 10 A at the left limit. Before the fix the row kept stage 1's D ON: 1 mOhm D
+    i_D = -9522 A, v_c+ 9.5220 V; ideal D (whose post-jump current is forward: only the
+    jump's impulse shows the reverse drive) v_c+ = 0 V."""
+    c1, c2 = 1e-9, 50e-12
+    b, fn = _jump_into_freewheel(d_kind)
+    r = _quiet(p.simulate, b, t_end=4e-6, dt=DT, switch_fn=fn,
+               enable_substep_state_correction=split, **RULE)
+    v, t, kk = _limits(r)
+    (j,) = kk
+    va, vc, i_d = (np.asarray(x) for x in (v.v("a"), v.v("c"), v.i("D")))
+    want = (c1 * va[j] + c2 * vc[j]) / (c1 + c2)
+    assert vc[j + 1] == pytest.approx(want, rel=1e-6)
+    assert va[j + 1] == pytest.approx(want, rel=1e-6)
+    assert -1e-6 <= i_d[j + 1] <= 0.0
+    assert i_d[j] == pytest.approx(np.asarray(v.i("L"))[j], rel=1e-3)   # the control
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "open (item A's ledger half): after an ideal jump into a fast RC (C1+C2 behind 1 mOhm, "
+    "tau ~ 1 ps) the stored sample after the edge reads i_R = 10.0917 A (no split) / "
+    "10.1883 A (split) for i_L = 9.9950 A: +0.97 % / +1.9 % of a collapse no record holds"))
+@pytest.mark.parametrize("split", [False, True])
+def test_the_sample_after_an_ideal_jump_into_a_fast_rc_obeys_kcl(split):
+    """_jump_into_freewheel with a plain 1 mOhm resistor in D's place: the capacitors settle
+    in ~1 ps after the share, so at the next stored sample (0.25 us later) KCL at c gives
+    i_R = i_L (truth: KCL; i_R = -v_c / 1 mOhm)."""
+    b, fn = _jump_into_freewheel("resistor")
+    r = _quiet(p.simulate, b, t_end=4e-6, dt=DT, switch_fn=fn,
+               enable_substep_state_correction=split, **RULE)
+    v, t, kk = _limits(r)
+    (j,) = [j for j in kk if t[j] > 1e-6]   # the closing (not a start row)
+    i_r = -np.asarray(v.v("c"))[j + 2] / 1e-3   # the stored sample after the row
+    assert i_r == pytest.approx(np.asarray(v.i("L"))[j + 2], rel=1e-3)
