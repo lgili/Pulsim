@@ -1377,8 +1377,36 @@ reviewer on 79330ab7..5613abbe (scoping + lazy root error came after the review)
     boost_classic 0.9997, stiff_two_timescale_rc 0.9454 (`.scratch/f10/refdbg/`). Of the 55
     comparable units on the refused run: above 1: none; incl. settle: diode_half_wave_rl_load
     2904 (the projected cluster, inside its window).
-* `chain_rest2.sh` (3058a87c): referee on the 3 dead units, samples, property 100×200,
-  `--truth`, events gate, the rehearsal. Then the referee on all 100 again (70526766).
+* `chain_rest2.sh` (3058a87c) and `chain_rest3.sh` (the referee, 3eef29a5 = 70526766 + docs):
+  * (c) referee, 100 units (`S9_referee_100b.jsonl`): **89 comparable, above 1: none**, worst
+    0.99991 (high_q_rlc_ringdown x[3]); incl. settle: diode_half_wave_rl_load 2904 (the projected
+    1 ns cluster, inside its window); settle_fallback 0. Not comparable (11): events differ 4
+    (half_bridge_transformer_dc, active_clamp_forward, flyback_converter, forward_converter),
+    DiodeModeInconsistentError boost_pfc_open_loop, no floor mapping three_phase_balanced_rl_load,
+    driven_lc_series_resonance (the referee process ended without a line; samples / property /
+    `--truth` run it fine), and 4 with one or two ~2 ps lines left unread (ll02_rc_pulse_charge
+    [2e-6, 2.000002e-6], ll03_rl_step, ll04_rlc_underdamped, snubber_rc): F-X-7's line after a
+    source corner, its reference instants inside EVENT_TOL of the corner — a referee limit, open.
+  * property 100×200 (`S9_property_100x200.jsonl`): **95 comparable, worst 0.99758, above 1:
+    none**; 5 events differ (cl_boost_pi, half_bridge_transformer_dc, boost_pfc_open_loop,
+    flyback_converter, forward_converter).
+  * `--truth` 6/6 ran: rule ratio / truth ratio rlc_series_resonant 0.49558 / 0.49558,
+    driven_lc 0.49862 / 0.49862, rl_natural 0.91659 / 0.91659, half_wave_rectifier_sine
+    0.91264 / 0.91264, pwm_voltage_rc 0.94091 / 0.94090, chopper_with_rc_snubber 4.9e-4 / 4.9e-4.
+  * (e) events gate: **same 100, diff 0, skipped 0**.
+  * (f) samples: 100/100 ran, 1 554 426 in all; three_phase_balanced_rl_load 5 290 (609 rule
+    samples, 1 projection); driven_lc 80 743. ladder500 (on 9d6dc0c4, untouched since): rule off 21
+    samples 24.2 s 139 MB; rule 1e-5 3 093 samples 80.9 s 166 MB, 0 capped / unbounded / floored.
+  * (d) rehearsal (`S9_NEXT_DEFAULTS_REHEARSAL.md`): no worker crash left. Engine-class rows:
+    three auto+next **timeouts (300 s)** on the routed engine's profile (driven_lc_series_resonance,
+    high_q_rlc_ringdown, three_phase_diode_rectifier — not the exact engine); **analytic
+    hard_switched_rc on dsed:output_grid: disagree, err_rms 0.0676** (tracked rehearsal 2.5e-10).
+    Cause, measured (`hsrc.py`): the closing switch gives the capacitor a 1 ps mode, which the
+    rule's event projection settles at once; F-X-7's sample 2 ps past each closing stores the
+    PROJECTED flow (0.0100 V) where the unprojected closed form reads 13.54 V, and err_rms's
+    trapezoid weights that one sample over half the next 5 µs line. The promise is against the
+    projected flow (decision in force) and the projection is recorded, so no engine change here;
+    but the rehearsal gate now reads this cell as wrong — for the orchestrator.
 
 ### Session 9 — what is left (for the successor, if this session stops before the chain ends)
 
