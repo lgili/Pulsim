@@ -1,0 +1,81 @@
+schema: pulsim-v1
+version: 1
+benchmark:
+  id: textbook_erickson_buck_ccm_r5
+  category: nonlinear
+  observables:
+    - column: V(out)
+    - column: I(L1)
+  # R. W. Erickson, D. Maksimovic, "Fundamentals of Power Electronics",
+  # 3rd ed., Springer 2020, ch. 2 (volt-second balance, charge balance,
+  # small-ripple approximation), buck converter in CCM. The numbers
+  # below are the chapter's formulas evaluated at this operating point
+  # (Vg = 24 V, D = 0.5, Ts = 20 us, L = 47 uH, C = 100 uF, R = 5 ohm);
+  # the book prints the formulas, not this point:
+  #   V      = D Vg                 = 0.5 * 24                    = 12.0 V
+  #   dI_pp  = (Vg - V) D Ts / L    = 12 * 0.5 * 20e-6 / 47e-6    = 2.5532 A
+  #   dV_pp  = dI_pp Ts / (8 C)     = 2.5532 * 20e-6 / 800e-6     = 63.83 mV
+  # CCM holds: K = 2 L / (R Ts) = 0.94 > K_crit = 1 - D = 0.5 (ch. 5).
+  # (The sibling textbook_erickson_buck_ccm.yaml, R = 10 ohm, has
+  # K = 0.47 < 0.5 and is in DCM: finding F-T-1.)
+  # The switch and the diode have 5 mohm on-resistance: at 2.4 A the
+  # drop is 12 mV, 0.1 % of V, well inside the tolerance.
+  validation:
+    type: published
+    source: "Erickson & Maksimovic, Fundamentals of Power Electronics, 3rd ed., ch. 2 (buck, CCM)"
+    tolerance_pct: 2
+    start_time: 9.9e-3          # the last five switching periods
+    values:
+      v_out: {metric: mean, observable: V(out), value: 12.0}
+      delta_il: {metric: ripple_pkpk, observable: I(L1), value: 2.5532}
+      delta_vc: {metric: ripple_pkpk, observable: V(out), value: 0.06383}
+simulation:
+  tstart: 0.0
+  tstop: 10e-3
+  dt: 0.2e-6
+  # variable step (TR-BDF2 lands the gate edges): the fixed-step engine
+  # samples the gate on its grid and reads dI_pp 2.0 % low at this dt
+  # (2.5067 A against the exact orbit's 2.5577 A)
+  adaptive_timestep: true
+  integrator: trapezoidal
+  switching_mode: ideal
+  uic: true
+components:
+  - type: voltage_source
+    name: Vdc
+    nodes: [vcc, 0]
+    waveform: {type: dc, value: 24.0}
+  - type: voltage_source
+    name: Vpwm
+    nodes: [gate, 0]
+    waveform:
+      type: pwm
+      v_high: 10.0
+      v_low: 0.0
+      frequency: 50000
+      duty: 0.5
+  - type: vcswitch
+    name: SW
+    nodes: [gate, vcc, sw]
+    v_threshold: 5.0
+    g_on: 200.0
+    g_off: 1e-6
+  - type: diode
+    name: Dfw
+    nodes: [0, sw]
+    g_on: 200.0
+    g_off: 1e-6
+  - type: inductor
+    name: L1
+    nodes: [sw, out]
+    value: 47e-6
+    ic: 0.0
+  - type: capacitor
+    name: C1
+    nodes: [out, 0]
+    value: 100e-6
+    ic: 0.0
+  - type: resistor
+    name: Rload
+    nodes: [out, 0]
+    value: 5.0

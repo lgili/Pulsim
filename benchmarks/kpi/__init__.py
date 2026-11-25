@@ -262,6 +262,25 @@ def compute_ripple_pkpk(
     return max(window) - min(window)
 
 
+def compute_time_average(times: Sequence[float], samples: Sequence[float]) -> float:
+    """Time-weighted mean (trapezoid) of a trace on any grid, uniform or not."""
+    if len(times) < 2 or not times[-1] - times[0] > 0.0:
+        raise ValueError("a time average needs at least two samples over a positive span")
+    area = sum(0.5 * (samples[k] + samples[k + 1]) * (times[k + 1] - times[k])
+               for k in range(len(times) - 1))
+    return area / (times[-1] - times[0])
+
+
+def compute_rms(times: Sequence[float], samples: Sequence[float]) -> float:
+    """Time-weighted RMS: the square is integrated exactly for a trace that is linear
+    between samples (Simpson on each interval), so a coarse grid does not bias it."""
+    if len(times) < 2 or not times[-1] - times[0] > 0.0:
+        raise ValueError("an RMS needs at least two samples over a positive span")
+    area = sum((samples[k] ** 2 + samples[k] * samples[k + 1] + samples[k + 1] ** 2) / 3.0
+               * (times[k + 1] - times[k]) for k in range(len(times) - 1))
+    return math.sqrt(area / (times[-1] - times[0]))
+
+
 # =============================================================================
 # Conduction + switching loss breakdown
 # =============================================================================
@@ -613,6 +632,8 @@ __all__ = [
     "compute_efficiency",
     "compute_transient_response",
     "compute_ripple_pkpk",
+    "compute_time_average",
+    "compute_rms",
     "compute_loss_breakdown",
     "compute_zvs_fraction",
     "compute_zcs_fraction",

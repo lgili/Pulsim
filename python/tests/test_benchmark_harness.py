@@ -215,7 +215,7 @@ def test_unmapped_construct_is_named():
 
 def test_triage_lists_every_circuit_on_disk():
     on_disk = {p.relative_to(BENCH).as_posix() for p in (BENCH / "circuits").rglob("*.yaml")}
-    assert len(on_disk) == 128
+    assert len(on_disk) == 129
     assert set(TRIAGE) == on_disk
     assert {e["status"] for e in TRIAGE.values()} <= {"runs", "skipped", "error"}
     for rel, e in TRIAGE.items():
@@ -482,6 +482,50 @@ def test_benchmark_runner_runs_v1_files_against_their_stored_expectations(tmp_pa
         assert got[key].message.startswith("refused: v1 integrator 'trbdf2' (fixed step)")
     sat = [r for (b, _), r in got.items() if b == "saturating_inductor_step"]
     assert sat and all(r.status == "skipped" and "saturable_inductor" in r.message for r in sat)
+
+
+def test_published_validation_checks_each_declared_value(tmp_path):
+    """`validation: {type: published}` (add-textbook-reference-cases 1.1-1.3): each declared
+    key is measured by the KPI suite over the window and held to the book's number; the error
+    goes to the results as `published__<key>_err_pct`. Erickson ch. 2 buck in CCM: V = D Vg =
+    12 V, dI_pp = 2.5532 A, dV_pp = 63.83 mV. The exact orbit of this circuit (5 mohm switches;
+    test_textbook_reference_cases.dcdc_truth('buck_R5')) is 11.98801 V / 2.55773 A / 63.971 mV,
+    i.e. -0.10 / +0.18 / +0.22 % from the book: the run must land there, not merely inside 2 %."""
+    import copy
+
+    import benchmark_runner as br
+    import kpi
+
+    bid = "textbook_erickson_buck_ccm_r5"
+    (r,) = br.run_benchmarks(BENCH / "manifests" / "benchmarks.yaml", tmp_path, selected=[bid])
+    assert r.status == "passed", r.message
+    orbit = {"v_out": 11.98801, "delta_il": 2.55773, "delta_vc": 0.063971}
+    for key, truth in orbit.items():
+        assert r.kpis[f"published__{key}"] == pytest.approx(truth, rel=2e-3), key  # measured <= 5e-4
+        assert abs(r.kpis[f"published__{key}_err_pct"]) < 0.5, key
+
+    doc = yaml.safe_load((BENCH / "circuits/switching/buck" / f"{bid}.yaml").read_text(encoding="utf-8"))
+    val = doc["benchmark"]["validation"]
+    assert val["type"] == "published" and "Erickson" in val["source"]
+    times, series = br.load_csv_series(tmp_path / "outputs" / bid / "default" / "pulsim.csv")
+    assert br.validate_published(times, series, val)[1] == ""
+    for key in orbit:                       # a published number off by 3 % fails, and is named
+        for k in (0.97, 1.03):
+            bad = copy.deepcopy(val)
+            bad["values"][key]["value"] *= k
+            out, msg = br.validate_published(times, series, bad)
+            assert msg.startswith(key) and abs(out[f"published__{key}_err_pct"]) > 2.0, (key, k, msg)
+    for broken, text in [({"source": ""}, "source"), ({"values": {}}, "no values")]:
+        with pytest.raises(ValueError, match=text):
+            br.validate_published(times, series, {**val, **broken})
+    with pytest.raises(ValueError, match="unknown metric"):
+        br.validate_published(times, series, {**val, "values": {"x": {"metric": "peak", "observable": "V(out)", "value": 1}}})
+
+    # the two KPI helpers are time-weighted: a grid clustered at one end does not bias them
+    t = [0.0, 1.0, 1.001, 1.002, 2.0]
+    v = [0.0, 0.0, 10.0, 0.0, 0.0]         # a 2 ms triangle of height 10 in a 2 s window
+    assert kpi.compute_time_average(t, v) == pytest.approx(0.005, rel=1e-12)   # plain mean: 2.0
+    assert kpi.compute_rms(t, v) == pytest.approx(math.sqrt(100.0 / 3.0 * 0.002 / 2.0), rel=1e-12)
 
 
 def test_a_suspect_reference_grades_nothing_and_a_frozen_error_may_not_grow():
