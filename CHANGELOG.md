@@ -51,6 +51,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Python package from different builds are refused with
   `UnsupportedError(feature="controller_state_layout")` (an `assert`,
   which `python -O` removes, was the only guard).
+- `device_loss_summary`: a switch with an in-kernel loss port whose result
+  has no recorded mask and no `switch_fn=` was left out of the summary;
+  its switching energy is now read from `result.loss_events` (they need
+  no mask) and its conduction fields are NaN with
+  `not_measured=("conduction",)` and a `RuntimeWarning`. An ideal
+  branch-form switch in the same case keeps its event switching energy.
 - `simulate(resume_from=...)`, `sweep` and `monte_carlo` look inside
   tuples, frozensets and frozen dataclasses when deciding whether a
   controller's closure holds state: a list or array inside a tuple is now

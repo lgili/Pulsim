@@ -516,3 +516,60 @@ def test_duck_typed_result_with_device_losses_but_no_loss_events_does_not_crash(
     rows_spec = _loss_by_name(b, duck, switch_specs=s_spec)
     assert rows_spec["Q1"]["E_sw_total"] > 0.0
 
+
+
+class _NoMaskRecord:
+    """A result whose engine path recorded no stamped mask (as a DSED run
+    with a Python-mask switch_fn): every attribute but switch_states."""
+
+    def __init__(self, res):
+        self._res = res
+
+    switch_states = None
+
+    def __getattr__(self, k):
+        return getattr(self._res, k)
+
+
+def test_loss_port_switch_without_mask_reads_events_not_zero():
+    # truth: the gate schedule's commutation count x the table's energy at
+    # the operating point (10 V blocked, 1 A conducted: the axes' only
+    # point), independent of the summary's own reading.
+    E_TAB = 1e-3
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "in", "gnd", 10.0)
+    b.add_switch("S1", "in", "o", 1e6, 1e-12)
+    b.add_resistor("RL", "o", "gnd", 10.0)
+    b.add_voltage_source("Vamb", "amb", "gnd", 25.0)
+    b.add_resistor("Rth", "tj", "amb", 1.0)
+    b.add_capacitor("Cth", "tj", "amb", 1e-3)
+    t = p.LossTable(v_axis=[10.0], i_axis=[1.0], tj_axis=[25.0],
+                    energy=np.full((1, 1, 1), E_TAB))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        b.set_device_losses("S1", junction="tj", E_on=t, E_off=t)
+    sf = p.make_pwm_switch_fn(10e3, 0.5, 0, 1)
+    t_end = 0.975e-3
+    edges, te = [], 0.0
+    while True:
+        te = sf.next_edge_after(te)
+        if not te < t_end:
+            break
+        edges.append(te)
+    n_on = sum(1 for e in edges if round(e * 10e3, 6) % 1 == 0)
+    n_off = len(edges) - n_on
+    assert (n_on, n_off) == (9, 10)
+    res = _sim(b, t_end, sf, "pwl", dt=1e-6)
+
+    with pytest.warns(RuntimeWarning, match="conduction is not measured"):
+        rows = {r["name"]: r for r in p.device_loss_summary(b, _NoMaskRecord(res))}
+    s = rows["S1"]
+    assert s["not_measured"] == ("conduction",)
+    assert math.isnan(s["P_avg"]) and math.isnan(s["E_total"])
+    assert (s["n_turn_on_events"], s["n_turn_off_events"]) == (n_on, n_off)
+    assert s["E_sw_total"] == pytest.approx((n_on + n_off) * E_TAB, rel=1e-9)
+    # the masked result's reading of the same events is the same
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        full = {r["name"]: r for r in p.device_loss_summary(b, res)}["S1"]
+    assert full["E_sw_total"] == s["E_sw_total"]

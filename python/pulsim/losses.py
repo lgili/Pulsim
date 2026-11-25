@@ -2322,9 +2322,18 @@ def device_loss_summary(
                     impulse_t=imp_t, name=entry["name"],
                     projected_limits=getattr(result, "engine_used", None) == "dsed"))
         else:
+            spec = (switch_by_bid.get(bid) or switch_by_name.get(entry["name"])
+                    if kind == "switch" else None)
+            if _use_kernel_switching(kernel_loss_records.get(entry["name"]), spec):
+                # the loss port's events need no mask
+                entry.update(_kernel_switching_loss(
+                    result.loss_events(entry["name"]), win, kind=kind))
+                left = "its duty is"
+            else:
+                left = "its duty and switching energy are"
             warnings.warn(
                 f"device_loss_summary: ideal {kind} {entry['name']!r} has no recorded "
-                "mask in this result: its duty and switching energy are left out.",
+                f"mask in this result: {left} left out.",
                 RuntimeWarning, stacklevel=3)
         ignored = [k for k, by_bid, by_name in (
             ("conduction_specs", cond_by_bid, cond_by_name),
@@ -2630,7 +2639,28 @@ def device_loss_summary(
                     kernel_masks is not None
                     and 0 <= sw_bit < kernel_masks.shape[1]):
                 # No recorded mask and no switch_fn: no way to know the
-                # per-step state.
+                # per-step state, so no conduction. A loss port's events
+                # need no mask: its switching energy is still measured,
+                # and the conduction reads NaN by name, never 0 J.
+                k_rec = kernel_loss_records.get(name)
+                s_spec = switch_by_bid.get(bid) or switch_by_name.get(name)
+                if _use_kernel_switching(k_rec, s_spec):
+                    nan = float("nan")
+                    entry = {"branch_id": int(bid), "kind": "switch",
+                             "name": name, "i_avg": nan, "i_rms": nan,
+                             "i_peak": nan, "P_avg": nan, "E_total": nan,
+                             "not_measured": ("conduction",)}
+                    entry.update(_kernel_switching_loss(
+                        result.loss_events(name), win, kind="switch"))
+                    summary.append(entry)
+                    warnings.warn(
+                        f"device_loss_summary: switch {name!r}: its conduction "
+                        "is not measured (NaN): the result carries no record "
+                        "of the stamped switch mask and switch_fn= was not "
+                        "given. Its switching energy is read from the loss "
+                        "port's events.", RuntimeWarning, stacklevel=2)
+                    switch_seq_idx += 1
+                    continue
                 warnings.warn(
                     f"device_loss_summary: switch {name!r} is left out: the "
                     "result carries no record of the stamped switch mask and "
