@@ -19,6 +19,7 @@
 // Switch). Capacitor/Inductor (trapezoidal companion + history) and
 // nonlinear devices (per-segment Newton) are V1+ extensions.
 
+#include "pulsim/sim/error.hpp"   // SingularError
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/dictionary.hpp"
 #include "pulsim/numeric/types.hpp"
@@ -1064,7 +1065,7 @@ public:
                             where = info.label;
                         }
                     }
-                    throw std::runtime_error(
+                    throw SingularError(
                         "compute_lti_state_space: algebraic block G_aa is numerically "
                         "singular at " + (where.empty() ? std::string{"a node group"} : where)
                         + ": a direction it cannot resolve (a node group tied to "
@@ -1788,7 +1789,7 @@ public:
                 pool_.state_size(graph_), sparse::Backend::Auto);
             const sparse::Matrix& J = e.J;
             if (!analyze_shared_(*e.solver, J, dt > Real{0})) {
-                throw std::runtime_error(std::format(
+                throw SingularError(std::format(
                     "PwlStateSpaceCache::solve_at: analyze failed "
                     "(structurally singular) for mask {} (dt={}){}",
                     mask.to_string(), dt,
@@ -1796,7 +1797,7 @@ public:
                                       e.solver.get())));
             }
             if (!e.solver->factorize(J)) {
-                throw std::runtime_error(std::format(
+                throw SingularError(std::format(
                     "PwlStateSpaceCache::solve_at: factorize failed "
                     "(numerically singular) for mask {} (dt={}){}",
                     mask.to_string(), dt,
@@ -2011,13 +2012,13 @@ public:
             rank1_solver_ = sparse::make_default_solver(
                 pool_.state_size(graph_), rank1_backend_hint_);
             if (!analyze_shared_(*rank1_solver_, J, dt_ > Real{0})) {
-                throw std::runtime_error(std::format(
+                throw SingularError(std::format(
                     "PwlStateSpaceCache::solve_rank1: initial analyze "
                     "failed (structurally singular) for mask {}",
                     mask.to_string()));
             }
             if (!rank1_solver_->factorize(J)) {
-                throw std::runtime_error(std::format(
+                throw SingularError(std::format(
                     "PwlStateSpaceCache::solve_rank1: initial factorize "
                     "failed (numerically singular) for mask {} (dt={})",
                     mask.to_string(), dt_));
@@ -2105,7 +2106,7 @@ public:
                 // is identical across all switch states (only conductance
                 // values change), so analyze() does NOT need to re-run.
                 if (!rank1_solver_->factorize(J)) {
-                    throw std::runtime_error(std::format(
+                    throw SingularError(std::format(
                         "PwlStateSpaceCache::solve_rank1: full refactor "
                         "fallback failed (numerically singular) for mask "
                         "{} (dt={})",
@@ -2651,7 +2652,7 @@ private:
 
         if (!refactored_via_partial) {
             if (!solver->factorize(new_J)) {
-                throw std::runtime_error(
+                throw SingularError(
                     "PwlStateSpaceCache::refactor_parametric: full "
                     "factorize fallback failed (numerically singular). "
                     "Check the updated parameter values.");

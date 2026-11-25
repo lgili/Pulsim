@@ -53,6 +53,8 @@ from ._pulsim import (  # type: ignore[import-not-found]
 )
 from ._pulsim import run_option_defaults as _run_option_defaults  # type: ignore[import-not-found]
 from ._refusal import _UnsupportedNotImplemented, unsupported
+from .errors import OptionsError
+from .errors import options_error as _options_error
 
 
 # =============================================================================
@@ -111,8 +113,10 @@ _VALID_INTEGRATORS = ("auto", "rk45", "bdf2")
 # usage site so it doesn't drift out of sync.)
 
 
-class _InconsistentInitialState(ValueError):
-    """A full-MNA initial_state that no reduced state reproduces."""
+class _InconsistentInitialState(OptionsError):
+    """A full-MNA initial_state that no reduced state reproduces (an
+    OptionsError, so still a ValueError)."""
+    option = "initial_state"
 
 
 def _validate_engine_kwargs(
@@ -135,7 +139,8 @@ def _validate_engine_kwargs(
     """
     # --- engine name itself ---
     if engine not in _VALID_ENGINES:
-        raise ValueError(
+        raise _options_error(
+            "engine",
             f"simulate(): unknown engine={engine!r}; "
             f"expected one of {_VALID_ENGINES}"
         )
@@ -143,7 +148,8 @@ def _validate_engine_kwargs(
     # --- engine='pwl' branch ---
     if engine == "pwl":
         if dt is None or dt <= 0:
-            raise ValueError(
+            raise _options_error(
+                "dt",
                 "simulate(engine='pwl'): a positive `dt` is required. "
                 "Either pass `dt=...` for fixed-step trapezoidal, or "
                 "switch to `engine='dsed'` for variable-step (no dt "
@@ -163,21 +169,25 @@ def _validate_engine_kwargs(
     #     ceiling h_max. ---
     if engine in ("auto", "trbdf2"):
         if dt is not None and dt <= 0:
-            raise ValueError(
+            raise _options_error(
+                "dt",
                 f"simulate(engine={engine!r}): dt (used as the step "
                 f"ceiling h_max here) must be positive, got {dt!r}")
         if rtol is not None and rtol <= 0:
-            raise ValueError(
+            raise _options_error(
+                "rtol",
                 f"simulate(engine={engine!r}): rtol must be "
                 f"positive, "
                 f"got {rtol!r}")
         if atol is not None and atol <= 0:
-            raise ValueError(
+            raise _options_error(
+                "atol",
                 f"simulate(engine={engine!r}): atol must be "
                 f"positive, "
                 f"got {atol!r}")
         if dt_init is not None and dt_init <= 0:
-            raise ValueError(
+            raise _options_error(
+                "dt_init",
                 f"simulate(engine={engine!r}): dt_init must be "
                 f"positive, "
                 f"got {dt_init!r}")
@@ -185,35 +195,42 @@ def _validate_engine_kwargs(
 
     # --- engine='dsed' branch ---
     if rtol is not None and rtol <= 0:
-        raise ValueError(
+        raise _options_error(
+            "rtol",
             f"simulate(engine='dsed'): rtol must be positive, got {rtol!r}"
         )
     if atol is not None and atol <= 0:
-        raise ValueError(
+        raise _options_error(
+            "atol",
             f"simulate(engine='dsed'): atol must be positive, got {atol!r}"
         )
     if dt_init is not None and dt_init <= 0:
-        raise ValueError(
+        raise _options_error(
+            "dt_init",
             f"simulate(engine='dsed'): dt_init must be positive, "
             f"got {dt_init!r}"
         )
     if integrator is not None and integrator not in _VALID_INTEGRATORS:
-        raise ValueError(
+        raise _options_error(
+            "integrator",
             f"simulate(engine='dsed'): unknown integrator={integrator!r}; "
             f"expected one of {_VALID_INTEGRATORS}"
         )
     if stiffness_threshold is not None and stiffness_threshold <= 0:
-        raise ValueError(
+        raise _options_error(
+            "stiffness_threshold",
             f"simulate(engine='dsed'): stiffness_threshold must be "
             f"positive, got {stiffness_threshold!r}"
         )
     if h_bdf2 is not None and h_bdf2 <= 0:
-        raise ValueError(
+        raise _options_error(
+            "h_bdf2",
             f"simulate(engine='dsed'): h_bdf2 must be positive, "
             f"got {h_bdf2!r}"
         )
     if dt is not None and dt <= 0:
-        raise ValueError(
+        raise _options_error(
+            "dt",
             f"simulate(engine='dsed'): dt (used as dt_max here) must "
             f"be positive, got {dt!r}"
         )
@@ -1143,7 +1160,8 @@ def run_dsed_from_builder(
             full_x0, x0 = x0, np.zeros(n_state, dtype=float)
             ambiguous = n_mna == n_state
         elif x0.shape != (n_state,):
-            raise ValueError(
+            raise _options_error(
+                "initial_state",
                 f"simulate(engine='dsed'): initial_state has shape "
                 f"{x0.shape}, expected ({n_state},)."
             )
@@ -1154,7 +1172,8 @@ def run_dsed_from_builder(
     if resume_from is not None:   # the run's own clock: t_end is absolute
         t_window = float(t_end) - float(resume_from.t)
     if t_window <= 0:
-        raise ValueError(
+        raise _options_error(
+            "t_end",
             f"simulate(engine='dsed'): t_end ({t_end}) must be > "
             f"t_start ({opts.t_start})."
         )
@@ -1365,7 +1384,8 @@ def run_dsed_from_builder(
     if full_x0 is not None and ambiguous:
         x0 = full_x0          # the non-native bridges read it as reduced, as before
     elif full_x0 is not None:
-        raise ValueError(
+        raise _options_error(
+            "initial_state",
             f"simulate(engine='dsed'): initial_state has shape {full_x0.shape}, "
             f"expected ({n_state},); a full-MNA vector is accepted only on the "
             "native adapter.")

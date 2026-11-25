@@ -144,6 +144,7 @@ nav:
       - 'Numerical Solvers (Phase 2)': solvers.md
       - API Reference: api-reference.md
       - 'Result Reference': result-reference.md
+      - 'Error Reference': errors.md
       - 'Device Reference': device-reference.md
       - UX Helpers (discover, plot, monitor): helpers.md
       - Gotchas: gotchas.md

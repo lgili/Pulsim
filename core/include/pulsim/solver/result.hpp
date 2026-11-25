@@ -802,10 +802,15 @@ public:
         : std::runtime_error(what),
           partial_(std::move(partial)),
           t_failed_(t_failed),
-          roundoff_budget_(roundoff_budget) {
+          roundoff_budget_(roundoff_budget),
+          singular_(singular_in_flight()) {
         // it captured the aborted engine's frame, which is unwinding
         partial_.gate_mask_fn = nullptr;
     }
+
+    /// The step failed on a singular matrix (a SingularError was being
+    /// handled when this was built); Python raises `pulsim.SingularError`.
+    [[nodiscard]] bool singular() const noexcept { return singular_; }
 
     /// Everything that WAS computed, up to but not including the
     /// step that failed.
@@ -827,6 +832,7 @@ private:
     SimulationResult partial_;
     Real t_failed_;
     bool roundoff_budget_ = false;
+    bool singular_ = false;
 };
 
 }  // namespace pulsim::solver

@@ -26,6 +26,7 @@
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/pwl/symbolic_plan.hpp"
+#include "pulsim/sim/error.hpp"   // NetlistError
 
 #include <algorithm>
 #include <bit>
@@ -140,7 +141,7 @@ public:
         auto node_name = [&](Index i) { return std::string{g.node(i).name}; };
         auto refuse = [&](std::string_view dev, std::string_view pin, Index nd,
                           std::string_view wants, std::string_view has) {
-            throw std::invalid_argument(std::format(
+            throw NetlistError(std::string(dev), node_name(nd), std::format(
                 "device \"{}\": pin {} ({}) is connected to node \"{}\", which "
                 "is {}", dev, pin, wants, node_name(nd), has));
         };
@@ -330,7 +331,7 @@ public:
         auto b = d_->lowered.clone();
         for (const auto& t : ties) {
             if (t.node < 0 || t.node >= b.graph().num_nodes()) {
-                throw std::invalid_argument(std::format(
+                throw NetlistError(t.name, "", std::format(
                     "with_ties: tie \"{}\" names node {}, which this "
                     "circuit does not have", t.name, t.node));
             }

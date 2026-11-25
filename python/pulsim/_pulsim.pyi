@@ -10,7 +10,7 @@ import collections.abc
 import numpy
 import numpy.typing
 import typing
-__all__: list[str] = ['BranchKind', 'BuilderScope', 'CacheMetrics', 'ChargeLaw', 'ChargeTable', 'Circuit', 'CircuitBuilder', 'CommutationEvent', 'ConductionTable', 'ControlGraphBuildError', 'ConvergenceError', 'CxxBlockChain', 'CxxBlockChainState', 'CxxChainBExtra', 'CxxChainPwmGate', 'CxxChainSignalGate', 'CxxChainTick', 'CxxClarkeTransform', 'CxxFirstOrderLowPass', 'CxxGain', 'CxxInputRef', 'CxxIntegrator', 'CxxInverseParkTransform', 'CxxLimiter', 'CxxPIController', 'CxxPIDController', 'CxxPLL', 'CxxParkTransform', 'CxxPwmGenerator', 'CxxSpaceVectorModulator', 'CxxSubtract', 'DCOperatingPoint', 'DCSolveReport', 'DCStrategy', 'DeviceInfo', 'DeviceLossRecord', 'DevicePath', 'DevicePool', 'DiodeModeInconsistentError', 'DtRetry', 'DutyRegister', 'EventIterationBreach', 'FluxMapDQ', 'Graph', 'GridKind', 'IdealDiodeParams', 'ImplausibleVoltage', 'InductorGuardAction', 'InternalError', 'LiveRingHandle', 'LoadedCircuit', 'LossEvent', 'LossTable3D', 'MnaSweepKernelResult', 'NativeMultiMaskPwm', 'NativePwm2Switch', 'NewtonCounters', 'NewtonRoundoffBudgetExceeded', 'OptionsError', 'Parameter', 'ParametricRefactorMode', 'ParametricRefactorResult', 'PreflightFinding', 'PreflightIssue', 'PreflightOptions', 'PreflightReport', 'PulsimError', 'PwlStateSpaceCache', 'ReinitRecord', 'ResolutionRecord', 'RingingRecord', 'RunOptions', 'RunStats', 'Simulation', 'SimulationAborted', 'SimulationOptions', 'SimulationResult', 'SolverSnapshot', 'StoredKind', 'SwitchSchedule', 'SwitchStateMask', 'ThevArm', 'ThevArmParams', 'ThreePhaseLegIndices', 'UnsupportedError', 'block_laws_source', 'compose_chain_observers', 'compute_dc_op', 'compute_dc_op_with_strategy', 'compute_dc_operating_point', 'describe_implausible_voltage', 'device_field_table', 'dopri5_solve', 'dsed_period_map', 'dsed_periodic_orbit', 'engine_capabilities', 'find_implausible_voltage', 'full_bridge', 'half_bridge', 'ja_evaluate', 'ja_replay', 'load_yaml_file', 'load_yaml_string', 'make_carrier_pwm_fn', 'make_chain_switch_fn', 'make_combined_switch_fn', 'make_constant_switch_fn', 'make_dead_time_pwm_pair_fn', 'make_edge_list_fn', 'make_phase_control_fn', 'make_phase_shift_full_bridge_fn', 'make_pwm_switch_fn', 'make_spwm_pair_fn', 'make_three_phase_spwm_fn', 'radau_iia3_solve', 'run_auto_native', 'run_auto_native_builder', 'run_bdf2_native', 'run_bdf2_native_builder', 'run_mna_sweep_kernel', 'run_option_defaults', 'run_option_table', 'run_ped_native', 'run_ped_native_builder', 'run_transient', 'run_transient_bdf1', 'run_transient_trbdf2', 'run_transient_with_chain', 'shockley_saturation_current_at', 'shockley_voltage_for_current', 'static_device_readings', 'thermal_voltage']
+__all__: list[str] = ['BranchKind', 'BuilderScope', 'CacheMetrics', 'ChargeLaw', 'ChargeTable', 'Circuit', 'CircuitBuilder', 'CommutationEvent', 'ConductionTable', 'ControlGraphBuildError', 'ConvergenceError', 'CxxBlockChain', 'CxxBlockChainState', 'CxxChainBExtra', 'CxxChainPwmGate', 'CxxChainSignalGate', 'CxxChainTick', 'CxxClarkeTransform', 'CxxFirstOrderLowPass', 'CxxGain', 'CxxInputRef', 'CxxIntegrator', 'CxxInverseParkTransform', 'CxxLimiter', 'CxxPIController', 'CxxPIDController', 'CxxPLL', 'CxxParkTransform', 'CxxPwmGenerator', 'CxxSpaceVectorModulator', 'CxxSubtract', 'DCOperatingPoint', 'DCSolveReport', 'DCStrategy', 'DeviceInfo', 'DeviceLossRecord', 'DevicePath', 'DevicePool', 'DiodeModeInconsistentError', 'DtRetry', 'DutyRegister', 'EventIterationBreach', 'FluxMapDQ', 'Graph', 'GridKind', 'IdealDiodeParams', 'ImplausibleVoltage', 'InductorGuardAction', 'InternalError', 'LiveRingHandle', 'LoadedCircuit', 'LossEvent', 'LossTable3D', 'MnaSweepKernelResult', 'NativeMultiMaskPwm', 'NativePwm2Switch', 'NetlistError', 'NewtonCounters', 'NewtonRoundoffBudgetExceeded', 'OptionsError', 'Parameter', 'ParametricRefactorMode', 'ParametricRefactorResult', 'PreflightFinding', 'PreflightIssue', 'PreflightOptions', 'PreflightReport', 'PulsimError', 'PwlStateSpaceCache', 'ReinitRecord', 'ResolutionRecord', 'RingingRecord', 'RunOptions', 'RunStats', 'Simulation', 'SimulationAborted', 'SimulationOptions', 'SimulationResult', 'SingularError', 'SolverSnapshot', 'StoredKind', 'SwitchSchedule', 'SwitchStateMask', 'ThevArm', 'ThevArmParams', 'ThreePhaseLegIndices', 'UnsupportedError', 'block_laws_source', 'compose_chain_observers', 'compute_dc_op', 'compute_dc_op_with_strategy', 'compute_dc_operating_point', 'describe_implausible_voltage', 'device_field_table', 'dopri5_solve', 'dsed_period_map', 'dsed_periodic_orbit', 'engine_capabilities', 'find_implausible_voltage', 'full_bridge', 'half_bridge', 'ja_evaluate', 'ja_replay', 'load_yaml_file', 'load_yaml_string', 'make_carrier_pwm_fn', 'make_chain_switch_fn', 'make_combined_switch_fn', 'make_constant_switch_fn', 'make_dead_time_pwm_pair_fn', 'make_edge_list_fn', 'make_phase_control_fn', 'make_phase_shift_full_bridge_fn', 'make_pwm_switch_fn', 'make_spwm_pair_fn', 'make_three_phase_spwm_fn', 'radau_iia3_solve', 'run_auto_native', 'run_auto_native_builder', 'run_bdf2_native', 'run_bdf2_native_builder', 'run_mna_sweep_kernel', 'run_option_defaults', 'run_option_table', 'run_ped_native', 'run_ped_native_builder', 'run_transient', 'run_transient_bdf1', 'run_transient_trbdf2', 'run_transient_with_chain', 'shockley_saturation_current_at', 'shockley_voltage_for_current', 'static_device_readings', 'thermal_voltage']
 class Graph:
     """
     Pulsim topology graph. Build via CircuitBuilder; access via builder.graph.
@@ -532,7 +532,8 @@ class SimulationResult:
     ``mode_diagnostics``. Set by :func:`pulsim.simulate` on ``pwl``. With
     ``mode_selection='auto'`` it also holds ``'mode_selection_auto'``
     (``requested``, ``chosen`` ``'lcp'`` / ``'legacy'``, ``reason``), on
-    every engine."""
+    every engine. On every engine ``'messages'`` holds the warnings the run
+    emitted, in order: ``(code, message, category)`` records."""
     control_tick_counts: list[int]
     """Controller ticks per tick source, in registration order (closed
     loops, then ``step_observer``): ``ceil(span / T_j)`` each. Set by
@@ -1100,6 +1101,8 @@ class SimulationAborted(ConvergenceError):
     pass
 class NewtonRoundoffBudgetExceeded(SimulationAborted):
     pass
+class SingularError(SimulationAborted):
+    pass
 class UnsupportedError(ValueError, PulsimError):
     device: typing.ClassVar[str] = ''
     engine: typing.ClassVar[str] = ''
@@ -1109,6 +1112,9 @@ class OptionsError(ValueError, PulsimError):
     option: typing.ClassVar[str] = ''
 class InternalError(RuntimeError, PulsimError):
     pass
+class NetlistError(ValueError, PulsimError):
+    device: typing.ClassVar[str] = ''
+    node: typing.ClassVar[str] = ''
 class SwitchStateMask:
     """
     Bit-vector identifying the on/off state of every switching branch. Construct with the total number of switches the cache enumerates (use `graph.num_switches`); then call `.set(i, True)` to flip individual bits.

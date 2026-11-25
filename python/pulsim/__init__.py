@@ -594,6 +594,8 @@ __all__ = [
     "UnsupportedError",
     "PulsimError",
     "OptionsError",
+    "NetlistError",
+    "SingularError",
     "InternalError",
     "ControlGraphBuildError",
     "value_and_grad",
@@ -887,10 +889,9 @@ def _warn_unlocated_edges(res):
       kept (it may carry an overshoot of the diode mode change).
     """
     c = getattr(res, "counters", None) or {}
-    import warnings
     n = c.get("unlocated_gate_steps", 0)
     if n:
-        warnings.warn(
+        _planning.emit("unlocated_edges",
             f"simulate(enable_substep_state_correction=True): {n} gate "
             "change(s) came from a switch_fn without next_edge_after(t) "
             "and could not be located inside the step; each was taken "
@@ -900,7 +901,7 @@ def _warn_unlocated_edges(res):
             UserWarning, stacklevel=4)
     n = c.get("split_event_overflows", 0)
     if n:
-        warnings.warn(
+        _planning.emit("unlocated_edges",
             f"simulate(enable_substep_state_correction=True): {n} step(s) "
             "had more events than the event split takes (8 per step); "
             "the events beyond it were taken unsplit, first order there. "
@@ -908,7 +909,7 @@ def _warn_unlocated_edges(res):
             UserWarning, stacklevel=4)
     n = c.get("n_gate_events_unresolved", 0)
     if n:
-        warnings.warn(
+        _planning.emit("unlocated_edges",
             f"simulate(enable_substep_state_correction=True): {n} step "
             "event(s) fell closer than split_snap*dt to an earlier one and "
             "were merged into it (a gate pulse or a source / b_extra_fn jump "
@@ -917,7 +918,7 @@ def _warn_unlocated_edges(res):
             UserWarning, stacklevel=4)
     n = c.get("stage2_retry_failures", 0)
     if n:
-        warnings.warn(
+        _planning.emit("unlocated_edges",
             f"simulate(discontinuity_restart=True): {n} restart step(s) "
             "changed a diode's mode in SDIRK stage 2 and the backward-Euler "
             "re-try that checks it failed; the SDIRK stage 2 was kept and "
@@ -941,7 +942,6 @@ def _warn_resolution(builder, res, dt):
     rd = res.resolution
     ring = list(rd.ringing)
     unest = rd.unestimated_fraction > _RESOLUTION_UNESTIMATED_MAX
-    import warnings
     lines = []
     if rd.lte_max > _RESOLUTION_LTE_MAX:
         name = builder.graph.branch_name(rd.lte_branch) or \
@@ -952,7 +952,7 @@ def _warn_resolution(builder, res, dt):
     if ring:
         try:
             names = builder.state_var_names()
-        except Exception:  # noqa: BLE001 — test doubles without names
+        except (AttributeError, TypeError):  # test doubles without names
             names = []
         worst = max(ring, key=lambda r: r.length)
         nm = names[worst.var] if worst.var < len(names) else \
@@ -966,7 +966,7 @@ def _warn_resolution(builder, res, dt):
             f"  * {rd.unestimated_fraction:.0%} of the steps could not be "
             "estimated (a mask change, restart, split or source jump "
             "within three steps): the run is not shown to be resolved.")
-    warnings.warn(
+    _planning.emit("resolution",
         f"simulate(): dt = {dt:.4g} s does not resolve this circuit "
         "(fixed-step engine).\n" + "\n".join(lines) +
         "\n  Reduce dt, or omit dt to let the variable-step engine "
@@ -1007,6 +1007,7 @@ def _yaml_retired_as_retired_error(native):
 load_yaml_string = _yaml_retired_as_retired_error(load_yaml_string)
 load_yaml_file = _yaml_retired_as_retired_error(load_yaml_file)
 from ._refusal import unsupported as _unsupported  # noqa: E402
+from ._refusal import _UnsupportedNotImplemented  # noqa: E402
 from ._control_plan import compose_control as _compose_control  # noqa: E402
 from ._control_plan import monitor_flags as _monitor_flags  # noqa: E402
 from ._control_state import save_into as _save_control_state  # noqa: E402
@@ -1032,37 +1033,8 @@ _passives.install(CircuitBuilder)
 
 
 
-class NameNotFoundError(KeyError, PulsimError):
-    """Raised by :meth:`SimulationResult.v` / `.i` / `.power` and the
-    :class:`CircuitBuilder` lookup helpers when a requested name
-    isn't registered. Carries ``name``, ``kind`` (one of
-    ``"node"``, ``"branch"``, ``"switch"``), and up to three
-    fuzzy-matched ``suggestions`` so the caller can hint at a
-    likely typo.
-
-    Subclasses :class:`KeyError` so existing
-    ``try: result.v(name) except KeyError`` patterns keep
-    working.
-    """
-
-    __slots__ = ("name", "kind", "suggestions")
-
-    def __init__(
-        self,
-        name: str,
-        kind: str,
-        suggestions: "list[str] | None" = None,
-    ) -> None:
-        self.name = name
-        self.kind = kind
-        self.suggestions = list(suggestions or [])
-        hint = (
-            f" Did you mean {self.suggestions}?"
-            if self.suggestions else ""
-        )
-        super().__init__(
-            f"{kind} {name!r} is not registered.{hint}"
-        )
+# add-kernel-simulation-object 8.1: the exception hierarchy's one home.
+from .errors import NameNotFoundError, NetlistError, SingularError  # noqa: E402
 
 
 def _result_v(self, name: str, t=None):
@@ -1115,7 +1087,7 @@ def _result_v(self, name: str, t=None):
                           else getattr(node, "name", "")
                 if n_name:
                     candidates.append(str(n_name))
-        except Exception:  # noqa: BLE001 — defensive only
+        except (AttributeError, TypeError):  # a graph without named nodes
             pass
         import difflib as _difflib
         sugg = _difflib.get_close_matches(name, candidates, n=3, cutoff=0.6)
@@ -1293,14 +1265,14 @@ def _result_i(self, name: str, t=None, *, port=None):
         try:
             state_idx = int(fn(b_id, builder.graph))
             break
-        except Exception:  # noqa: BLE001 — wrong device kind
+        except (IndexError, ValueError, TypeError):  # wrong device kind
             continue
     if state_idx is None:
         # A branch-form switch or diode solves its own current i_s.
         fn = getattr(builder.pool, "branch_var_id_for_switch", None)
         try:
             k = int(fn(b_id, builder.graph)) if fn else -1
-        except Exception:  # noqa: BLE001 — not a switched branch
+        except (IndexError, ValueError, TypeError):  # not a switched branch
             k = -1
         state_idx = k if k >= 0 else None
     states = _sa(self)
@@ -1322,7 +1294,7 @@ def _result_i(self, name: str, t=None, *, port=None):
             if int(d.get("branch_id", -1)) == int(b_id):
                 desc = d
                 break
-    except Exception:  # noqa: BLE001 — defensive
+    except (AttributeError, TypeError):  # a builder without components()
         desc = None
     if desc is None:
         raise RuntimeError(
@@ -1507,7 +1479,7 @@ def _result_i(self, name: str, t=None, *, port=None):
         sf = getattr(self, "_switch_fn", None)
         try:
             seq_idx = int(builder.switch_index_of(name))
-        except Exception as exc:  # noqa: BLE001 — usage error
+        except (IndexError, ValueError, AttributeError, TypeError) as exc:  # usage error
             raise RuntimeError(
                 f"result.i({name!r}): switch_index_of failed "
                 f"({exc!r}); make sure {name!r} is a switch added "
@@ -1673,7 +1645,7 @@ def _result_currents(self, *, skip_unsupported: bool = True
         return out
     try:
         comps = list(builder.components())
-    except Exception:  # noqa: BLE001 — defensive
+    except (AttributeError, TypeError):  # a builder without components()
         return out
     for d in comps:
         n = d.get("name", "")
@@ -2011,8 +1983,7 @@ def _step_loop_python_callbacks(**hooks) -> "tuple[str, ...]":
 def _zero_newton_iterations_is_none(n):
     """simulate(max_newton_iterations=0): the deprecated "default" spelling."""
     if n is not None and n == 0:  # False too: it was "not set" (False == 0)
-        import warnings
-        warnings.warn(
+        _planning.emit("deprecated_option",
             "simulate(max_newton_iterations=0): 0 as 'the default' is "
             "deprecated; pass None (the default, 50). From the next release "
             "0 is refused.", DeprecationWarning, stacklevel=4)
@@ -2026,9 +1997,8 @@ def _warn_impulses(res) -> None:
     recs = list(getattr(res, "reinit_records", None) or ())
     if not recs:
         return
-    import warnings
     r0 = recs[0]
-    warnings.warn(
+    _planning.emit("impulses",
         f"simulate(on_impulse='warn'): {len(recs)} "
         f"impulsive re-initialisation(s); first at t = {r0.t:g}: "
         f"{', '.join(r0.devices)} made {', '.join(r0.states)} dependent "
@@ -2088,13 +2058,9 @@ def _compose_step_hooks(step_observer, b_extra_fn, obs, b, state_size,
     return step_observer, b_extra_fn
 
 
-def _options_error(option, message):
-    """An `OptionsError` (a ValueError) naming the option, as the kernel's
-    own value checks raise it (one error type for a bad count on every
-    path)."""
-    err = OptionsError(message)
-    err.option = option
-    return err
+# An `OptionsError` (a ValueError) naming the option, as the kernel's own
+# value checks raise it (one error type for a bad count on every path).
+from .errors import options_error as _options_error  # noqa: E402
 
 
 def _new_pwl_cache(builder, circuit, dt):
@@ -2232,7 +2198,7 @@ def _resolve_loaded_circuit(lc, t_end, dt, t_start, store_every):
                    if not lc.has_simulation else
                    "has a simulation: block without a t_end after "
                    f"t_start ({t_start!r})")
-            raise ValueError(
+            raise _options_error("t_end",
                 f"simulate(): the YAML {lc.source!r} {why}, so its run "
                 f"window is empty (t_end = {t_end!r}). Add a top-level "
                 "'simulation: {t_end: ..., dt: ...}' (a sibling of "
@@ -2313,8 +2279,7 @@ def _yaml_keys_not_honoured(filled, engine, dt, source) -> "list[str]":
             drop.append(k)
             loud.append(f"{k}={v!r}")
     if loud:
-        import warnings
-        warnings.warn(
+        _planning.emit("yaml_keys_not_honoured",
             f"simulate({source!r}): the YAML simulation: key(s) "
             f"{', '.join(loud)} are not used: this run can land on "
             f"engine={'/'.join(landing)!r}, which cannot honour them "
@@ -2377,8 +2342,7 @@ def _mode_auto_record(chosen, reason, warn=False):
     in ``result.diagnostics['mode_selection_auto']``). ``warn``: the reason
     is a keyword the caller passed, so the fallback is said out loud."""
     if warn:
-        import warnings
-        warnings.warn(
+        _planning.emit("mode_selection_auto",
             f"simulate(mode_selection='auto'): the complementarity selection "
             f"does not apply ({reason}); this run uses the legacy settle.",
             UserWarning, stacklevel=6)
@@ -2866,23 +2830,44 @@ def simulate(
     # call. Two tuples of <= 30 names each: a longer call or tuple literal
     # compiles to one LIST_APPEND per name. test_run_plan keeps both
     # halves, and _plan_run's tuple, equal to the signature's order.
-    plan = _plan_run(builder, *((
-        t_end, dt, engine, rtol, atol, dt_init, integrator,
-        stiffness_threshold, h_bdf2, t_start, switch_fn, b_extra_fn,
-        step_observer, start_from_dc_op, enable_nonlinear_refresh,
-        max_newton_iterations, max_event_iterations, strict_event_iterations,
-        max_dt_halvings, voltage_sanity_factor, store_every, auto_regularize,
-        tol_newton_dx, tol_newton_res, enable_newton_line_search) + (
-        enable_newton_lm, newton_roundoff_budget,
-        enable_substep_state_correction, discontinuity_restart,
-        resolution_diagnostics, on_impulse, device_path,
-        inductor_freeze_di_max, inductor_abs_clamp, progress, initial_state,
-        should_continue, closed_loops, live_stream, mmc_arms, on_cache,
-        controller_period, resume_from, control_tick, solver, sensitivities,
-        mode_selection, allow_implicit_segments, undriven, recorders, output_rtol)))
-    if sensitivities is not None:
-        return _step_sensitivities(plan, sensitivities)
-    return _finalize(_ENGINES[plan.engine](plan), plan)
+    # add-kernel-simulation-object 8.3: the run's warnings, recorded as
+    # they are emitted (_planning.emit) and kept on the result.
+    _msgs = []
+    _tok = _RUN_MESSAGES.set(_msgs)
+    try:
+        plan = _plan_run(builder, *((
+            t_end, dt, engine, rtol, atol, dt_init, integrator,
+            stiffness_threshold, h_bdf2, t_start, switch_fn, b_extra_fn,
+            step_observer, start_from_dc_op, enable_nonlinear_refresh,
+            max_newton_iterations, max_event_iterations, strict_event_iterations,
+            max_dt_halvings, voltage_sanity_factor, store_every, auto_regularize,
+            tol_newton_dx, tol_newton_res, enable_newton_line_search) + (
+            enable_newton_lm, newton_roundoff_budget,
+            enable_substep_state_correction, discontinuity_restart,
+            resolution_diagnostics, on_impulse, device_path,
+            inductor_freeze_di_max, inductor_abs_clamp, progress, initial_state,
+            should_continue, closed_loops, live_stream, mmc_arms, on_cache,
+            controller_period, resume_from, control_tick, solver, sensitivities,
+            mode_selection, allow_implicit_segments, undriven, recorders, output_rtol)))
+        res = (_step_sensitivities(plan, sensitivities)
+               if sensitivities is not None
+               else _finalize(_ENGINES[plan.engine](plan), plan))
+    finally:
+        _RUN_MESSAGES.reset(_tok)
+    _keep_messages(res, _msgs)
+    return res
+
+
+_RUN_MESSAGES = _planning.RUN_MESSAGES
+
+
+def _keep_messages(res, msgs) -> None:
+    """``result.diagnostics["messages"]``: the warnings the run emitted, in
+    order, as ``_plan.Diagnostic(code, message, category)`` (task 8.3)."""
+    d = getattr(res, "diagnostics", None)
+    if d is None:
+        d = res.diagnostics = {}
+    d["messages"] = tuple(msgs)
 
 
 def _step_sensitivities(plan, names):
@@ -2990,12 +2975,11 @@ def _undriven(engine, builder, stacklevel=2, policy=None):
             from ._pulsim import _switch_census as _census
             _, _nd, _controlled = _census(
                 builder.graph, builder.pool)
-        except Exception:  # noqa: BLE001
+        except (AttributeError, TypeError):  # test doubles w/o pool
             _controlled = []
     if _controlled:
-        import warnings
         if engine == "pwl":
-            warnings.warn(
+            _planning.emit("undriven_switches",
                 f"simulate(): no switch_fn was given, but the "
                 f"circuit has {len(_controlled)} controlled "
                 f"switch(es) (indices {list(_controlled)}). They "
@@ -3006,7 +2990,7 @@ def _undriven(engine, builder, stacklevel=2, policy=None):
                 "default flips to all-OPEN.",
                 stacklevel=stacklevel)
         else:
-            warnings.warn(
+            _planning.emit("undriven_switches",
                 f"simulate(engine='dsed'): no switch_fn was given, "
                 f"but the circuit has {len(_controlled)} controlled "
                 f"switch(es) (indices {list(_controlled)}). They "
@@ -3103,7 +3087,7 @@ def _compose(builder, closed_loops, step_observer, controller_period,
     Returns ``(control_plan, b_extra_fn)``; `_compose_for` specialises the
     plan for the engine the run lands on."""
     if control_tick not in ("label", "state"):
-        raise ValueError(
+        raise _options_error("control_tick",
             f"simulate(control_tick={control_tick!r}): use 'label' (the "
             "default) or 'state'")
     _plan = _compose_control(builder, closed_loops, step_observer,
@@ -3337,7 +3321,8 @@ def _route(
                     "fixed step"]
             if _route_reasons:
                 if dt is None or dt <= 0:
-                    raise ValueError(
+                    raise _unsupported(
+                        "trbdf2", getattr(_route_reasons[0], "feature", ""),
                         "simulate(): this circuit cannot use the "
                         "variable-step engine — "
                         + "; ".join(_route_reasons)
@@ -3392,7 +3377,8 @@ def _route(
                 "'kernel' (default), 'dopri5', 'radau'. For DSED's "
                 "RK45/BDF2/auto integrators, use engine='dsed'."
             )
-        raise NotImplementedError(
+        raise _unsupported(
+            "pwl", "integrator", cls=_UnsupportedNotImplemented, message=
             f"simulate(integrator={integrator!r}) is reserved for "
             "the v1.6 cache refactor — `PwlStateSpaceCache` would "
             "need to expose continuous-time (G, M, b) and the "
@@ -3494,7 +3480,7 @@ def _plan_run(
     _caller_builder = builder  # identity checks (MMC arms) name the caller's
     if isinstance(builder, Circuit):
         if mmc_arms:
-            raise ValueError(
+            raise _options_error("mmc_arms",
                 "simulate(circuit, mmc_arms=...): MMC arms are registered "
                 "on a CircuitBuilder; pass that builder, not a "
                 "pulsim.Circuit")
@@ -3508,7 +3494,7 @@ def _plan_run(
             "simulate(): missing required argument 't_end' (end time, s). "
             "Only a LoadedCircuit with a simulation: block supplies it.")
     if not (t_end > t_start):
-        raise ValueError(
+        raise _options_error("t_end",
             f"simulate(): t_end ({t_end!r}) must be greater than t_start "
             f"({t_start!r}). If these came from a YAML's "
             "loaded.options, the file had no top-level simulation: block "
@@ -3623,8 +3609,7 @@ def _plan_run(
                                            _now["atol"], _now["dt_init"])
 
     if enable_nonlinear_refresh is not None:
-        import warnings
-        warnings.warn(
+        _planning.emit("deprecated_option",
             "simulate(enable_nonlinear_refresh=...) is deprecated and will "
             "be removed: the kernel stamps every Newton device itself "
             "(add-unified-device-interface). True is the default "
@@ -3671,7 +3656,7 @@ def _plan_run(
     # Every engine: pwl (branch form) and the exact engine (dependent
     # states) record; trbdf2 refuses dependent modes and never records.
     if on_impulse not in ("record", "warn", "error"):
-        raise ValueError(f"simulate(on_impulse={on_impulse!r}): expected "
+        raise _options_error("on_impulse", f"simulate(on_impulse={on_impulse!r}): expected "
                          "'record', 'warn' or 'error'")
     if undriven is not None and undriven not in ("refuse", "open", "closed"):
         raise _options_error("undriven", (
@@ -3708,7 +3693,7 @@ def _plan_run(
         h_bdf2=h_bdf2,
     )
     if mode_selection not in (None, "legacy", "shadow", "lcp", "auto"):
-        raise ValueError(
+        raise _options_error("mode_selection",
             f"simulate(): mode_selection={mode_selection!r}; expected "
             "None, 'legacy', 'shadow', 'lcp' or 'auto'.")
     _mode_auto = None   # mode_selection='auto' is resolved in _route
@@ -3741,8 +3726,7 @@ def _plan_run(
         _run_circuit, _preflight_report, _ties = _apply_ties(
             builder, _run_circuit, _kernel_run, _ties)
         if not _preflight_report.empty():
-            import warnings
-            warnings.warn(
+            _planning.emit("preflight_ties",
                 "simulate(): " + _preflight_report.summary() +
                 "\n  These ties give the MNA a voltage reference "
                 "without loading the circuit (1 GΩ draws nanoamps). "
@@ -3792,7 +3776,7 @@ def _plan_run(
                 raise _unsupported(
                     "dsed", "resume_from",
                     f"simulate(resume_from=...): the snapshot is not valid: {_why}.")
-            raise ValueError(
+            raise _options_error("resume_from",
                 "simulate(resume_from=...): the snapshot is not valid — "
                 "it came from a run that produced none (an aborted run, "
                 "a SolverSnapshot() built by hand and never populated, or an "
@@ -3922,7 +3906,7 @@ def _plan_run(
         # without them (their statistics are closed forms: F-B2-1).
         if output_rtol is not None:
             if isinstance(output_rtol, bool) or not 0.0 < output_rtol < float("inf"):
-                raise ValueError(f"simulate(output_rtol={output_rtol!r}): must be > 0 (None = off)")
+                raise _options_error("output_rtol", f"simulate(output_rtol={output_rtol!r}): must be > 0 (None = off)")
             if dt is not None or (store_every or 1) != 1:
                 output_rtol = None
         step = _planning.new(_planning.ExactStep, (
@@ -4004,7 +3988,7 @@ def _plan_run(
             # (all four demonstrated by the adversarial review), so they
             # refuse with the mechanism named instead.
             if store_every is not None and int(store_every) != 1:
-                raise ValueError(
+                raise _options_error("store_every",
                     "simulate(mmc_arms=..., store_every>1): decimation "
                     "can drop the run's FINAL state, and the end-of-run "
                     "capacitor back-solve would then fold the last "
@@ -4012,7 +3996,7 @@ def _plan_run(
                     "steps old — volts-scale v_c error in a switching "
                     "arm. Record at full rate and decimate afterwards.")
             if start_from_dc_op:
-                raise ValueError(
+                raise _options_error("start_from_dc_op",
                     "simulate(mmc_arms=..., start_from_dc_op=True): the "
                     "DC operating point is computed BEFORE the arm's "
                     "first stamp and without its V_eq back-EMF, so a "
@@ -4021,7 +4005,7 @@ def _plan_run(
                     "Start from t=0 state (the default) or pass "
                     "initial_state= explicitly.")
             if max_dt_halvings is not None and int(max_dt_halvings) > 0:
-                raise ValueError(
+                raise _options_error("max_dt_halvings",
                     "simulate(mmc_arms=..., max_dt_halvings>0): the "
                     "dt-halving retry re-solves a failed step at sub-dt "
                     "with the arm's FULL-dt companion (R_c = dt/2C and "
@@ -4030,13 +4014,13 @@ def _plan_run(
                     "bookkeeping. The ladder is disabled automatically "
                     "when mmc_arms is set; do not request it.")
             if discontinuity_restart:
-                raise ValueError(
+                raise _options_error("discontinuity_restart",
                     "simulate(mmc_arms=..., discontinuity_restart=True): "
                     "the restart half-steps re-solve at dt/2 with the "
                     "arm's full-dt Thevenin stamp — the dt-halving "
                     "corruption again.")
             if enable_substep_state_correction:
-                raise ValueError(
+                raise _options_error("enable_substep_state_correction",
                     "simulate(mmc_arms=..., "
                     "enable_substep_state_correction=True): the "
                     "commutation sub-split re-solves at dt1/dt2 with "
@@ -4046,7 +4030,7 @@ def _plan_run(
                 _unset = [a.name for a in mmc_arms
                            if a.v_c_preset is None]
                 if _unset:
-                    raise ValueError(
+                    raise _options_error("initial_state",
                         "simulate(mmc_arms=..., initial_state=...): "
                         f"arm(s) {_unset} have no v_c_preset. A "
                         "continuation restarts every arm from "
@@ -4756,9 +4740,8 @@ def _finalize(out, plan):
     # per-step diode-state error is never silent.
     _breaches = getattr(res, "event_iteration_breaches", None)
     if _breaches:
-        import warnings
         _b0 = _breaches[0]
-        warnings.warn(
+        _planning.emit("event_iterations",
             f"simulate(): diode event iteration failed to settle on "
             f"{len(_breaches)} of {len(res.times)} steps (first at "
             f"t={_b0.t:.6g}, "
@@ -4851,10 +4834,9 @@ def _finalize(out, plan):
     # nothing if nobody says it out loud.
     _retries = list(getattr(res, "dt_retries", []) or [])
     if _retries:
-        import warnings
         worst = max(d.halvings for d in _retries)
         first = min(_retries, key=lambda d: d.t)
-        warnings.warn(
+        _planning.emit("dt_retries",
             f"simulate(): {len(_retries)} step(s) would not converge "
             f"at dt = {dt:g} and were re-taken at a smaller step "
             f"(down to dt/{1 << worst}), first at t = "
@@ -4875,7 +4857,6 @@ def _finalize(out, plan):
 
     _guards = list(getattr(res, "inductor_guard_actions", []) or [])
     if _guards:
-        import warnings
         lines = []
         for g in _guards:
             name = builder.graph.branch_name(g.branch_id) or \
@@ -4888,7 +4869,7 @@ def _finalize(out, plan):
                 f"{g.reported_limit:.4g} A. A guard that stays "
                 f"engaged over many steps is HOLDING the trajectory "
                 f"there, not trimming an outlier.")
-        warnings.warn(
+        _planning.emit("inductor_guard",
             "simulate(): a post-solve inductor guard replaced the "
             "solver's answer.\n" + "\n".join(lines) +
             "\n  These guards do not solve anything — they substitute "
@@ -4987,8 +4968,7 @@ def _warn_newton_roundoff(res, eng) -> None:
     solve was accepted at roundoff level instead of aborting."""
     n = int(getattr(res, "newton_roundoff_accepts", 0) or 0)
     if n > 0:
-        import warnings
-        warnings.warn(
+        _planning.emit("newton_roundoff",
             f"{eng}: {n} Newton solve(s) ran out of iterations with "
             f"||dx|| stagnated at roundoff and were accepted: every "
             f"row's residual is within "
@@ -5031,7 +5011,6 @@ def _trbdf2_warn_stats(res, builder, stats, engine_asked) -> None:
     """The variable-step engine's own confessions, from its stats and
     its switch-state record. Each one names what the engine could not
     guarantee and how to cross-check it."""
-    import warnings
     eng = f"simulate(engine={engine_asked!r})"
     # reads the `stats` argument (in simulate() the same numbers as
     # res.stats): tests drive the confessions with edited dicts
@@ -5039,7 +5018,7 @@ def _trbdf2_warn_stats(res, builder, stats, engine_asked) -> None:
         return stats.get(k, 0)
     _warn_newton_roundoff(res, eng)
     if _st("n_forced_accepts") > 0:
-        warnings.warn(
+        _planning.emit("trbdf2_stats",
             f"{eng}: "
             f"{_st('n_forced_accepts')} step(s) were "
             "accepted with the error estimate above tolerance "
@@ -5055,7 +5034,7 @@ def _trbdf2_warn_stats(res, builder, stats, engine_asked) -> None:
     # produces them every few cycles (8 in 0.1 s on a V_th = 0 bridge
     # behind 0.1 ohm).
     if _st("n_chatter_breaks") > 3:
-        warnings.warn(
+        _planning.emit("trbdf2_stats",
             f"{eng}: a diode rode its "
             f"conduction boundary on "
             f"{_st('n_chatter_breaks')} step(s): its "
@@ -5078,7 +5057,7 @@ def _trbdf2_warn_stats(res, builder, stats, engine_asked) -> None:
     if _st("n_gate_undersampled") > 0:
         w = float(_st("gate_pulse_min"))
         sp = float(_st("gate_sample_spacing_max"))
-        warnings.warn(
+        _planning.emit("trbdf2_stats",
             f"{eng}: switch_fn produced a gate pulse of {w:.3g} s, "
             "narrower than the spacing at which the engine had been "
             f"sampling that gate (at most {sp:.3g} s), so pulses that "
@@ -5102,7 +5081,7 @@ def _trbdf2_warn_stats(res, builder, stats, engine_asked) -> None:
         subnets = _floating_subnets(builder)
         where = ("node(s) " + "; ".join(", ".join(sn) for sn in subnets)
                  if subnets else "some subnet")
-        warnings.warn(
+        _planning.emit("trbdf2_stats",
             f"{eng}: {where} reach the rest of the circuit only "
             "through switches/diodes, so while those are OFF the "
             "subnet's common-mode voltage is set by their g_off alone "
@@ -5142,7 +5121,7 @@ def _trbdf2_warn_stats(res, builder, stats, engine_asked) -> None:
                     "switches/diodes; grounding one of them (a DC rail) "
                     "removed this on a floating-rail bridge with a DC "
                     "choke.")
-            warnings.warn(
+            _planning.emit("trbdf2_stats",
                 f"{eng}: the variable-step engine held diode(s) {names} "
                 f"in a state their commutation rule forbids, from "
                 f"t = {first:.6g} s: a missed commutation, so every "
@@ -5325,7 +5304,7 @@ def _trbdf2_blockers(builder, *, dt, step_observer, closed_loops,
         try:
             _, _nd, _ctl = _switch_census(builder.graph,
                                            builder.pool)
-        except Exception:  # noqa: BLE001 — test doubles
+        except (AttributeError, TypeError):  # test doubles w/o pool
             _ctl = []
         if _ctl:
             why.append(_blk("switch_fn",
@@ -5363,12 +5342,11 @@ def _auto_check_voltage_sanity(res, builder, factor):
                 builder.graph, builder.pool,
                 list(_np.asarray(res.times, dtype=float)),
                 _np.asarray(res.states, dtype=float), f)
-    except Exception:  # pragma: no cover — never break a good run
+    except (AttributeError, TypeError, IndexError):  # pragma: no cover — never break a good run
         return
     if volt is not None and volt.node >= 0:
-        import warnings
         res._implausible_voltage = volt
-        warnings.warn(
+        _planning.emit("implausible_voltage",
             "simulate(): " + _k.describe_implausible_voltage(
                 builder.graph, builder.pool, volt),
             stacklevel=4)
@@ -5391,12 +5369,11 @@ def _check_right_limit_voltage(res, builder, factor):
             builder.graph, builder.pool,
             list(_np.asarray(res.times, dtype=float)[_np.asarray(rl, dtype=int)]),
             _np.asarray(res.right_limit_states, dtype=float), f)
-    except Exception:  # pragma: no cover — never break a good run
+    except (AttributeError, TypeError, IndexError):  # pragma: no cover — never break a good run
         return
     if volt is not None and volt.node >= 0:
-        import warnings
         res._implausible_voltage = volt
-        warnings.warn(
+        _planning.emit("implausible_voltage",
             "simulate(): " + _k.describe_implausible_voltage(
                 builder.graph, builder.pool, volt),
             stacklevel=4)
@@ -5525,7 +5502,7 @@ def _auto_attach_motor_traces(
         if isinstance(obj, _Bundle):
             try:
                 obj.attach_to_result(result)
-            except Exception:  # noqa: BLE001 — defensive
+            except (AttributeError, TypeError):  # a result without attributes
                 pass
             return
         # Composed observer (closed_loops path) — walks the inner
@@ -5560,7 +5537,7 @@ def _auto_attach_motor_traces(
     # uses, keeping `res.signal("M1.omega")` uniform across the two.
     try:
         _attach_native_machine_traces(result, builder)
-    except Exception:  # noqa: BLE001 — never break a finished result
+    except (AttributeError, KeyError, IndexError, TypeError):  # never break a finished result
         pass
 
 

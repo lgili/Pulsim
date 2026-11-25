@@ -26,6 +26,7 @@ from typing import Any, Callable, List, Optional, Tuple
 from ._pulsim import make_combined_switch_fn  # type: ignore[import-not-found]
 from ._control_state import start_run
 from .c_block import _c_graph_observer, static_state_hold
+from .errors import options_error
 
 TickFn = Callable[[float, object], None]
 
@@ -387,7 +388,8 @@ def _check_fixed_periods(periods, dt: float, stacklevel: int = 6) -> None:
     that is not a multiple of dt warns (ticks late by less than dt)."""
     for period in periods:
         if period < dt * (1.0 - 1e-9):
-            raise ValueError(
+            raise options_error(
+                "dt",
                 f"simulate(): controller period {period:.6g} s is "
                 f"shorter than dt = {dt:.6g} s, so two ticks "
                 "would fall in one step. Pass dt <= the period.")
