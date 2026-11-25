@@ -385,9 +385,12 @@ def solve(m, x, *, rtol, max_period_runs, n_relax):
             M, fresh = jac(x, xe), True
         IM = I_n - M
         sig = np.linalg.svd(IM, compute_uv=False)
-        eig_im = np.linalg.eigvals(IM)
-        singular = (sig[-1] <= 1e-10 * max(1.0, sig[0])
-                    or float(np.min(np.abs(eig_im))) <= m.marginal)
+        if m.n_ctrl > 0:   # controller scaling makes sigma_min small with every multiplier far from 1
+            eig_im = np.linalg.eigvals(IM)
+            singular = (sig[-1] <= 1e-10 * max(1.0, sig[0])
+                        or float(np.min(np.abs(eig_im))) <= m.marginal)
+        else:              # the open-loop rule, unchanged
+            singular = sig[-1] <= m.marginal * max(1.0, sig[0])
         if r <= 1.0:
             # stop on the orbit error estimate (I - M)^-1 G, the next
             # correction (|G| / (1 - |mu|) with a slow mode), not on |G|

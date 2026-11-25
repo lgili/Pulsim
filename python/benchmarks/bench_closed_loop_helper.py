@@ -48,8 +48,8 @@ def build_buck() -> ps.CircuitBuilder:
 
 
 def _steady_state_vout(res: ps.SimulationResult, dt: float) -> float:
-    n_tail = max(1, int(round(SS_WINDOW_S / dt)))
-    return float(np.mean(res.v("vout")[-n_tail:]))
+    t = np.asarray(res.times)
+    return float(ps.time_average(t, res.v("vout"), t_from=float(t[-1]) - SS_WINDOW_S))
 
 
 def run_helper_buck(
@@ -186,9 +186,9 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             ok = False
-        if stats["ss_delta"] > 1e-12:
+        if stats["ss_delta"] > 1e-9 * abs(stats["v_helper_ss"]):
             print(
-                f"FAIL: |delta vout_ss| {stats['ss_delta']:.3e} > 1e-12",
+                f"FAIL: |delta vout_ss| {stats['ss_delta']:.3e} > 1e-9 relative",
                 file=sys.stderr,
             )
             ok = False

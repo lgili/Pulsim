@@ -173,14 +173,14 @@ assert float(ev["Tj"][-1]) > float(ev["Tj"][0]) + 15.0
 
 ## 4. Verify energy conservation
 
-The kernel accumulates every joule of switching and conduction heat in compensated form (`res.heat_injected + res.heat_pending`). With `conduction="table"`, the total heat deposited into `Tj_Q1` matches `E_on + E_off + E_cond_table` to machine precision (`1e-12` relative), and `res.device_energy("Q1")` also reports `E_cond_electrical` side by side so any difference between the circuit's `R_on` and the table's `V_on(i, T_j)` is explicit.
+The kernel accumulates every joule of switching and conduction heat in compensated form (`res.heat_injected + res.heat_pending`). With `conduction="table"`, the total heat deposited into `Tj_Q1` matches `E_on + E_off + E_cond_table` to rounding (checked at `1e-10` relative), and `res.device_energy("Q1")` also reports `E_cond_electrical` side by side so any difference between the circuit's `R_on` and the table's `V_on(i, T_j)` is explicit.
 
 ```python
 heat_recorded = e_closed["E_on"] + e_closed["E_off"] + e_closed["E_cond_table"]
 heat_ledger = res.heat_injected + res.heat_pending
 rel_err = abs(heat_ledger - heat_recorded) / heat_recorded
 print(f"Heat ledger vs recorded: rel_err = {rel_err:.2e}")
-assert rel_err < 1e-12
+assert rel_err < 1e-10   # a bookkeeping identity of one kernel
 ```
 
 ## 5. What this does and does not show

@@ -1586,25 +1586,29 @@ def _use_kernel_switching(k_rec: Any, user_spec: Any) -> bool:
     """Whether to source a device's switching losses from
     ``result.loss_events`` rather than re-estimating from sampled waveforms.
 
-    Uses the kernel record whenever present, except when the kernel port
-    has neither an ``E_on`` nor an ``E_off`` table (a conduction-only port)
-    AND the caller explicitly passed post-hoc ``switch_specs`` /
-    ``diode_specs``. ZVS / ZCS runs and zero-valued ``LossTable`` ports
+    Uses the kernel record when its port has an ``E_on`` or ``E_off`` table
+    (a caller's post-hoc spec for that device is then ignored, with a
+    warning). A conduction-only port leaves the device to the post-hoc path:
+    without a spec it reports no switching numbers. ZVS / ZCS runs and zero-valued ``LossTable`` ports
     set ``has_e_on`` / ``has_e_off`` on ``DeviceLossRecord`` and therefore
     keep the kernel's ``0.0 J`` result instead of being overwritten.
     """
     if k_rec is None:
         return False
-    if user_spec is None:
-        return True
     has_on = getattr(k_rec, "has_e_on", None)
     has_off = getattr(k_rec, "has_e_off", None)
     if has_on is not None or has_off is not None:
-        return bool(has_on) or bool(has_off)
-    return bool(
-        float(getattr(k_rec, "E_on", 0.0)) > 0.0
-        or float(getattr(k_rec, "E_off", 0.0)) > 0.0
-    )
+        tables = bool(has_on) or bool(has_off)
+    else:
+        tables = (float(getattr(k_rec, "E_on", 0.0)) > 0.0
+                  or float(getattr(k_rec, "E_off", 0.0)) > 0.0)
+    if tables and user_spec is not None:
+        warnings.warn(
+            f"device_loss_summary: {getattr(k_rec, 'device', '?')!r} has an in-kernel "
+            "loss port with switching tables (set_device_losses); its recorded events "
+            "are used and the post-hoc switch_specs / diode_specs entry is ignored",
+            UserWarning, stacklevel=3)
+    return tables
 
 
 def _kernel_switching_loss(

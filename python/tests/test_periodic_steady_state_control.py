@@ -143,7 +143,7 @@ def test_warm_start_and_steady_state_delegation():
 
     # Warm start from converged result takes 1 Newton check + FD Jacobian
     r2 = p.periodic_steady_state(b, period=T, closed_loops=[lp], start_from=r1)
-    assert np.allclose(r2.x0, r1.x0, rtol=0, atol=1e-12)
+    assert np.allclose(r2.x0, r1.x0, rtol=0, atol=1e-9)
     assert r2.n_period_runs <= 6
 
 

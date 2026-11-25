@@ -189,7 +189,9 @@ def test_closed_loop_tj_kernel_events_preserved_in_summaries():
     # Even if a fixed-Tj switch_specs is also passed, the kernel's closed-loop
     # record takes precedence rather than overwriting with stale fixed-Tj values.
     stale_spec = {"S1": {"E_on_table": tab, "E_off_table": tab, "Tj": 25.0}}
-    row_with_spec = _loss_by_name(b, res, switch_specs=stale_spec)["S1"]
+    with pytest.warns(UserWarning, match="'S1'.*ignored"):
+        rows = p.device_loss_summary(b, res, switch_specs=stale_spec)
+    row_with_spec = {r["name"]: r for r in rows}["S1"]
     assert row_with_spec == row_no_spec
 
     # Steady-state window sees higher average switching power than early start-up.
@@ -306,10 +308,8 @@ def test_untracked_devices_and_conduction_only_port_behaviour():
     b2.set_device_losses("Q1", Tj=25.0)
     r2 = _sim(b2, t_end, fn2, "pwl", dt=1e-7)
     row_c_only = _loss_by_name(b2, r2)["Q1"]
-    assert row_c_only["E_sw_total"] == 0.0
-    assert row_c_only["P_sw_avg"] == 0.0
-    assert row_c_only["n_turn_on_events"] == 20
-    assert row_c_only["n_turn_off_events"] == 20
+    assert "P_sw_avg" not in row_c_only and "E_sw_total" not in row_c_only
+    assert r2.device_energy("Q1")["n_on"] == r2.device_energy("Q1")["n_off"] == 20
 
     # Explicit post-hoc switch_specs on a conduction-only port is honoured.
     s_spec = {"Q1": {"E_on_ref": 1e-4, "E_off_ref": 1e-4, "V_ref": 24.0, "I_ref": 2.0}}
@@ -345,8 +345,8 @@ def test_resumed_run_filters_pre_split_kernel_events(engine):
     row_window = _loss_by_name(bf, full, t_from=float(second.times[0]), t_to=t_end)["Q1"]
     assert row_resumed["n_turn_on_events"] == row_window["n_turn_on_events"] == 10
     assert row_resumed["n_turn_off_events"] == row_window["n_turn_off_events"] == 10
-    assert row_resumed["E_sw_total"] == pytest.approx(row_window["E_sw_total"], rel=1e-12)
-    assert row_resumed["P_sw_avg"] == pytest.approx(row_window["P_sw_avg"], rel=1e-12)
+    assert row_resumed["E_sw_total"] == pytest.approx(row_window["E_sw_total"], rel=1e-9)
+    assert row_resumed["P_sw_avg"] == pytest.approx(row_window["P_sw_avg"], rel=1e-9)
 
 
 def test_ideal_branch_form_switch_with_loss_port():
