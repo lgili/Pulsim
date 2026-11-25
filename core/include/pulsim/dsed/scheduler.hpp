@@ -694,6 +694,7 @@ public:
                     // past the event (2 ps: the shortest step near_time tells apart) is a
                     // sample too; a step too short to hold it keeps its end.
                     bool out_keep_end = false;
+                    Real out_from = std::numeric_limits<Real>::quiet_NaN();   // the rule's chords start past it
                     if (output_rtol_ > Real{0} && output_jump_) {
                         output_jump_ = false;
                         const Real te = t + Real{2} * std::max(Real{1e-12},
@@ -705,6 +706,7 @@ public:
                             const MaskT m = system_.current_mask();
                             ped_push_sample(result, te, output_x_, m, m, nullptr);
                             ++result.n_output_samples;
+                            out_from = te;
                         }
                     }
                     if (output_rtol_ > Real{0} && !out_steps) {
@@ -735,7 +737,8 @@ public:
                             if (!out_defer) output_flush_(t, x, result);
                         }
                         if (!out_defer)
-                            out_defer = push_output_samples_(t, x, t1, result.n_events, t_target, result)
+                            out_defer = push_output_samples_(t, x, t1, result.n_events, t_target, result,
+                                                             out_from)
                                         && !evt;
                         if (out_keep_end) out_defer = false;
                     }
@@ -3800,11 +3803,18 @@ private:
     /// mode's basis each, 6.6e-8 A on ten bridges at 1e-5, 2.1e-6 A at 1e-8).
     /// True when the last chord (to t1) was certified by the bound (not the
     /// cap / budget / an unbounded mode): only then may t1 go unstored (F-X-4).
+    /// t_from: a sample already stored inside the step (F-X-7's, 2 ps past an event):
+    /// the chords start there, so no sample lands before it (stored times stay ordered).
     bool push_output_samples_(Real t0, const Vector& x0, Real t1, std::size_t n_events,
-                              Real t_target, PEDResult<MaskT>& result) {
+                              Real t_target, PEDResult<MaskT>& result,
+                              Real t_from = std::numeric_limits<Real>::quiet_NaN()) {
         const MaskT mask = system_.current_mask();
         Real tau = t0;
         output_x_ = x0;
+        if (t_from > t0) {
+            tau = t_from;
+            advance_(t0, x0, tau - t0, output_x_);
+        }
         for (;;) {
             const Real h = t1 - tau;
             const Real d = output_step_(tau, output_x_, h, n_events, t_target);
