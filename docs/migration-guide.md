@@ -5,8 +5,9 @@
 
 ## From 2.0 to 2.1
 
-No option default changes in 2.1. A 2.0 script still needs attention in
-three ways: a few calls now raise a named error instead of running, some
+The existing `simulate()` options keep their 2.0 defaults (a few defaults
+below the Python API moved: see the changelog's *Changed*). A 2.0 script
+still needs attention in three ways: a few calls now raise a named error instead of running, some
 calls print a `DeprecationWarning` / `FutureWarning`, and some results move
 because a silent wrong answer was corrected. The complete list is the
 2.1.0 entry of the changelog (sections *Changed*, *Deprecated*, *Fixed*).
@@ -109,7 +110,55 @@ share current with a gated-on switch below `R_on·|i| = V_f`, and the
 leg-output voltage during dead time shifts by `V_f`. For the old
 behaviour pass `V_f=0.0, V_th=0.7`. `add_bridge_rectifier` gained a
 `V_f=0.0` drop; its `V_th=0.7` threshold is unchanged. The composite MOSFET / IGBT
-diodes' `V_F` became a conduction drop too (next section).
+diodes' `V_F` became a conduction drop too (below).
+
+### MOSFET body diode and IGBT freewheel diode: `V_F` is a drop
+
+`add_mosfet`, `add_mosfet_with_body_diode`, `add_mosfet_level1` (body
+diode) and `add_igbt_level1(with_fwd=True)` build their diode as
+`add_diode(V_th=0, V_f=V_F)`: while it conducts, `v = V_F + i/g_on`. In 2.0
+`V_F` was only the turn-on threshold. With the default `V_F=0.7`, 10 A
+through the body diode of an off MOSFET drops 0.710 V instead of 0.010 V,
+and a 24 V buck freewheeling through a gate-off `add_mosfet` reads
+V_out 11.640 V instead of 11.990 V. The Level-1 diodes turned on at a fixed
+0.5 V; they now take `V_F` (default 0.7 V). `add_igbt` has no diode and is
+unchanged. To get the 2.0 diode back (a 0.7 V threshold, no drop), build the
+switch and the diode yourself:
+
+```python
+def body_diode_drop(V_th, V_f):
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vd", "d", "gnd", 0.0)
+    b.add_current_source("Is", "s", "gnd", 10.0)    # 10 A forced through the diode
+    b.add_switch("Q", "d", "s", 1 / 1e-3, 1 / 1e9)  # the channel
+    b.add_diode("Q_body", "s", "d", 1e3, 1e-9, V_th=V_th, V_f=V_f)
+    off = p.SwitchStateMask(b.graph.num_switches)    # every bit off: channel open
+    r = p.simulate(b, t_end=1e-6, dt=1e-7, switch_fn=lambda t: off)
+    return r.v("s")[-1] - r.v("d")[-1]
+
+print(f"2.0 diode (V_th=0.7, V_f=0): v_SD = {body_diode_drop(0.7, 0.0):.3f} V")
+print(f"2.1 diode (V_th=0, V_f=0.7): v_SD = {body_diode_drop(0.0, 0.7):.3f} V")
+```
+
+```text
+2.0 diode (V_th=0.7, V_f=0): v_SD = 0.010 V
+2.1 diode (V_th=0, V_f=0.7): v_SD = 0.710 V
+```
+
+### Python callbacks in control chains
+
+`MixedDomainBlockChain.make_step_observer(use_kernel=False)` raises
+`DeprecationWarning` as an exception (a warnings filter does not silence
+it): the Python evaluator of a chain is gone. Wrap custom Python code in
+`pulsim.PythonBlock(fn)`.
+
+### Default-path results to re-check
+
+* A MOSFET with a nonlinear output capacitance on the variable-step engine
+  (`engine='trbdf2'`, or `auto` without `dt`): the conduction energy after
+  a gate edge reads +3.91 % against its closed form (a known limitation).
+* Loss summaries: a switch's `i_rms` now counts the step where it flips
+  (+0.56 % on a 30 % PWM at 100 steps per period, toward the closed form).
 
 ## Pre-1.0 to 1.0
 Pulsim 1.0.0 shipped a brand-new kernel. The pre-1.0 API surface

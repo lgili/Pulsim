@@ -8,9 +8,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [2.1.0] - 2026-11-XX
 
-2.1.0 is pull request #147: new engines, devices and analyses behind options
-that default off, and a long list of silent wrong answers corrected. No option
-default changes. It is still **not a drop-in upgrade for every 2.0 script**:
+2.1.0 brings new engines, devices and analyses behind new options that
+default off, and a long list of silent wrong answers corrected. The defaults
+of the existing `simulate()` options are kept (one spelling changed:
+`max_newton_iterations` 0 → `None`, still 50 iterations). It is still **not a
+drop-in upgrade for every 2.0 script**: a few defaults below the Python API
+moved (the raw `_pulsim` run functions, `TrBdf2Options`, the Level-1 diode
+threshold — see **Changed**),
 some results move with default options (the corrections under **Fixed**, and
 the entries under **Changed**, several of them marked BREAKING), and some 2.0
 calls now raise a named error instead of running. Read **Changed** and the
@@ -80,7 +84,8 @@ unchanged under "Development log").
 - **Immutable circuit IR** `pulsim.Circuit` from `builder.build()`; `builder.set_value("R1.R",
   2.0)`, `builder.param(...)`, `circuit.with_params(...)`, `circuit.with_value(...)`, parameter
   expressions, `Circuit.to_yaml()` / `from_yaml(text)`, scopes, node domains.
-- `pulsim.sweep(circuit, params=...)` / `pulsim.monte_carlo(circuit, distributions=...)` (points
+- `pulsim.sweep(build, params=..., kpi_fn=...)` / `pulsim.monte_carlo(build, distributions=...,
+  kpi_fn=...)` (points
   run in the kernel), `sweep(..., backend="auto")`.
 - **Periodic steady state** `p.periodic_steady_state(b, *, period, switch_fn=None,
   start_from=None)` (Newton shooting on the true state), also `engine='pwl' | 'trbdf2'`;
@@ -115,7 +120,13 @@ unchanged under "Development log").
 
 ### Fixed
 
-Silent wrong answers, with the numbers the log states.
+Silent wrong answers, with the numbers the log states. `engine='exact'` is the
+2.1 name of 2.0's `engine='dsed'` (both spellings work).
+
+- Loss / thermal summaries: a switch's `i_rms` counts the step where it
+  flips as its energy already did (it read `I²·h/3` there): a 30 % PWM into a
+  resistor at 100 steps per period read `i_rms` 0.539248 A, now 0.542300 A
+  (closed form 0.542300 A). Default options, `pwl` / `trbdf2`.
 
 - `res.v("gnd")` returned the last state column (1 V into 1 Ω read `-1`); it is zeros.
 - Diode / switch currents, duties and losses now come from the stamped mask: every bridge diode at
@@ -233,7 +244,8 @@ Behaviour that differs from 2.0.0. "Default: yes" = seen with default options.
   diodes already used the RK45 scheduler and are unchanged". Default: yes.
 - `engine='exact'` refuses a segment it cannot step exactly (breaking for `b_extra_fn` users);
   `allow_implicit_segments=True` restores the numeric path. Default: yes. Also raises
-  `DiodeModeInconsistentError` on a stored sample with a diode against its rule.
+  `pulsim._pulsim.DiodeModeInconsistentError` (a `RuntimeError`) on a stored sample with a
+  diode against its rule.
 - Exact engine returns `pulsim.SimulationResult` (`_PEDSimulationResult` is gone; BREAKING, class
   identity); "Every value is bit-identical".
 - Exact-engine loss / thermal summaries read both event limits: "exact-engine results change in
@@ -261,6 +273,11 @@ Behaviour that differs from 2.0.0. "Default: yes" = seen with default options.
   move in the last bits".
 - Impulsive re-initialisation energy goes into the device's junction: "Numbers move on `pwl` only
   for such circuits".
+- The low-level run functions of the compiled module (`pulsim._pulsim.run_transient`,
+  `run_transient_trbdf2`, `run_transient_with_chain`, `compute_dc_operating_point`) default
+  `enable_nonlinear_refresh` to `None` (the kernel stamps the Newton devices) instead of `False`
+  (which simulated a Shockley diode, MOSFET or IGBT as an open circuit: 10.000 V on a clamp that
+  reads 0.5937 V). Default: yes, for callers of these functions; `pulsim.simulate` is unaffected.
 - Level-1 MOSFET carries no current at V_DS = 0: pinned results unchanged except a Level-1 buck on
   trbdf2 and `mosfet_nmos_dc`. MNA machines: "machine results move by the removed leak"; PMSM on
   `pwl` runs at the requested `dt` ("results change").
@@ -311,10 +328,11 @@ Warnings a 2.0 script can now see (checked in `python/pulsim` and `python/bindin
 
 **Removed since 2.0.0**
 
-- `CircuitBuilder.add_nonlinear_diode` → `add_diode(name, anode, cathode, g_on, g_off, V_f=...)`
-  or `add_shockley_diode(...)`; `allow_non_passive=True` still builds the legacy device.
+- `CircuitBuilder.add_nonlinear_diode` is retired (still present, raises `RetiredDeviceError`;
+  `allow_non_passive=True` still builds the legacy device) → `add_diode(name, anode, cathode,
+  g_on, g_off, V_f=...)` or `add_shockley_diode(...)`.
 - The Python evaluator of `MixedDomainBlockChain`: `make_step_observer(use_kernel=False)` raises
-  `DeprecationWarning`; `MixedDomainBlockChain.update()` is gone → `pulsim.PythonBlock(fn)`.
+  `DeprecationWarning` as an exception (a warnings filter does not silence it); `MixedDomainBlockChain.update()` is gone → `pulsim.PythonBlock(fn)`.
 - `_PEDSimulationResult` → `pulsim.SimulationResult`.
 - The old sub-step correction behind `enable_substep_state_correction` (it "never fired") → the
   event split, which needs `discontinuity_restart=True`.
@@ -336,8 +354,9 @@ Warnings a 2.0 script can now see (checked in `python/pulsim` and `python/bindin
 - Exact engine `output_rtol` (default off): a thermal summary read from stored samples depends on
   the output grid (2.7e-3 at `output_rtol=1e-5`); its bound on recovered rows is not in this
   release; the no-crossing certificate costs +11–13 % on two forward converters with the rule off.
-- Variable-step engine with a nonlinear output capacitance: the conduction energy after a gate
-  edge reads +3.8 %.
+- Variable-step engine (`trbdf2`, and `auto` without `dt`) with a MOSFET's nonlinear output
+  capacitance, DEFAULT options: the conduction energy after a gate edge reads +3.91 % against
+  its closed form (a Coss buck; +4.40 % before this release's fixes).
 - Sensitivities are refused at a recorded jump: a DCM buck on pwl + split that returned a number
   now refuses at a recorded cut-set jump (accepted regression).
 - Twelve paralleled bridges are refused by name on the exact engine (a conditioning limit).

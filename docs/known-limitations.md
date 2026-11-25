@@ -31,13 +31,18 @@ The numbers are in the `Known limitations` part of the 2.1.0 entry of the
   `switch_fn` inside one step is not seen.
 * **Exact engine output rule** (`engine='exact', output_rtol=...`): a
   thermal summary read from stored samples depends on the output grid.
-* **Variable-step engine, nonlinear output capacitance**: the conduction
-  energy after a gate edge reads +3.8 %.
 * **Sensitivities** are refused by name at a recorded cut-set jump (a
   DCM buck on `pwl` with splitting that returned a number before).
 * **Exact engine**: twelve paralleled bridges are refused by name; the
   phase-shifted full bridge does not run with device capacitances nor in
   ideal form.
+
+## On default options: nonlinear output capacitance on the variable-step engine
+
+A MOSFET with a nonlinear output capacitance on `engine='trbdf2'` (and on
+`auto` without `dt`, which lands there): the conduction energy after a gate
+edge reads +3.91 % against its closed form (a Coss buck). Workaround: pass
+`dt` (fixed step), or check the energy with a step-size study.
 
 ## Engine capability matrix
 

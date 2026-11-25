@@ -261,8 +261,8 @@ publish [`llms.txt`](docs/llms.txt), an index for tools that read one.
 
 ## What's new in v2.1
 
-Pulsim 2.1.0 changes no option default. What it adds sits behind options
-that default off:
+Pulsim 2.1.0 keeps the defaults of the existing `simulate()` options. What
+it adds sits behind new options that default off:
 
 * the **exact engine**'s losses, recorders, sensitivities and output rule
   (`engine='exact'`, `output_rtol=`);
