@@ -163,12 +163,51 @@ print(f"Total Q1 heat (closed loop): "
       f"{(e_open['E_on'] + e_open['E_off'] + e_open['E_cond_table']) / T_END:.2f} W")
 print(f"device_loss_summary P_sw_avg: {summary['Q1']['P_sw_avg']:.2f} W")
 
-# Closed-loop Tj rises above ambient and produces higher losses than frozen 40 C
-assert tj_mean > T_AMB + 20.0
-assert e_closed["E_on"] + e_closed["E_off"] > e_open["E_on"] + e_open["E_off"]
-assert e_closed["E_cond_table"] > e_open["E_cond_table"]
-# Commutation events record the rising live junction temperature
-assert float(ev["Tj"][-1]) > float(ev["Tj"][0]) + 15.0
+```
+
+The truth for both runs is the averaged model in closed form, computed here from the XML's numbers (not from the run). In steady state `i_L` ramps from 7.5 A to 12.5 A (ripple `(V_in − V_out)·D/(f_sw·L)` = 5 A), so the switch turns on at 7.5 A and off at 12.5 A, both at 400 V. The tables are linear in `T_j`, so the heat is `P(T_j) = P(25) + k·(T_j − 25)`, and the Cauer ladder with this heat is a linear two-state ODE, solved here by its eigenvectors.
+
+```python
+I_AX = np.array([0.0, 10.0, 20.0])
+E_ON = {25: [0, 0.50e-3, 1.00e-3], 125: [0, 0.90e-3, 1.80e-3]}    # the 400 V rows
+E_OFF = {25: [0, 0.40e-3, 0.80e-3], 125: [0, 0.70e-3, 1.40e-3]}
+V_ON = {25: [0, 1.50, 2.00], 125: [0, 1.80, 2.50]}
+I_VALLEY, I_PEAK = 7.5, 12.5
+
+
+def heat(tj):
+    """Average Q1 heat (W) at a constant junction temperature."""
+    w = (tj - 25.0) / 100.0
+
+    def table(d, i):
+        return (1 - w) * np.interp(i, I_AX, d[25]) + w * np.interp(i, I_AX, d[125])
+
+    i = np.linspace(I_VALLEY, I_PEAK, 20001)
+    p_cond = DUTY * np.trapezoid(table(V_ON, i) * i, i) / (I_PEAK - I_VALLEY)
+    return F_SW * (table(E_ON, I_VALLEY) + table(E_OFF, I_PEAK)) + p_cond
+
+
+p25 = heat(25.0)
+k = (heat(125.0) - p25) / 100.0          # 24.79 W + 0.150 W/K * (Tj - 25)
+R0, R1, C0, C1 = 0.4, 0.6, 0.002, 0.005  # junction stage, then the heatsink stage
+A = np.array([[(k - 1 / R0) / C0, 1 / (R0 * C0)],
+              [1 / (R0 * C1), -(1 / R0 + 1 / R1) / C1]])
+rhs = np.array([(p25 - 25.0 * k) / C0, T_AMB / (R1 * C1)])
+x_ss = -np.linalg.solve(A, rhs)                    # 71.81 C, 59.09 C
+lam, vec = np.linalg.eig(A)
+coef = np.linalg.solve(vec, np.array([T_AMB, T_AMB]) - x_ss)
+t_q = np.linspace(T_END - 1e-3, T_END, 2001)
+tj_q = (x_ss[0] + (vec[0] * coef) @ np.exp(np.outer(lam, t_q))).real
+tj_truth = np.trapezoid(tj_q, t_q) / 1e-3          # 71.21 C (not yet settled)
+p_open_truth = heat(T_AMB)                          # 27.04 W at a frozen 40 C
+p_open = (e_open["E_on"] + e_open["E_off"] + e_open["E_cond_table"]) / T_END
+print(f"Tj final 1 ms mean: {tj_mean:.3f} C, averaged model {tj_truth:.3f} C")
+print(f"Open-loop heat: {p_open:.3f} W, averaged model {p_open_truth:.3f} W")
+# measured 0.02 K and 3.4e-4: the bounds cover the run's own start
+# transient (i_L spans 5.8-14.7 A in the first periods) and its
+# 7.6-12.4 A steady ripple against the ideal 7.5-12.5 A
+assert abs(tj_mean - tj_truth) < 0.1
+assert abs(p_open - p_open_truth) < 2e-3 * p_open_truth
 ```
 
 ## 4. Verify energy conservation

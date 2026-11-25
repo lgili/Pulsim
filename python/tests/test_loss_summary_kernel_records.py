@@ -200,8 +200,18 @@ def test_closed_loop_tj_kernel_events_preserved_in_summaries():
 
     ev = res.loss_events("S1")
     e_total_kernel = math.fsum(ev["E"])
-    # Fixed Tj = 25 °C would give 1 mJ * len(ev); closed loop runs hotter (> 25 °C).
-    assert e_total_kernel > 1.15 * (1e-3 * len(ev))
+    # Truth: the averaged thermal model in closed form. P = 2 f_sw E(T) =
+    # 20 W (1 + 0.01 dT), C dT/dt = P - dT/R  ->  dT(t) = 25 K (1 - e^{-80 t}),
+    # and each event books E(T(t_k)). The kernel heats in 1 mJ pulses
+    # (dT steps of E/C <= 0.125 K, measured 0.096 K off the curve), which
+    # moves E(T) by <= 0.01 * 0.125 = 1.25e-3 relative (measured 6.1e-4).
+    t_k = np.asarray(ev["t"])
+
+    def e_truth(t):
+        return 1e-3 * (1.0 + 0.01 * 25.0 * (1.0 - np.exp(-80.0 * t)))
+
+    assert len(ev) == 1000
+    assert e_total_kernel == pytest.approx(float(np.sum(e_truth(t_k))), rel=1.5e-3)
 
     row_no_spec = _loss_by_name(b, res)["S1"]
     assert row_no_spec["E_sw_total"] == pytest.approx(e_total_kernel, rel=1e-12)
@@ -218,7 +228,11 @@ def test_closed_loop_tj_kernel_events_preserved_in_summaries():
     # Steady-state window sees higher average switching power than early start-up.
     early = _loss_by_name(b, res, t_from=0.0, t_to=0.005)["S1"]
     late = _loss_by_name(b, res, t_from=0.04, t_to=0.05)["S1"]
-    assert late["P_sw_avg"] > early["P_sw_avg"] * 1.15
+    for row, (a, b_) in ((early, (0.0, 0.005)), (late, (0.04, 0.05))):
+        in_w = (t_k >= a) & (t_k < b_)
+        truth = float(np.sum(e_truth(t_k[in_w]))) / (b_ - a)
+        assert row["P_sw_avg"] == pytest.approx(truth, rel=1.5e-3)
+    # truth: 20.89 W early, 24.86 W late
 
 
 @pytest.mark.parametrize("engine,rel_tol", [
@@ -263,7 +277,7 @@ def test_device_thermal_summary_uses_kernel_events_and_matches_posthoc_at_fixed_
         np.testing.assert_array_equal(th_kern["T_j_trace"], th_both["T_j_trace"])
 
         # Matches post-hoc fixed-Tj thermal summary.
-        assert th_kern["P_sw_avg"] > 100.0
+        assert th_post["P_sw_avg"] > 0.0      # the parity below is not 0 == 0
         for key in ("P_cond_avg", "P_sw_avg", "P_total_avg", "T_j_avg", "T_j_peak"):
             assert th_kern[key] == pytest.approx(th_post[key], rel=rel_tol), (engine, win_kw, key)
         np.testing.assert_allclose(th_kern["T_j_trace"], th_post["T_j_trace"], rtol=rel_tol)
@@ -293,7 +307,13 @@ def test_diode_kernel_recovery_reaches_thermal_summary():
     )["D1"]
     assert th["P_sw_avg"] == pytest.approx(loss["P_sw_avg"], rel=1e-12)
     assert th["P_total_avg"] == pytest.approx(th["P_cond_avg"] + loss["P_sw_avg"], rel=1e-12)
-    assert th["T_j_avg"] > 25.0 + 0.5 * th["P_sw_avg"]
+    # truth: R || C (R = 1 K/W, tau = 50 us) driven from 25 C by the mean
+    # heat P: T_avg = 25 + R P (1 - tau/T (1 - e^{-T/tau})). The heat comes
+    # in 20 pulses, not evenly: moving a pulse by up to half its period
+    # moves the mean by <= 1/40 of the rise (measured 1.7e-4 of it).
+    span_th = span
+    rise = th["P_total_avg"] * (1.0 - 5e-5 / span_th * (1.0 - math.exp(-span_th / 5e-5)))
+    assert th["T_j_avg"] - 25.0 == pytest.approx(rise, rel=1.0 / 40.0)
 
 
 def test_untracked_devices_and_conduction_only_port_behaviour():

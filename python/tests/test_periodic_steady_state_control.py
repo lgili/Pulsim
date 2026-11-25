@@ -144,7 +144,9 @@ def test_voltage_mode_buck_pi_orbit_and_long_transient(engine, kw):
         t_l = np.asarray(res_tr.times)
         last = t_l >= t_l[-1] - T * (1 + 1e-9)
         e_tr = _mean_err(t_l[last], np.asarray(res_tr.v("out"))[last])
-        assert 1e-5 < e_orbit < 1e-4      # a ripple offset, not zero
+        # the mean error is not the sampled error (< 1e-9 above): it is the
+        # ripple's offset, whose truth is the long transient's (next line)
+        assert e_orbit > 1e3 * 1e-9
         assert abs(e_orbit - e_tr) < 1e-7
 
     # each part against its own half of the long transient

@@ -388,6 +388,8 @@ def solve(m, x, *, rtol, max_period_runs, n_relax):
         sig = np.linalg.svd(IM, compute_uv=False)
         if m.n_ctrl > 0:   # controller scaling makes sigma_min small with every multiplier far from 1
             eig_im = np.linalg.eigvals(IM)
+            # cond(I - M) >= 1e10 times the FD noise (>= marginal >= 1e-10
+            # relative) is a relative error >= 1 in the Newton step: no digit
             singular = (sig[-1] <= 1e-10 * max(1.0, sig[0])
                         or float(np.min(np.abs(eig_im))) <= m.marginal)
         else:              # the open-loop rule, unchanged

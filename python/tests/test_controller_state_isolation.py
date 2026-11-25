@@ -384,7 +384,10 @@ def test_resume_of_a_block_over_a_frozen_config_continues_the_run():
     j = b.node_id_of("out")
     xf, xs = np.asarray(full.states), np.asarray(second.states)
     assert xs[-1, j] == pytest.approx(xf[-1, j], rel=1e-9)
-    assert abs(xf[-1, j] - 12.0) < 1.0      # the band regulates: not a dead loop
+    # not a dead loop: one sits at 0 V (gate held off) or at V_in (held on),
+    # both > 10 V from the 12 V reference; a regulating band stays within
+    # its per-tick swing of it
+    assert abs(xf[-1, j] - 12.0) < 1.0
 
 
 def test_resume_of_a_block_over_a_list_inside_a_tuple_is_refused():
