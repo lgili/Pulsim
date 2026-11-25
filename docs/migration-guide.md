@@ -1,5 +1,117 @@
-# Migration Guide — pre-1.0 → 1.0
+# Migration Guide
 
+* [From 2.0 to 2.1](#from-20-to-21)
+* [Pre-1.0 to 1.0](#pre-10-to-10) and the 1.5 → 1.6 notes below it.
+
+## From 2.0 to 2.1
+
+No option default changes in 2.1. A 2.0 script still needs attention in
+three ways: a few calls now raise a named error instead of running, some
+calls print a `DeprecationWarning` / `FutureWarning`, and some results move
+because a silent wrong answer was corrected. The complete list is the
+2.1.0 entry of the changelog (sections *Changed*, *Deprecated*, *Fixed*).
+
+### Calls that now raise
+
+An option the engine that runs cannot honour is refused instead of being
+ignored with a `UserWarning`. The most common case: `rtol` with a `dt`
+(an explicit `dt` routes `engine='auto'` to the fixed step, which has no
+error control).
+
+```python
+import numpy as np
+import pulsim as p
+
+b = p.CircuitBuilder()
+b.add_voltage_source("V1", "in", "gnd", 1.0)
+b.add_resistor("R1", "in", "out", 1e3)
+b.add_capacitor("C1", "out", "gnd", 1e-6)
+try:
+    p.simulate(b, t_end=1e-3, dt=1e-6, rtol=1e-6)
+except p.UnsupportedError:
+    print("rtol with dt: refused")
+res = p.simulate(b, t_end=1e-3, dt=1e-6)          # drop rtol, or drop dt
+print(type(res.times).__name__, res.engine_used)
+```
+
+```text
+rtol with dt: refused
+ndarray pwl
+```
+
+Others, each with a message that names the fix: `integrator=` on `pwl`,
+`trbdf2` or `auto`; `controller_period=` without a `step_observer`; a
+switch mask of the wrong width; `store_every < 1`; `thermal_specs` on an
+element without a loss model; `run_mna_sweep` on a circuit with switches
+and no `mask=`; `periodic_steady_state` on latching devices, loss ports
+or closed loops. `add_nonlinear_diode` is retired:
+
+```python
+try:
+    p.CircuitBuilder().add_nonlinear_diode("D1", "a", "gnd", {})
+except p.RetiredDeviceError:
+    print("use add_diode(..., V_f=...) or add_shockley_diode(...)")
+```
+
+```text
+use add_diode(..., V_f=...) or add_shockley_diode(...)
+```
+
+### `res.times` is a numpy array
+
+`SimulationResult.times` is a read-only, zero-copy `numpy.ndarray`
+(it was a list). `len`, indexing, slicing and `np.asarray(res.times)`
+are unchanged; list-only idioms (`res.times + [...]`, `.index`,
+`if res.times:`) need `list(res.times)`. `np.asarray(res.times)` is now
+the read-only view itself: use `np.array(res.times)` or `.copy()` before
+writing into it.
+
+### What the new warnings mean
+
+| Warning (category) | Raised by | Replace with |
+|---|---|---|
+| `DeprecationWarning` | `simulate(max_newton_iterations=0)` | `None` (the default, 50); 0 will be refused |
+| `DeprecationWarning` | `simulate(enable_nonlinear_refresh=...)` | omit it |
+| `DeprecationWarning` | `builder.update_resistor_R` / `update_inductor_L` / `update_capacitor_C` / `update_voltage_source_V` | `builder.set_value("R1.R", v)` or `circuit.with_value("R1.R", v)` |
+| `DeprecationWarning` | `add_pmsm`, `add_bldc`, `add_induction_motor`, `add_dc_motor` and their `make_*_observer` | `add_pmsm_mna`, `add_bldc_mna`, `add_induction_machine_mna`, `add_dc_machine` |
+| `DeprecationWarning` | `make_thyristor_switch_fn`, `BlockChain.add_thyristor` | `CircuitBuilder.add_thyristor` |
+| `DeprecationWarning` | `run_periodic_shooting`, `run_harmonic_balance` | `p.periodic_steady_state(..., engine='pwl', dt=dt)` |
+| `DeprecationWarning` | a Python callable as `measured=` / `setpoint=` of a control helper, `add_c_block(fn=)` | a node name (`measured="vout"`), `code=` or `lib=` |
+| `FutureWarning` | `add_igbt(...)` without `reverse_blocking` | pass `reverse_blocking=True` or `False` explicitly; the default becomes `True` in a later release |
+
+```python
+import warnings
+
+with warnings.catch_warnings(record=True) as caught:
+    warnings.simplefilter("always")
+    p.simulate(b, t_end=1e-4, dt=1e-6, max_newton_iterations=0)
+print(caught[0].category.__name__)
+```
+
+```text
+DeprecationWarning
+```
+
+### Results that move
+
+<!-- MEASURED-TABLE -->
+
+### PWL diode forward drop (PSIM `V_f`)
+
+`add_diode` gained `V_f` (default 0): the PSIM "Diode Voltage Drop",
+`v = V_f + i/g_on` while ON, so the diode dissipates `V_f·i + i²/g_on`.
+Omitting it changes nothing. `V_th` stays the turn-on threshold.
+
+**Breaking:** `add_three_phase_vsi(V_f=0.7)` now passes `V_f` as that
+drop (it was the turn-on threshold `V_th` and added no loss). The
+freewheel diodes' conduction loss rises by `V_f·I_avg`, they no longer
+share current with a gated-on switch below `R_on·|i| = V_f`, and the
+leg-output voltage during dead time shifts by `V_f`. For the old
+behaviour pass `V_f=0.0, V_th=0.7`. `add_bridge_rectifier` gained a
+`V_f=0.0` drop; its `V_th=0.7` threshold is unchanged. The composite MOSFET / IGBT
+diodes' `V_F` became a conduction drop too (next section).
+
+## Pre-1.0 to 1.0
 Pulsim 1.0.0 shipped a brand-new kernel. The pre-1.0 API surface
 (``Circuit``, ``Simulator``, ``YamlParser``, ``Preset``, ``codegen``,
 ``fmu``, ``schematic``, ``templates``, ``robust=True``, …) was
@@ -27,19 +139,11 @@ The 1.0 surface is **flat** — there's no `pulsim.v2` namespace. All
 device builders, analyses, and helpers live directly on the
 `pulsim` module.
 
-### `res.times` is a numpy array (Unreleased)
-
-`SimulationResult.times` is a read-only, zero-copy `numpy.ndarray`
-(it was a list). `len`, indexing, slicing and `np.asarray(res.times)`
-are unchanged; list-only idioms (`res.times + [...]`, `.index`,
-`if res.times:`) need `list(res.times)`. `np.asarray(res.times)` is now
-the read-only view itself: use `np.array(res.times)` or `.copy()` before
-writing into it.
-
 ## Top-level objects
 
 ### `pulsim.Circuit` → `pulsim.CircuitBuilder`
 
+<!-- doctest: skip reason="shows a pre-2.1 API from an older migration note; kept for readers porting old code" -->
 ```python
 # Pre-1.0
 ckt = ps.Circuit()
@@ -54,6 +158,7 @@ b.add_resistor("R1", "n1", "gnd", 100.0)
 
 ### `pulsim.Simulator` → `pulsim.simulate(...)`
 
+<!-- doctest: skip reason="shows a pre-2.1 API from an older migration note; kept for readers porting old code" -->
 ```python
 # Pre-1.0
 opts = ps.SimulationOptions(t_end=1e-3, dt=1e-5)
@@ -67,6 +172,7 @@ res = p.simulate(b, t_end=1e-3, dt=1e-5)
 For full control over the cache/solver/options pipeline, the
 explicit form is still available:
 
+<!-- doctest: skip reason="shows a pre-2.1 API from an older migration note; kept for readers porting old code" -->
 ```python
 cache = p.PwlStateSpaceCache(b.graph, b.pool)
 cache.build(dt=1e-5)
@@ -77,6 +183,7 @@ res  = p.run_transient(cache, b.graph, b.pool, opts,
 
 ### `pulsim.YamlParser` → `pulsim.load_yaml_file(...)`
 
+<!-- doctest: skip reason="shows a pre-2.1 API from an older migration note; kept for readers porting old code" -->
 ```python
 # Pre-1.0
 parser = ps.YamlParser(ps.YamlParserOptions())
@@ -119,6 +226,7 @@ The hand-rolled pre-1.0 step-callback / `signal_evaluator.py` flows
 are replaced by the `MixedDomainBlockChain` executor (runs in C++,
 no Python interpreter cost per step):
 
+<!-- doctest: skip reason="shows a pre-2.1 API from an older migration note; kept for readers porting old code" -->
 ```python
 chain = p.MixedDomainBlockChain()
 pi    = chain.add_block(p.PIController(kp=0.5, ki=1200.0))
@@ -172,6 +280,7 @@ the `v2` prefix was dropped: `pulsim.v2.CircuitBuilder` is now
 and so on. Code that used the `v2` prefix during the transition
 just needs:
 
+<!-- doctest: skip reason="shows a pre-2.1 API from an older migration note; kept for readers porting old code" -->
 ```python
 # Before
 import pulsim.v2 as p
@@ -197,6 +306,7 @@ binders don't trip on the same shape.
 
 In 1.5, `pulsim.sweep` was a *subpackage* with helpers:
 
+<!-- doctest: skip reason="shows a pre-2.1 API from an older migration note; kept for readers porting old code" -->
 ```python
 # Pre-1.6 — no longer works
 from pulsim.sweep import Distribution, Cartesian, metrics
@@ -211,6 +321,7 @@ default) and `pulsim.monte_carlo` is its random-draw sibling. The
 distribution / metric helper classes were retired — callers supply
 their own lambdas:
 
+<!-- doctest: skip reason="shows a pre-2.1 API from an older migration note; kept for readers porting old code" -->
 ```python
 # 1.6 — grid sweep (drop-in for the old Cartesian pattern)
 import pulsim as p
@@ -233,6 +344,7 @@ res = p.sweep(
 print(res.to_dataframe())
 ```
 
+<!-- doctest: skip reason="shows a pre-2.1 API from an older migration note; kept for readers porting old code" -->
 ```python
 # 1.6 — Monte Carlo (drop-in for the old Distribution pattern)
 res = p.monte_carlo(
@@ -265,6 +377,7 @@ returns a single float. Use `rng.normal`, `rng.uniform`,
 The 1.6 `kpi_fn` returns a `dict[str, float]`. Combine multiple
 KPIs in one pass:
 
+<!-- doctest: skip reason="shows a pre-2.1 API from an older migration note; kept for readers porting old code" -->
 ```python
 def kpi(res, params):
     import numpy as np
@@ -282,6 +395,7 @@ duplicated what callers can express in three lines of numpy.
 
 ### `add_rc_snubber` — positional → keyword-only
 
+<!-- doctest: skip reason="shows a pre-2.1 API from an older migration note; kept for readers porting old code" -->
 ```python
 # Pre-1.6 — used to accept positional args
 p.add_rc_snubber(builder, R, C, from_node, to_node)   # TypeError in 1.6
@@ -297,6 +411,7 @@ p.add_rc_snubber(
 
 The full 1.6 signature:
 
+<!-- doctest: skip reason="shows a pre-2.1 API from an older migration note; kept for readers porting old code" -->
 ```python
 def add_rc_snubber(
     builder, *,
@@ -318,6 +433,7 @@ In 1.5 some helpers had a Pre-1.0-style POD params struct (e.g.
 as **direct kwargs**. There's no `PmsmParams` / `ThreePhaseVsiParams`
 struct — pass the parameters directly:
 
+<!-- doctest: skip reason="shows a pre-2.1 API from an older migration note; kept for readers porting old code" -->
 ```python
 # 1.6
 motor = p.add_pmsm(
@@ -342,6 +458,7 @@ params struct.
 If a GUI converter built against the old `Params` shape needs to
 construct kwargs from a settings dict, just splat it:
 
+<!-- doctest: skip reason="shows a pre-2.1 API from an older migration note; kept for readers porting old code" -->
 ```python
 pmsm_kwargs = {
     "name": "M1",
@@ -360,21 +477,6 @@ motor = p.add_pmsm(builder, **pmsm_kwargs)
 
 This is intentional — no parallel `*Params` data structure to keep
 in sync with the kwarg list.
-
-## After 2.0.0 — PWL diode forward drop (PSIM `V_f`)
-
-`add_diode` gained `V_f` (default 0): the PSIM "Diode Voltage Drop",
-`v = V_f + i/g_on` while ON, so the diode dissipates `V_f·i + i²/g_on`.
-Omitting it changes nothing. `V_th` stays the turn-on threshold.
-
-**Breaking:** `add_three_phase_vsi(V_f=0.7)` now passes `V_f` as that
-drop (it was the turn-on threshold `V_th` and added no loss). The
-freewheel diodes' conduction loss rises by `V_f·I_avg`, they no longer
-share current with a gated-on switch below `R_on·|i| = V_f`, and the
-leg-output voltage during dead time shifts by `V_f`. For the old
-behaviour pass `V_f=0.0, V_th=0.7`. `add_bridge_rectifier` gained a
-`V_f=0.0` drop; its `V_th=0.7` threshold is unchanged. `add_mosfet`'s
-`V_F` stays a body-diode threshold.
 
 ## See also
 
