@@ -114,7 +114,7 @@ void init_module(py::module_& m) {
     m.doc() = "Pulsim kernel — PWL state-space cache, "
               "trapezoidal companion, Newton, and the "
               "high-level CircuitBuilder API.";
-    m.attr("__version__") = "1.6.4";
+    m.attr("__version__") = "2.1.0";
 
     using namespace pulsim;
 

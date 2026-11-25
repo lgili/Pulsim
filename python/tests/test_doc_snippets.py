@@ -9,7 +9,8 @@ Conventions for doc authors
 ---------------------------
 
 Which files
-    ``python/pulsim/AI_GUIDE.md``, ``README.md``, ``docs/getting-started.md``
+    ``python/pulsim/AI_GUIDE.md``, ``README.md``, ``docs/getting-started.md``,
+    ``docs/index.md``, ``docs/migration-guide.md``, ``docs/known-limitations.md``
     and ``docs/tutorials/*.md`` (see ``DOC_FILES``). One test per file.
 
 Which blocks
@@ -91,6 +92,9 @@ DOC_FILES = [
     REPO_ROOT / "README.md",
     REPO_ROOT / "docs" / "getting-started.md",
     REPO_ROOT / "docs" / "ideal-switch.md",
+    REPO_ROOT / "docs" / "index.md",
+    REPO_ROOT / "docs" / "migration-guide.md",
+    REPO_ROOT / "docs" / "known-limitations.md",
     *sorted((REPO_ROOT / "docs" / "tutorials").glob("*.md")),
 ]
 BUDGET_ROWS = 2_900_000  # measured 2,175,414 rows on 77ce4a28: 33 % margin

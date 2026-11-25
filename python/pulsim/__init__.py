@@ -3002,8 +3002,8 @@ def _undriven(engine, builder, stacklevel=2, policy=None):
                 "default to ALL CLOSED, which short-circuits "
                 "bridge legs (shoot-through). Pass an explicit "
                 "switch_fn / closed_loops that drives these bits. "
-                "In Pulsim v2.0 this becomes an error and the "
-                "default flips to all-OPEN.",
+                "simulate(undriven='refuse') makes this an "
+                "error.",
                 stacklevel=stacklevel)
         else:
             warnings.warn(
@@ -5569,7 +5569,7 @@ def _auto_attach_motor_traces(
 # no separate Python-side params class — pass v_dc,
 # v_amplitude, frequency, phase as keyword args.
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"
 
 
 def get_include() -> str:
