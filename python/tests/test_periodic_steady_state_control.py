@@ -823,3 +823,15 @@ def test_layout_check_survives_python_O():
     out = subprocess.run([sys.executable, "-O", "-c", code], capture_output=True,
                          text=True, check=True)
     assert out.stdout.strip() == "controller_state_layout"
+
+
+def test_closed_loop_period_run_lets_a_stub_error_through(monkeypatch):
+    """A NotImplementedError (a stub or a bug) inside a closed-loop period
+    run reaches the caller; it is not reported as a non-convergence."""
+    def stub(*a, **k):
+        raise NotImplementedError("stub")
+    monkeypatch.setattr(p._pulsim, "run_ped_native_builder", stub)
+    b = _buck()
+    lp = _pi_loop(b)
+    with pytest.raises(NotImplementedError, match="stub"):
+        p.periodic_steady_state(b, period=T, closed_loops=[lp])
