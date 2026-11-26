@@ -16,10 +16,10 @@ fails when its err_rms grows past 2x the frozen `known_err:`.
 
 | configuration | agree | disagree | error | refused | unverified |
 |---|---:|---:|---:|---:|---:|
-| pwl | 82 | 28 | 2 | 0 | 0 |
-| pwl+restart | 100 | 10 | 2 | 0 | 0 |
-| pwl+split | 100 | 10 | 2 | 0 | 0 |
-| trbdf2 | 109 | 1 | 2 | 0 | 0 |
+| pwl | 82 | 29 | 1 | 0 | 0 |
+| pwl+restart | 100 | 11 | 1 | 0 | 0 |
+| pwl+split | 100 | 11 | 1 | 0 | 0 |
+| trbdf2 | 109 | 2 | 1 | 0 | 0 |
 | dsed | 103 | 0 | 0 | 9 | 0 |
 
 ### Fixed engine: restart rule and split (circuits where any of the three does not agree)
@@ -47,7 +47,7 @@ fails when its err_rms grows past 2x the frozen `known_err:`.
 | switching/isolated/forward_converter.yaml | 0.02 | 0.707 | 2.67e-06 | 2.63e-06 |
 | switching/isolated/full_bridge_dc.yaml | 0.02 | 0.0828 | 2.67e-05 | 2.67e-05 |
 | switching/isolated/ll11_llc_resonant_converter.yaml | 0.02 | error | error | error |
-| switching/isolated/ll13_active_clamp_forward.yaml | 0.02 | error | error | error |
+| switching/isolated/ll13_active_clamp_forward.yaml | 0.02 | 4.51 | 0.0566 | 0.0566 |
 | switching/isolated/llc_half_bridge_zvs.yaml | 0.02 | 0.021 | 0.000586 | 0.000586 |
 | switching/isolated/psfb_full_bridge_zvs.yaml | 0.02 | 0.0211 | 0.0017 | 0.0017 |
 | switching/isolated/synchronous_flyback.yaml | 0.02 | 0.207 | 1.29e-06 | 1.29e-06 |
@@ -71,10 +71,8 @@ fails when its err_rms grows past 2x the frozen `known_err:`.
 | switching/inverter/ll10_full_bridge_inverter_lc.yaml | pwl+split | disagree (0.05) | agree | 0.000127 | now agree: drop the freeze |
 | switching/isolated/full_bridge_dc.yaml | pwl+restart | disagree (0.0815) | agree | 2.67e-05 | now agree: drop the freeze |
 | switching/isolated/full_bridge_dc.yaml | pwl+split | disagree (0.0815) | agree | 2.67e-05 | now agree: drop the freeze |
-| switching/isolated/ll13_active_clamp_forward.yaml | pwl | disagree (4.51) | error |  | new outcome |
-| switching/isolated/ll13_active_clamp_forward.yaml | pwl+restart | disagree (0.335) | error |  | new outcome |
-| switching/isolated/ll13_active_clamp_forward.yaml | pwl+split | disagree (0.335) | error |  | new outcome |
-| switching/isolated/ll13_active_clamp_forward.yaml | trbdf2 | disagree (0.00133) | error |  | new outcome |
+| switching/isolated/ll13_active_clamp_forward.yaml | pwl+restart | disagree (0.335) | disagree | 0.0566 | improved 0.335 -> 0.0566: re-freeze |
+| switching/isolated/ll13_active_clamp_forward.yaml | pwl+split | disagree (0.335) | disagree | 0.0566 | improved 0.335 -> 0.0566: re-freeze |
 | switching/multilevel/cascaded_h_bridge_5level.yaml | pwl+restart | disagree (0.0269) | agree | 5.69e-05 | now agree: drop the freeze |
 | switching/multilevel/cascaded_h_bridge_5level.yaml | pwl+split | disagree (0.0269) | agree | 5.69e-05 | now agree: drop the freeze |
 | switching/multilevel/flying_capacitor_3level.yaml | pwl+restart | disagree (0.05) | agree | 3.74e-05 | now agree: drop the freeze |
@@ -139,6 +137,10 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | switching/isolated/flyback_converter.yaml | pwl | 0.02 | 0.949 | V(out) | chatter | 19.1% | 2e-05 | 2e+02 |
 | switching/isolated/forward_converter.yaml | pwl | 0.02 | 0.707 | V(out) | chatter | 6.2% | 9.9e-06 | 99 |
 | switching/isolated/full_bridge_dc.yaml | pwl | 0.02 | 0.0828 | V(load_p) | 3.54e-06 | 4.0% | 1e-07 | 0.5 |
+| switching/isolated/ll13_active_clamp_forward.yaml | pwl | 0.02 | 4.51 | V(clamp_node) | 0.642 | 5.0% | 5e-11 | 0.001 |
+| switching/isolated/ll13_active_clamp_forward.yaml | pwl+restart | 0.02 | 0.0566 | V(drain) | 0.0475 | 1.2% | 5e-08 | 1 |
+| switching/isolated/ll13_active_clamp_forward.yaml | pwl+split | 0.02 | 0.0566 | V(drain) | 0.0475 | 1.2% | 5e-08 | 1 |
+| switching/isolated/ll13_active_clamp_forward.yaml | trbdf2 | 0.001 | 0.00108 | V(ctrl_clamp) | 3.32e-05 | 0.0% | 5e-11 |  |
 | switching/isolated/llc_half_bridge_zvs.yaml | pwl | 0.02 | 0.021 | V(mid) | chatter | 18.8% | 8.5e-06 | 8.5e+02 |
 | switching/isolated/psfb_full_bridge_zvs.yaml | pwl | 0.02 | 0.0211 | V(b) | chatter | 39.2% | 7e-06 | 7e+02 |
 | switching/isolated/synchronous_flyback.yaml | pwl | 0.02 | 0.207 | V(out) | 0.143 | 1.0% | 9.9e-13 | 9.9e-06 |
@@ -250,7 +252,7 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | switching/isolated/forward_converter.yaml | 0.707 | 2.67e-06 | 2.63e-06 | 2.17e-05 | 1.12e-06 |
 | switching/isolated/full_bridge_dc.yaml | 0.0828 | 2.67e-05 | 2.67e-05 | 0.000141 | 2.67e-05 |
 | switching/isolated/ll11_llc_resonant_converter.yaml | error | error | error | error | refused |
-| switching/isolated/ll13_active_clamp_forward.yaml | error | error | error | error | refused |
+| switching/isolated/ll13_active_clamp_forward.yaml | 4.51 | 0.0566 | 0.0566 | 0.00108 | refused |
 | switching/isolated/llc_half_bridge_zvs.yaml | 0.021 | 0.000586 | 0.000586 | 2.9e-05 | 2.98e-05 |
 | switching/isolated/psfb_full_bridge_zvs.yaml | 0.0211 | 0.0017 | 0.0017 | 1.62e-05 | 0.000127 |
 | switching/isolated/synchronous_flyback.yaml | 0.207 | 1.29e-06 | 1.29e-06 | 9.15e-06 | 1.02e-06 |

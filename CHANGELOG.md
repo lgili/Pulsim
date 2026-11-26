@@ -6,6 +6,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### TR-BDF2: edge probes and the floating-point fixed point
+
+- **An edge probe that passes only as a floating-point fixed point is retaken
+  longer** (`trbdf2` / `esdirk43`, counted in `n_probe_newton_retries`), as a
+  stalled probe was in 2.1.0. `ll13_active_clamp_forward` at rtol 1e-8 /
+  atol 1e-12 (the benchmark reference) committed a 2.3 fs probe at 3.5e8 V
+  after the 1.5 us turn-off and then aborted at h_min; it runs again. ll13's
+  own trajectories at other tolerances move (fewer roundoff accepts).
+
 ### Exact engine, phase 3 slice (add-exact-propagator-strategy groups 7, 10)
 
 - **Coupled inductors with |k| = 1 are refused by name.** The exact engine's

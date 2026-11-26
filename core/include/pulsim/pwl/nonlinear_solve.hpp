@@ -202,6 +202,9 @@ struct NewtonRoundoffAcceptance {
     /// them is a state the solver is not tracking (BUDGET in DECISIONS).
     Size max_consecutive = Size{130};
     bool accepted = false;
+    /// The accepted iterate passed only at its own magnitudes (the
+    /// floating-point fixed point of DECISIONS 12), not at the start's.
+    bool fixed_point = false;
     Real omega = 0;
     Index row = kInvalidIndex;
     /// Run counters (the caller keeps one object per run).
@@ -249,6 +252,7 @@ inline void solve_with_newton_in_place(
     const bool ro_on = roundoff != nullptr && roundoff->enabled;
     if (roundoff != nullptr) {
         roundoff->accepted = false;
+        roundoff->fixed_point = false;
     }
     // Roundoff acceptance state: whether f(x_k), x_k were recorded this
     // call (in the workspace: no allocation per call) and the last
@@ -786,6 +790,7 @@ inline void solve_with_newton_in_place(
             }
         };
         backward_error(w.ro_scale);
+        bool own_scale = false;
         // A FLOATING-POINT FIXED POINT (DECISIONS 12): every component of
         // the last Newton step is within the absolute tol_dx or within
         // 4 eps of the iterate's own value, so no update can move x_k any
@@ -816,6 +821,7 @@ inline void solve_with_newton_in_place(
                 sk += seg.b_constant.cwiseAbs() + b_extra.cwiseAbs() + f_nl.cwiseAbs();
                 if (J_nl.nonZeros() > 0) sk += J_nl.cwiseAbs() * axk;
                 backward_error(sk.cwiseMax(w.ro_scale));
+                own_scale = true;
             }
         }
         if (stagnated && ro_dx[0] <= dx_cap
@@ -837,6 +843,7 @@ inline void solve_with_newton_in_place(
             }
             x = w.ro_x;
             roundoff->accepted = true;
+            roundoff->fixed_point = own_scale;
             roundoff->omega = omega;
             roundoff->row = row;
             ++roundoff->consecutive;
