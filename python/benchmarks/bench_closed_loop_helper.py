@@ -47,6 +47,14 @@ def build_buck() -> ps.CircuitBuilder:
     return b
 
 
+# Both runners on one schedule: the PI reads v(out) at step ends and the gate
+# edge is taken at the next grid point. Under the release defaults the
+# helper's graph reads the state at its tick instant (control_tick='state')
+# and the restart locates its gate edges, which the hand-rolled loop (a
+# step_observer and a switch_fn without next_edge_after) cannot reproduce.
+_SAME_SCHEDULE = {"discontinuity_restart": False, "control_tick": "label"}
+
+
 def _steady_state_vout(res: ps.SimulationResult, dt: float) -> float:
     t = np.asarray(res.times)
     return float(ps.time_average(t, res.v("vout"), t_from=float(t[-1]) - SS_WINDOW_S))
@@ -72,7 +80,7 @@ def run_helper_buck(
         switch="Q1",
         freq=freq,
     )
-    res = ps.simulate(b, t_end=t_end, dt=dt, closed_loops=[loop])
+    res = ps.simulate(b, t_end=t_end, dt=dt, closed_loops=[loop], **_SAME_SCHEDULE)
     return _steady_state_vout(res, dt)
 
 
@@ -114,6 +122,7 @@ def run_hand_rolled_buck(
         dt=dt,
         switch_fn=switch_fn,
         step_observer=step_observer,
+        **_SAME_SCHEDULE,
     )
     return _steady_state_vout(res, dt)
 
