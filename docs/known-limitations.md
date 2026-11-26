@@ -162,11 +162,15 @@ engine accepts a keyword and ignores it. The defaults are
 <!-- option-capabilities:end -->
 
 The charge laws `ChargeLaw.table` / `.vdmos_cgd` are the
-NonlinearCapacitor row. `add_power_mosfet` is ONE f/q device (channel,
-C_gd / C_ds charge laws, body diode: the ExternalDevice row) plus the
-Resistor, Inductor and Capacitor rows of its linear elements: it runs on
-`pwl`, `trbdf2`, the DC operating point and the kernel AC sweep, and is
-refused on `dsed` and `bdf1`, naming the device.
+NonlinearCapacitor row. `add_power_mosfet` is a composite of the
+MosfetLevel1, Capacitor, NonlinearCapacitor, Resistor, Inductor and
+Shockley / Lauritzen diode rows: it runs on `pwl` and `trbdf2` and is
+refused on `dsed`, `bdf1` and the kernel AC sweep, naming the channel.
+With `fq_device=True` (opt-in) it is ONE f/q device (channel, C_gd,
+C_ds, body diode: the ExternalDevice row) plus the Resistor, Inductor
+and Capacitor rows of R_d, R_g, L_s, C_gs: it runs on `pwl`, `trbdf2`,
+the DC operating point and the kernel AC sweep, and is refused on `dsed`
+and `bdf1`, naming the device.
 
 The branch form of a switch or diode (`add_ideal_switch`,
 `add_diode(form='branch')`, YAML `form: branch`; opt-in) has its own
@@ -320,7 +324,8 @@ event where the signal jumps.
 
 | Limitation | Measured | Workaround |
 |---|---|---|
-| **`add_power_mosfet`'s loss row is `v_DS · i_D` of the external drain / source pins.** The gate-drive energy is not in it, and at a switch event elsewhere in the circuit the device current's right limit is taken as its sample (the device itself is continuous). | `res.i("Q1")` is the drain-terminal current (within 1e-9 of a 1 mΩ sense resistor). | For gate loss, read `res.i("Q1.rg")`. |
+| **`add_power_mosfet` (default composite): no `res.i` of the device and no loss row.** | `res.i("Q1")` raises like `mosfet_level1`; `device_loss_summary` omits it. | `fq_device=True`, `p.double_pulse_test` (sense resistor), or a 1 mΩ resistor in series. |
+| **`add_power_mosfet(fq_device=True)`'s loss row is `v_DS · i_D` of the external drain / source pins.** The gate-drive energy is not in it, and at a switch event elsewhere in the circuit the device current's right limit is taken as its sample (the device itself is continuous). | `res.i("Q1")` is the drain-terminal current (within 1e-9 of a 1 mΩ sense resistor). | For gate loss, read `res.i("Q1.rg")`. |
 | **The level-1 MOSFET has a negative slope near threshold.** The triode polynomial at small or negative overdrive makes dI/dV_DS < 0 at V_DS = 0 for V_OV in (≈ −0.72/κ, 0), and just past saturation onset (down to −0.040 S for K = 1.43, κ = 15); there `i·v` reaches −0.29 mW. The zero-voltage leak `α(1−β)·K·V_OV²` is gone since 2026-11-19: zero current at V_DS = 0, C¹ across it (add-unified-device-interface DECISIONS #44). | K = 1.43, κ = 15: min dI/dV_DS −0.040 S; min i·v −0.29 mW at V_OV = −0.20 V, V_DS = −0.21 V. | Drive the gate well past threshold (κ·V_OV ≫ 1), or raise `kappa`. |
 | **`add_power_mosfet` non-goals:** p-channel, live T_j inside the law (T_j is run-constant), drain inductance and package networks, avalanche, SiC/GaN effects; a table channel (`channel=p.ChannelTable(...)`) is taken at the T_j it was measured at (temperature coefficients refused with it). | - | - |
 | **A gate transient on `pwl` needs a step that resolves it.** | The 400 V / 10 A double pulse with a 65 ns plateau: 7501 steps at `dt` = 0.2 ns; `trbdf2` takes about 1200. | `engine="trbdf2"`. |

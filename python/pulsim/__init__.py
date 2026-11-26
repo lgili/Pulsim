@@ -1251,28 +1251,17 @@ def _result_i(self, name: str, t=None, *, port=None):
                 f"only for a gyrator (this branch is "
                 f"{kinds.get(b_id)!r}).")
 
-    pm_desc = None if getattr(self, "_xdev_trace", None) is None else next(
-        (d for d in builder.components() if d.get("kind") == "power_mosfet"
-         and int(d.get("branch_id", -1)) == int(b_id)), None)
-
-    def _pm_fin(col):
-        return col if t is None else col[t]
-    # ------------- power MOSFET: the drain-terminal current -------------
-    if pm_desc is not None:
-        # (before the state fast path: with a Lauritzen body diode the
-        # device's branch carries its internal charge unknown)
-        # add-power-mosfet-datasheet-device 5.3: the f/q device's drain-pin
-        # current (f + dq/dt, recorded every accepted step) plus the linear
-        # capacitors on d'; with R_d the drift resistor carries all of it.
-        subs = set(pm_desc.get("sub_elements", ()))
-        if f"{name}.rd" in subs:
-            return _pm_fin(_result_i(self, f"{name}.rd"))
+    # ------------- power MOSFET f/q device: the drain-terminal current -------------
+    # add-power-mosfet-datasheet-device 5.3 (fq_device=True only; the default
+    # composite keeps its channel-branch reading). Every C_gd / C_ds is inside
+    # the device, so its drain-pin current (f + dq/dt, recorded every accepted
+    # step) is the whole current at d' (= R_d's current when there is one).
+    # Before the state fast path: a Lauritzen body diode's charge is on this branch.
+    if getattr(self, "_xdev_trace", None) is not None and any(
+            d.get("kind") == "power_mosfet" and int(d.get("branch_id", -1)) == int(b_id)
+            and d.get("params", {}).get("fq_device") for d in builder.components()):
         col = _np.asarray(_rec_mod.result_device_output(self, name, "i(d)"), dtype=float)
-        if f"{name}.cds" in subs:
-            col = col + _result_i(self, f"{name}.cds")
-        if f"{name}.cgd" in subs:          # gate -> drain
-            col = col - _result_i(self, f"{name}.cgd")
-        return _pm_fin(col)
+        return col if t is None else col[t]
 
     # ---- Fast path: state-vector-native kinds (inductor, VS family) ----
     # Try inductor first (most common case), then the source family

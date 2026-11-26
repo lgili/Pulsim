@@ -16,8 +16,9 @@
 // composite kind used (device/laws.hpp bodies), so the device's Newton
 // matrix is the composite's entry by entry (up to the order of the sums).
 // The Jacobian is forward AD of the same expressions the residual
-// evaluates. Linear elements (R_d, R_g, L_s, a constant C_gs / C_gd /
-// C_ds) stay the MNA's own linear stamps.
+// evaluates. R_d, R_g, L_s and C_gs stay the MNA's own linear stamps; a
+// constant C_gd / C_ds is a linear charge INSIDE the device, so the
+// device's drain-pin current (f + dq/dt) is the whole current at d'.
 
 #include "pulsim/ad/ad_scalar.hpp"
 #include "pulsim/device/laws.hpp"
@@ -49,6 +50,7 @@ struct Core {
     device::laws::MosfetL1Params<Real> ch{};
     std::shared_ptr<const ChannelTable> table;         //!< replaces the Level-1 law
     std::optional<NonlinearCapacitor::Params> gd, ds;  //!< charge laws (u = v_gd, v_ds)
+    Real c_gd = 0, c_ds = 0;                           //!< constant capacitances [F]
     PowerMosfet::BodyDiode body = PowerMosfet::BodyDiode::None;
     device::laws::ShockleyParams<Real> sh{};
     device::laws::LauritzenParams<Real> la{};
@@ -102,6 +104,8 @@ inline Dense evaluate(const Core& c, const Real* x) {
     };
     if (c.gd) charge(*c.gd, G, D);
     if (c.ds) charge(*c.ds, D, S);
+    const T qgd = c.c_gd * (v[G] - v[D]), qds = c.c_ds * (v[D] - v[S]);
+    q[G] += qgd; q[D] += qds - qgd; q[S] -= qds;
     // body diode s' (anode) → d' (cathode)
     if (c.body == PowerMosfet::BodyDiode::Shockley) {
         O2 o;
@@ -131,8 +135,8 @@ inline Dense evaluate(const Core& c, const Real* x) {
 inline Pattern pattern(const Core& c) {
     std::array<std::array<bool, 4>, 4> F{}, Q{};
     for (Row r : {D, S}) for (Row k : {D, S, G}) F[r][k] = true;    // channel (+ body diode)
-    if (c.gd) for (Row r : {G, D}) for (Row k : {G, D}) Q[r][k] = true;
-    if (c.ds) for (Row r : {D, S}) for (Row k : {D, S}) Q[r][k] = true;
+    if (c.gd || c.c_gd != Real{0}) for (Row r : {G, D}) for (Row k : {G, D}) Q[r][k] = true;
+    if (c.ds || c.c_ds != Real{0}) for (Row r : {D, S}) for (Row k : {D, S}) Q[r][k] = true;
     if (c.body == PowerMosfet::BodyDiode::Lauritzen) {
         for (Row r : {D, S, QM}) for (Row k : {D, S, QM}) F[r][k] = true;
         Q[QM][QM] = true;
@@ -145,6 +149,35 @@ inline Pattern pattern(const Core& c) {
         }
     }
     return p;
+}
+
+/// The Core of a power MOSFET record (at T_j): the builder and the YAML
+/// reader build the device from this one function.
+inline Core core_of(const PowerMosfet::Record& rec) {
+    using PM = PowerMosfet;
+    const auto& p = rec.params;
+    Core c;
+    c.ch = {rec.K_eff, rec.V_T_eff, p.lambda, p.kappa};
+    c.table = p.channel;
+    c.body = p.body;
+    if (p.body == PM::BodyDiode::Shockley) {
+        const auto& d = p.shockley;
+        c.sh = device::laws::ShockleyDiode::from(ShockleyDiode::Params{
+            .I_S = d.I_S, .n = d.n, .V_T = d.V_T, .G_min = d.G_min, .BV = d.BV});
+    } else if (p.body == PM::BodyDiode::Lauritzen) {
+        const auto& d = p.lauritzen;
+        c.la = device::laws::LauritzenDiode::from(LauritzenDiode::Params{
+            .I_S = d.I_S, .n = d.n, .V_T = d.V_T, .tau = d.tau, .T_M = d.T_M,
+            .G_min = d.G_min});
+    }
+    auto put = [](const PM::Capacitance& x, std::optional<NonlinearCapacitor::Params>& law,
+                  Real& C) {
+        if (const Real* v = std::get_if<Real>(&x)) C = *v;
+        else law = std::get<NonlinearCapacitor::Params>(x);
+    };
+    put(p.C_gd, c.gd, c.c_gd);
+    put(p.C_ds, c.ds, c.c_ds);
+    return c;
 }
 
 // ---- the in-process model: one descriptor per device, the Core behind create()

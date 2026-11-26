@@ -2418,6 +2418,7 @@ void init_module(py::module_& m) {
                           pd["rds_tc2"] = pp.rds_tc2; pd["vt_tc"] = pp.vt_tc;
                           pd["K_eff"] = pm->K_eff; pd["V_T_eff"] = pm->V_T_eff;
                           pd["R_d_eff"] = pm->R_d_eff;
+                          if (pp.fq_device) pd["fq_device"] = true;
                           desc["kind"] = "power_mosfet";
                           desc["params"] = pd;
                           desc["pins"] = py::make_tuple(pm->drain, pm->source, pm->gate);
@@ -2481,7 +2482,8 @@ void init_module(py::module_& m) {
                  const py::object& C_ds, Real R_g, Real L_s,
                  const py::object& body_diode, Real T_j, Real rds_tc1,
                  Real rds_tc2, Real vt_tc,
-                 std::optional<models::ChannelTable> channel) -> builder::CircuitBuilder& {
+                 std::optional<models::ChannelTable> channel,
+                 bool fq_device) -> builder::CircuitBuilder& {
                   using PM = models::PowerMosfet;
                   auto cap = [&](const py::object& o, const char* what)
                       -> PM::Capacitance {
@@ -2559,6 +2561,7 @@ void init_module(py::module_& m) {
                           S.BV = get("BV", S.BV);
                       }
                   }
+                  p.fq_device = fq_device;
                   if (channel) {
                       p.channel = std::make_shared<const models::ChannelTable>(std::move(*channel));
                   }
@@ -2574,10 +2577,9 @@ void init_module(py::module_& m) {
               py::arg("body_diode") = py::none(),
               py::arg("T_j") = 25.0, py::arg("rds_tc1") = 0.0,
               py::arg("rds_tc2") = 0.0, py::arg("vt_tc") = 0.0,
-              py::arg("channel") = py::none(),
+              py::arg("channel") = py::none(), py::arg("fq_device") = false,
               py::return_value_policy::reference,
-              "Datasheet power MOSFET as one call: Level-1 channel (or channel= a "
-              "ChannelTable, which replaces K, V_T, lambda_, kappa) (K "
+              "Datasheet power MOSFET as one call: Level-1 channel (K "
               "[A/V^2], V_T [V], third quadrant by terminal swap), drift "
               "resistance R_d [ohm], C_gs [F], C_gd and C_ds (float = linear "
               "farads, 0 = absent; or a ChargeTable / ChargeLaw), internal "
@@ -2585,10 +2587,12 @@ void init_module(py::module_& m) {
               "body_diode None or {'model': 'lauritzen'|'shockley', ...}. "
               "T_j [degC] is run-constant: R_d *= r, K /= r with r = 1 + "
               "rds_tc1*dT + rds_tc2*dT^2, V_T += vt_tc*dT (dT = T_j - 25). "
-              "The channel, the C_gd / C_ds charge laws and the body diode are "
-              "ONE f/q device 'name'; sub-elements name.rd/.rg/.ls/.cgs and "
-              "name.cgd/.cds when that capacitance is a number. res.i(name) "
-              "is the drain-terminal current. Runs on pwl (time step must resolve the gate "
+              "Default: a composite, sub-elements name (channel), "
+              "name.rd/.rg/.ls/.cgs/.cgd/.cds, name_body. fq_device=True (opt-in): "
+              "the channel (or channel= a ChannelTable, replacing K, V_T, lambda_, "
+              "kappa), C_gd, C_ds and the body diode are ONE f/q device 'name' "
+              "(sub-elements name.rd/.rg/.ls/.cgs); res.i(name) is then the "
+              "drain-terminal current and device_loss_summary lists it. Runs on pwl (time step must resolve the gate "
               "transient: ~0.2 ns for a 60 ns plateau) and trbdf2. "
               "components() reports one 'power_mosfet' entry.");
 

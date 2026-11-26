@@ -2455,8 +2455,8 @@ def device_loss_summary(
             })
             continue
 
-        if kind == "power_mosfet":
-            # add-power-mosfet-datasheet-device 5.3: v_DS · i_D across the
+        if kind == "power_mosfet" and desc.get("params", {}).get("fq_device"):
+            # add-power-mosfet-datasheet-device 5.3 (fq_device only): v_DS · i_D across the
             # EXTERNAL drain / source pins (switching + conduction loss, R_d
             # included; the gate drive is not). i_D = res.i(name).
             # shortcut: the device is continuous, so i_D's right limit is

@@ -407,8 +407,7 @@ def test_power_mosfet_composite_is_refused_by_name():
                        C_gs=1e-9, C_gd=100e-12, C_ds=0.0)
     with pytest.raises(p.UnsupportedError, match="nonlinear or stateful.*Mq") as ei:
         p.periodic_steady_state(b, period=T, switch_fn=_pwm(b, 0.3))
-    # since task 5.2 the device is one f/q device on the ExternalDevice row
-    assert (ei.value.device, ei.value.kind) == ("Mq", "ExternalDevice")
+    assert (ei.value.device, ei.value.kind) == ("Mq", "MosfetLevel1")
 
 
 def test_budget_exhaustion_reports_the_history():
