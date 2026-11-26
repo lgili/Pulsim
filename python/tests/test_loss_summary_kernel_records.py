@@ -113,11 +113,17 @@ def test_device_loss_summary_windowing_on_kernel_events(engine):
     # i_L's kink) sit one dt earlier. An event belongs to a window by its
     # scheduled instant: the cut at 100 us (Q1 on, D1 off) books that edge in
     # the later window, on plain pwl (99.9 us) in the earlier one.
+    # Since the release's restart default pwl takes each oracle edge at its
+    # instant, no lag (discontinuity_restart=False brings it back); every edge
+    # here is on pwl's grid, which snaps it to the grid instant n * dt (1000 *
+    # 1e-7 = 9.999999999999999e-05, one ulp under 1e-4: the cut at 100 us then
+    # books that edge in the EARLIER window on pwl).
     T = 1e-5
-    lag = 1e-7 if engine == "pwl" else 0.0
     k = np.arange(20)
-    sched = {("Q1", "on"): (k + 1) * T - lag, ("Q1", "off"): k * T + T / 2 - lag,
-             ("D1", "on"): k * T + T / 2 - lag, ("D1", "off"): (k + 1) * T - lag}
+    sched = {("Q1", "on"): (k + 1) * T, ("Q1", "off"): k * T + T / 2,
+             ("D1", "on"): k * T + T / 2, ("D1", "off"): (k + 1) * T}
+    if engine == "pwl":
+        sched = {key: np.round(s / 1e-7) * 1e-7 for key, s in sched.items()}
     for n in names:
         ev = res.loss_events(n)
         E_kind = {}
@@ -210,7 +216,12 @@ def test_closed_loop_tj_kernel_events_preserved_in_summaries():
     def e_truth(t):
         return 1e-3 * (1.0 + 0.01 * 25.0 * (1.0 - np.exp(-80.0 * t)))
 
-    assert len(ev) == 1000
+    # Truth: the schedule's edges k * 50 us, k = 1..999, at their instants (the
+    # release's restart locates each oracle edge; the one at t_end = 0.05 s is
+    # not inside the run). With discontinuity_restart=False each sat one dt
+    # earlier and the 1000th landed at 0.049998.
+    assert len(ev) == 999
+    assert np.abs(np.sort(t_k) - np.arange(1, 1000) * 5e-5).max() < 1e-12
     assert e_total_kernel == pytest.approx(float(np.sum(e_truth(t_k))), rel=1.5e-3)
 
     row_no_spec = _loss_by_name(b, res)["S1"]
