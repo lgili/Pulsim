@@ -273,3 +273,29 @@ def test_a_circuit_with_a_loss_port_is_refused_by_the_evaluator():
     with pytest.raises(p.UnsupportedError) as ei:
         _cir(circuit=b.build())
     assert (ei.value.feature, ei.value.device) == ("device_losses", "S")
+
+
+def test_a_design_with_an_inductor_cut_is_handed_to_the_python_path():
+    """R6 (release): a period whose switch cuts the inductor current (an ideal
+    switch, no freewheel path) is not finished in the kernel. Today the kernel's
+    periodic orbit refuses the dependent-state mode before its cut-set check
+    (design_batch.hpp: a cut-set record hands over too, so the Python path warns
+    by the record); the design's record is the Python path's own, refused by
+    name."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", 24.0)
+    b.add_ideal_switch("S", "vin", "sw", R_on=1e-3, g_off=0.0)
+    b.add_inductor("L", "sw", "vout", 100e-6)
+    b.add_resistor("RL", "vout", "gnd", 10.0)
+    sf = p.make_pwm_switch_fn(1 / T, 0.5, b.switch_index_of("S"), b.graph.num_switches)
+    ev = Evaluator(circuit=b.build(), fields={"L": "L.L"}, switch_fn=sf, period=T,
+                   loads=("RL",), output="vout", steady=SteadySpec(method="pss"),
+                   kpis=[Kpi.ripple("vout")])
+    ds = [dict(L=100e-6), dict(L=220e-6)]
+    recs = ev.evaluate_many(ds, workers=1)
+    st = ev.last_batch
+    assert st["kernel"] == 0 and st["python"] == 2
+    (why, n), = st["python_reasons"].items()
+    assert n == 2 and "dependent states" in why, why
+    assert [dict_free(r) for r in recs] == _python(ev, ds)
+    assert {r.status for r in recs} == {"refused"}
