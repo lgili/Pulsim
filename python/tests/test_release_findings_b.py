@@ -84,13 +84,14 @@ def _charges(view):
 
 
 def test_f54_exact_two_limit_trace_closes_the_bridge_charge():
-    """F-5-4 (exact engine): the left-limit samples miss every V_th turn-on
-    jump (-1.2e-3); with both limits the trapezoid closes the charge to the
-    output rule's interpolation tolerance (measured 1.1e-4)."""
+    """F-5-4 (exact engine): with both limits the trapezoid closes the charge
+    to the output rule's interpolation tolerance (measured 1.1e-4). The stored
+    trace alone closes it too since F-X-7 stores the flow 2 ps past every
+    turn-on (3.5e-6; the left limits alone read -1.2e-3 before)."""
     _, r = _bridge_run(0.7, "exact")
     q_raw, q_dc = _charges(r)
     q_in, q_dc2 = _charges(p.with_event_limits(r))
-    assert abs(q_raw / q_dc - 1) > 1e-3          # the left limits alone
+    assert abs(q_raw / q_dc - 1) <= 3e-4, (q_raw, q_dc)   # F-X-7's 2 ps samples
     assert abs(q_in / q_dc2 - 1) <= 3e-4, (q_in, q_dc2)
 
 
@@ -127,8 +128,9 @@ def test_f54_f55_pwl_restart_steps_close_the_bridge_charge(V_th):
 def test_f62_exact_time_average_of_the_two_limit_trace_is_the_summary():
     """The right limit of each turn-on (13.6 A) is stored; read with it,
     time_average equals the summary's i_avg (which integrates each step
-    from its right limit) and steady_state_stats reads it too. The left
-    limits alone read -0.21 %."""
+    from its right limit) and steady_state_stats reads it too. The stored
+    trace reads it within 4.3e-9 since F-X-7 stores the flow 2 ps past each
+    turn-on (the left limits alone read -0.21 % before)."""
     b = p.CircuitBuilder()
     b.add_sine_voltage_source("Vac", "ac", "n", 0.0, 230 * np.sqrt(2), 50.0)
     b.add_resistor("Rline", "ac", "x", 0.1)
@@ -144,7 +146,7 @@ def test_f62_exact_time_average_of_the_two_limit_trace_is_the_summary():
     st = p.steady_state_stats(r, "BR__D1", t_from=0.08, kind="i")
     assert st.mean == pytest.approx(avg, rel=1e-12)
     raw = p.time_average(r.times, r.i("BR__D1"), t_from=0.08)
-    assert raw < avg * (1 - 1e-3)
+    assert raw == pytest.approx(avg, rel=1e-7)   # F-X-7's 2 ps samples
 
 
 # ---------------------------------------------------------------------------

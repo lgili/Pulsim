@@ -1591,6 +1591,7 @@ void init_module(py::module_& m) {
                     feed_ad->attach(loss_hooks);
                     sim.set_hooks(&loss_hooks);
                     seg_src.emplace(adapter, f);
+                    seg_src->set_extrema(output_rtol > Real{0});   // F-Y-3: rule on only
                     f.set_segment_source(&*seg_src);
                     seg_guard.f = &f;
                     feed_ad->set_segment(&*seg_src);
@@ -1695,6 +1696,10 @@ void init_module(py::module_& m) {
                 cf["n_closed"] = seg_src->n_closed();
                 cf["n_line"] = seg_src->n_line();
                 cf["why"] = seg_src->why();
+                if (output_rtol > Real{0}) {   // rule off: the PR head's keys only
+                    cf["n_extrema_closed"] = seg_src->n_extrema_closed();
+                    cf["n_extrema_ends"] = seg_src->n_extrema_ends();
+                }
                 d["recorder_closed_form"] = cf;
             }
             if (!tick_cbs.empty()) d["control_tick_counts"] = sim.tick_counts();
@@ -1702,6 +1707,16 @@ void init_module(py::module_& m) {
                 d["n_output_capped"] = sim.n_output_capped();
                 d["n_output_unbounded"] = sim.n_output_unbounded();
                 d["output_budget_t"] = sim.output_budget_t();
+                d["n_output_floored"] = sim.n_output_floored();
+                const auto& fr = sim.output_floor_row();
+                d["output_floor_row"] = std::vector<double>(fr.data(), fr.data() + fr.size());
+                d["n_projections"] = sim.n_projections();
+                const auto pm = sim.projection_max();
+                d["projection_max_row"] = std::vector<double>(pm.data(), pm.data() + pm.size());
+                py::list recs;
+                for (const auto& r : sim.projection_records())
+                    recs.append(py::make_tuple(r.t, r.amplitude, r.row, r.tau));
+                d["projection_records"] = recs;
             }
             d["exact"] = exact_report_dict(adapter, res.n_predicate_evals);
             if (mode_shadow_h_e > Real{0}) {

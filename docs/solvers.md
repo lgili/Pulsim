@@ -220,3 +220,43 @@ step after a refreshed edge).
   you need adaptive stepping today without waiting for v1.6.0.
 - `openspec/changes/add-adaptive-runge-kutta-solvers/` — proposal +
   design + delta spec.
+
+## The exact engine's output rule (`output_rtol`)
+
+With `engine='exact'`, no `dt`, `store_every` or recorders, `output_rtol`
+chooses the stored samples: every event instant (both limits of a jump),
+and between events only the samples a tolerance needs. The promise: the
+straight line between two consecutive stored samples is within
+`max(output_rtol * range, atol, floor)` of the exact solution at every
+instant of the line, for every stored column (states, node voltages,
+branch currents). `range` is the column's range over the run so far
+(through the end of the exact step holding the line, at least 1e-3 of
+its peak); `atol` is the run's absolute tolerance (default 1e-9). No
+column is promised below its own rounding floor (`floor`, 16·eps times
+the sum of the magnitudes of the terms it is evaluated from): a column
+whose bound only fits through its floor is certified constant up to
+rounding at that floor and counted in `res.diagnostics['output_grid']`
+(`n_output_floored`, `output_floor_max`, `output_floor_by_column`). A
+source corner (a pulse or PWM edge) is always a stored sample. The sample
+stored at an event is its left limit (the right limit is
+`res.right_limit_states`, `pulsim.with_event_limits`); after an event
+that changed the mode or a source's piece the solution 2 ps later is a
+stored sample as well, so plain interpolation of `res.times` draws a
+jump of a node voltage as a jump (over those 2 ps, the one line the
+promise does not cover) and not as a ramp to the next sample. The
+"exact solution" of the promise is the flow WITH the parasitic cluster
+projected at each event: modes whose time constant is below 1e-6 of the
+run's resolved time scale are settled at the event instant (the rule-off
+run lets them decay; a diode turn-off's ~1 ns mode read 0.31 V apart for
+a few ns). Every projection is recorded in `diagnostics['output_grid']`:
+`n_projections`, `projection_max_by_column` (per stored column the largest
+amplitude a projection moved it by) and `projections` (the first 1000:
+instant `t`, largest `amplitude`, its `column`, the cluster's slowest time
+constant `tau`). Recorders on such a run read a window's min / max inside
+each exact step from its closed form where one exists (a constant plus one
+damped sinusoid or at most two real exponentials); elsewhere the step ends
+are kept and counted (`res.recorder_feed['closed_form']['n_extrema_ends']`). Where the
+4096-sample cap per interval, a mode without a diagonalising basis, or
+the run's 2e6-sample budget suspends the promise, the diagnostics say
+so and the run warns. `benchmarks/tools/output_rule_referee.py` checks
+the promise on the benchmark set.

@@ -119,7 +119,7 @@ void init_module(py::module_& m) {
     m.doc() = "Pulsim kernel — PWL state-space cache, "
               "trapezoidal companion, Newton, and the "
               "high-level CircuitBuilder API.";
-    m.attr("__version__") = "1.6.4";
+    m.attr("__version__") = "2.1.0";
 
     using namespace pulsim;
 
@@ -203,6 +203,13 @@ void init_module(py::module_& m) {
     // the message.
     static py::object budget_exc = py::exception<void>(
         m, "NewtonRoundoffBudgetExceeded", aborted_exc.ptr());
+    // The step failed on a singular matrix (pulsim::SingularError inside
+    // the engine): a SimulationAborted (same payload) whose message names
+    // the rows. A SingularError that escapes without an engine's wrap stays
+    // a plain RuntimeError, so no `except ConvergenceError` handler starts
+    // catching a topology defect it let through before.
+    static py::object singular_exc = py::exception<void>(
+        m, "SingularError", aborted_exc.ptr());
     py::register_exception_translator(
         [](std::exception_ptr pe) {
             if (!pe) {
@@ -211,8 +218,9 @@ void init_module(py::module_& m) {
             try {
                 std::rethrow_exception(pe);
             } catch (const solver::SimulationAborted& e) {
-                py::object& type =
-                    e.roundoff_budget() ? budget_exc : aborted_exc;
+                py::object& type = e.roundoff_budget() ? budget_exc
+                                   : e.singular()      ? singular_exc
+                                                       : aborted_exc;
                 py::object inst = type(e.what());
                 // `partial` is a COPY: the C++ exception is destroyed
                 // as the translator returns, so a reference would
@@ -245,6 +253,12 @@ void init_module(py::module_& m) {
     // An engine broke its own invariant (pulsim::InternalError): a pulsim bug.
     static py::object internal_exc =
         pulsim_error_type("InternalError", PyExc_RuntimeError);
+    // The circuit itself is wrong (pulsim::NetlistError): a ValueError
+    // naming the device and / or node.
+    static py::object netlist_exc =
+        pulsim_error_type("NetlistError", PyExc_ValueError);
+    netlist_exc.attr("device") = "";
+    netlist_exc.attr("node") = "";
     for (const char* a : {"engine", "feature", "device", "kind"}) {
         unsupported_exc.attr(a) = "";
     }
@@ -270,6 +284,11 @@ void init_module(py::module_& m) {
                 PyErr_SetObject(options_exc.ptr(), inst.ptr());
             } catch (const InternalError& e) {
                 PyErr_SetString(internal_exc.ptr(), e.what());
+            } catch (const NetlistError& e) {
+                py::object inst = netlist_exc(e.what());
+                inst.attr("device") = e.device();
+                inst.attr("node") = e.node();
+                PyErr_SetObject(netlist_exc.ptr(), inst.ptr());
             }
         });
 

@@ -82,6 +82,12 @@ jobs:
           CIBW_ENVIRONMENT_MACOS: >-
             MACOSX_DEPLOYMENT_TARGET=13.3
 
+          # Linux: two compile jobs, as ci.yml's Linux Python builds use. With
+          # ninja's default (nproc + 2) the 2026-11-25 dry run of the 2.1 tree
+          # lost its runner ("lost communication") after 48 min in Build wheels.
+          CIBW_ENVIRONMENT_LINUX: >-
+            CMAKE_BUILD_PARALLEL_LEVEL=2
+
           # Linux: Install build tools
           CIBW_BEFORE_ALL_LINUX: |
             if command -v yum &> /dev/null; then

@@ -38,6 +38,7 @@
 
 #pragma once
 
+#include "pulsim/sim/error.hpp"   // SingularError
 #include "pulsim/builder/circuit_builder.hpp"
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
@@ -423,12 +424,12 @@ inline void bdf1_assemble_segment(const topology::Graph& graph,
 
         auto solver = sparse::make_default_solver();
         if (!solver->analyze(J)) {
-            throw std::runtime_error(
+            throw SingularError(
                 "run_transient_bdf1: structurally singular at t="
                 + std::to_string(t));
         }
         if (!solver->factorize(J)) {
-            throw std::runtime_error(
+            throw SingularError(
                 "run_transient_bdf1: numerically singular at t="
                 + std::to_string(t));
         }

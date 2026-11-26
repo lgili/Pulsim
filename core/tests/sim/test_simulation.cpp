@@ -250,3 +250,77 @@ TEST_CASE("the object keeps one cache and lands offset ticks on the grid",
     // t_start + offset + k*period, k = 0..3, across the split.
     REQUIRE(hits == std::vector<Real>{4 * kDt, 20 * kDt, 36 * kDt, 52 * kDt});
 }
+
+TEST_CASE("the exact engine's refusal names the device and the engine",
+          "[sim][facade][errors]") {
+    // add-kernel-simulation-object 10.3: a Shockley diode is a Newton device
+    // the exact engine does not run; the object names it before refusing the
+    // engine as a whole.
+    const auto circuit = ir::Circuit::from_builder(shockley_buck());
+    sim::RunOptions o;
+    o.t_end = 1e-4;
+    o.engine = sim::EngineChoice::Exact;
+    try {
+        sim::Simulation s{circuit, o};
+        FAIL("no refusal");
+    } catch (const UnsupportedError& e) {
+        REQUIRE(e.engine() == "dsed");
+        REQUIRE(e.device() == "D");
+        REQUIRE(e.kind() == "ShockleyDiode");
+    }
+}
+
+TEST_CASE("netlist and singular errors are PulsimErrors with their std base",
+          "[sim][errors]") {
+    STATIC_REQUIRE(std::is_base_of_v<std::invalid_argument, NetlistError>);
+    STATIC_REQUIRE(std::is_base_of_v<PulsimError, NetlistError>);
+    STATIC_REQUIRE(std::is_base_of_v<std::runtime_error, SingularError>);
+    STATIC_REQUIRE(std::is_base_of_v<PulsimError, SingularError>);
+    const auto circuit = ir::Circuit::from_builder(shockley_buck());
+    const std::vector<ir::Tie> bad{{"Rtie", 999, 1e6}};
+    try {
+        (void)circuit.with_ties(bad);
+        FAIL("no refusal");
+    } catch (const NetlistError& e) {
+        REQUIRE(e.device() == "Rtie");
+        REQUIRE(std::string(e.what()).find("999") != std::string::npos);
+    }
+    // A SimulationAborted built while a SingularError is handled says so;
+    // one built for any other reason does not.
+    try {
+        try {
+            throw SingularError("numerically singular");
+        } catch (const std::runtime_error& e) {
+            throw solver::SimulationAborted(e.what(), {}, 0.5);
+        }
+    } catch (const solver::SimulationAborted& e) {
+        REQUIRE(e.singular());
+    }
+    REQUIRE_FALSE(solver::SimulationAborted("other", {}, 0.5).singular());
+}
+
+TEST_CASE("a singular step aborts as singular through the engine's wrap",
+          "[sim][errors]") {
+    // Two voltage sources in parallel: every step matrix is singular. With
+    // and without the dt-halving retries the abort reports singular().
+    builder::CircuitBuilder b;
+    b.add_voltage_source("V1", "a", "gnd", 1.0);
+    b.add_voltage_source("V2", "a", "gnd", 2.0);
+    b.add_resistor("R", "a", "gnd", 1.0);
+    const auto circuit = ir::Circuit::from_builder(b);
+    for (const Size halvings : {Size{0}, Size{3}}) {
+        sim::RunOptions o;
+        o.engine = sim::EngineChoice::Pwl;
+        o.t_end = 1e-5;
+        o.dt = 1e-7;
+        o.max_dt_halvings = halvings;
+        sim::Simulation s{circuit, o};
+        try {
+            (void)s.run();
+            FAIL("no abort");
+        } catch (const solver::SimulationAborted& e) {
+            REQUIRE(e.singular());
+            REQUIRE(std::string(e.what()).find("singular") != std::string::npos);
+        }
+    }
+}

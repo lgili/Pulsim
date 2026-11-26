@@ -111,6 +111,9 @@ public:
         ExactLTI exact;
         Vector exact_b;                 // reduced, augmented-const b
         std::vector<Real> aug_omegas;   // one per oscillator pair
+        // the sines' direct share of the recovered vector, R_b·stamp·amp·(cos φ, sin φ):
+        // one (sin ωt, cos ωt) column pair per oscillator (n_mna × 2k; the output rule's rows)
+        DenseMatrix recover_osc;
         // Z_ω = (iωI − A)⁻¹(q_cos − i·q_sin), one column per ω: the states'
         // forced (sinusoidal steady-state) response. The augmented propagator
         // carries the oscillator states, which reach x as this particular
@@ -680,8 +683,30 @@ public:
             w.xa[n + 2 * j + 1] = std::cos(om * t);
             w.ta[n + 2 * j] = w.ta[n + 2 * j + 1] = rtol;
         }
+        // the recovered vector's rows too (the stored samples are it): y = R·x + R_osc·(s, c)
+        // + the piecewise-linear sources' share (linear in τ: no chord error), so its chord
+        // error is O·(the augmented state's), O = [R, R_osc], bounded in the same modal form
+        if (w.ty.size() == e.recover_from_state.rows() && w.ty.size() > 0 && e.exact.valid
+            && e.exact.tier == 1) {
+            if (e.exact.chord_P_re.rows() != n + 2 * k + w.ty.size()) {
+                const auto m = w.ty.size();
+                DenseMatrix O = DenseMatrix::Zero(n + 2 * k + m, n + 2 * k);
+                O.topRows(n + 2 * k).setIdentity();
+                O.bottomLeftCorner(m, n) = e.recover_from_state;
+                if (k > 0 && e.recover_osc.rows() == m) O.bottomRightCorner(m, 2 * k) = e.recover_osc;
+                e.exact.chord_P_re = O * e.exact.V_re;
+                e.exact.chord_P_im = O * e.exact.V_im;
+                e.exact.chord_M = O.cwiseAbs()
+                                  * e.exact.V_re.binaryExpr(e.exact.V_im,
+                                                            [](Real a, Real b) { return std::hypot(a, b); });
+            }
+            w.ta.conservativeResize(n + 2 * k + w.ty.size());
+            w.ta.tail(w.ty.size()) = w.ty;   // floored in exact_chord_step (w.tyf)
+        }
         if (pwl_sources_.empty()) {
-            return exact_chord_step(e.exact, w.xa, nullptr, nullptr, w.ta, h, bounded, w);
+            const Real d = exact_chord_step(e.exact, w.xa, nullptr, nullptr, w.ta, h, bounded, w);
+            if (w.tyf.size() == w.ty.size()) w.ty = w.ty.cwiseMax(w.tyf);
+            return d;
         }
         const auto m = static_cast<Index>(pwl_sources_.size());
         w.v.resize(m);
@@ -695,7 +720,9 @@ public:
         }
         w.c0.head(n).noalias() = e.pwl_cols * w.v;
         w.c1.head(n).noalias() = e.pwl_cols * w.s;
-        return exact_chord_step(e.exact, w.xa, &w.c0, &w.c1, w.ta, h, bounded, w);
+        const Real d = exact_chord_step(e.exact, w.xa, &w.c0, &w.c1, w.ta, h, bounded, w);
+        if (w.tyf.size() == w.ty.size()) w.ty = w.ty.cwiseMax(w.tyf);   // the deferral check's
+        return d;
     }
 
     /// The current mode's settle length for decisions (exact_settle_length).
@@ -753,6 +780,24 @@ public:
         }
         x = project_onto_slow_manifold(e.A, b_vector(t), x,
                                        fast_threshold);
+    }
+
+    /// The slowest time constant of the cluster project_slow removes
+    /// (modes with Re λ < −fast_threshold): 1 / min(−Re λ); 0 when none.
+    [[nodiscard]] Real fast_cluster_tau(Real fast_threshold) const {
+        ensure_current_resolved_();
+        ensure_exact_built_(*current_entry_);
+        const LTIEntry& e = *current_entry_;
+        if (e.A.rows() == 0) return Real{0};   // no state (a resistive clipper): EigenSolver of 0x0 segfaults
+        // the mode's own eigenvalues (once per mode); with sines they are the augmented
+        // matrix's, A's plus the oscillators' ±iω (Re 0: never in the cluster). A dense
+        // eigensolve only where the exact build has none (its eig failed)
+        Eigen::VectorXcd lam = e.exact.lambda;
+        if (lam.size() < e.A.rows()) lam = Eigen::EigenSolver<DenseMatrix>(e.A, false).eigenvalues();
+        Real slow = std::numeric_limits<Real>::infinity();
+        for (Eigen::Index i = 0; i < lam.size(); ++i)
+            if (lam[i].real() < -fast_threshold) slow = std::min(slow, -lam[i].real());
+        return std::isfinite(slow) ? Real{1} / slow : Real{0};
     }
 
     /// Dependent states: project x onto the current mode's constraint
@@ -1458,6 +1503,7 @@ private:
         // Distinct frequencies, amplitude+phase folded per source.
         std::vector<Real> omegas;
         std::vector<Vector> q_sin, q_cos;    // reduced coupling cols
+        std::vector<Vector> r_sin, r_cos;    // recovered-vector cols (recover_from_b · stamp)
         for (const auto& sn : sines) {
             Index j = kInvalidIndex;
             for (Size m = 0; m < omegas.size(); ++m) {
@@ -1470,6 +1516,8 @@ private:
                 omegas.push_back(sn.omega);
                 q_sin.push_back(Vector::Zero(n));
                 q_cos.push_back(Vector::Zero(n));
+                r_sin.push_back(Vector::Zero(n_mna));
+                r_cos.push_back(Vector::Zero(n_mna));
                 j = static_cast<Index>(omegas.size() - 1);
             }
             // −amp·sin(ωt+φ) on the source row, reduced through
@@ -1485,9 +1533,19 @@ private:
                 += col * (sn.amp * std::cos(sn.phase));
             q_cos[static_cast<Size>(j)]
                 += col * (sn.amp * std::sin(sn.phase));
+            if (entry.recover_from_b.rows() == n_mna) {
+                const Vector rc = entry.recover_from_b * stamp;
+                r_sin[static_cast<Size>(j)] += rc * (sn.amp * std::cos(sn.phase));
+                r_cos[static_cast<Size>(j)] += rc * (sn.amp * std::sin(sn.phase));
+            }
         }
 
         const auto k = static_cast<Index>(omegas.size());
+        entry.recover_osc = DenseMatrix::Zero(n_mna, 2 * k);
+        for (Index j = 0; j < k; ++j) {
+            entry.recover_osc.col(2 * j) = r_sin[static_cast<Size>(j)];
+            entry.recover_osc.col(2 * j + 1) = r_cos[static_cast<Size>(j)];
+        }
         entry.forced_z = Eigen::MatrixXcd::Zero(n, k);
         for (Index j = 0; j < k; ++j) {
             const auto js = static_cast<Size>(j);

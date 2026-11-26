@@ -34,7 +34,7 @@ python -c "import pulsim as p; print(p.__version__)"
 ```
 
 ```
-2.0.0
+2.1.0
 ```
 
 ## Your first transient — an RC in a few lines

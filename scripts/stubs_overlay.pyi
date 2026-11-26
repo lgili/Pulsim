@@ -56,7 +56,8 @@ class SimulationResult:
     ``mode_diagnostics``. Set by :func:`pulsim.simulate` on ``pwl``. With
     ``mode_selection='auto'`` it also holds ``'mode_selection_auto'``
     (``requested``, ``chosen`` ``'lcp'`` / ``'legacy'``, ``reason``), on
-    every engine."""
+    every engine. On every engine ``'messages'`` holds the warnings the run
+    emitted, in order: ``(code, message, category)`` records."""
     control_tick_counts: list[int]
     """Controller ticks per tick source, in registration order (closed
     loops, then ``step_observer``): ``ceil(span / T_j)`` each. Set by

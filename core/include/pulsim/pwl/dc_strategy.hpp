@@ -45,6 +45,7 @@
 
 #pragma once
 
+#include "pulsim/sim/error.hpp"   // SingularError
 #include "pulsim/analysis/cancellation.hpp"
 #include "pulsim/pwl/cache.hpp"
 #include "pulsim/pwl/continuation.hpp"
@@ -176,14 +177,14 @@ struct DCResidual {
     if (!refresh) {
         auto solver = sparse::make_default_solver();
         if (!solver->analyze(seg.J)) {
-            throw std::runtime_error(std::format(
+            throw SingularError(std::format(
                 "dc_solve_at: matrix structurally singular at "
                 "gmin = {:.3e}, source scale = {:.3f}{}",
                 gmin, source_scale,
                 explain_singular(graph, pool, seg.J, solver.get())));
         }
         if (!solver->factorize(seg.J)) {
-            throw std::runtime_error(std::format(
+            throw SingularError(std::format(
                 "dc_solve_at: matrix numerically singular at "
                 "gmin = {:.3e}, source scale = {:.3f}{}",
                 gmin, source_scale,
@@ -286,7 +287,7 @@ inline void require_unaugmented_residual(
         const auto defect =
             dc_structural_defect(graph, pool, mask, refresh, t_eval);
         if (defect.present) {
-            throw std::runtime_error(std::format(
+            throw SingularError(std::format(
                 "compute_dc_op_gmin_stepped: DC system structurally "
                 "singular for mask {} — gmin cannot substitute for a "
                 "missing equation{}",
@@ -598,7 +599,7 @@ namespace detail {
         const auto defect =
             dc_structural_defect(graph, pool, mask, refresh, t_eval);
         if (defect.present) {
-            throw std::runtime_error(std::format(
+            throw SingularError(std::format(
                 "compute_dc_op: DC system structurally singular for "
                 "mask {} — this is a topology defect, not a "
                 "convergence one, so no fallback strategy will fix "

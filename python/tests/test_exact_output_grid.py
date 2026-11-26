@@ -266,3 +266,43 @@ def test_the_run_budget_stops_the_rule_with_one_warning(monkeypatch):
     # past the budget the default grid of a run without the rule (the last step ends at t_end)
     grid = np.diff(np.asarray(pulsim.simulate(b, 2e-3, engine="exact").times)).max()
     assert np.diff(t[t > tb])[:-1].min() >= 0.99 * grid
+
+
+def test_the_analytic_gate_reads_the_projected_flow():
+    """DECISIONS 8: the rule's promise is against the flow with the parasitic cluster
+    projected at events, and each projection is recorded; the rehearsal's analytic
+    gate reads the closed form with the recorded mode removed. hard_switched_rc: the
+    closing switch gives C a 1 ps mode (tau = C / (1/R + g_on)); F-X-7 stores the
+    projected value 2 ps past each closing, where the unprojected form reads 13.54 V."""
+    _bench()
+    import metrics
+    import reference_status as rs
+    from analytic import BY_ID
+    c = BY_ID["hard_switched_rc"]
+    with rs.extra_kwargs(dict(output_rtol=1e-5)):
+        r = c.run("dsed")
+    t, y = np.asarray(r.times), np.asarray(c.observe(r))
+    assert np.all(np.diff(t) >= 0)
+    P = r.diagnostics["output_grid"]["projections"]
+    assert len(P) == 5
+    ceil = rs.ANALYTIC[c.id]["dsed"]["ceiling"]
+    kw = dict(abs_scale=c.abs_scale, exclude_t0=c.exclude_t0)
+    # control: the records ignored, the cell disagrees (0.0676)
+    assert metrics.err_rms(t, y, c.exact, **kw) > 1e3 * ceil
+    ref = metrics.projected_reference(c.exact, P)
+    assert ref.n_applied == 5
+    assert metrics.err_rms(t, y, ref, **kw) <= ceil
+    # the projected closed form inside the window is the closed switch's settled value
+    vinf = 100.0 / 10.0 / (1 / 10.0 + 1e3)
+    k = int(np.searchsorted(t, P[0]["t"], side="right"))
+    assert t[k] - P[0]["t"] < 40 * P[0]["tau"]
+    assert ref(t[k:k + 1])[0] == pytest.approx(vinf, rel=1e-6)
+    # a record whose tau the closed form does not decay at is not applied, nor is none
+    assert metrics.projected_reference(c.exact, [dict(p, tau=10 * p["tau"]) for p in P]) is c.exact
+    assert metrics.projected_reference(c.exact, ()) is c.exact
+    # the caller's parasitic bound: a record above it is not applied (rehearsal: 1e-6 of the span)
+    assert metrics.projected_reference(c.exact, P, tau_max=0.5 * P[0]["tau"]) is c.exact
+    assert metrics.projected_reference(c.exact, P, tau_max=1e-6 * c.t_end).n_applied == 5
+    # a duplicate record a few ulps later is the same mode: removed once
+    dup = P + [dict(P[0], t=float(np.nextafter(P[0]["t"], 1.0)))]
+    assert metrics.projected_reference(c.exact, dup).n_applied == 5

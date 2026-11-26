@@ -144,10 +144,11 @@ nav:
       - 'Numerical Solvers (Phase 2)': solvers.md
       - API Reference: api-reference.md
       - 'Result Reference': result-reference.md
+      - 'Error Reference': errors.md
       - 'Device Reference': device-reference.md
       - UX Helpers (discover, plot, monitor): helpers.md
       - Gotchas: gotchas.md
-      - 'Known Limitations (2.0)': known-limitations.md
+      - 'Known Limitations (2.1)': known-limitations.md
   - How Pulsim Works:
       - 'Overview': how-pulsim-works/index.md
       - '1 — Introduction (why SMPS is hard)': how-pulsim-works/01-introduction.md
@@ -183,5 +184,5 @@ nav:
       - Build System: build-system.md
       - Performance Tuning: performance-tuning.md
       - Troubleshooting: troubleshooting.md
-      - Migration Guide (legacy → 1.0): migration-guide.md
+      - Migration Guide (2.0 → 2.1, legacy → 1.0): migration-guide.md
       - Docs Versioning and Release: versioning-and-release.md

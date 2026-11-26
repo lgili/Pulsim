@@ -756,3 +756,20 @@ moves. The measure, the old one kept beside it, the tests and the triage are in
 **Suite.** Full pytest m6 on the triaged tree (8c58b082 + the uncommitted reviewer items): 1 failed / 7076 passed / 136 skipped / 88 xfailed. The one failure was a strict XPASS: F-5-1 closes (the pathless IGBT's inductor: 100 A → −3.3e-5 A with one cut-set record of 0.1 V·s / 5 J, and the voltage check now names `QL`; it read −141.4 A, no record, no warning); mark removed, record asserted. The five files edited after the run started were re-run alone: 154 passed / 4 skipped / 7 xfailed. `FINDINGS.md` regenerated from those results: **25 open (13 W / 5 R / 7 C), 24 closed, 33 parked tests.** A second full run on the final tip was not made (one full pytest per session on the shared Mac).
 
 **Not done on this tip:** the C++ twins of the voltage check (`sim::Simulation::check_voltage_`, `dsed/design_batch.hpp`) still read samples only; ctest, Eigen 3.4.0, `reference_status`, the rehearsal (task 3.5), the counters bisect.
+
+## 13. The rehearsal's analytic gate reads the projected flow (numbered 8 on the integration line) (owner's delegate, 2026-11-25)
+
+- The output rule's promise is stated against the flow with the parasitic cluster projected at
+  events (the `simulate` docstring), and every projection is recorded
+  (`diagnostics['output_grid']['projections']`: `t`, `amplitude`, `column`, `tau`). So the
+  rehearsal's analytic gate (err_rms and `rule_ratio` of an analytic case) reads the PROJECTED
+  closed form: `metrics.projected_reference(case.exact, records)` removes, on each record's window
+  `(t, t + 40 tau]`, the closed form's own fast part `D exp(-(s - t)/tau)`.
+- Only `t` and `tau` come from the engine. `D` is the closed form's fast part (the closed form
+  minus its slow part, extrapolated linearly from `t + 40 tau` and `t + 80 tau`); a record whose
+  `tau` the closed form does not decay at (within 1e-3 at `t + tau`) is not applied, so the gate
+  never takes the engine's projected values as truth. One mode per instant; records past the cap
+  (1000) are not applied (those windows stay graded against the unprojected form).
+- F-X-7's sample 2 ps past each event stays. The engine does not change.
+- A run with no record is graded by `case.exact` itself (the same object): its cells are
+  byte-identical. A cell with records carries `n_projected`.
