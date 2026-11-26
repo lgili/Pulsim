@@ -720,7 +720,14 @@ sm.response([0.0])                   # H(z=1): d v_out / d D = 23.09 V
   period (a gate that changes itself at `t > T`), the internals of
   pulsim, NumPy, SciPy, the standard library and installed packages
   (their functions and classes are taken as stateless; the user's
-  instances of their classes are measured). A controller that should
+  instances of their Python classes are measured); state that returns to
+  its start value after the probe's calls; a value compared through its
+  own `__eq__` (one without visible state) changes only as `__eq__`
+  sees. pulsim's native schedules (`SwitchSchedule`, `NativePwm2Switch`,
+  `NativeMultiMaskPwm`) are taken as stateless; any other native object
+  the gate reaches (a `CxxPIController`, a chain) is refused as
+  uncomparable. The probe calls the gate, so a refused gate is left with
+  its state moved. A controller that should
   move belongs in a compiled control graph (`closed_loops=`,
   `control=`), whose state is part of `x0`.
 * **Multipliers.** `stable = max|μ| < 1`. An orbit with a multiplier

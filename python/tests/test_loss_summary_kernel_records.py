@@ -311,8 +311,8 @@ def test_diode_kernel_recovery_reaches_thermal_summary():
     # heat P: T_avg = 25 + R P (1 - tau/T (1 - e^{-T/tau})). The heat comes
     # in 20 pulses, not evenly: moving a pulse by up to half its period
     # moves the mean by <= 1/40 of the rise (measured 1.7e-4 of it).
-    span_th = span
-    rise = th["P_total_avg"] * (1.0 - 5e-5 / span_th * (1.0 - math.exp(-span_th / 5e-5)))
+    # (P is the summary's own mean heat: the R || C response is the truth)
+    rise = th["P_total_avg"] * (1.0 - 5e-5 / span * (1.0 - math.exp(-span / 5e-5)))
     assert th["T_j_avg"] - 25.0 == pytest.approx(rise, rel=1.0 / 40.0)
 
 

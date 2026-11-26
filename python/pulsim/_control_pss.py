@@ -382,6 +382,11 @@ class _Opaque(Exception):
     pass
 
 
+# native gate schedules: immutable after construction
+_KERNEL_STATELESS = frozenset({"SwitchSchedule", "NativePwm2Switch",
+                               "NativeMultiMaskPwm", "CxxInputRef"})
+
+
 _IMMUTABLETYPE = 1 << 8     # set on C types (static and most heap ones)
 
 
@@ -413,7 +418,9 @@ def _pure_python(cls) -> bool:
 def _library(v) -> bool:
     """Code (a function or class) of pulsim, the standard library or an
     installed package: taken as stateless, its data is not walked."""
+    import os
     import sys
+    import sysconfig
     mod = (getattr(v, "__module__", None) or "") if isinstance(
         v, (type, types.FunctionType)) else ""
     if mod.split(".")[0] in ("pulsim", "numpy", "scipy"):
@@ -423,8 +430,13 @@ def _library(v) -> bool:
     if not fname and isinstance(v, type):
         m = sys.modules.get(mod)
         fname = getattr(m, "__file__", "") or ""
-    return "site-packages" in fname or (
-        bool(fname) and fname.startswith(sys.base_prefix))
+    if not fname:
+        return False
+    if f"{os.sep}site-packages{os.sep}" in fname:
+        return True
+    paths = sysconfig.get_paths()
+    return any(fname.startswith(os.path.join(paths[k], ""))
+               for k in ("stdlib", "platstdlib") if paths.get(k))
 
 
 def _code_names(code, gl: set, at: set) -> None:
@@ -509,8 +521,14 @@ def _snap(v, path: str, out: dict, seen: set) -> None:
         return
     tmod = (v.__module__ if isinstance(v, type) else type(v).__module__) or ""
     if str(tmod).startswith("pulsim._pulsim"):
-        out[path] = ("kernel", id(v))   # C++ objects: not Python state
-        return
+        if (isinstance(v, (type, types.BuiltinFunctionType))
+                or type(v).__name__ in _KERNEL_STATELESS):
+            out[path] = ("kernel", id(v))
+            return
+        # any other native object (a CxxPIController, a chain) keeps C++
+        # state no snapshot here can read
+        raise _Opaque(f"{path} (native {type(v).__name__}: its C++ state "
+                      "cannot be compared)")
     if id(v) in seen:
         out[path] = ("seen", id(v))
         return
@@ -553,7 +571,7 @@ def _snap(v, path: str, out: dict, seen: set) -> None:
         out[path] = ("partial", id(v))
         _snap(v.func, f"{path}.func", out, seen)
         _snap(v.args, f"{path}.args", out, seen)
-        _snap(dict(v.keywords), f"{path}.keywords", out, seen)
+        _snap(v.keywords, f"{path}.keywords", out, seen)
         return
     if isinstance(v, (types.BuiltinFunctionType, types.BuiltinMethodType,
                       types.MethodWrapperType)):
@@ -626,6 +644,9 @@ def _gate_state_moves(sf, T: float) -> str:
         before = _gate_snapshot(sf)
     except _Opaque as e:
         return f"uncomparable state at {e}"
+    except Exception as e:  # RecursionError on deep data, a raising __repr__
+        return (f"its state could not be measured: snapshotting it raised "
+                f"{type(e).__name__}: {e}")
     try:
         for k in range(257):
             sf(T * k / 256)
@@ -645,6 +666,9 @@ def _gate_state_moves(sf, T: float) -> str:
         after = _gate_snapshot(sf)
     except _Opaque as e:
         return f"uncomparable state at {e}"
+    except Exception as e:
+        return (f"its state could not be measured: snapshotting it raised "
+                f"{type(e).__name__}: {e}")
     moved = [k for k in after if k not in before
              or not _leaf_equal(before[k], after[k])]
     moved += [k for k in before if k not in after]

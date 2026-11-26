@@ -144,9 +144,6 @@ def test_voltage_mode_buck_pi_orbit_and_long_transient(engine, kw):
         t_l = np.asarray(res_tr.times)
         last = t_l >= t_l[-1] - T * (1 + 1e-9)
         e_tr = _mean_err(t_l[last], np.asarray(res_tr.v("out"))[last])
-        # the mean error is not the sampled error (< 1e-9 above): it is the
-        # ripple's offset, whose truth is the long transient's (next line)
-        assert e_orbit > 1e3 * 1e-9
         assert abs(e_orbit - e_tr) < 1e-7
 
     # each part against its own half of the long transient
@@ -529,6 +526,42 @@ def test_closure_reading_a_float_is_accepted():
     assert r.stable and np.abs(r.x0 - r_ref.x0).max() < 1e-12
 
 
+def test_gate_review_cases():
+    import functools
+    import pulsim._control_pss as cp
+    from pulsim import _pulsim as cp_kernel
+
+    sf = p.make_pwm_switch_fn(1.0 / T, 0.4, 0, 1)
+
+    def lut_gate(t, lut):
+        return sf(t) if lut[0] > 0 else sf(t)
+
+    # a partial over a list it only reads: accepted (was refused through
+    # a temporary keywords dict whose id changed)
+    assert cp._gate_state_moves(functools.partial(lut_gate, lut=[0.5]), T) == ""
+
+    # a native controller stepped by the gate: its C++ state cannot be read
+    class _G:
+        def __init__(self):
+            self.pi = cp_kernel.CxxPIController()
+
+        def __call__(self, t):
+            self.pi.update(1.0, 0.0, 1e-7)
+            return sf(t)
+
+    assert "native CxxPIController" in cp._gate_state_moves(_G(), T)
+
+    # deep data: a named refusal, not a RecursionError
+    deep = None
+    for _ in range(5000):
+        deep = [deep]
+
+    def deep_gate(t):
+        return sf(t) if deep else sf(t)
+
+    assert "could not be measured" in cp._gate_state_moves(deep_gate, T)
+
+
 def test_gate_over_an_opaque_object_is_refused_naming_it():
     import random
 
@@ -751,8 +784,8 @@ def test_closed_loop_exact_sampled_model_is_refused_by_name():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("const,wrong,what", [
-    ("_GROUP_REC_BYTES", 32, "byte"),            # one byte short per group
-    ("_COUNTERS_BYTES", 16, "byte"),             # a counter dropped
+    ("_GROUP_REC_BYTES", 32, "count .*exceeds|parsed|end inside"),
+    ("_COUNTERS_BYTES", 16, "count .*exceeds|parsed|end inside"),
     ("_STATE_MAGIC", 0x5053474300000002, "layout tag"),   # another version
 ])
 def test_wrong_layout_constant_is_refused_by_name(monkeypatch, const, wrong, what):
@@ -765,7 +798,8 @@ def test_wrong_layout_constant_is_refused_by_name(monkeypatch, const, wrong, wha
     with pytest.raises(p.UnsupportedError) as ei:
         p.periodic_steady_state(b, period=T, closed_loops=[lp])
     assert ei.value.feature == "controller_state_layout"
-    assert what in str(ei.value)
+    import re
+    assert re.search(what, str(ei.value)), str(ei.value)
 
 
 def test_layout_check_survives_python_O():

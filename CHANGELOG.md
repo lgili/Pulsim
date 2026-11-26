@@ -41,8 +41,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   attributes) is compared before and after; the message names the first
   path that changed (`'switch_fn.n_calls' changed`). Also refused, by
   name: a reachable value with no visible state and no `__eq__` (a
-  `random.Random`, a NumPy `Generator`, an iterator) and a gate the
-  probe cannot call. Accepted as in 2.1.0: a gate that only reads its
+  `random.Random`, a NumPy `Generator`, an iterator, a native object
+  other than pulsim's gate schedules) and a gate the probe cannot call
+  or snapshot. Accepted as in 2.1.0: a gate that only reads its
   state (a PWM object with `duty` / `f_sw`, a closure over a float or a
   list it does not change). 2.1.0 took a gate whose state moved as
   open-loop and solved for an orbit of a gate that was not periodic.
