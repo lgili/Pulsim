@@ -812,10 +812,6 @@ inline void exact_advance_affine_into(const ExactLTI& e, const Vector& x, Real h
 /// predicate can see (cᵀV ≠ 0) — over-scans resonant circuits; upgrade
 /// when predicates become affine rows (task 3.2).
 [[nodiscard]] inline Real exact_scan_step(const ExactLTI& e) {
-    // tier 4 (the action) has no spectrum: |Im λ| ≤ ρ(A) ≤ ‖A‖₁ bounds the fastest period
-    if (e.tier == 4)
-        return e.norm_A1 > Real{0} ? std::numbers::pi_v<Real> / (Real{4} * e.norm_A1)
-                                   : std::numeric_limits<Real>::infinity();
     Real w_max = Real{0};
     for (Eigen::Index i = 0; i < e.lambda.size(); ++i) {
         const Real wi = std::abs(e.lambda[i].imag());

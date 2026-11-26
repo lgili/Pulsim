@@ -30,7 +30,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the dense exponential). The engine uses it: a DC-driven mode of 65 states
   or more takes the cheaper of the dense propagator and the action over the
   steps expected in it, or hands over with reason `'cost'`; its diode
-  predicates are located on the action's states. `result.exact['routes']`
+  predicates are located on the action's states, scanned and settled on the mode's
+  eigenvalues (kept without eigenvectors) like a dense mode. `result.exact['routes']`
   reports the kernel, reason, size and counters per mode. Modes below 65
   states run as before.
 - **Fixed-step cells a few ulps off the grid** (an edge or tick time computed

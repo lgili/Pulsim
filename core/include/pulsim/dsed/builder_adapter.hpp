@@ -1364,6 +1364,9 @@ private:
             entry.exact.valid = true;
             entry.exact.tier = 4;
             entry.exact.action.emplace(std::move(act));
+            // the spectrum only (no eigenvectors, ~10 n^3 against the dense setup's ~1200 n^3):
+            // the scan step, the settle at a diode decision and the fast samples read it
+            if (n > 0) entry.exact.lambda = Eigen::EigenSolver<DenseMatrix>(entry.A, false).eigenvalues();
             return true;
         }
         entry.exact.reason = "cost: the dense setup is not repaid over " + detail::fmt_e(N)
@@ -2201,8 +2204,17 @@ private:
     ExactRouteCosts route_costs_{};
     Eigen::Index route_min_n_ = 65;
 public:
-    void set_route_costs(const ExactRouteCosts& c) noexcept { route_costs_ = c; }
-    void set_route_min_n(Eigen::Index n) noexcept { route_min_n_ = n; }
+    // the route is decided at a mode's first build: a new rule rebuilds the modes
+    void set_route_costs(const ExactRouteCosts& c) { route_costs_ = c; drop_exact_(); }
+    void set_route_min_n(Eigen::Index n) { route_min_n_ = n; drop_exact_(); }
+private:
+    void drop_exact_() {
+        for (auto& [m, e] : mask_cache_) {
+            e.exact_built = false;
+            e.exact = ExactLTI{};
+        }
+        pg_bytes_ = 0;
+    }
 private:
 };
 

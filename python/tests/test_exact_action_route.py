@@ -123,7 +123,7 @@ def test_double_crossing_inside_one_step_is_found_on_an_action_mode():
     # An undamped LC tank (v_C = 1 - cos(w t)) beside a 32-section ladder (66 states: routed).
     # dt = one tank period, so v_C is back near 0 at every step end: the crossing of
     # V_th = 1.5 at w t = 2 pi / 3 and back at 4 pi / 3 is invisible to the step ends and
-    # is found only by the scan bounded by ||A||_1 (an action mode has no spectrum).
+    # is found only by the scan (an action mode keeps its eigenvalues for it).
     lt, ct, vth, msec = 1e-6, 1e-6, 1.5, 32
     w = 1 / np.sqrt(lt * ct)
     dt = 2 * np.pi / w
