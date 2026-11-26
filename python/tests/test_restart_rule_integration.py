@@ -281,7 +281,8 @@ def test_controller_ticks_are_unchanged_and_the_gate_stays_on_plain_pwls_side():
     """With the rule the gate of step (t_{k-1}, t_k] is switch_fn(t_k - 0.5001 dt)
     (F-SB-2; it was switch_fn(t_{k-1}), one sample later): tick instants,
     counts and jitter are the flag-off ones; an off-grid PWM edge is recorded
-    at the sample plain pwl records it at."""
+    at the sample plain pwl records it at when it lies past mid-step (the
+    nearer grid point is then the step end, plain pwl's side)."""
     def run(**kw):
         b = p.CircuitBuilder()
         b.add_voltage_source("Vin", "in", "gnd", 24.0)

@@ -5221,7 +5221,7 @@ inline SimulationResult run_transient(
                         diodes.restore_on_bits(diodes_snap);
                     }
                     // shortcut: the retry ignores events inside the step
-                    // (the gate keeps the step's start sample, as the
+                    // (the gate keeps the step's own sample, 0.5001 h back, as the
                     // restart rule alone; a built-in source jump inside it
                     // is read where the sub-steps fall and not restarted);
                     // retries are rare.
