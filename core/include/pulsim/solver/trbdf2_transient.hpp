@@ -2038,7 +2038,9 @@ inline SimulationResult run_transient_trbdf2(
         // A stateful kind restarts by SDIRK only where the edge changes the
         // mode (a source corner under the same mask keeps TR-BDF2: SDIRK
         // there tripled the restart steps of a saturable boost's pulse
-        // source and gave an idle IGBT tail extra steps).
+        // source and gave an idle IGBT tail extra steps). An edge under the
+        // same mask (a corner, or a gate edge the stamped mask does not see)
+        // commits its probe, as 2.1.0 did (below).
         const bool lin = !opts.sdirk_on_linear_circuits
             && !(hs.any() && !(m_probe == x_mask));
         const Real t_plus = t + dtp;
@@ -2231,9 +2233,10 @@ inline SimulationResult run_transient_trbdf2(
         // 0.6 ps loop at the defaults: v_sw -0.3586 against -0.71 before
         // and -0.70 on the next sample, a spike, when the first step was
         // shorter than dtp and the post-edge sample was dropped); it is
-        // the fallback when this solve fails. Nothing of the solve stays:
-        // counters, learned floor, roundoff run and step context are
-        // restored, and it runs after every consumer of the probe.
+        // the fallback when this solve fails. What later code reads is
+        // restored (probe dt / ok, learned floor, roundoff run, its counters,
+        // step context) and it runs after every consumer of the probe; the
+        // solve counters and one extra factorization per such edge remain.
         if (!rl_row) return;
         Vector x_rl = x_trial;
         bool rl_ok = false;
