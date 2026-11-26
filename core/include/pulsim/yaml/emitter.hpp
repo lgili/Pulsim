@@ -852,6 +852,9 @@ struct YamlIo {
             const auto* pm = b.power_mosfet_record(p.branches.front());
             if (p.kind == K::ExternalDevice && pm && pm->params.fq_device) {
                 add_power_mosfet_device_(b, *pm, p, pin);
+            } else if (pm && pm->params.fq_device) {
+                fail(p.name, "its power MOSFET record says fq_device but the entry is not "
+                             "an external_device");
             } else {
                 add_device_(b, p.n, p.kind, p.name, p.branches, pin);
             }
@@ -1160,6 +1163,12 @@ private:
             }
             p.channel = std::make_shared<const m::ChannelTable>(std::move(vgs), std::move(vds),
                                                                 std::move(I));
+        }
+        // the builder's checks: an fq device's law comes from this record alone
+        try {
+            m::PowerMosfet::validate(p, w);
+        } catch (const std::invalid_argument& e) {
+            fail(w, e.what());
         }
         const Index ch = b.branch_id_of(text(n["channel"], w, "channel"));
         b.power_mosfets_.emplace(ch, std::move(r));
