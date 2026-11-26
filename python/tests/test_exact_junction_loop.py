@@ -165,6 +165,8 @@ def test_junction_temperatures_agree_with_trbdf2_at_tight_tolerance(make, t_end,
     for e in edges:
         lag |= (te > e) & (te <= tt[np.searchsorted(tt, e + 1e-12, side="right")])
     assert len(edges) > 0 and lag.sum() == len(edges)
+    # the heat those rows carry is the same on both engines (the ledger)
+    assert ex.heat_injected == pytest.approx(tr.heat_injected, rel=1e-4)
     for k, _n in enumerate(names):
         a = np.asarray(ex.v(f"tj{k}"))
         c = np.interp(te, tt[1:], np.asarray(tr.v(f"tj{k}"))[1:])

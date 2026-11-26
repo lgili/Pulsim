@@ -907,7 +907,12 @@ void init_module(py::module_& m) {
             og["n_output_floored"] = nr.contains("n_output_floored")
                 ? py::int_(nr["n_output_floored"]) : py::int_(0);
             const auto fr = vec("output_floor_row");
-            og["output_floor_max"] = fr.empty() ? 0.0 : *std::max_element(fr.begin(), fr.end());
+            double fmax = 0.0;   // numpy's max: a NaN propagates
+            for (std::size_t j = 0; j < fr.size(); ++j) {
+                if (j == 0 || std::isnan(fr[j]) || fr[j] > fmax) fmax = fr[j];
+                if (std::isnan(fmax)) break;
+            }
+            og["output_floor_max"] = fmax;
             og["output_floor_by_column"] = tail(fr);
             og["n_projections"] = nr.contains("n_projections")
                 ? py::int_(nr["n_projections"]) : py::int_(0);

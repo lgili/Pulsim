@@ -12,6 +12,7 @@ of the span off the mpmath truth).
 
 from __future__ import annotations
 
+import math
 import sys
 import warnings
 from pathlib import Path
@@ -346,6 +347,8 @@ def test_the_output_grid_dict_is_the_python_definition(ncol, t_start, budget):
             assert got[key].dtype == np.float64
         else:
             assert got[key] == w, key
+    nan = dict(raw, output_floor_row=[1e-15, float("nan"), 2e-15])
+    assert math.isnan(k._output_grid_dict(nan, ncol, t_start)["output_floor_max"])
     empty = {"n_output_capped": 0, "n_output_unbounded": 0, "output_budget_t": float("nan")}
     got = k._output_grid_dict(empty, ncol, t_start)
     assert got["output_floor_max"] == 0.0 and got["projections"] == [] and got["n_output_samples"] == 0
