@@ -1,5 +1,14 @@
 # Tasks — add-adaptive-runge-kutta-solvers
 
+> **Resolution (orchestrator, 2026-11-23; the owner decision `refactor-unified-transient-stepper` 0.3 asks for).**
+> The standalone Python integrators of this change shipped (8.3: `python/pulsim/integrators.py`, in the 2.0 release).
+> Their in-kernel coupling (groups 1, 4, 5.2, the dense-output formulas 2.3 / 3.3 and the examples of group 6) is
+> NOT built: the kernel's high-order stiff method is ESDIRK4(3) (`integrator='esdirk43'`,
+> `add-high-order-stiff-integrator`), on the unified stepper, with event location by re-steps; the Python
+> DOPRI5 / Radau path is deprecated and then deleted by `refactor-unified-transient-stepper` 11.2. Those boxes are
+> closed here as superseded. 8.4 (archive) stays open until the pull request that carries this is merged.
+
+
 > Status (Phase 2.4 — v1.5.1):
 > **Python DormandPrince5 + RadauIIA3 ship**, plus a **C++ port of
 > DormandPrince5** exposed as `pulsim._pulsim.dopri5_solve(f, t0, t_end,
@@ -15,10 +24,10 @@
 
 ## 1. Integrator scaffolding (C++ kernel — deferred to v1.6.0)
 
-- [ ] 1.1 Define `IntegratorStep` C++ concept.
-- [ ] 1.2 Refactor existing Tustin + BDF1 to the concept.
-- [ ] 1.3 Add `Integrator` enum + dispatch in `run_transient`.
-- [ ] 1.4 Expose enum on `SimulationOptions::Advanced::Timestep`.
+- [x] 1.1 Define `IntegratorStep` C++ concept.
+- [x] 1.2 Refactor existing Tustin + BDF1 to the concept.
+- [x] 1.3 Add `Integrator` enum + dispatch in `run_transient`.
+- [x] 1.4 Expose enum on `SimulationOptions::Advanced::Timestep`.
 
 ## 1b. Standalone C++ DOPRI5 + Radau IIA(3) — done
 
@@ -49,37 +58,37 @@
 
 - [x] 2.1 ``python/pulsim/integrators.py::DormandPrince5`` — 7-stage FSAL explicit RK with Butcher tableau hard-coded.
 - [x] 2.2 4th-order embedded estimate → ``err_norm`` for the step controller.
-- [ ] 2.3 4th-order Hermite-type dense-output formula — deferred (only needed for in-kernel event detection in v1.6.0).
+- [x] 2.3 4th-order Hermite-type dense-output formula — deferred (only needed for in-kernel event detection in v1.6.0).
 - [x] 2.4 Unit tests: exp(-t) within 1e-7, SHO over 2π within 1e-6, order-of-convergence verified across rtol = 1e-4 / 1e-6 / 1e-8.
 
 ## 3. Radau IIA(3) — Python implementation shipped
 
 - [x] 3.1 ``python/pulsim/integrators.py::RadauIIA3`` — 2-stage implicit RK, L-stable, Butcher tableau hard-coded.
 - [x] 3.2 Newton inner solver via numpy ``linalg.solve`` on the 2n × 2n block system; optional analytical Jacobian or central finite differences.
-- [ ] 3.3 3rd-order Radau interpolant for dense output — deferred (with task 2.3, only needed for in-kernel events).
+- [x] 3.3 3rd-order Radau interpolant for dense output — deferred (with task 2.3, only needed for in-kernel events).
 - [x] 3.4 Step-controller feedback: error from step-doubling (Richardson), Newton iteration-count tracked but not yet fed back into ``dt`` selection (single-PI controller for now).
 - [x] 3.5 Unit tests: stiff van der Pol (μ=100) — Radau uses ≤50% of DOPRI5's steps at matched tolerance, both producing the same final state to 7 sig figs.
 
 ## 4. Step controller wiring (in-kernel — deferred to v1.6.0)
 
-- [ ] 4.1 Have DOPRI5 and Radau emit ``err_norm`` consumed by the existing LTE-based controller.
-- [ ] 4.2 Reuse the existing event detector with dense-output interpolant for sub-step localisation.
-- [ ] 4.3 Event-time bisection regression: half-wave rectifier zero-crossing within 1 ns.
+- [x] 4.1 Have DOPRI5 and Radau emit ``err_norm`` consumed by the existing LTE-based controller.
+- [x] 4.2 Reuse the existing event detector with dense-output interpolant for sub-step localisation.
+- [x] 4.3 Event-time bisection regression: half-wave rectifier zero-crossing within 1 ns.
 
 ## 5. Python API
 
 - [x] 5.1 ``pulsim.DormandPrince5``, ``pulsim.RadauIIA3``, ``pulsim.AdaptiveSolution`` re-exported.
-- [ ] 5.2 ``simulate(integrator="dopri5"|"radau", step_mode="variable")`` shorthand — deferred to v1.6.0 (waits on in-kernel coupling).
+- [x] 5.2 ``simulate(integrator="dopri5"|"radau", step_mode="variable")`` shorthand — deferred to v1.6.0 (waits on in-kernel coupling).
 - [x] 5.3 pytest: 9/9 pass (constructor + analytical accuracy + order-of-convergence + Radau-beats-DOPRI5-on-stiff + solution shape + invalid-input guards).
 
 ## 6. Benchmarks + examples — deferred to v1.6.0
 
-- [ ] 6.1 ``examples/scripts/run_psfb_adaptive_dopri5.py``.
+- [x] 6.1 ``examples/scripts/run_psfb_adaptive_dopri5.py``.
   (Reconciled 2026-11: not present;
   examples/scripts/run_adaptive_rk_speedup.py (van der Pol) and
   run_adaptive_rl_settle.py demonstrate the integrators instead.)
-- [ ] 6.2 ``examples/scripts/run_stiff_thermal_radau.py``.
-- [ ] 6.3 ``benchmarks/regression/`` wall-clock comparison entry.
+- [x] 6.2 ``examples/scripts/run_stiff_thermal_radau.py``.
+- [x] 6.3 ``benchmarks/regression/`` wall-clock comparison entry.
 
 ## 7. Docs — deferred to v1.5.1 final cut
 
@@ -91,5 +100,5 @@
 
 - [x] 8.1 ``openspec validate add-adaptive-runge-kutta-solvers --strict`` clean.
 - [x] 8.2 Local pytest 9/9 pass in 0.25 s.
-- [ ] 8.3 Ship as the standalone-integrator half in v1.5.1; in-kernel coupling lands in v1.6.0.
+- [x] 8.3 Ship as the standalone-integrator half in v1.5.1; in-kernel coupling lands in v1.6.0.
 - [ ] 8.4 Archive: ``openspec archive add-adaptive-runge-kutta-solvers --yes``.

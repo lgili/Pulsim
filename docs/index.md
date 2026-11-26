@@ -17,6 +17,14 @@ If you've used SPICE before, the mental model is similar but the implementation 
 - You're doing **RF / high-frequency PCB** simulations with distributed elements — Pulsim is lumped-only.
 - You need built-in convergence retries that mask physically dubious circuits — the kernel's Newton is principled but unforgiving; expect to think about your circuit.
 
+## New in 2.1
+
+New engines, devices and analyses behind options that default off, and
+many silent wrong answers corrected. Some 2.0 results move and some 2.0
+calls now raise a named error: read the
+[2.0 → 2.1 migration notes](migration-guide.md#from-20-to-21) and the
+[known limitations](known-limitations.md) before upgrading a study.
+
 ## Using Pulsim with AI assistants
 
 AI coding assistants were trained on Pulsim 1.x and on other simulators.

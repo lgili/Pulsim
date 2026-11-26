@@ -2914,13 +2914,40 @@ def _step_sensitivities(plan, names):
             "the driver outside the kernel Simulation object (a sweep "
             "replay or a control_tick='state' graph), which carries no "
             "sensitivities.")
-    plan.step.run_options.sensitivities = names
+    plan.step.run_options.sensitivities = _step_duty_names(plan, names)
     res = _finalize(_ENGINES[engine](plan), plan)
     sr = StepSensitivityResult.from_trace(
         res.sensitivity_trace, plan.builder, engine)
+    sr.params = list(names)
     res.sensitivity = sr
     res.sens = sr.sens
     return res
+
+
+def _step_duty_names(plan, names):
+    """'<switch>.duty' on pwl / trbdf2 (add-parameter-sensitivities 6.1): the
+    gate must be a fixed-period trailing-edge PWM of that switch alone (the
+    exact path's own check); the kernel gets '<switch>.duty#T=<period>' and
+    moves the OFF edge by dτ/dD = T."""
+    from .sensitivity import _duty_period
+    out = []
+    for nm in names:
+        comp, _, fld = nm.rpartition(".")
+        if fld != "duty":
+            out.append(nm)
+            continue
+        b = plan.builder
+        bit = int(b.switch_index_of(comp))
+        sf = plan.drive.switch_fn
+        if sf is None or not hasattr(sf, "next_edge_after"):
+            raise _unsupported(
+                plan.engine, "sensitivity_parameter",
+                f"sensitivities: {nm!r}: the duty is a parameter only of a "
+                "gate built with make_pwm_switch_fn (its edges are known).")
+        T, _D = _duty_period(sf, bit, plan.t_end, nm,
+                             int(b.graph.num_switches))
+        out.append(f"{nm}#T={T!r}")
+    return out
 
 
 # Stage A's plan.resolved_from compares each keyword with these: taken from
@@ -2975,8 +3002,8 @@ def _undriven(engine, builder, stacklevel=2, policy=None):
                 "default to ALL CLOSED, which short-circuits "
                 "bridge legs (shoot-through). Pass an explicit "
                 "switch_fn / closed_loops that drives these bits. "
-                "In Pulsim v2.0 this becomes an error and the "
-                "default flips to all-OPEN.",
+                "simulate(undriven='refuse') makes this an "
+                "error.",
                 stacklevel=stacklevel)
         else:
             warnings.warn(
@@ -5542,7 +5569,7 @@ def _auto_attach_motor_traces(
 # no separate Python-side params class — pass v_dc,
 # v_amplitude, frequency, phase as keyword args.
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"
 
 
 def get_include() -> str:

@@ -1516,6 +1516,8 @@ inline SimulationResult run_transient_trbdf2(
     // The mask the current x was solved under (final_snapshot).
     SwitchStateMask x_mask = initial_mask;
     bool x_mask_known = !initial_seeded;
+    // a seeded start decides its mode at the first step (from x0: no event)
+    if (sens.on() && x_mask_known) [[unlikely]] sens.start_mode(initial_mask);
     // A resumed run continues its mode: no re-initialisation at the seam
     // (review M3). shortcut: a run cut within the 3 re-init steps of an
     // entry resumes with plain steps; carry reinit_left in the snapshot
@@ -1968,6 +1970,9 @@ inline SimulationResult run_transient_trbdf2(
     SwitchStateMask edge_slots_m;
     auto restart_after_gate_event = [&](bool settled, Real t_gates,
                                         Real hp, bool commit) {
+        if (sens.on()) [[unlikely]] {   // group 6: the edge, at a landed instant
+            sens.time_event(t, x_mask, settled ? gates_decided : mask_at(t_gates), true);
+        }
         if (!opts.refresh_after_event) {
             return;
         }
@@ -2066,6 +2071,11 @@ inline SimulationResult run_transient_trbdf2(
                 gate.learn_toggles(diodes.num_gated() > 0 ? switch_fn(t_gates)
                                                           : m_probe, t);
             }
+            if (sens.on()) [[unlikely]] {   // the probe is a trapezoidal step
+                sens.begin_step(t, x);
+                sens_stage(0, step::psi_trapezoidal(dtp), m_probe, dtp, x_trial, t_plus);
+                sens.commit(t_plus);
+            }
             x = x_trial;
             x_sig = x;
             const Real t_hook0 = t;
@@ -2091,9 +2101,10 @@ inline SimulationResult run_transient_trbdf2(
         const bool sampled = commit && t_plus < opts.t_end - h_min
             && t_plus < queue.next_of(events::Kind::ControlTick) - h_min;
         if (sampled) device_state_once(t, x);   // the left side's row, before the slots move
-        if (sens.on()) [[unlikely]] {   // the slots move, x and t do not
-            sens.refuse_step(t, "followed by a slot-only derivative refresh "
-                                "(the consistent start after a gate edge)");
+        if (sens.on()) [[unlikely]] {   // the slots move, x and t do not: mirrored
+            sens.begin_step(t, x);
+            sens_stage(0, step::psi_trapezoidal(dtp), m_probe, dtp, x_trial, t_plus);
+            sens.adopt_stage_slots();
         }
         history.refresh_derivatives(x_trial, dtp);
         if (lt) lt->slots_rewritten();
@@ -3002,6 +3013,7 @@ inline SimulationResult run_transient_trbdf2(
                 && (!landed_on_bp || bp_t >= t_stop)
                 && !(t_next_tick > t && t_next_tick < t_stop - h_min)
                 && (!lines || t_stop - t <= h_max)) {   // D18: never past tau
+                if (sens.on()) [[unlikely]] sens.edge_past_end(t + h, sw_now, switch_fn(t_stop));
                 h = t_stop - t;
                 t_land = std::numeric_limits<Real>::quiet_NaN();
                 landed_on_edge = false;
@@ -3800,6 +3812,15 @@ inline SimulationResult run_transient_trbdf2(
                     const Real dt_floor =
                         std::max(h_min, h * Real{1e-4});
                     if (t_star - t < dt_floor) {
+                        if (sens.on()) [[unlikely]] {
+                            // carried as an event at t from the committed
+                            // state, this was 3.6e-4 off a Radau truth on a
+                            // sine-fed rectifier at rtol 1e-10 (7.6e-5 at
+                            // 1e-12): refused until that bias is traced
+                            sens.refuse_step(t, "met by a diode crossing within the "
+                                             "conditioning floor of its start (flipped "
+                                             "by probes at t, not landed)");
+                        }
                         // Chatter-safe path: the crossing is
                         // within tolerance of the point we are
                         // already AT — flip the bits HERE with a
@@ -4176,6 +4197,26 @@ inline SimulationResult run_transient_trbdf2(
                     } else {
                     history.update_from_state(x_trial, dt_land);
                     }
+                    if (sens.on()) [[unlikely]] {   // group 6: the landing's stage
+                        if ((kE && ed_land) || (kE && interp_land && !sdirk)) {
+                            sens.refuse_step(t + dt_land, "an interpolated or ESDIRK "
+                                             "diode landing (no trapezoidal stage)");
+                        }
+                        sens.begin_step(t, x);
+                        if (interp_land) {   // no solve: carried on a resident factor
+                            Real f_dt = Real{0};
+                            const auto* f = cache.any_resident_factor(mask_step, f_dt);
+                            if (f == nullptr) {
+                                sens.refuse_step(t + dt_land, "an interpolated diode "
+                                                 "landing with no factor of its mode");
+                            }
+                            sens.carry(t + dt_land, mask_step, x_trial, *f, Real{2} / f_dt);
+                        } else {
+                            sens_stage(0, step::psi_trapezoidal(dt_land), mask_step, dt_land,
+                                       x_trial, t + dt_land);
+                            sens.commit(t + dt_land);
+                        }
+                    }
                     // The stateful devices land here too. Only the
                     // linear companion history was committed at an
                     // event landing, so the Coss, Lauritzen, IGBT
@@ -4243,6 +4284,30 @@ inline SimulationResult run_transient_trbdf2(
                     // chatter guard.
                     const bool net_flip =
                         diodes.snapshot_on_bits() != bits_land;
+                    if (sens.on() && net_flip) [[unlikely]] {
+                        const auto& de = diodes.entries()[cross_idx];
+                        if (nl_effective) {
+                            sens.refuse_newton_event(t, graph.branch_name(de.branch_id));
+                            sens.refuse_step(t, "a diode event of a Newton solve");
+                        }
+                        // the landing's own factor, or any of its mode (an
+                        // interpolated landing solved nothing)
+                        Real sens_fac_dt = dt_land;
+                        const auto* sens_fac = interp_land
+                            ? cache.any_resident_factor(mask_step, sens_fac_dt)
+                            : &cache.resident_factor(mask_step, dt_land);
+                        if (sens_fac == nullptr) {
+                            sens.refuse_step(t, "an interpolated diode landing with no "
+                                             "factor of its mode");
+                        }
+                        sens.state_event(t, graph.branch_name(de.branch_id), de.from, de.to,
+                                         (bits_land[cross_idx] && de.var >= 0) ? de.var
+                                                                              : Index{-1},
+                                         mask_step, *sens_fac, Real{2} / sens_fac_dt,
+                                         [&](Real ts, Vector& out) {
+                                             accumulate_sources(ts, out);
+                                         });
+                    }
                     if (!net_flip) {
                         x_sig = x;
                     } else {
