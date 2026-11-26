@@ -26,6 +26,14 @@ The numbers are in the `Known limitations` part of the 2.1.0 entry of the
 * **Restart rule** (`discontinuity_restart=True`): the ideal-switch
   flyback on the fixed engine gets worse under step refinement; an edge
   off the `dt` grid stays first order without event splitting.
+  **In 2.1.0 the rule can also return a wrong steady state:** a diode that
+  turns off inside the restart step's second stage is not located, and the
+  stage starts from an extrapolated capacitor voltage. Measured on a boost
+  with a 1 nH residual inductance: 51.34 V with the rule on, against 42.11 V
+  (an independent ODE solve; `trbdf2` reads 42.111 V, the fixed engine
+  with the rule off 41.86 V). The rule is off by default; until the fix
+  ships, compare a run with the rule on against `trbdf2` before trusting
+  it on a converter whose diode commutates right after a gate edge.
 * **Event splitting** (with the restart rule): a retried step is re-taken
   without its interior events; an even number of edges of an opaque
   `switch_fn` inside one step is not seen.
