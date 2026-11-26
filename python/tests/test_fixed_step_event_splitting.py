@@ -76,7 +76,7 @@ def test_gate_edge_off_the_grid_is_second_order(frac, at_2us, rule_2us):
     assert errs[2] == pytest.approx(at_2us, rel=2e-2)
     assert all(f >= 3.7 for f in _factors(errs)), errs
     # The rule alone takes the edge at the nearer grid point (F-SB-2's gate
-    # sample 0.51 dt before the step end): first order.
+    # sample 0.5001 dt before the step end): first order.
     rule = [_rl(dt, frac, **RULE)[1] for dt in (4e-6, 2e-6)]
     assert rule[1] == pytest.approx(rule_2us, rel=1e-3)
     assert _factors(rule)[0] == pytest.approx(2.0, abs=0.02)
@@ -696,7 +696,7 @@ def test_split_is_second_order_on_each_integrated_device(case):
 
 
 def test_rule_keeps_a_pulse_narrower_than_a_step():
-    """The rule alone reads a step's gate 0.51 dt before its end, so a pulse that
+    """The rule alone reads a step's gate 0.5001 dt before its end, so a pulse that
     starts on the grid ends at the nearer grid point: 0.6 dt -> one ON step,
     0.4 dt -> none. Read at t - dt/100 every pulse narrower than a step was
     dropped (a closed-loop boost's duty floor never turned on, ll15)."""
@@ -714,3 +714,20 @@ def test_rule_keeps_a_pulse_narrower_than_a_step():
         return int(np.count_nonzero(np.asarray(res.i("R"))[1:] > 1.0))
     assert on_steps(0.6) == 5    # one step per period: the turn-off rounds to the step end
     assert on_steps(0.4) == 0    # the turn-off rounds to the step start: no ON step
+
+
+@pytest.mark.parametrize("off", [0.0, 0.01, 0.005, 0.2])
+def test_rule_rounds_an_edge_to_the_nearer_grid_point_symmetrically(off):
+    """The rule alone moves an off-grid edge to the nearer grid point: an edge
+    at (0.5 - off) dt into a step is taken off*dt-less-than-half early, one at
+    (0.5 + off) dt as much late, so the RL errors (V/L e^{-t/tau} times the
+    shift, first order) are equal and opposite. A tie (off = 0) goes to the
+    step end. With the gate read 0.51 dt back an edge at 0.495 dt went to the
+    farther point (-6.13e-3 vs +5.95e-3 at 0.49 dt, dt 2 us)."""
+    dt = 2e-6
+    lo, hi = _rl(dt, 0.5 - off, **RULE)[1], _rl(dt, 0.5 + off, **RULE)[1]
+    assert hi < 0                                  # late: the step end
+    if off == 0.0:
+        return
+    assert lo > 0                                  # early: the step start
+    assert abs(lo + hi) <= 5e-3 * abs(lo), (lo, hi)   # 0.25 vs 0.75: 1.2e-3 (curvature)

@@ -278,7 +278,7 @@ def test_composites_through_a_restart(fn, dts):
 
 # --- controller ticks with the rule on ---------------------------------------------
 def test_controller_ticks_are_unchanged_and_the_gate_stays_on_plain_pwls_side():
-    """With the rule the gate of step (t_{k-1}, t_k] is switch_fn(t_k - dt/100)
+    """With the rule the gate of step (t_{k-1}, t_k] is switch_fn(t_k - 0.5001 dt)
     (F-SB-2; it was switch_fn(t_{k-1}), one sample later): tick instants,
     counts and jitter are the flag-off ones; an off-grid PWM edge is recorded
     at the sample plain pwl records it at."""
@@ -321,11 +321,13 @@ def _buck_window_at_boundary():
     n, k = b.graph.num_switches, b.switch_index_of("Q")
 
     def fn(t):   # on for indices 0..35 of every 100
-        # under the rule the step ending on the period boundary reads the gate
-        # at t - dt/100 (index 0, F-SB-2): the edge step is the period's last,
-        # so the boundary sits inside its window (two steps owed)
+        # index j holds on [(j - 0.7) dt, (j + 0.3) dt): the turn-on edge sits
+        # 0.3 dt into the period's last step. The rule takes an edge at the
+        # nearer grid point (gate read 0.5001 dt before the step end, F-SB-2):
+        # its start, so the period's last step is the edge step and the
+        # boundary sits inside its window (two steps owed)
         m = p.SwitchStateMask(n)
-        j = int(round(t / 1e-7)) % 100
+        j = int(math.floor(t / 1e-7 + 0.7)) % 100
         m.set(k, j < 36)
         return m
     return b, fn

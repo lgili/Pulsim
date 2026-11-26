@@ -98,11 +98,14 @@ KNOWN_PWL = {   # (ZVS / turn-on voltage, switching energy): the first assertion
 # The restart rule's right-limit row at a turn-on is the model's own x(t_e+) (C_oss voltage continuous,
 # the ~0.3 ps collapse recorded); _engine_trace adds the record's post-collapse row one ulp later
 # (with_right_limits(collapse=True)), so the trapezoid no longer carries the pre-collapse row over the next step (LLC S_hi was +12 %,
-# PSFB S1 +29 %; now -0.34 % / -0.03 %). The PSFB's lagging-leg switches stay off, cause not diagnosed.
+# PSFB S1 +29 %; now -0.34 % / -0.03 %). The PSFB's lagging leg: see the xfail's numbers.
 KNOWN_RESTART = {
-    "psfb_full_bridge_zvs": ("known: the restart rule's lagging-leg energy reads low after the collapse-row "
-                             "fix (leading leg S1 -0.03 %, cause not diagnosed); measured: S3 energy "
-                             "3.051e-11 J vs the truth's trapezoid 3.380e-11 J (-10 %)"),
+    "psfb_full_bridge_zvs": ("known: the restart rule's lagging-leg energy reads low; measured: S3 energy "
+                             "3.051e-11 J vs the truth's trapezoid 3.380e-11 J (-10 %; exact 3.178e-11, -4 %). "
+                             "The engine's grid rows meet the truth to <= 5 uV; the reader's collapse row "
+                             "holds the step's END state (-3.63e-4 V at 8.00 us+, truth's post-collapse "
+                             "~-5.6e-4 V) over the first step after each turn-on: S3 turn-ons -2.8 / -4.1 / "
+                             "-8.6 % per event at 8 / 18 / 28 us; the post-collapse x(t_e+) + J is not exported"),
 }
 
 

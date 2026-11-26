@@ -191,13 +191,23 @@ rule".
   a line from it spread the collapse over the whole step: the ZVS switching
   energy read +12 % (LLC) / +29 % (PSFB S1), now -0.3 % / -0.03 %; the
   half-bridge leg and active-clamp forward read 0.038 / 0.068 against trbdf2,
-  now 0.0102 / 0.00165 (2.1.0's values).
-- Same rule without event splitting: a step's gate is read 0.51 of the step
-  before its end, so an edge inside the step takes effect at the nearer grid
-  point (a tie at mid-step: the end). Read just before the end (t - dt/100), a
-  pulse narrower than a step that starts on the grid was dropped: a closed-loop
-  boost's 0.25 us duty floor in 0.5 us steps never turned the switch on (0.216
-  against trbdf2, now 0.0484).
+  now 0.0102 / 0.00165 (2.1.0's values). The end sample held over the first
+  step after a turn-on reads a post-collapse slope low: PSFB S3 -10 % against
+  the trapezoid on the same grid (-4 % against the exact energy).
+- Same rule without event splitting (`discontinuity_restart=True`,
+  `enable_substep_state_correction=False`): an off-grid gate edge from a
+  `switch_fn` now takes effect at the NEARER grid point (a tie at mid-step: the
+  step end; the gate is read 0.5001 of a step before its end). It took effect
+  at the grid point before the edge (read at t - dt/100), which dropped every
+  pulse narrower than a step that starts on the grid: a closed-loop boost's
+  0.25 us duty floor in 0.5 us steps never turned the switch on (0.216 against
+  trbdf2, now 0.0484). An edge 0.3 dt into a step now acts at the step start,
+  0.7 dt in at its end; the timing error is at most half a step and symmetric
+  (edges on the grid and the event split are unchanged).
+- Same rule: a right-limit row the engine owes at an event but cannot solve
+  (its solve throws, or is not finite) is now counted in
+  `n_right_limit_fallbacks`; it was dropped silently (the active-clamp
+  forward's 19 main-switch turn-offs: 0 counted, now 19).
 
 ## [2.1.0] - 2026-11-25
 

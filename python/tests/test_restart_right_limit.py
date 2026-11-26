@@ -63,11 +63,12 @@ def test_a_closing_records_one_right_limit_and_the_state_is_continuous(split):
     r = _quiet(p.simulate, b, t_end=6e-6, dt=DT, switch_fn=_gate(b, "S", False),
                enable_substep_state_correction=split, **RULE)
     # one row, at the edge: none at t = 0, none at the window's later steps.
-    # Without the split the restart rule reads the gate just before the step's
-    # end, so the edge inside (2.0, 2.5] us takes effect from 2.0 us; the split
-    # lands it at T_E (an inner event, not a sample)
+    # Without the split the restart rule takes an edge at the nearer grid point
+    # (gate read 0.5001 dt before the step end); T_E = 2.25 us is mid-step of
+    # (2.0, 2.5] us, a tie, taken at the end: 2.5 us. The split lands it at T_E
+    # (an inner event, not a sample)
     v, tv, k = _limits(r)
-    assert tv[k] == pytest.approx([T_E if split else 2.0e-6], rel=1e-12)
+    assert tv[k] == pytest.approx([T_E if split else 2.5e-6], rel=1e-12)
     vc, va = np.asarray(v.v("c")), np.asarray(v.v("a"))
     (j,) = k
     assert vc[j] == 0.0
@@ -475,7 +476,12 @@ def test_the_sample_after_an_ideal_jump_carries_no_jump_current(split):
     r = _quiet(p.simulate, b, t_end=6e-6, dt=DT, switch_fn=_gate(b, "S", False),
                enable_substep_state_correction=split, **RULE)
     t, iv = np.asarray(r.times), np.asarray(r.i("V"))
-    after = t > T_E + 1e-12
+    # without the split the closing acts at the nearer grid point; T_E is
+    # mid-step of (2.0, 2.5] us, a tie, taken at the end: the 2.5 us row is
+    # still open (its left limit)
+    t_on = T_E if split else 2.5e-6
+    after = t > t_on + 1e-12
+    assert after.sum() >= 6
     assert np.abs(iv[after]) == pytest.approx(np.ones(after.sum()), rel=1e-6)
 
 
@@ -920,3 +926,23 @@ def test_a_closing_beside_an_lc_with_nothing_to_share_is_continuous(split):
     assert il[j + 1] == pytest.approx(il[j], abs=1e-9)
     np.testing.assert_allclose(va[j + 1:], vc[j + 1:], rtol=0, atol=1e-9)
     assert va[-1] < 9.0   # the ring through S moved both
+
+
+def test_a_due_right_limit_is_stored_or_counted():
+    """ll13 (active-clamp forward, pwl + rule): at S_main's turn-offs (1.5,
+    5.5, ... us) the record steps' right-limit solve (the ε mode, Newton)
+    throws; the row was dropped with n_right_limit_fallbacks = 0. Every
+    reinit record's step without a row is now a counted fallback."""
+    import sys
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[2] / "benchmarks"
+    sys.path[:0] = [str(root / "tools"), str(root)]
+    v1_reader = pytest.importorskip("v1_reader")
+    case = v1_reader.load(str(root / "circuits" / "switching" / "isolated" /
+                              "ll13_active_clamp_forward.yaml"))
+    r = _quiet(case.run, "pwl", discontinuity_restart=True)
+    t = np.asarray(r.times)
+    rows = {float(t[i]) for i in np.asarray(r.right_limit_index)}
+    missing = {float(rec.t) for rec in r.reinit_records} - rows
+    assert missing                                   # measured: 19 turn-offs
+    assert r.n_right_limit_fallbacks >= len(missing), (len(missing), r.n_right_limit_fallbacks)

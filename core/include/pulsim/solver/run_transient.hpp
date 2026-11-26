@@ -1670,12 +1670,15 @@ inline SimulationResult run_transient(
     const bool split = opts.enable_substep_state_correction;
     // Events this close to a step boundary are taken at it (design D4).
     const Real snap = opts.dt * opts.split_snap;
-    // the restart rule's gate sample without the split (F-SB-2): 0.51 of a
-    // step back from its end, so an edge inside the step takes effect at the
-    // nearer boundary (an edge past 0.49 h, a tie at mid-step among them: the end). The step end (t - dt/100)
-    // dropped every pulse narrower than a step that starts on the grid (the
+    // the restart rule's gate sample without the split (F-SB-2): just past
+    // mid-step back from its end, so an edge inside the step takes effect at
+    // the nearer boundary (a tie at mid-step: the end). 0.5 + 1e-4, not 0.51:
+    // 0.51 sent an edge at 0.49-0.5 h to the farther point (RL error -6.13e-3
+    // at 0.495 h vs +5.95e-3 at 0.49 h, dt 2 us); 1e-4 h stays far above a
+    // closure's 1e-9-of-a-period band. The step end (t - dt/100) dropped
+    // every pulse narrower than a step that starts on the grid (the
     // closed-loop boost's 5 % duty floor: 0 % applied, 0.216 against trbdf2)
-    constexpr Real gate_back = Real{0.51};
+    constexpr Real gate_back = Real{0.5001};
     // A source jump snapped to the step end (t - snap <= tau < t): the
     // solve AT `src_end_at` reads the built-in sources at `src_end_read`
     // (= tau, so value_at(tau - left_by) is the pre-jump level). NaN
@@ -3061,8 +3064,10 @@ inline SimulationResult run_transient(
         //    meet only to the probe's tolerance, or a mode that is not
         //    consistent at t_e+ (a diode it holds ON carries reverse current,
         //    one it holds OFF is forward-biased) is NOT certified: a pin that
-        //    does not converge, or a mode that never settles, stores no row
-        //    and is counted (n_right_limit_fallbacks).
+        //    does not converge, a mode that never settles, or a solve that
+        //    throws (ll13's ε-mode Newton at S_main's turn-offs) stores no
+        //    row and is counted (n_right_limit_fallbacks): a due row is
+        //    either stored or counted.
         //  - an ideal element's jump (ip_struct): the constraint current
         //    after the jump is c/ε-polluted by the probe's tolerance; three
         //    solves at ε, 2ε, 4ε (ε = 5e-4·γh) and −2x1 + 5x2 − 2x4 remove
@@ -3226,7 +3231,6 @@ inline SimulationResult run_transient(
             // no row: no diode mode holds at t_e+ (F1), or the row's solve did
             // not converge (a diverged pin is no state; counted, not published)
             bool unheld = false;
-            bool redecided = false;   // a re-decided mode's solve ran (it may throw)
             const Size rf_s = restart_factorizations;
             struct AuxEvents {   // the run's event factors stay put, on any exit
                 const decltype(cache)& c;
@@ -3426,7 +3430,6 @@ inline SimulationResult run_transient(
                         if (round == 4) break;
                         (void)events::redecide(diodes, *at);
                         bits_moved = true;
-                        redecided = true;
                         // the stamped mask's diode bits only: combine() would
                         // re-read a gated device's gate from a stamped bit
                         if (lin) {
@@ -3489,14 +3492,14 @@ inline SimulationResult run_transient(
                 }
             } catch (const std::runtime_error&) {
                 ok = 0;   // no right limit recorded; the run goes on
-                unheld = unheld || redecided;   // counted: the mode did not settle
+                unheld = true;   // counted: a due row that is not stored is a fallback
             } catch (const std::invalid_argument&) {
                 ok = 0;   // a refusal (UnsupportedError) of the ε mode
-                unheld = unheld || redecided;
+                unheld = true;
             }
             aux_events.reset();
             restart_factorizations = rf_s;
-            if (ok && !out.allFinite()) ok = 0;
+            if (ok && !out.allFinite()) unheld = true;   // no state: counted
             if ((ok && count) || unheld) ++result.n_right_limit_fallbacks;
             if (unheld) ok = 0;
             history.restore(rl_hcur);
@@ -3764,9 +3767,9 @@ inline SimulationResult run_transient(
             // gate is sampled at the step START (design D4); the
             // observer keeps its (t_k, x_{k-1}) label, whose move to
             // t_{k-1} belongs to fix-control-tick-semantics.
-            // Restart rule without the split: the gate 0.51 h before the
+            // Restart rule without the split: the gate 0.5001 h before the
             // step end (gate_back), so an edge inside the step takes effect
-            // at the nearer step boundary (past 0.49 h: the end) and an edge on a grid point t_prev
+            // at the nearer step boundary (a tie at mid-step: the end) and an edge on a grid point t_prev
             // is exact (F-SB-2). Not an ulp from t: a closure's own tolerance
             // band (1e-9 of a period) must not read an edge at t as already
             // there. The split samples t_prev and places the step's edges itself.
@@ -6056,7 +6059,7 @@ inline SimulationResult run_transient(
             // and a null user fn cost nothing. `b_extra_user` aliases the
             // buffer so the solves below are unchanged.
             // discontinuity_restart: the same sampling as the dynamic
-            // path — sample k reads the gate 0.51 dt before t and the jumping
+            // path — sample k reads the gate 0.5001 dt before t and the jumping
             // sources at their left limit — so adding a capacitor does
             // not shift the recorded mask by one sample. (k = 0: t.)
             st_gate_t = restart_rule && k > 0 ? t - gate_back * opts.dt : t;   // as the dynamic path

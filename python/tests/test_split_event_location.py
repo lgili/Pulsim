@@ -84,7 +84,7 @@ def test_restart_without_the_split_takes_plain_pwls_side(edge):
 
 
 def test_restart_takes_an_edge_within_dt_over_100_of_a_grid_point_there():
-    # the gate is read at t_k - dt/100: an edge 0.995 h in is taken at t_k
+    # the gate is read at t_k - 0.5001 dt: an edge 0.995 h in is taken at t_k (the nearer point)
     _, rest = _gated(EDGES[2], H, **RESTART)
     assert rest[0] == pytest.approx(20.1e-6, abs=1e-6 * H)
 
