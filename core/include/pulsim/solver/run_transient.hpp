@@ -2900,8 +2900,9 @@ inline SimulationResult run_transient(
             // An ideal element's jump: the tracker records the constraint's
             // share J_i at the step's commit, in the mode the step ends in; the
             // collapse J − J_i of a fast mode the jump excites is recorded there
-            // too (ideal_pending), against that same mode
-            if (structural) {
+            // too (ideal_pending), against that same mode. Moves alone (flag 2)
+            // are no jump: nothing to book (review: a spurious record)
+            if (structural && ip_jump) {
                 IdealJump& ij = ideal_pending.emplace_back();
                 ij.t = t_from;
                 ij.j.resize(ne);
@@ -4199,6 +4200,7 @@ inline SimulationResult run_transient(
                 // the flip is the next piece's start)
                 x = rs_x1;
                 diodes.restore_on_bits(rs_bits);
+                mask_cycle = cycle_1;   // the discarded flipping pass's cycle is not this solve's
                 run_event_iteration(t_from + h, dt_eq, true, true);
                 on_to_off = false;
             }
@@ -4533,7 +4535,6 @@ inline SimulationResult run_transient(
             rs_cut.piece1 = false;
             const bool flipped_1 = flipped;
             commit_backward_euler(be_commit_h);
-            ++result.n_restart_cuts;
             diodes.restore_on_bits(post);
             // the event's right limit: a located turn-off (split_step's rl_loc)
             rl_loc.t = td;
@@ -4544,11 +4545,12 @@ inline SimulationResult run_transient(
             rl_loc.bits = post;
             restart_lined_once(run_event_iteration, td, (a + h) - td, snap, true);
             flipped = flipped || flipped_1;
-            if ((mask_cycle || flipped) && !unsettled_uncut) {
+            const bool uncut = (mask_cycle || flipped) && !unsettled_uncut;
+            if (!uncut) ++result.n_restart_cuts;   // counted once the cut is kept (a throw keeps none)
+            if (uncut) {
                 // a piece left the diode mode unsettled where the whole step
                 // settled (the three-phase rectifier's mask cycle at 2.55 ms):
                 // the uncut step stands
-                --result.n_restart_cuts;
                 restore0();
                 restart_lined_once(run_event_iteration, a, h, loc, ev);
                 result.stage2_retries = s2r;   // the same pass again: counted once
