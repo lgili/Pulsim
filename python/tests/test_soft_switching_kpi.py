@@ -55,7 +55,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-import pulsim
+import pulsim._result_views as rv
 
 mp = pytest.importorskip("mpmath")
 pytest.importorskip("yaml")
@@ -96,8 +96,8 @@ KNOWN_PWL = {   # (ZVS / turn-on voltage, switching energy): the first assertion
 
 
 # The restart rule's right-limit row at a turn-on is the model's own x(t_e+) (C_oss voltage continuous,
-# the ~0.3 ps collapse recorded); pulsim.with_event_limits adds the record's post-collapse row one ulp
-# later, so the trapezoid no longer carries the pre-collapse row over the next step (LLC S_hi was +12 %,
+# the ~0.3 ps collapse recorded); _engine_trace adds the record's post-collapse row one ulp later
+# (with_right_limits(collapse=True)), so the trapezoid no longer carries the pre-collapse row over the next step (LLC S_hi was +12 %,
 # PSFB S1 +29 %; now -0.34 % / -0.03 %). The PSFB's lagging-leg switches stay off, cause not diagnosed.
 KNOWN_RESTART = {
     "psfb_full_bridge_zvs": ("known: the restart rule's lagging-leg energy reads low after the collapse-row "
@@ -136,7 +136,9 @@ def _engine_trace(case, engine):
     kw = dict(ENGINES[engine])
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        r = pulsim.with_event_limits(v1_reader.load(path).run(kw.pop("engine"), **kw))
+        r = v1_reader.load(path).run(kw.pop("engine"), **kw)
+        # a reinit record's collapse at t_e+, as the engine ran the step (not a line from x(t_e+))
+        r = rv.with_right_limits(rv.with_inner_events(r), collapse=True)
     obs = lambda c: np.asarray(v1_reader.observable(r, c), dtype=float)[1:]  # noqa: E731
     return (np.asarray(r.times, dtype=float)[1:],
             {s: (obs(g) > 0.5, obs(v), obs(f"I({s})")) for s, g, v in sws})

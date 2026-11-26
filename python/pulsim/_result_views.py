@@ -403,7 +403,7 @@ def with_event_limits(result):
     event split) is inserted as its own rows, left limit at its time and
     right limit one ulp later. A result without event limits is returned
     as it is."""
-    return with_right_limits(with_inner_events(result), collapse=True)
+    return with_right_limits(with_inner_events(result))
 
 
 def pl_integral(times: np.ndarray, y: np.ndarray,
