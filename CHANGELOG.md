@@ -6,6 +6,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Power MOSFET as one f/q device (add-power-mosfet-datasheet-device, group 5)
+
+- **`add_power_mosfet` builds ONE device** for the channel, the C_gd /
+  C_ds charge laws and the body diode (an in-process model on the
+  external-device f/q contract; Jacobian by forward AD of the residual).
+  Same call, same YAML. R_d, R_g, L_s and constant capacitances stay
+  linear elements. Numbers move: on `pwl` within 1e-9 of 2.1.0 (the
+  composite's 1e-12 S placeholder on each nonlinear-capacitor node is
+  gone); on `trbdf2` the step controller now sees the device's pin charge
+  rows instead of one row per capacitor, so the grid differs (energies
+  within the engine's tolerance). `components()` lists the device and the
+  linear sub-elements only (no `{name}_body`, no `{name}.cgd` / `.cds`
+  for a charge law). A Lauritzen body diode adds one internal unknown.
+- **`res.i("Q1")`** is the drain-terminal current; **`device_loss_summary`**
+  lists the device (`v_DS · i_D` of the external pins). The kernel AC
+  sweep and the DC operating point linearise / solve it from its f and q.
+- **`p.ChannelTable(v_gs, v_ds, I)`** and `add_power_mosfet(channel=)`:
+  a tabulated output characteristic (bicubic Hermite with monotone
+  tangents, C¹; third quadrant by terminal swap). A non-monotone table,
+  a non-zero `I(V_GS, 0)` or an unsorted axis raises `pulsim.NetlistError`
+  naming the point. Temperature coefficients are refused with a table.
+- `dsed` / `bdf1` refuse the device by name (ExternalDevice row).
+
 ### Typed errors and run diagnostics (add-kernel-simulation-object, group 8)
 
 - **One base class.** Every error pulsim raises on purpose is a

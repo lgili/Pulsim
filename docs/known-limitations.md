@@ -162,10 +162,11 @@ engine accepts a keyword and ignores it. The defaults are
 <!-- option-capabilities:end -->
 
 The charge laws `ChargeLaw.table` / `.vdmos_cgd` are the
-NonlinearCapacitor row. `add_power_mosfet` is a composite of the
-MosfetLevel1, Capacitor, NonlinearCapacitor, Resistor, Inductor and
-Shockley / Lauritzen diode rows: it runs on `pwl` and `trbdf2` and is
-refused on `dsed`, `bdf1` and the kernel AC sweep, naming the channel.
+NonlinearCapacitor row. `add_power_mosfet` is ONE f/q device (channel,
+C_gd / C_ds charge laws, body diode: the ExternalDevice row) plus the
+Resistor, Inductor and Capacitor rows of its linear elements: it runs on
+`pwl`, `trbdf2`, the DC operating point and the kernel AC sweep, and is
+refused on `dsed` and `bdf1`, naming the device.
 
 The branch form of a switch or diode (`add_ideal_switch`,
 `add_diode(form='branch')`, YAML `form: branch`; opt-in) has its own
@@ -310,7 +311,7 @@ event where the signal jumps.
 
 | Limitation | Measured | Workaround |
 |---|---|---|
-| **`res.i()` and `device_loss_summary` do not cover the Lauritzen diode, the nonlinear capacitor, an IGBT with a tail or `add_power_mosfet`.** Their current needs a stored charge the states do not give the law. The static Newton kinds (Shockley, smooth diode, level-1 MOSFET, level-1 IGBT without a tail) and the saturable inductor are covered: against a 1 mΩ sense resistor within 2e-12 of the peak current and 4e-13 in energy on `pwl` and `trbdf2`. | `res.i("X")` raises `NotImplementedError` naming the recipe. | Put a 1 mΩ resistor in series and read `res.i` of the resistor (guide trap 1). |
+| **`res.i()` and `device_loss_summary` do not cover the Lauritzen diode, the nonlinear capacitor or an IGBT with a tail.** Their current needs a stored charge the states do not give the law. The static Newton kinds (Shockley, smooth diode, level-1 MOSFET, level-1 IGBT without a tail) and the saturable inductor are covered: against a 1 mΩ sense resistor within 2e-12 of the peak current and 4e-13 in energy on `pwl` and `trbdf2`. | `res.i("X")` raises `NotImplementedError` naming the recipe. | Put a 1 mΩ resistor in series and read `res.i` of the resistor (guide trap 1). |
 | **`device_loss_summary` and `device_thermal_summary` have no time window.** Both average the whole record, start-up included. | Bridge of trap 13 (`V_th = 0.7`, `dt = 1e-6`, 0.1 s): the conduction model (`V_f0 = 0.7`, `r_on = 0.02`) on `BR__D1` reads 2.338 W over the run and 0.136 W over 80-100 ms (17.2x). | Apply the model to `res.i(name)` with `p.time_average(t, ..., t_from=...)` (guide 3.4). |
 | **`p.time_rms` reads pulsed currents low on a fixed grid.** `time_rms` joins the samples with straight lines, so each hard edge becomes a one-step ramp. Guide trap 14. | Buck 48 V to 12 V, D = 0.25, 100 kHz, 4 Ω. MOSFET RMS over 4-6 ms: 1.4905, 1.4956 and 1.4981 A at `dt` = 1e-7, 5e-8 and 2.5e-8, against 1.5007 A from `sqrt(time_average(i**2))` at all three. The `i_rms` that `device_loss_summary` gives a switch or a PWL diode integrates `i**2` exactly in each step (1.50522 A at `dt` = 1e-7, 4 Ω, 47 µF). | `np.sqrt(p.time_average(t, i**2, t_from=...))`. |
 | **The missed-commutation warning of `res.i` repeats once per call site.** Python's default filter keys on the calling line. | Six reads of one diode from four lines print it four times. | `warnings.filterwarnings("once", message=".*commutation rule forbids")` prints it once. It matches both the "OFF while forward-biased" and the "ON while reverse-biased" form. |
@@ -319,9 +320,9 @@ event where the signal jumps.
 
 | Limitation | Measured | Workaround |
 |---|---|---|
-| **`add_power_mosfet` is a composite of Newton devices: no `res.i` of the device and no loss row.** The generic readings cover the bare `mosfet_level1`, not this composite. | `res.i("Q1")` raises like `mosfet_level1`; `device_loss_summary` omits it. | `p.double_pulse_test` (sense resistor), or a 1 mΩ resistor in series. |
+| **`add_power_mosfet`'s loss row is `v_DS · i_D` of the external drain / source pins.** The gate-drive energy is not in it, and at a switch event elsewhere in the circuit the device current's right limit is taken as its sample (the device itself is continuous). | `res.i("Q1")` is the drain-terminal current (within 1e-9 of a 1 mΩ sense resistor). | For gate loss, read `res.i("Q1.rg")`. |
 | **The level-1 MOSFET has a negative slope near threshold.** The triode polynomial at small or negative overdrive makes dI/dV_DS < 0 at V_DS = 0 for V_OV in (≈ −0.72/κ, 0), and just past saturation onset (down to −0.040 S for K = 1.43, κ = 15); there `i·v` reaches −0.29 mW. The zero-voltage leak `α(1−β)·K·V_OV²` is gone since 2026-11-19: zero current at V_DS = 0, C¹ across it (add-unified-device-interface DECISIONS #44). | K = 1.43, κ = 15: min dI/dV_DS −0.040 S; min i·v −0.29 mW at V_OV = −0.20 V, V_DS = −0.21 V. | Drive the gate well past threshold (κ·V_OV ≫ 1), or raise `kappa`. |
-| **`add_power_mosfet` non-goals:** p-channel, live T_j inside the law (T_j is run-constant), drain inductance and package networks, avalanche, SiC/GaN effects, a table channel (constant-K Level-1 only), AC analysis. | - | - |
+| **`add_power_mosfet` non-goals:** p-channel, live T_j inside the law (T_j is run-constant), drain inductance and package networks, avalanche, SiC/GaN effects; a table channel (`channel=p.ChannelTable(...)`) is taken at the T_j it was measured at (temperature coefficients refused with it). | - | - |
 | **A gate transient on `pwl` needs a step that resolves it.** | The 400 V / 10 A double pulse with a 65 ns plateau: 7501 steps at `dt` = 0.2 ns; `trbdf2` takes about 1200. | `engine="trbdf2"`. |
 | **VDMOS import: absent capacitances are 0 (LTspice), not ngspice's defaults** (CGDMAX 2 nF, CGDMIN 20 pF, CGS 1.4 nF, CJO 0.5 nF). CJO uses the junction law without SPICE's FC linearisation. | - | Write every charge parameter in the card; `charge="drop"` restores the ideal-gate device. |
 | **`spice_to_builder` reads a subset of SPICE.** | `Q` (BJT) and `K` (coupled inductors) raise `NotImplementedError`. A `{...}` expression takes the parameter grammar (no unit suffixes inside the braces). `B` sources raise `ValueError`. `.subckt` is flattened correctly. | Build those parts with `CircuitBuilder` (`add_transformer` for coupled inductors) or a YAML netlist. |

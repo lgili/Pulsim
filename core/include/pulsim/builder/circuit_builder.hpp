@@ -30,6 +30,7 @@
 #include "pulsim/models/igbt_level1.hpp"
 #include "pulsim/models/mosfet_level1.hpp"
 #include "pulsim/models/power_mosfet.hpp"
+#include "pulsim/models/power_mosfet_device.hpp"
 #include "pulsim/models/vcvs.hpp"
 #include "pulsim/models/controlled_sources.hpp"
 #include "pulsim/models/pulse_voltage_source.hpp"
@@ -2633,31 +2634,43 @@ public:
         if (p.R_d > Real{0}) add_resistor(sub(n + ".rd"), drain, dn, rec.R_d_eff);
         if (p.R_g > Real{0}) add_resistor(sub(n + ".rg"), gate, gn, p.R_g);
         if (p.L_s > Real{0}) add_inductor(sub(n + ".ls"), sn, source, p.L_s);
-        add_mosfet_level1(sub(n), dn, sn, gn, rec.K_eff, rec.V_T_eff,
-                          p.lambda, p.kappa, /*with_body_diode=*/false);
+        // add-power-mosfet-datasheet-device 5.2: the channel, the charge
+        // laws and the body diode are ONE f/q device (pins d', s', g');
+        // constant capacitances stay linear stamps.
+        namespace pmd = models::power_mosfet_device;
+        pmd::Core core;
+        core.ch = {rec.K_eff, rec.V_T_eff, p.lambda, p.kappa};
+        core.table = p.channel;
+        core.body = p.body;
+        if (p.body == PM::BodyDiode::Shockley) {
+            const auto& d = p.shockley;
+            core.sh = device::laws::ShockleyDiode::from(models::ShockleyDiode::Params{
+                .I_S = d.I_S, .n = d.n, .V_T = d.V_T, .G_min = d.G_min, .BV = d.BV});
+        } else if (p.body == PM::BodyDiode::Lauritzen) {
+            const auto& d = p.lauritzen;
+            core.la = device::laws::LauritzenDiode::from(models::LauritzenDiode::Params{
+                .I_S = d.I_S, .n = d.n, .V_T = d.V_T, .tau = d.tau, .T_M = d.T_M,
+                .G_min = d.G_min});
+        }
+        auto law = [](const PM::Capacitance& c) -> std::optional<models::NonlinearCapacitor::Params> {
+            if (std::holds_alternative<Real>(c)) return std::nullopt;
+            return std::get<models::NonlinearCapacitor::Params>(c);
+        };
+        core.gd = law(p.C_gd);
+        core.ds = law(p.C_ds);
+        auto [model, prm] = pmd::make_model(std::move(core));
+        add_external_device(sub(n), {dn, sn, gn}, std::move(model), std::move(prm),
+                            /*check=*/false, /*debug_jacobian=*/false, /*record=*/true);
         const Index channel = branch_id_of(n);
         if (p.C_gs > Real{0}) add_capacitor(sub(n + ".cgs"), gn, sn, p.C_gs);
         auto add_cap = [&](const PM::Capacitance& c, const std::string& cn,
                            const std::string& a, const std::string& b) {
-            if (const Real* x = std::get_if<Real>(&c)) {
-                if (*x > Real{0}) add_capacitor(sub(cn), a, b, *x);
-            } else {
-                add_nonlinear_capacitor_law(
-                    sub(cn), a, b,
-                    std::get<models::NonlinearCapacitor::Params>(c));
+            if (const Real* x = std::get_if<Real>(&c); x && *x > Real{0}) {
+                add_capacitor(sub(cn), a, b, *x);
             }
         };
         add_cap(p.C_gd, n + ".cgd", gn, dn);
         add_cap(p.C_ds, n + ".cds", dn, sn);
-        if (p.body == PM::BodyDiode::Shockley) {
-            const auto& d = p.shockley;
-            add_shockley_diode(sub(n + "_body"), sn, dn,
-                               d.I_S, d.n, d.V_T, d.G_min, d.BV);
-        } else if (p.body == PM::BodyDiode::Lauritzen) {
-            const auto& d = p.lauritzen;
-            add_lauritzen_diode(sub(n + "_body"), sn, dn,
-                                d.I_S, d.n, d.V_T, d.tau, d.T_M, d.G_min);
-        }
         power_mosfets_.emplace(channel, std::move(rec));
         return *this;
     }

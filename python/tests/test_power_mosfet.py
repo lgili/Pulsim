@@ -195,8 +195,9 @@ def test_components_reports_one_power_mosfet_entry():
     assert prm["C_gd"]["law"] == "vdmos_cgd" and prm["C_gd"]["cgd_max"] == 1e-9
     assert prm["C_ds"]["law"] == "junction" and prm["body_diode"] == "lauritzen"
     assert prm["R_d_eff"] == pytest.approx(0.01 * 1.3) and prm["K_eff"] == pytest.approx(1.43 / 1.3)
-    assert pm[0]["sub_elements"] == ["Q1.rd", "Q1.rg", "Q1.ls", "Q1", "Q1.cgs", "Q1.cgd",
-                                     "Q1.cds", "Q1_body"]
+    # task 5.2: the channel, both charge laws and the body diode are ONE
+    # f/q device "Q1"; only the linear elements are separate
+    assert pm[0]["sub_elements"] == ["Q1.rd", "Q1.rg", "Q1.ls", "Q1", "Q1.cgs"]
     assert {c["name"] for c in comps} >= set(pm[0]["sub_elements"])
 
 
@@ -601,3 +602,183 @@ def test_current_through_a_partly_on_channel_crosses_zero(engine, vgs):
         r = p.simulate(b, t_end=2e-3, engine=engine, **kw)
     v = np.asarray(r.v("d"))
     assert v.min() < 0 < v.max() and np.max(np.abs(v)) < 0.05
+
+
+# ---------------------------------------------------------------------------
+# group 5: the table channel, the one f/q device, generic outputs
+# ---------------------------------------------------------------------------
+LAWS = dict(K=1.43, V_T=3.0, C_gs=1e-9, C_gd=None, C_ds=None,
+            body_diode={"model": "lauritzen", "tau": 50e-9, "T_M": 10e-9})
+
+
+def _pm_laws():
+    return dict(LAWS, C_gd=p.ChargeLaw.vdmos_cgd(100e-12, 10e-12, 0.5),
+                C_ds=p.ChargeLaw.junction(200e-12, 25.0, 0.5))
+
+
+def _p4_sense(dev, engine):
+    """The probe fixture with a 1 mOhm sense resistor in the drain."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vdc", "vdc", "gnd", VDC)
+    b.add_inductor("L", "vdc", "sw", 500e-6, i0=IL)
+    b.add_shockley_diode("Df", "sw", "vdc")
+    b.add_resistor("Rsense", "sw", "d", 1e-3)
+    b.add_power_mosfet("M", "d", "gnd", "drv", R_g=10.0, **dev)
+    b.add_pulse_voltage_source("Vg", "drv", "gnd", 0.0, 12.0, 100e-9, 700e-9, 0.0, 5e-9, 5e-9)
+    kw = dict(dt=2e-10) if engine == "pwl" else {}
+    return b, p.simulate(b, t_end=1.5e-6, engine=engine, **kw)
+
+
+@pytest.mark.parametrize("engine", ["pwl", "trbdf2"])
+@pytest.mark.parametrize("dev", [
+    pytest.param("linear", marks=pytest.mark.xfail(strict=True, reason=(
+        "a constant C_gd at the drain is a linear capacitor whose res.i() "
+        "(the ladder's reconstruction) is not the engine's companion current: "
+        "measured 2.5 A off on pwl after the inconsistent start, 0.042 A on trbdf2"))),
+    "laws"])
+def test_res_i_and_loss_row_against_a_sense_resistor(engine, dev):
+    """Task 5.3: res.i(name) is the drain-terminal current (truth: the 1 mOhm
+    sense resistor's own current, an independent element), and the loss row
+    is the integral of v_DS * i_D on the result's own grid, each factor
+    piecewise linear per step (the rule every loss row uses)."""
+    d = DEV if dev == "linear" else _pm_laws()
+    b, r = _p4_sense(d, engine)
+    i_m = np.asarray(r.i("M"))
+    i_s = np.asarray(r.i("Rsense"))
+    # from sample 1: the start is inconsistent (i0 = 10 A against zero
+    # node voltages), so the capacitor currents AT t = 0 are undefined
+    # measured 2026-11-26 (laws): pwl <= 1e-9, trbdf2 1.3e-9 of scale
+    assert np.max(np.abs(i_m[1:] - i_s[1:])) <= 3e-9 * np.max(np.abs(i_s))
+    t = np.asarray(r.times)
+    # the loss row starts at the first solved sample (row 0 is the seed)
+    t, v, i_s = t[1:], np.asarray(r.v("d"))[1:], i_s[1:]
+    h = np.diff(t)
+    E = float(np.sum(h / 6 * (2 * v[:-1] * i_s[:-1] + v[:-1] * i_s[1:]
+                              + v[1:] * i_s[:-1] + 2 * v[1:] * i_s[1:])))
+    row = [x for x in p.device_loss_summary(b, r) if x["name"] == "M"]
+    assert len(row) == 1 and row[0]["kind"] == "power_mosfet"
+    assert row[0]["E_total"] == pytest.approx(E, rel=1e-8)
+
+
+@pytest.mark.parametrize("engine", ["pwl", "trbdf2"])
+def test_one_device_matches_the_hand_built_composite_with_laws(engine):
+    """Task 5.2: the f/q device against the same circuit built by hand from
+    the separate kinds the composite used (Level-1 channel, two nonlinear
+    capacitors, a Lauritzen diode). pwl: same steps, same Newton matrix ->
+    1e-9 of scale; trbdf2: the error norm sees the device's pin q rows
+    instead of one row per capacitor, so the grid differs -> bounded by the
+    engine's own tolerance."""
+    laws = _pm_laws()
+
+    def run(device):
+        b = p.CircuitBuilder()
+        b.add_voltage_source("Vdc", "vdc", "gnd", VDC)
+        b.add_inductor("L", "vdc", "sw", 500e-6, i0=IL)
+        b.add_shockley_diode("Df", "sw", "vdc")
+        b.add_resistor("Rsense", "sw", "d", 1e-3)
+        b.add_pulse_voltage_source("Vg", "drv", "gnd", 0.0, 12.0, 100e-9, 700e-9, 0.0, 5e-9, 5e-9)
+        if device:
+            b.add_power_mosfet("M", "d", "gnd", "drv", R_g=10.0, **laws)
+        else:
+            b.add_resistor("M.rg", "drv", "M.g", 10.0)
+            b.add_mosfet_level1("M", "d", "gnd", "M.g", 1.43, 3.0, 0.0, 15.0, False)
+            b.add_capacitor("M.cgs", "M.g", "gnd", 1e-9)
+            b.add_nonlinear_capacitor("M.cgd", "M.g", "d", laws["C_gd"])
+            b.add_nonlinear_capacitor("M.cds", "d", "gnd", laws["C_ds"])
+            b.add_lauritzen_diode("M_body", "gnd", "d", tau=50e-9, T_M=10e-9)
+        kw = dict(dt=2e-10) if engine == "pwl" else {}
+        r = p.simulate(b, t_end=1.5e-6, engine=engine, **kw)
+        t = np.asarray(r.times)
+        return t, np.asarray(r.v("d")), np.asarray(r.v("M.g")), np.asarray(r.i("Rsense"))
+
+    a, c = run(True), run(False)
+    if engine == "pwl":
+        assert np.array_equal(a[0], c[0])
+        for x, y in zip(a[1:], c[1:]):
+            # measured 2026-11-26: 1.1e-9 / 1.3e-9 of scale on the currents
+            # (the composite's 1e-12 S placeholder on each nonlinear-capacitor
+            # node, DECISIONS 20, is not in the device)
+            assert np.max(np.abs(x - y)) <= 3e-9 * np.max(np.abs(y))
+    else:
+        Ea = np.trapezoid(a[1] * a[3], a[0])
+        Ec = np.trapezoid(c[1] * c[3], c[0])
+        assert Ea == pytest.approx(Ec, rel=2e-3)
+
+
+def _square_law_table():
+    vgs = [2.0, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 7.0, 8.0, 10.0, 12.0, 14.0]
+    vds = [0.0, 0.25, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0, 8.0, 12.0, 20.0, 50.0, 100.0, 500.0]
+    cur = [[1.43 * (2 * max(g - 3, 0) * min(v, max(g - 3, 0)) - min(v, max(g - 3, 0)) ** 2)
+          for v in vds] for g in vgs]
+    return p.ChannelTable(vgs, vds, cur)
+
+
+def test_channel_table_refusals_are_typed_and_name_the_point():
+    vgs, vds = [3.0, 4.0, 5.0], [0.0, 1.0, 2.0, 4.0]
+    good = [[0, 0, 0, 0], [0, 1.0, 1.5, 1.6], [0, 2.0, 3.0, 3.2]]
+    bad = [row[:] for row in good]
+    bad[2][3] = 2.9
+    with pytest.raises(p.NetlistError, match=r"not monotone in V_DS at V_GS = 5.*\[2\]\[3\]"):
+        p.ChannelTable(vgs, vds, bad)
+    bad = [row[:] for row in good]
+    bad[0][0] = 1e-3
+    with pytest.raises(p.NetlistError, match="must be 0"):
+        p.ChannelTable(vgs, vds, bad)
+    t = p.ChannelTable(vgs, vds, good)
+    assert t.current(5.0, 2.0)[0] == 3.0
+    i_f, gg_f, gd_f = t.current(4.0, 1e-13)
+    i_r, gg_r, gd_r = t.current(4.0, -1e-13)
+    assert abs(i_f + i_r) <= 1e-12 * abs(i_f) and gd_f == pytest.approx(gd_r, rel=1e-9)
+    with pytest.raises(ValueError, match="channel table carries its own"):
+        b = p.CircuitBuilder()
+        b.add_power_mosfet("M", "d", "gnd", "g", K=1.0, V_T=3.0, C_gs=1e-9, C_gd=0.0,
+                           C_ds=0.0, channel=t, rds_tc1=4e-3)
+
+
+def test_double_pulse_with_a_table_channel_follows_the_level1_law():
+    """A table sampled from the Level-1 square law (its kappa blend aside)
+    gives the Level-1 device's switching energies to a few percent; the
+    truth is the Level-1 device, an independent law."""
+    lvl = p.double_pulse_test(DEV, V_dd=VDC, I_load=IL, R_g_ext=10.0, V_drive=12.0,
+                              L_load=500e-6, engine="trbdf2")
+    tab = p.double_pulse_test(dict(DEV, channel=_square_law_table()), V_dd=VDC, I_load=IL,
+                              R_g_ext=10.0, V_drive=12.0, L_load=500e-6, engine="trbdf2")
+    assert tab.E_on == pytest.approx(lvl.E_on, rel=0.05)
+    assert tab.E_off == pytest.approx(lvl.E_off, rel=0.05)
+    assert tab.t_plateau == pytest.approx(lvl.t_plateau, rel=0.05)
+
+
+def test_ac_sweep_of_the_device_against_its_linearised_closed_form():
+    """Task 5.3: AC from f and q at a triode operating point. Closed form:
+    the deep-triode Level-1 conductance K(2 V_OV - 2 x), the VDMOS C_gd and
+    junction C_ds laws (design.md formulas), the Shockley body diode's
+    reverse conductance; x from the DC balance by bisection."""
+    K, VT0, Vgs, Vb, R = 1e-2, 2.0, 15.0, 1.0, 100.0
+    cmax, cmin, a, C0, V0, m = 1e-9, 50e-12, 0.5, 1e-9, 25.0, 0.5
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "in", "gnd", Vb)
+    b.add_resistor("R", "in", "o", R)
+    b.add_voltage_source("Vg", "g", "gnd", Vgs)
+    b.add_power_mosfet("Md", "o", "gnd", "g", K=K, V_T=VT0, C_gs=1e-9,
+                       C_gd=p.ChargeLaw.vdmos_cgd(cmax, cmin, a),
+                       C_ds=p.ChargeLaw.junction(C0, V0, m), body_diode={"model": "shockley"})
+    vov, IS, Vt, G = Vgs - VT0, 1e-12, 0.025852, 1e-12
+
+    def bal(x):   # current into o: source side minus channel, plus the reverse diode
+        return (Vb - x) / R + IS * math.expm1(-x / Vt) - G * x - K * (2 * vov * x - x * x)
+    lo, hi = 0.0, Vb
+    for _ in range(200):
+        mid = 0.5 * (lo + hi)
+        lo, hi = (mid, hi) if bal(mid) > 0 else (lo, mid)
+    x = 0.5 * (lo + hi)
+    g = K * (2 * vov - 2 * x) + IS / Vt * math.exp(-x / Vt) + G
+    s = (cmax - cmin) / (1 + math.pi / 2)
+    u = Vgs - x                                   # v_gd > 0
+    C = (cmax - s + s * math.tanh(a * u)) + C0 * (1 + x / V0) ** (-m)
+    F = np.array([1e5, 1e6, 1e7])
+    w = 2 * np.pi * F
+    Z = 1 / (g + 1j * w * C)
+    exact = Z / (R + Z)
+    H = p.run_mna_sweep(b, output_idx=b.node_id_of("o"), freqs=F,
+                        v_in_branch_id=b.branch_id_of("V")).H
+    np.testing.assert_allclose(H, exact, rtol=1e-9)

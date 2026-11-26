@@ -364,7 +364,7 @@ from .spice_import import (
     spice_to_builder,
 )
 # add-power-mosfet-datasheet-device: charge laws, double pulse, fitters.
-from ._pulsim import ChargeLaw, ChargeTable  # type: ignore[import-not-found]
+from ._pulsim import ChannelTable, ChargeLaw, ChargeTable  # type: ignore[import-not-found]
 from ._pulsim import FluxMapDQ  # type: ignore[import-not-found]
 # add-in-kernel-event-losses: kernel datasheet tables (LossTable.to_kernel()).
 from ._pulsim import ConductionTable, LossTable3D  # type: ignore[import-not-found]
@@ -811,6 +811,7 @@ __all__ = [
     "parse_spice_netlist",
     "spice_to_builder",
     "ChargeLaw",
+    "ChannelTable",
     "ChargeTable",
     "FluxMapDQ",
     "LossTable3D",
@@ -1249,6 +1250,29 @@ def _result_i(self, name: str, t=None, *, port=None):
                 f"result.i({name!r}, port={port!r}): `port` is 1 or 2 and "
                 f"only for a gyrator (this branch is "
                 f"{kinds.get(b_id)!r}).")
+
+    pm_desc = None if getattr(self, "_xdev_trace", None) is None else next(
+        (d for d in builder.components() if d.get("kind") == "power_mosfet"
+         and int(d.get("branch_id", -1)) == int(b_id)), None)
+
+    def _pm_fin(col):
+        return col if t is None else col[t]
+    # ------------- power MOSFET: the drain-terminal current -------------
+    if pm_desc is not None:
+        # (before the state fast path: with a Lauritzen body diode the
+        # device's branch carries its internal charge unknown)
+        # add-power-mosfet-datasheet-device 5.3: the f/q device's drain-pin
+        # current (f + dq/dt, recorded every accepted step) plus the linear
+        # capacitors on d'; with R_d the drift resistor carries all of it.
+        subs = set(pm_desc.get("sub_elements", ()))
+        if f"{name}.rd" in subs:
+            return _pm_fin(_result_i(self, f"{name}.rd"))
+        col = _np.asarray(_rec_mod.result_device_output(self, name, "i(d)"), dtype=float)
+        if f"{name}.cds" in subs:
+            col = col + _result_i(self, f"{name}.cds")
+        if f"{name}.cgd" in subs:          # gate -> drain
+            col = col - _result_i(self, f"{name}.cgd")
+        return _pm_fin(col)
 
     # ---- Fast path: state-vector-native kinds (inductor, VS family) ----
     # Try inductor first (most common case), then the source family

@@ -1087,8 +1087,9 @@ def test_ac_sweep_cell_of_the_controlled_source_kinds(kind):
 
 # ---------------------------------------------------------------------
 # add-power-mosfet-datasheet-device (task 2.9): the charge-law variants
-# are the NonlinearCapacitor kind and add_power_mosfet is a composite of
-# existing kinds, so they add no table row. Their cells: run where every
+# are the NonlinearCapacitor kind and add_power_mosfet is one f/q device
+# on the ExternalDevice row (task 5.2) plus linear elements, so they add
+# no table row. Their cells: run where every
 # kind they are made of runs (agreeing with pwl), refused by name
 # elsewhere, transient and kernel AC sweep alike.
 # ---------------------------------------------------------------------
@@ -1154,8 +1155,8 @@ VARIANT_CELLS = {
          "o", "Cn", 1e-4, 1e-7, False), ("NonlinearCapacitor",)),
     "power_mosfet": (
         (_pm, "o", "Md", 2e-3, 2e-7, False),
-        ("MosfetLevel1", "Capacitor", "NonlinearCapacitor", "ShockleyDiode",
-         "Resistor")),
+        # task 5.2: one f/q device (the ExternalDevice row) + linear R, C_gs
+        ("ExternalDevice", "Capacitor", "Resistor")),
 }
 
 

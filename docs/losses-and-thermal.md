@@ -537,9 +537,13 @@ and I_rr as time-weighted integrals, starting from the off-state bias
 (an all-zero start turns the device on through C_gd before the gate
 command). Use `engine="trbdf2"`; on `pwl`
 the step must resolve the gate transient (0.2 ns for a 60 ns plateau).
-The datasheet fitters are in `pulsim.datasheet`. Losses of the
-composite are not in `device_loss_summary` yet (unified device
-interface).
+The datasheet fitters are in `pulsim.datasheet`. The channel, the
+charge laws and the body diode are one f/q device: `res.i("Q1")` is its
+drain-terminal current and `device_loss_summary` lists it (`kind =
+"power_mosfet"`, `v_DS · i_D` of the external pins, gate drive
+excluded). A measured output characteristic replaces the Level-1 law
+with `channel=p.ChannelTable(v_gs, v_ds, I)` (monotone, `I(V_GS, 0) =
+0`, third quadrant by terminal swap).
 
 ## What's *not* covered
 
