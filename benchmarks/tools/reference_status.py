@@ -148,9 +148,16 @@ def analytic():
             try:
                 with profile_of(cfg), extra_kwargs(kw):
                     r = c.run(eng)
-                e = metrics.err_rms(np.asarray(r.times), c.observe(r), c.exact,
+                # the projected flow where the run recorded projections (DECISIONS 13), as
+                # the rehearsal and the harness read it; a run without one: c.exact itself
+                og = (getattr(r, "diagnostics", None) or {}).get("output_grid") or {}
+                ref = metrics.projected_reference(c.exact, og.get("projections") or (),
+                                                  tau_max=1e-6 * c.t_end)
+                e = metrics.err_rms(np.asarray(r.times), c.observe(r), ref,
                                     abs_scale=c.abs_scale, exclude_t0=c.exclude_t0)
                 rec.update(err_rms=e, outcome="agree" if e <= spec.get("ceiling", 1e-3) else "disagree")
+                if ref is not c.exact:
+                    rec["n_projected"] = ref.n_applied
             except dr.REFUSAL as ex:
                 rec.update(outcome="refused", message=f"{type(ex).__name__}: {ex}"[:200])
             except Exception as ex:  # noqa: BLE001 - classified
