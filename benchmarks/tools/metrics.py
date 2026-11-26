@@ -373,8 +373,10 @@ def exact_parts(t, y, cand, *, span: float, h: float, truth_events=(), engine_ev
       exposes no event record: then the rows carry every timing error.
     limits: ``max |engine − truth|`` over every one-sided value the engine
       records at an instant after the initial one: at a matched event its left
-      (and right) value against the truth's limits at the TRUTH's instant; at
-      an unmatched engine event and at every other right-limit row, against
+      (and right) value against the truth's limits at the TRUTH's instant
+      (a side facing another engine instant matched to the same truth instant
+      is a state between the engine's own flips: against the truth at the
+      ENGINE's instant); at an unmatched engine event and at every other right-limit row, against
       the truth's limits at the engine's instant.
     rule (1), a projected transient: at a matched event where the engine
       reports a projection and records a right value the truth does not
@@ -500,14 +502,27 @@ def exact_parts(t, y, cand, *, span: float, h: float, truth_events=(), engine_ev
 
     # (c) one-sided limits, after the initial instant
     errs = []
+    # a truth instant whose flips the engine makes at several instants: a side facing another of
+    # them is a state between the engine's own flips, graded against the truth at the engine's instant
+    span_of = {}
+    for i, j in pairs:
+        key = next((k for k in span_of if abs(k - truth_events[i][0]) <= 4 * np.spacing(abs(k))),
+                   truth_events[i][0])
+        lo, hi = span_of.get(key, (np.inf, -np.inf))
+        span_of[key] = (min(lo, engine_events[j][0]), max(hi, engine_events[j][0]))
     for i, j in pairs:
         te, _, left, right = engine_events[j][:4]
         if te > t0p:
-            errs.append((te, abs(left - truth_events[i][2])))
+            tl_, tr_ = truth_events[i][2], truth_events[i][3]
+            lo, hi = next(v for k, v in span_of.items() if abs(k - truth_events[i][0]) <= 4 * np.spacing(abs(k)))
+            if len(engine_events[j]) >= 6:
+                tl_ = engine_events[j][4] if te > lo else tl_
+                tr_ = engine_events[j][5] if te < hi else tr_
+            errs.append((te, abs(left - tl_)))
             if j in collapsed:
                 errs.append((te, collapsed[j][2]))
             elif right is not None:
-                errs.append((te, abs(right - truth_events[i][3])))
+                errs.append((te, abs(right - tr_)))
     for j in spurious:
         te, _, left, right, tl, tr = engine_events[j][:6]
         errs.append((te, abs(left - tl)))
