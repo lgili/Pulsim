@@ -258,3 +258,36 @@ def test_jump_rule_books_the_impulse_energy():
     e, truth, n_forced = _cut_set_goff(1e-9)
     assert n_forced == 1
     assert abs(e / truth - 1) < 1e-2
+
+
+def test_stiff_run_resumed_at_and_after_a_hard_turn_on_meets_the_ode():
+    """Reviewer finding 1 (a snapshot right after a gate edge does not carry
+    the owed SDIRK restart): case A of the fs5 file (Sh into a conducting Dl
+    across C_oss, tau ~1 ps) cut at the 1 us edge, 1 fs and 0.1 ps after
+    it, resumed to 20 ps. Truth: the post-edge 1-D C_oss ODE (Radau, rtol
+    1e-13). Measured: every split 1.0e-9 .. 1.2e-9 V off at +20 ps on both
+    integrators (uninterrupted runs to the same end: 2.3e-7 / 8.0e-8 V)."""
+    solve_ivp = pytest.importorskip("scipy.integrate").solve_ivp
+    import test_release_findings_fs5 as F
+    vdc, c0, v0, m, g, i_a = F.VDC, F.C0, F.V0, F.M, F.GON, F.I_A
+
+    def cap(v):
+        return c0 / (1 + v / v0) ** m
+    ode = solve_ivp(lambda t, y: [(g * (vdc - y[0]) - i_a + F.GOFF * y[0])
+                                  / (cap(y[0]) + cap(vdc - y[0]))],
+                    [0, 2e-11], [-(F.VF + i_a / g)], method="Radau",
+                    rtol=1e-13, atol=1e-12)
+    truth = float(ode.y[0, -1])
+    te, t2 = 1e-6, 1e-6 + 2e-11
+    for eng in F.ENGINES:
+        for cut in (te, te + 1e-15, te + 1e-13):
+            b = F._builder()
+            fn = F._gates(b)
+            snap = None
+            for t_end in (cut, t2):
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    r = p.simulate(b, t_end=t_end, switch_fn=fn, resume_from=snap,
+                                   **F.ENGINES[eng])
+                snap = r.final_snapshot
+            assert abs(float(np.asarray(r.v("sw"))[-1]) - truth) < 1e-8, (eng, cut)
