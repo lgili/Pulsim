@@ -138,7 +138,8 @@ b_cut.add_resistor("R", "a", "b", 1.0)
 b_cut.add_inductor("L", "b", "gnd", 1e-3)
 try:
     p.simulate(b_cut, t_end=1e-4, dt=5e-5, engine="pwl",
-               switch_fn=lambda t: p.SwitchStateMask(1))
+               switch_fn=lambda t: p.SwitchStateMask(1),
+               discontinuity_restart=False)   # the default restart takes the jump
 except p.UnsupportedError as exc:
     print("3:", exc.engine, exc.feature, exc.device, exc.kind)
 ```

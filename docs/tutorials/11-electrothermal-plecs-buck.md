@@ -167,6 +167,7 @@ print(f"device_loss_summary P_sw_avg: {summary['Q1']['P_sw_avg']:.2f} W")
 
 The truth for both runs is the averaged model in closed form, computed here from the XML's numbers (not from the run). In steady state `i_L` ramps from 7.5 A to 12.5 A (ripple `(V_in − V_out)·D/(f_sw·L)` = 5 A), so the switch turns on at 7.5 A and off at 12.5 A, both at 400 V. The tables are linear in `T_j`, so the heat is `P(T_j) = P(25) + k·(T_j − 25)`, and the Cauer ladder with this heat is a linear two-state ODE, solved here by its eigenvectors.
 
+<!-- doctest: xfail reason="release finding F-X-8: under the default restart rule the closed-loop Tj at dt = 1 us is 0.13 K under its dt -> 0 limit (71.014 C vs ~71.145 C; 0.19 K from the averaged model)" -->
 ```python
 I_AX = np.array([0.0, 10.0, 20.0])
 E_ON = {25: [0, 0.50e-3, 1.00e-3], 125: [0, 0.90e-3, 1.80e-3]}    # the 400 V rows

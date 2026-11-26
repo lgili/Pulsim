@@ -214,6 +214,15 @@ F = [
      "against 46.200520 V unsplit"),
     ("F-X-2", "H", "C", "the `auto` routing costs 4745 bytecodes per call",
      "`test_simulate_overhead` no-dt script", "ceiling 3760 bytecodes", "3683 (trbdf2 route)", "5456 (pulsim.exact_route alone 4745)"),
+    # ---- R6 (2026-11-25 night)
+    ("F-X-8", "A", "W", "the restart rule makes a closed-loop junction temperature first order in dt (0.13 K low at 1 us) [owner: restart line / in-kernel event losses]",
+     "docs/tutorials/11-electrothermal-plecs-buck.md (PLECS-XML buck, 20 kHz, closed-loop Tj, `engine='pwl', dt=1e-6`), "
+     "Tj mean over the last 1 ms",
+     "the dt -> 0 limit ~71.145 C (both restart on and off converge there: 1e-7 gives 71.131 / 71.149 C); "
+     "averaged model 71.205 C (idealized ripple 7.5 .. 12.5 A)",
+     "71.182 C at dt 1e-6 (discontinuity_restart=False; 0.035 K from the limit)",
+     "71.014 / 71.075 / 71.116 / 71.131 C at dt 1e-6 / 5e-7 / 2e-7 / 1e-7 (first order); the energies agree with dt 1e-7 "
+     "to 5e-4 and the event currents to 1e-6, so the error is in the junction's response, not in the booked heat"),
 ]
 
 # Closed by a fix merged into the release branch: id -> where and the measured result.
