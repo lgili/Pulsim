@@ -4675,6 +4675,7 @@ inline SimulationResult run_transient_trbdf2(
                         lt->accept_step(t_pre, t, x, mask_step, &x_g, w, w, Real{1} - Real{2} * w);
                     }
                 }
+                const std::size_t n_rec0 = result.reinit_records.size();
                 if (structure.active()) {
                     // D4 record (pwl/reinit.hpp, the fixed engine's code):
                     // the explicit projection from the step's start state.
@@ -4683,7 +4684,8 @@ inline SimulationResult run_transient_trbdf2(
                                   opts.on_impulse_error, "trbdf2", result);
                     if (lt) lt->impulses(result.reinit_records);
                 }
-                if (jump_rec) {
+                // a D4 record on this step already holds its E(start) - E(end)
+                if (jump_rec && result.reinit_records.size() == n_rec0) {
                     jump_rec->sample = static_cast<long>(result.times.size()) - 1;
                     result.reinit_records.push_back(std::move(*jump_rec));
                     if (lt) lt->impulses(result.reinit_records);

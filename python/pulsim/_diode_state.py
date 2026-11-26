@@ -316,9 +316,8 @@ def _exempt_edge_layer(result, times, v, closed, V_f, V_on, exempt, nodes) -> No
     V_f = 0.7 V for ~30 as after Sh turns on, while the voltage falls
     through V_f). The samples right after an edge row (right_limit_index)
     with the flipped bit, a violation that only shrinks from the one at
-    the edge's right limit, and within the longest probe the engine takes
-    (1e-6 of its step ceiling, at most span / 1000) are that layer, not a
-    missed commutation; the first sample that breaks the run ends it.
+    the edge's right limit, and within 1e-9 of the run's span of the edge
+    are that layer, not a missed commutation; the first sample that breaks the run ends it.
     Marks them in ``exempt``."""
     if getattr(result, "engine_used", None) != "trbdf2":
         return
