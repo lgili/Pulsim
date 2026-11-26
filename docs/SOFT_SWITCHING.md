@@ -34,8 +34,11 @@ gate; its ZCS test uses its conduction flag.
 - **ZCS fraction**: the same with `|I_D|` against `threshold_a` (default 0.1 A).
 - **Switching loss per event**: `∫ V_DS · I_D dt` over `window_s` after each
   transition (trapezoid over the samples, window end interpolated), summed and
-  divided by the span. The window must contain the transition and end before
-  the next one; it includes that window's conduction.
+  divided by the trace's span. The window starts at the first sample that shows
+  the new switch state and must end before the next transition; it includes that
+  window's conduction. The benchmark runner skips the first stored sample (an
+  algebraic node's first sample is not solved: a switch ON from t = 0 would count
+  a turn-on with a made-up V_DS).
 
 In a benchmark YAML the three KPIs take `switch_observable`,
 `voltage_observable` / `current_observable`, `threshold_v` / `threshold_a`,
@@ -59,6 +62,40 @@ In a benchmark YAML the three KPIs take `switch_observable`,
   dead-time transition and reads the gate at the step's end; its ZVS fraction
   on the LLC and phase-shifted full-bridge references is wrong by whole events
   (recorded as known disagreements in `benchmarks/manifests/v2_triage.yaml`).
+
+## The truth and the bounds
+
+`benchmarks/tools/soft_switching_truth.py` (on `exact_truth.py`, mpmath, never
+imports pulsim) gives, per switch, the left limit of `V_DS` at every turn-on, the
+ZVS fraction and the switching energy of the windows above, exact. The KPI is a
+trapezoid over a trace's samples, so it carries the quadrature error of that grid
+even with exact states; the tool measures it on the same grid. The baselines
+`benchmarks/baselines/{llc_half_bridge_zvs,psfb_full_bridge_zvs,buck_hard_switching_reference}.csv.gz`
+are the same truth on the netlist grid with both limits at every event
+(`soft_switching_truth.py baseline`). Checks and their bounds:
+`python/tests/test_soft_switching_kpi.py` (runner columns, `pwl` with the
+restart rule, `trbdf2`, `dsed`), run as a bench by
+`benchmark_runner.py --benchmarks benchmarks/manifests/soft_switching.yaml`.
+
+| benchmark | switch | ZVS (truth) | exact switching energy | avg over the run |
+|---|---|---|---|---|
+| LLC | S_hi / S_lo | 1.0 (\|V_DS\| ≤ 1.1 mV) | 7.022e-11 / 7.280e-11 J | 1.76 / 1.82 µW |
+| PSFB | S1 / S2 / S3 / S4 | 1.0 (< 5 mV) | 5.702e-10 / 8.527e-10 / 3.178e-11 / 3.306e-11 J | (30 µs run) |
+| buck (hard) | SH | 0 (24.02–24.08 V, then 1.42–6.01 V in DCM) | 7.406e-6 J | 14.81 mW |
+
+The buck has no device capacitance: its "switching" energy is the conduction in
+the 1 µs windows, not an `E_oss`.
+
+## Known disagreements (strict xfails)
+
+| engine | benchmark | measured | truth |
+|---|---|---|---|
+| plain `pwl` (trap 9) | LLC | V_DS at S_lo's 4 µs turn-on 0.918 V; S_hi energy 9.250e-11 J (+32 %) | −0.0011 V; 7.022e-11 J |
+| plain `pwl` (trap 9) | PSFB | ZVS of S3 and S4 2/3 (8.53 V at 8 µs); S1 energy 1.046e-9 J (+84 %) | 1.0; 5.702e-10 J |
+| plain `pwl` (trap 9) | buck | ZVS 0.04 (1 of 25 turn-ons read soft) | 0 of 24 |
+| `trbdf2` (F-S-5) | PSFB | V(b) 599.8 V at 3e-16 s after a consistent start | 400 V |
+
+Use the restart rule (`discontinuity_restart=True`), `trbdf2` or `dsed` for these KPIs.
 
 ## Reference circuits
 
