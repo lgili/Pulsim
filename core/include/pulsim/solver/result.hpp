@@ -520,6 +520,10 @@ struct SimulationResult {
     // ... and its give-ups (the chord kept: mixed directions, a signal
     // that does not bracket, a failed trial, the 40-trial cap)
     Size split_locator_giveups = 0;
+    // The restart rule: steps cut at a diode turn-off located inside an
+    // SDIRK step's stage 2 (the backward-Euler re-take confirmed it; the
+    // locator's trials and give-ups are counted above).
+    Size n_restart_cuts = 0;
     // add-unified-event-queue group 5: the fixed engine's control ticks
     // (one count per TickPlan source) and the largest lateness of a tick
     // on the grid (step time minus scheduled instant).

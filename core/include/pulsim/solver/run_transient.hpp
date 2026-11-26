@@ -932,6 +932,18 @@ inline SimulationResult run_transient(
         bool vf0 = false, pure = false, at_b = false, off = false;
         std::vector<bool> bits;
     } rl_loc;
+    // A diode turn-off located inside a restart step's stage 2 (run_restart:
+    // the step is cut there, restart_lined): armed by restart_lined only;
+    // t (NaN: none), the post-event bits, and restart_lined's entry state.
+    struct RsCut {
+        bool arm = false, vf0 = false;   // vf0: only V_f = 0, ungated diodes flip
+        bool piece1 = false;             // run_restart is the cut's first piece
+        Real t = std::numeric_limits<Real>::quiet_NaN();
+        std::vector<bool> bits, b0, lsb0;
+        Vector x0, x_end;
+        std::vector<Real> h0;
+        pwl::StatefulHistories::Snapshot hs0;
+    } rs_cut;
     // event_right_limit's pin (Anderson): buffers sized once per run
     Vector rlp_u, rlp_r, rlp_g, rlp_r0, rlp_g0, rlp_sc, rlp_rs, rlp_gam, rlp_ua;
     DenseMatrix rlp_dr, rlp_dg;
@@ -3884,6 +3896,113 @@ inline SimulationResult run_transient(
             }
         };  // step_begin
 
+        // A turn-off that stage 2 of a restart step (t_from, h) makes and the
+        // backward-Euler re-take confirms: its instant on SDIRK trial steps
+        // of tau from the step start under stage 1's bits (the method the
+        // cut's first piece takes), bracketed by stage 1's own state at γh
+        // (it conducts there) and the trial at h. Kept, SDIRK's stage 2
+        // starts the new mode from x0* = x0 + c·(x1 − x0), stage 1's slope
+        // extrapolated past the event (a 1 nH boost: v_out 51.34 V for
+        // 42.11 V). Returns NaN: no cut (a turn-on in stage 2, no sign
+        // change, a failed trial, an instant within snap of an end).
+        // Leaves x / histories / bits as the last trial: the caller puts
+        // them back. Out of line, once per run.
+        auto restart_cut_at = [&](auto& rei, Real t_from, Real h) PULSIM_STEP_DRIVER -> Real {
+            constexpr Real nan = std::numeric_limits<Real>::quiet_NaN();
+            constexpr Real c = (Real{1} - kGamma) / kGamma;
+            const auto ents = diodes.entries();
+            const Real t1 = t_from + kGamma * h, t2 = t_from + h;
+            for (Size q = 0; q < ents.size(); ++q) {
+                if (rs_bits[q] != rs_bits2[q] && !rs_bits[q]) return nan;   // a turn-on
+            }
+            auto trial = [&](Real tau) {
+                history.restore(rs_hist);
+                hs.restore(rs_hs);
+                diodes.restore_on_bits(rs_bits);
+                x = rs_x1;
+                const Real ts = kGamma * tau;
+                try {
+                    accumulate_b_extra(t_from + ts, Real{2} * ts, true);
+                    rei(t_from + ts, Real{2} * ts, true, true);
+                    history.extrapolate_previous(x, c);
+                    hs.extrapolate_previous(x, c);
+                    accumulate_b_extra(t_from + tau, Real{2} * ts, true);
+                    rei(t_from + tau, Real{2} * ts, true, true);
+                } catch (const pwl::NewtonRoundoffBudgetExceeded&) {
+                    throw;
+                } catch (const std::runtime_error&) {
+                    return false;
+                }
+                return x.allFinite();
+            };
+            if (!trial(h)) return nan;
+            rs_cut.x_end = x;
+            auto sig = [&](Size j, const Vector& xv) {
+                return models::SwitchedDiode::crossing_signal(
+                    true, ents[j].law_voltage(xv, true), ents[j].params());
+            };
+            // the earliest chord, and the diodes that cross with it (a bridge's
+            // pair) share one signal: ON stays on while s > 0
+            cross_scratch.assign(ents.size(), t2 + h);
+            Real t_c = t2;
+            for (Size j = 0; j < ents.size(); ++j) {
+                if (!(rs_bits[j] && !rs_bits2[j])) continue;
+                const Real s1 = sig(j, rs_x1), s2 = sig(j, rs_cut.x_end);
+                if (!(s1 > Real{0} && s2 < Real{0})) continue;
+                cross_scratch[j] = interp_commutation_time(t1, t2, s1, s2);
+                t_c = std::min(t_c, cross_scratch[j]);
+            }
+            if (!(t_c < t2)) return nan;
+            auto signal = [&](const Vector& xv) {
+                Real s = 0;
+                for (Size j = 0; j < ents.size(); ++j) {
+                    if (cross_scratch[j] - t_c < snap) s += sig(j, xv);
+                }
+                return s;
+            };
+            const Real s_a = signal(rs_x1), s_b = signal(rs_cut.x_end);
+            events::Bracket br{t1, s_a, t2, s_b, s_a, s_b, 0};
+            auto narrow = [&](const events::Bracket& q) { return q.tb - q.ta <= snap; };
+            Real t_cur = t1, t_was = t2;
+            bool failed = false;
+            const int n_trials = events::illinois(br, 40,
+                [&](Real, const events::Bracket& q) { return narrow(q); },
+                [&](Real t_loc, Real& sm) {
+                    t_was = t_cur;
+                    t_cur = t_loc;
+                    if (!trial(t_loc - t_from)) {
+                        failed = true;
+                        return false;
+                    }
+                    sm = signal(x);
+                    return true;
+                },
+                [](events::BracketEnd) {},
+                [&](const events::Bracket& q) {
+                    return narrow(q) || std::abs(t_cur - t_was) <= snap ||
+                           q.sa_raw == Real{0} || q.sb_raw == Real{0};
+                });
+            result.split_locator_trials += static_cast<Size>(n_trials);
+            if (failed) {
+                ++result.split_locator_giveups;
+                return nan;
+            }
+            const Real t_new = br.sa_raw == Real{0} ? br.ta
+                : br.sb_raw == Real{0} ? br.tb
+                : std::clamp(br.ta - br.sa_raw * (br.tb - br.ta) / (br.sb_raw - br.sa_raw),
+                             br.ta, br.tb);
+            if (!(t_new - t_from >= snap && t2 - t_new >= snap)) return nan;
+            rs_cut.bits = rs_bits;
+            rs_cut.vf0 = true;
+            for (Size j = 0; j < ents.size(); ++j) {
+                if (!(cross_scratch[j] - t_c < snap)) continue;
+                rs_cut.bits[j] = false;
+                rs_cut.vf0 = rs_cut.vf0 && ents[j].V_f == Real{0} &&
+                             ents[j].gate == models::SwitchedDiode::Gate::None;
+            }
+            return t_new;
+        };
+
         // run_restart and restart_lined are built once per run, not per step:
         // step_take passes its run_event_iteration (as consistent_start takes it).
         // One Alexander SDIRK(2,2) step of h from t_from (γ = 1 −
@@ -4026,6 +4145,15 @@ inline SimulationResult run_transient(
                     on_to_off = on_to_off || (rs_bits[q] != rs_bits2[q]);
                 }
             }
+            if (on_to_off && rs_cut.piece1) {
+                // the first piece of a cut step ends AT the located turn-off:
+                // its stage 2 stays in stage 1's mode (the locator's trial;
+                // the flip is the next piece's start)
+                x = rs_x1;
+                diodes.restore_on_bits(rs_bits);
+                run_event_iteration(t_from + h, dt_eq, true, true);
+                on_to_off = false;
+            }
             if (on_to_off) {
                 // Stage 2 changed the mode. Re-take it as backward
                 // Euler from x1 under stage 1's bits; if that keeps
@@ -4054,7 +4182,7 @@ inline SimulationResult run_transient(
                 // A re-try that fails (Newton, a singular factor at
                 // the new dt) falls back to the SDIRK stage 2, which
                 // had already succeeded.
-                bool keep_be = false;
+                bool keep_be = false, be_ok = true;
                 try {
                     commit_backward_euler(h_s);      // stage 1, as taken
                     accumulate_b_extra(t_from + h, Real{2} * h_b, true);
@@ -4065,6 +4193,14 @@ inline SimulationResult run_transient(
                     throw;   // a run budget: never swallowed by a retry
                 } catch (const std::runtime_error&) {
                     ++result.stage2_retry_failures;
+                    be_ok = false;
+                }
+                // a real turn-off inside stage 2: located, the caller
+                // (restart_lined) cuts the step there; the state below
+                // is put back as before either way
+                if (!keep_be && be_ok && rs_cut.arm && !impulsive && !ip_jump && !ln_pre &&
+                    !sx.on) {
+                    rs_cut.t = restart_cut_at(run_event_iteration, t_from, h);
                 }
                 if (keep_be) {
                     ++result.stage2_be_kept;
@@ -4119,7 +4255,7 @@ inline SimulationResult run_transient(
         // ev: the (sub)step starts at an event (a trigger at the step
         // start, a scheduled or located split event): its right limit is
         // recorded (F-SB-1); a window step's only after a probed jump.
-        auto restart_lined = [&](auto& run_event_iteration, Real a, Real h, Real loc, bool ev) {
+        auto restart_lined_once = [&](auto& run_event_iteration, Real a, Real h, Real loc, bool ev) {
             const bool inner = a != t_prev_step;
             StepLines& lines = *L;   // restart steps exist under the rule only
             if (lines.owner != t_step) {   // the step's first: no per-step reset
@@ -4267,6 +4403,89 @@ inline SimulationResult run_transient(
                     }
                 }
             }
+        };
+        // restart_lined_once, cut at a turn-off run_restart located inside
+        // its stage 2 (restart_cut_at): back to the (sub)step start, the
+        // piece up to the event in the old mode (not armed again), its
+        // commit, the new mode's bits, and the rest restarted from the
+        // event as a located one (split_step's sequence). The last piece's
+        // commit stays the caller's.
+        // shortcut: one cut per call (a second turn-off in the rest is
+        // SDIRK's stage 2, as before); upgrade if two independent turn-offs
+        // inside one step matter
+        auto restart_lined = [&](auto& run_event_iteration, Real a, Real h, Real loc, bool ev) {
+            rs_cut.arm = has_diodes && !sx.on;
+            rs_cut.t = std::numeric_limits<Real>::quiet_NaN();
+            if (!rs_cut.arm) {
+                restart_lined_once(run_event_iteration, a, h, loc, ev);
+                return;
+            }
+            StepLines& lines = *L;
+            rs_cut.x0 = x;
+            history.snapshot_into(rs_cut.h0);
+            hs.snapshot_into(rs_cut.hs0);
+            diodes.snapshot_on_bits_into(rs_cut.b0);
+            rs_cut.lsb0 = last_solved_bits;
+            const bool cycle0 = mask_cycle, known0 = stamped_known;
+            const auto mask0 = stamped_mask;
+            const Size ip0 = impulse_pending.size(), fb0 = result.n_right_limit_fallbacks;
+            const Real erl0 = event_rl_t;
+            const Real rlt0 = rl_loc.t;   // the only field consumed (event_right_limit)
+            const Real owner0 = lines.owner;
+            const Size n0 = lines.n;
+            const bool eo0 = lines.end_own, st0 = lines.start, ok0 = lines.ok;
+            const bool rso0 = lines.rl_start_ok, rsj0 = lines.rl_start_jump;
+            try {
+                restart_lined_once(run_event_iteration, a, h, loc, ev);
+            } catch (...) {
+                rs_cut.arm = false;   // the dt-retry ladder calls run_restart unarmed
+                throw;
+            }
+            rs_cut.arm = false;
+            if (std::isnan(rs_cut.t)) return;
+            const Real td = rs_cut.t;
+            const auto post = rs_cut.bits;
+            const bool vf0 = rs_cut.vf0;
+            x = rs_cut.x0;
+            history.restore(rs_cut.h0);
+            hs.restore(rs_cut.hs0);
+            diodes.restore_on_bits(rs_cut.b0);
+            last_solved_bits = rs_cut.lsb0;
+            mask_cycle = cycle0;
+            stamped_known = known0;
+            stamped_mask = mask0;
+            impulse_pending.resize(ip0);
+            result.n_right_limit_fallbacks = fb0;
+            event_rl_t = erl0;
+            rl_loc.t = rlt0;
+            lines.owner = owner0;
+            lines.n = n0;
+            lines.end_own = eo0;
+            lines.start = st0;
+            lines.ok = ok0;
+            lines.rl_start_ok = rso0;
+            lines.rl_start_jump = rsj0;
+            rs_cut.piece1 = true;
+            try {
+                restart_lined_once(run_event_iteration, a, td - a, loc, ev);
+            } catch (...) {
+                rs_cut.piece1 = false;
+                throw;
+            }
+            rs_cut.piece1 = false;
+            const bool flipped_1 = flipped;
+            commit_backward_euler(be_commit_h);
+            ++result.n_restart_cuts;
+            diodes.restore_on_bits(post);
+            // the event's right limit: a located turn-off (split_step's rl_loc)
+            rl_loc.t = td;
+            rl_loc.at_b = false;
+            rl_loc.off = true;
+            rl_loc.vf0 = vf0;
+            rl_loc.pure = vf0;
+            rl_loc.bits = post;
+            restart_lined_once(run_event_iteration, td, (a + h) - td, snap, true);
+            flipped = flipped || flipped_1;
         };
 
         auto step_take = [&]() PULSIM_STEP_PHASE {

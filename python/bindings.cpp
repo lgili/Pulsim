@@ -3606,6 +3606,7 @@ void init_module(py::module_& m) {
                 d["n_gate_events_bisected"] = r.n_gate_events_bisected;
                 d["split_locator_trials"] = r.split_locator_trials;
                 d["split_locator_giveups"] = r.split_locator_giveups;
+                d["n_restart_cuts"] = r.n_restart_cuts;
                 d["mode_structure_checks"] = r.mode_structure_checks;
                 d["ideal_loop_releases"] = r.ideal_loop_releases;
                 return d;
