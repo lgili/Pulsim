@@ -773,3 +773,14 @@ moves. The measure, the old one kept beside it, the tests and the triage are in
 - F-X-7's sample 2 ps past each event stays. The engine does not change.
 - A run with no record is graded by `case.exact` itself (the same object): its cells are
   byte-identical. A cell with records carries `n_projected`.
+
+## 14. R5 — 2.1.0 and the integration line merged; the 2026-11-23 decisions implemented (release integrator, 2026-11-25 night)
+
+**Merged:** `feat/core-integration-next` 6f512b6a (41970372) and 49b4bce4 (c31901ad): main at v2.1.0 (sensitivities through events), the typed kernel errors and `diagnostics["messages"]`, the exact engine's output-rule line (projection records, F-X-7's post-event sample, F-Y-3's closed-form window extrema, the referee), the validation closeout. The release keeps its flipped defaults (reviewed, fresh context: none reverted, no incoming code dropped); `[2.1.0]` of the CHANGELOG is the incoming text verbatim, the flip's block sits under `[Unreleased]`; version strings stay 2.1.0.
+
+**Closed by the merge** (run with `--runxfail`, marks removed, `FIXED` entries): F-Y-1 (pwl sensitivities run under restart + split; the counters' truth is n_p (n + 3), the three SDIRK(2,2) start steps adding one stage each), F-Y-3. **Not closed:** F-X-7 (the bus of `bridge3_overlap` now within 3e-2 V of pwl+split, was 39.56 V; the line currents 8.28e-5 A off against 2e-5; the boost DCM V_R on `auto` 28.67 V against 34.302 V). F-5-4 closes on the exact engine only.
+
+**Decisions of 2026-11-23 implemented:**
+- The impulse-energy warning: a cut-set record destroys L i^2 / 2; `simulate()` warns once per run (code `impulse_energy`) when the records remove more than 1e-6 of the largest energy the linear inductors / capacitors store over the run, whatever `dt`; `on_impulse='error'` refuses instead. Nonlinear / magnetic stores are not read (a circuit with none of the linear kinds is not warned: no scale).
+- The C++ twins: `solver::find_implausible_impulse_voltage` judges the largest cut as |lambda| / dt by the same detector; `sim::Simulation::check_voltage_` reads it on the fixed engine; the kernel design evaluator hands a period with a cut-set record (dW > 0) to the Python path.
+- `test_permeance_magnetic`'s default row: 8e-9, three times the measured 2.59e-9, which is the located-event residual (the two formulations' located instants differ by 3.7e-14 s over 199 events, asserted; unsplit the identity holds to 3.5e-12).

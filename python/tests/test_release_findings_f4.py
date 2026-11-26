@@ -243,7 +243,7 @@ def test_f9_every_projection_of_the_parasitic_cluster_is_recorded():
     assert q["amplitude"] == pytest.approx(pm.max()) and q["amplitude"] >= pm[j[0]]
     # the OFF mode's one state: L1 / (R1 + 1/g_off), read from the sine-augmented mode's eigenvalues
     assert q["tau"] == pytest.approx(1e-3 / (10.0 + 1e6), rel=1e-9)
-    off = _no_dt(case)
+    off = _no_dt(case, output_rtol=0)   # release: the rule is the default; 0 = off
     assert "output_grid" not in (off.diagnostics or {})
 
 
@@ -270,7 +270,7 @@ def test_fy3_a_window_max_inside_one_exact_step_is_the_trajectory_peak():
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         on = p.simulate(b, t_end, engine="exact", output_rtol=1e-5, recorders=rec)
-        off = p.simulate(b, t_end, engine="exact", recorders=rec)
+        off = p.simulate(b, t_end, engine="exact", recorders=rec, output_rtol=0)   # release: 0 = off
     w = {k: float(np.asarray(v)[0]) for k, v in on.recorded["r"].windows["v(c)"].items()}
     assert w["max"] == pytest.approx(peak, rel=1e-9)       # the step ends miss it by ~1e-3 V
     assert w["t_max"] == pytest.approx(tp, rel=1e-6)

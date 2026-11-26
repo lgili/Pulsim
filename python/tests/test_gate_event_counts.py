@@ -72,6 +72,9 @@ def test_a_pulse_narrower_than_the_snap_is_counted_and_reported():
     assert c["n_gate_events_unresolved"] == 5
     with warnings.catch_warnings():
         warnings.simplefilter("error")
+        # the subject is the gate count; each 0.2 ns pulse cuts L1's current (two
+        # cut-set records, 9.2e-13 J of 6.5e-12 J stored): the energy warning's
+        warnings.filterwarnings("ignore", message=r".*instantaneous current cut")
         c = _pwl(1e-5).counters
     assert c["n_gate_events"] == EDGES_NARROW
     assert c["n_gate_events_unresolved"] == 0

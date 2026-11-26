@@ -2,13 +2,13 @@
 
 Pulsim models switched devices in two forms:
 
-- **Conductance form** (`form="conductance"`, the current default): a switch or
+- **Conductance form** (`form="conductance"`, the 2.x default; pass it to keep the old numbers): a switch or
   diode stamps a finite conductance `g_on` when closed and `g_off` when open.
   `g_on` must be finite and positive (`g_on = inf` is refused), and opening
   `g_off = 0` across an inductor with no freewheel path causes large numerical
   spikes.
-- **Branch form** (`add_ideal_switch`, or `form="branch"` on `add_switch` /
-  `add_diode`): allocates a dedicated branch-current unknown $i_s$ in the MNA
+- **Branch form** (the default of `add_switch` / `add_diode` since the number-changing
+  release; `add_ideal_switch`): allocates a dedicated branch-current unknown $i_s$ in the MNA
   system (`I(<name>)` in `b.state_var_names()`, read directly via `res.i(name)`).
   Because voltage and current sit in separate equations, `R_on = 0` and
   `g_off = 0` are well-conditioned and exact.
@@ -27,8 +27,8 @@ Use `add_ideal_switch` or pass `form="branch"` to `add_switch` / `add_diode`:
 | Builder call | Defaults (`form="branch"`) | Notes |
 |---|---|---|
 | `b.add_ideal_switch(name, n_pos, n_neg, R_on=0.0, g_off=0.0)` | `R_on=0.0`, `g_off=0.0` | Branch current unknown $i_s$; `R_on = 0` is an ideal 0 V short when closed |
-| `b.add_switch(name, n_pos, n_neg, g_on=None, g_off=None, *, form="conductance", R_on=None)` | `R_on=0.0`, `g_off=0.0` | With `form="branch"`, omit `g_on`/`R_on` for ideal `R_on = 0`, or set `R_on` (or `g_on`, stored as `R_on = 1/g_on`) |
-| `b.add_diode(name, anode, cathode, g_on=None, g_off=None, V_th=0.0, V_f=0.0, *, form="conductance", R_on=None)` | `R_on=0.0`, `g_off=0.0`, `V_th=0.0`, `V_f=0.0` | While ON, $v_{ak} = V_f + R_{\text{on}} i_d$; `V_th` is the turn-on threshold |
+| `b.add_switch(name, n_pos, n_neg, g_on=None, g_off=None, *, form="branch", R_on=None)` | `R_on=0.0`, `g_off=0.0` | With `form="branch"`, omit `g_on`/`R_on` for ideal `R_on = 0`, or set `R_on` (or `g_on`, stored as `R_on = 1/g_on`) |
+| `b.add_diode(name, anode, cathode, g_on=None, g_off=None, V_th=0.0, V_f=0.0, *, form="branch", R_on=None)` | `R_on=0.0`, `g_off=0.0`, `V_th=0.0`, `V_f=0.0` | While ON, $v_{ak} = V_f + R_{\text{on}} i_d$; `V_th` is the turn-on threshold |
 
 In YAML netlists, add `form: branch` directly on `type: switch` or
 `type: diode`:
@@ -94,7 +94,7 @@ mode is structurally singular or unsupported, `simulate()` raises
 |---|---|---|---|
 | `floating_node` | An island of nodes has no path to ground because every boundary element is open with `g_off = 0`. | Two open ideal switches in series, or an ungrounded island bounded solely by OFF `g_off = 0` diodes. | Give at least one boundary element `g_off > 0` (e.g. `1e-9`), or tie the island to ground with a high-value resistor (`1e9` Ω). |
 | `ideal_voltage_loop` | Closed `R_on = 0` elements form a zero-impedance loop with voltage sources (or inductors at DC). | Shoot-through across a voltage rail, parallel closed ideal switches, or an ideal diode forward-biased across a source. | Fix the gate pattern, or add finite `R_on > 0` (or series impedance). |
-| `dependent_states` | A mode closes a capacitor loop (`R_on = 0`) or opens an inductor cut-set (`g_off = 0`), constraining state variables. | `engine="pwl"` run without `discontinuity_restart=True`, or a circuit combining `R_on=0`/`g_off=0` with a nonlinear stateful device (e.g. `SaturableInductor`). | Pass `discontinuity_restart=True` on `pwl` (automatic on `trbdf2`/`dsed`), or use `R_on > 0` and `g_off > 0` with nonlinear stateful models. |
+| `dependent_states` | A mode closes a capacitor loop (`R_on = 0`) or opens an inductor cut-set (`g_off = 0`), constraining state variables. | `engine="pwl"` run with `discontinuity_restart=False` (the restart rule is the default since the number-changing release), or a circuit combining `R_on=0`/`g_off=0` with a nonlinear stateful device (e.g. `SaturableInductor`). | Keep the default `discontinuity_restart=True` on `pwl` (automatic on `trbdf2`/`dsed`), or use `R_on > 0` and `g_off > 0` with nonlinear stateful models. |
 
 Note on loops with ideal diodes: if an ON ideal diode closes a loop with a
 voltage source and closed ideal switches that *reverse-biases* the diode, the

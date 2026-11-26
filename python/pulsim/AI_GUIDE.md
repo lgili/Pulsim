@@ -518,7 +518,6 @@ branches it feeds, each computed independently. On the rectifier of 3.3
 every coulomb from the AC source flows through the diodes into `RL` or
 `C`:
 
-<!-- doctest: xfail reason="release finding F-5-4: an event jump stored without its right limit" -->
 ```python
 t = np.asarray(rect.times)
 q_src = np.trapezoid(np.abs(rect.i("Vac")), t)
@@ -529,7 +528,7 @@ assert abs(q_load - q_src) < 1e-3 * q_src
 ```
 
 ```text
-source 199.1 mC, load 199.4 mC
+source 199.4 mC, load 199.4 mC
 ```
 
 The diode branch currents must close the same balance (`D1`, `D2` feed
