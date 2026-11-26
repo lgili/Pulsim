@@ -1955,6 +1955,11 @@ inline SimulationResult run_transient_trbdf2(
     Size sdirk_left = 0;       // SDIRK restart steps still owed (set below)
     const bool sdirk_ok = opts.sdirk_on_linear_circuits || nl_effective;
     bool sdirk_gate = false;   // the pending restart came from a gate edge
+    // The gate-edge restart's first h at this edge, and the edge whose
+    // restart is retaken there as one L-stable step (see the forced accept)
+    Real edge_h0 = 0, edge_hf = 0, edge_err0 = 0;
+    Real edge_h0_t = std::numeric_limits<Real>::quiet_NaN();
+    Real edge_jump_t = std::numeric_limits<Real>::quiet_NaN();
     // Where and under which mode a gate edge re-solved the slots (x itself
     // is the pre-edge solve): esdirk43's explicit stage may read them.
     Real edge_slots_t = std::numeric_limits<Real>::quiet_NaN();
@@ -3557,6 +3562,44 @@ inline SimulationResult run_transient_trbdf2(
                 return step::Verdict::Reject;
             }
 
+            // A gate-edge restart forced at h_lo whose own Newton solve ended at
+            // the floating-point floor (a roundoff accept): the edge started a mode double
+            // precision cannot track (a saturable L1 + L2 cut-set opened by a
+            // 1 nS switch: tau ~2e-13 s, the node at 1.9e9 V, one ulp 2.4e-7 V
+            // above the absolute dx tolerance). Its estimate is the jump,
+            // h-independent (2.77e8 from 2.8e-7 s down to 2.8e-11 s); chasing
+            // it at h_lo took ~450 forced accepts, every solve a roundoff
+            // accept: 131 in a row, NewtonRoundoffBudgetExceeded. The restart
+            // is retaken ONCE as the L-stable SDIRK step across the impulse,
+            // at the smallest h whose estimate still read the jump alone
+            // (within 10 % of the first: h >> tau, the stages damp the mode to
+            // ~tau/h of the jump), and accepted there, counted as a forced
+            // accept. A mode Newton converges on is resolved as before (a
+            // C_oss / channel loop at 400 V: jumping it dropped 1.7 % of the
+            // conduction energy, its dissipation is in those steps).
+            // shortcut: a loss port does not book this impulse's dissipation
+            // (as at any forced accept); upgrade by routing the jump's energy
+            // as the reinit record does.
+            if (err > Real{1} && sdirk && sdirk_gate && x_edge_t == t && !reinit_step) {
+                if (edge_h0_t != t) {
+                    edge_h0_t = t;
+                    edge_err0 = err;
+                    edge_h0 = edge_hf = h;
+                } else if (err >= Real{0.9} * edge_err0) {
+                    edge_h0 = std::min(edge_h0, h);   // still the jump alone
+                }
+                if (edge_jump_t == t) {
+                    ++st.n_forced_accepts;
+                    return step::Verdict::Accept;
+                }
+                if (h <= h_lo * Real{1.0001} && newton_roundoff.accepted
+                    && edge_h0 < edge_hf && edge_h0 > Real{16} * h) {
+                    edge_jump_t = t;
+                    h = edge_h0;
+                    ++st.n_reject;
+                    return step::Verdict::Reject;
+                }
+            }
             if (err > Real{1} && h <= h_lo * Real{1.0001}) {
                 // Cannot shrink further: accept, but CONFESS —
                 // silence here would be an unbounded-error hole.
