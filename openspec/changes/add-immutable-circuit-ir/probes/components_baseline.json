@@ -337,6 +337,10 @@
   "n": 7,
   "sha": "062aba5ac888454e"
  },
+ "benchmarks/circuits/switching/buck/textbook_erickson_buck_ccm_r5.yaml": {
+  "n": 7,
+  "sha": "7db59d6e2ed5fa76"
+ },
  "benchmarks/circuits/switching/buck/triple_sync_buck.yaml": {
   "n": 22,
   "sha": "363168c8c7442d33"

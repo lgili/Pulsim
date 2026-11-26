@@ -1572,6 +1572,88 @@ def _switch_switching_loss(closed_trace: np.ndarray,
     }
 
 
+def _kernel_loss_records(result) -> Dict[str, Any]:
+    """Map device name -> ``DeviceLossRecord`` for devices tracked by an
+    in-kernel loss port (``CircuitBuilder.set_device_losses``), or ``{}``
+    when the result carries no usable kernel loss records."""
+    recs = getattr(result, "_device_losses", None)
+    if not recs or not callable(getattr(result, "loss_events", None)):
+        return {}
+    return {str(r.device): r for r in recs}
+
+
+def _use_kernel_switching(k_rec: Any, user_spec: Any) -> bool:
+    """Whether to source a device's switching losses from
+    ``result.loss_events`` rather than re-estimating from sampled waveforms.
+
+    Uses the kernel record when its port has an ``E_on`` or ``E_off`` table
+    (a caller's post-hoc spec for that device is then ignored, with a
+    warning). A conduction-only port leaves the device to the post-hoc path:
+    without a spec it reports no switching numbers. ZVS / ZCS runs and zero-valued ``LossTable`` ports
+    set ``has_e_on`` / ``has_e_off`` on ``DeviceLossRecord`` and therefore
+    keep the kernel's ``0.0 J`` result instead of being overwritten.
+    """
+    if k_rec is None:
+        return False
+    has_on = getattr(k_rec, "has_e_on", None)
+    has_off = getattr(k_rec, "has_e_off", None)
+    if has_on is not None or has_off is not None:
+        tables = bool(has_on) or bool(has_off)
+    else:
+        tables = (float(getattr(k_rec, "E_on", 0.0)) > 0.0
+                  or float(getattr(k_rec, "E_off", 0.0)) > 0.0)
+    if tables and user_spec is not None:
+        warnings.warn(
+            f"device_loss_summary: {getattr(k_rec, 'device', '?')!r} has an in-kernel "
+            "loss port with switching tables (set_device_losses); its recorded events "
+            "are used and the post-hoc switch_specs / diode_specs entry is ignored",
+            UserWarning, stacklevel=3)
+    return tables
+
+
+def _kernel_switching_loss(
+    events: np.ndarray,
+    win: "_views.TimeWindow",
+    *,
+    kind: str = "switch",
+) -> Dict[str, Any]:
+    """Aggregate kernel-recorded commutation events (``result.loss_events``)
+    over ``win``.
+
+    Events belong to the window when ``win.a <= ev["t"] < win.b`` — the
+    same half-open rule as ``TimeWindow.starts_inside`` and
+    :func:`impulse_losses`, so adjacent windows partition the events
+    without double-counting and a resumed run's inherited pre-split
+    events are excluded automatically.
+    """
+    if events.size:
+        t_ev = events["t"]
+        ev = events[(t_ev >= win.a) & (t_ev < win.b)]
+    else:
+        ev = events
+    is_on = ev["kind"] == "on"
+    is_off = ev["kind"] == "off"
+    n_on = int(np.count_nonzero(is_on))
+    n_off = int(np.count_nonzero(is_off))
+    E_on = float(math.fsum(ev["E"][is_on])) if n_on else 0.0
+    E_off = float(math.fsum(ev["E"][is_off])) if n_off else 0.0
+    E_total = E_on + E_off
+    T = win.span if win.times_full.size > 1 else 0.0
+    if kind == "diode":
+        f_sw = (float(n_off) / T) if T > 0 else 0.0
+    else:
+        f_sw = (float(n_on + n_off) / (2.0 * T)) if T > 0 else 0.0
+    return {
+        "E_sw_on_total": E_on,
+        "E_sw_off_total": E_off,
+        "E_sw_total": E_total,
+        "P_sw_avg": (E_total / T) if T > 0 else 0.0,
+        "n_turn_on_events": n_on,
+        "n_turn_off_events": n_off,
+        "f_sw_estimate": f_sw,
+    }
+
+
 def _resolve_core_material(spec: Mapping[str, Any]) -> Any:
     """Pull a ``CoreMaterial`` out of a core_loss_specs entry. Accepts
     either ``{"material": "<catalog-name>"}`` or
@@ -1805,6 +1887,15 @@ def device_loss_summary(
       recorded stamped mask; without a record, ``switch_fn`` is
       re-evaluated (with a warning), and without either the switch
       entry is skipped (kept honest — no silent default).
+    * **in-kernel loss ports** (``CircuitBuilder.set_device_losses``) —
+      when ``result`` carries kernel commutation records
+      (``result.loss_events(name)``), switching counts and energies
+      (``E_sw_on_total``, ``E_sw_off_total``, ``E_sw_total``,
+      ``P_sw_avg``, ``n_turn_on_events``, ``n_turn_off_events``,
+      ``f_sw_estimate``) are read directly from those records over
+      ``[t_from, t_to)`` rather than re-estimated from sampled
+      waveforms, even when ``switch_specs`` / ``diode_specs`` are
+      omitted. Circuits without ``set_device_losses`` are unaffected.
     * **ideal branch form** (``form='branch'``, ``R_on = 0``) — the solved
       branch current and ``v · i`` (``form='branch'``; 0 W of conduction),
       and always the impulsive category ``E_impulse_total`` /
@@ -2131,6 +2222,10 @@ def device_loss_summary(
                 "energies are not modelled by device_loss_summary yet. Drop "
                 "the entry, or use reverse_blocking=False for the IGBT.")
 
+    # Kernel loss-port records (add-in-kernel-event-losses task 5.1):
+    # empty dict when the circuit has no set_device_losses ports.
+    kernel_loss_records = _kernel_loss_records(result)
+
     # The kernel's per-sample record of the stamped mask (None for a
     # result that carries none) and each switch-kind branch's bit.
     kernel_masks, _ = _views.recorded_switch_states(result, builder)
@@ -2211,7 +2306,11 @@ def device_loss_summary(
             entry["duty_conducting" if kind == "diode" else "duty_closed"] = _duty(closed)
             spec = (switch_by_bid.get(bid) or switch_by_name.get(entry["name"])
                     if kind == "switch" else None)
-            if spec is not None:
+            k_rec = kernel_loss_records.get(entry["name"])
+            if _use_kernel_switching(k_rec, spec):
+                entry.update(_kernel_switching_loss(
+                    result.loss_events(entry["name"]), win, kind=kind))
+            elif spec is not None:
                 closed_s = closed
                 if masks_s is not None and masks_s is not kernel_masks:
                     closed_s = np.asarray(masks_s[:, bit], dtype=bool)
@@ -2223,9 +2322,18 @@ def device_loss_summary(
                     impulse_t=imp_t, name=entry["name"],
                     projected_limits=getattr(result, "engine_used", None) == "dsed"))
         else:
+            spec = (switch_by_bid.get(bid) or switch_by_name.get(entry["name"])
+                    if kind == "switch" else None)
+            if _use_kernel_switching(kernel_loss_records.get(entry["name"]), spec):
+                # the loss port's events need no mask
+                entry.update(_kernel_switching_loss(
+                    result.loss_events(entry["name"]), win, kind=kind))
+                left = "its duty is"
+            else:
+                left = "its duty and switching energy are"
             warnings.warn(
                 f"device_loss_summary: ideal {kind} {entry['name']!r} has no recorded "
-                "mask in this result: its duty and switching energy are left out.",
+                f"mask in this result: {left} left out.",
                 RuntimeWarning, stacklevel=3)
         ignored = [k for k, by_bid, by_name in (
             ("conduction_specs", cond_by_bid, cond_by_name),
@@ -2485,12 +2593,16 @@ def device_loss_summary(
                 entry["E_cond_model"] = E_m
                 entry["V_f0"] = V_f0
                 entry["r_on"] = r_on
-            # Optional datasheet reverse-recovery loss: the turn-offs
-            # of the whole run (V_R and Q_F need the samples after and
-            # before each one), those whose t_off is inside the window.
+            # Switching / reverse-recovery loss: read kernel loss_events
+            # when present (set_device_losses); otherwise use post-hoc
+            # diode_specs on the whole run, filtered to the window.
             d_spec = (diode_by_bid.get(bid)
                       or diode_by_name.get(name))
-            if d_spec is not None:
+            k_rec = kernel_loss_records.get(name)
+            if _use_kernel_switching(k_rec, d_spec):
+                entry.update(_kernel_switching_loss(
+                    result.loss_events(name), win, kind="diode"))
+            elif d_spec is not None:
                 t_rr = _recovery_time(d_spec, name)
                 offs = _diode_turn_offs(
                     d_trace, times, t_rr=t_rr, other_flip=d_flip,
@@ -2527,7 +2639,28 @@ def device_loss_summary(
                     kernel_masks is not None
                     and 0 <= sw_bit < kernel_masks.shape[1]):
                 # No recorded mask and no switch_fn: no way to know the
-                # per-step state.
+                # per-step state, so no conduction. A loss port's events
+                # need no mask: its switching energy is still measured,
+                # and the conduction reads NaN by name, never 0 J.
+                k_rec = kernel_loss_records.get(name)
+                s_spec = switch_by_bid.get(bid) or switch_by_name.get(name)
+                if _use_kernel_switching(k_rec, s_spec):
+                    nan = float("nan")
+                    entry = {"branch_id": int(bid), "kind": "switch",
+                             "name": name, "i_avg": nan, "i_rms": nan,
+                             "i_peak": nan, "P_avg": nan, "E_total": nan,
+                             "not_measured": ("conduction",)}
+                    entry.update(_kernel_switching_loss(
+                        result.loss_events(name), win, kind="switch"))
+                    summary.append(entry)
+                    warnings.warn(
+                        f"device_loss_summary: switch {name!r}: its conduction "
+                        "is not measured (NaN): the result carries no record "
+                        "of the stamped switch mask and switch_fn= was not "
+                        "given. Its switching energy is read from the loss "
+                        "port's events.", RuntimeWarning, stacklevel=2)
+                    switch_seq_idx += 1
+                    continue
                 warnings.warn(
                     f"device_loss_summary: switch {name!r} is left out: the "
                     "result carries no record of the stamped switch mask and "
@@ -2584,7 +2717,11 @@ def device_loss_summary(
                 entry["r_on"] = r_on
             s_spec = (switch_by_bid.get(bid)
                       or switch_by_name.get(name))
-            if s_spec is not None:
+            k_rec = kernel_loss_records.get(name)
+            if _use_kernel_switching(k_rec, s_spec):
+                entry.update(_kernel_switching_loss(
+                    result.loss_events(name), win, kind="switch"))
+            elif s_spec is not None:
                 entry.update(
                     _switch_switching_loss(closed, times, v_SW,
                                             i_SW, s_spec,

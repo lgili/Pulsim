@@ -124,6 +124,7 @@ circuits:
   circuits/switching/buck/sync_buck_500khz.yaml: {status: runs}
   circuits/switching/buck/synchronous_buck.yaml: {status: runs}
   circuits/switching/buck/textbook_erickson_buck_ccm.yaml: {status: runs}
+  circuits/switching/buck/textbook_erickson_buck_ccm_r5.yaml: {status: runs}
   circuits/switching/buck/triple_sync_buck.yaml: {status: runs}
   circuits/switching/buck_boost/bidirectional_buck_boost.yaml: {status: runs}
   circuits/switching/buck_boost/buck_boost.yaml: {status: runs}

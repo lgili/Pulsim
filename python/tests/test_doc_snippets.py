@@ -91,6 +91,7 @@ DOC_FILES = [
     REPO_ROOT / "python" / "pulsim" / "AI_GUIDE.md",
     REPO_ROOT / "README.md",
     REPO_ROOT / "docs" / "getting-started.md",
+    REPO_ROOT / "docs" / "ideal-switch.md",
     REPO_ROOT / "docs" / "index.md",
     REPO_ROOT / "docs" / "migration-guide.md",
     REPO_ROOT / "docs" / "known-limitations.md",

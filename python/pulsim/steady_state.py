@@ -213,6 +213,11 @@ def steady_state(builder, *, period: float, dt: float | None = None,
 
     if dt is None:
         from .periodic_steady_state import periodic_steady_state
+        ctrl_kw = {}
+        for k in ("closed_loops", "step_observer", "controller_period",
+                  "control"):
+            if k in simulate_kwargs:
+                ctrl_kw[k] = simulate_kwargs.pop(k)
         if simulate_kwargs:
             raise ValueError(
                 "steady_state without dt runs periodic_steady_state on "
@@ -221,7 +226,7 @@ def steady_state(builder, *, period: float, dt: float | None = None,
                 "the fixed engine.")
         return periodic_steady_state(builder, period=period,
                                      switch_fn=switch_fn,
-                                     start_from=start_from)
+                                     start_from=start_from, **ctrl_kw)
     if not (period > 0):
         raise ValueError(f"steady_state: period must be > 0, "
                           f"got {period!r}")

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import pickle
 import warnings
+from dataclasses import dataclass
 
 import numpy as np
 import pytest
@@ -329,3 +330,103 @@ def test_trbdf2_resumes_off_a_groups_grid_on_that_grid():
     p.simulate(b, 1e-3, engine="trbdf2", step_observer=obs, switch_fn=sw,
                resume_from=first.final_snapshot)
     assert list(ch._cxx_chain.tick_counts())[1:] == [10, 4]   # [0]: every call
+
+
+# ------------------------------------------- frozen dataclass / tuple cells
+# _mutable_cell (shared by resume, sweep and periodic_steady_state's hidden
+# state rule) searches a frozen dataclass's fields and a tuple's items: a
+# block over a frozen config of floats is pure, so it resumes and sweeps
+# (before: refused as a closure over an object), and a list inside a tuple
+# is state (before: let through, the second segment / point continued it).
+# Truth: the uninterrupted run, and a fresh standalone run per point.
+
+@dataclass(frozen=True)
+class _Band:
+    ref: float
+    on: float
+    off: float
+
+
+_BAND = _Band(ref=12.0, on=1.0, off=0.0)
+
+
+def _over_frozen(cfg):
+    def f(x):
+        return cfg.on if x < cfg.ref else cfg.off
+    return f
+
+
+def _bang_bang(b, fn):
+    ch = p.MixedDomainBlockChain(rate=p.Rate(1e-5))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        ch.add("f", p.PythonBlock(fn), inputs=dict(x="node:out"), output="y")
+    obs = ch.make_step_observer(b)
+    gate = ch.make_pwm_switch_fn("y", num_switches=b.graph.num_switches,
+                                 switch_idx=b.switch_index_of("Q"))
+    return dict(step_observer=obs, switch_fn=gate)
+
+
+def _run(b, t_end, ctl, **kw):
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return p.simulate(b, t_end, dt=DT, **ctl, **kw)
+
+
+def test_resume_of_a_block_over_a_frozen_config_continues_the_run():
+    t1, t2 = 1.53e-3, 3e-3
+    bf = _buck()
+    full = _run(bf, t2, _bang_bang(bf, _over_frozen(_BAND)))
+    b = _buck()
+    ctl = _bang_bang(b, _over_frozen(_BAND))
+    first = _run(b, t1, ctl)
+    _run(b, 2.2e-3, ctl)                                   # between
+    second = _run(b, t2, ctl, resume_from=first.final_snapshot)
+    j = b.node_id_of("out")
+    xf, xs = np.asarray(full.states), np.asarray(second.states)
+    assert xs[-1, j] == pytest.approx(xf[-1, j], rel=1e-9)
+    # not a dead loop: one sits at 0 V (gate held off) or at V_in (held on),
+    # both > 10 V from the 12 V reference; a regulating band stays within
+    # its per-tick swing of it
+    assert abs(xf[-1, j] - 12.0) < 1.0
+
+
+def test_resume_of_a_block_over_a_list_inside_a_tuple_is_refused():
+    box = ([0],)
+
+    def f(x):
+        box[0][0] += 1
+        return 1.0 if x < 12.0 else 0.0
+    b = _buck()
+    ctl = _bang_bang(b, f)
+    first = _run(b, 1e-3, ctl)
+    with pytest.raises(p.UnsupportedError) as e:
+        _run(b, 2e-3, ctl, resume_from=first.final_snapshot)
+    assert e.value.feature == "controller_state" and "'f'" in str(e.value)
+
+
+def test_a_sweep_of_a_block_over_a_frozen_config_restarts_it_per_point():
+    def kw(b):
+        j = b.node_id_of("out")
+        return dict(**_bang_bang(b, _over_frozen(_BAND)),
+                    kpi_fn=lambda r, d: {"v": float(np.asarray(r.states)[-1, j])})
+    v = _sweep("factory", kw=kw).kpis["v"]
+    for R, v_k in zip(GRID, v):
+        b = _buck(R)
+        ref = _run(b, 1e-3, _bang_bang(b, _over_frozen(_BAND)))
+        assert v_k == pytest.approx(
+            float(np.asarray(ref.states)[-1, b.node_id_of("out")]), rel=1e-12), R
+    assert v[0] != v[1]
+
+
+def test_a_sweep_of_a_block_over_a_list_inside_a_tuple_is_refused():
+    def kw(b):
+        box = ([0],)
+
+        def f(x):
+            box[0][0] += 1
+            return 1.0 if x < 12.0 else 0.0
+        return dict(**_bang_bang(b, f), kpi_fn=lambda r, d: {})
+    with pytest.raises(p.UnsupportedError) as e:
+        _sweep("factory", kw=kw)
+    assert e.value.feature == "controller_state" and "'f'" in str(e.value)
