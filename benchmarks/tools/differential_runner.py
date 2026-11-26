@@ -168,7 +168,7 @@ class Trace(tuple):
 def traces(res, cols):
     """``(t, {col: y}, switch record or None)``, every jump two-sided."""
     raw = res
-    res = with_right_limits(res)
+    res = with_right_limits(res, collapse=True)   # a record's collapse at t_e+, as the engine took it
     t = np.asarray(res.times, dtype=float)
     tr = Trace((t, {c: np.asarray(v1_reader.observable(res, c), dtype=float) for c in cols},
                 switch_record(res, t)))

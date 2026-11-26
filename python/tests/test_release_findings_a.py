@@ -174,7 +174,8 @@ def _psfb_vout(primary, on_grid=False, **kw):
     """The output voltage v(vout) - v(rect_neg). The secondary floats: its common mode is
     set by the diodes' g_off leaks alone (mV, rounding), not a circuit quantity.
     ``on_grid``: every gate edge moved to the grid point the restart rule without the
-    split takes it at (the gate read at t_k - dt/100 acts over (t_{k-1}, t_k])."""
+    split takes it at: the gate read at t_k - 0.5001 dt acts over (t_{k-1}, t_k], so an edge
+    takes effect at the nearer grid point (a tie at mid-step: the end)."""
     b = _psfb(primary)
     sw = p.make_phase_shift_full_bridge_fn(
         switching_frequency=100e3, phase_shift=1.0, leg_a_hs_idx=0, leg_a_ls_idx=1,
@@ -183,7 +184,7 @@ def _psfb_vout(primary, on_grid=False, **kw):
         dt, sw0 = kw["dt"], sw
 
         def sw(t):   # an opaque function: the split bisects its changes onto the grid
-            return sw0(dt * np.ceil(t / dt - 1e-9) - dt / 100)
+            return sw0(dt * np.ceil(t / dt - 1e-9) - 0.5001 * dt)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         res = p.simulate(b, t_end=0.2e-3, switch_fn=sw, **kw)
@@ -218,6 +219,8 @@ def test_f37_saturable_psfb_runs_under_the_restart_rule(selector):
     # plain run takes them at; measured 6e-5 apart on the saturable - linear difference,
     # 3e-6 V on v_out). The old pin (the split's own difference, rel 0.05) held only
     # while the plain run took an off-grid edge on the ceil side (0.008827 vs 0.008123).
+    # The reference samples the gate where the engine does (t_k - 0.5001 dt): a t_k - dt/100
+    # reference put leg B's edges on the far side (d 0.008974 vs 0.008124).
     plain = dict(RESTART, mode_selection=selector, enable_substep_state_correction=False)
     d = _psfb_vout("saturable", dt=50e-9, **plain) - _psfb_vout("linear", dt=50e-9, **plain)
     d_ref = (_psfb_vout("saturable", True, dt=50e-9, **split)

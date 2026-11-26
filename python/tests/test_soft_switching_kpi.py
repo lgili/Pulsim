@@ -55,7 +55,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-import pulsim
+import pulsim._result_views as rv
 
 mp = pytest.importorskip("mpmath")
 pytest.importorskip("yaml")
@@ -95,16 +95,17 @@ KNOWN_PWL = {   # (ZVS / turn-on voltage, switching energy): the first assertion
 }
 
 
-# Known since the restart-line merge: its right-limit row at a turn-on is the model's own x(t_e+)
-# (C_oss voltage continuous, the ~0.3 ps collapse only recorded: fixes/restart-right-limit.md),
-# with the channel's ON current; the KPI's trapezoid carries that row across the whole next step,
-# while the truth's first point is the post-collapse state (03ba952a's row was post-collapse).
-_RL = ("known: the restart rule's right-limit row at a ZVS turn-on is pre-collapse (v_DS -1.14 mV, "
-       "i -1.14 A at the LLC's 8 us edge; post-collapse -0.569 mV), and the trapezoid carries it over "
-       "the next 10 ns step; measured: {}")
+# The restart rule's right-limit row at a turn-on is the model's own x(t_e+) (C_oss voltage continuous,
+# the ~0.3 ps collapse recorded); _engine_trace adds the record's post-collapse row one ulp later
+# (with_right_limits(collapse=True)), so the trapezoid no longer carries the pre-collapse row over the next step (LLC S_hi was +12 %,
+# PSFB S1 +29 %; now -0.34 % / -0.03 %). The PSFB's lagging leg: see the xfail's numbers.
 KNOWN_RESTART = {
-    "llc_half_bridge_zvs": _RL.format("S_hi energy 7.874e-11 J vs the truth's trapezoid 7.025e-11 J (+12 %)"),
-    "psfb_full_bridge_zvs": _RL.format("S1 energy 7.379e-10 J vs the truth's trapezoid 5.701e-10 J (+29 %)"),
+    "psfb_full_bridge_zvs": ("known: the restart rule's lagging-leg energy reads low; measured: S3 energy "
+                             "3.051e-11 J vs the truth's trapezoid 3.380e-11 J (-10 %; exact 3.178e-11, -4 %). "
+                             "The engine's grid rows meet the truth to <= 5 uV; the reader's collapse row "
+                             "holds the step's END state (-3.63e-4 V at 8.00 us+, truth's post-collapse "
+                             "~-5.6e-4 V) over the first step after each turn-on: S3 turn-ons -2.8 / -4.1 / "
+                             "-8.6 % per event at 8 / 18 / 28 us; the post-collapse x(t_e+) + J is not exported"),
 }
 
 
@@ -138,7 +139,9 @@ def _engine_trace(case, engine):
     kw = dict(ENGINES[engine])
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        r = pulsim.with_event_limits(v1_reader.load(path).run(kw.pop("engine"), **kw))
+        r = v1_reader.load(path).run(kw.pop("engine"), **kw)
+        # a reinit record's collapse at t_e+, as the engine ran the step (not a line from x(t_e+))
+        r = rv.with_right_limits(rv.with_inner_events(r), collapse=True)
     obs = lambda c: np.asarray(v1_reader.observable(r, c), dtype=float)[1:]  # noqa: E731
     return (np.asarray(r.times, dtype=float)[1:],
             {s: (obs(g) > 0.5, obs(v), obs(f"I({s})")) for s, g, v in sws})
@@ -280,3 +283,26 @@ def test_trbdf2_keeps_the_psfb_consistent_start():
         r = v1_reader.load(CASES["psfb_full_bridge_zvs"][0]).run("trbdf2")
     t, v = np.asarray(r.times), np.asarray(r.v("b"))
     assert np.max(np.abs(v[t < 1e-9] - 400.0)) < 1.0
+
+
+def test_collapse_rows_follow_each_record_step():
+    """with_right_limits(collapse=True): after a record's step start (with or
+    without a right-limit row there) one row holding the step's end sample;
+    times strictly increasing, every per-row array the same length."""
+    import types
+    from pulsim._result_views import with_right_limits
+    t = np.array([0.0, 1.0, 2.0, 3.0, 4.0])
+    st = np.arange(10.0).reshape(5, 2)
+    sw = np.array([[0], [1], [0], [1], [0]], dtype=bool)
+    rec = lambda k: types.SimpleNamespace(sample=k, t=t[k - 1])  # noqa: E731
+    r = types.SimpleNamespace(times=t, states=st, switch_states=sw, right_limit_index=np.array([1]),
+                              right_limit_states=np.array([[-1.0, -1.0]]),
+                              right_limit_switch_states=np.array([[1]], dtype=bool),
+                              reinit_records=[rec(2), rec(4)])   # steps (1, 2] (right limit at 1) and (3, 4]
+    v = with_right_limits(r, collapse=True)
+    assert np.all(np.diff(v.times) > 0) and len(v.times) == len(v.states) == len(v.switch_states) == 8
+    assert v.times[2] == np.nextafter(1.0, np.inf) and v.states[2].tolist() == [-1.0, -1.0]
+    assert v.times[3] == np.nextafter(v.times[2], np.inf) and v.states[3].tolist() == st[2].tolist()
+    assert v.times[6] == np.nextafter(3.0, np.inf) and v.states[6].tolist() == st[4].tolist()
+    assert v.switch_states[3].tolist() == sw[2].tolist()
+    assert len(with_right_limits(r).times) == 6   # without collapse: one row per right limit
