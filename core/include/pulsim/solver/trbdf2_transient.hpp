@@ -111,6 +111,7 @@
 #include "pulsim/solver/step/esdirk43.hpp"
 #include "pulsim/solver/step/integrators.hpp"
 #include "pulsim/solver/step/sensitivity.hpp"
+#include "pulsim/solver/step/source_accumulator.hpp"
 #include "pulsim/solver/step/stepper.hpp"
 #include "pulsim/solver/run_transient.hpp"   // combine_masks, SimulationAborted
 #include "pulsim/sources/pwm_b_extra.hpp"
@@ -720,38 +721,14 @@ inline SimulationResult run_transient_trbdf2(
         }
     }
 
-    // Built-in time-varying source census + reusable buffers
-    // (same pattern as run_transient).
-    bool has_pwm = false, has_sine = false, has_pulse = false;
-    for (Index b_id = 0; b_id < graph.num_branches(); ++b_id) {
-        if (graph.branch(b_id).kind != topology::BranchKind::Source) {
-            continue;
-        }
-        switch (pool.kind_of(b_id)) {
-        case pwl::DevicePool::StoredKind::PWMVoltageSource:
-            has_pwm = true; break;
-        case pwl::DevicePool::StoredKind::SineVoltageSource:
-            has_sine = true; break;
-        case pwl::DevicePool::StoredKind::PulseVoltageSource:
-            has_pulse = true; break;
-        default: break;
-        }
-    }
-    Vector be_pwm, be_sine, be_pulse, b_src, b_stage, x_g, x_1,
-        x_trial;
-    std::vector<std::pair<Index, Index>> sine_vars;   // (branch, source row)
-    for (Index b_id = 0; b_id < graph.num_branches(); ++b_id) {
-        const auto& br = graph.branch(b_id);
-        if (br.kind == topology::BranchKind::Source
-            && pool.kind_of(br.id)
-                   == pwl::DevicePool::StoredKind::SineVoltageSource) {
-            sine_vars.emplace_back(br.id,
-                                   pool.branch_var_id_for_source(br.id, graph));
-        }
-    }
-    const bool has_iwave =
-        sources::has_current_waveform_sources(pool, graph);
-    Vector be_iwave;
+    // The built-in sources' rows (refactor-unified-transient-stepper
+    // group 1): step::SourceAccumulator, shared with run_transient and the
+    // DSED adapter. Its per-row `0 + (−v)` adds equal the dense per-kind
+    // passes this replaced bit for bit: `out` is a zeroed buffer plus
+    // b_extra_fn, never −0.0 (DECISIONS 21).
+    step::SourceAccumulator src_acc{pool, graph};
+    Vector b_src, b_stage, x_g, x_1, x_trial;
+    const bool has_iwave = src_acc.has_current_waveforms();
 
     // Source-only overlay at time `at_t` (no history terms).
     auto accumulate_sources = [&](Real at_t, Vector& out) {
@@ -759,31 +736,7 @@ inline SimulationResult run_transient_trbdf2(
         if (b_extra_fn) {
             out += b_extra_fn(at_t);
         }
-        if (has_pwm) {
-            sources::compute_pwm_b_extra(pool, graph, at_t, be_pwm);
-            out += be_pwm;
-        }
-        if (has_sine) {
-            // compute_sine_b_extra's arithmetic on the sine branches found
-            // once (it scanned every branch with a pool lookup per call:
-            // 9 % of the bridge rectifier's run time).
-            be_sine.setZero(static_cast<Index>(state_size));
-            for (const auto& [b_id, var] : sine_vars) {
-                be_sine[var] += -models::SineVoltageSource::value_at(
-                    pool.sine_voltage_source_params(b_id), at_t);
-            }
-            out += be_sine;
-        }
-        if (has_pulse) {
-            sources::compute_pulse_b_extra(pool, graph, at_t,
-                                            be_pulse);
-            out += be_pulse;
-        }
-        if (has_iwave) {
-            sources::compute_current_waveform_b_extra(pool, graph, at_t,
-                                                      be_iwave);
-            out += be_iwave;
-        }
+        src_acc.add(pool, graph, out, at_t, Real{0});
         if (lt) lt->inject(out);   // the heat owed, on every solve
         if (lines) lines->inject(out, at_t);   // the waves tau ago (D18)
     };

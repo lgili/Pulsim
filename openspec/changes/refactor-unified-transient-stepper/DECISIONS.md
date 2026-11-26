@@ -986,3 +986,27 @@ says where the implementation departs from them or what it settled.
     slice ran; its `python/tests/test_recorders.py:21-22` skips trbdf2
     in-loop feeds under PULSIM_TRBDF2_STEPPER_LEGACY=1, a variable nothing
     reads after this slice: delete those two lines when merging.
+
+21. **Groups 0–1 (2026-11-26): the baseline is the branch point; only the
+    source terms are shared.** Baseline recorded on `400011ee`
+    (`feat/core-integration-next`), not on `main` (the integration tree is
+    where these engines live; DECISIONS 2): the compare suites of
+    DECISIONS 20 (goldens with counters, stateful, engines, step
+    sequences, seam, pwl identity 399 cells, trbdf2 identity 380 cells,
+    DSED bit identity default + shadow, AC, residuals, recorders, loss,
+    sensitivity, PSS, exact outputs), instructions per accepted step
+    (`h/instr1.py`, LTO off both sides) for the cost and the peak RSS of
+    one `python/bindings.cpp` compile for the build. DECISIONS 7 stands
+    for the WHOLE right-hand side: the three callers keep their own
+    association of history, `b_extra_fn` and sources. What is one
+    implementation now is the source part, `step::SourceAccumulator`
+    (`solver/step/source_accumulator.hpp`): the fixed engine's per-row
+    `b[row] += 0 + (−v)` lists, which the fixed engine had already proved
+    equal to the dense per-kind passes (update-fixed-step-loop-
+    bookkeeping). The TR-BDF2 overlay and the DSED adapter's
+    `build_time_varying_b_extra_` drop their dense passes for it; equal
+    bit for bit because their target is a zeroed buffer (plus
+    `b_extra_fn` on TR-BDF2), never −0.0, so `b + (+0.0)` on the rows a
+    source does not own was always the identity. The fixed engine's
+    current-waveform adds (one of them subtracts) stay on the dense helper
+    they already shared with the other two.

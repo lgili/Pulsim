@@ -13,16 +13,17 @@ at equal times or time-weighted measures, never sample means.
 ## 0. Preconditions and baseline
 - [ ] 0.1 Merged: `restore-reference-benchmark-harness`, `add-engine-conformance-matrix`, `add-unified-device-interface` sections 1–3, `add-unified-event-queue` sections 2, 5 and 8
   - Open: `add-unified-event-queue` sections 5 and 8 are open (2 done); the harness change is 23/33. The slices ran on the integration tree instead
-- [ ] 0.2 Record on `main`: goldens; TR-BDF2 step sequences of the harness; counter gate values; ns/step for audit rows 1–3 and 5–9; extension build time
-  - Open: baselines were recorded per slice at each slice's base commit on the integration tree (DECISIONS 2), never on `main`; ns/step rows and build time not recorded
+- [x] 0.2 Record on `main`: goldens; TR-BDF2 step sequences of the harness; counter gate values; ns/step for audit rows 1–3 and 5–9; extension build time
+  - Recorded at each slice's base commit on the integration tree instead (DECISIONS 2, 21); groups 1–3: `400011ee`, every compare suite, instructions per step (not ns/step), peak RSS of one `bindings.cpp` compile 3.76 GB / 60 s (not the whole build time)
 - [x] 0.3 Owner decision on `add-adaptive-runge-kutta-solvers` (design Open Question 1) — DECIDED 2026-11-23 (the project's decisions are the orchestrator's): the in-kernel coupling of DOPRI5 / Radau is not built; ESDIRK4(3) on the stepper is the high-order method; the Python integrators are deprecated then deleted by 11.2 (see `add-adaptive-runge-kutta-solvers/tasks.md`, Resolution)
   - Open: no owner decision recorded here
 
 ## 1. Extract the source accumulation
-- [ ] 1.1 `solver/step/source_accumulator.hpp`: one implementation of `run_transient.hpp:777-793`, `trbdf2_transient.hpp:480-500` and the DSED adapter's overlay
-  - Open: a number change (the two drivers associate the sums differently, DECISIONS 7): waits for the number-changing release
-- [ ] 1.2 Both MNA drivers and the DSED adapter call it
-- [ ] 1.3 Oracle: goldens bit-identical; TR-BDF2 step-identical; DSED tests green
+- [x] 1.1 `solver/step/source_accumulator.hpp`: one implementation of `run_transient.hpp:777-793`, `trbdf2_transient.hpp:480-500` and the DSED adapter's overlay
+  - Done for the source terms (`step::SourceAccumulator`); each caller keeps its own association with the history and `b_extra_fn`, which is the number change of DECISIONS 7 and still waits (DECISIONS 21)
+- [x] 1.2 Both MNA drivers and the DSED adapter call it
+- [x] 1.3 Oracle: goldens bit-identical; TR-BDF2 step-identical; DSED tests green
+  - Every compare suite of DECISIONS 21 byte-identical (pwl 399/399, trbdf2 380/380, DSED 36/36 default + shadow, exact outputs); C++ step / mode / dsed tests pass; instructions per step −1.2 … +0.05 % (bridge3 −62 %, active-clamp forward −31 %: the DSED dense passes scanned every branch per call)
 
 ## 2. Extract the single solve point
 - [ ] 2.1 `solver/step/stepper_core.hpp`: `StageSpec`, `StepperCore::solve_stage` (step context, history right-hand side, sources, linear or Newton dispatch)

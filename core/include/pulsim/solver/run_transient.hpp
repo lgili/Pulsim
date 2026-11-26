@@ -65,6 +65,7 @@
 #include "pulsim/solver/step/integrators.hpp"
 #include "pulsim/solver/step/stepper.hpp"
 #include "pulsim/solver/step/sensitivity.hpp"
+#include "pulsim/solver/step/source_accumulator.hpp"
 #include "pulsim/solver/unsupported.hpp"
 #include "pulsim/sources/pulse_b_extra.hpp"
 #include "pulsim/sources/current_waveform_b_extra.hpp"
@@ -1476,68 +1477,23 @@ inline SimulationResult run_transient(
     // PWM/sine/pulse helpers otherwise allocate + zero a state-size vector AND
     // scan every branch on every step; detect ONCE which kinds the circuit
     // contains, then reuse buffers and skip absent kinds in the hot loops.
-    // update-fixed-step-loop-bookkeeping: the (branch, row) lists are
-    // built once, in the branch order of the dense passes, and each step
-    // writes its rows directly. `b[row] += (0 + (−v))` is the dense pass's
-    // `out[row] += −v` on a zeroed buffer followed by `b += out`, bit for
-    // bit; the rows a source does not own skip `b + (+0.0)`, which only
-    // differs from `b` for a −0.0 entry (checked by byte comparison).
-    using SrcRows = std::vector<std::pair<Index, Index>>;
-    SrcRows pwm_rows, sine_rows, pulse_rows;
-    for (Index b_id = 0; b_id < graph.num_branches(); ++b_id) {
-        const auto& br = graph.branch(b_id);
-        if (br.kind != topology::BranchKind::Source) {
-            continue;
-        }
-        switch (pool.kind_of(br.id)) {
-        case pwl::DevicePool::StoredKind::PWMVoltageSource:
-            pwm_rows.emplace_back(br.id,
-                pool.branch_var_id_for_source(br.id, graph)); break;
-        case pwl::DevicePool::StoredKind::SineVoltageSource:
-            sine_rows.emplace_back(br.id,
-                pool.branch_var_id_for_source(br.id, graph)); break;
-        case pwl::DevicePool::StoredKind::PulseVoltageSource:
-            pulse_rows.emplace_back(br.id,
-                pool.branch_var_id_for_source(br.id, graph)); break;
-        default:
-            break;
-        }
-    }
+    // The (branch, row) lists and the per-row adds live in
+    // step::SourceAccumulator (refactor-unified-transient-stepper group 1),
+    // shared with the TR-BDF2 engine and the DSED adapter; this engine keeps
+    // its own association with the history and b_extra_fn (DECISIONS 7, 21).
+    step::SourceAccumulator src_acc{pool, graph};
     // add-controlled-source-set: sine / pulse / table current sources
     // (node rows, two per source: kept on the dense helper).
-    const bool has_iwave =
-        sources::has_current_waveform_sources(pool, graph);
+    const bool has_iwave = src_acc.has_current_waveforms();
     Vector be_iwave;
-    const bool has_pwm = !pwm_rows.empty();
-    const bool has_pulse = !pulse_rows.empty();
+    const bool has_pwm = src_acc.has_pwm();
+    const bool has_pulse = src_acc.has_pulse();
     // `src_t`: PWM/pulse sample time; `sine_t`: the sine's; `lb`: a
     // jumping source at `src_t` reads value_at(src_t − lb) (as the dense
     // passes did).
     auto add_source_rows = [&](Vector& b, Real src_t, Real sine_t,
                                Real lb) {
-        const auto read_t = [&](Index id) {
-            const bool jumps = lb > Real{0} &&
-                sources::source_jumps_at(pool, id, src_t);
-            // src_t != sine_t: a jump snapped to the step end; only the
-            // source that jumps there is re-timed (review: a ramped
-            // pulse was read up to 0.01 dt early).
-            if (src_t != sine_t && !jumps) {
-                return sine_t;
-            }
-            return jumps ? src_t - lb : src_t;
-        };
-        for (const auto& [id, row] : pwm_rows) {
-            b[row] += Real{0} + -models::PWMVoltageSource::value_at(
-                pool.pwm_voltage_source_params(id), read_t(id));
-        }
-        for (const auto& [id, row] : sine_rows) {
-            b[row] += Real{0} + -models::SineVoltageSource::value_at(
-                pool.sine_voltage_source_params(id), sine_t);
-        }
-        for (const auto& [id, row] : pulse_rows) {
-            b[row] += Real{0} + -models::PulseVoltageSource::value_at(
-                pool.pulse_voltage_source_params(id), read_t(id));
-        }
+        src_acc.add_voltage_rows(pool, b, src_t, sine_t, lb);
     };
 
     // Is a smaller step even capable of helping? Reachability to

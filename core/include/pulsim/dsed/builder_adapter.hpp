@@ -43,6 +43,7 @@
 #include "pulsim/events/mode_selector.hpp"
 #include "pulsim/pwl/cache.hpp"
 #include "pulsim/pwl/device_pool.hpp"
+#include "pulsim/solver/step/source_accumulator.hpp"
 #include "pulsim/solver/unsupported.hpp"
 #include "pulsim/sources/pulse_b_extra.hpp"
 #include "pulsim/sources/current_waveform_b_extra.hpp"
@@ -2085,13 +2086,11 @@ private:
     [[nodiscard]] const Vector& build_time_varying_b_extra_(Real t, Real left_by = Real{0}) const {
         if (bx_valid_ && t == bx_t_ && left_by == bx_left_) return bx_;
         Vector& b = bx_;
-        sources::compute_pwm_b_extra(pool_, graph_, t, b, left_by);
-        b += sources::compute_sine_b_extra(pool_, graph_, t);
-        Vector& w = bx_w_;
-        sources::compute_pulse_b_extra(pool_, graph_, t, w, left_by);
-        b += w;
-        sources::compute_current_waveform_b_extra(pool_, graph_, t, w, left_by);
-        b += w;
+        // step::SourceAccumulator (refactor-unified-transient-stepper
+        // group 1): the per-kind dense passes' sums bit for bit on a zeroed
+        // buffer (DECISIONS 21); b_extra_fn last, as before.
+        b.setZero(static_cast<Index>(pool_.state_size(graph_)));
+        src_acc_.add(pool_, graph_, b, t, left_by);
         if (b_extra_fn_) {
             b += b_extra_fn_(t);
         }
@@ -2100,7 +2099,7 @@ private:
         bx_valid_ = !b_extra_fn_;
         return b;
     }
-    mutable Vector bx_, bx_w_;
+    mutable Vector bx_;
     mutable Real bx_t_ = Real{0}, bx_left_ = Real{0};
     mutable bool bx_valid_ = false;
 
@@ -2172,6 +2171,8 @@ private:
 
     const topology::Graph&    graph_;
     const pwl::DevicePool&    pool_;
+    // after graph_ / pool_: its initializer reads them
+    mutable step::SourceAccumulator src_acc_{pool_, graph_};
     pwl::PwlStateSpaceCache&  cache_;
     std::vector<ReinitRecord> reinit_log_;
     std::function<Vector(Real)> b_extra_fn_;
