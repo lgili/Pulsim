@@ -40,8 +40,11 @@ DP = 0.3                                    # duty of the B cases
 SA, SF, SC, SR2, SRL = 10.0, 1e3, 10e-6, 20.0, 100.0   # C: half-wave rectifier
 
 ENGINES = {
-    "pwl": ("pwl", {}),
-    "pwl+restart": ("pwl", dict(discontinuity_restart=True)),
+    # release: the restart rule and event splitting are the default, so each
+    # column names its configuration explicitly (the table was taken on 2.1.0)
+    "pwl": ("pwl", dict(discontinuity_restart=False)),
+    "pwl+restart": ("pwl", dict(discontinuity_restart=True,
+                                enable_substep_state_correction=False)),
     "pwl+split": ("pwl", dict(discontinuity_restart=True,
                               enable_substep_state_correction=True)),
     "trbdf2": ("trbdf2", dict(rtol=1e-10, atol=1e-13)),
