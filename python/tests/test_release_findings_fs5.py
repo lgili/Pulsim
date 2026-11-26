@@ -284,24 +284,23 @@ def test_roundoff_heavy_reference_circuit_runs_on_trbdf2(name, kw):
 
 
 # ------------- case A at a tight tolerance: the chatter floor (gate-edge line) --
-# Closed form 62.8335 uJ. At rtol 1e-8 the first steps after the 1 us hard
-# turn-on (Sh into a conducting Dl across C_oss, tau ~1 ps) exhaust the chatter
-# guard on Dl; h is then floored at h_chatter = 2.2e-13 s for 1e3 h_chatter,
-# and the transient is crossed by forced accepts (174 on trbdf2; 14f: 4).
-# Measured on the gate-edge merge: trbdf2 63.0154 uJ (+0.29 %; 14f 62.8368),
-# esdirk43 63.0065 uJ (+0.27 %; 14f 63.0082: the same floor, already there).
-# rtol 1e-7, 1e-9 and 1e-10 read the same 63.0154 / 63.008. The defaults
-# moved toward the truth (trbdf2 62.8490 -> 62.8386).
-# A REGRESSION against 2.1.0 (origin/main ec08e98e, same script): trbdf2 rtol
-# 1e-7 / 1e-8 / 1e-9 read 62.8372 / 62.8368 / 62.8367 there (4 forced
-# accepts, no chatter break); esdirk43 62.8414 / 63.0082 / 62.8368. Seen on
-# the line: the edge's post-edge samples keep Dl ON (mask 1001) for two
-# samples, then Dl chatters (2 breaks) and h sits at h_chatter (0.22 ps).
-@pytest.mark.xfail(strict=True, reason="open (regression vs 2.1.0): chatter-floor forced "
-                   "accepts through the C_oss transient at rtol <= 1e-7 (+0.29 % trbdf2, "
-                   "+0.27 % esdirk43; 2.1.0 +0.005 %)")
+# Closed form 62.8335 uJ (it leaves out the load current's cross term in Sh
+# during the transient, 10 A x the excess drop: a 1-D ODE of the same circuit,
+# Radau rtol 1e-13, gives 62.83666 uJ). After the 1 us hard turn-on (Sh into
+# a conducting Dl across C_oss, tau ~1 ps) the post-edge restart started
+# from the pre-edge x, where the Dl the settle turned OFF sits at
+# v_D = 0.71 V > V_f for 30 as: a first step shorter than the probe read that
+# as a crossing back, Dl chattered (2 breaks), h sat at h_chatter (0.22 ps)
+# and 174 forced accepts crossed the transient: 63.0154 uJ (+0.29 %) on
+# trbdf2 at rtol 1e-7 / 1e-8 / 1e-9 (2.1.0: 62.8372 / 62.8368 / 62.8367),
+# esdirk43 63.0081 / 63.0065 / 63.0081 (2.1.0: 62.8414 / 63.0082 / 62.8368).
+# Now (edge_layer, the probe from the controller's step, the edge sample's
+# right limit): trbdf2 62.8373 / 62.8368 / 62.8367, esdirk43 62.8415 /
+# 62.8377 / 62.8369.
+@pytest.mark.parametrize("rtol", [1e-7, 1e-8, 1e-9])
 @pytest.mark.parametrize("eng", list(ENGINES))
-def test_hard_turn_on_energy_at_a_tight_tolerance(eng):
-    b, fn, r = _run(eng, rtol=1e-8)
+def test_hard_turn_on_energy_at_a_tight_tolerance(eng, rtol):
+    b, fn, r = _run(eng, rtol=rtol)
     e = _window_loss(b, fn, r, 1e-6 - 2e-9, 1e-6 + 20e-9)
-    assert e == pytest.approx(_e_hard_A(2e-9, 20e-9), rel=1e-3)
+    assert r._trbdf2_stats["n_chatter_breaks"] == 0
+    assert e == pytest.approx(_e_hard_A(2e-9, 20e-9), rel=2.5e-4)

@@ -17,11 +17,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   aborts with `NewtonRoundoffBudgetExceeded` at tight tolerance: the restart is retaken once as
   one L-stable step across the impulse.
 - Sensitivities through a gate edge follow the consistent post-edge start.
-
-### Known limitations
-- Case A hard turn-on (soft-switching validation) at rtol <= 1e-7 reads +0.29 % (trbdf2) /
-  +0.27 % (esdirk43) against its closed form; 2.1.0 read +0.005 % there (a regression of this
-  change, open).
+- A hard turn-on into a conducting freewheel diode (soft-switching case A, rtol 1e-8): the diode
+  the edge turned off no longer turns back on inside the first attoseconds (it chattered and the
+  turn-on energy read +0.27 % on esdirk43, in 2.1.0 too); trbdf2 / esdirk43 now 62.8368 /
+  62.8377 uJ against an ODE truth of 62.8367 uJ. A trbdf2 result now carries the gate edge's
+  right limit (`right_limit_index` / `right_limit_states`) on circuits with a stateful device, so
+  the sampled loss integral starts the first post-edge step from the post-edge powers.
 
 ## [2.1.0] - 2026-11-25
 

@@ -1967,6 +1967,10 @@ inline SimulationResult run_transient_trbdf2(
     Real edge_slots_t = std::numeric_limits<Real>::quiet_NaN();
     Vector x_edge;   // the edge's probe: the next step's Newton warm start
     Real x_edge_t = std::numeric_limits<Real>::quiet_NaN();
+    // The diodes a gate edge left on their forbidden side at x (decided bit
+    // + 1, 0: none) and the end of the span the settle decided them over
+    std::vector<char> edge_layer;
+    Real edge_layer_t1 = -std::numeric_limits<Real>::infinity();
     SwitchStateMask edge_slots_m;
     auto restart_after_gate_event = [&](bool settled, Real t_gates,
                                         Real hp, bool commit) {
@@ -2116,6 +2120,30 @@ inline SimulationResult run_transient_trbdf2(
             sdirk_left = std::max(sdirk_left, Size{1});
             sdirk_gate = true;
         }
+        // The settle decided the diodes on the probe at t + dtp; the restart
+        // starts from x at t. A diode the edge leaves on its FORBIDDEN side
+        // at x (case A, a hard turn-on into a conducting Dl: OFF at
+        // v_D = 0.71 V > V_f = 0.7 V, back below V_f 30 as later) read a
+        // first step shorter than dtp as a crossing back and turned on
+        // again: chatter, h floored at h_chatter, 174 forced accepts, the
+        // turn-on energy +0.29 % (2.1.0, which committed the probe, +0.005 %).
+        // Such a diode keeps the settle's bit over [t, t + dtp] (the span the
+        // probe decided it on; 2.1.0 committed it there): its crossing test
+        // is skipped on a step that starts in it and ends on the allowed side
+        // or inside it. (A floor h >= dtp instead forced a 1 ps step across
+        // the C_oss buck's 0.6 ps loop: its conduction energy +0.06 -> +0.32 %.)
+        edge_layer.assign(has_diodes ? diodes.entries().size() : 0, 0);
+        edge_layer_t1 = -std::numeric_limits<Real>::infinity();
+        if (!lin) {
+            for (Size d = 0; d < edge_layer.size(); ++d) {
+                const Real sx = detail_trbdf2::crossing_signal(diodes, d, x);
+                if (detail_trbdf2::forbidden(diodes, d, sx)
+                    && std::abs(sx) > detail_trbdf2::held_tolerance(diodes, d, x)) {
+                    edge_layer[d] = diodes.entries()[d].is_on ? 2 : 1;   // the decided bit + 1
+                    edge_layer_t1 = t_plus;
+                }
+            }
+        }
         x_edge = x_trial;
         x_edge_t = t;
         // x is the pre-edge solve and the slots are the probe's on both
@@ -2139,6 +2167,31 @@ inline SimulationResult run_transient_trbdf2(
         x_sig = x_trial;
         gates_decided = m_probe;
         drop_superseded_event_sample(t);
+        // The edge sample's RIGHT limit (result.right_limit_*, as the fixed
+        // engine's restart steps record it): the probe under the new mode.
+        // Without it the record integrates [t, t + dtp] from the left
+        // limit: case A's Sh turns on at P0 = 1.6e8 W and P0 dtp / 2 was
+        // lost (0.022 uJ at rtol 1e-9, 0.12 uJ at the defaults' 1.5 fs).
+        // shortcut: the SDIRK path only (a stateful kind and a mode change);
+        // a linear circuit's TR-BDF2 restart keeps the left limit there.
+        if (!lin && !result.times.empty() && result.times.back() == t) {
+            const Size nb = static_cast<Size>(graph.num_switches());
+            result.has_event_limits = true;
+            result.event_limit_width = static_cast<Size>(x_trial.size());
+            result.event_limit_switches = nb;
+            const Size k = result.times.size() - 1;
+            if (!result.right_limit_index.empty() && result.right_limit_index.back() == k) {
+                result.right_limit_index.pop_back();   // a second restart at t: the last one
+                result.right_limit_states.resize(result.right_limit_states.size() - x_trial.size());
+                result.right_limit_switch_bits.resize(result.right_limit_switch_bits.size() - nb);
+            }
+            result.right_limit_index.push_back(k);
+            result.right_limit_states.insert(result.right_limit_states.end(),
+                                             x_trial.data(), x_trial.data() + x_trial.size());
+            for (Size b = 0; b < nb; ++b) {
+                result.right_limit_switch_bits.push_back(m_probe.get(b) ? 1 : 0);
+            }
+        }
         push_time(t_plus, "post-edge");
         result.states.push_back(x_trial);
         result.event_iteration_count.push_back(0);
@@ -3753,6 +3806,13 @@ inline SimulationResult run_transient_trbdf2(
                     // bridge, 318k steps for 40 ms.
                     const Real tol_d = detail_trbdf2::held_tolerance(
                         diodes, d, x_1);
+                    // a diode in the edge's layer (see edge_layer)
+                    if (t < edge_layer_t1 && edge_layer[d] != 0
+                        && (edge_layer[d] == 2) == diodes.entries()[d].is_on
+                        && (!detail_trbdf2::forbidden(diodes, d, s1)
+                            || t + h <= edge_layer_t1)) {
+                        continue;
+                    }
                     const bool crossed =
                         ((s0 > Real{0}) != (s1 > Real{0})
                          || (s0 > Real{0}) != (sg > Real{0}))
@@ -4517,8 +4577,13 @@ inline SimulationResult run_transient_trbdf2(
                     // The probes pin (v, i) via a tiny-dt trap and
                     // ask which diodes conduct under the post-edge
                     // mask; nothing is committed.
-                    const Real h_probe =
-                        std::max(h_probe_floor, h * Real{1e-6});
+                    // A stateful kind: from the step the controller chose, not
+                    // the landing's remainder (case A, esdirk43 rtol 1e-8: a
+                    // 22 ps remainder gave a 22 as probe, still inside the
+                    // 30 as where the conducting Dl's forbidden side is
+                    // ambiguous; it decided Dl ON, then chattered).
+                    const Real h_probe = std::max(
+                        h_probe_floor, (hs.any() ? std::max(h, h_ctrl) : h) * Real{1e-6});
                     bool settled = false;
                     if (has_diodes) {
                         const std::vector<bool> bits0 = diodes.snapshot_on_bits();
