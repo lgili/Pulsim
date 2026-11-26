@@ -161,14 +161,10 @@ def _buck(L=100e-6, R=50.0, C=47e-6, Vin=24.0):
 
 
 @pytest.mark.parametrize("engine,kw", [
-    pytest.param("pwl", dict(dt=ref.T / 1000, enable_substep_state_correction=True,
-                             discontinuity_restart=True), marks=pytest.mark.xfail(
-        strict=True, raises=p.UnsupportedError,
-        reason="OPEN (DECISIONS 16, merge onto the PR line): the restart's "
-               "consistent start (jump series) moves the state at the turn-off at "
-               "29.524 T (cut-set record of L, 1.7e-10 V*s, 1.5e-16 J); dJ/dp is "
-               "not carried, refused by name. It was a number (within 1e-5) "
-               "before the jump series existed")),
+    # was OPEN (DECISIONS 16: the restart's jump at 29.524 T refused dJ/dp);
+    # carried since the sensitivities-through-events merge (2.1.0, R6)
+    ("pwl", dict(dt=ref.T / 1000, enable_substep_state_correction=True,
+                 discontinuity_restart=True)),
     ("trbdf2", dict(rtol=1e-10, atol=1e-13)),
     pytest.param("trbdf2", dict(rtol=1e-9, atol=1e-12), marks=pytest.mark.xfail(
         strict=True, raises=p.UnsupportedError,
@@ -191,7 +187,8 @@ def test_unlocated_diode_event_on_pwl_is_refused_naming_the_diode():
     """6.3: the fixed engine without event splitting refuses a diode event,
     naming the diode: the event sits on the grid (a staircase in p)."""
     with pytest.raises(p.UnsupportedError) as ei:
-        _run(_diode_on(), T_END_ON, "pwl", dt=1e-7, sensitivities=["C.C"])
+        _run(_diode_on(), T_END_ON, "pwl", dt=1e-7, sensitivities=["C.C"],
+             enable_substep_state_correction=False)   # the split is the default
     assert (ei.value.engine, ei.value.feature) == ("pwl", "sensitivities")
     assert "'D' turns ON" in str(ei.value)
     assert "enable_substep_state_correction" in str(ei.value)
@@ -203,7 +200,7 @@ def test_unlocated_duty_edge_on_pwl_is_refused():
                               b.graph.num_switches)
     with pytest.raises(p.UnsupportedError) as ei:
         _run(b, 0.8 * TP, "pwl", dt=1e-6, switch_fn=sf,
-             sensitivities=["S.duty"])
+             sensitivities=["S.duty"], enable_substep_state_correction=False)
     assert "staircase" in str(ei.value)
 
 
