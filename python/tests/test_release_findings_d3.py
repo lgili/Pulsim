@@ -206,9 +206,11 @@ def test_run_resumed_at_and_after_a_gate_edge_meets_the_quadrature():
 # across the impulse) needs a roundoff-accepted Newton solve at h_lo: it fires
 # at g_off <= 1e-8 (node >= 1.8e8 V) and not at g_off >= 1e-7 (tau >= 5e-11 s),
 # where the mode is resolved and its energy booked (trbdf2 +1.5e-3 / +1.8e-3
-# rel at rtol 1e-8 / defaults; 2.1.0 -1.7e-2). Where it fires the sampled
-# loss reads E_S = 4.0e-2 J against 8.2e-4 J (the post-edge probe sample at
-# 1.9e9 V starts the jump step's trapezoid): the strict xfail below.
+# rel at rtol 1e-8 / defaults; 2.1.0 -1.7e-2). Where it fires the jump step
+# books its energy as an "edge_jump" re-initialisation record (the edge's
+# probe sample at 1.9e9 V and right limit withdrawn): E_S = E_total +
+# E_impulse_total reads 8.2114e-4 J for 8.1995e-4 J (+1.4e-3; before the
+# record 4.0e-2 J). The window covers the jump step (>= 1 ns).
 _TE = 2e-4
 
 
@@ -232,9 +234,10 @@ def _cut_set_goff(goff, **kw):
     j = j if t[j] == _TE else j - 1
     di = np.asarray(r.i("L1"))[j] - np.asarray(r.i("L2"))[j]
     tau = 0.5e-3 * goff
-    e = [x for x in device_loss_summary(b, r, switch_fn=fn, t_from=_TE,
-                                        t_to=_TE + min(40 * tau, 1e-6))
-         if x["name"] == "S"][0]["E_total"]
+    s = [x for x in device_loss_summary(b, r, switch_fn=fn, t_from=_TE,
+                                        t_to=_TE + min(max(40 * tau, 1e-9), 1e-6))
+         if x["name"] == "S"][0]
+    e = s["E_total"] + s.get("E_impulse_total", 0.0)   # the jump's record
     return e, 0.5 * 0.5e-3 * di ** 2, r._trbdf2_stats["n_forced_accepts"]
 
 
@@ -249,11 +252,6 @@ def test_jump_rule_does_not_fire_on_a_resolvable_lossy_mode(goff, kw):
     assert abs(e / truth - 1) < (2.5e-2 if kw.get("integrator") else 2.5e-3)
 
 
-@pytest.mark.xfail(strict=True, reason="open: where the jump rule fires (g_off 1e-9, "
-                   "node 1.9e9 V) the sampled loss of S reads 4.0e-2 J against "
-                   "1/2 Leq di^2 = 8.2e-4 J (2.1.0: 9.4e-5 J, or NewtonRoundoffBudget"
-                   "Exceeded at rtol 1e-8); the jump's energy is not routed as a "
-                   "re-initialisation record yet")
 def test_jump_rule_books_the_impulse_energy():
     e, truth, n_forced = _cut_set_goff(1e-9)
     assert n_forced == 1

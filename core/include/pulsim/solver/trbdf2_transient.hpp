@@ -1969,10 +1969,84 @@ inline SimulationResult run_transient_trbdf2(
     Real edge_slots_t = std::numeric_limits<Real>::quiet_NaN();
     Vector x_edge;   // the edge's probe: the next step's Newton warm start
     Real x_edge_t = std::numeric_limits<Real>::quiet_NaN();
+    SwitchStateMask edge_mask0 = initial_mask;   // the mode before that edge (jump record's cause)
     // The diodes a gate edge left on their forbidden side at x (decided bit
     // + 1, 0: none) and the end of the span the settle decided them over
     std::vector<char> edge_layer;
     Real edge_layer_t1 = -std::numeric_limits<Real>::infinity();
+    // The forced jump step (the verdict's edge_jump_t) dissipates the mode
+    // it damps; no stored sample resolves it, so its energy is booked as a
+    // re-initialisation record (kind "edge_jump", caused by the edge's gated
+    // switch). The loss views book the step's conduction as its end power
+    // times h (the reinit partition), so dW = what the step dissipates beyond
+    // that = sum over the stored states of E(start) - E(end) + h p(end)
+    // (Tellegen at the end state: the sources' and resistors' work over h at
+    // their end power; saturable L: trapezoid of i dλ). The cut-set of the d3
+    // tests: E(start) - E(end) = 1/2 Leq di^2 (+1.2e-3), h p(end) -1.1e-4 J
+    // (the mode's residue at the step's end, booked by its end power).
+    // shortcut: a capacitor's h p(end) is left out (its end current is no
+    // unknown), and a circuit with any other stateful kind gets no record;
+    // upgrade with a stored-energy law and end power per kind.
+    auto edge_jump_record = [&](const Vector& xa, const Vector& xb, Real t0, Real hj,
+                                const SwitchStateMask& m) -> std::optional<solver::ReinitRecord> {
+        if (!pool.transformer_couplings().empty()) return std::nullopt;
+        using SK = pwl::DevicePool::StoredKind;
+        auto vb = [&](const Vector& xv, Index b) {
+            const auto& br = graph.branch(b);
+            return stamping::read_node_voltage(xv, br.from)
+                - stamping::read_node_voltage(xv, br.to);
+        };
+        solver::ReinitRecord rec;
+        rec.t = t0;
+        rec.kind = "edge_jump";
+        long s = -1;
+        for (Index b = 0; b < graph.num_branches(); ++b) {
+            if (graph.branch(b).kind == topology::BranchKind::Switch) ++s;
+            if (!pool.is_registered(b)) continue;
+            Real dw = 0;
+            switch (pool.kind_of(b)) {
+            case SK::Inductor: {
+                const Index v = pool.branch_var_id_for_inductor(b, graph);
+                dw = Real{0.5} * pool.inductor_params(b).L
+                    * (xa[v] * xa[v] - xb[v] * xb[v]) + hj * vb(xb, b) * xb[v];
+                break;
+            }
+            case SK::SaturableInductor: {
+                const Index v = pool.branch_var_id_for_inductor(b, graph);
+                const auto& p = pool.saturable_inductor_params(b);
+                dw = Real{0.5} * (xa[v] + xb[v])
+                    * (models::SaturableInductor::flux(xa[v], p)
+                       - models::SaturableInductor::flux(xb[v], p))
+                    + hj * vb(xb, b) * xb[v];
+                break;
+            }
+            case SK::Capacitor: {
+                const Real a = vb(xa, b), c = vb(xb, b);
+                dw = Real{0.5} * pool.capacitor_params(b).C * (a * a - c * c);
+                break;
+            }
+            case SK::Resistor: case SK::VoltageSource: case SK::Switch: case SK::Diode:
+            case SK::NonlinearDiode: case SK::CurrentSource: case SK::PWMVoltageSource:
+            case SK::SineVoltageSource: case SK::PulseVoltageSource: case SK::VCVS:
+            case SK::ShockleyDiode: case SK::IdealTransformer: case SK::VCCS: case SK::CCCS:
+            case SK::CCVS: case SK::Gyrator: case SK::SineCurrentSource:
+            case SK::PulseCurrentSource: case SK::PwlCurrentSource:
+                if (s >= 0 && graph.branch(b).kind == topology::BranchKind::Switch
+                    && pool.kind_of(b) != SK::Diode
+                    && m.get(static_cast<Size>(s)) != edge_mask0.get(static_cast<Size>(s))) {
+                    rec.devices.emplace_back(graph.branch_name(b));
+                }
+                continue;
+            default:
+                return std::nullopt;   // a stateful kind without a stored-energy law here
+            }
+            if (dw != Real{0}) rec.states.emplace_back(graph.branch_name(b));
+            rec.dW += dw;
+        }
+        if (!(rec.dW > 0) || rec.devices.empty()) return std::nullopt;
+        rec.cause = rec.devices.front();
+        return rec;
+    };
     SwitchStateMask edge_slots_m;
     auto restart_after_gate_event = [&](bool settled, Real t_gates,
                                         Real hp, bool commit) {
@@ -2155,6 +2229,7 @@ inline SimulationResult run_transient_trbdf2(
         }
         x_edge = x_trial;
         x_edge_t = t;
+        edge_mask0 = x_mask;
         // x is the pre-edge solve and the slots are the probe's on both
         // paths: a snapshot taken before the next commit (a cancel stop)
         // must say so (post_edge_derivatives), or a resume reads the
@@ -4553,6 +4628,22 @@ inline SimulationResult run_transient_trbdf2(
                 q_live = true;
                 if (structure.active()) x_pre = x;
                 const Real t_pre = t;
+                // the jump step runs from the pre-edge solve x at the edge:
+                // its record replaces the edge's probe sample and right limit
+                // (their 1.9e9 V would start the step's line, 4.0e-2 J for
+                // the 8.2e-4 J the record books)
+                auto jump_rec = edge_jump_t == t
+                    ? edge_jump_record(x, x_1, t, h, mask_step) : std::nullopt;
+                if (jump_rec) {
+                    drop_superseded_event_sample(t);
+                    const Size k = result.times.size() - 1;
+                    if (!result.right_limit_index.empty() && result.right_limit_index.back() == k) {
+                        result.right_limit_index.pop_back();
+                        result.right_limit_states.resize(result.right_limit_states.size() - x.size());
+                        result.right_limit_switch_bits.resize(result.right_limit_switch_bits.size()
+                                                              - graph.num_switches());
+                    }
+                }
                 x = x_1;
                 x_sig = x;
                 // a landed step ends ON its instant (h was set from it)
@@ -4590,6 +4681,11 @@ inline SimulationResult run_transient_trbdf2(
                     reinit.record(structure, mask_step, x_pre, x, t_pre,
                                   static_cast<long>(result.times.size()) - 1,
                                   opts.on_impulse_error, "trbdf2", result);
+                    if (lt) lt->impulses(result.reinit_records);
+                }
+                if (jump_rec) {
+                    jump_rec->sample = static_cast<long>(result.times.size()) - 1;
+                    result.reinit_records.push_back(std::move(*jump_rec));
                     if (lt) lt->impulses(result.reinit_records);
                 }
                 x_mask = mask_step;
