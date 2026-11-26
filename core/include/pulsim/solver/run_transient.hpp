@@ -64,6 +64,7 @@
 #include "pulsim/solver/step/controllers.hpp"
 #include "pulsim/solver/step/integrators.hpp"
 #include "pulsim/solver/step/stepper.hpp"
+#include "pulsim/solver/step/stepper_core.hpp"
 #include "pulsim/solver/step/sensitivity.hpp"
 #include "pulsim/solver/step/source_accumulator.hpp"
 #include "pulsim/solver/unsupported.hpp"
@@ -314,9 +315,9 @@ inline SimulationResult run_transient(
 
         if (b_extra_fn) {
             const Vector b_extra = b_extra_fn(t);
-            cache.solve(mask, b_extra, x);
+            cache.solve(mask, b_extra, x);   // solve-exempt: V0 overload (task 11.1)
         } else {
-            cache.solve(mask, zero_b_extra, x);
+            cache.solve(mask, zero_b_extra, x);   // solve-exempt: V0 overload (task 11.1)
         }
 
         // Record the sample. `x` is copied into the result so the
@@ -1412,7 +1413,7 @@ inline SimulationResult run_transient(
                     const auto sc = mode_ports->scale(mode_x0);
                     d.settle_consistent = pwl::judge_mode(
                         diodes, mode_settled, x, sc, mode_selector.tol, &d.settle_violation);
-                    cache.solve_at(combine_masks(gates, mode_mask_of(sel.on), diode_owned),
+                    cache.solve_at(combine_masks(gates, mode_mask_of(sel.on), diode_owned),   // factor-reuse
                                    for_dt, bx, mode_xj);
                     d.lcp_consistent = pwl::judge_mode(
                         diodes, sel.on, mode_xj, sc, mode_selector.tol, &d.lcp_violation);
@@ -3166,7 +3167,7 @@ inline SimulationResult run_transient(
                 history.compute_b_extra_backward_euler(e, rl_h);
                 b_extra = rl_bs + rl_h;
                 if (lin) {
-                    cache.solve_at(stamped_mask, Real{2} * e, b_extra, x);
+                    cache.solve_at(stamped_mask, Real{2} * e, b_extra, x);   // solve-exempt: restart-line re-solve (DECISIONS 22)
                 } else {
                     x = rl_x1;
                     rei(t_from + e, Real{2} * e, true, true);
@@ -4575,19 +4576,68 @@ inline SimulationResult run_transient(
             // ones by construction).
             // The linear solve of a site under `mask` (the loop's own branches).
             auto mode_solve = [&](const topology::SwitchStateMask& mask,
-                                  Real for_dt, bool be, Vector& out) {
+                                  Real for_dt, bool be, Vector& out) PULSIM_STEP_PHASE {
                 if (restart_rule && (for_dt == restart_dt || be)) {
                     const auto m0 = cache.metrics();
-                    cache.solve_at(mask, for_dt, b_extra, out);
+                    cache.solve_at(mask, for_dt, b_extra, out);   // solve-point
                     const auto m1 = cache.metrics();
                     restart_factorizations += static_cast<Size>(
                         (m1.event_builds - m0.event_builds) +
                         (m1.event_refactors - m0.event_refactors));
                 } else if (for_dt == opts.dt && for_dt == cache.dt()) {
-                    cache.solve_segment(nominal_segment(mask), b_extra, out);
+                    cache.solve_segment(nominal_segment(mask), b_extra, out);   // solve-point
                 } else {
-                    cache.solve_at(mask, for_dt, b_extra, out);
+                    cache.solve_at(mask, for_dt, b_extra, out);   // solve-point
                 }
+            };
+            // The single solve point of the event iteration (refactor-unified-
+            // transient-stepper group 2): x under `mask`, linear through
+            // mode_solve, else Newton (warm-started from x). `step_ctx` is set
+            // by run_event_iteration before its first solve.
+            auto solve_point = [&](const topology::SwitchStateMask& mask,
+                                   Real for_dt, bool backward_euler) PULSIM_STEP_PHASE {
+                (void)step::dispatch_solve(
+                    static_cast<bool>(nl_refresh_effective),
+                    [&]() PULSIM_STEP_PHASE { mode_solve(mask, for_dt, backward_euler, x); },
+                    [&]() PULSIM_STEP_PHASE {
+                        if (for_dt == opts.dt && !newton_only_rows) {
+                            const auto& seg = nominal_segment(mask);
+                            sens_J_lin = &seg.J;
+                            x = pwl::solve_with_newton_b_extra(   // solve-point
+                                seg, nl_refresh_effective, graph, pool,
+                                /*x_init=*/x, b_extra,
+                                opts.max_newton_iterations,
+                                opts.tol_newton_dx,
+                                opts.tol_newton_res,
+                                opts.enable_newton_line_search,
+                                opts.enable_newton_lm,
+                                &newton_ws, &newton_roundoff);
+                            note_roundoff();
+                        } else {
+                            // Off-nominal dt: assemble the companion
+                            // system for this step size. No factorization
+                            // is wasted — Newton refactorizes
+                            // J_lin + J_nl every iteration anyway, so the
+                            // segment is only a carrier for J and b.
+                            pwl::assemble_segment(
+                                graph, pool, mask, for_dt,
+                                retry_seg.J, retry_seg.b_constant);
+                            sparse::compress_in_place(retry_seg.J);
+                            retry_seg.state_size = state_size;
+                            sens_J_lin = &retry_seg.J;
+                            x = pwl::solve_with_newton_b_extra(   // solve-point
+                                retry_seg, nl_refresh_effective, graph,
+                                pool, /*x_init=*/x, b_extra,
+                                opts.max_newton_iterations,
+                                opts.tol_newton_dx,
+                                opts.tol_newton_res,
+                                opts.enable_newton_line_search,
+                                opts.enable_newton_lm,
+                                &newton_ws, &newton_roundoff);
+                            note_roundoff();
+                        }
+                        return true;
+                    });
             };
 
             auto run_event_iteration = [&](Real at_t, Real for_dt,
@@ -4707,63 +4757,7 @@ inline SimulationResult run_transient(
                     mask_cycle = true;
                     break;
                 }
-                if (nl_refresh_effective) {
-                    if (for_dt == opts.dt && !newton_only_rows) {
-                        const auto& seg = nominal_segment(mask);
-                        sens_J_lin = &seg.J;
-                        x = pwl::solve_with_newton_b_extra(
-                            seg, nl_refresh_effective, graph, pool,
-                            /*x_init=*/x, b_extra,
-                            opts.max_newton_iterations,
-                            opts.tol_newton_dx,
-                            opts.tol_newton_res,
-                            opts.enable_newton_line_search,
-                            opts.enable_newton_lm,
-                            &newton_ws, &newton_roundoff);
-                        note_roundoff();
-                    } else {
-                        // Off-nominal dt: assemble the companion
-                        // system for this step size. No factorization
-                        // is wasted — Newton refactorizes
-                        // J_lin + J_nl every iteration anyway, so the
-                        // segment is only a carrier for J and b.
-                        pwl::assemble_segment(
-                            graph, pool, mask, for_dt,
-                            retry_seg.J, retry_seg.b_constant);
-                        sparse::compress_in_place(retry_seg.J);
-                        retry_seg.state_size = state_size;
-                        sens_J_lin = &retry_seg.J;
-                        x = pwl::solve_with_newton_b_extra(
-                            retry_seg, nl_refresh_effective, graph,
-                            pool, /*x_init=*/x, b_extra,
-                            opts.max_newton_iterations,
-                            opts.tol_newton_dx,
-                            opts.tol_newton_res,
-                            opts.enable_newton_line_search,
-                            opts.enable_newton_lm,
-                            &newton_ws, &newton_roundoff);
-                        note_roundoff();
-                    }
-                } else {
-                    // `solve_at` delegates to `solve` bit-identically
-                    // when the dt matches, so the nominal path costs
-                    // nothing extra.
-                    // Every restart stage counts, the split's sub-interval
-                    // stages (dt_eq = 2γ·h_sub) included (review L8b).
-                    if (restart_rule && (for_dt == restart_dt || backward_euler)) {
-                        const auto m0 = cache.metrics();
-                        cache.solve_at(mask, for_dt, b_extra, x);
-                        const auto m1 = cache.metrics();
-                        restart_factorizations += static_cast<Size>(
-                            (m1.event_builds - m0.event_builds) +
-                            (m1.event_refactors - m0.event_refactors));
-                    } else if (for_dt == opts.dt && for_dt == cache.dt()) {
-                        // == solve_at's delegation to solve(mask, …)
-                        cache.solve_segment(nominal_segment(mask), b_extra, x);
-                    } else {
-                        cache.solve_at(mask, for_dt, b_extra, x);
-                    }
-                }
+                solve_point(mask, for_dt, backward_euler);
                 // The mask x was just solved under — what the
                 // stored sample records (a mask cycle breaks out
                 // BEFORE re-solving, so this stays the last solve).
@@ -6068,7 +6062,7 @@ inline SimulationResult run_transient(
             if (diodes.num_gated() > 0) gated_prev_stamp = stamped_mask;
             const bool mode_site_s = mode_ports.has_value() && !nl_refresh_effective;
             auto solve_s = [&](const topology::SwitchStateMask& m, Vector& out) {
-                cache.solve_segment(nominal_segment(m), b_extra_user, out);
+                cache.solve_segment(nominal_segment(m), b_extra_user, out);   // solve-exempt: static path (DECISIONS 22)
             };
             if (mode_site_s) mode_begin();
             if (mode_site_s && opts.mode_selection == 2) {
@@ -6098,7 +6092,7 @@ inline SimulationResult run_transient(
                 }
                 if (nl_refresh_effective) {
                     const auto& seg = nominal_segment(mask);
-                    x = pwl::solve_with_newton_b_extra(
+                    x = pwl::solve_with_newton_b_extra(   // solve-exempt: static path (DECISIONS 22)
                         seg, nl_refresh_effective, graph, pool,
                         /*x_init=*/x, b_extra_user,
                         opts.max_newton_iterations,
@@ -6107,7 +6101,7 @@ inline SimulationResult run_transient(
                         opts.enable_newton_line_search,
                         opts.enable_newton_lm, &newton_ws);
                 } else {
-                    cache.solve_segment(nominal_segment(mask), b_extra_user, x);
+                    cache.solve_segment(nominal_segment(mask), b_extra_user, x);   // solve-exempt: static path (DECISIONS 22)
                 }
                 stamped_mask = mask;
                 stamped_known = true;

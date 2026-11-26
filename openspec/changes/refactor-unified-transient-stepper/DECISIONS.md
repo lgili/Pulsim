@@ -1010,3 +1010,31 @@ says where the implementation departs from them or what it settled.
     source does not own was always the identity. The fixed engine's
     current-waveform adds (one of them subtracts) stay on the dense helper
     they already shared with the other two.
+
+22. **Group 2: the solve point is the step context plus the engine's
+    dispatch; `StepperCore::solve_stage` is a free function.** The
+    design's `solve_stage` folds in the history right-hand side and the
+    sources; doing that moves bits (DECISIONS 7) and needs the engines'
+    state in one object (group 3 holds only the histories). Shipped:
+    `step::solve_stage(ctx, StageSpec, t_end, dispatch)` (sets the
+    devices' step context from the stage table, then runs the engine's
+    dispatch, which builds its right-hand side and solves) and
+    `step::dispatch_solve(nonlinear, linear, newton)`, both forced
+    inline (`solver/step/stepper_core.hpp`). TR-BDF2: `trap_solve` (every
+    probe, landing, settle and event trial goes through it) calls
+    `solve_stage`; `solve_dispatch` (the stage solves, the record solve
+    and the ESDIRK stages call it directly, with the context set at the
+    stage start as before) is `dispatch_solve`. Fixed engine: the event
+    iteration's three inline solves (linear + two Newton) are one
+    `solve_point` lambda over `mode_solve` and `dispatch_solve`; the
+    retry sub-steps and the sub-step correction reach it through
+    `run_event_iteration`, which keeps setting `step_ctx` once per call
+    (the mode settle reads it before the first solve). Every remaining
+    direct call carries a role tag that `test_single_solve_point.py`
+    checks: `factor-reuse` (noise floor, mode judge, LTE filter: solves on
+    an existing factor that produce no state) and `solve-exempt` (the V0
+    overload, deleted by task 11.1; the static path, which has no
+    stateful device; the right-limit restart line's linear re-solve,
+    which runs outside the event iteration on its own BE right-hand
+    side). Moving those three onto the solve point is not an extraction:
+    each has its own counters and right-hand side.
