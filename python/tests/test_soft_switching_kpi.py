@@ -278,3 +278,26 @@ def test_trbdf2_keeps_the_psfb_consistent_start():
         r = v1_reader.load(CASES["psfb_full_bridge_zvs"][0]).run("trbdf2")
     t, v = np.asarray(r.times), np.asarray(r.v("b"))
     assert np.max(np.abs(v[t < 1e-9] - 400.0)) < 1.0
+
+
+def test_collapse_rows_follow_each_record_step():
+    """with_right_limits(collapse=True): after a record's step start (with or
+    without a right-limit row there) one row holding the step's end sample;
+    times strictly increasing, every per-row array the same length."""
+    import types
+    from pulsim._result_views import with_right_limits
+    t = np.array([0.0, 1.0, 2.0, 3.0, 4.0])
+    st = np.arange(10.0).reshape(5, 2)
+    sw = np.array([[0], [1], [0], [1], [0]], dtype=bool)
+    rec = lambda k: types.SimpleNamespace(sample=k, t=t[k - 1])  # noqa: E731
+    r = types.SimpleNamespace(times=t, states=st, switch_states=sw, right_limit_index=np.array([1]),
+                              right_limit_states=np.array([[-1.0, -1.0]]),
+                              right_limit_switch_states=np.array([[1]], dtype=bool),
+                              reinit_records=[rec(2), rec(4)])   # steps (1, 2] (right limit at 1) and (3, 4]
+    v = with_right_limits(r, collapse=True)
+    assert np.all(np.diff(v.times) > 0) and len(v.times) == len(v.states) == len(v.switch_states) == 8
+    assert v.times[2] == np.nextafter(1.0, np.inf) and v.states[2].tolist() == [-1.0, -1.0]
+    assert v.times[3] == np.nextafter(v.times[2], np.inf) and v.states[3].tolist() == st[2].tolist()
+    assert v.times[6] == np.nextafter(3.0, np.inf) and v.states[6].tolist() == st[4].tolist()
+    assert v.switch_states[3].tolist() == sw[2].tolist()
+    assert len(with_right_limits(r).times) == 6   # without collapse: one row per right limit

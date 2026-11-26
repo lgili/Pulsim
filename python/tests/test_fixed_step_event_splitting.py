@@ -188,7 +188,8 @@ def test_duty_off_the_grid_is_second_order():
     assert all(f >= 3.5 for f in _factors(errs)), errs   # 4.2 4.2 4.3
     # The rule alone takes the duty edge (0.835 of a T/50 step in) at the
     # nearer grid point, the one after it (F-SB-2's step-end sample took the
-    # one before: -0.409 V at T/50, -0.164 V at T/100): first order.
+    # one before: -0.409 V at T/50, -0.164 V at T/100). Not converging here: the
+    # edge sits 0.165 of a step from the point it rounds to at both T/50 and T/100.
     assert _buck_err(50, **RULE) == pytest.approx(0.0808, rel=1e-2)
     assert _buck_err(100, **RULE) == pytest.approx(0.0808, rel=1e-2)
 

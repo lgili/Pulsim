@@ -1672,7 +1672,7 @@ inline SimulationResult run_transient(
     const Real snap = opts.dt * opts.split_snap;
     // the restart rule's gate sample without the split (F-SB-2): 0.51 of a
     // step back from its end, so an edge inside the step takes effect at the
-    // nearer boundary (a tie at mid-step: the end). The step end (t - dt/100)
+    // nearer boundary (an edge past 0.49 h, a tie at mid-step among them: the end). The step end (t - dt/100)
     // dropped every pulse narrower than a step that starts on the grid (the
     // closed-loop boost's 5 % duty floor: 0 % applied, 0.216 against trbdf2)
     constexpr Real gate_back = Real{0.51};
@@ -3766,7 +3766,7 @@ inline SimulationResult run_transient(
             // t_{k-1} belongs to fix-control-tick-semantics.
             // Restart rule without the split: the gate 0.51 h before the
             // step end (gate_back), so an edge inside the step takes effect
-            // at the nearer step boundary and an edge on a grid point t_prev
+            // at the nearer step boundary (past 0.49 h: the end) and an edge on a grid point t_prev
             // is exact (F-SB-2). Not an ulp from t: a closure's own tolerance
             // band (1e-9 of a period) must not read an edge at t as already
             // there. The split samples t_prev and places the step's edges itself.
