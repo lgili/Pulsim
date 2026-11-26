@@ -270,6 +270,13 @@ FIXED = {
              "0.1 V*s / 5 J = L i0^2 / 2; it read -141.4 A, 5 J -> 10 J, no record) and the voltage-sanity check reads the "
              "record (7085e2c7): \"'QL' cut the current of 'L' ... 1.000e+08 V\"; "
              "`test_without_the_fwd_the_solver_says_so` passes with the record asserted, mark removed",
+    "F-Y-1": "merge of main 2.1.0 (sensitivities through events, 65f09dc3) via feat/core-integration-next (R5, "
+             "41970372): the six pwl tests of `test_sensitivity_step` and `test_sensitivities_cell[pwl]` pass under the "
+             "release defaults; marks removed, the two counter checks re-pinned to n_p (n + 3) (the restart rule's three "
+             "SDIRK(2,2) steps add one stage each: 406 for the RC, 5 x 4003 for the rectifier)",
+    "F-Y-3": "merge of feat/core-integration-next (R5, 41970372; the fix is 306efc60: a window's min / max inside an "
+             "exact step from its closed form): `test_resume_and_fresh_t_start_match_the_uninterrupted_tail[buck-auto]` "
+             "passes under the release defaults; mark removed",
     "F-X-1": "merge of the PR line (R3): ten paralleled bridges run on the exact engine under the default output rule on "
              "both selections; `test_ten_paralleled_bridges_agree_with_pwl` holds the rule-off run to 1e-3 V of pwl + split "
              "and the default run to that plus the rule's promise (measured 2.6e-3 V); mark removed",

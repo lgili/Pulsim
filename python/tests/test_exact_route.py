@@ -94,7 +94,8 @@ def test_coupled_inductors_route_exact():
 
 
 @pytest.mark.xfail(strict=True, reason="release finding F-X-7: the default output rule does not bound an output "
-                   "that is not a state: the bus reads 39.56 V off between samples (0.0107 V with output_rtol=0)")
+                   "that is not a state. R5 (after the output-rule line, 2026-11-25): the bus now agrees with "
+                   "pwl+split within 3e-2 V (was 39.56 V off); the line currents read 8.28e-5 A off (bound 2e-5)")
 def test_inductor_cut_set_runs_and_agrees_with_pwl():
     """The three-phase overlap family: a DC current source in series with the line inductors.
     The settle picked a mode its law forbids at 126 us (on mode_selection='lcp' too) and the run

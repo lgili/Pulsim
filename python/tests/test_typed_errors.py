@@ -9,6 +9,7 @@ the category and text the user saw."""
 import ast
 import pathlib
 import warnings
+from unittest import mock
 
 import pytest
 
@@ -206,7 +207,10 @@ def test_routed_warnings_name_the_callers_line():
             warnings.simplefilter("always")
             r1 = p.simulate(_buck(), 1e-5, dt=1e-7, switch_fn=_SW, enable_nonlinear_refresh=True)  # A
             r2 = p.simulate(_buck(), 1e-5, dt=1e-7, switch_fn=_SW, max_newton_iterations=0)  # B
-            r3 = p.simulate(_undriven_switch(), 1e-6, dt=1e-7, engine="pwl")  # C
+            # release: undriven defaults to "refuse" (a refusal, not a warning); the
+            # warning site is the per-engine policy of the legacy period
+            with mock.patch.object(p._plan, "DEFAULT_UNDRIVEN", None):
+                r3 = p.simulate(_undriven_switch(), 1e-6, dt=1e-7, engine="pwl")  # C
         return w, (r1, r2, r3)
     w, rs = run()
     for tag, r in zip("ABC", rs):

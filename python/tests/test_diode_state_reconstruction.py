@@ -110,8 +110,10 @@ def test_bridge_diode_charge_closes_against_the_dc_side(V_th, engine, request):
     ∫ v_p/R_L dt + C·Δv_p — computed from node voltages alone; the
     return pair D3 + D4 must carry the same charge back. Fixed engine
     measured at 3e-12 relative; the auto engine's coarse adaptive grid
-    integrates to 1.6e-4 (trapezoid over 1.1k samples), hence 1e-3."""
-    if V_th > 0:
+    integrates to 1.6e-4 (trapezoid over 1.1k samples), hence 1e-3. On the
+    exact engine ('auto') the V_th = 0.7 cell closes since the output-rule line
+    stores the flow 2 ps past each event (F-X-7's sample; R5, 2026-11-25)."""
+    if V_th > 0 and engine == "pwl":
         _finding(request, F4)
     elif engine == "pwl":
         _finding(request, F5)
@@ -543,7 +545,8 @@ def test_boost_dcm_recovery_voltage_is_v_out_minus_v_in(engine, request):
     if engine == "auto":
         _finding(request, (
             "release finding F-X-7: under the default output rule (no dt -> the exact engine) "
-            "the loss summary's V_R at a DCM turn-off reads 39.49 V; V_out - V_in is 34.302 V "
+            "the loss summary's V_R at a DCM turn-off reads 28.67 V (R5, after the output-rule line; "
+            "39.49 V before); V_out - V_in is 34.302 V "
             "(the step-end run: the 'auto-step-ends' cell reads 34.301 V; this run's own sparse "
             "v(out) interpolates to 33.49 V there). 101 turn-offs after 2 ms, 2289 samples: "
             "v(sw) is not a state and is a chord between two stored samples"))

@@ -50,14 +50,11 @@ def _rc_closed_form(t, R=R0, C=C0):
     return -V * t / (R * R * C) * e, -V * t / (R * C * C) * e
 
 
-# release finding F-Y-1: with event splitting the fixed engine's default, the
-# stage recurrence refuses the first split step by name (RC: at t = 1e-06;
-# the Shockley rectifier: at t = 1e-05); before the release these ran
-# (dx/dp to central differences within the tests' bounds). The fix is the
-# sensitivity of a split step (feat/core-sensitivity-events).
-F_Y_1 = pytest.mark.xfail(strict=True, raises=p.UnsupportedError, reason=(
-    "release finding F-Y-1: sensitivities on engine='pwl' are refused 'the step was split at "
-    "its events' under the release default (event splitting on)"))
+# The fixed engine's release default opens a run with the restart rule's three
+# SDIRK(2,2) steps (two stages each, one more than the trapezoid): a pwl run of
+# n steps solves the sensitivity system n_p (n + 3) times (F-Y-1 closed by the
+# sensitivity-events merge 65f09dc3: the split steps carry the recurrence).
+SDIRK_EXTRA = 3
 
 
 def test_rc_on_trbdf2_matches_the_closed_form():
@@ -106,7 +103,6 @@ def _pwl_rc_final(R=R0, C=C0, dt=1e-6, t_end=TAU):
     return float(r.states[-1][b.node_id_of("out")])
 
 
-@F_Y_1
 def test_rc_on_pwl_matches_central_differences_and_the_closed_form():
     b = _rc()
     r = _run(b, TAU, "pwl", dt=1e-6, sensitivities=["R.R", "C.C"])
@@ -124,7 +120,6 @@ def test_rc_on_pwl_matches_central_differences_and_the_closed_form():
     assert abs(S[0] / dR - 1) < 1e-3 and abs(S[1] / dC - 1) < 1e-3
 
 
-@F_Y_1
 def test_linear_counters_and_factorizations():
     """5.5: n_sens_solves = n_p × stages × accepted steps on a linear
     circuit, no refinement, and the factor traffic unchanged."""
@@ -133,7 +128,7 @@ def test_linear_counters_and_factorizations():
     c = r.sensitivity.counters
     n_steps = len(r.sensitivity.times) - 1
     assert n_steps == 200
-    assert c == {"n_sens_solves": 2 * 1 * n_steps, "n_sens_iterations": 0,
+    assert c == {"n_sens_solves": 2 * (n_steps + SDIRK_EXTRA), "n_sens_iterations": 0,
                  "n_sens_discarded": 0}
 
     b0, b1 = _rc(), _rc()
@@ -176,7 +171,6 @@ def _pwl_rect(t_end=40e-3, dt=1e-5, sens=None, **kw):
     return b, r
 
 
-@F_Y_1
 def test_shockley_rectifier_on_pwl_matches_central_differences():
     """5.4 / 4.4: the trapezoidal rectifier of the prototype (4000 steps over
     40 ms), through the Shockley law: forward sensitivities within 1e-6 of
@@ -198,11 +192,10 @@ def test_shockley_rectifier_on_pwl_matches_central_differences():
         assert worst[nm] < 1e-6, (nm, got, fd, est)
     # Newton: refinement on the last iteration's factor, at most two per stage
     c = r.sensitivity.counters
-    assert c["n_sens_solves"] == len(names) * 4000
+    assert c["n_sens_solves"] == len(names) * (4000 + SDIRK_EXTRA)
     assert 0 < c["n_sens_iterations"] <= 2 * c["n_sens_solves"]
 
 
-@F_Y_1
 def test_states_and_factorizations_identical_with_sensitivities():
     """5.4 / 5.5: the run's states are the same bits with and without
     sensitivities, and the Newton factorizations are the same count."""
@@ -281,7 +274,6 @@ def _mos(K=0.5, V_T=2.0):
     return b
 
 
-@F_Y_1
 @pytest.mark.parametrize("k", ["K", "V_T"])
 def test_mosfet_level1_on_pwl_matches_central_differences(k):
     p0 = {"K": 0.5, "V_T": 2.0}[k]

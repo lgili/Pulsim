@@ -724,10 +724,7 @@ def test_fixed_step_feature_refused_by_name(feature, engine):
 
 
 @pytest.mark.parametrize("engine", (
-    pytest.param("pwl", marks=pytest.mark.xfail(strict=True, raises=p.UnsupportedError, reason=(
-        "release finding F-Y-1: sensitivities on engine='pwl' are refused 'at t = 1e-06 the step "
-        "was split at its events' under the release default (event splitting on); honoured before"))),
-    "trbdf2", "auto", "dsed"))
+    "pwl", "trbdf2", "auto", "dsed"))
 def test_sensitivities_cell(engine):
     """add-parameter-sensitivities: honoured on the exact path and, by the
     stage recurrence (group 5), on pwl and trbdf2; 'auto' refuses the
