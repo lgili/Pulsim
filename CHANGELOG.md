@@ -192,6 +192,12 @@ rule".
   half-bridge leg and active-clamp forward read 0.038 / 0.068 against trbdf2,
   now 0.0102 / 0.00165 (2.1.0's values). `with_right_limits(res)` is unchanged
   unless `collapse=True`.
+- Same rule without event splitting: a step's gate is read 0.51 of the step
+  before its end, so an edge inside the step takes effect at the nearer grid
+  point (a tie at mid-step: the end). Read just before the end (t - dt/100), a
+  pulse narrower than a step that starts on the grid was dropped: a closed-loop
+  boost's 0.25 us duty floor in 0.5 us steps never turned the switch on (0.216
+  against trbdf2, now 0.0484).
 
 ## [2.1.0] - 2026-11-25
 

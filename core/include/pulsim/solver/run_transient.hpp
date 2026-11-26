@@ -1670,8 +1670,12 @@ inline SimulationResult run_transient(
     const bool split = opts.enable_substep_state_correction;
     // Events this close to a step boundary are taken at it (design D4).
     const Real snap = opts.dt * opts.split_snap;
-    // the restart rule's gate sample without the split (F-SB-2)
-    const Real gate_left = opts.dt * Real{0.01};
+    // the restart rule's gate sample without the split (F-SB-2): 0.51 of a
+    // step back from its end, so an edge inside the step takes effect at the
+    // nearer boundary (a tie at mid-step: the end). The step end (t - dt/100)
+    // dropped every pulse narrower than a step that starts on the grid (the
+    // closed-loop boost's 5 % duty floor: 0 % applied, 0.216 against trbdf2)
+    constexpr Real gate_back = Real{0.51};
     // A source jump snapped to the step end (t - snap <= tau < t): the
     // solve AT `src_end_at` reads the built-in sources at `src_end_read`
     // (= tau, so value_at(tau - left_by) is the pre-jump level). NaN
@@ -3760,14 +3764,13 @@ inline SimulationResult run_transient(
             // gate is sampled at the step START (design D4); the
             // observer keeps its (t_k, x_{k-1}) label, whose move to
             // t_{k-1} belongs to fix-control-tick-semantics.
-            // Restart rule without the split: the gate just before the
-            // step end (t - dt/100), so an edge inside the step takes
-            // effect from t_prev, the side plain pwl takes, and an edge
-            // on a grid point t_prev is exact (F-SB-2). dt/100, not an
-            // ulp: a closure's own tolerance band (1e-9 of a period) must
-            // not read an edge at t as already there. The split samples
-            // t_prev and places the step's edges itself.
-            gate_t = !restart_rule ? t : split ? t_prev : t - gate_left;
+            // Restart rule without the split: the gate 0.51 h before the
+            // step end (gate_back), so an edge inside the step takes effect
+            // at the nearer step boundary and an edge on a grid point t_prev
+            // is exact (F-SB-2). Not an ulp from t: a closure's own tolerance
+            // band (1e-9 of a period) must not read an edge at t as already
+            // there. The split samples t_prev and places the step's edges itself.
+            gate_t = !restart_rule ? t : split ? t_prev : t - gate_back * (t - t_prev);
             if (step_observer || step_observer_in) {
                 (has_ticks ? step_observer : step_observer_in)(t, x_prev);
                 // An observer (or a control tick) may mutate the
@@ -6053,10 +6056,10 @@ inline SimulationResult run_transient(
             // and a null user fn cost nothing. `b_extra_user` aliases the
             // buffer so the solves below are unchanged.
             // discontinuity_restart: the same sampling as the dynamic
-            // path — sample k reads the gate at t_{k-1} and the jumping
+            // path — sample k reads the gate 0.51 dt before t and the jumping
             // sources at their left limit — so adding a capacitor does
             // not shift the recorded mask by one sample. (k = 0: t.)
-            st_gate_t = restart_rule && k > 0 ? t - gate_left : t;   // as the dynamic path
+            st_gate_t = restart_rule && k > 0 ? t - gate_back * opts.dt : t;   // as the dynamic path
             const Real src_left = k > 0 ? left_by : Real{0};
             b_extra.setZero();
             if (b_extra_fn) {

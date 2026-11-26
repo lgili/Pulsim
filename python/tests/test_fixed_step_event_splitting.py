@@ -67,7 +67,7 @@ def _rl(dt, frac, **kw):
 
 @pytest.mark.parametrize("frac, at_2us, rule_2us", [
     (0.3, +1.012e-6, +3.639e-3),     # rule: 0.3 dt early (was -8.497e-3, 0.7 dt late)
-    (0.7, +1.014e-6, +8.477e-3),     # rule: 0.7 dt early (was -3.635e-3, 0.3 dt late)
+    (0.7, +1.014e-6, -3.635e-3),     # rule: 0.3 dt late, the nearer grid point (was +8.477e-3, 0.7 dt early)
 ])
 def test_gate_edge_off_the_grid_is_second_order(frac, at_2us, rule_2us):
     errs = [_rl(dt, frac, **SPLIT)[1] for dt in (8e-6, 4e-6, 2e-6, 1e-6)]
@@ -75,8 +75,8 @@ def test_gate_edge_off_the_grid_is_second_order(frac, at_2us, rule_2us):
     # The edge on the grid with the rule alone reads +1.01e-6 too.
     assert errs[2] == pytest.approx(at_2us, rel=2e-2)
     assert all(f >= 3.7 for f in _factors(errs)), errs
-    # The rule alone takes the edge at the grid point before it (plain
-    # pwl's side, F-SB-2): first order.
+    # The rule alone takes the edge at the nearer grid point (F-SB-2's gate
+    # sample 0.51 dt before the step end): first order.
     rule = [_rl(dt, frac, **RULE)[1] for dt in (4e-6, 2e-6)]
     assert rule[1] == pytest.approx(rule_2us, rel=1e-3)
     assert _factors(rule)[0] == pytest.approx(2.0, abs=0.02)
@@ -187,10 +187,10 @@ def test_duty_off_the_grid_is_second_order():
     assert abs(errs[0]) <= 2e-6, errs          # engine: +1.07e-6 (prototype 7.3e-6)
     assert all(f >= 3.5 for f in _factors(errs)), errs   # 4.2 4.2 4.3
     # The rule alone takes the duty edge (0.835 of a T/50 step in) at the
-    # grid point before it (plain pwl's side, F-SB-2; it took the one after,
-    # +8.08e-2 V at T/50 and T/100): first order.
-    assert _buck_err(50, **RULE) == pytest.approx(-0.4090, rel=1e-2)
-    assert _buck_err(100, **RULE) == pytest.approx(-0.1641, rel=1e-2)
+    # nearer grid point, the one after it (F-SB-2's step-end sample took the
+    # one before: -0.409 V at T/50, -0.164 V at T/100): first order.
+    assert _buck_err(50, **RULE) == pytest.approx(0.0808, rel=1e-2)
+    assert _buck_err(100, **RULE) == pytest.approx(0.0808, rel=1e-2)
 
 
 # --- DCM buck: the diode turn-off is located -----------------------------------
@@ -692,3 +692,24 @@ def test_split_is_second_order_on_each_integrated_device(case):
     _, orders, splits = mod.run(getattr(mod, case))
     assert splits >= 8
     assert orders[-1] >= 1.9 and orders[-2] >= 1.85, orders
+
+
+def test_rule_keeps_a_pulse_narrower_than_a_step():
+    """The rule alone reads a step's gate 0.51 dt before its end, so a pulse that
+    starts on the grid ends at the nearer grid point: 0.6 dt -> one ON step,
+    0.4 dt -> none. Read at t - dt/100 every pulse narrower than a step was
+    dropped (a closed-loop boost's duty floor never turned on, ll15)."""
+    dt = 1e-6
+
+    def on_steps(width):
+        b = p.CircuitBuilder()
+        b.add_voltage_source("V", "in", "gnd", V)
+        b.add_switch("S", "in", "a", GON, GOFF)
+        b.add_resistor("R", "a", "gnd", R)
+        # 10 us period, ON for width*dt from each period start (on the grid)
+        fn = p.make_pwm_switch_fn(1e5, width * dt / 1e-5, b.switch_index_of("S"),
+                                  b.graph.num_switches, 0.0)
+        res = p.simulate(b, t_end=50e-6, dt=dt, engine="pwl", switch_fn=fn, **RULE)
+        return int(np.count_nonzero(np.asarray(res.i("R"))[1:] > 1.0))
+    assert on_steps(0.6) == 5    # one step per period: the turn-off rounds to the step end
+    assert on_steps(0.4) == 0    # the turn-off rounds to the step start: no ON step
