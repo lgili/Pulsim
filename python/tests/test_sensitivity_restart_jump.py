@@ -62,9 +62,9 @@ def test_the_same_circuit_before_the_jump_returns_a_true_number(split):
 
 @pytest.mark.parametrize("split", [False, True])
 def test_an_ideal_jump_that_moves_stage_2s_start_is_refused_by_name(split):
-    """C1 1 uF (10 V) -ideal S- C2 50 nF || RL: the restart line moves the
-    dependent states' histories to the row's x0+ before stage 2 (its item C);
-    the recurrence does not carry that move, so it refuses it by name. The
+    """C1 1 uF (10 V) -ideal S- C2 50 nF || RL: the restart line restarts the
+    step from the states the ideal jump moved (x0 + J, an impulsive start; item
+    A); the recurrence does not carry that move, so it refuses it by name. The
     control: the same run without sensitivities shares the charge (closed form
     10*C1/(C1 + C2) at the row)."""
     def build():
@@ -97,4 +97,4 @@ def test_an_ideal_jump_that_moves_stage_2s_start_is_refused_by_name(split):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             p.simulate(b, switch_fn=fn, sensitivities=["RL.R"], **kw)
-    assert "ideal element's jump" in str(ei.value)
+    assert "restarted from a state its event moved" in str(ei.value)
