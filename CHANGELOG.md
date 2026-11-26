@@ -36,6 +36,21 @@ settle). The harness's `legacy` profile (`benchmarks/tools/next_defaults.py`
 `legacy()`) reproduces the pre-release numbers through the explicit values
 above.
 
+### An instantaneous current cut warns by the energy it destroys
+
+- Under the restart rule a current cut in an instant (a diode-less bridge
+  opening an inductive load) is an impulse record, and the stored trace
+  shows no spike. `simulate()` now warns once per run (code
+  `impulse_energy` in `diagnostics["messages"]`) when the cut-set records
+  remove more than 1e-6 of the largest energy the circuit's inductors and
+  capacitors store, whatever `dt`: the 2 mH / 13.5 A bridge warns at
+  dt = 2e-6 (3.5 J in 20 cuts) as at 2e-7. A locator's rounding-level
+  record never warns. `on_impulse='error'` still refuses instead.
+- The kernel object (`pulsim.Simulation` / `sim::Simulation`) reads the
+  cut-set records in its voltage check on the fixed engine as `simulate()`
+  does (|lambda| / dt). The kernel design evaluator hands a period with a
+  cut-set record to the Python path.
+
 ### Typed errors and run diagnostics (add-kernel-simulation-object, group 8)
 
 - **One base class.** Every error pulsim raises on purpose is a

@@ -684,9 +684,12 @@ def _buck(magnetic):
 @pytest.mark.parametrize("engine,kw,tol", [
     # release: "the same grid" is the unsplit step (no located event)
     ("pwl", dict(dt=1e-7, enable_substep_state_correction=False), 1e-9),
-    # the release default locates each commutation in its step: the two
-    # formulations place it to the locator's residual (measured 2.6e-9)
-    pytest.param("pwl", dict(dt=1e-7), 2e-8, id="pwl-default"),
+    # the release default locates each commutation in its step. The model
+    # identity holds to 3.5e-12 on the unsplit step (the row above); split, the
+    # two formulations' located instants differ by the locator's residual
+    # (measured 3.7e-14 s over 199 events, asserted below) and v(out) by
+    # 2.59e-9 of its range: the bound is that residual's effect x 3
+    pytest.param("pwl", dict(dt=1e-7), 8e-9, id="pwl-default"),
     ("trbdf2", dict(rtol=1e-8, atol=1e-10), 1e-4),
 ])
 def test_gapped_core_in_a_switching_buck_equals_its_inductor(engine, kw, tol):
@@ -701,6 +704,9 @@ def test_gapped_core_in_a_switching_buck_equals_its_inductor(engine, kw, tol):
     tt = np.linspace(1e-4, 1e-3, 500)
     a, c = (np.interp(tt, r.times, r.v("vout")) for r in runs)
     assert rel(a, c) < tol
+    if engine == "pwl":   # the premise: both place every event at the same instant
+        ev = [np.array([e.t_estimated for e in r.commutation_events]) for r in runs]
+        assert len(ev[0]) == len(ev[1]) and np.max(np.abs(ev[0] - ev[1])) <= 1e-12
 
 
 @pytest.mark.parametrize("case", ["three_limb", "ee"])

@@ -171,3 +171,76 @@ def test_floating_neutral_vsi_runs_on_the_exact_engine():
     assert np.max(np.abs(r.v("n") - v_n)) < 1e-9 * 600.0
     msg = _dsed_dispatch._BRIDGE_FALLBACK_MESSAGE
     assert "notes/" not in msg and "floating capacitors" not in msg
+
+
+@pytest.mark.parametrize("dt", [2e-6, 2e-7])
+def test_a_cut_that_destroys_energy_warns_by_energy_whatever_dt(dt):
+    """Orchestrator decision 2026-11-23: the hazard of the diode-less bridge is
+    the energy each cut destroys, not the voltage one step happens to show
+    (45 x the rail at dt = 2e-6, under the voltage check's factor 100). One
+    warning per run, same text at both steps. Truth: each record removes
+    L i^2 / 2 of the current it cut, i = V/R (1 - exp(-R t_on / L)) with
+    t_on = 1e-4 +- dt (F-SB-2), so the total of the 20 cuts lies in
+    20 L i(t_on -+ dt)^2 / 2."""
+    import re
+    b, vsi = _bridge(False)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        r = p.simulate(b, t_end=4e-3, dt=dt,
+                       switch_fn=_chop(vsi, b.graph.num_switches), engine="pwl")
+    msgs = [str(w.message) for w in caught if "destroyed" in str(w.message)]
+    assert len(msgs) == 1, msgs
+    m = re.search(r"(\d+) instantaneous current cut\(s\) of 'Lload' destroyed (\S+) J", msgs[0])
+    assert m, msgs[0]
+    R, L = 5.0 + 0.05 + 1e-3, 2e-3
+    lo, hi = (300.0 / R * (1.0 - np.exp(-R * t_on / L)) for t_on in (1e-4 - dt, 1e-4 + dt))
+    n = int(m.group(1))
+    assert n == len(r.reinit_records) == 20
+    assert n * 0.5 * L * lo ** 2 * (1 - 1e-3) <= float(m.group(2)) <= n * 0.5 * L * hi ** 2 * (1 + 1e-3)
+    assert [d.code for d in r.diagnostics["messages"]].count("impulse_energy") == 1
+
+
+def test_a_locator_residual_does_not_warn():
+    """The threshold (1e-6 of the largest stored energy) is far above a
+    locator's rounding-level record (F-Y-4: 2e-15 J) and far below a real cut
+    (L i^2 / 2 = the stored energy itself): the helper on two synthetic records."""
+    from types import SimpleNamespace as NS
+    b, _ = _bridge(True)
+    L, i_max = 2e-3, 10.0                         # stored: L i^2 / 2 = 0.1 J
+    res = NS(i=lambda name: np.array([0.0, i_max]) if name == "Lload" else np.zeros(2),
+             v=lambda node: np.zeros(2))
+    rec = lambda dW: NS(kind="cut_set", dW=dW, cause="", devices=["X"], states=["Lload"])  # noqa: E731
+    for dW, warns in ((2e-15, False), (0.5 * L * i_max ** 2, True)):
+        res.reinit_records = [rec(dW)]
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            p._warn_impulse_energy(res, b, "record")
+        assert bool([w for w in caught if "destroyed" in str(w.message)]) is warns, dW
+    with warnings.catch_warnings(record=True) as caught:   # 'error' refuses instead
+        warnings.simplefilter("always")
+        p._warn_impulse_energy(res, b, "error")
+    assert not caught
+
+
+@pytest.mark.parametrize("dt,warns", [(2e-6, False), (2e-7, True)])
+def test_the_kernel_object_reads_the_cut_set_records_too(dt, warns):
+    """The C++ twin of the voltage check (`sim::Simulation::check_voltage_`)
+    reads the restart rule's records as simulate() does: the largest cut is
+    the spike |lambda| / dt = L i / dt one step would hold, judged against
+    100 x the 300 V rail. Truth: i(t_on) = V/R (1 - exp(-R t_on / L)),
+    t_on = 1e-4 +- dt, so L i / dt is ~1.3e4 V at dt = 2e-6 (no warning)
+    and ~1.3e5 V at dt = 2e-7 (warning, naming that peak)."""
+    import re
+    b, vsi = _bridge(False)
+    sim = p.Simulation(b.build(), p.RunOptions(t_end=4e-3, dt=dt, engine="pwl"))
+    sim.set_switch_fn(_chop(vsi, b.graph.num_switches))
+    res = sim.run()
+    assert res.reinit_records
+    R, L = 5.0 + 0.05 + 1e-3, 2e-3
+    lo, hi = (L * 300.0 / R * (1.0 - np.exp(-R * t_on / L)) / dt for t_on in (1e-4 - dt, 1e-4 + dt))
+    assert bool(hi < 100 * 300.0) is not warns and bool(lo > 100 * 300.0) is warns   # the premise
+    d = [x for x in sim.diagnostics if x["code"] == "implausible_voltage"]
+    assert bool(d) is warns, sim.diagnostics
+    if warns:
+        peak = float(re.search(r"reached (\S+) V", d[0]["message"]).group(1))
+        assert lo * (1 - 1e-3) <= peak <= hi * (1 + 1e-3), (peak, lo, hi)

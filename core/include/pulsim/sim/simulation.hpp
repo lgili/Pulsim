@@ -514,9 +514,13 @@ private:
     }
 
     void check_voltage_(const solver::SimulationResult& res) {
-        const auto v = solver::find_implausible_voltage(
-            graph(), pool(), res,
-            opts_.voltage_sanity_factor.value_or(Defaults::voltage_sanity_factor));
+        const Real f = opts_.voltage_sanity_factor.value_or(Defaults::voltage_sanity_factor);
+        auto v = solver::find_implausible_voltage(graph(), pool(), res, f);
+        // the restart rule's cut-set records hold the spike the samples do not
+        if (v.node < 0 && plan_.engine == Engine::FixedTrap && opts_.dt
+            && !res.reinit_records.empty()) {
+            v = solver::find_implausible_impulse_voltage(graph(), pool(), res, *opts_.dt, f);
+        }
         if (v.node >= 0) {
             diags_.push_back({Severity::Warning, "implausible_voltage",
                               solver::describe(graph(), pool(), v),

@@ -53,6 +53,7 @@
 #include "pulsim/solver/result.hpp"
 #include "pulsim/topology/graph.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <format>
 #include <string>
@@ -195,6 +196,52 @@ struct ImplausibleVoltage {
         out.source_scale = scale;
     }
     return out;
+}
+
+/// Under the restart rule an inductor current cut in an instant is an
+/// impulse RECORD (`result.reinit_records`), not a stored megavolt. The
+/// largest cut-set record is judged as the spike one step `dt` would have
+/// held: |lambda| / dt at the node the cutting device shares with the
+/// inductor, by the same detector (twin of Python's `_warn_impulse_voltage`).
+[[nodiscard]] inline ImplausibleVoltage find_implausible_impulse_voltage(
+    const topology::Graph& graph,
+    const pwl::DevicePool& pool,
+    const SimulationResult& result,
+    Real dt,
+    Real factor = Real{100}) {
+    const ReinitRecord* r = nullptr;
+    for (const auto& q : result.reinit_records) {
+        if (q.kind == "cut_set" && !q.devices.empty() && !q.states.empty()
+            && (r == nullptr || std::abs(q.lambda) > std::abs(r->lambda))) {
+            r = &q;
+        }
+    }
+    if (r == nullptr || !(dt > Real{0})) return {};
+    auto ends = [&](const std::string& name) {
+        std::vector<Index> e;
+        for (Index b = 0; b < graph.num_branches(); ++b) {
+            if (graph.branch_name(b) != name) continue;
+            for (Index n : {graph.branch(b).from, graph.branch(b).to}) {
+                if (n >= 0) e.push_back(n);
+            }
+            break;
+        }
+        return e;
+    };
+    const auto dev = ends(r->devices.front());
+    const auto st = ends(r->states.front());
+    if (dev.empty()) return {};   // the record names a node, not a device
+    std::vector<Index> at;
+    for (Index n : dev) {
+        if (std::find(st.begin(), st.end(), n) != st.end()) at.push_back(n);
+    }
+    if (at.empty()) at = dev;
+    SimulationResult one;
+    one.times = {r->t};
+    Vector row = Vector::Zero(graph.num_nodes());
+    for (Index n : at) row[n] = std::abs(r->lambda) / dt;
+    one.states = {row};
+    return find_implausible_voltage(graph, pool, one, factor);
 }
 
 /// Human-readable form of the finding, naming the node.

@@ -405,6 +405,13 @@ DesignOut evaluate_design(const ir::Circuit& base, const Plan& plan,
         for (const auto& e : p.events) out.pattern.emplace_back(e.name, e.t / T);
         out.x0 = r.x0;
         if (!p.integrals_ok) throw Fallback{"no closed-form period integrals"};
+        // a cut-set record holds the spike the node extrema do not (an
+        // instantaneous cut destroys L i^2 / 2): the Python path warns by it
+        for (const auto& rec : ad.reinit_log()) {
+            if (rec.kind == "cut_set" && rec.dW > 0) {
+                throw Fallback{"an impulsive re-initialisation (a cut-set record)"};
+            }
+        }
         // the implausible-voltage scan of a kernel period (node extrema)
         if (plan.node_obs0 >= 0) {
             solver::SimulationResult sr;

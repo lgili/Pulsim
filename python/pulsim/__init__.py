@@ -2007,6 +2007,68 @@ def _warn_impulses(res) -> None:
         UserWarning, stacklevel=4)
 
 
+# A cut-set record warns when it removes more than this fraction of the
+# largest energy the run's inductors / capacitors store (orchestrator,
+# 2026-11-23): a locator residual (F-Y-4: 2e-15 J) never does.
+IMPULSE_ENERGY_FRACTION = 1e-6
+
+
+def _largest_stored_energy(res, builder) -> float:
+    """max over the samples and the linear L / C of L i^2 / 2, C v^2 / 2.
+    shortcut: nonlinear / saturable / magnetic elements are not read; a
+    circuit with none of the linear kinds gives 0 (no scale: no warning)."""
+    import numpy as _np
+    w = 0.0
+    for c in builder.components():
+        k, prm = c["kind"], c["params"]
+        try:
+            if k == "inductor":
+                x, half = _np.asarray(res.i(c["name"]), dtype=float), 0.5 * float(prm["L_henries"])
+            elif k == "capacitor":
+                a, b_ = (_np.zeros(1) if n < 0 else _np.asarray(res.v(builder.graph.node_name(n)), dtype=float)
+                         for n in c["nodes"][:2])
+                x, half = a - b_, 0.5 * float(prm["C_farads"])
+            else:
+                continue
+        except (KeyError, AttributeError, IndexError, TypeError, ValueError, RuntimeError):
+            continue
+        if x.size:
+            w = max(w, half * float(_np.nanmax(x * x)))
+    return w
+
+
+def _warn_impulse_energy(res, builder, on_impulse) -> None:
+    """A cut-set record destroys energy (dW = L i^2 / 2 of the current it
+    cuts): warned once per run by that energy, whatever dt, under
+    on_impulse='record' / 'warn' ('error' refuses the run instead). The
+    voltage check (voltage_sanity_factor) is a separate signal."""
+    if on_impulse == "error":
+        return
+    cuts = [r for r in (getattr(res, "reinit_records", None) or ())
+            if r.kind == "cut_set" and r.dW > 0]
+    if not cuts:
+        return
+    w_max = _largest_stored_energy(res, builder)
+    hot = [r for r in cuts if r.dW > IMPULSE_ENERGY_FRACTION * w_max]
+    if not (w_max > 0) or not hot:
+        return
+    by_dev = {}
+    for r in hot:
+        dev = r.cause or (r.devices[0] if r.devices else "?")
+        by_dev[dev] = by_dev.get(dev, 0.0) + r.dW
+    dev = max(by_dev, key=by_dev.get)
+    states = sorted({s for r in hot for s in r.states})
+    total = sum(r.dW for r in hot)
+    _planning.emit("impulse_energy",
+        f"simulate(): {len(hot)} instantaneous current cut(s) of "
+        f"{', '.join(repr(s) for s in states)} destroyed {total:.4g} J "
+        f"(largest stored energy {w_max:.4g} J; '{dev}' cut {by_dev[dev]:.4g} J of it): "
+        f"nothing gives the inductor current a path when it opens. "
+        f"Add a freewheel diode or snubber; on_impulse='error' refuses the "
+        f"run instead. See res.reinit_records.",
+        UserWarning, stacklevel=4)
+
+
 def _carry_jumps(fn, parts):
     """Give a composed b_extra_fn the declared jumps of its parts.
 
@@ -4851,6 +4913,7 @@ def _finalize(out, plan):
                                   if _planning.UNIFORM_ENGINE_RULES else ""))
         if on_impulse == "warn":
             _warn_impulses(res)
+        _warn_impulse_energy(res, builder, on_impulse)
         if plan.undriven is not None:
             _note_undriven(res, plan.undriven)
         return res
@@ -4888,6 +4951,7 @@ def _finalize(out, plan):
         _trbdf2_warn_stats(res, builder, _stats, plan.engine_asked)
         if on_impulse == "warn":
             _warn_impulses(res)
+        _warn_impulse_energy(res, builder, on_impulse)
         _save_control_state(_plan.graphs, res)
         if plan.undriven is not None:
             _note_undriven(res, plan.undriven)
@@ -5018,6 +5082,7 @@ def _finalize(out, plan):
     _warn_unlocated_edges(res)
     if on_impulse == "warn":
         _warn_impulses(res)
+    _warn_impulse_energy(res, builder, on_impulse)
 
     _guards = list(getattr(res, "inductor_guard_actions", []) or [])
     if _guards:
@@ -5528,7 +5593,6 @@ def _warn_impulse_voltage(res, builder, f, dt):
     shares with the inductor) — by the same detector, so the factor, the
     source scale and its refusals to judge are the stored trace's."""
     import numpy as _np
-    import warnings
     _k = _pulsim_module
     cuts = [r for r in res.reinit_records if r.kind == "cut_set" and r.devices]
     if not cuts:
@@ -5546,14 +5610,14 @@ def _warn_impulse_voltage(res, builder, f, dt):
     if volt.node < 0:
         return
     res._implausible_voltage = volt
-    warnings.warn(
+    _planning.emit("implausible_voltage",
         f"simulate(): '{r.devices[0]}' cut the current of "
         f"{', '.join(repr(n) for n in r.states)} in an instant ({len(cuts)} time(s); "
         f"largest at t = {r.t:.6g} s: an impulse of {abs(r.lambda_):.4g} V*s, "
         f"{r.dW:.4g} J removed, see res.reinit_records). Over one step of "
         f"{float(dt):g} s that is: "
         + _k.describe_implausible_voltage(builder.graph, builder.pool, volt),
-        stacklevel=5)
+        stacklevel=4)
 
 
 def _check_right_limit_voltage(res, builder, factor):
