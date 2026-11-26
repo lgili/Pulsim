@@ -1,7 +1,7 @@
 """add-exact-propagator-strategy 15.2 (D13): a mode routed to the action of the exponential.
 
 An RLC ladder of 100 sections (200 states) visited for 400 steps: the dense setup
-(2 n^3 (6 + log2 ||A h||)) is not repaid, the action's plan is within m_max, so the mode
+(dense_setup_n3 n^3, calibrated in 15.4) is not repaid, the action's plan is within m_max, so the mode
 steps by the truncated-Taylor action on its sparse matrix and has no eigenbasis. Its
 event predicates are evaluated on the action's states and located by the engine's
 bracketing. Truth: scipy's dense expm of the ladder's own ODE, written here from the
@@ -117,3 +117,44 @@ def test_small_circuits_stay_dense():
     b.add_capacitor("C", "b", "gnd", 1e-6)
     r = _run(b, 10e-6)
     assert [(q["kernel"], q["reason"]) for q in r.exact["routes"]] == [("dense", "n < route_min_n")]
+
+
+def test_double_crossing_inside_one_step_is_found_on_an_action_mode():
+    # An undamped LC tank (v_C = 1 - cos(w t)) beside a 32-section ladder (66 states: routed).
+    # dt = one tank period, so v_C is back near 0 at every step end: the crossing of
+    # V_th = 1.5 at w t = 2 pi / 3 and back at 4 pi / 3 is invisible to the step ends and
+    # is found only by the scan bounded by ||A||_1 (an action mode has no spectrum).
+    lt, ct, vth, msec = 1e-6, 1e-6, 1.5, 32
+    w = 1 / np.sqrt(lt * ct)
+    dt = 2 * np.pi / w
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "a0", "gnd", VIN)
+    for k in range(1, msec + 1):
+        b.add_resistor(f"R{k}", f"a{k - 1}", f"r{k}", RS)
+        b.add_inductor(f"L{k}", f"r{k}", f"a{k}", L0)
+        b.add_capacitor(f"C{k}", f"a{k}", "gnd", C0)
+    b.add_resistor("RL", f"a{msec}", "gnd", RLOAD)
+    b.add_voltage_source("VT", "t0", "gnd", 1.0)
+    b.add_inductor("LT", "t0", "t1", lt)
+    b.add_capacitor("CT", "t1", "gnd", ct)
+    b.add_diode("D", "t1", "o", GON, GOFF, vth)
+    b.add_resistor("RD", "o", "gnd", RLOAD)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(b, t_end=3 * dt, engine="exact", dt=dt, integrator="rk45")
+    assert r.exact["routes"][0]["kernel"] == "action"
+    # truth: the tank's own ODE with the off diode's leak g = g_off / (1 + g_off R_D), by expm
+    g_l = GOFF / (1 + GOFF * RLOAD)
+    A = np.array([[0.0, -1 / lt, 1 / lt], [1 / ct, -g_l / ct, 0.0], [0.0, 0.0, 0.0]])
+
+    def gv(t):
+        return (expm(A * t) @ np.array([0.0, 0.0, 1.0]))[1] / (1 + GOFF * RLOAD) - vth
+
+    lo, hi = 0.5 * dt / np.pi * 2, 0.5 * dt          # brackets w t = 2 pi / 3
+    assert gv(lo) < 0 < gv(hi) and gv(dt) < 0       # the step end sees no crossing
+    for _ in range(80):
+        mid = 0.5 * (lo + hi)
+        lo, hi = (mid, hi) if gv(mid) < 0 else (lo, mid)
+    ev = np.asarray(r.event_times)
+    assert len(ev) >= 1
+    assert abs(ev[0] - 0.5 * (lo + hi)) <= 1e-12, ev[0] - 0.5 * (lo + hi)
