@@ -894,6 +894,12 @@ def run_benchmarks(
                         )
 
                     times, series = load_csv_series(output_path)
+                    # the first stored sample of an algebraic node is not solved (a gate or a
+                    # bus reads 0 there: KNOWN_LIMITATIONS): no KPI reads it, or a switch that
+                    # is ON from t = 0 counts a turn-on with a made-up V_DS (the buck reference
+                    # read ZVS 1/25 from it, the LLC's S_hi 32 uJ of switching energy on trbdf2)
+                    times = times[1:]
+                    series = {k: v[1:] for k, v in series.items()}
                     sample_rate = (1.0 / (times[1] - times[0])) if len(times) > 1 else 0.0
 
                     # Metrics that use a single `observable` field as the

@@ -422,8 +422,14 @@ def compute_switching_loss_per_event(
     interpolated), summed and divided by the span: the average switching
     loss in W.
 
-    The window must cover the transition and stop before the next one; it
-    includes the conduction of that window. An edge the solver does not
+    The window starts at the first sample that shows the new state (the
+    edge itself when the engine lands its gate edges or they sit on the
+    grid) and must stop before the next transition; it includes the
+    conduction of that window. (Until 2026-11 it started one sample
+    earlier: on a variable grid that sample can be far before the edge,
+    and the conduction up to the edge was booked as switching energy --
+    on the PSFB reference's S3 under trbdf2, 2.55e-10 J against the exact
+    3.18e-11 J; from the edge, 3.66e-11 J.) An edge the solver does not
     resolve (a capacitor collapsing through milliohms inside one step) is
     not in the samples, so it is not in this integral either: book it from
     the stored-energy change instead.
@@ -445,9 +451,9 @@ def compute_switching_loss_per_event(
         if switch_states[k] == switch_states[k - 1]:
             continue
         events += 1
-        t0 = times[k - 1]
+        t0 = times[k]               # the first sample that shows the new state: the edge
         t1 = t0 + window_s
-        j = k - 1
+        j = k
         while j + 1 < n and times[j + 1] <= t1:
             energy += 0.5 * (p[j] + p[j + 1]) * (times[j + 1] - times[j])
             j += 1

@@ -22,6 +22,32 @@ benchmark:
     - column: I(Llk)
     - column: I(Lo)
     - column: V(out)
+  # Probe convention: docs/SOFT_SWITCHING.md (V_DS positive terminal first, I_D = I(switch)).
+  # The window after each edge is shorter than the 80 ns dead time, so it ends before the next edge.
+  # Baseline: the exact truth (benchmarks/tools/soft_switching_truth.py baseline, mpmath;
+  # never a Pulsim run) on the 10 ns grid, both limits at every event, with V_DS and I_D of
+  # every switch. 1.7 V = the baseline's linear interpolation between its rows on the
+  # dead-time ramp, max (h^2/8)|v''| = 1.17 V, + the 0.5 V each engine sample is held to
+  # against the exact truth (test_soft_switching_validation.py). From 50 ns: a 10 ns row
+  # cannot follow a start transient of picoseconds (and trbdf2's first fs on the PSFB, F-S-5).
+  # The plain fixed engine (default scenario) is a known disagreement (trap 9, v2_triage).
+  expectations:
+    metrics:
+      max_error: 1.7
+  validation:
+    type: reference
+    observable: V(b)
+    baseline: baselines/psfb_full_bridge_zvs.csv
+    start_time: 50e-9
+  kpi:
+    - {metric: zvs_fraction, switch_observable: V(g1), voltage_observable: "V(vin,a)", threshold_v: 5.0, lookback_samples: 1, label: S1}
+    - {metric: switching_loss, switch_observable: V(g1), voltage_observable: "V(vin,a)", current_observable: I(S1), window_s: 50e-9, label: S1}
+    - {metric: zvs_fraction, switch_observable: V(g2), voltage_observable: "V(a)", threshold_v: 5.0, lookback_samples: 1, label: S2}
+    - {metric: switching_loss, switch_observable: V(g2), voltage_observable: "V(a)", current_observable: I(S2), window_s: 50e-9, label: S2}
+    - {metric: zvs_fraction, switch_observable: V(g3), voltage_observable: "V(vin,b)", threshold_v: 5.0, lookback_samples: 1, label: S3}
+    - {metric: switching_loss, switch_observable: V(g3), voltage_observable: "V(vin,b)", current_observable: I(S3), window_s: 50e-9, label: S3}
+    - {metric: zvs_fraction, switch_observable: V(g4), voltage_observable: "V(b)", threshold_v: 5.0, lookback_samples: 1, label: S4}
+    - {metric: switching_loss, switch_observable: V(g4), voltage_observable: "V(b)", current_observable: I(S4), window_s: 50e-9, label: S4}
 simulation:
   tstart: 0.0
   tstop: 30e-6

@@ -5,6 +5,10 @@ benchmark:
   category: nonlinear
   observables:
     - column: V(out)
+  # Baseline: the exact truth (benchmarks/tools/soft_switching_truth.py baseline, mpmath;
+  # never a Pulsim run), 0.2 us grid, both limits at every event. 0.1 V: the plain fixed
+  # engine books each commutation one step early (AI_GUIDE trap 9), 0.051 V measured on
+  # V(out); the baseline's own interpolation error is 2.6e-5 V.
   expectations:
     metrics:
       max_error: 1.0e-1
@@ -13,24 +17,32 @@ benchmark:
     type: reference
     observable: V(out)
     baseline: baselines/buck_hard_switching_reference.csv
-  # Reference case: a hard-switched buck.  At each ON-event the V_DS
-  # is the full V_in (24 V); at each OFF-event the diode current is
-  # at its peak.  ZVS fraction should be ~ 0 % and switching loss
-  # is the documented non-zero value — used as the "no soft
-  # switching" reference for ZVS / LLC benches.
+  # Reference case: a hard-switched buck. Probe convention of
+  # docs/SOFT_SWITCHING.md: SH is a high-side switch (vcc, sw), so
+  # V_DS = V(vcc) - V(sw) and I_D = I(SH). (Before 2026-11-23 the entry
+  # read V(sw) and I(L1): V(sw) is ~0 while the diode freewheels, so the
+  # hard turn-ons were counted as soft: "ZVS" 42 %.)
+  # Truth (soft_switching_truth.py, exact): 24 turn-ons in (0, 500 us), V_DS at each
+  # 24.02-24.08 V while the diode freewheels (the first 10), then 1.42-6.01 V
+  # (24 V - V_out: the L-C start overshoots V_out to ~22.6 V and the inductor
+  # current reaches zero, DCM): ZVS fraction 0 at 1 V (the lowest hard edge 1.42 V).
+  # The circuit has no device capacitance, so a hard turn-on dissipates
+  # nothing here: the switching-loss KPI is the conduction inside its
+  # windows (i^2 / g_on over 1 us after each edge), not an E_oss:
+  # exact 7.4057e-6 J over the 49 edges, 14.81 mW averaged over the 500 us.
   kpi:
     - metric: zvs_fraction
       switch_observable: V(gate)
-      voltage_observable: V(sw)
+      voltage_observable: V(vcc,sw)
       threshold_v: 1.0
-      lookback_samples: 2
+      lookback_samples: 1
       label: SH
     - metric: switching_loss
       switch_observable: V(gate)
-      voltage_observable: V(sw)
-      current_observable: I(L1)
+      voltage_observable: V(vcc,sw)
+      current_observable: I(SH)
       label: SH
-      window_s: 1.0e-6     # int v*i dt over 5 steps after each edge (F-S-2: required)
+      window_s: 1.0e-6     # int v*i dt over 1 us after each edge (F-S-2: required)
 simulation:
   tstart: 0.0
   tstop: 500e-6
