@@ -844,3 +844,45 @@ TEST_CASE("Exact: a row is promised down to its rounding floor, never hiding a v
     REQUIRE(std::abs(w.fu[2] - floor) <= 1e-6 * floor);
     REQUIRE(w.fu[0] == 0.0);
 }
+
+// add-exact-propagator-strategy 10.1 / 10.4 (D8): the fixed-step pair
+// x <- Phi x + Gamma of (mask, h) against the modal step it replaces; its
+// counters; the byte budget.
+TEST_CASE("Exact: the fixed-step pair equals the modal step (tier 1, DC and sine)",
+          "[v2][dsed][exact_lti][fixed_step]") {
+    for (const bool sine : {false, true}) {
+        builder::CircuitBuilder b;
+        if (sine) b.add_sine_voltage_source("V", "in", "gnd", 2.0, 5.0, 60.0, 0.7);
+        else b.add_voltage_source("V", "in", "gnd", 10.0);
+        b.add_resistor("R", "in", "a", 5.0);
+        b.add_inductor("L", "a", "o", 100e-6);
+        b.add_capacitor("C", "o", "gnd", 10e-6);
+        b.add_resistor("RL", "o", "gnd", 20.0);
+        pwl::PwlStateSpaceCache cache{b.graph(), b.pool()};
+        dsed::NativeCircuitBuilderAdapter<> ad{b.graph(), b.pool(), cache};
+        ad.set_mask(topology::SwitchStateMask(0));
+        REQUIRE(ad.has_exact_step());
+        const Real h = 1e-6;
+        Vector x = Vector::Zero(ad.n_state()), y(x.size()), z(x.size());
+        const std::size_t eig0 = ad.n_eig();
+        Real t = 0.0;
+        for (int k = 0; k < 200; ++k, t += h) {
+            REQUIRE(ad.exact_fixed_step_into(t, x, h, y));
+            ad.exact_advance_state_into(t, x, h, z);
+            REQUIRE((y - z).cwiseAbs().maxCoeff() <= 1e-13 * std::max(1.0, z.cwiseAbs().maxCoeff()));
+            x = z;
+        }
+        REQUIRE(x.cwiseAbs().maxCoeff() > 0.1);            // the circuit moved
+        const std::size_t N = static_cast<std::size_t>(x.size() + (sine ? 2 : 0));
+        REQUIRE(ad.n_fixed_steps() == 200);
+        REQUIRE(ad.n_phi_gamma_builds() == 1);
+        REQUIRE(ad.fixed_step_flops() == 200 * (N * N + N));
+        REQUIRE(ad.phi_gamma_bytes() == (N * N + N) * sizeof(Real));
+        REQUIRE(ad.n_eig() == eig0);                         // no factorization per step
+        // a second length is a second pair; with the budget spent it is refused
+        ad.set_phi_gamma_budget(ad.phi_gamma_bytes());
+        REQUIRE_FALSE(ad.exact_fixed_step_into(t, x, h / 2, y));
+        REQUIRE(ad.n_phi_gamma_refused() == 1);
+        REQUIRE(ad.exact_fixed_step_into(t, x, h, y));       // the cached one still steps
+    }
+}

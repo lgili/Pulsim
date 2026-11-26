@@ -793,6 +793,12 @@ py::dict exact_report_dict(const AdapterT& adapter,
     d["n_pade"] = adapter.n_pade();
     d["n_phi_cache_hits"] = adapter.n_pade_hits();
     d["n_predicate_evals"] = n_predicate_evals;
+    // add-exact-propagator-strategy 10.4: the fixed-step form's counters
+    d["n_fixed_steps"] = adapter.n_fixed_steps();
+    d["n_phi_gamma_builds"] = adapter.n_phi_gamma_builds();
+    d["n_phi_gamma_refused"] = adapter.n_phi_gamma_refused();
+    d["fixed_step_flops"] = adapter.fixed_step_flops();
+    d["phi_gamma_bytes"] = adapter.phi_gamma_bytes();
     return d;
 }
 
@@ -1348,7 +1354,7 @@ void init_module(py::module_& m) {
            std::vector<Real> tick_origins,
            std::vector<std::uint64_t> tick_next_k,
            py::object loop_feed,
-           Real t_offset, std::size_t output_budget) {
+           Real t_offset, std::size_t output_budget, bool fixed_step) {
             const pulsim::solver::SolverSnapshot* resume = snapshot_or_null(resume_arg);
             PySwitchFnSSM sf(std::move(switch_fn_obj));
             // add-unified-event-queue group 3: control ticks on the
@@ -1514,6 +1520,7 @@ void init_module(py::module_& m) {
             sim.set_settle_round_cap(settle_round_cap);
             sim.set_diode_law_check(diode_law_rel);
             if (output_rtol > Real{0}) sim.set_output_rule(output_rtol, atol, output_cap, output_budget);
+            sim.set_fixed_step(fixed_step);
             if (!tick_cbs.empty()) {
                 pulsim::events::TickPlan plan;
                 for (std::size_t j = 0; j < tick_periods.size(); ++j) {
@@ -1780,6 +1787,7 @@ void init_module(py::module_& m) {
         py::arg("loop_feed") = py::none(),
         py::arg("t_offset") = Real{0},
         py::arg("output_budget") = std::size_t{2000000},
+        py::arg("fixed_step") = false,
         "Bridge.11 — native PEDSimulator (DOPRI5) over a "
         "NativeCircuitBuilderAdapter. RHS / b_vector / A_matrix all "
         "execute in C++ without GIL roundtrips; the only Python "

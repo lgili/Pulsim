@@ -656,6 +656,14 @@ public:
                 }
                 if (system_.has_exact_step()) {
                     Real h_ex = std::min(dt_max_, t_target - t);
+                    // 10.1 / 10.2 (D8): the fixed-step form steps the grid k·dt_max; a step
+                    // cut by an event or an edge reaches the next grid point exactly (modal)
+                    Real g_next = std::numeric_limits<Real>::infinity();
+                    if (fixed_step_) {
+                        g_next = grid_after_(t);
+                        h_ex = std::min(g_next, t_target) - t;
+                    }
+                    const Real h_grid = h_ex;
                     while (fast_k_ < fast_t_.size()
                            && (fast_t_[fast_k_] <= t || near_time(t, fast_t_[fast_k_]))) {
                         ++fast_k_;
@@ -675,7 +683,14 @@ public:
                                    ? std::min(h_ex, Real{0.5} * (t_target - t)) : t_target - t;
                     }
                     const MaskT mask_before = system_.current_mask();
-                    advance_(t, x, h_ex, x_new_);
+                    // a whole grid cell from a grid point: x <- Phi x + Gamma of (mask, dt_max)
+                    // (its length g_next - t is dt_max to an ulp of t)
+                    bool pg_step = false;
+                    if constexpr (requires { system_.exact_fixed_step_into(t, x, h_ex, x_new_); }) {
+                        if (fixed_step_ && h_ex == h_grid && g_next <= t_target && on_grid_(t))
+                            pg_step = system_.exact_fixed_step_into(t, x, dt_max_, x_new_);
+                    }
+                    if (!pg_step) advance_(t, x, h_ex, x_new_);
 
                     std::optional<PredicateEvent> evt;
                     if (predictor_.size() > 0) {
@@ -759,6 +774,7 @@ public:
                         plan_fast_samples_(t, !(system_.current_mask() == mask_before));
                     } else {
                         t += h_ex;
+                        if (fixed_step_ && near_time(t, g_next)) t = g_next;   // on the grid
                         x.swap(x_new_);
                         const bool on_edge = t_gate < t_end && near_time(t, t_gate);
                         if (on_edge || tick_due_(t)) {
@@ -1126,6 +1142,12 @@ public:
     // (default 64). A small cap reaches the give-up deterministically on
     // any build and any rounding; production code leaves the defaults.
     void set_max_steps(std::size_t n) noexcept { max_steps_ = n; }
+    /// add-exact-propagator-strategy 10 (D8): the fixed-step form of the
+    /// exact engine. Exact steps go from grid point to grid point (k·dt_max);
+    /// a full cell is x <- Phi x + Gamma from the adapter's (mask, dt_max)
+    /// cache; an event between grid points is located as before and the
+    /// rest of the cell is an exact (modal) sub-step to the next grid point.
+    void set_fixed_step(bool on) noexcept { fixed_step_ = on; }
     void set_settle_round_cap(int n) noexcept { settle_round_cap_ = n < 1 ? 1 : n; }
 
 private:
@@ -3867,6 +3889,17 @@ private:
     int settle_rounds_ = 0;
     int settle_round_cap_ = 64;
     std::size_t max_steps_ = 10'000'000;
+    bool fixed_step_ = false;
+    /// The first grid point k·dt_max past t (not within near_time of it).
+    [[nodiscard]] Real grid_after_(Real t) const {
+        Real j = std::floor(t / dt_max_) + Real{1};
+        Real g = j * dt_max_;
+        while (!(g > t) || near_time(g, t)) g = (j += Real{1}) * dt_max_;
+        return g;
+    }
+    [[nodiscard]] bool on_grid_(Real t) const {
+        return t == std::round(t / dt_max_) * dt_max_;
+    }
     // The predicate that fired the last predicate event, and when: only
     // it is skipped as "just fired" at a step starting at that instant.
     int last_fired_index_ = -1;

@@ -836,3 +836,33 @@ Tasks: 20.1 ticked (seen passing); 20.2-20.4 and add-in-kernel-event-losses 3.3 
 
 ### The bar on b7c7858f (extension built from the tree, .so sha f3c2bb68 equal installed)
 full pytest 5873 passed / 110 skipped / 9 xfailed; `-m reference` 383; reference_status exit 0, its JSON identical to b1's; goldens ALL IDENTICAL; bit-identity 34/36 default and shadow; exact scoreboard 324 values, 0 changed vs b1; flips identical to b1 except wall times; banks 1/9/10 2.541e-5 / 5.843e-4 / 2.117e-4, 12 raises as at baseline; fuzz / truths / orbit as baseline; dsedall 340; C++ on Eigen 5 and 3.4.0: dsed 140 cases / 40927 assertions, layer4_v3 29, mode 40, thermal 9, record 17, all pass; ruff clean, openspec 78, stubs up to date. Full ctest not run.
+
+## Phase 3 slice, 2026-11-25 → 26 (branch `feat/core-exact-phase3` from 6f512b6a)
+
+### Group 7 — coupled inductors
+- **Found:** 7.1 was already in the tree (the inductance-matrix block of 2026-11-17, above); its
+  boxes were never ticked. The conformance coupled-inductor cell already required dsed to run and
+  agree (`test_engine_conformance.py::test_coupled_inductor_cell`); there was no "refused" row to move.
+- **Changed:** |k| = 1 was a bare `std::runtime_error` (the bridge wrapped it into an
+  `UnsupportedError(dsed, extraction)` without a device). It is now thrown typed and by name from the
+  extractor: `UnsupportedError(dsed, extraction, device='T.p+T.s', kind='InductorCoupling')`, the
+  windings of every coupling with M != 0 (both the structural and the general reduction).
+
+### Group 10 — fixed-step Φ/Γ (D8)
+| Question | Option taken | Evidence | How to reverse |
+|---|---|---|---|
+| How the fixed-step form is asked for (the unified stepper's `Fixed{dt}` does not exist yet) | `integrator='fixed'` on `engine='exact'` / `'dsed'`, `dt` required (the grid k·dt); it is the event-driven integrator (`rk45` path) with `set_fixed_step(true)`; nothing changes for any other integrator value | `test_exact_fixed_step.py`; default runs byte-identical (baseline compare) | Drop 'fixed' from `_VALID_INTEGRATORS` |
+| Cache key and budget | Per mask (the adapter's mode entry) a list of at most 4 pairs keyed on h bitwise; a byte counter over all masks against 64 MiB (`set_phi_gamma_budget`); a pair over budget is not built and the cell is a modal step (`n_phi_gamma_refused`). The pairs are dropped with the propagators (set_max_step / set_horizon) | C++ `Exact: the fixed-step pair equals the modal step` | — |
+| Which cells use the pair | A cell that starts on the grid (t == round(t/dt)·dt) and is not cut (no edge, sample or event before the next grid point): the pair of h = dt_max (the cell's length g − t equals dt to an ulp of t). Every other step is the modal step of its own length (the D8 "exact sub-steps", not cached) | CCM buck: 352 / 400, 1999 / 2000, 3999 / 4000 cells by the pair at T/10, T/50, T/100 (an edge an ulp off the grid starts a modal cell) | — |
+| Sources | DC and sine (augmented oscillator states: Φ is time-independent). A piecewise-linear source (pulse / PWM / PWL) keeps the modal step: its level changes per piece (shortcut in `exact_fixed_step_into`) | — | Fold the piece's level into a per-piece Γ |
+| After an event between grid points | The located event fires as on the event-driven form; the next step goes to the next grid point (modal), then the grid continues; t snaps to the grid point (near_time) | DCM orbit 4000 T at T/10: every grid point of the last period is a sample; orbit and turn-off instant as the event-driven form | — |
+| ns per step (information, not a gate) | CCM buck, 400 T at T/100 (40 000 steps, 39 974 by the pair), whole `simulate()` min of 5, shared machine: fixed 267 / 329 ns, event-driven 302 / 358 ns (two interleaved rounds). The kernel is a small part of a step here (n = 2: sample storage and the predicate scan dominate) | `.scratch/phase3/ns.py` | — |
+
+### Group 15 — scaling rule (D13): kernel and rule, not wired into the engine
+| Question | Option taken | Evidence | How to reverse |
+|---|---|---|---|
+| The action kernel | `dsed/expm_action.hpp`: Al-Mohy & Higham 2011 Alg. 3.2 (shift μ = trace/n, θ_m table for 2⁻⁵³, the series stopped once two terms are below u·‖F‖∞) on an Eigen sparse matrix built by `setFromTriplets` (compressed, never refilled: the Eigen 3.4.x growth defect does not apply). (m, s) from ‖A − μI‖₁ only (no d_p = ‖Aᵖ‖^{1/p} estimates): shortcut, ~2× scipy's matvecs on a highly non-normal mode (5610 planned vs 2492 on the 1 ns snubber ladder) | C++ `test_expm_action.cpp` on Eigen 5 and 3.4.0 | delete the header |
+| 15.3's "20 ± 2 matvecs" | Measured 16.0 per step (plan m = 23, s = 1, early stop). The bound's cost side (≤ 22) is asserted; the accuracy at that stop is checked on n = 200 against the dense Padé exponential (≤ 1e-13 relative over 20 steps) | Eigen 3.4.0 run: `16.0 >= 18.0` failed with the original lower bound | — |
+| The route rule | `choose_exact_route(n, nnz, ‖Ah‖₁, N_steps)`: dense when `48n²` ≤ the budget (1 GiB) and `setup + N·2n² ≤ N·2·nnz·(m·s)`; else the action when m·s ≤ m_max = 200; else implicit, reason 'cost'. Snubbed ladder n = 300: N = 1e4 → dense, N = 50 → implicit 'cost'; ladder n = 2000 → action | same tests | — |
+| Engine wiring (15.2's per-mode route and `result.exact['routes']`) | NOT done: the exact engine's event location (scan, chord bounds, slow-manifold projection) reads the mode's eigenbasis; an action mode needs its own predicate evaluation. Every mode still runs dense | — | — |
+| 15.4 calibration | C++ `[.calib]` case (dsed tests binary, Release arm64, Eigen 5, shared machine): ladder n = 201 / 501 / 1001 / 2001, 16 matvecs per step: action 13.6 / 19.0 / 35.3 / 102 µs per step = 8.5e-10 / 4.7e-10 / 4.4e-10 / 6.4e-10 s per (2·nnz) flop; dense Φx 4.1 / 42.6 / 94.1 / 609 µs = 5.0e-11 / 8.5e-11 / 4.7e-11 / 7.6e-11 s per (2n²) flop. Constant taken: an action flop weighs 8 dense flops (`action_flop_weight`). m_max = 200 and the 1 GiB dense budget are NOT calibrated (no hand-over path to time); the dense setup constant 2n³(6 + log₂‖Ah‖₁) is D13's, not measured | `pulsim_core_dsed_tests "[calib]" -s` | — |

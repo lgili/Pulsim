@@ -46,8 +46,8 @@ circuit of `numerics/p2_buck.py`: 24 V, 100 µH, 47 µF, `g_on = 1e3`,
 - [x] 6.3 Tests: series RL with `i0 = 100 A` decays as `100·e^{−tR/L}` to 1e-10; a floating capacitor with `c0 = 5 V` reads 5 V at t = 0 on both terminals' difference; two paralleled capacitors (1 µF at 10 V, 3 µF at 2 V) start at 4.0 V with the adjustment reported; agreement with `engine='trbdf2'` (rtol 1e-9) to 1e-6 — parallel capacitors: refused by name by the extractor (capacitor loop), not 4.0 V; recorded in KNOWN_LIMITATIONS.md
 
 ## 7. Coupled inductors
-- [ ] 7.1 Inductance-matrix block in the extraction; refusal for `|k| = 1`
-- [ ] 7.2 Tests: two coupled inductors (L₁ = L₂ = 1 mH, k = 0.9), each winding in series with 1 Ω, 10 V step on the primary, secondary loop closed: `i₁,₂ = 5·[(1 − e^{−t/τ₊}) ± (1 − e^{−t/τ₋})]` with `τ± = (1 ± k)·L/R = 1.9 ms, 0.1 ms`, within 1e-10; flyback agreement with `trbdf2` to 1e-5
+- [x] 7.1 Inductance-matrix block in the extraction; refusal for `|k| = 1` — block since 2026-11-17 (DECISIONS); the refusal is now typed and by name (`UnsupportedError` extraction, device `T.p+T.s`, kind `InductorCoupling`; C++ `compute_lti_state_space extracts magnetically coupled circuits`)
+- [x] 7.2 Tests: two coupled inductors (L₁ = L₂ = 1 mH, k = 0.9), each winding in series with 1 Ω, 10 V step on the primary, secondary loop closed: `i₁,₂ = 5·[(1 − e^{−t/τ₊}) ± (1 − e^{−t/τ₋})]` with `τ± = (1 ± k)·L/R = 1.9 ms, 0.1 ms`, within 1e-10; flyback agreement with `trbdf2` to 1e-5 — `test_exact_coupled_inductors.py`: closed form within 1e-10 A on dsed and exact; a flyback against trbdf2 (rtol 1e-9) at the 99 period starts: 3.2e-7 relative
 
 ## 8. Sources through the event queue (needs `add-unified-event-queue`)
 - [x] 8.1 Piecewise-constant sources: breakpoints as time events, `b` constant between — done in the dsed scheduler without the unified queue: `next_source_corner_after(t)` joins the gate-edge min (DECISIONS: group 16 slice)
@@ -60,10 +60,10 @@ circuit of `numerics/p2_buck.py`: 24 V, 100 µH, 47 µF, `g_on = 1e3`,
 - [ ] 9.3 Conformance-matrix rows for the strategy: every device kind either runs or is refused by name
 
 ## 10. Fixed-step Φ/Γ
-- [ ] 10.1 `(Φ_m, Γ_m)` cache keyed on `(mask, dt)`, byte-budgeted; dense update loop
-- [ ] 10.2 Exact sub-steps for diode events between grid points
-- [ ] 10.3 Tests: CCM buck at dt = T/10, T/50, T/100 within 1e-10 of the task 1.1 reference (prototype: 7e-14, 1.3e-12, 2.5e-12); DCM orbit within 1e-9; identical to the event-driven form to 1e-11
-- [ ] 10.4 Measurement gate: flops per step = n² + n (counted), zero allocations, zero factorizations after the first visit of each mask; ns/step reported
+- [x] 10.1 `(Φ_m, Γ_m)` cache keyed on `(mask, dt)`, byte-budgeted; dense update loop — `integrator='fixed'` (DECISIONS phase 3 slice); 4 pairs per mask, 64 MiB over all masks; DC and sine sources (a PWL source keeps the modal step)
+- [x] 10.2 Exact sub-steps for diode events between grid points — the event located as on the event-driven form, the cell finished by a modal step to the next grid point
+- [x] 10.3 Tests: CCM buck at dt = T/10, T/50, T/100 within 1e-10 of the task 1.1 reference (prototype: 7e-14, 1.3e-12, 2.5e-12); DCM orbit within 1e-9; identical to the event-driven form to 1e-11 — `test_exact_fixed_step.py`: 3.5e-13 / 1.8e-12 / 7.6e-13 A; DCM orbit and turn-off instant at T/10 after 4000 T; fixed vs event-driven < 1e-11 (CCM end state, DCM period starts)
+- [x] 10.4 Measurement gate: flops per step = n² + n (counted), zero allocations, zero factorizations after the first visit of each mask; ns/step reported — counters in `result.exact` (`fixed_step_flops == n_fixed_steps·(n²+n)`, `n_eig` = masks); zero allocations: `pulsim_core_perf_tests` "exact fixed step: zero allocations per step"; ns/step: see DECISIONS phase 3 slice
 
 ## 11. Hybrid with Newton devices (needs `add-unified-device-interface`)
 - [ ] 11.1 `affine_region` on the device interface; mode key `(mask, regions)`; region boundaries as state events
@@ -89,10 +89,10 @@ circuit of `numerics/p2_buck.py`: 24 V, 100 µH, 47 µF, `g_on = 1e3`,
 - [ ] 14.3 Tests: a buck whose switch is a MOSFET Level 1 and whose diode is PWL matches `trbdf2` (rtol 1e-9) within 1e-6 on `v_C`, and `t_exact_fraction` is at least the fraction of each period the MOSFET spends in cutoff (minus the event tolerance); a Shockley-diode rectifier runs with `n_exact_segments = 0`
 
 ## 15. Scaling rule (D13)
-- [ ] 15.1 Action-of-the-exponential kernel (truncated Taylor with scaling and the 1-norm estimate) on the sparse `A` of a mode, augmented with the source states
-- [ ] 15.2 Cost model and route choice per mode; counters in `result.exact['routes']`
-- [ ] 15.3 Tests on the RLC ladder of `probes/expm_action_ladder.py` (h = 1 µs): n = 2000 non-stiff → action, 20 ± 2 matvecs per step, states within 1e-13 of the dense kernel on n = 200; n = 300 with snubbers and a mode visited for 10⁴ steps → dense; the same with 50 steps per visit → hand-over with reason `'cost'`
-- [ ] 15.4 Calibrate the flop constants, `m_max` and the dense budget against C++ timings with the counter harness; record them here
+- [x] 15.1 Action-of-the-exponential kernel (truncated Taylor with scaling and the 1-norm estimate) on the sparse `A` of a mode, augmented with the source states — `dsed/expm_action.hpp` (`ExpmAction`, `augment_affine`); (m, s) from ‖A − μI‖₁, not the d_p estimates (shortcut, DECISIONS phase 3); not wired into the engine
+- [ ] 15.2 Cost model and route choice per mode; counters in `result.exact['routes']` — partial: the rule `choose_exact_route` (C++, tested); not wired: no per-mode route in the engine, no `result.exact['routes']` (the event location reads the eigenbasis)
+- [x] 15.3 Tests on the RLC ladder of `probes/expm_action_ladder.py` (h = 1 µs): n = 2000 non-stiff → action, 20 ± 2 matvecs per step, states within 1e-13 of the dense kernel on n = 200; n = 300 with snubbers and a mode visited for 10⁴ steps → dense; the same with 50 steps per visit → hand-over with reason `'cost'` — `core/tests/dsed/test_expm_action.cpp` (Eigen 5 and 3.4.0): n = 2000 → action, 16.0 matvecs per step (bound restated ≤ 22, DECISIONS); n = 200 3.3e-15 of the dense Padé exponential; n = 300 snubbed, 1e4 steps → dense; 50 steps → hand-over 'cost' on the raw flop model, dense on the calibrated one (strict expected failure)
+- [ ] 15.4 Calibrate the flop constants, `m_max` and the dense budget against C++ timings with the counter harness; record them here — partial: action flop = 8 dense flops (C++ `[.calib]`: 4.4e-10…8.5e-10 s per action flop, 4.7e-11…8.5e-11 s per dense flop, ladder n = 201…2001); `m_max` and the budget not calibrated
 
 ## 16. Exact sources (D14)
 - [x] 16.1 Augmented source states: polynomial chain, exponential, shared oscillator pairs; PWL corners as time events. Sine: shared oscillator pairs (before this change). Pulse / PWM: level + ramp through φ₁ / φ₂ between corners, each corner a time event (DECISIONS: group 16 slice). Exponential and higher-polynomial sources: no such source exists in the builder; table sources: none exist (only `add_saturable_inductor_table` takes a table)

@@ -433,6 +433,67 @@ public:
         out = aug_out_.head(n);
     }
 
+    /// add-exact-propagator-strategy 10.1 (D8): one full grid step of
+    /// length h as x ← Φ·x + Γ from the (mask, h) cache (the mask is the
+    /// entry, h the key, bitwise). False, nothing written, where the pair
+    /// does not apply: no exact step, a piecewise-linear source (its level
+    /// changes per piece: shortcut, the caller takes the modal step; upgrade
+    /// when a pulse-driven fixed run needs the n² step), or the byte budget
+    /// spent on other pairs.
+    bool exact_fixed_step_into(Real t, const Vector& x, Real h, Vector& out) const {
+        ensure_current_resolved_();
+        ensure_exact_built_(*current_entry_);
+        const LTIEntry& e = *current_entry_;
+        if (!e.exact.valid || !pwl_sources_.empty()) return false;
+        const PhiGamma* pg = nullptr;
+        auto& c = e.exact.pg_cache;
+        for (std::size_t i = 0; i < c.size(); ++i)
+            if (c[i].h == h) { pg = &c[i]; break; }
+        if (pg == nullptr) {
+            const auto N = static_cast<std::size_t>(
+                x.size() + 2 * static_cast<Index>(e.aug_omegas.size()));
+            const std::size_t bytes = (N * N + N) * sizeof(Real);
+            constexpr std::size_t kPerMask = 4;   // h = dt plus a few edge-cut lengths at most
+            if (c.size() >= kPerMask) {
+                pg_bytes_ -= (static_cast<std::size_t>(c.front().Phi.size()) + c.front().Gamma.size()) * sizeof(Real);
+                c.erase(c.begin());
+            }
+            if (pg_bytes_ + bytes > pg_budget_) { ++n_pg_refused_; return false; }
+            c.push_back(make_phi_gamma(e.exact, h));
+            pg_bytes_ += bytes;
+            ++n_pg_builds_;
+            pg = &c.back();
+        }
+        const auto n = x.size();
+        const auto k = static_cast<Index>(e.aug_omegas.size());
+        if (k == 0) {
+            phi_gamma_step_into(*pg, x, out);
+        } else {
+            aug_in_.resize(n + 2 * k);
+            aug_out_.resize(n + 2 * k);
+            aug_in_.head(n) = x;
+            for (Index j = 0; j < k; ++j) {
+                const Real w = e.aug_omegas[static_cast<Size>(j)];
+                aug_in_[n + 2 * j]     = std::sin(w * t);
+                aug_in_[n + 2 * j + 1] = std::cos(w * t);
+            }
+            phi_gamma_step_into(*pg, aug_in_, aug_out_);
+            out = aug_out_.head(n);
+        }
+        const auto N = static_cast<std::size_t>(pg->Gamma.size());
+        ++n_fixed_steps_;
+        fixed_flops_ += N * N + N;
+        return true;
+    }
+    /// 10.4 counters: fixed (Φ, Γ) steps, pairs built, multiply-adds of
+    /// those steps, pairs refused by the budget; the budget in bytes.
+    [[nodiscard]] std::size_t n_fixed_steps() const noexcept { return n_fixed_steps_; }
+    [[nodiscard]] std::size_t n_phi_gamma_builds() const noexcept { return n_pg_builds_; }
+    [[nodiscard]] std::size_t fixed_step_flops() const noexcept { return fixed_flops_; }
+    [[nodiscard]] std::size_t n_phi_gamma_refused() const noexcept { return n_pg_refused_; }
+    [[nodiscard]] std::size_t phi_gamma_bytes() const noexcept { return pg_bytes_; }
+    void set_phi_gamma_budget(std::size_t bytes) noexcept { pg_budget_ = bytes; }
+
     /// The first corner of a piecewise-linear source strictly after t
     /// (+∞ when there is none): a time event of the scheduler, so no
     /// exact step straddles a change of a source's piece (D14).
@@ -751,6 +812,7 @@ public:
             e.exact_built = false;
             e.exact = ExactLTI{};
         }
+        pg_bytes_ = 0;   // the pairs went with the propagators
     }
 
     /// The run's length: tier 1's propagator_defect is stated over it
@@ -765,6 +827,7 @@ public:
             e.exact_built = false;
             e.exact = ExactLTI{};
         }
+        pg_bytes_ = 0;   // the pairs went with the propagators
     }
 
     /// Consistent reinitialisation onto the current mode's slow
@@ -2078,6 +2141,10 @@ private:
     mutable std::size_t n_eig_ = 0;
     mutable Real build_seconds_ = 0;
     mutable Vector aug_in_, aug_out_;
+    // 10.1: the fixed-step pairs' bytes over every mask, and their budget (64 MiB)
+    mutable std::size_t pg_bytes_ = 0, n_pg_builds_ = 0, n_fixed_steps_ = 0, fixed_flops_ = 0,
+                        n_pg_refused_ = 0;
+    std::size_t pg_budget_ = std::size_t{64} << 20;
 };
 
 }  // namespace pulsim::dsed

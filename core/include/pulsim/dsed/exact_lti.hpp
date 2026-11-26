@@ -58,6 +58,15 @@ inline constexpr Real kExactRoundoff = std::numeric_limits<Real>::epsilon();
 /// The accepted error level of tiers 1 and 2 (`u·κ`, `u·‖Ah‖₁`).
 inline constexpr Real kExactTierBound = Real{1e-10};
 
+/// add-exact-propagator-strategy 10.1 (D8): the fixed-step pair of one
+/// step length h, x(t+h) = Φ·x + Γ (Γ for the b the propagator was built
+/// with), dense and real.
+struct PhiGamma {
+    Real h = 0;
+    DenseMatrix Phi;
+    Vector Gamma;
+};
+
 /// The propagator of one mode.
 struct ExactLTI {
     bool valid = false;        // tier 1 or 2: an exact step exists
@@ -84,6 +93,9 @@ struct ExactLTI {
     mutable std::vector<std::pair<Real, DenseMatrix>> pade_cache;
     mutable std::size_t n_pade = 0;       // Padé exponentials evaluated
     mutable std::size_t n_pade_hits = 0;  // cache hits
+    // 10.1: the (Φ, Γ) pairs of this mode, keyed on h (bitwise); the
+    // owner's byte budget decides whether a pair is kept (fixed-step form)
+    mutable std::vector<PhiGamma> pg_cache;
 
     // Workspaces: a step allocates nothing.
     mutable Vector z_re, z_im, zn_re, zn_im, y, c1_re, c1_im;
@@ -638,6 +650,43 @@ inline constexpr Real kPadeTheta13 = 5.371920351148152;
     }
     e.pade_cache.emplace_back(h, pade_compute(e, e.bs, h));
     return e.pade_cache.back().second;
+}
+
+/// 10.1 (D8): the pair (Φ, Γ) of a step h. Tier 1 from the modal form,
+/// Φ = Re(V·diag(e^{λh})·V⁻¹), Γ = Re(V·(h·φ₁(λh) ∘ w)); tier 2 from the
+/// augmented exponential, unscaled out of the energy coordinates.
+[[nodiscard]] inline PhiGamma make_phi_gamma(const ExactLTI& e, Real h) {
+    PhiGamma out;
+    out.h = h;
+    if (e.tier == 2) {
+        const auto n = e.As.rows();
+        const DenseMatrix& E = pade_exp(e, h);
+        out.Phi = e.d.cwiseInverse().asDiagonal() * E.topLeftCorner(n, n) * e.d.asDiagonal();
+        out.Gamma = E.topRightCorner(n, 1).cwiseQuotient(e.d);
+        return out;
+    }
+    const auto n = e.V_re.rows();
+    Eigen::MatrixXcd V(n, n), Vinv(n, n);
+    V.real() = e.V_re;
+    V.imag() = e.V_im;
+    Vinv.real() = e.Vinv_re;
+    Vinv.imag() = e.Vinv_im;
+    Eigen::VectorXcd ex(n), g(n);
+    for (Eigen::Index i = 0; i < n; ++i) {
+        const std::complex<Real> s = e.lambda[i] * h;
+        ex[i] = std::exp(s);
+        g[i] = h * phi1(s) * e.w[i];
+    }
+    out.Phi = (V * ex.asDiagonal() * Vinv).real();
+    out.Gamma = (V * g).real();
+    return out;
+}
+
+/// One fixed step x ← Φ·x + Γ into `out` (distinct from x): n² + n
+/// multiply-adds, no allocation.
+inline void phi_gamma_step_into(const PhiGamma& pg, const Vector& x, Vector& out) {
+    out.noalias() = pg.Phi * x;
+    out += pg.Gamma;
 }
 
 /// Advance `x` by `h` into `out` (same size; no allocation after the

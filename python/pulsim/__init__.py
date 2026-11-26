@@ -2600,6 +2600,11 @@ def simulate(
         one go to the stiffness detector, which picks DOPRI5 or BDF2.
         ``result.n_exact_steps`` counts the exact steps. ``'bdf2'``
         starts each segment with one backward-Euler step.
+        ``'fixed'`` (needs ``dt``): the exact steps go from grid point to
+        grid point (k·dt), a full cell ``x <- Φ·x + Γ`` from a cache keyed on
+        (mode, dt); a diode event between grid points is located exactly and
+        the cell finished by an exact sub-step (counters in
+        ``result.exact``: ``n_fixed_steps``, ``fixed_step_flops``).
     stiffness_threshold
         DSED override: ``|λ_max|·h`` ratio above which auto-dispatch
         picks BDF2 (default 10.0).
