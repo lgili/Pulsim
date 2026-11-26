@@ -1367,6 +1367,9 @@ class _ClosedLoopExactMap:
                 enable_event_projection=False, diode_law_rel=0.0,
                 event_log=True, **self._tick_kw, **self._guard)
         except RuntimeError as e:
+            if isinstance(e, (NotImplementedError, RecursionError)) or \
+                    type(e).__name__ == "_CxxCancelled":
+                raise       # a stub, a bug or a cancellation: not a non-convergence
             raise _conv(f"a period run failed: {e}") from e
         states = np.asarray(r["states"], dtype=float)
         self.n_steps += int(r["n_accept"])

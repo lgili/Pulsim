@@ -25,6 +25,7 @@ from typing import Any
 import numpy as np
 
 from ._control_state import _cxx, _has, _mutable_cell
+from ._pulsim import InternalError  # type: ignore[import-not-found]
 from ._refusal import unsupported
 
 _ANALYSIS = "periodic_steady_state"
@@ -1016,10 +1017,10 @@ def _dummy_dump_bytes(spec, overrides: dict[str, Any] | None = None) -> tuple[by
 def _find_double_offset(b0: bytes, b1: bytes) -> int:
     diff = [i for i in range(len(b0)) if b0[i] != b1[i]]
     if not diff:
-        raise RuntimeError("failed to locate controller state byte offset")
+        raise InternalError("failed to locate controller state byte offset")
     off = diff[0]
     if off + 8 > len(b0):
-        raise RuntimeError("controller state byte offset out of range")
+        raise InternalError("controller state byte offset out of range")
     return off
 
 
