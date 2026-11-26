@@ -1113,6 +1113,18 @@ inline SimulationResult run_transient_trbdf2(
                 }
                 singular = true;
             }
+            // A probe that passes only as a floating-point fixed point at
+            // its own magnitudes (DECISIONS 12) is retaken longer, as a
+            // stalled one: it sits on the edge's fast mode at a magnitude
+            // where no later solve converges in tol_dx. ll13's 1.5 us
+            // turn-off at rtol 1e-8: a 2.3 fs probe at 3.5e8 V (tau 1.7e-13 s)
+            // committed, every step after it ended at roundoff and Newton
+            // was declined down to h_min; 2.1.0 (no such rule) retook it
+            // 100x and went on from 5e6 V. Counted in n_probe_newton_retries.
+            if (ok && newton_roundoff.accepted && newton_roundoff.fixed_point
+                && dt_try < dt_cap) {
+                ok = false;
+            }
             last_probe_dt = dt_try;
             last_probe_ok = ok;
             if (ok || dt_try >= dt_cap) {

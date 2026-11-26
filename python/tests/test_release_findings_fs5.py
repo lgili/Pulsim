@@ -259,9 +259,14 @@ _HEAVY = {
 # spike (3.8e8 V, ||dx|| below one ulp) declined against the start-state row
 # scale. DECISIONS 12 of add-newton-roundoff-acceptance; measured 9.4e-6 /
 # 1.0e-4 of range against the reference.
+# ll13 at the reference tolerance (differential_runner.reference: rtol 1e-8,
+# atol 1e-12) aborted at h_min after the 1.5 us turn-off on the gate-edge merge:
+# the edge probe (2.3 fs, 3.5e8 V) passed as such a fixed point and was committed;
+# probes now retake it longer, as 2.1.0 did (n_probe_newton_retries).
 @pytest.mark.parametrize(("name", "kw"), [
     ("ll08", {}), ("ll13", {}), ("ll13", {"rtol": 1e-7}),
-    ("ll13", {"rtol": 1e-6, "integrator": "esdirk43"})])
+    ("ll13", {"rtol": 1e-6, "integrator": "esdirk43"}),
+    ("ll13", {"rtol": 1e-8, "atol": 1e-12})])
 def test_roundoff_heavy_reference_circuit_runs_on_trbdf2(name, kw):
     rel, dt_ref, period, offs, inductors, nodes = _HEAVY[name]
     bench = Path(__file__).resolve().parents[2] / "benchmarks"
