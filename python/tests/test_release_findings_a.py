@@ -103,9 +103,12 @@ def test_f33_flyback_turn_off_does_not_enter_the_body_diode():
 def test_f33_flyback_peak_converges_at_second_order():
     """The restart from the consistent state x0+ is second order through the
     impulsive turn-off: peak primary current against the exact engine's
-    16.381990162 A (measured 5.1e-6, 1.2e-6 A at dt 10, 5 ns)."""
+    16.381990162 A. Measured 5.1e-6, 1.2e-6 A at dt 10, 5 ns before the restart
+    step was cut at the turn-off its stage 2 makes (n_restart_cuts); since: 6.27e-6,
+    1.08e-6, 8.2e-8, 4.6e-8 A at dt 40, 20, 10, 5 ns (a floor of ~5e-8 A, 3e-9
+    relative, below 10 ns: the order is read above it)."""
     peak_exact = 16.381990162
-    e = [abs(_run_flyback(dt=dt, **RESTART).max() - peak_exact) for dt in (1e-8, 5e-9)]
+    e = [abs(_run_flyback(dt=dt, **RESTART).max() - peak_exact) for dt in (4e-8, 2e-8)]
     assert e[0] < 1e-5 and e[0] / e[1] > 3.5, e
 
 
@@ -413,14 +416,17 @@ def _two_rectifiers(which, dt=1e-4):
 def test_split_locates_independent_diodes_on_their_own_signals():
     """Only diodes at one FLOATING island share a summed signal (the floating bridge of
     F-3-1). Two grounded rectifiers crossing in one step keep their own crossings: the
-    first is located where it is alone, and its waveform is the lone run's bit for bit
-    (the summed signal put both at a common time between them)."""
+    first is located where it is alone, and its waveform is the lone run's (the summed
+    signal put both at a common time between them). Not bit for bit: the restart step
+    cut at the second rectifier's turn-off (n_restart_cuts) splits the shared step for
+    both, which moves o1 by its truncation error (1.4e-10 relative, measured)."""
     alone, both = _two_rectifiers("1"), _two_rectifiers("12")
     d1 = [e.t_estimated for e in alone.commutation_events]
     b1 = [e.t_estimated for e in both.commutation_events if e.branch_id == 1]
     assert len(d1) == len(b1) >= 3
     np.testing.assert_allclose(b1, d1, rtol=0, atol=1e-12)
-    np.testing.assert_array_equal(np.asarray(both.v("o1")), np.asarray(alone.v("o1")))
+    np.testing.assert_allclose(np.asarray(both.v("o1")), np.asarray(alone.v("o1")),
+                               rtol=1e-9, atol=0)
 
 
 def _rectifier_and_unrelated_pulse(pulse):

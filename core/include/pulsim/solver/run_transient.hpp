@@ -4474,7 +4474,7 @@ inline SimulationResult run_transient(
             hs.snapshot_into(rs_cut.hs0);
             diodes.snapshot_on_bits_into(rs_cut.b0);
             rs_cut.lsb0 = last_solved_bits;
-            const bool cycle0 = mask_cycle, known0 = stamped_known;
+            const bool cycle0 = mask_cycle, known0 = stamped_known, flipped0 = flipped;
             const auto mask0 = stamped_mask;
             const Size ip0 = impulse_pending.size(), fb0 = result.n_right_limit_fallbacks;
             const Size ij0 = ideal_pending.size();
@@ -4495,26 +4495,34 @@ inline SimulationResult run_transient(
             const Real td = rs_cut.t;
             const auto post = rs_cut.bits;
             const bool vf0 = rs_cut.vf0;
-            x = rs_cut.x0;
-            history.restore(rs_cut.h0);
-            hs.restore(rs_cut.hs0);
-            diodes.restore_on_bits(rs_cut.b0);
-            last_solved_bits = rs_cut.lsb0;
-            mask_cycle = cycle0;
-            stamped_known = known0;
-            stamped_mask = mask0;
-            impulse_pending.resize(ip0);
-            ideal_pending.resize(ij0);
-            result.n_right_limit_fallbacks = fb0;
-            event_rl_t = erl0;
-            rl_loc.t = rlt0;
-            lines.owner = owner0;
-            lines.n = n0;
-            lines.end_own = eo0;
-            lines.start = st0;
-            lines.ok = ok0;
-            lines.rl_start_ok = rso0;
-            lines.rl_start_jump = rsj0;
+            const bool unsettled_uncut = mask_cycle || flipped;
+            // the counters keep the uncut pass's work (the pieces add theirs)
+            const Size s2r = result.stage2_retries, s2k = result.stage2_be_kept,
+                       s2f = result.stage2_retry_failures;
+            auto restore0 = [&]() {
+                flipped = flipped0;
+                x = rs_cut.x0;
+                history.restore(rs_cut.h0);
+                hs.restore(rs_cut.hs0);
+                diodes.restore_on_bits(rs_cut.b0);
+                last_solved_bits = rs_cut.lsb0;
+                mask_cycle = cycle0;
+                stamped_known = known0;
+                stamped_mask = mask0;
+                impulse_pending.resize(ip0);
+                ideal_pending.resize(ij0);
+                result.n_right_limit_fallbacks = fb0;
+                event_rl_t = erl0;
+                rl_loc.t = rlt0;
+                lines.owner = owner0;
+                lines.n = n0;
+                lines.end_own = eo0;
+                lines.start = st0;
+                lines.ok = ok0;
+                lines.rl_start_ok = rso0;
+                lines.rl_start_jump = rsj0;
+            };
+            restore0();
             rs_cut.piece1 = true;
             try {
                 restart_lined_once(run_event_iteration, a, td - a, loc, ev);
@@ -4536,6 +4544,17 @@ inline SimulationResult run_transient(
             rl_loc.bits = post;
             restart_lined_once(run_event_iteration, td, (a + h) - td, snap, true);
             flipped = flipped || flipped_1;
+            if ((mask_cycle || flipped) && !unsettled_uncut) {
+                // a piece left the diode mode unsettled where the whole step
+                // settled (the three-phase rectifier's mask cycle at 2.55 ms):
+                // the uncut step stands
+                --result.n_restart_cuts;
+                restore0();
+                restart_lined_once(run_event_iteration, a, h, loc, ev);
+                result.stage2_retries = s2r;   // the same pass again: counted once
+                result.stage2_be_kept = s2k;
+                result.stage2_retry_failures = s2f;
+            }
         };
 
         auto step_take = [&]() PULSIM_STEP_PHASE {
