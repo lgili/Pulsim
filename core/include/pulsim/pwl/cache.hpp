@@ -668,13 +668,21 @@ public:
     /// not positive definite) is refused by name: the coupled windings
     /// (k != 0), joined by '+'.
     [[noreturn]] void throw_coupling_not_pd_() const {
+        // the pairs with |k| = 1 to rounding when there are any (a group of three or more
+        // windings can be singular with every pair below 1: then every coupled winding)
         std::string names;
-        for (const auto& tc : pool_.transformer_couplings()) {
-            if (models::TwoWindingTransformer::mutual_inductance(tc.params) == Real{0}) continue;
-            for (const Index b : {tc.primary_branch_id, tc.secondary_branch_id}) {
-                if (!names.empty()) names += "+";
-                names += std::string(graph_.branch_name(b));
+        for (const bool unit_only : {true, false}) {
+            for (const auto& tc : pool_.transformer_couplings()) {
+                const Real M = models::TwoWindingTransformer::mutual_inductance(tc.params);
+                if (M == Real{0}) continue;
+                if (unit_only && std::abs(M) < (Real{1} - Real{1e-9}) * std::sqrt(tc.params.L_p * tc.params.L_s))
+                    continue;
+                for (const Index b : {tc.primary_branch_id, tc.secondary_branch_id}) {
+                    if (!names.empty()) names += "+";
+                    names += std::string(graph_.branch_name(b));
+                }
             }
+            if (!names.empty()) break;
         }
         throw UnsupportedError(
             "dsed", "extraction", names, "InductorCoupling",

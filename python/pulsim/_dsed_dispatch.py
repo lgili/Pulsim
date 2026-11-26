@@ -1455,6 +1455,12 @@ def run_dsed_from_builder(
                    and run_bdf2_native is not None
                    and run_auto_native is not None)
 
+    if fixed_step:
+        raise unsupported(
+            "dsed", "integrator", message=
+            "simulate(engine='exact', integrator='fixed'): the native adapter "
+            "rejected this circuit and the fallback path has no fixed-step form. "
+            "Drop integrator='fixed'.")
     if bridge10_ok:
         if opts.integrator == "rk45":
             native_res = run_ped_native(

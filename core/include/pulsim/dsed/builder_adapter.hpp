@@ -486,7 +486,8 @@ public:
         return true;
     }
     /// 10.4 counters: fixed (Φ, Γ) steps, pairs built, multiply-adds of
-    /// those steps, pairs refused by the budget; the budget in bytes.
+    /// those steps, cells the budget sent to the modal step (a count of
+    /// steps, not of pairs); the budget in bytes.
     [[nodiscard]] std::size_t n_fixed_steps() const noexcept { return n_fixed_steps_; }
     [[nodiscard]] std::size_t n_phi_gamma_builds() const noexcept { return n_pg_builds_; }
     [[nodiscard]] std::size_t fixed_step_flops() const noexcept { return fixed_flops_; }
