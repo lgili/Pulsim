@@ -2832,8 +2832,34 @@ inline SimulationResult run_transient(
             // (+0.97 % of i at dt 0.5 µs). The tracker
             // still records J_i (from the state vectors); J_f is not recorded.
             const bool impulsive = solved && moving;
-            ip_jump = solved && jumped;   // the right limit adds J (event_right_limit)
-            ip_moved = solved && moving;  // the histories are x0 + d: the right limit starts from x0
+            // An ideal share whose states the rule does not flag (each one's d
+            // is under its slow motion: C1 -S- C2 beside an LC at a split's
+            // half step) is still an ideal jump: its constraint sum K·x jumps
+            // (the same test on K·x). Else the right limit pinned every state
+            // to x0, which the constraint cannot meet (diverged, no row), and
+            // stage 2's pseudo-state carried c·J of the share (item C).
+            bool share = false;
+            if (structural && solved && !jumped) {
+                for (const auto& ds : structure.check(stamped_mask, true).dependent) {
+                    Real k0 = 0, k1 = 0, k2 = 0, k3 = 0, kf2 = 0, kf3 = 0, sc = 0;
+                    for (Size j = 0; j < ds.states.size(); ++j) {
+                        for (Size k = 0; k < ne; ++k) {
+                            if (ents[k].branch_id != ds.states[j]) continue;
+                            const auto& e = ents[k];
+                            const Real s = static_cast<Real>(ds.signs[j]);
+                            const Real a0 = is_cap(e) ? e.v_prev : e.i_prev, a1 = state(e, ip_x1);
+                            k0 += s * a0; k1 += s * a1;
+                            k2 += s * state(e, ip_x2m); k3 += s * state(e, ip_x3m);
+                            kf2 += s * state(e, ip_x2); kf3 += s * state(e, ip_x3f);
+                            sc += Real{1e-8} * (Real{1} + std::abs(a0) + std::abs(a1)) +
+                                  (is_cap(e) ? Real{0} : tol_i) + allow(ip_r[k], k);
+                        }
+                    }
+                    share = share || (jumps(k0, k1, k2, k3, sc) && jumps(k0, k1, kf2, kf3, sc));
+                }
+            }
+            ip_jump = solved && (jumped || share);   // the right limit adds J (event_right_limit)
+            ip_moved = solved && (moving || share);  // the right limit starts from x0
             ip_struct = structural;
             if (!impulsive && solved && moving && L) [[unlikely]] {
                 // the lines' stage 1 from x0+ (a window integral is the

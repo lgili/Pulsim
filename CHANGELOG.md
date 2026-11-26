@@ -8,6 +8,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Fixed engine, `discontinuity_restart=True`: an ideal element's charge share
+  whose single states the jump test does not flag (C1 -S- C2 beside an LC, the
+  closing landed on a half step by event splitting) is now read as an ideal
+  jump from its loop sum. Its right-limit row was pinned to the pre-event states,
+  diverged and was dropped (counted); it is now the closed-form share. A
+  three-way share through two ideal switches now gets its row too.
 - Fixed engine, `discontinuity_restart=True`: an event's right-limit row whose
   diode mode does not hold at t_e+ (a freewheel diode stage 1 holds ON while a
   node capacitor or an ideal element's jump reverse-biases it) is re-decided and

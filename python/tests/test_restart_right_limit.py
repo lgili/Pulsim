@@ -744,13 +744,15 @@ def test_the_sample_after_an_ideal_jump_into_a_fast_rc_obeys_kcl(split):
     np.testing.assert_allclose(i_r, np.asarray(v.i("L"))[j + 2:], rtol=1e-6)
 
 
-def test_a_right_limit_whose_pin_does_not_converge_stores_no_row():
+@pytest.mark.parametrize("split", [False, True])
+def test_a_three_way_ideal_share_has_its_row(split):
     """Review (rev_fin2 probe_i): C1 1 nF (10 V) -ideal S- c (C2 50 pF) -ideal Sd (R_on 0)-
     d (C3 1 nF, 88 V) with a 0.04 A current source draining d; S and Sd close at T_E. The
     pin of that ideal three-way share diverged (a = -37.49 V for the 8.78 V share) and was
-    published. Now: no row at the closing, the counter says so, and the samples after it
-    follow the closed form v(t) = s3 - 0.04 (t - t_e)/(C1 + C2 + C3), s3 the three-way
-    charge share of the left values (every state tied by the two ideal switches)."""
+    published; then no row was stored (counted). Since item 3 the share is read as an
+    ideal jump (its loop sums jump): the row is s3, the three-way charge share of the
+    left values, on all three nodes, and the samples after it follow the closed form
+    v(t) = s3 - 0.04 (t - t_e)/(C1 + C2 + C3) (every state tied by the two ideal switches)."""
     c1, c2, c3, i0 = 1e-9, 50e-12, 1e-9, -0.04
     b = p.CircuitBuilder()
     b.add_capacitor("C1", "a", "gnd", c1, 10.0)
@@ -766,16 +768,17 @@ def test_a_right_limit_whose_pin_does_not_converge_stores_no_row():
         m.set(k, t >= T_E)
         m.set(kd, t >= T_E)
         return m
-    r = _quiet(p.simulate, b, t_end=4e-6, dt=DT, switch_fn=fn, **RULE)
+    r = _quiet(p.simulate, b, t_end=4e-6, dt=DT, switch_fn=fn,
+               enable_substep_state_correction=split, **RULE)
     v, t, kk = _limits(r)
-    assert not [j for j in kk if t[j] > 1e-6]   # no row at the closing
-    assert r.n_right_limit_fallbacks >= 1
+    assert r.n_right_limit_fallbacks == 0
     va, vc, vd = (np.asarray(x) for x in (v.v("a"), v.v("c"), v.v("d")))
-    # the closing's step: the last sample where a and d still differ
-    (j,) = np.flatnonzero((np.abs(va - vd) > 1e-3)[:-1] & (np.abs(va - vd) <= 1e-3)[1:])
-    s3 = (c1 * va[j] + c2 * vc[j] + c3 * vd[j]) / (c1 + c2 + c3)
-    after = slice(j + 1, None)
-    want = s3 + i0 * (t[after] - t[j]) / (c1 + c2 + c3)
+    (jr,) = [j for j in kk if t[j] > 1e-6]
+    s3r = (c1 * va[jr] + c2 * vc[jr] + c3 * vd[jr]) / (c1 + c2 + c3)
+    for y in (va, vc, vd):
+        assert y[jr + 1] == pytest.approx(s3r, rel=1e-6)
+    after = slice(jr + 1, None)
+    want = s3r + i0 * (t[after] - t[jr]) / (c1 + c2 + c3)
     for y in (va, vc, vd):
         np.testing.assert_allclose(y[after], want, rtol=0, atol=1e-6 * 100.0)
 
@@ -868,3 +871,52 @@ def test_an_ideal_clamp_with_nothing_to_dump_books_nothing():
     b = _clamped_dump(0.0, 10.0)
     r = _quiet(p.simulate, b, t_end=4e-6, dt=DT, switch_fn=_gate_n(b), **RULE)
     assert [x.dW for x in r.reinit_records if x.t > 1e-6] == []
+
+
+def _share_beside_lc(v2):
+    """C1 1 nF (10 V) -ideal S- c: C2 50 pF (v2; None: no C2), L 10 uH (0 A) -1 mOhm- gnd."""
+    b = p.CircuitBuilder()
+    b.add_capacitor("C1", "a", "gnd", 1e-9, 10.0)
+    b.add_ideal_switch("S", "a", "c", 0.0, 0.0)
+    if v2 is not None:
+        b.add_capacitor("C2", "c", "gnd", 50e-12, v2)
+    b.add_inductor("L", "c", "o", 10e-6, 0.0)
+    b.add_resistor("R", "o", "gnd", 1e-3)
+    return b
+
+
+@pytest.mark.parametrize("split", [False, True])
+def test_an_ideal_share_beside_an_lc_has_its_row(split):
+    """Item 3: with the split the closing lands at T_E on a half step, where no
+    state's d clears its slow motion (the LC rings at 0.64 us): the share was not
+    read as a jump, the row pinned C1 and C2 to x0 (which the loop cannot meet),
+    the pin diverged and no row was stored (n_right_limit_fallbacks 1). Truth: the
+    charge share v+ = (C1 v_a- + C2 v_c-)/(C1 + C2) on both, i_L continuous."""
+    b = _share_beside_lc(0.0)
+    r = _quiet(p.simulate, b, t_end=3e-6, dt=DT, switch_fn=_gate_n(b),
+               enable_substep_state_correction=split, **RULE)
+    assert r.n_right_limit_fallbacks == 0
+    v, t, k = _limits(r)
+    (j,) = [q for q in k if t[q] > 1e-6]
+    va, vc, il = (np.asarray(x) for x in (v.v("a"), v.v("c"), v.i("L")))
+    want = (1e-9 * va[j] + 50e-12 * vc[j]) / (1e-9 + 50e-12)
+    assert va[j + 1] == pytest.approx(want, rel=1e-6)
+    assert vc[j + 1] == pytest.approx(want, rel=1e-6)
+    assert il[j + 1] == pytest.approx(il[j], abs=1e-9)
+
+
+@pytest.mark.parametrize("split", [False, True])
+def test_a_closing_beside_an_lc_with_nothing_to_share_is_continuous(split):
+    """Control: no C2 (no loop, nothing to share): the row is the left limit's states and
+    S conducts (v_a = v_c after; C1 rings down through L)."""
+    b = _share_beside_lc(None)
+    r = _quiet(p.simulate, b, t_end=3e-6, dt=DT, switch_fn=_gate_n(b),
+               enable_substep_state_correction=split, **RULE)
+    assert r.n_right_limit_fallbacks == 0
+    v, t, k = _limits(r)
+    (j,) = [q for q in k if t[q] > 1e-6]
+    va, vc, il = (np.asarray(x) for x in (v.v("a"), v.v("c"), v.i("L")))
+    assert va[j + 1] == pytest.approx(va[j], rel=1e-6)
+    assert il[j + 1] == pytest.approx(il[j], abs=1e-9)
+    np.testing.assert_allclose(va[j + 1:], vc[j + 1:], rtol=0, atol=1e-9)
+    assert va[-1] < 9.0   # the ring through S moved both
