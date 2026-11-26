@@ -2685,7 +2685,8 @@ def simulate(
         refuses the circuit's time-varying sources and controllers by name.
     switch_fn
         Callable ``t -> SwitchStateMask`` controlling the
-        switch state at each sample.  Defaults to all-closed.
+        switch state at each sample. Without one, a circuit with controlled
+        switches is refused (``undriven='refuse'``, the release default).
     b_extra_fn
         PWL-only: Callable ``t -> list[float]`` adding to the constant
         residual F = J·x + b at each step.  An entry ``e`` on a voltage
@@ -3225,8 +3226,8 @@ def _compose(builder, closed_loops, step_observer, controller_period,
     plan for the engine the run lands on."""
     if control_tick not in ("label", "state"):
         raise _options_error("control_tick",
-            f"simulate(control_tick={control_tick!r}): use 'label' (the "
-            "default) or 'state'")
+            f"simulate(control_tick={control_tick!r}): use 'state' (the "
+            "default) or 'label'")
     _plan = _compose_control(builder, closed_loops, step_observer,
                              controller_period, switch_fn,
                              resume=resume_from is not None,
