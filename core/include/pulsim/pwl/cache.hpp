@@ -664,6 +664,26 @@ public:
     /// * `h_a`, `h_b` are legacy recovery step sizes, retained for
     ///   API compatibility only — the exact split (v2.0 Phase 1)
     ///   ignores them.
+    /// add-exact-propagator-strategy 7.1: |k| = 1 (the inductance matrix
+    /// not positive definite) is refused by name: the coupled windings
+    /// (k != 0), joined by '+'.
+    [[noreturn]] void throw_coupling_not_pd_() const {
+        std::string names;
+        for (const auto& tc : pool_.transformer_couplings()) {
+            if (models::TwoWindingTransformer::mutual_inductance(tc.params) == Real{0}) continue;
+            for (const Index b : {tc.primary_branch_id, tc.secondary_branch_id}) {
+                if (!names.empty()) names += "+";
+                names += std::string(graph_.branch_name(b));
+            }
+        }
+        throw UnsupportedError(
+            "dsed", "extraction", names, "InductorCoupling",
+            "compute_lti_state_space: the coupled-inductor matrix of " + names
+            + " is not positive definite (|k| >= 1 on a transformer / "
+            "coupled-inductor pair): the winding currents are not "
+            "independent states.");
+    }
+
     [[nodiscard]] ContinuousLTI
     compute_lti_state_space(
         const topology::SwitchStateMask& mask,
@@ -962,11 +982,7 @@ public:
                 const Eigen::LLT<DenseMatrix> ellt(En);
                 if (!dinv.allFinite() || ellt.info() != Eigen::Success
                     || ellt.matrixL().toDenseMatrix().diagonal().minCoeff() <= Real{1e-6}) {
-                    throw std::runtime_error(
-                        "compute_lti_state_space: the coupled-inductor "
-                        "matrix is not positive definite (|k| >= 1 on a "
-                        "transformer / coupled-inductor pair): the winding "
-                        "currents are not independent states.");
+                    throw_coupling_not_pd_();
                 }
             }
             // G_aa: rank-revealing. The structural path found it singular
@@ -1676,11 +1692,7 @@ public:
             if (llt.info() != Eigen::Success
                 || llt.matrixL().toDenseMatrix().diagonal().minCoeff()
                        <= Real{1e-6} * std::sqrt(lmax)) {
-                throw std::runtime_error(
-                    "compute_lti_state_space: the coupled-inductor "
-                    "matrix is not positive definite (|k| >= 1 on a "
-                    "transformer / coupled-inductor pair): the winding "
-                    "currents are not independent states.");
+                throw_coupling_not_pd_();
             }
             A.middleRows(n_cap, n_ind) =
                 -llt.solve(DenseMatrix(A.middleRows(n_cap, n_ind)));
