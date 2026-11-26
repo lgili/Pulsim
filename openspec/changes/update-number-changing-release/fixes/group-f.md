@@ -1599,3 +1599,21 @@ reviewer on 79330ab7..5613abbe (scoping + lazy root error came after the review)
   resolution (±0.5 % in-process noise on buck_ccm, +0.46 % measured); test_diode_state_reconstruction
   (`interpolable` in the test, release branch); the 4 "events differ" referee units and
   boost_pfc_open_loop's DiodeModeInconsistentError under the rule's referee route.
+
+## Windows: ten bridges under the rule (orchestrator, 2026-11-26) — OPEN
+
+CI on PR #150 head a5a1f19b: `test_fx1_ten_branch_form_bridges_run_under_the_rule[constant]`
+hit the 900 s test timeout on `windows-latest` under Python 3.10, 3.11, 3.12 and 3.13, in the
+rule-on run (`output_rtol=1e-5`, ten branch-form bridges, `t_end = 0.02`). The same commit
+passes on `ubuntu-24.04` in 166 s per case and on `macos-15` in 109 s per case.
+
+Not known: whether Windows is more than 5x slower or does not terminate. This test's own
+docstring records that the Windows C runtime takes different parasitic cuts on this circuit
+(5.3e-9 V against 1e-12 V on the bus), so a chatter that the other platforms do not see is
+the first suspect.
+
+State: the test is skipped on `win32` with this reason (a timeout kills the whole pytest
+session, so it cannot be an xfail). `output_rtol` is off by default, so a default run is not
+affected. To do: a CI-only diagnostic of the same circuit with a short `t_end` and the event
+/ projection counters printed, on Windows and Linux, to tell slow from non-terminating; then
+the fix. The skip comes off with it.
