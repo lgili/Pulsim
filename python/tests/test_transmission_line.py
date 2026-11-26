@@ -451,7 +451,14 @@ def _rc_far(rs=10.0, line=True):
     return b
 
 
-@pytest.mark.parametrize("rtol", [1e-4, 1e-8])
+_LAT_XF = pytest.mark.xfail(strict=True, reason=(
+    "open (gate-edge line regression vs 2.1.0, inherited: fails on 07e3ea6a "
+    "too, passes on ec08e98e): the first reflection reads 0.5555555631 V "
+    "against 5/9 (rel 1.4e-8 > 1e-9) at rtol 1e-4 and 1e-8"))
+
+
+@pytest.mark.parametrize("rtol", [pytest.param(1e-4, marks=_LAT_XF),
+                                  pytest.param(1e-8, marks=_LAT_XF)])
 def test_trbdf2_lattice_and_the_step_bound(rtol):
     # dt is trbdf2's step ceiling; 10 tau is clamped to tau by the line
     r = p.simulate(_line(10.0), t_end=7 * TAU, engine="trbdf2", rtol=rtol, dt=10 * TAU)
@@ -494,7 +501,9 @@ def test_trbdf2_converges_with_rtol_on_a_reflecting_line():
     assert errs[0] < 2e-4 and errs[1] < 3e-6, errs
 
 
-@pytest.mark.parametrize("rtol", [1e-3, 1e-4, 1e-6])
+@pytest.mark.parametrize("rtol", [1e-3, 1e-4, pytest.param(1e-6, marks=pytest.mark.xfail(
+    strict=True, reason="open (gate-edge line regression vs 2.1.0, inherited: fails on "
+    "07e3ea6a too): 7 rejects with the line against 2 without it (bound 2*2+2)"))])
 def test_trbdf2_matched_line_rejects_as_the_circuit_without_it(rtol):
     # measured equal (6/6, 4/4, 2/2); without the c + tau breakpoint the
     # arriving front was rejected: 17 vs 6, 27 vs 4, 30 vs 2

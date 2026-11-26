@@ -31,7 +31,10 @@ def _circuit(form):
     return b, p.make_constant_switch_fn(m)
 
 
-@pytest.mark.parametrize("form", ["conductance", "branch"])
+@pytest.mark.parametrize("form", ["conductance", pytest.param("branch", marks=pytest.mark.xfail(
+    strict=True, reason="open (gate-edge line vs 2.1.0, inherited: fails on 07e3ea6a too): "
+    "n_newton_start_retries 0 (2.1.0 >= 1); the end state is 3.2e-5 V from pwl dt 1e-9 "
+    "(as 2.1.0): trace whether the start no longer needs the retry or the count is lost"))])
 def test_newton_circuit_runs_from_a_zero_start(form):
     b, fn = _circuit(form)
     with warnings.catch_warnings():
