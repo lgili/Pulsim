@@ -95,16 +95,14 @@ KNOWN_PWL = {   # (ZVS / turn-on voltage, switching energy): the first assertion
 }
 
 
-# Known since the restart-line merge: its right-limit row at a turn-on is the model's own x(t_e+)
-# (C_oss voltage continuous, the ~0.3 ps collapse only recorded: fixes/restart-right-limit.md),
-# with the channel's ON current; the KPI's trapezoid carries that row across the whole next step,
-# while the truth's first point is the post-collapse state (03ba952a's row was post-collapse).
-_RL = ("known: the restart rule's right-limit row at a ZVS turn-on is pre-collapse (v_DS -1.14 mV, "
-       "i -1.14 A at the LLC's 8 us edge; post-collapse -0.569 mV), and the trapezoid carries it over "
-       "the next 10 ns step; measured: {}")
+# The restart rule's right-limit row at a turn-on is the model's own x(t_e+) (C_oss voltage continuous,
+# the ~0.3 ps collapse recorded); pulsim.with_event_limits adds the record's post-collapse row one ulp
+# later, so the trapezoid no longer carries the pre-collapse row over the next step (LLC S_hi was +12 %,
+# PSFB S1 +29 %; now -0.34 % / -0.03 %). The PSFB's lagging-leg switches stay off, cause not diagnosed.
 KNOWN_RESTART = {
-    "llc_half_bridge_zvs": _RL.format("S_hi energy 7.874e-11 J vs the truth's trapezoid 7.025e-11 J (+12 %)"),
-    "psfb_full_bridge_zvs": _RL.format("S1 energy 7.379e-10 J vs the truth's trapezoid 5.701e-10 J (+29 %)"),
+    "psfb_full_bridge_zvs": ("known: the restart rule's lagging-leg energy reads low after the collapse-row "
+                             "fix (leading leg S1 -0.03 %, cause not diagnosed); measured: S3 energy "
+                             "3.051e-11 J vs the truth's trapezoid 3.380e-11 J (-10 %)"),
 }
 
 

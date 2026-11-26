@@ -183,6 +183,15 @@ rule".
   dependent structures that share a state is projected jointly. An ideal clamp
   diode across C2 when an ideal switch closes C1 onto it recorded the free
   C1-C2 share (2.381 nJ) instead of C1's whole dump (50 nJ).
+- `pulsim.with_event_limits(res)` (and the reference harness): at a
+  re-initialisation record's step under the restart rule, a row one ulp after
+  the right limit holds the step's end sample, the state the engine ran the
+  step from. The right-limit row is x(t_e+) before the recorded fast collapse;
+  a line from it spread the collapse over the whole step: the ZVS switching
+  energy read +12 % (LLC) / +29 % (PSFB S1), now -0.3 % / -0.03 %; the
+  half-bridge leg and active-clamp forward read 0.038 / 0.068 against trbdf2,
+  now 0.0102 / 0.00165 (2.1.0's values). `with_right_limits(res)` is unchanged
+  unless `collapse=True`.
 
 ## [2.1.0] - 2026-11-25
 
