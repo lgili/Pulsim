@@ -619,7 +619,7 @@ def _snap(v, path: str, out: dict, seen: set) -> None:
         try:
             out[path] = ("eq", copy.deepcopy(v))
             return
-        except Exception:
+        except (TypeError, ValueError, AttributeError, RecursionError, copy.Error):
             pass
     raise _Opaque(f"{path} ({cls.__name__}: no visible state and no __eq__)")
 
@@ -633,7 +633,7 @@ def _gate_snapshot(sf) -> dict:
 def _leaf_equal(a, b) -> bool:
     try:
         return bool(a == b)
-    except Exception:
+    except (TypeError, ValueError):  # numpy's ambiguous truth value
         return False
 
 
@@ -644,29 +644,25 @@ def _gate_state_moves(sf, T: float) -> str:
         before = _gate_snapshot(sf)
     except _Opaque as e:
         return f"uncomparable state at {e}"
-    except Exception as e:  # RecursionError on deep data, a raising __repr__
+    except RecursionError as e:  # deep data
         return (f"its state could not be measured: snapshotting it raised "
                 f"{type(e).__name__}: {e}")
-    try:
-        for k in range(257):
-            sf(T * k / 256)
-        nea = getattr(sf, "next_edge_after", None)
-        if callable(nea):
-            t, n = 0.0, 0
-            while n < 10000:
-                t2 = nea(t)
-                if t2 is None or not (t2 > t) or t2 > T:
-                    break
-                sf(t2)
-                t, n = t2, n + 1
-    except Exception as e:  # a gate that cannot be probed is not measured
-        return (f"its state could not be measured: evaluating it over one "
-                f"period raised {type(e).__name__}: {e}")
+    for k in range(257):
+        sf(T * k / 256)
+    nea = getattr(sf, "next_edge_after", None)
+    if callable(nea):
+        t, n = 0.0, 0
+        while n < 10000:
+            t2 = nea(t)
+            if t2 is None or not (t2 > t) or t2 > T:
+                break
+            sf(t2)
+            t, n = t2, n + 1
     try:
         after = _gate_snapshot(sf)
     except _Opaque as e:
         return f"uncomparable state at {e}"
-    except Exception as e:
+    except RecursionError as e:
         return (f"its state could not be measured: snapshotting it raised "
                 f"{type(e).__name__}: {e}")
     moved = [k for k in after if k not in before

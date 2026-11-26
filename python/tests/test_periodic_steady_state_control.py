@@ -559,7 +559,13 @@ def test_gate_review_cases():
     def deep_gate(t):
         return sf(t) if deep else sf(t)
 
-    assert "could not be measured" in cp._gate_state_moves(deep_gate, T)
+    import sys
+    lim = sys.getrecursionlimit()
+    sys.setrecursionlimit(1000)          # an earlier test may have raised it
+    try:
+        assert "could not be measured" in cp._gate_state_moves(deep_gate, T)
+    finally:
+        sys.setrecursionlimit(lim)
 
 
 def test_gate_over_an_opaque_object_is_refused_naming_it():
