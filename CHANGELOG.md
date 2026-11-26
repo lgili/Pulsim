@@ -21,8 +21,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   closing two capacitors that sit behind 1 mOhm) restarts from the state after
   the fast collapse; the stored sample after the edge carried +0.97 % (dt
   0.5 us) / +1.9 % (with event splitting) of the collapse in the resistor's
-  current. The collapse's own energy is still not recorded (the tracker
-  records the ideal share only).
+  current. The collapse's own energy is now recorded too: one more reinit
+  record (dW = the collapse, e.g. 23.23 nJ beside the share's 2.381 nJ; the
+  event's 25.61 nJ in total).
+- Same rule (in 2.1.0 too): a diode turn-off inside the second stage of a
+  restart step is located and the step is cut there. The kept stage started
+  the new mode from SDIRK's pseudo-state, stage 1's slope extrapolated past the
+  turn-off: a boost behind a 1 nH inductor read 51.34 V for 42.11 V. Counted
+  in `result.counters["n_restart_cuts"]`.
+- Ideal elements (pwl and trbdf2, in 2.1.0 too): a re-initialisation of
+  dependent structures that share a state is projected jointly. An ideal clamp
+  diode across C2 when an ideal switch closes C1 onto it recorded the free
+  C1-C2 share (2.381 nJ) instead of C1's whole dump (50 nJ).
 
 ## [2.1.0] - 2026-11-25
 

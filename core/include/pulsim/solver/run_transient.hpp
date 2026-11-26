@@ -892,6 +892,14 @@ inline SimulationResult run_transient(
     // this step), for the event-sample storage to read.
     Vector ip_x1, ip_b, ip_h0, ip_h1, ip_x2, ip_x3f, ip_x2m, ip_s2, ip_s3;
     std::vector<Real> ip_hist, ip_d, ip_r, ip_nc, ip_sl;
+    // an ideal element's jump J (consistent_start), for the record of its fast part
+    // J − J_i at the step's commit (the tracker's mode)
+    struct IdealJump {
+        Real t = 0;
+        std::vector<Real> j;
+        std::vector<char> move;
+    };
+    std::vector<IdealJump> ideal_pending;
     // the jump's vector series (consistent_start): the reading's x3, the later
     // stages and their sources; the start mode's probe (ip_y1, ip_bits1, ip_m1)
     Vector ip_x3m, ip_xk, ip_sk, ip_y1, ip_y2, ip_w, ip_c, ip_g;
@@ -2863,6 +2871,20 @@ inline SimulationResult run_transient(
                 stamped_mask = stamped_s;
                 return false;
             }
+            // An ideal element's jump: the tracker records the constraint's
+            // share J_i at the step's commit, in the mode the step ends in; the
+            // collapse J − J_i of a fast mode the jump excites is recorded there
+            // too (ideal_pending), against that same mode
+            if (structural) {
+                IdealJump& ij = ideal_pending.emplace_back();
+                ij.t = t_from;
+                ij.j.resize(ne);
+                ij.move.resize(ne);
+                for (Size k = 0; k < ne; ++k) {
+                    ij.j[k] = ip_d[2 * k];
+                    ij.move[k] = ip_d[2 * k + 1] == Real{2};
+                }
+            }
             // The record (every non-structural device kind). dW =
             // ½·JᵀM·J > 0 by the test above (M is positive semidefinite).
             // Only a jump (flag 1) is recorded; moves alone record nothing.
@@ -4429,6 +4451,7 @@ inline SimulationResult run_transient(
             const bool cycle0 = mask_cycle, known0 = stamped_known;
             const auto mask0 = stamped_mask;
             const Size ip0 = impulse_pending.size(), fb0 = result.n_right_limit_fallbacks;
+            const Size ij0 = ideal_pending.size();
             const Real erl0 = event_rl_t;
             const Real rlt0 = rl_loc.t;   // the only field consumed (event_right_limit)
             const Real owner0 = lines.owner;
@@ -4455,6 +4478,7 @@ inline SimulationResult run_transient(
             stamped_known = known0;
             stamped_mask = mask0;
             impulse_pending.resize(ip0);
+            ideal_pending.resize(ij0);
             result.n_right_limit_fallbacks = fb0;
             event_rl_t = erl0;
             rl_loc.t = rlt0;
@@ -5159,6 +5183,7 @@ inline SimulationResult run_transient(
                     split_events.clear();
                     rs_first_valid = false;
                     impulse_pending.clear();
+                    ideal_pending.clear();
                     event_rl_t = std::numeric_limits<Real>::quiet_NaN();
 
                     const Size n_sub = Size{1} << h;
@@ -5552,6 +5577,95 @@ inline SimulationResult run_transient(
             if (sens.on()) [[unlikely]] sens.commit(t);
         };  // step_commit
 
+        // An ideal element's jump J beside a fast mode it excites (C1 −S− C2,
+        // 1 mΩ to C3: the share 2.381 nJ, then the collapse 23.23 nJ of the
+        // 25.61): the tracker recorded the share J_i, the minimum-energy
+        // projection onto the structures of the mode the step ends in; the rest
+        // J_f = J − J_i is recorded here, dW = ½·J_fᵀM·J_f (J_iᵀM·J_f = 0: J_f
+        // keeps every constraint of that mode). J_i jointly over all of them
+        // (structures sharing a state constrain each other: an ideal clamp
+        // diode across C2 as C1 −S− C2 closes). Nothing below 1e-6 of ½·JᵀM·J
+        // (the series' J_i is exact to its fit: no fast mode).
+        auto record_ideal_fast = [&](const IdealJump& ij, long sample) {
+            const auto& ents = history.entries();
+            const Size ne = ents.size();
+            if (ij.j.size() != ne) return;
+            const auto& deps = structure.check(stamped_mask, true).dependent;
+            const auto nd = static_cast<Index>(deps.size()), nk = static_cast<Index>(ne);
+            DenseMatrix kk = DenseMatrix::Zero(nd, nk);
+            Vector mi(nk), jv(nk);
+            for (Size k = 0; k < ne; ++k) {
+                mi[static_cast<Index>(k)] = Real{1} / ents[k].C_or_L;
+                jv[static_cast<Index>(k)] = ij.j[k];
+            }
+            for (Index g = 0; g < nd; ++g) {
+                const auto& d = deps[static_cast<Size>(g)];
+                for (Size q = 0; q < d.states.size(); ++q) {
+                    for (Size k = 0; k < ne; ++k) {
+                        if (ents[k].branch_id == d.states[q]) {
+                            kk(g, static_cast<Index>(k)) += static_cast<Real>(d.signs[q]);
+                        }
+                    }
+                }
+            }
+            Vector jf = jv;
+            if (nd > 0) {
+                const DenseMatrix a = kk * mi.asDiagonal() * kk.transpose();
+                const Vector lam = a.completeOrthogonalDecomposition().solve(kk * jv);
+                jf -= mi.cwiseProduct(kk.transpose() * lam);
+            }
+            if (!jf.allFinite()) return;
+            Real e_f = 0, e_all = 0, dom_e = -1;
+            Size dom = 0;
+            for (Size k = 0; k < ne; ++k) {
+                if (ij.move[k]) continue;   // a move: no loss
+                const auto kq = static_cast<Index>(k);
+                const Real ek = Real{0.5} * ents[k].C_or_L * jf[kq] * jf[kq];
+                e_f += ek;
+                e_all += Real{0.5} * ents[k].C_or_L * jv[kq] * jv[kq];
+                if (ek > dom_e) {
+                    dom_e = ek;
+                    dom = k;
+                }
+            }
+            for (const auto& tc : history.transformer_couplings()) {
+                if (ij.move[tc.p_entry_idx] || ij.move[tc.s_entry_idx]) continue;
+                const Real m = models::TwoWindingTransformer::mutual_inductance(tc.params);
+                e_f += m * jf[static_cast<Index>(tc.p_entry_idx)] * jf[static_cast<Index>(tc.s_entry_idx)];
+                e_all += m * jv[static_cast<Index>(tc.p_entry_idx)] * jv[static_cast<Index>(tc.s_entry_idx)];
+            }
+            if (!(e_f > Real{1e-6} * e_all)) return;
+            solver::ReinitRecord rec;
+            rec.t = ij.t;
+            rec.kind = ents[dom].kind == pwl::DevicePool::StoredKind::Capacitor ? "capacitor_loop"
+                                                                                : "cut_set";
+            for (Size k = 0; k < ne; ++k) {
+                const auto kq = static_cast<Index>(k);
+                if (!ij.move[k] && Real{0.5} * ents[k].C_or_L * jf[kq] * jf[kq] > Real{1e-6} * dom_e) {
+                    rec.states.emplace_back(graph.branch_name(ents[k].branch_id));
+                }
+            }
+            rec.lambda = ents[dom].C_or_L * jf[static_cast<Index>(dom)];
+            rec.dW = e_f;
+            for (const auto& d : deps) {   // the ideal elements whose jump excited it
+                for (const Index el : d.elements) {
+                    const std::string nm(graph.branch_name(el));
+                    if (std::find(rec.devices.begin(), rec.devices.end(), nm) == rec.devices.end()) {
+                        rec.devices.push_back(nm);
+                    }
+                }
+            }
+            // the cause: the tracker's (its record of this event, the last one at ij.t)
+            for (auto it = result.reinit_records.rbegin(); it != result.reinit_records.rend(); ++it) {
+                if (it->t == ij.t || it->t == t_prev_step) {
+                    rec.cause = it->cause;
+                    break;
+                }
+            }
+            if (rec.cause.empty() && !rec.devices.empty()) rec.cause = rec.devices.front();
+            rec.sample = sample;
+            result.reinit_records.push_back(std::move(rec));
+        };
         // Release group B: a step's lines into the result's event limits
         // (`before`: the stored sample the step starts at).
         auto record_lines = [&](Size before) {
@@ -5761,6 +5875,11 @@ inline SimulationResult run_transient(
                                   ? static_cast<long>(result.times.size()) - 1
                                   : -1L,
                               opts.on_impulse_error, "pwl", result);
+                for (const IdealJump& ij : ideal_pending) {
+                    record_ideal_fast(ij, k % opts.store_every == 0
+                                              ? static_cast<long>(result.times.size()) - 1 : -1L);
+                }
+                ideal_pending.clear();
                 if (lt) lt->impulses(result.reinit_records);
             }
             if (hook_mask) {

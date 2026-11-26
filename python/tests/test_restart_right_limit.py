@@ -778,3 +778,93 @@ def test_a_right_limit_whose_pin_does_not_converge_stores_no_row():
     want = s3 + i0 * (t[after] - t[j]) / (c1 + c2 + c3)
     for y in (va, vc, vd):
         np.testing.assert_allclose(y[after], want, rtol=0, atol=1e-6 * 100.0)
+
+
+def _share_into_fast_mode(c3):
+    """C1 1 nF (10 V) -ideal S- c: C2 50 pF, c -1 mOhm- d: C3 (c3; 0: none), 1 MOhm leak."""
+    b = p.CircuitBuilder()
+    b.add_capacitor("C1", "a", "gnd", 1e-9, 10.0)
+    b.add_ideal_switch("S", "a", "c", 0.0, 0.0)
+    b.add_capacitor("C2", "c", "gnd", 50e-12, 0.0)
+    if c3:
+        b.add_resistor("Rf", "c", "d", 1e-3)
+        b.add_capacitor("C3", "d", "gnd", c3, 0.0)
+        b.add_resistor("Rl", "d", "gnd", 1e6)
+    else:
+        b.add_resistor("Rl", "c", "gnd", 1e6)
+    return b
+
+
+@pytest.mark.parametrize("split", [False, True])
+def test_an_ideal_jump_books_the_fast_collapse_it_excites(split):
+    """Review of 4b945143 (finding 1): the share C1-C2 (J_i) excites C1||C2 -1 mOhm- C3
+    (tau 0.5 ps), which collapses inside the event (J_f). Closed form of the event's
+    loss: W(x0) - W(all at Q/(C1 + C2 + C3)) = 25.61 nJ = the share's 2.381 nJ + the
+    collapse's 1/2 C_eq (9.524 V)^2, C_eq = (C1 + C2) C3/(C1 + C2 + C3). 5c2bca28 booked
+    the share only (2.381 nJ)."""
+    c1, c2, c3 = 1e-9, 50e-12, 1e-9
+    b = _share_into_fast_mode(c3)
+    r = _quiet(p.simulate, b, t_end=4e-6, dt=DT, switch_fn=_gate(b, "S", False),
+               enable_substep_state_correction=split, **RULE)
+    recs = [x for x in r.reinit_records if x.t > 1e-6]
+    w0, q = 0.5 * c1 * 100.0, c1 * 10.0
+    want = w0 - 0.5 * q * q / (c1 + c2 + c3)
+    assert sum(x.dW for x in recs) == pytest.approx(want, rel=1e-4)
+    share = 0.5 * c1 * c2 / (c1 + c2) * 100.0
+    assert [x.dW for x in recs if x.states == ["C1", "C2"]] == [pytest.approx(share, rel=1e-6)]
+    assert all(x.cause == "S" for x in recs)
+
+
+@pytest.mark.parametrize("split", [False, True])
+def test_an_ideal_jump_without_a_fast_mode_books_the_share_only(split):
+    """Control: C1 -S- C2 with a 1 MOhm leak only (no fast mode): one record, the
+    share's closed form 1/2 C1 C2/(C1 + C2) (10 V)^2 = 2.381 nJ."""
+    b = _share_into_fast_mode(0.0)
+    r = _quiet(p.simulate, b, t_end=4e-6, dt=DT, switch_fn=_gate(b, "S", False),
+               enable_substep_state_correction=split, **RULE)
+    recs = [x for x in r.reinit_records if x.t > 1e-6]
+    assert [x.dW for x in recs] == [pytest.approx(0.5 * 1e-9 * 50e-12 / 1.05e-9 * 100.0, rel=1e-6)]
+
+
+def _gate_n(b):
+    k, ns = b.switch_index_of("S"), b.graph.num_switches
+
+    def fn(t):
+        m = p.SwitchStateMask(ns)
+        m.set(k, t >= T_E)
+        return m
+    return fn
+
+
+def _clamped_dump(v1, il0):
+    """C1 1 nF (v1) -ideal S- c: C2 50 pF (0 V), ideal D gnd->c (R_on 0), L 10 uH (il0) -> 1 mOhm."""
+    b = p.CircuitBuilder()
+    b.add_capacitor("C1", "a", "gnd", 1e-9, v1)
+    b.add_ideal_switch("S", "a", "c", 0.0, 0.0)
+    b.add_capacitor("C2", "c", "gnd", 50e-12, 0.0)
+    b.add_diode("D", "gnd", "c", None, 1e-9, form="branch", R_on=0.0)
+    b.add_inductor("L", "c", "o", 10e-6, il0)
+    b.add_resistor("R", "o", "gnd", 1e-3)
+    return b
+
+
+@pytest.mark.parametrize("split", [False, True])
+@pytest.mark.parametrize("il0", [10.0, 0.0])
+def test_an_ideal_clamp_dump_books_the_whole_dump(il0, split):
+    """Review of 4b945143 (finding 2): v1 = -10 V; closing S forward-biases D, which holds c
+    at 0, so C1 dumps all of its charge through S + D: closed form 1/2 C1 v1^2 = 50 nJ
+    (dsed 50.0 nJ). 2.1.0 and 5c2bca28 booked the free share C1-C2 (2.381 nJ), as if D
+    were off. Control of D conducting: v_a = 0 after the event."""
+    b = _clamped_dump(-10.0, il0)
+    r = _quiet(p.simulate, b, t_end=4e-6, dt=DT, switch_fn=_gate_n(b),
+               enable_substep_state_correction=split, **RULE)
+    recs = [x for x in r.reinit_records if x.t > 1e-6]
+    assert sum(x.dW for x in recs) == pytest.approx(0.5 * 1e-9 * 100.0, rel=1e-4)
+    assert abs(np.asarray(r.v("a"))[-1]) < 1e-9
+
+
+def test_an_ideal_clamp_with_nothing_to_dump_books_nothing():
+    """Control: C1 at 0 V (D at its boundary, nothing moves when S closes): no record."""
+    b = _clamped_dump(0.0, 10.0)
+    r = _quiet(p.simulate, b, t_end=4e-6, dt=DT, switch_fn=_gate_n(b), **RULE)
+    assert [x.dW for x in r.reinit_records if x.t > 1e-6] == []
