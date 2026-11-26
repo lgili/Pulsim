@@ -155,12 +155,23 @@ def test_junction_temperatures_agree_with_trbdf2_at_tight_tolerance(make, t_end,
     b2, fn2, _ = make()
     tr = _sim(b2, t_end, fn2, "trbdf2", rtol=rtol, atol=1e-12)
     te, tt = np.asarray(ex.times), np.asarray(tr.times)
+    # Under the default output rule the exact engine writes each edge's right
+    # limit 2 ps after it (the event's heat already in); trbdf2 books that heat
+    # on its tiny post-edge step and delivers it over the NEXT step (~70 ns):
+    # the reference's own lag, so the exact rows inside it are not compared
+    # (one per edge; every other row is held at the original bound).
+    edges = te[:-1][np.diff(te) < 1e-10]
+    lag = np.zeros(len(te), bool)
+    for e in edges:
+        lag |= (te > e) & (te <= tt[np.searchsorted(tt, e + 1e-12, side="right")])
+    assert len(edges) > 0 and lag.sum() == len(edges)
     for k, _n in enumerate(names):
         a = np.asarray(ex.v(f"tj{k}"))
         c = np.interp(te, tt[1:], np.asarray(tr.v(f"tj{k}"))[1:])
         rise = a.max() - T_AMB
         assert rise > 0.01, k
-        assert np.max(np.abs(a - c)) <= 1e-4 * rise, (k, np.max(np.abs(a - c)) / rise)
+        d = np.abs(a - c)[~lag]
+        assert np.max(d) <= 1e-4 * rise, (k, np.max(d) / rise)
 
 
 def test_a_resumed_run_carries_the_junction_temperatures():
