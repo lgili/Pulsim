@@ -3645,8 +3645,13 @@ inline SimulationResult run_transient_trbdf2(
             // Measured: the cut-set runs at trbdf2 rtol 1e-8 / 1e-9 and esdirk43
             // (i(200.1 us) - 0.908907 = +4.615e-4, 2.1.0 +4.615e-4), 1 forced accept.
             // shortcut: a loss port does not book this impulse's dissipation
-            // (as at any forced accept); upgrade by routing the jump's energy
-            // as the reinit record does.
+            // (as at any forced accept), and the sampled loss over-reads it
+            // (the post-edge probe sample at 1.9e9 V starts the jump step's
+            // line: 4.0e-2 J for 8.2e-4 J, strict xfail in the d3 tests);
+            // upgrade by routing the jump's energy as the reinit record does.
+            // Bounded (d3 tests): it fires at g_off <= 1e-8 on that cut-set
+            // (node >= 1.8e8 V), not at g_off >= 1e-7 (tau >= 5e-11 s,
+            // resolved, its energy within 2e-3).
             if (err > Real{1} && sdirk && sdirk_gate && x_edge_t == t && !reinit_step) {
                 if (edge_h0_t != t) {
                     edge_h0_t = t;
