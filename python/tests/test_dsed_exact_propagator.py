@@ -406,7 +406,18 @@ def test_half_wave_rl_rectifier_with_a_zero_band_diode_is_repaired_or_named():
     t, tr = np.asarray(r.times), np.asarray(ref.times)
     assert np.trapezoid(r.i("L"), t) / 3e-3 == pytest.approx(
         np.trapezoid(ref.i("L"), tr) / 3e-3, abs=1e-4)
-    assert np.abs(np.interp(t, tr, ref.v("a")) - np.asarray(r.v("a"))).max() < 1e-4
+    # Under the default output rule the exact engine writes each turn-off's
+    # projected right limit 2 ps after it (the diode's L/R_off = 1 ps mode
+    # settled, recorded in output_grid.projections); trbdf2 resolves that mode
+    # over a few ps. Such a row is the projected flow: it is read against the
+    # reference once the mode has settled (40 tau later, DECISIONS 13).
+    tq = t.copy()
+    for q in r.diagnostics["output_grid"]["projections"]:
+        w = 40.0 * q["tau"]
+        assert w < 1e-10
+        tq[(t > q["t"]) & (t <= q["t"] + w)] = q["t"] + w
+    assert np.count_nonzero(tq != t) == 3                    # one per turn-off
+    assert np.abs(np.interp(tq, tr, ref.v("a")) - np.asarray(r.v("a"))).max() < 1e-4
     DD.MODE_GUARD = False
     try:
         r_off = p.simulate(build(), 3e-3, engine="dsed")
