@@ -16,12 +16,13 @@ benchmark:
     - column: V(mid)
     - column: I(Lr)
   # Probe convention: docs/SOFT_SWITCHING.md (V_DS positive terminal first, I_D = I(switch)).
-  # The window after each edge is shorter than the 300 ns dead time, so it ends before the next edge.
+  # The KPI window (100 ns) ends before the switch's own next gate edge (3.7 us later).
   # Baseline: the exact truth (benchmarks/tools/soft_switching_truth.py baseline, mpmath;
   # never a Pulsim run) on the 10 ns grid, both limits at every event, with V_DS and I_D of
   # every switch. 0.7 V = the baseline's linear interpolation between its rows on the
   # dead-time ramp, max (h^2/8)|v''| = 0.19 V, + the 0.5 V each engine sample is held to
-  # against the exact truth (test_soft_switching_validation.py). From 50 ns: a 10 ns row
+  # against the exact truth inside each dead-time transition (test_soft_switching_validation.py
+  # *_dead_time_commutation_against_exact_truth); both checked in test_soft_switching_kpi.py. From 50 ns: a 10 ns row
   # cannot follow a start transient of picoseconds (and trbdf2's first fs on the PSFB, F-S-5).
   # The plain fixed engine (default scenario) is a known disagreement (trap 9, v2_triage).
   expectations:

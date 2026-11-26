@@ -6,12 +6,13 @@ For a gated switch between ``a`` and ``k`` (conductance form: i_D = g v_DS, g = 
 * every turn-on in (0, t_end): the LEFT limit of v_DS = v(a) - v(k) at the gate edge;
 * the energy the KPI defines (docs/SOFT_SWITCHING.md): the sum over every gate edge of
   int g v_DS^2 dt over ``window_s`` after it (clipped at t_end), g that of the new gate state
-  (the window ends before the next gate edge, so g is constant on it). One terminal must be
-  ground or a DC bus, so the integral is exact from the tool's window mean and RMS of the other
+  (assumed: the window ends before the switch's own next gate edge, so g is constant on it;
+  true for the three references: 1 us / 10 us, 100 ns / 3.7 us, 50 ns / 4.92 us). One terminal
+  must be ground or a DC bus (checked at the window's two ends only), so the integral is exact from the tool's window mean and RMS of the other
   node: int (Vb - v)^2 = (Vb^2 - 2 Vb mean + rms^2) T;
 * with ``grid`` (the sample times of a trace): the same windows integrated by the trapezoid
-  rule over the truth sampled at the right limit of the edge and at the grid points inside the
-  window, the window end interpolated -- the quadrature the KPI applies to a trace, so
+  rule over the truth sampled after the edge's sub-picosecond C_oss collapse (JUMP_S) and at the
+  grid points inside the window, the window end interpolated -- the quadrature the KPI applies to a trace, so
   ``|trapz - exact|`` is the part of a KPI's error that its sample grid alone causes.
 
 ``baseline`` writes a reference CSV for the benchmark runner: the truth on the netlist's dt grid
@@ -36,7 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import exact_truth as et  # noqa: E402
 
 
-JUMP_S = mp.mpf("1e-12")
+JUMP_S = mp.mpf("1e-11")
 
 
 def _switch(sol, name):
@@ -66,10 +67,13 @@ def switch_kpi_truth(sol, name: str, window_s: float, threshold_v: float, grid=N
         return (vb ** 2 - 2 * vb * w["mean"] + w["rms"] ** 2) * (t1 - t0)
 
     def trapz_v2(t0, t1):
-        # the integrand starts at te + 1 ps: a turned-on switch collapses its node's C_oss
-        # (200 pF / 2 kS = 0.2 ps) -- a jump to every sampled trace, a 1e-15 J ramp here
-        ts = [t0] + [mp.mpf(x) for x in grid if t0 < x < t1] + [mp.mpf(x) for x in grid if x >= t1][:1]
-        v = sol.sample([col], [max(x, t0 + JUMP_S) for x in ts])[col]
+        # the integrand's first point is the truth extrapolated to te from te + 10 ps and
+        # te + 20 ps: a turned-on switch collapses its node's C_oss (2 x 200 pF over 2 kS or
+        # 1 kS: 0.2-0.4 ps, so 10 ps is >= 25 tau) -- a jump to every trace with event rows
+        # (a grid row inside the collapse -- an event's right limit one ulp on -- is that limit)
+        ts = [t0] + [mp.mpf(x) for x in grid if t0 + 2 * JUMP_S < x < t1] + [mp.mpf(x) for x in grid if x >= t1][:1]
+        v = sol.sample([col], [t0 + JUMP_S, t0 + 2 * JUMP_S] + ts[1:])[col]
+        v = [2 * v[0] - v[1]] + v[2:]       # back to te, linearly: the slow drift removed too
         s = mp.mpf(0)
         for i in range(len(ts) - 1):
             lo, hi = ts[i], ts[i + 1]

@@ -28,14 +28,20 @@ Bounds:
   1.3e-5 V seen), pwl+restart 1e-3 V (second order at h = dt; 1.3e-4 V seen).
 * Switching energy: the KPI is the trapezoid of v i over the engine's own
   samples, so it carries the quadrature error of that grid even with exact
-  states; the truth measures it (the same windows, trapezoid over the truth
-  sampled at the engine's times from 1 ps after the edge -- the 0.2 ps C_oss
-  collapse at a turn-on is a jump to every sampled trace). Held to
-  |trapz - exact| + tol E: dsed 1e-5 (states exact; 6e-7 seen), trbdf2 1e-3
+  states (trbdf2 on the PSFB's S3: +15 % against the exact energy, all of it
+  quadrature: about two samples in a 50 ns window). The truth measures that
+  part (the same windows, trapezoid over the truth sampled at the engine's
+  times, its first point extrapolated to the edge from 10 and 20 ps after
+  it -- the 0.2-0.4 ps C_oss collapse at a turn-on is a jump to every trace
+  with event rows), and the
+  KPI is held to it: |E_kpi - E_trapz| <= tol E_exact, tol = dsed 3e-5
+  (its states are exact to ~1e-10 V; what is left is the truth's first point,
+  extrapolated over the collapse: 8.5e-6 seen on the PSFB's S3), trbdf2 1e-3
   (its rtol; 1.6e-4 seen), pwl+restart 1e-2 (the ON window integrates
   g_on v^2 with v ~ 1 mV: 2 dv/v at the 5.4e-6 V second-order state error
-  seen = 1e-2; 5.9e-3 seen), plain pwl h / window_s (trap 9 shifts each
-  window by up to one step).
+  seen = 1e-2; 3.7e-3 seen); the
+  plain fixed engine is held to the restart rule's 1e-2 (the buck meets it,
+  3.1e-3; LLC and PSFB do not).
 The plain fixed engine (no restart rule) is trap 9: strict xfails with the
 numbers it gives.
 """
@@ -75,7 +81,7 @@ CASES = {
 ENGINES = {"pwl": "runner default", "trbdf2": "runner variable",
            "pwl_restart": dict(engine="pwl", discontinuity_restart=True), "dsed": dict(engine="dsed")}
 V_TOL = {"dsed": 1e-9, "trbdf2": 1e-4, "pwl_restart": 1e-3}
-E_TOL = {"dsed": 1e-5, "trbdf2": 1e-3, "pwl_restart": 1e-2}
+E_TOL = {"dsed": 3e-5, "trbdf2": 1e-3, "pwl_restart": 1e-2, "pwl": 1e-2}
 TRAP9 = ("known: trap 9 -- the plain fixed engine books each commutation one step early and rings on "
          "the switch node; measured: {}")
 KNOWN_PWL = {   # (ZVS / turn-on voltage, switching energy): the first assertion each fails
@@ -168,6 +174,16 @@ def test_truth_meets_the_design_targets():
                 assert tr["zvs_fraction"] == 0.0 and v.min() > 1.4 and tr["turn_on_events"] == 24
             else:
                 assert tr["zvs_fraction"] == 1.0 and v.max() < 5e-3, (case, sw, v)
+    # the numbers docs/SOFT_SWITCHING.md publishes
+    exact = {("llc_half_bridge_zvs", "S_hi"): 7.022e-11, ("llc_half_bridge_zvs", "S_lo"): 7.280e-11,
+             ("psfb_full_bridge_zvs", "S1"): 5.702e-10, ("psfb_full_bridge_zvs", "S2"): 8.527e-10,
+             ("psfb_full_bridge_zvs", "S3"): 3.178e-11, ("psfb_full_bridge_zvs", "S4"): 3.306e-11,
+             ("buck_hard_switching_reference", "SH"): 7.406e-6}
+    for (case, sw), e in exact.items():
+        assert _truth(case, sw)["switching_energy_j"] == pytest.approx(e, rel=1e-3), (case, sw)
+    assert max(np.abs(_truth("llc_half_bridge_zvs", s)["v_ds_at_turn_on"]).max() for s in ("S_hi", "S_lo")) < 1.2e-3
+    vb = np.asarray(_truth("buck_hard_switching_reference", "SH")["v_ds_at_turn_on"])
+    assert np.all((vb[:10] > 24.01) & (vb[:10] < 24.09)) and np.all((vb[10:] > 1.41) & (vb[10:] < 6.02)), vb
     sol = _sol("llc_half_bridge_zvs")
     t_end = mp.mpf(40e-6)
     p_out = sol.window(["V(p)"], mp.mpf(0), t_end)["V(p)"]["rms"] ** 2 / 150
@@ -195,21 +211,17 @@ def test_zvs_kpi_and_turn_on_voltage(runner, case, engine):
 
 @pytest.mark.parametrize("case,engine", list(_cells(1)))
 def test_switching_energy_kpi(runner, case, engine):
-    _, sws, w, _ = CASES[case]
+    _, sws, _, _ = CASES[case]
     t, _, kpis = _measured(runner, case, engine)
-    dt = v1_reader.load(CASES[case][0]).dt
     for sw, _, _ in sws:
         tr = _truth(case, sw, tuple(t))
         exact, trapz = tr["switching_energy_j"], tr["switching_energy_trapz_j"]
         got = kpis[sw]["switching_energy_j"]
-        tol = E_TOL.get(engine, dt / w)
-        assert abs(got - exact) <= abs(trapz - exact) + tol * exact, (sw, got, exact, trapz)
-        # the average column against exact / t_end: the runner divides by the trace's span,
-        # t_end - t[0] (its first sample dropped), so exact (1/span - 1/t_end) is added exactly
+        tol = E_TOL[engine]
+        assert abs(got - trapz) <= tol * exact, (sw, got, trapz, exact)
+        # the average column: the runner divides by the trace's span (its first sample dropped)
         span = t[-1] - t[0]
-        avg = kpis[sw]["switching_loss_w_avg"]
-        assert abs(avg - exact / tr["t_end"]) <= (abs(trapz - exact) + tol * exact) / span \
-            + exact * abs(1 / span - 1 / tr["t_end"]) * (1 + 1e-9), (sw, avg)
+        assert abs(kpis[sw]["switching_loss_w_avg"] - trapz / span) <= tol * exact / span, sw
 
 
 def test_runner_writes_the_kpi_columns_and_the_benches_pass(runner):
@@ -225,6 +237,21 @@ def test_runner_writes_the_kpi_columns_and_the_benches_pass(runner):
                 assert f"kpi__{m}__{sw}" in head, (case, sw, m)
     status = {k: (r.status, r.max_error) for k, r in rows.items()}
     assert status[("buck_hard_switching_reference", "default")][0] == "passed", status
+    assert status[("buck_hard_switching_reference", "variable")][0] == "passed", status
+    # the LLC / PSFB max_error = the baseline's linear interpolation, max (h^2/8)|v''| over its
+    # rows from 50 ns, + the 0.5 V per-sample bound of the dead-time tests
+    for case in ("llc_half_bridge_zvs", "psfb_full_bridge_zvs"):
+        bm = br.load_yaml(CASES[case][0])["benchmark"]
+        t, ser = br.load_csv_series(ROOT / "baselines" / f"{case}.csv.gz")
+        t, v = np.asarray(t), np.asarray(ser[bm["validation"]["observable"]])
+        m = t >= 50e-9
+        t, v = t[m], v[m]
+        h1, h2 = np.diff(t)[:-1], np.diff(t)[1:]
+        ok = (h1 > 1e-12) & (h2 > 1e-12)            # not across an event's two limits
+        d2 = 2 * ((v[2:] - v[1:-1]) / h2 - (v[1:-1] - v[:-2]) / h1) / (h1 + h2)
+        interp = float(np.max((np.maximum(h1, h2) ** 2 / 8 * np.abs(d2))[ok]))
+        bound = float(bm["expectations"]["metrics"]["max_error"])
+        assert interp + 0.5 <= bound < interp + 0.55, (case, interp, bound)
     for case in ("llc_half_bridge_zvs", "psfb_full_bridge_zvs"):
         assert status[(case, "variable")][0] == "passed", status
         # trap 9 on the plain fixed engine: a known disagreement (v2_triage), > 200 V seen

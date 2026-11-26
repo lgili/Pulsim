@@ -69,7 +69,13 @@ In a benchmark YAML the three KPIs take `switch_observable`,
 imports pulsim) gives, per switch, the left limit of `V_DS` at every turn-on, the
 ZVS fraction and the switching energy of the windows above, exact. The KPI is a
 trapezoid over a trace's samples, so it carries the quadrature error of that grid
-even with exact states; the tool measures it on the same grid. The baselines
+even with exact states: on `trbdf2` the PSFB's S3 column reads 3.66e-11 J against
+the exact 3.18e-11 J (+15 %, about two samples in its 50 ns window), all of it
+quadrature. The tool measures that part on the same grid, and the test holds the
+column to it. The window starts at the first sample of the new state: on a trace
+without event rows, a hard transition between the last old-state sample and that
+sample is not integrated (none of the three references has one: their C_oss edges
+are soft and the buck has no device capacitance). The baselines
 `benchmarks/baselines/{llc_half_bridge_zvs,psfb_full_bridge_zvs,buck_hard_switching_reference}.csv.gz`
 are the same truth on the netlist grid with both limits at every event
 (`soft_switching_truth.py baseline`). Checks and their bounds:
@@ -79,9 +85,9 @@ restart rule, `trbdf2`, `dsed`), run as a bench by
 
 | benchmark | switch | ZVS (truth) | exact switching energy | avg over the run |
 |---|---|---|---|---|
-| LLC | S_hi / S_lo | 1.0 (\|V_DS\| ≤ 1.1 mV) | 7.022e-11 / 7.280e-11 J | 1.76 / 1.82 µW |
+| LLC | S_hi / S_lo | 1.0 (\|V_DS\| < 1.2 mV) | 7.022e-11 / 7.280e-11 J | 1.76 / 1.82 µW |
 | PSFB | S1 / S2 / S3 / S4 | 1.0 (< 5 mV) | 5.702e-10 / 8.527e-10 / 3.178e-11 / 3.306e-11 J | (30 µs run) |
-| buck (hard) | SH | 0 (24.02–24.08 V, then 1.42–6.01 V in DCM) | 7.406e-6 J | 14.81 mW |
+| buck (hard) | SH | 0 (24.01–24.09 V, then 1.42–6.01 V in DCM) | 7.406e-6 J | 14.81 mW |
 
 The buck has no device capacitance: its "switching" energy is the conduction in
 the 1 µs windows, not an `E_oss`.

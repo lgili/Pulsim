@@ -6,9 +6,9 @@ benchmark:
   observables:
     - column: V(out)
   # Baseline: the exact truth (benchmarks/tools/soft_switching_truth.py baseline, mpmath;
-  # never a Pulsim run), 0.2 us grid, both limits at every event. 0.1 V: the plain fixed
-  # engine books each commutation one step early (AI_GUIDE trap 9), 0.051 V measured on
-  # V(out); the baseline's own interpolation error is 2.6e-5 V.
+  # never a Pulsim run), 0.2 us grid, both limits at every event. 0.1 V is this bench's
+  # inherited threshold, not derived: the plain fixed engine (trap 9, one step early)
+  # measures 0.051 V on V(out), trbdf2 5.05e-5 V; the baseline's interpolation 2.6e-5 V.
   expectations:
     metrics:
       max_error: 1.0e-1
@@ -23,7 +23,7 @@ benchmark:
   # read V(sw) and I(L1): V(sw) is ~0 while the diode freewheels, so the
   # hard turn-ons were counted as soft: "ZVS" 42 %.)
   # Truth (soft_switching_truth.py, exact): 24 turn-ons in (0, 500 us), V_DS at each
-  # 24.02-24.08 V while the diode freewheels (the first 10), then 1.42-6.01 V
+  # 24.01-24.09 V while the diode freewheels (the first 10), then 1.42-6.01 V
   # (24 V - V_out: the L-C start overshoots V_out to ~22.6 V and the inductor
   # current reaches zero, DCM): ZVS fraction 0 at 1 V (the lowest hard edge 1.42 V).
   # The circuit has no device capacitance, so a hard turn-on dissipates

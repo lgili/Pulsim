@@ -429,7 +429,9 @@ def compute_switching_loss_per_event(
     earlier: on a variable grid that sample can be far before the edge,
     and the conduction up to the edge was booked as switching energy --
     on the PSFB reference's S3 under trbdf2, 2.55e-10 J against the exact
-    3.18e-11 J; from the edge, 3.66e-11 J.) An edge the solver does not
+    3.18e-11 J; from the edge, 3.66e-11 J.) On a trace without event rows a
+    hard transition between the last old-state sample and that first sample
+    is therefore not integrated. An edge the solver does not
     resolve (a capacitor collapsing through milliohms inside one step) is
     not in the samples, so it is not in this integral either: book it from
     the stored-energy change instead.
