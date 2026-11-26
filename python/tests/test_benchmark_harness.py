@@ -265,7 +265,11 @@ def test_triage_entry_is_true(rel):
 
 def _err(case, engine, k=1.0):
     r = case.run(engine, k)
-    return metrics.err_rms(np.asarray(r.times), case.observe(r), case.exact,
+    # the analytic gate reads the projected flow where the run recorded projections
+    # (DECISIONS 13 / integration DECISIONS 8; the rehearsal's own reading)
+    og = (getattr(r, "diagnostics", None) or {}).get("output_grid") or {}
+    ref = metrics.projected_reference(case.exact, og.get("projections") or (), tau_max=1e-6 * case.t_end)
+    return metrics.err_rms(np.asarray(r.times), case.observe(r), ref,
                            abs_scale=case.abs_scale, exclude_t0=case.exclude_t0)
 
 
