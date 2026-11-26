@@ -146,7 +146,8 @@ def _reinit_step_starts(result, states: np.ndarray, masks, into=None):
     the result has no re-initialisation record. ``into``: the
     ``(states, masks)`` to write into instead of copies of the inputs."""
     keep = (states, masks) if into is None else into
-    if states.ndim != 2:
+    # no record: return before the call (simulate()'s bytecode ratchet)
+    if states.ndim != 2 or not getattr(result, "reinit_records", None):
         return keep
     ks = _reinit_samples(result, states.shape[0])
     if not ks:

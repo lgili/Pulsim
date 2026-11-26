@@ -34,7 +34,8 @@ The numbers are in the `Known limitations` part of the 2.1.0 entry of the
   `trbdf2` reads 42.111 V, the fixed engine with the rule off 41.86 V).
   This line fixes it: the turn-off is located and the restart step is cut
   there (counted in `result.counters["n_restart_cuts"]`; the same boost
-  reads 42.75 V). On 2.1.0 the rule is off by default; with it on, compare
+  reads 42.75 V; re-measured on this line with the 0.5001 h gate sample:
+  42.750 V 0.1 us after the edge, 42.114 V at 0.4 us against 41.48 V). On 2.1.0 the rule is off by default; with it on, compare
   against `trbdf2` before trusting it on a converter whose diode commutates
   right after a gate edge.
 * **Event splitting** (with the restart rule): a retried step is re-taken
