@@ -48,7 +48,7 @@ def _jsonable(v, depth=0):
     return str(v)[:200]
 
 
-def child(n, t_end, rule, gate, timeout):
+def child(n, t_end, rule, gate, timeout, budget=0):
     import faulthandler
     import warnings
     faulthandler.dump_traceback_later(max(5.0, timeout - 10.0), exit=False)
@@ -57,6 +57,9 @@ def child(n, t_end, rule, gate, timeout):
     import numpy as np
     import pulsim as p
     from test_release_findings_f import _branch_bridges
+    if budget:
+        import pulsim._dsed_dispatch as dd
+        dd.OUTPUT_BUDGET = budget
 
     b = _branch_bridges(n)
     kw = {"output_rtol": 1e-5} if rule else {}
@@ -79,7 +82,8 @@ def child(n, t_end, rule, gate, timeout):
         warnings.simplefilter("always")
         r = p.simulate(b, t_end=t_end, engine="exact", **kw)
     wall = time.perf_counter() - t0
-    rec = {"n": n, "t_end": t_end, "rule": rule, "gate": gate, "wall": round(wall, 3),
+    rec = {"n": n, "t_end": t_end, "rule": rule, "gate": gate, "budget": budget,
+           "wall": round(wall, 3),
            "n_times": len(r.times), "t_last": float(r.times[-1]),
            "n_events": len(r.event_times),
            "bus_end": float(np.asarray(r.v("p"))[-1] - np.asarray(r.v("n"))[-1]),
@@ -95,28 +99,24 @@ def child(n, t_end, rule, gate, timeout):
     print("RESULT " + json.dumps(rec, default=str), flush=True)
 
 
-# (n, t_end, rule, gate, timeout s)
+# (n, t_end, rule, gate, timeout s, output budget; 0 = the default 2e6)
 PLAN = [
-    (1, 0.02, True, "constant", 300),
-    (2, 0.02, True, "constant", 300),
-    (4, 0.02, True, "constant", 600),
-    (10, 0.02, False, "constant", 900),
-    (7, 0.02, True, "constant", 1200),
-    (10, 0.005, True, "constant", 900),
-    (10, 0.02, True, "python", 1800),
+    (10, 0.02, True, "constant", 900, 100_000),
+    (10, 0.02, True, "python", 900, 100_000),
+    (10, 0.02, True, "constant", 3600, 0),
 ]
 
 
 def driver():
     import platform
     print("PLATFORM", platform.platform(), sys.version.replace("\n", " "), flush=True)
-    for n, t_end, rule, gate, timeout in PLAN:
-        tag = "n=%d t_end=%g rule=%s gate=%s" % (n, t_end, rule, gate)
+    for n, t_end, rule, gate, timeout, budget in PLAN:
+        tag = "n=%d t_end=%g rule=%s gate=%s budget=%d" % (n, t_end, rule, gate, budget)
         print("=== RUN " + tag, flush=True)
         t0 = time.perf_counter()
         try:
             cp = subprocess.run([sys.executable, __file__, "child", str(n), repr(t_end),
-                                 str(int(rule)), gate, str(timeout)],
+                                 str(int(rule)), gate, str(timeout), str(budget)],
                                 capture_output=True, text=True, timeout=timeout)
             out, err, status = cp.stdout, cp.stderr, "rc=%d" % cp.returncode
         except subprocess.TimeoutExpired as e:
@@ -138,6 +138,6 @@ def driver():
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "child":
         child(int(sys.argv[2]), float(sys.argv[3]), bool(int(sys.argv[4])), sys.argv[5],
-              float(sys.argv[6]))
+              float(sys.argv[6]), int(sys.argv[7]) if len(sys.argv) > 7 else 0)
     else:
         driver()
