@@ -4783,6 +4783,6 @@ def thermal_voltage(T_kelvin: float) -> float:
     """
     Thermal voltage kT/q [V] at a junction temperature [K]. 25.85 mV at 300 K. NOTE, because it is the opposite of what everyone remembers: raising V_T ALONE RAISES the forward drop (V_F = n*V_T*ln(i/I_S) at fixed I_S, so 0.710 V at 25 C becomes 0.948 V at 125 C). A real diode's negative temperature coefficient comes from I_S, which roughly doubles every 10 C. A temperature sweep must scale BOTH — pair this with `shockley_saturation_current_at`.
     """
-__version__: str = '1.6.4'
+__version__: str = '2.1.0'
 full_bridge: _MmcSubmoduleType
 half_bridge: _MmcSubmoduleType
