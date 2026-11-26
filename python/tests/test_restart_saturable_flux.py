@@ -203,3 +203,35 @@ def test_the_kernel_reads_a_clamp_turn_on_after_the_recorded_collapse(l1, split)
     k = r.device_energy("D")
     assert k["n_on"] == 1
     assert k["E_on"] == pytest.approx(l1 * i0 / (l1 + 2e-4), rel=2e-3)
+
+
+def test_a_core_pushed_past_its_flux_limit_is_refused_with_what_to_change():
+    """Boost turn-off with an atan core of L_residual = 0 deep in saturation (1 mH, 50 mA,
+    12 V for 7 us: ~1200 A) and 100 pF at the switch node: the core and Csw form a fast mode
+    whose current collapses while the flux barely moves; the restart's estimate of the flux
+    lies past the law's limit (pi/2) L_0 I_sat, which no current reaches. Decided: a loud
+    refusal by name that says what the user can change. Control: L_residual = 1 nH (the law
+    has no flux limit) runs."""
+    def go(lr):
+        b = p.CircuitBuilder()
+        b.add_voltage_source("V", "in", "gnd", 12.0)
+        b.add_saturable_inductor("Lc", "in", "sw", 1e-3, 0.05, lr)
+        b.add_switch("S", "sw", "gnd", 1e2, 1e-9)
+        b.add_diode("Dd", "sw", "out", 1e2, 1e-9)
+        b.add_capacitor("Csw", "sw", "gnd", 100e-12)
+        b.add_capacitor("Co", "out", "gnd", 1e-6, 14.0)
+        b.add_resistor("R", "out", "gnd", 20.0)
+        n, k = b.graph.num_switches, b.switch_index_of("S")
+
+        def fn(t):
+            m = p.SwitchStateMask(n)
+            m.set(k, t < 7e-6)
+            return m
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            return p.simulate(b, t_end=8e-6, dt=1e-7, engine="pwl", discontinuity_restart=True,
+                              switch_fn=fn)
+    with pytest.raises(p.UnsupportedError, match=r"saturable_inductor 'Lc'.*flux limit.*L_residual > 0"):
+        go(0.0)
+    r = go(1e-9)   # the control
+    assert float(np.asarray(r.i("Lc"))[-1]) > 0.0

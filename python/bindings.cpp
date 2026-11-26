@@ -3982,11 +3982,11 @@ void init_module(py::module_& m) {
                        "split off.")
         .def_readonly("n_right_limit_fallbacks",
                        &SimulationResult::n_right_limit_fallbacks,
-                       "Restart rule: event right limits in which an "
-                       "unknown failed the epsilon-limit smoothness test at "
-                       "every epsilon and took the fallback (the impulse "
-                       "rule's x0+, else the left value). 0 with the rule "
-                       "off.")
+                       "Restart rule: event right limits that are not "
+                       "certified: a row whose solve did not converge or "
+                       "whose diode mode does not hold at t_e+ (no row is "
+                       "stored), or a located turn-off solved through g_off "
+                       "(the row is stored). 0 with the rule off.")
         .def_readonly("event_iteration_breaches",
                        &SimulationResult::event_iteration_breaches)
         .def_readonly("newton_roundoff_accepts",

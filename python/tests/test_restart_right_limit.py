@@ -727,19 +727,54 @@ def test_an_ideal_jump_whose_row_mode_does_not_hold_re_decides(d_kind, split):
     assert i_d[j] == pytest.approx(np.asarray(v.i("L"))[j], rel=1e-3)   # the control
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "open (item A's ledger half): after an ideal jump into a fast RC (C1+C2 behind 1 mOhm, "
-    "tau ~ 1 ps) the stored sample after the edge reads i_R = 10.0917 A (no split) / "
-    "10.1883 A (split) for i_L = 9.9950 A: +0.97 % / +1.9 % of a collapse no record holds"))
+# closed (item A): the ideal jump is impulsive too, its J holds the fast collapse
 @pytest.mark.parametrize("split", [False, True])
 def test_the_sample_after_an_ideal_jump_into_a_fast_rc_obeys_kcl(split):
     """_jump_into_freewheel with a plain 1 mOhm resistor in D's place: the capacitors settle
-    in ~1 ps after the share, so at the next stored sample (0.25 us later) KCL at c gives
-    i_R = i_L (truth: KCL; i_R = -v_c / 1 mOhm)."""
+    in ~1 ps after the share, so at the next stored sample KCL at c gives i_R = i_L (truth:
+    KCL; i_R = -v_c / 1 mOhm). Before: stage 1 started from x0 and left the 9.5 V collapse
+    to the SDIRK pair, R(z) ~ (1 - c)/z of it in every later sample: i_R = 10.0917 A (no
+    split) / 10.1883 A (split) for i_L = 9.9950 A."""
     b, fn = _jump_into_freewheel("resistor")
     r = _quiet(p.simulate, b, t_end=4e-6, dt=DT, switch_fn=fn,
                enable_substep_state_correction=split, **RULE)
     v, t, kk = _limits(r)
     (j,) = [j for j in kk if t[j] > 1e-6]   # the closing (not a start row)
-    i_r = -np.asarray(v.v("c"))[j + 2] / 1e-3   # the stored sample after the row
-    assert i_r == pytest.approx(np.asarray(v.i("L"))[j + 2], rel=1e-3)
+    i_r = -np.asarray(v.v("c"))[j + 2:] / 1e-3   # every stored sample after the row
+    np.testing.assert_allclose(i_r, np.asarray(v.i("L"))[j + 2:], rtol=1e-6)
+
+
+def test_a_right_limit_whose_pin_does_not_converge_stores_no_row():
+    """Review (rev_fin2 probe_i): C1 1 nF (10 V) -ideal S- c (C2 50 pF) -ideal Sd (R_on 0)-
+    d (C3 1 nF, 88 V) with a 0.04 A current source draining d; S and Sd close at T_E. The
+    pin of that ideal three-way share diverged (a = -37.49 V for the 8.78 V share) and was
+    published. Now: no row at the closing, the counter says so, and the samples after it
+    follow the closed form v(t) = s3 - 0.04 (t - t_e)/(C1 + C2 + C3), s3 the three-way
+    charge share of the left values (every state tied by the two ideal switches)."""
+    c1, c2, c3, i0 = 1e-9, 50e-12, 1e-9, -0.04
+    b = p.CircuitBuilder()
+    b.add_capacitor("C1", "a", "gnd", c1, 10.0)
+    b.add_ideal_switch("S", "a", "c", 0.0, 0.0)
+    b.add_capacitor("C2", "c", "gnd", c2, 0.0)
+    b.add_ideal_switch("Sd", "c", "d", 0.0, 1e-9)
+    b.add_capacitor("C3", "d", "gnd", c3, 88.0)
+    b.add_current_source("I", "d", "gnd", i0)   # flows out of d's terminal into d
+    k, kd, ns = b.switch_index_of("S"), b.switch_index_of("Sd"), b.graph.num_switches
+
+    def fn(t):
+        m = p.SwitchStateMask(ns)
+        m.set(k, t >= T_E)
+        m.set(kd, t >= T_E)
+        return m
+    r = _quiet(p.simulate, b, t_end=4e-6, dt=DT, switch_fn=fn, **RULE)
+    v, t, kk = _limits(r)
+    assert not [j for j in kk if t[j] > 1e-6]   # no row at the closing
+    assert r.n_right_limit_fallbacks >= 1
+    va, vc, vd = (np.asarray(x) for x in (v.v("a"), v.v("c"), v.v("d")))
+    # the closing's step: the last sample where a and d still differ
+    (j,) = np.flatnonzero((np.abs(va - vd) > 1e-3)[:-1] & (np.abs(va - vd) <= 1e-3)[1:])
+    s3 = (c1 * va[j] + c2 * vc[j] + c3 * vd[j]) / (c1 + c2 + c3)
+    after = slice(j + 1, None)
+    want = s3 + i0 * (t[after] - t[j]) / (c1 + c2 + c3)
+    for y in (va, vc, vd):
+        np.testing.assert_allclose(y[after], want, rtol=0, atol=1e-6 * 100.0)

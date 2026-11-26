@@ -6,6 +6,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed engine, `discontinuity_restart=True`: an event's right-limit row whose
+  diode mode does not hold at t_e+ (a freewheel diode stage 1 holds ON while a
+  node capacitor or an ideal element's jump reverse-biases it) is re-decided and
+  solved again in the mode that holds; a mode that never settles stores no row.
+  The loss ledger booked a turn-on from the reverse-biased row (E_on 14x the
+  bound).
+- Same rule: a right-limit row whose solve did not converge is no longer stored
+  (a three-way ideal share read -37.49 V for 8.78 V); it is counted in
+  `n_right_limit_fallbacks`, whose docstring now says what it counts.
+- Same rule: an ideal element's jump that excites a fast mode (an ideal switch
+  closing two capacitors that sit behind 1 mOhm) restarts from the state after
+  the fast collapse; the stored sample after the edge carried +0.97 % (dt
+  0.5 us) / +1.9 % (with event splitting) of the collapse in the resistor's
+  current. The collapse's own energy is still not recorded (the tracker
+  records the ideal share only).
+
 ## [2.1.0] - 2026-11-25
 
 2.1.0 brings new engines, devices and analyses behind new options that

@@ -2694,7 +2694,7 @@ inline SimulationResult run_transient(
                 }
                 return true;
             };
-            if (solved && !structural && moving && ne + nn + nsat >= 2) {
+            if (solved && moving && ne + nn + nsat >= 2) {
                 ip_f0.assign(ip_js.begin(), ip_js.end());   // the flagged entries
                 ip_js.clear();   // every state but a hysteretic core (no inverse: not carried)
                 for (Size k = 0; k < ne + nn + nsat; ++k) {
@@ -2765,7 +2765,12 @@ inline SimulationResult run_transient(
                     refuse_jump(e.branch_id,
                                 Real{2} * ip_x1[e.branch_var_id] - ip_x2m[e.branch_var_id] - e.i_L_old,
                                 "saturable_inductor", "A",
-                                "the flux after it lies outside the law's range");
+                                "the restart's estimate of the core's flux after it lies "
+                                "past the law's flux limit (the atan law with L_residual = 0 "
+                                "saturates at (pi/2)*L_0*I_sat; a table at its flat end), so "
+                                "no current carries that flux; give the core L_residual > 0 "
+                                "(or extend the table), add a snubber or damping across the "
+                                "fast loop the core collapses into, or take a smaller dt");
                 }
                 ip_sl[3 * k] = ip;
                 sl_jumped = true;
@@ -2799,7 +2804,14 @@ inline SimulationResult run_transient(
                     }
                 }
             }
-            const bool impulsive = solved && moving && !structural;
+            // An ideal element's jump is impulsive too (item A): its J is the
+            // constraint's share J_i AND the collapse J_f of any fast mode it
+            // excites (C1 -S- C2 beside 1 mΩ, τ 1 ps), both modes of the stage
+            // map (the share is ρ = 0). Stage 1 from x0 left J_f to the SDIRK
+            // pair: R(z) ≈ (1 − c)/z of the collapse in the step's sample
+            // (+0.97 % of i at dt 0.5 µs). The tracker
+            // still records J_i (from the state vectors); J_f is not recorded.
+            const bool impulsive = solved && moving;
             ip_jump = solved && jumped;   // the right limit adds J (event_right_limit)
             ip_moved = solved && moving;  // the histories are x0 + d: the right limit starts from x0
             ip_struct = structural;
@@ -2842,7 +2854,7 @@ inline SimulationResult run_transient(
             // The record (every non-structural device kind). dW =
             // ½·JᵀM·J > 0 by the test above (M is positive semidefinite).
             // Only a jump (flag 1) is recorded; moves alone record nothing.
-            if (jumped) {
+            if (jumped && !structural) {   // (structural: the tracker's record)
                 const bool sl = dom >= ne + nn;    // the dominant state: a saturable core
                 const bool nl = dom >= ne && !sl;  // a nonlinear capacitor
                 const Index d_from = sl ? sats[dom - ne - nn].from : nl ? ncs[dom - ne].from : ents[dom].from;
@@ -2983,8 +2995,9 @@ inline SimulationResult run_transient(
         //    A mode with τ ≲ ε (unresolved), an ideal constraint the targets
         //    meet only to the probe's tolerance, or a mode that is not
         //    consistent at t_e+ (a diode it holds ON carries reverse current,
-        //    one it holds OFF is forward-biased) is NOT certified: the row
-        //    keeps the last solve and is counted (n_right_limit_fallbacks).
+        //    one it holds OFF is forward-biased) is NOT certified: a pin that
+        //    does not converge, or a mode that never settles, stores no row
+        //    and is counted (n_right_limit_fallbacks).
         //  - an ideal element's jump (ip_struct): the constraint current
         //    after the jump is c/ε-polluted by the probe's tolerance; three
         //    solves at ε, 2ε, 4ε (ε = 5e-4·γh) and −2x1 + 5x2 − 2x4 remove
@@ -3145,7 +3158,9 @@ inline SimulationResult run_transient(
                 return 2 * k + (ents[k].kind == pwl::DevicePool::StoredKind::Capacitor ? 0 : 1);
             };
             int ok = 1;
-            bool unheld = false;   // no diode mode holds at t_e+ (F1)
+            // no row: no diode mode holds at t_e+ (F1), or the row's solve did
+            // not converge (a diverged pin is no state; counted, not published)
+            bool unheld = false;
             bool redecided = false;   // a re-decided mode's solve ran (it may throw)
             const Size rf_s = restart_factorizations;
             struct AuxEvents {   // the run's event factors stay put, on any exit
@@ -3399,13 +3414,13 @@ inline SimulationResult run_transient(
                     };
                     bool conv = elim_solve();
                     hold_mode(elim_solve, conv, &rl_xa);
-                    count = count || !conv;
+                    unheld = unheld || !conv;
                 } else {
                     bool conv = pinned(eps, !ip_jump && !ip_moved);
                     out = x;
                     // stage 1's slope is the old mode's: no prediction
                     hold_mode([&] { const bool c = pinned(eps); out = x; return c; }, conv, nullptr);
-                    count = count || !conv;
+                    unheld = unheld || !conv;
                 }
             } catch (const std::runtime_error&) {
                 ok = 0;   // no right limit recorded; the run goes on
@@ -3961,7 +3976,7 @@ inline SimulationResult run_transient(
             // x0* = x0 + c·(x1 − x0) then carries c·J of it: the stored sample
             // read a jump-current residue (i(V) = +3.83 A for −1 A). The
             // dependent states start stage 2 from x0+ (the row's solve).
-            if (ip_struct && ip_jump && !rl_dep_x.empty()) {
+            if (!impulsive && ip_struct && ip_jump && !rl_dep_x.empty()) {
                 history.snapshot_into(rl_hw);
                 for (const auto& [sl, v] : rl_dep_x) rl_hw[sl] = v;
                 history.restore(rl_hw);

@@ -454,9 +454,10 @@ struct SimulationResult {
     /// Steps split at an event inside them
     /// (SimulationOptions::enable_substep_state_correction). 0 off.
     Size n_split_steps = 0;
-    /// Restart rule: event right limits in which an unknown's ε → 0 limit
-    /// failed its smoothness test at every ε and took the fallback (the
-    /// impulse rule's x0+, else the left value). 0 off.
+    /// Restart rule: event right limits that are not certified: a row whose
+    /// solve did not converge or whose diode mode does not hold at t_e+ (no
+    /// row is stored), or a located turn-off solved through g_off (the row
+    /// is stored). 0 off.
     Size n_right_limit_fallbacks = 0;
     /// update-fixed-step-loop-bookkeeping loop counters (`res.counters`):
     /// `switch_fn` evaluations in the step loop, segment lookups the

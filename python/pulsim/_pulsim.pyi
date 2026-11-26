@@ -415,7 +415,7 @@ class SimulationResult:
     @property
     def n_right_limit_fallbacks(self) -> int:
         """
-        Restart rule: event right limits in which an unknown failed the epsilon-limit smoothness test at every epsilon and took the fallback (the impulse rule's x0+, else the left value). 0 with the rule off.
+        Restart rule: event right limits that are not certified: a row whose solve did not converge or whose diode mode does not hold at t_e+ (no row is stored), or a located turn-off solved through g_off (the row is stored). 0 with the rule off.
         """
     @property
     def n_rk45_steps(self):
