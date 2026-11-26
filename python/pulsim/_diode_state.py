@@ -309,6 +309,34 @@ def _event_sample_mask(result, times: np.ndarray) -> np.ndarray:
     return out
 
 
+def _exempt_edge_layer(result, times, v, closed, V_f, V_on, exempt) -> None:
+    """trbdf2's gate-edge layer: a diode the edge's settle flipped
+    (decided on the post-edge probe) whose own rule still forbids the new
+    bit at the edge, for attoseconds (case A: Dl OFF at v_D = 0.71 V >
+    V_f = 0.7 V for ~30 as after Sh turns on, while the voltage falls
+    through V_f). The samples right after an edge row (right_limit_index)
+    with the flipped bit and a violation that only shrinks from the edge's
+    own are that layer, not a missed commutation; the first sample that
+    breaks the run ends it. Marks them in ``exempt``."""
+    if getattr(result, "engine_used", None) != "trbdf2":
+        return
+    rl = getattr(result, "right_limit_index", None)
+    if rl is None:
+        return
+    n = times.size
+    dv = np.where(closed, V_f - v, v - V_on)   # the violation of the stamped bit
+    for k in np.asarray(rl, dtype=np.int64).tolist():
+        if not 0 <= k < n - 1:
+            continue
+        left = bool(closed[k])
+        last = (v[k] - V_on) if left else (V_f - v[k])   # the new bit's violation at the edge
+        j = k + 1
+        while j < n and bool(closed[j]) != left and 0 < dv[j] <= last:
+            exempt[j] = True
+            last = dv[j]
+            j += 1
+
+
 def _build(builder, result, states, times) -> Dict[int, DiodeStateTrace]:
     comps = list(builder.components())
     diodes = [c for c in comps if c.get("kind") == "diode"]
@@ -414,6 +442,7 @@ def _build(builder, result, states, times) -> Dict[int, DiodeStateTrace]:
             i_env = float(i_abs[rest].max()) if rest.any() else 0.0
             exempt = unsolved | (landing & np.where(closed, i_abs <= i_env,
                                                     v <= v_env))
+            _exempt_edge_layer(result, times, v, closed, V_f, V_on, exempt)
             # A gated device (IGBT, GTO, thyristor) blocks forward
             # voltage while its gate is off: OFF under forward bias is
             # its law, not a missed turn-on. With its gate ON it is a

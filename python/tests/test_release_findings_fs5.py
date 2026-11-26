@@ -304,3 +304,34 @@ def test_hard_turn_on_energy_at_a_tight_tolerance(eng, rtol):
     e = _window_loss(b, fn, r, 1e-6 - 2e-9, 1e-6 + 20e-9)
     assert r._trbdf2_stats["n_chatter_breaks"] == 0
     assert e == pytest.approx(_e_hard_A(2e-9, 20e-9), rel=2.5e-4)
+
+
+# The same window at the DEFAULT tolerance, against the ODE (62.83666 uJ).
+# 2.1.0: trbdf2 62.84903, esdirk43 62.92590 uJ; the error sits in the
+# loop's first picosecond (the integrator at rtol 1e-3), not at the edge:
+# the window [te, te + 10 fs] reads 1.59272 against the ODE's 1.59276 since
+# the edge sample's right limit (2.1.0 1.47161: the committed probe's lag).
+_E_ODE_A = 62.83666e-6
+_ERR_210_DEFAULTS = {"trbdf2": 62.84903e-6 - _E_ODE_A, "esdirk43": 62.92590e-6 - _E_ODE_A}
+
+
+@pytest.mark.parametrize("eng", list(ENGINES))
+def test_hard_turn_on_energy_at_the_defaults(eng):
+    b, fn, r = _run(eng)
+    e = _window_loss(b, fn, r, 1e-6 - 2e-9, 1e-6 + 20e-9)
+    assert r._trbdf2_stats["n_chatter_breaks"] == 0
+    # equal to 2.1.0 within the five decimals its numbers were recorded to
+    assert abs(e - _E_ODE_A) <= _ERR_210_DEFAULTS[eng] * 1.001
+
+
+@pytest.mark.parametrize("rtol", [None, 1e-8])
+def test_hard_turn_on_reports_no_missed_commutation(rtol):
+    # the Dl the edge turns off sits ~30 as above V_f while v_D falls
+    # through it (the edge layer): not a missed commutation
+    b = _builder()
+    fn = _gates(b)
+    kw = {} if rtol is None else dict(rtol=rtol)
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        p.simulate(b, t_end=2.2 / FSW, switch_fn=fn, engine="trbdf2", **kw)
+    assert not [x for x in w if "missed commutation" in str(x.message)]

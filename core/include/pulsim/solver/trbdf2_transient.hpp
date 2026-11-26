@@ -1885,10 +1885,12 @@ inline SimulationResult run_transient_trbdf2(
     // after is dropped, so the record stays increasing.
     Real event_sample_t = -std::numeric_limits<Real>::infinity();
     Real gate_sample_t = -std::numeric_limits<Real>::infinity();   // a post-edge one the hooks saw
+    Real line_sample_t = -std::numeric_limits<Real>::infinity();   // a post-edge one the lines hold
     auto drop_superseded_event_sample = [&](Real t_new) {
         if (event_sample_t >= t_new && !result.times.empty()
             && result.times.back() == event_sample_t) {
             if (gate_sample_t == event_sample_t) hooks->sample(event_sample_t, nullptr, nullptr);
+            if (line_sample_t == event_sample_t) lines->withdraw(event_sample_t);
             result.times.pop_back();
             result.states.pop_back();
             result.event_iteration_count.pop_back();
@@ -1904,7 +1906,7 @@ inline SimulationResult run_transient_trbdf2(
             }
         }
         event_sample_t = -std::numeric_limits<Real>::infinity();
-        gate_sample_t = event_sample_t;
+        gate_sample_t = line_sample_t = event_sample_t;
     };
     // Every recorded time: a sample below the previous one is the engine
     // breaking its own invariant, raised rather than returned as a result.
@@ -1974,6 +1976,7 @@ inline SimulationResult run_transient_trbdf2(
     SwitchStateMask edge_slots_m;
     auto restart_after_gate_event = [&](bool settled, Real t_gates,
                                         Real hp, bool commit) {
+        edge_layer_t1 = -std::numeric_limits<Real>::infinity();   // every path: no layer yet
         if (sens.on()) [[unlikely]] {   // group 6: the edge, at a landed instant
             sens.time_event(t, x_mask, settled ? gates_decided : mask_at(t_gates), true);
         }
@@ -2066,7 +2069,12 @@ inline SimulationResult run_transient_trbdf2(
             }
             return false;
         };
-        if (lin && (dtp > hp * Real{1.0001} || probe_moved()) && commit
+        bool rl_row = false;   // this edge wrote a right-limit row (below)
+        // A source corner under the same mode keeps 2.1.0's committed probe
+        // too: the corner's slot is no jump (the states' derivatives are
+        // continuous), and the restart from x with the probe's slots cost a
+        // matched line into an RC load at rtol 1e-6 7 rejects (2.1.0: 2).
+        if (lin && (dtp > hp * Real{1.0001} || probe_moved() || m_probe == x_mask) && commit
             && t_plus < opts.t_end - h_min
             && t_plus < queue.next_of(events::Kind::ControlTick) - h_min) {
             history.update_from_state(x_trial, dtp);
@@ -2129,11 +2137,10 @@ inline SimulationResult run_transient_trbdf2(
         // turn-on energy +0.29 % (2.1.0, which committed the probe, +0.005 %).
         // Such a diode keeps the settle's bit over [t, t + dtp] (the span the
         // probe decided it on; 2.1.0 committed it there): its crossing test
-        // is skipped on a step that starts in it and ends on the allowed side
-        // or inside it. (A floor h >= dtp instead forced a 1 ps step across
+        // is skipped on a step that ends inside that span; a longer step is
+        // tested (its s1 and stage signal lie past the layer). (A floor h >= dtp instead forced a 1 ps step across
         // the C_oss buck's 0.6 ps loop: its conduction energy +0.06 -> +0.32 %.)
         edge_layer.assign(has_diodes ? diodes.entries().size() : 0, 0);
-        edge_layer_t1 = -std::numeric_limits<Real>::infinity();
         if (!lin) {
             for (Size d = 0; d < edge_layer.size(); ++d) {
                 const Real sx = detail_trbdf2::crossing_signal(diodes, d, x);
@@ -2191,6 +2198,7 @@ inline SimulationResult run_transient_trbdf2(
             for (Size b = 0; b < nb; ++b) {
                 result.right_limit_switch_bits.push_back(m_probe.get(b) ? 1 : 0);
             }
+            rl_row = true;
         }
         push_time(t_plus, "post-edge");
         result.states.push_back(x_trial);
@@ -2204,9 +2212,60 @@ inline SimulationResult run_transient_trbdf2(
         // t_e: the next commit's row is still due), the recorder feed's
         // sample, withdrawn with the row (drop_superseded_event_sample).
         if (hook_ds) hooks->device_state(t_plus, x_trial, hs);
+        // The lines' past holds the right limit too: with only x(t) and the
+        // next commit, a front launched at the edge reached the far end a
+        // delay later as a ramp over that step (the lattice's 5/9 plateau
+        // read 0.5555555631, 2.1.0 committed the probe: exact).
+        if (lines) {
+            lines->commit(t_plus, x_trial);
+            line_sample_t = t_plus;
+        }
         if (hooks != nullptr && hooks->has_sample()) {
             hooks->sample(t_plus, &x_trial, &m_probe);
             gate_sample_t = t_plus;
+        }
+        // The row is the CONSISTENT right limit the restart starts from:
+        // x's states, the new mode's algebraic unknowns at t (a probe
+        // 1e-3 dtp long: its states move 1e-3 of the edge probe's). The
+        // edge probe itself sits dtp past the edge (1.5 fs into case A's
+        // 0.6 ps loop at the defaults: v_sw -0.3586 against -0.71 before
+        // and -0.70 on the next sample, a spike, when the first step was
+        // shorter than dtp and the post-edge sample was dropped); it is
+        // the fallback when this solve fails. Nothing of the solve stays:
+        // counters, learned floor, roundoff run and step context are
+        // restored, and it runs after every consumer of the probe.
+        if (!rl_row) return;
+        Vector x_rl = x_trial;
+        bool rl_ok = false;
+        {
+            const Real dtp_keep = last_probe_dt, learned_keep = h_probe_learned;
+            const bool ok_keep = last_probe_ok;
+            const pwl::NewtonRoundoffAcceptance ro_keep = newton_roundoff;
+            const Size ro_n = ro_accepts, retries = n_probe_newton_retries;
+            const Real ro_w = ro_omega_max;
+            const Index ro_r = ro_row;
+            const std::string err_keep = newton_last_error;
+            const pwl::StepCtx ctx_keep = step_ctx;
+            try {
+                rl_ok = probe_solve(m_probe, t, dtp * Real{1e-3}, x_rl)
+                        && last_probe_dt < dtp && x_rl.allFinite();
+            } catch (const std::runtime_error&) {
+                rl_ok = false;
+            }
+            last_probe_dt = dtp_keep;
+            h_probe_learned = learned_keep;
+            last_probe_ok = ok_keep;
+            newton_roundoff = ro_keep;
+            ro_accepts = ro_n;
+            n_probe_newton_retries = retries;
+            ro_omega_max = ro_w;
+            ro_row = ro_r;
+            newton_last_error = err_keep;
+            step_ctx = ctx_keep;
+        }
+        if (rl_ok) {   // the row's states: the last ones pushed
+            std::copy(x_rl.data(), x_rl.data() + x_rl.size(),
+                      result.right_limit_states.end() - x_rl.size());
         }
     };
 
@@ -3812,10 +3871,9 @@ inline SimulationResult run_transient_trbdf2(
                     const Real tol_d = detail_trbdf2::held_tolerance(
                         diodes, d, x_1);
                     // a diode in the edge's layer (see edge_layer)
-                    if (t < edge_layer_t1 && edge_layer[d] != 0
-                        && (edge_layer[d] == 2) == diodes.entries()[d].is_on
-                        && (!detail_trbdf2::forbidden(diodes, d, s1)
-                            || t + h <= edge_layer_t1)) {
+                    // (only a step that ends inside it: a longer one is tested)
+                    if (t + h <= edge_layer_t1 && edge_layer[d] != 0
+                        && (edge_layer[d] == 2) == diodes.entries()[d].is_on) {
                         continue;
                     }
                     const bool crossed =
