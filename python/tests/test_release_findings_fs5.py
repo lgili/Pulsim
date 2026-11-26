@@ -292,8 +292,14 @@ def test_roundoff_heavy_reference_circuit_runs_on_trbdf2(name, kw):
 # esdirk43 63.0065 uJ (+0.27 %; 14f 63.0082: the same floor, already there).
 # rtol 1e-7, 1e-9 and 1e-10 read the same 63.0154 / 63.008. The defaults
 # moved toward the truth (trbdf2 62.8490 -> 62.8386).
-@pytest.mark.xfail(strict=True, reason="open: chatter-floor forced accepts through the C_oss "
-                   "transient at rtol <= 1e-7 (+0.29 % trbdf2, +0.27 % esdirk43)")
+# A REGRESSION against 2.1.0 (origin/main ec08e98e, same script): trbdf2 rtol
+# 1e-7 / 1e-8 / 1e-9 read 62.8372 / 62.8368 / 62.8367 there (4 forced
+# accepts, no chatter break); esdirk43 62.8414 / 63.0082 / 62.8368. Seen on
+# the line: the edge's post-edge samples keep Dl ON (mask 1001) for two
+# samples, then Dl chatters (2 breaks) and h sits at h_chatter (0.22 ps).
+@pytest.mark.xfail(strict=True, reason="open (regression vs 2.1.0): chatter-floor forced "
+                   "accepts through the C_oss transient at rtol <= 1e-7 (+0.29 % trbdf2, "
+                   "+0.27 % esdirk43; 2.1.0 +0.005 %)")
 @pytest.mark.parametrize("eng", list(ENGINES))
 def test_hard_turn_on_energy_at_a_tight_tolerance(eng):
     b, fn, r = _run(eng, rtol=1e-8)

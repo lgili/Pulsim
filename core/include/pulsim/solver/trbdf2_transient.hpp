@@ -3589,6 +3589,8 @@ inline SimulationResult run_transient_trbdf2(
             // accept. A mode Newton converges on is resolved as before (a
             // C_oss / channel loop at 400 V: jumping it dropped 1.7 % of the
             // conduction energy, its dissipation is in those steps).
+            // Measured: the cut-set runs at trbdf2 rtol 1e-8 / 1e-9 and esdirk43
+            // (i(200.1 us) - 0.908907 = +4.615e-4, 2.1.0 +4.615e-4), 1 forced accept.
             // shortcut: a loss port does not book this impulse's dissipation
             // (as at any forced accept); upgrade by routing the jump's energy
             // as the reinit record does.

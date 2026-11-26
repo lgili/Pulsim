@@ -6,6 +6,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- Variable-step engine (`trbdf2`, `integrator='esdirk43'`) with a MOSFET's nonlinear output
+  capacitance: the conduction energy after a gate edge read +3.80 % against its closed form
+  (2.1.0's known limitation, +3.91 % in its notes); +0.057 % now (rtol 1e-6 +3.82 → +0.013 %,
+  rtol 1e-8 +2.22 → +0.007 %, esdirk43 +5.14 → +0.14 %). The step after a gate edge starts from
+  the consistent post-edge point (the new mode's derivative slots at the edge) instead of
+  committing a femtosecond probe step from the pre-edge slot.
+- A gate edge that opens a saturable-inductor cut-set (tau ~2e-13 s, node at ~1e9 V) no longer
+  aborts with `NewtonRoundoffBudgetExceeded` at tight tolerance: the restart is retaken once as
+  one L-stable step across the impulse.
+- Sensitivities through a gate edge follow the consistent post-edge start.
+
+### Known limitations
+- Case A hard turn-on (soft-switching validation) at rtol <= 1e-7 reads +0.29 % (trbdf2) /
+  +0.27 % (esdirk43) against its closed form; 2.1.0 read +0.005 % there (a regression of this
+  change, open).
+
 ## [2.1.0] - 2026-11-25
 
 2.1.0 brings new engines, devices and analyses behind new options that
