@@ -22,7 +22,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   turn-on energy read +0.27 % on esdirk43, in 2.1.0 too); trbdf2 / esdirk43 now 62.8368 /
   62.8377 uJ against an ODE truth of 62.8367 uJ. A trbdf2 result now carries the gate edge's
   right limit (`right_limit_index` / `right_limit_states`) on circuits with a stateful device, so
-  the sampled loss integral starts the first post-edge step from the post-edge powers.
+  the sampled loss integral starts the first post-edge step from the post-edge powers. That
+  right limit is the consistent state at the edge (the states before it, the new mode's
+  algebraic unknowns), and `simulate()` no longer warns "held diode ... missed commutation" for
+  the attoseconds the turned-off diode needs to fall through V_f. At the defaults case A reads
+  62.8489 / 62.9259 uJ (2.1.0: 62.8490 / 62.9259).
+- Regressions of the unreleased line against 2.1.0, fixed before release: a source corner on a
+  linear circuit commits its probe again (a transmission line's lattice read 0.5555555631 V for
+  5/9 and a matched line took 7 rejects for 2), and the lines' past holds a gate edge's right
+  limit.
 
 ## [2.1.0] - 2026-11-25
 
