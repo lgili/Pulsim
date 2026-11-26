@@ -51,9 +51,12 @@ The numbers are in the `Known limitations` part of the 2.1.0 entry of the
 ## On default options: nonlinear output capacitance on the variable-step engine
 
 A MOSFET with a nonlinear output capacitance on `engine='trbdf2'` (and on
-`auto` without `dt`, which lands there): the conduction energy after a gate
-edge reads +3.91 % against its closed form (a Coss buck). Workaround: pass
-`dt` (fixed step), or check the energy with a step-size study.
+`auto` without `dt`, which lands there): in 2.1.0 the conduction energy after
+a gate edge read +3.91 % against its closed form (a Coss buck). Since
+[Unreleased] it reads +0.057 % at the defaults (+0.14 % with
+`integrator='esdirk43'`, +0.007 % at rtol 1e-8): the step after the edge
+starts from the consistent post-edge point. For a tighter number, lower
+`rtol` or pass `dt` (fixed step).
 
 ## Engine capability matrix
 

@@ -2,18 +2,24 @@
 
 ### Requirement: TR-BDF2 Derivative Refresh After A Gate Event
 
-The variable-step engine SHALL, after every gate-edge landing, commit
-the last probe of the zero-time diode cascade (a trapezoidal solve of
-length `h_probe` under the post-event mask) as a recorded step, so that
-the derivative slots of its companion history (inductor voltage,
-capacitor current, and the stored derivative of each stateful device)
-hold post-edge values; the probe sample SHALL be recorded with its
-switch state, so that loss and charge post-processing integrate across
-the edge with the right mask. After a gate edge settled at a step
-boundary, and when the probe would reach `t_end`, it SHALL instead
-replace only the derivative slots with the probe's values, leaving the
-states untouched. It SHALL take one probe for this purpose when the
-cascade did not run or did not settle. The first step after a gate edge SHALL therefore be sized by
+The variable-step engine SHALL, after every gate-edge landing, start
+the next step from a consistent right limit: the states continuous, the
+algebraic unknowns and the derivative slots those of the post-edge mode.
+The last probe of the zero-time diode cascade (a trapezoidal solve of
+length `h_probe` under the post-event mask) SHALL be recorded, not
+committed, as the post-edge sample with its switch state, so that loss
+and charge post-processing integrate across the edge with the right
+mask. On a circuit with a stateful device the next step SHALL be the
+SDIRK(2,2) restart from the committed state (its backward-Euler stages
+read no derivative slot); otherwise the derivative slots (inductor
+voltage, capacitor current) SHALL be replaced by the probe's own
+companion values and the next step SHALL be TR-BDF2 from the committed
+state. A probe whose Newton solve was retaken at a longer step than
+requested is a step of its own and SHALL stay committed. After a gate
+edge settled at a step boundary, and when the probe would reach `t_end`,
+it SHALL instead replace only the derivative slots with the probe's
+values, leaving the states untouched. It SHALL take one probe for this
+purpose when the cascade did not run or did not settle. The first step after a gate edge SHALL therefore be sized by
 an error estimate of the post-edge circuit. Diode events and the
 initial settle SHALL keep the committed slots: a diode turn-off at the
 zero crossing of an inductor's current leaves that inductor on a
@@ -47,9 +53,16 @@ false` SHALL reproduce the previous step sequence exactly.
 - **GIVEN** a circuit with a stateful device, a PWL diode and a gate
   edge
 - **WHEN** the edge is landed
-- **THEN** the device's derivative slot is refreshed from the probe,
-  every probe sets the device step and stage, and the run agrees with
-  the fixed engine
+- **THEN** the next step is the SDIRK(2,2) restart, whose commit stores
+  the device's post-edge derivative slot, every probe sets the device
+  step and stage, and the run agrees with the fixed engine
+
+#### Scenario: C_oss conduction energy across a gate edge
+- **GIVEN** the release-findings C_oss buck (a MOSFET with C_oss, 40 gate
+  edges)
+- **WHEN** it runs at the default tolerances
+- **THEN** the booked conduction energy is within 1 % of the closed form
+  (+3.9 % when the probe was committed from the pre-edge slots)
 
 ### Requirement: TR-BDF2 Post-Edge Step Memory
 

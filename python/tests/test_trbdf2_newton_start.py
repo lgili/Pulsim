@@ -39,7 +39,13 @@ def test_newton_circuit_runs_from_a_zero_start(form):
         r = p.simulate(b, 1e-5, engine="trbdf2", switch_fn=fn)
         b2, fn2 = _circuit(form)
         ref = p.simulate(b2, 1e-5, engine="pwl", dt=1e-9, switch_fn=fn2)
-    assert r._trbdf2_stats["n_newton_start_retries"] >= 1
+    # Either the start solve was retried, or it was accepted as a
+    # floating-point fixed point (add-newton-roundoff-acceptance DECISIONS
+    # 12: rows judged at x_k's own magnitudes). The branch form takes the
+    # second since that rule: no retry, and its trajectory is byte-identical
+    # to 2.1.0's (which retried 4 times).
+    assert (r._trbdf2_stats["n_newton_start_retries"]
+            + r.newton_roundoff_accepts) >= 1
     # the capacitor charges through the switch and the diode: both engines
     # end on the same state (3.2e-5 V apart against pwl
     # at dt = 1e-9, both forms)

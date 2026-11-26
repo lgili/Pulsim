@@ -158,6 +158,17 @@ public:
         if (at_bound) ++n_at_bound_;
     }
 
+    /// Withdraw the last sample when it sits at `t` (a stored post-edge
+    /// sample that the next commit did not lie after), never the first.
+    void withdraw(Real t) {
+        for (auto& l : lines_) {
+            if (l.t.size() - l.head < 2 || l.t.back() != t) continue;
+            l.t.pop_back();
+            l.wa.pop_back();
+            l.wb.pop_back();
+        }
+    }
+
     /// Committed steps as long as the shortest delay (the line set the
     /// step: TR-BDF2's h_max is clamped to it).
     [[nodiscard]] Size n_at_bound() const noexcept { return n_at_bound_; }

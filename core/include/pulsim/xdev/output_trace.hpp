@@ -85,6 +85,12 @@ private:
                 devs_.push_back(std::move(d));
             }
         }
+        // a row the engine stored and then dropped (a post-edge sample a
+        // later commit did not lie after, release D3): superseded
+        while (!t_.empty() && t_.back() >= t) {
+            t_.pop_back();
+            for (auto& d : devs_) d.rows.resize(d.rows.size() - d.columns.size());
+        }
         t_.push_back(t);
         for (auto& d : devs_) {
             const std::size_t w = d.columns.size();

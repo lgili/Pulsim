@@ -216,6 +216,32 @@ rule".
   diode across C2 when an ideal switch closes C1 onto it recorded the free
   C1-C2 share (2.381 nJ) instead of C1's whole dump (50 nJ).
 
+### Fixed
+- Variable-step engine (`trbdf2`, `integrator='esdirk43'`) with a MOSFET's nonlinear output
+  capacitance: the conduction energy after a gate edge read +3.80 % against its closed form
+  (2.1.0's known limitation, +3.91 % in its notes); +0.057 % now (rtol 1e-6 +3.82 → +0.013 %,
+  rtol 1e-8 +2.22 → +0.007 %, esdirk43 +5.14 → +0.14 %). The step after a gate edge starts from
+  the consistent post-edge point (the new mode's derivative slots at the edge) instead of
+  committing a femtosecond probe step from the pre-edge slot.
+- A gate edge that opens a saturable-inductor cut-set (tau ~2e-13 s, node at ~1e9 V) no longer
+  aborts with `NewtonRoundoffBudgetExceeded` at tight tolerance: the restart is retaken once as
+  one L-stable step across the impulse.
+- Sensitivities through a gate edge follow the consistent post-edge start.
+- A hard turn-on into a conducting freewheel diode (soft-switching case A, rtol 1e-8): the diode
+  the edge turned off no longer turns back on inside the first attoseconds (it chattered and the
+  turn-on energy read +0.27 % on esdirk43, in 2.1.0 too); trbdf2 / esdirk43 now 62.8368 /
+  62.8377 uJ against an ODE truth of 62.8367 uJ. A trbdf2 result now carries the gate edge's
+  right limit (`right_limit_index` / `right_limit_states`) on circuits with a stateful device, so
+  the sampled loss integral starts the first post-edge step from the post-edge powers. That
+  right limit is the consistent state at the edge (the states before it, the new mode's
+  algebraic unknowns), and `simulate()` no longer warns "held diode ... missed commutation" for
+  the attoseconds the turned-off diode needs to fall through V_f. At the defaults case A reads
+  62.8489 / 62.9259 uJ (2.1.0: 62.8490 / 62.9259).
+- Regressions of the unreleased line against 2.1.0, fixed before release: a source corner on a
+  linear circuit commits its probe again (a transmission line's lattice read 0.5555555631 V for
+  5/9 and a matched line took 7 rejects for 2), and the lines' past holds a gate edge's right
+  limit.
+
 ## [2.1.0] - 2026-11-25
 
 2.1.0 brings new engines, devices and analyses behind new options that
