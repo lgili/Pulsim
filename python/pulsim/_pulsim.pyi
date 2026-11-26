@@ -4553,6 +4553,10 @@ def _min_source_period(graph: Graph, pool: DevicePool) -> float:
     """
     Shortest period of the sine / PWM sources (inf when none): T_ref of the shadow LCP's event step (add-complementarity-mode-selection D5).
     """
+def _output_grid_dict(native_res: dict[typing.Any, typing.Any], ncol: int, t_start: float) -> dict[typing.Any, typing.Any]:
+    """
+    diagnostics['output_grid'] of an exact run under the output rule (internal: _dsed_dispatch._result_from_native).
+    """
 def _probe_atoms(text: str) -> list[str]:
     """
     The readings of a probe expression, normalised, in first-use order (add-probes-and-recorders). Raises ValueError naming the probe.

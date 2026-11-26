@@ -306,3 +306,46 @@ def test_the_analytic_gate_reads_the_projected_flow():
     # a duplicate record a few ulps later is the same mode: removed once
     dup = P + [dict(P[0], t=float(np.nextafter(P[0]["t"], 1.0)))]
     assert metrics.projected_reference(c.exact, dup).n_applied == 5
+
+
+def _output_grid_reference(native_res, ncol, t_start):
+    """The Python block _result_from_native ran before the dict moved to C++
+    (the per-call overhead ratchet): the definition the C++ build is held to."""
+    og = {k: int(native_res[k]) for k in ("n_output_capped", "n_output_unbounded")}
+    og["n_output_samples"] = int(native_res.get("n_output_samples", 0))
+    og["n_output_floored"] = int(native_res.get("n_output_floored", 0))
+    fr = np.asarray(native_res.get("output_floor_row", []), dtype=float)
+    og["output_floor_max"] = float(fr.max()) if fr.size else 0.0
+    og["output_floor_by_column"] = fr[-ncol:] if fr.size >= ncol > 0 else np.zeros(ncol)
+    og["n_projections"] = int(native_res.get("n_projections", 0))
+    pm = np.asarray(native_res.get("projection_max_row", []), dtype=float)
+    og["projection_max_by_column"] = pm[-ncol:] if pm.size >= ncol > 0 else np.zeros(ncol)
+    og["projections"] = [
+        {"t": t + t_start, "amplitude": a, "tau": tau,
+         "column": (int(r) - (pm.size - ncol)) if 0 < ncol and int(r) >= pm.size - ncol else None}
+        for t, a, r, tau in native_res.get("projection_records", [])]
+    tb = native_res["output_budget_t"]
+    og["output_budget_t"] = None if tb != tb else tb + t_start
+    return og
+
+
+@pytest.mark.parametrize("ncol,t_start,budget", [
+    (3, 0.0, float("nan")), (3, 2.5e-3, 1e-4), (0, 0.0, float("nan")), (6, 1e-6, float("nan"))])
+def test_the_output_grid_dict_is_the_python_definition(ncol, t_start, budget):
+    from pulsim import _pulsim as k
+    raw = {"n_output_capped": 2, "n_output_unbounded": 1, "n_output_samples": 41,
+           "n_output_floored": 3, "output_floor_row": [1e-15, 4e-15, 2e-15, 3e-15, 5e-16],
+           "n_projections": 3, "projection_max_row": [0.5, 2.0, 0.0, 7.0, 1.0],
+           "projection_records": [(1e-5, 2.0, 1, 1e-12), (2e-5, 7.0, 3, 2e-12), (3e-5, 1.0, 4, 1e-12)],
+           "output_budget_t": budget}
+    got, want = k._output_grid_dict(raw, ncol, t_start), _output_grid_reference(raw, ncol, t_start)
+    assert list(got) == list(want)
+    for key, w in want.items():
+        if isinstance(w, np.ndarray):
+            np.testing.assert_array_equal(got[key], w)
+            assert got[key].dtype == np.float64
+        else:
+            assert got[key] == w, key
+    empty = {"n_output_capped": 0, "n_output_unbounded": 0, "output_budget_t": float("nan")}
+    got = k._output_grid_dict(empty, ncol, t_start)
+    assert got["output_floor_max"] == 0.0 and got["projections"] == [] and got["n_output_samples"] == 0

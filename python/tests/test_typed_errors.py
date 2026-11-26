@@ -248,3 +248,29 @@ def test_a_run_keeps_the_warnings_it_emitted():
     # outside a run, nothing is recorded and nothing leaks into the next run
     from pulsim import _plan
     assert _plan.RUN_MESSAGES.get() is None
+
+
+def test_a_warning_is_recorded_once_after_an_auto_fallback():
+    """'auto' took the exact engine, which refused the run by name: the call is
+    planned and run again on trbdf2, and the planning warning both attempts
+    emit is recorded once (it was recorded twice)."""
+    b = p.CircuitBuilder()   # a PWL buck: 'auto' without dt routes it to the exact engine
+    b.add_voltage_source("V", "in", "gnd", 12.0)
+    b.add_switch("S", "in", "sw", 1e3, 1e-9)
+    b.add_diode("D", "gnd", "sw", 1e3, 1e-9)
+    b.add_inductor("L", "sw", "out", 100e-6)
+    b.add_capacitor("C", "out", "gnd", 10e-6)
+    b.add_resistor("R", "out", "gnd", 5.0)
+    sw = p.make_pwm_switch_fn(frequency=50e3, duty=0.4, switch_idx=0, num_switches=2)
+    real, seen = p._ENGINES["dsed"], []
+
+    def refuse(plan):
+        seen.append(plan.engine)
+        raise p._unsupported("dsed", "probe", "simulate(): refused for the test")
+
+    with mock.patch.dict(p._ENGINES, {"dsed": refuse}), warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(b, 4e-5, switch_fn=sw, max_newton_iterations=0)   # a planning warning
+    assert p._ENGINES["dsed"] is real and seen == ["dsed"]
+    assert r.engine_used == "trbdf2"
+    assert [d.code for d in r.diagnostics["messages"]].count("deprecated_option") == 1

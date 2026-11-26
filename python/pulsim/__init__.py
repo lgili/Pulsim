@@ -2957,7 +2957,11 @@ def simulate(
             res = _auto_exact_fallback(builder, plan, e)
     finally:
         _RUN_MESSAGES.reset(_tok)
-    _keep_messages(res, _msgs)
+    # _keep_messages inlined: a call frame per simulate() (overhead ratchet)
+    d = getattr(res, "diagnostics", None)
+    if d is None:
+        d = res.diagnostics = {}
+    d["messages"] = tuple(_msgs)
     return res
 
 
@@ -2973,11 +2977,14 @@ def _auto_exact_replan(builder, args, err):
     refusal stands.)"""
     if _exact_snapshot(args[list(_SIMULATE_DEFAULTS).index("resume_from")]):
         raise err
+    run = _RUN_MESSAGES.get()
+    n = len(run) if run is not None else 0
     tok = _AUTO_EXACT_OFF.set(True)
     try:
         plan2 = _plan_run(builder, *args)
     finally:
         _AUTO_EXACT_OFF.reset(tok)
+    _drop_repeats(n)
     why = (f"engine='auto': the exact engine refused the run "
            f"({getattr(err, 'feature', '') or type(err).__name__}: "
            f"{str(err).splitlines()[0][:160]})")
@@ -2992,20 +2999,24 @@ def _auto_exact_fallback(builder, plan, err):
     re-raised unchanged."""
     if plan.engine_asked != "auto" or plan.engine != "dsed":
         raise err
+    run = _RUN_MESSAGES.get()
+    n = len(run) if run is not None else 0
     plan2 = _auto_exact_replan(builder, plan.resolved_from._args, err)
-    return _finalize(_ENGINES[plan2.engine](plan2), plan2)
+    res = _finalize(_ENGINES[plan2.engine](plan2), plan2)
+    _drop_repeats(n)
+    return res
 
 
 _RUN_MESSAGES = _planning.RUN_MESSAGES
 
 
-def _keep_messages(res, msgs) -> None:
-    """``result.diagnostics["messages"]``: the warnings the run emitted, in
-    order, as ``_plan.Diagnostic(code, message, category)`` (task 8.3)."""
-    d = getattr(res, "diagnostics", None)
-    if d is None:
-        d = res.diagnostics = {}
-    d["messages"] = tuple(msgs)
+def _drop_repeats(n: int) -> None:
+    """After an 'auto' fallback re-planned (and re-ran) the call: a message the
+    refused attempt already recorded (the run's first ``n``) is recorded once."""
+    run = _RUN_MESSAGES.get()
+    if run is not None:
+        seen = set(run[:n])
+        run[n:] = [m for m in run[n:] if m not in seen]
 
 
 def _step_sensitivities(plan, names):
@@ -4851,20 +4862,13 @@ def _finalize(out, plan):
     each engine runs today, in today's order. One function, one section
     per engine: what differs between them is recorded in DECISIONS 23."""
     res = out.result; builder = out.builder; switch_fn = out.switch_fn
-    b_extra_fn = out.b_extra_fn; step_observer = out.step_observer
-    should_continue = out.should_continue
-    cxx_chain = out.cxx_chain; _mmc_finalize = out.mmc_finalize
-    d = plan.drive
+    b_extra_fn = out.b_extra_fn
     engine = plan.engine
     _preflight_report = plan.preflight; _run_plan = plan.circuit_plan
     voltage_sanity_factor = plan.voltage_sanity_factor
     on_impulse = plan.events.on_impulse
-    _mode_auto = plan.events.mode_auto; _route_reasons = plan.route_reasons
-    _plan = d.control; closed_loops = d.closed_loops; progress = d.progress
-    dt = plan.step.dt
-    _step_observer_user = d.user_step_observer
-    _b_extra_fn_user = d.user_b_extra_fn
-    _closed_loops_user = d.user_closed_loops
+    # what the exact engine's section does not read is read after it (the
+    # per-call overhead ratchet, test_simulate_overhead)
     if engine == "dsed":
         try:
             res._preflight = _preflight_report
@@ -4914,10 +4918,21 @@ def _finalize(out, plan):
                                   if _planning.UNIFORM_ENGINE_RULES else ""))
         if on_impulse == "warn":
             _warn_impulses(res)
-        _warn_impulse_energy(res, builder, on_impulse)
+        if _recs:   # the energy check reads cut-set records only (no call per run without one)
+            _warn_impulse_energy(res, builder, on_impulse)
         if plan.undriven is not None:
             _note_undriven(res, plan.undriven)
         return res
+    step_observer = out.step_observer
+    should_continue = out.should_continue
+    cxx_chain = out.cxx_chain; _mmc_finalize = out.mmc_finalize
+    d = plan.drive
+    _mode_auto = plan.events.mode_auto; _route_reasons = plan.route_reasons
+    _plan = d.control; closed_loops = d.closed_loops; progress = d.progress
+    dt = plan.step.dt
+    _step_observer_user = d.user_step_observer
+    _b_extra_fn_user = d.user_b_extra_fn
+    _closed_loops_user = d.user_closed_loops
     if engine == "trbdf2":
         res._builder = builder
         res._preflight = _preflight_report
@@ -4952,7 +4967,8 @@ def _finalize(out, plan):
         _trbdf2_warn_stats(res, builder, _stats, plan.engine_asked)
         if on_impulse == "warn":
             _warn_impulses(res)
-        _warn_impulse_energy(res, builder, on_impulse)
+        if getattr(res, "reinit_records", None):
+            _warn_impulse_energy(res, builder, on_impulse)
         _save_control_state(_plan.graphs, res)
         if plan.undriven is not None:
             _note_undriven(res, plan.undriven)
@@ -5083,7 +5099,8 @@ def _finalize(out, plan):
     _warn_unlocated_edges(res)
     if on_impulse == "warn":
         _warn_impulses(res)
-    _warn_impulse_energy(res, builder, on_impulse)
+    if getattr(res, "reinit_records", None):
+        _warn_impulse_energy(res, builder, on_impulse)
 
     _guards = list(getattr(res, "inductor_guard_actions", []) or [])
     if _guards:

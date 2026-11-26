@@ -73,6 +73,7 @@
 #include <cstdint>
 #include <optional>
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <stdexcept>
 #include <utility>
@@ -878,6 +879,65 @@ void init_module(py::module_& m) {
             PyErr_SetObject(diode_law_exc.ptr(), inst.ptr());
         }
     });
+
+    // diagnostics['output_grid'] of an exact run under the output rule, from
+    // the run's raw keys (_dsed_dispatch._result_from_native): built here so a
+    // simulate() call pays one call for it, not ~160 bytecodes (the per-call
+    // overhead ratchet, test_simulate_overhead). `ncol`: the stored columns of
+    // the full state (0 without it); `t_start`: the run's clock offset.
+    m.def("_output_grid_dict",
+        [](const py::dict& nr, py::ssize_t ncol, double t_start) {
+            const auto vec = [&](const char* k) {
+                return nr.contains(k) ? nr[k].cast<std::vector<double>>()
+                                      : std::vector<double>{};
+            };
+            const auto tail = [&](const std::vector<double>& v) {
+                py::array_t<double> a(ncol > 0 ? ncol : 0);
+                auto* p = a.mutable_data();
+                const bool fits = ncol > 0 && static_cast<py::ssize_t>(v.size()) >= ncol;
+                for (py::ssize_t j = 0; j < ncol; ++j)
+                    p[j] = fits ? v[v.size() - static_cast<std::size_t>(ncol) + j] : 0.0;
+                return a;
+            };
+            py::dict og;
+            og["n_output_capped"] = py::int_(nr["n_output_capped"]);
+            og["n_output_unbounded"] = py::int_(nr["n_output_unbounded"]);
+            og["n_output_samples"] = nr.contains("n_output_samples")
+                ? py::int_(nr["n_output_samples"]) : py::int_(0);
+            og["n_output_floored"] = nr.contains("n_output_floored")
+                ? py::int_(nr["n_output_floored"]) : py::int_(0);
+            const auto fr = vec("output_floor_row");
+            og["output_floor_max"] = fr.empty() ? 0.0 : *std::max_element(fr.begin(), fr.end());
+            og["output_floor_by_column"] = tail(fr);
+            og["n_projections"] = nr.contains("n_projections")
+                ? py::int_(nr["n_projections"]) : py::int_(0);
+            const auto pm = vec("projection_max_row");
+            og["projection_max_by_column"] = tail(pm);
+            // a row of the recovered vector that is not a stored column: None
+            const long long first = static_cast<long long>(pm.size()) - ncol;
+            py::list recs;
+            if (nr.contains("projection_records")) {
+                for (const auto& rec : nr["projection_records"]) {
+                    const auto t = rec.cast<py::tuple>();
+                    const long long r = t[2].cast<long long>();
+                    py::dict d;
+                    d["t"] = t[0].cast<double>() + t_start;
+                    d["amplitude"] = t[1].cast<double>();
+                    d["tau"] = t[3].cast<double>();
+                    d["column"] = (ncol > 0 && r >= first) ? py::object(py::int_(r - first))
+                                                           : py::object(py::none());
+                    recs.append(d);
+                }
+            }
+            og["projections"] = recs;
+            const double tb = nr["output_budget_t"].cast<double>();
+            og["output_budget_t"] = std::isnan(tb) ? py::object(py::none())
+                                                   : py::object(py::float_(tb + t_start));
+            return og;
+        },
+        py::arg("native_res"), py::arg("ncol"), py::arg("t_start"),
+        "diagnostics['output_grid'] of an exact run under the output rule "
+        "(internal: _dsed_dispatch._result_from_native).");
 
     // add-complementarity-mode-selection task 2: the dense Lemke solver,
     // for the oracle comparison against tests/oracles/lcp_reference.py.
