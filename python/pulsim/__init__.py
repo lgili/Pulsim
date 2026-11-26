@@ -876,9 +876,11 @@ _RESOLUTION_UNESTIMATED_MAX = 0.5
 def _warn_unlocated_edges(res):
     """Fixed-step loop counters that mean a less accurate step: say so once.
 
-    * ``unlocated_gate_steps`` (review M3 / L4): a gate change from a
-      switch_fn without an edge oracle that happened INSIDE the previous
-      step (an edge exactly on the grid is not counted);
+    * ``unlocated_gate_steps`` (review M3 / L4, F-SB-2): gate changes of a
+      switch_fn without an edge oracle that were not bisected (more than
+      eight in one step). The others are bisected to ``split_snap*dt`` and
+      split at (``n_gate_events_bisected``; a pulse that opens and closes
+      between two grid samples is not seen);
     * ``split_event_overflows`` (L5): steps with more events than the
       split takes; the rest were taken unsplit (first order there);
     * ``n_gate_events_unresolved`` (tasks 3.4/5.5): step events (gate
@@ -894,10 +896,10 @@ def _warn_unlocated_edges(res):
         _planning.emit("unlocated_edges",
             f"simulate(enable_substep_state_correction=True): {n} gate "
             "change(s) came from a switch_fn without next_edge_after(t) "
-            "and could not be located inside the step; each was taken "
-            "at the next grid point (first order there). Give the "
-            "schedule an oracle (make_pwm_switch_fn & co. have one) or "
-            "put the edges on the dt grid. See res.counters.",
+            "and could not be located inside the step (more than eight in "
+            "one step); each was taken at the next grid point (first order "
+            "there). Reduce dt or give the schedule an oracle "
+            "(make_pwm_switch_fn & co. have one). See res.counters.",
             UserWarning, stacklevel=4)
     n = c.get("split_event_overflows", 0)
     if n:

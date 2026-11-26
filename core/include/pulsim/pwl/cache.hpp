@@ -252,6 +252,7 @@ public:
         bump_generation_();
         segments_.clear();
         event_entries_.clear();
+        aux_event_entries_.clear();
         const Size num_switches = graph_.num_switches();
         for (auto mask :
              topology::enumerate_switch_states(num_switches)) {
@@ -275,6 +276,7 @@ public:
         bump_generation_();
         segments_.clear();
         event_entries_.clear();
+        aux_event_entries_.clear();
     }
 
     /// Currently-built dt. Returns 0 for static-only builds.
@@ -1887,6 +1889,21 @@ public:
             "{} at dt = {}", mask.to_string(), dt));
     }
 
+    /// An out-of-band event table: the restart rule's right-limit solves
+    /// (F-SB-1, run_transient's event_right_limit) take another dt at every
+    /// event; swapped in around them they leave the run's event factors and
+    /// counters exactly as its own solves make them. Call twice (in, out).
+    void swap_aux_events() const {
+        event_entries_.swap(aux_event_entries_);
+        std::atomic<std::uint64_t>* c[4] = {&event_hits_, &event_refactors_,
+                                            &event_builds_, &event_evictions_};
+        for (int i = 0; i < 4; ++i) {
+            const std::uint64_t v = c[i]->load(std::memory_order_relaxed);
+            c[i]->store(aux_counters_[i], std::memory_order_relaxed);
+            aux_counters_[i] = v;
+        }
+    }
+
     /// Any factor of `mask` resident now (the event entry's, else the
     /// segment's at the cache dt), read-only like `resident_factor`; its dt
     /// in `dt_out`. nullptr when none is (add-parameter-sensitivities 6.3:
@@ -2306,6 +2323,7 @@ public:
         // solve_at rebuilds from the updated pool. (The v1.x aux
         // cache silently kept STALE factors here.)
         event_entries_.clear();
+        aux_event_entries_.clear();
 
         // 1. Push the updates into the pool. Each `update_*` mutator
         //    dispatches on the stored device kind; mismatched kinds
@@ -2829,6 +2847,10 @@ private:
 
     mutable numeric::Dictionary<topology::SwitchStateMask,
                                  EventEntry> event_entries_;
+    // swap_aux_events: the out-of-band table and its counters
+    mutable numeric::Dictionary<topology::SwitchStateMask,
+                                 EventEntry> aux_event_entries_;
+    mutable std::uint64_t aux_counters_[4] = {0, 0, 0, 0};
 
     // Monotonic recency clock shared by the event-entry LRU and
     // the lazy segment LRU. `mutable` — bumped from const solve

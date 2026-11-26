@@ -175,10 +175,11 @@ struct SimulationOptions {
     bool enable_substep_state_correction = false;
 
     /// The split's snap, as a fraction of dt: an event this close to a
-    /// step boundary is taken at it, and events this close merge. The
-    /// default 0.01 moves an edge by up to dt/100 (first order, small
-    /// constant); simulate(control_tick='state') sets 1e-6 (G30).
-    Real split_snap = Real{0.01};
+    /// step boundary is taken at it, events this close merge, a diode
+    /// crossing is located to it and an opaque switch_fn edge is bisected
+    /// to it. Default 1e-6 (G30's value, now for every run: 0.01 moved
+    /// an edge up to dt/100, F-SB-2).
+    Real split_snap = Real{1e-6};
 
     /// Discontinuity restart (add-discontinuity-restart-rule). The step
     /// containing a discontinuity — a change of the stamped mask, a

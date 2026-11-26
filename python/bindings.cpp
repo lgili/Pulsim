@@ -3200,7 +3200,7 @@ void init_module(py::module_& m) {
                         &SimulationOptions::enable_substep_state_correction)
         .def_readwrite("split_snap", &SimulationOptions::split_snap,
                         "Split events within split_snap*dt of a step "
-                        "boundary are taken at it (default 0.01).")
+                        "boundary are taken at it (default 1e-6).")
         .def_readwrite("resolution_diagnostics",
                         &SimulationOptions::resolution_diagnostics,
                         "Record SimulationResult.resolution (truncation "
@@ -3624,6 +3624,10 @@ void init_module(py::module_& m) {
                 d["split_event_overflows"] = r.split_event_overflows;
                 d["n_gate_events"] = r.n_gate_events;
                 d["n_gate_events_unresolved"] = r.n_gate_events_unresolved;
+                d["n_gate_events_bisected"] = r.n_gate_events_bisected;
+                d["split_locator_trials"] = r.split_locator_trials;
+                d["split_locator_giveups"] = r.split_locator_giveups;
+                d["n_restart_cuts"] = r.n_restart_cuts;
                 d["mode_structure_checks"] = r.mode_structure_checks;
                 d["ideal_loop_releases"] = r.ideal_loop_releases;
                 return d;
@@ -3838,12 +3842,12 @@ void init_module(py::module_& m) {
                 r.right_limit_states.assign(a.data(), a.data() + a.size());
             },
             "(len(right_limit_index), n_states): the right limit of each "
-            "of those samples (where the next step starts). On the fixed "
-            "engine under the restart rule it is the start of the line "
-            "whose trapezoid is the restart step's own SDIRK quadrature "
-            "(exact for the step's integral of a quantity linear in the "
-            "state; as a value the right limit to second order, to first "
-            "order after a kept backward-Euler stage 2).")
+            "of those samples: the state value one instant after the "
+            "event (each capacitor / inductor state continuous, or moved "
+            "by an ideal element's jump; the other unknowns solved in the "
+            "event's mode). Recorded only at events; on the fixed engine "
+            "under the restart rule never at a restart window's later "
+            "steps nor at t = 0 unless the start is a probed jump.")
         .def_property("right_limit_switch_states",
             [](const SimulationResult& r) -> py::object {
                 if (!r.has_event_limits) return py::none();
@@ -3998,6 +4002,13 @@ void init_module(py::module_& m) {
                        "crossing inside them "
                        "(enable_substep_state_correction). 0 with the "
                        "split off.")
+        .def_readonly("n_right_limit_fallbacks",
+                       &SimulationResult::n_right_limit_fallbacks,
+                       "Restart rule: event right limits that are not "
+                       "certified: a row whose solve did not converge or "
+                       "whose diode mode does not hold at t_e+ (no row is "
+                       "stored), or a located turn-off solved through g_off "
+                       "(the row is stored). 0 with the rule off.")
         .def_readonly("event_iteration_breaches",
                        &SimulationResult::event_iteration_breaches)
         .def_readonly("newton_roundoff_accepts",

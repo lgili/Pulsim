@@ -297,11 +297,10 @@ public:
     /// `per-step-heap-allocations`): reuses `out`'s capacity — no
     /// heap traffic in the per-step / per-event-iteration loop.
     void snapshot_on_bits_into(std::vector<bool>& out) const {
-        out.clear();
-        out.reserve(diodes_.size());
-        for (const auto& d : diodes_) {
-            out.push_back(d.is_on);
-        }
+        // resize + assign: clear/reserve/push_back on vector<bool> was 4 %
+        // of a pwl buck's run (called several times per step)
+        out.resize(diodes_.size());
+        for (Size i = 0; i < diodes_.size(); ++i) out[i] = diodes_[i].is_on;
     }
 
     /// Accepts the conduction bits alone, or followed by one gate bit

@@ -116,10 +116,31 @@ struct StepLines {
     // from x0+ for the lines (an ideal element's jump): not the run's i_prev
     std::vector<Real> c_end;
     bool end_own = false;
+    // F-SB-1: the RIGHT LIMIT of an event as a state value, x(t_e+) (the
+    // result's right_limit_* / inner_events), apart from the quadrature
+    // starts above (x_start, right[]: the lines' business, never a limit).
+    // `rl_*`: run_restart's scratch; `rl_start*`: at the step start, set
+    // only where something happens; `rl_right*`: per inner event; `held`:
+    // the mixed step's held-pieces row (quadrature, not an event).
+    Vector rl_x, rl_start;
+    topology::SwitchStateMask rl_m, rl_m_start;
+    // rl_left / rl_start_left: a continuity point (a located V_f = 0
+    // crossing alone): the row is the left value
+    bool rl_ok = false, rl_start_ok = false, rl_left = false, rl_start_left = false;
+    std::array<Vector, kMax> rl_right;
+    std::array<topology::SwitchStateMask, kMax> rl_m_right;
+    std::array<bool, kMax> rl_right_ok{}, held{};
+    // the event at the row carries a recorded jump: the row is x(t_e+) BEFORE
+    // the collapse the record reports; the regular part (the loss tracker's
+    // edge reading) starts after it, at the lines' start
+    bool rl_start_jump = false;
+    std::array<bool, kMax> rl_right_jump{};
     void clear() noexcept {
         start = false;
         n = 0;
         end_own = false;
+        rl_start_ok = false;
+        rl_start_jump = false;
     }
     [[nodiscard]] bool empty() const noexcept { return !start && n == 0; }
 };
@@ -324,16 +345,33 @@ private:
                 // limit; else the step's ends
                 Real vb = d.v, ib = d.i, vp = v1, ip = i1;
                 const auto bit = static_cast<Size>(d.law.bit);
-                if (L.start && L.m_start.get(bit) == on1) {
+                // ONE definition: the stored rows are the state values x(t_e+)
+                // (rl_*, F-SB-1), not the lines' quadrature starts; a
+                // continuity point's row is the stored left (d.v, d.i). At a
+                // recorded jump the regular part starts after the collapse: the
+                // lines' start (the row there holds the pre-collapse state: a
+                // clamp diode read 1e-8 A for the 0.167 A it picks up — review)
+                if (L.rl_start_ok && !L.rl_start_jump && L.rl_m_start.get(bit) == on1) {
+                    if (!L.rl_start_left) {
+                        vp = v_of_(d, L.rl_start);
+                        ip = i_of_(d, L.rl_start, on1);
+                    } else {
+                        vp = d.v;
+                        ip = d.i;
+                    }
+                } else if (L.start && L.m_start.get(bit) == on1) {
                     vp = v_of_(d, L.x_start);
                     ip = i_of_(d, L.x_start, on1);
                 } else {
                     for (Size j = 0; j < L.n; ++j) {
-                        if (!L.right_ok[j] || L.m_right[j].get(bit) != on1) continue;
+                        const bool rl = !L.held[j] && L.rl_right_ok[j] && !L.rl_right_jump[j];
+                        const auto& mr = rl ? L.rl_m_right[j] : L.m_right[j];
+                        if (!(rl || L.right_ok[j]) || mr.get(bit) != on1) continue;
+                        const Vector& xr = rl ? L.rl_right[j] : L.right[j];
                         vb = v_of_(d, L.left[j]);
                         ib = i_of_(d, L.left[j], L.m_left[j].get(bit));
-                        vp = v_of_(d, L.right[j]);
-                        ip = i_of_(d, L.right[j], on1);
+                        vp = v_of_(d, xr);
+                        ip = i_of_(d, xr, on1);
                         break;
                     }
                 }

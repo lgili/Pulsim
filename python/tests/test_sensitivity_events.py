@@ -161,14 +161,11 @@ def _buck(L=100e-6, R=50.0, C=47e-6, Vin=24.0):
 
 
 @pytest.mark.parametrize("engine,kw", [
-    pytest.param("pwl", dict(dt=ref.T / 1000, enable_substep_state_correction=True,
-                             discontinuity_restart=True), marks=pytest.mark.xfail(
-        strict=True, raises=p.UnsupportedError,
-        reason="OPEN (DECISIONS 16, merge onto the PR line): the restart's "
-               "consistent start (jump series) moves the state at the turn-off at "
-               "29.524 T (cut-set record of L, 1.7e-10 V*s, 1.5e-16 J); dJ/dp is "
-               "not carried, refused by name. It was a number (within 1e-5) "
-               "before the jump series existed")),
+    # (was a strict xfail on the PR line: a cut-set "jump" of 1.7e-10 V*s at
+    # the turn-off at 29.524 T, the locator's residual; no record on the
+    # restart line, so the run returns its number)
+    ("pwl", dict(dt=ref.T / 1000, enable_substep_state_correction=True,
+                 discontinuity_restart=True)),
     ("trbdf2", dict(rtol=1e-10, atol=1e-13)),
     pytest.param("trbdf2", dict(rtol=1e-9, atol=1e-12), marks=pytest.mark.xfail(
         strict=True, raises=p.UnsupportedError,

@@ -148,6 +148,42 @@ rule".
   `controller_period` and `control` to `periodic_steady_state` (2.1.0
   raised `ValueError` on any simulate keyword without `dt`).
 
+### Restart rule repairs (fixed engine, `discontinuity_restart=True`)
+
+#### Fixed
+
+- Fixed engine, `discontinuity_restart=True`: an ideal element's charge share
+  whose single states the jump test does not flag (C1 -S- C2 beside an LC, the
+  closing landed on a half step by event splitting) is now read as an ideal
+  jump from its loop sum. Its right-limit row was pinned to the pre-event states,
+  diverged and was dropped (counted); it is now the closed-form share. A
+  three-way share through two ideal switches now gets its row too.
+- Fixed engine, `discontinuity_restart=True`: an event's right-limit row whose
+  diode mode does not hold at t_e+ (a freewheel diode stage 1 holds ON while a
+  node capacitor or an ideal element's jump reverse-biases it) is re-decided and
+  solved again in the mode that holds; a mode that never settles stores no row.
+  The loss ledger booked a turn-on from the reverse-biased row (E_on 14x the
+  bound).
+- Same rule: a right-limit row whose solve did not converge is no longer stored
+  (a three-way ideal share read -37.49 V for 8.78 V); it is counted in
+  `n_right_limit_fallbacks`, whose docstring now says what it counts.
+- Same rule: an ideal element's jump that excites a fast mode (an ideal switch
+  closing two capacitors that sit behind 1 mOhm) restarts from the state after
+  the fast collapse; the stored sample after the edge carried +0.97 % (dt
+  0.5 us) / +1.9 % (with event splitting) of the collapse in the resistor's
+  current. The collapse's own energy is now recorded too: one more reinit
+  record (dW = the collapse, e.g. 23.23 nJ beside the share's 2.381 nJ; the
+  event's 25.61 nJ in total).
+- Same rule (in 2.1.0 too): a diode turn-off inside the second stage of a
+  restart step is located and the step is cut there. The kept stage started
+  the new mode from SDIRK's pseudo-state, stage 1's slope extrapolated past the
+  turn-off: a boost behind a 1 nH inductor read 51.34 V for 42.11 V. Counted
+  in `result.counters["n_restart_cuts"]`.
+- Ideal elements (pwl and trbdf2, in 2.1.0 too): a re-initialisation of
+  dependent structures that share a state is projected jointly. An ideal clamp
+  diode across C2 when an ideal switch closes C1 onto it recorded the free
+  C1-C2 share (2.381 nJ) instead of C1's whole dump (50 nJ).
+
 ## [2.1.0] - 2026-11-25
 
 2.1.0 brings new engines, devices and analyses behind new options that
