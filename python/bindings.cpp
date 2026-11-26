@@ -674,7 +674,9 @@ void init_module(py::module_& m) {
         .def_readonly("E_cond_table", &thermal::DeviceLossRecord::E_cond_table)
         .def_readonly("E_impulse", &thermal::DeviceLossRecord::E_impulse)
         .def_readonly("n_on", &thermal::DeviceLossRecord::n_on)
-        .def_readonly("n_off", &thermal::DeviceLossRecord::n_off);
+        .def_readonly("n_off", &thermal::DeviceLossRecord::n_off)
+        .def_readonly("has_e_on", &thermal::DeviceLossRecord::has_e_on)
+        .def_readonly("has_e_off", &thermal::DeviceLossRecord::has_e_off);
     m.def("_commutation_points",
         [](const std::vector<std::tuple<bool, Real, Real>>& seq, bool gated,
            Real g_on, Real g_off) {

@@ -54,15 +54,36 @@ class TransientMap:
 
     loop = "fd-broyden"
 
-    def __init__(self, builder, T, switch_fn, engine, dt=None, options=None):
+    def __init__(self, builder, T, switch_fn, engine, dt=None, options=None,
+                 *, closed_loops=None, step_observer=None,
+                 controller_period=None, control=None):
         from .periodic_steady_state import (_check_circuit, _check_schedule,
-                                            _err)
+                                            _err, _refuse_closed_loop)
         from .periodic_steady_state import _from_circuit
+        from ._control_plan import compose_control
+        from ._control_pss import (
+            ControlGraphStateMapper, active_graph_ids, active_sink_sources,
+            check_hidden_controller_state, normalize_control_args,
+        )
         builder, circuit = _from_circuit(builder)
         # the runs take the Circuit itself: one symbolic analysis for all
         self._src = builder if circuit is None else circuit
-        self.builder, self.T, self.sf, self.engine = builder, float(T), \
-            switch_fn, engine
+        self.builder, self.T, self.engine = builder, float(T), engine
+        switch_fn, closed_loops, step_observer, controller_period = \
+            normalize_control_args(
+                builder, switch_fn=switch_fn, closed_loops=closed_loops,
+                step_observer=step_observer,
+                controller_period=controller_period, control=control)
+        has_ctrl = bool(closed_loops) or step_observer is not None
+        check_hidden_controller_state(
+            switch_fn=switch_fn, closed_loops=closed_loops,
+            step_observer=step_observer,
+            refuse_closed_loop_fn=None if has_ctrl else _refuse_closed_loop,
+            period=self.T)
+        self.user_sf = switch_fn
+        self.user_loops = closed_loops
+        self.user_obs = step_observer
+        self.controller_period = controller_period
         if engine not in ("pwl", "trbdf2"):
             raise _err(f"engine must be 'exact', 'dsed', 'pwl' or "
                        f"'trbdf2', got {engine!r}")
@@ -85,9 +106,6 @@ class TransientMap:
                              f"{c['name']!r} (thyristor / TRIAC): its latch "
                              "is not part of the state each period run "
                              "starts from. Use one long simulate() run.")
-        from .periodic_steady_state import _refuse_graph_driven
-        _refuse_graph_driven(builder)
-        _check_circuit(builder, self.T, comps)
         opts = dict(options or {})
         from .periodic_steady_state import _closed_loop_source
         if _closed_loop_source(opts.get("b_extra_fn")):
@@ -101,6 +119,16 @@ class TransientMap:
                              "start, the end and the schedule themselves; "
                              "a controller with hidden state has no place "
                              "in the true state of the section.")
+        plan = compose_control(
+            builder, closed_loops, step_observer, controller_period,
+            switch_fn, resume=False, snapshot=None)
+        self._active_graphs = active_graph_ids(plan)
+        active_sinks = active_sink_sources(plan)
+        from .periodic_steady_state import _refuse_graph_driven
+        _refuse_graph_driven(builder, active_sinks=active_sinks)
+        _check_circuit(builder, self.T, comps)
+        self.sf = plan.switch_fn if has_ctrl else switch_fn
+        self.mapper = ControlGraphStateMapper(plan.graphs, self.T)
         if engine == "pwl":
             if dt is None or not (dt > 0):
                 raise _err("engine='pwl' needs dt > 0.")
@@ -123,7 +151,17 @@ class TransientMap:
                                  "reaches.")
             opts.update(dt=float(dt), discontinuity_restart=True,
                         enable_substep_state_correction=True)
+            if has_ctrl:
+                opts.setdefault("control_tick", "state")
         else:
+            if has_ctrl:
+                # Validate variable-step compatibility (e.g. compute_delay)
+                plan_v = plan.for_variable_step("trbdf2")
+                if plan_v.every_step:
+                    raise _unsup(
+                        "step_observer",
+                        "a step_observer without a Rate or controller_period "
+                        "has no cadence on engine='trbdf2'.")
             opts.setdefault("rtol", 1e-10)
             opts.setdefault("atol", 1e-13)
             opts["dt"] = float(dt) if dt is not None else self.T / 100.0
@@ -136,11 +174,11 @@ class TransientMap:
         self.marginal = max(1e-10, 100.0 * noise / self.fd_rel)
         from . import _pulsim
         controlled = _pulsim._switch_census(builder.graph, builder.pool)[2]
-        if switch_fn is None and len(controlled):
+        if self.sf is None and len(controlled):
             raise _err(f"the circuit has {len(controlled)} controlled "
                        "switch(es) and no switch_fn: there is no gate "
                        "schedule to be periodic in.")
-        self._check_gate(switch_fn, _check_schedule, _err)
+        self._check_gate(self.sf, _check_schedule, _err)
 
         # the true state: capacitor voltages and inductor currents
         n_full = len(builder.state_var_names())
@@ -175,21 +213,25 @@ class TransientMap:
                          "currents are not independent (a capacitor loop or "
                          "an inductor cut-set), so they are not a state.")
         self.pinv = np.linalg.pinv(self.Cm)
-        self.labels, self.label_devices = labels, devs
-        self.n = len(rows)
+        self.n_circuit = len(rows)
+        self.n_ctrl = self.mapper.n_ctrl
+        self.ctrl_labels = list(self.mapper.labels)
+        self.labels = [*labels, *self.mapper.labels]
+        self.label_devices = [*devs, *self.mapper.devices]
+        self.n = self.n_circuit + self.n_ctrl
         self.n_runs = self.n_steps = 0
         self.n_jacobians = self.n_broyden = 0
 
     def _check_gate(self, sf, check_schedule, err):
         from .periodic_steady_state import _refuse_closed_loop
-        _refuse_closed_loop(sf)
+        _refuse_closed_loop(sf, active_graphs=self._active_graphs)
         T = self.T
         if sf is None:
             if self.engine == "pwl":
                 raise _unsup("section", self._no_edge())
             return
         if hasattr(sf, "next_edge_after"):
-            check_schedule(sf, T)
+            check_schedule(sf, T, active_graphs=self._active_graphs)
             edge0 = not (sf(0.0) == sf(T * (1.0 - 1e-9)))
         elif self.engine == "pwl":
             # an opaque gate is sampled at the grid points (the restart
@@ -220,11 +262,23 @@ class TransientMap:
 
     # -- the map -------------------------------------------------------
     def full(self, x):
-        """The MNA vector that carries the true state ``x``."""
-        return self.pinv @ np.asarray(x, dtype=float)
+        """The MNA vector that carries the true circuit state."""
+        x_circ = np.asarray(x, dtype=float)[:self.n_circuit]
+        return self.pinv @ x_circ
 
     def simulate(self, x, periods=1):
         from . import simulate
+        from ._control_state import suppress_sweep_points
+        x = np.asarray(x, dtype=float)
+        if self.n_ctrl > 0:
+            self.mapper.seed(x[self.n_circuit:])
+            with suppress_sweep_points():
+                return simulate(
+                    self._src, t_end=periods * self.T, engine=self.engine,
+                    switch_fn=self.user_sf, closed_loops=self.user_loops,
+                    step_observer=self.user_obs,
+                    controller_period=self.controller_period,
+                    initial_state=self.full(x), **self.kw)
         return simulate(self._src, t_end=periods * self.T,
                         engine=self.engine, switch_fn=self.sf,
                         initial_state=self.full(x), **self.kw)
@@ -233,6 +287,7 @@ class TransientMap:
         """``(x(T), max |x_i(t)|, the run)``; a failed run raises."""
         from ._result_views import states_as_array
         from .periodic_steady_state import _conv
+        x = np.asarray(x, dtype=float)
         self.n_runs += 1
         try:
             res = self.simulate(x)
@@ -246,8 +301,23 @@ class TransientMap:
             raise _conv(f"a period run ended at t = {t[-1]!r}, not at the "
                         f"period {self.T!r}.")
         Y = states_as_array(res) @ self.Cm.T
+        x_circ_end = Y[-1].copy()
+        sc_circ = np.abs(Y).max(axis=0)
+        if self.n_ctrl > 0:
+            x_ctrl_0 = x[self.n_circuit:]
+            x_ctrl_end = self.mapper.read()
+            x_end = np.concatenate([x_circ_end, x_ctrl_end])
+            ref_sc = (float(sc_circ.max())
+                      if sc_circ.size and float(sc_circ.max()) > 0 else 1.0)
+            sc_ctrl = np.maximum(
+                np.maximum(np.abs(x_ctrl_0), np.abs(x_ctrl_end)),
+                1e-3 * ref_sc)
+            sc = np.concatenate([sc_circ, sc_ctrl])
+        else:
+            x_end = x_circ_end
+            sc = sc_circ
         self.n_steps += max(len(t) - 1, 0)
-        return Y[-1].copy(), np.abs(Y).max(axis=0), res
+        return x_end, sc, res
 
     # -- diagnostics shared with the exact path's messages --------------
     def name_states(self, v, scale=None):
@@ -316,7 +386,14 @@ def solve(m, x, *, rtol, max_period_runs, n_relax):
             M, fresh = jac(x, xe), True
         IM = I_n - M
         sig = np.linalg.svd(IM, compute_uv=False)
-        singular = sig[-1] <= m.marginal * max(1.0, sig[0])
+        if m.n_ctrl > 0:   # controller scaling makes sigma_min small with every multiplier far from 1
+            eig_im = np.linalg.eigvals(IM)
+            # cond(I - M) >= 1e10 times the FD noise (>= marginal >= 1e-10
+            # relative) is a relative error >= 1 in the Newton step: no digit
+            singular = (sig[-1] <= 1e-10 * max(1.0, sig[0])
+                        or float(np.min(np.abs(eig_im))) <= m.marginal)
+        else:              # the open-loop rule, unchanged
+            singular = sig[-1] <= m.marginal * max(1.0, sig[0])
         if r <= 1.0:
             # stop on the orbit error estimate (I - M)^-1 G, the next
             # correction (|G| / (1 - |mu|) with a slow mode), not on |G|
@@ -343,6 +420,15 @@ def solve(m, x, *, rtol, max_period_runs, n_relax):
             polished, stalls = -1.0, 0
         if singular:
             if not fresh:
+                M, fresh = jac(x, xe), True
+                continue
+            if r > 1.0 and getattr(m, "n_ctrl", 0) > 0 and relax_rounds < 3:
+                relax_rounds += 1
+                polished, stalls = -1.0, 0
+                for _ in range(n_relax):
+                    budget()
+                    x = xe
+                    xe, sc, last = m.run(x)
                 M, fresh = jac(x, xe), True
                 continue
             _, _, Vt = np.linalg.svd(IM)
@@ -412,15 +498,21 @@ def solve(m, x, *, rtol, max_period_runs, n_relax):
     # deterministic simulate() from X(x), so re-running x reproduces the
     # accepted run bit for bit (DECISIONS 17); that run is the orbit.
     residual = float(np.abs(xe - x).max())
-    from ._result_views import states_as_array
-    full = np.array(states_as_array(last)[-1], dtype=float)
+    if isinstance(last, dict):
+        full = (np.asarray(last["states_full"][-1], dtype=float)
+                if last.get("states_full") is not None else None)
+    else:
+        from ._result_views import states_as_array
+        full = np.array(states_as_array(last)[-1], dtype=float)
     vrun = last
     return x, M, mu, history, full, residual, vrun, err_est
 
 
 def periodic_steady_state_on(builder, *, period, switch_fn, engine, dt,
                              options, start_from, max_period_runs, n_relax,
-                             rtol, sensitivities):
+                             rtol, sensitivities, closed_loops=None,
+                             step_observer=None, controller_period=None,
+                             control=None):
     """:func:`pulsim.periodic_steady_state` on ``engine`` (pwl, trbdf2)."""
     from .periodic_steady_state import (PeriodicSteadyStateResult, _classify,
                                         _err)
@@ -428,10 +520,15 @@ def periodic_steady_state_on(builder, *, period, switch_fn, engine, dt,
         raise _unsup("sensitivities", "orbit sensitivities exist on "
                      f"engine='exact' only (engine={engine!r}: refused, never "
                      "a finite difference).")
-    m = TransientMap(builder, period, switch_fn, engine, dt, options)
+    m = TransientMap(builder, period, switch_fn, engine, dt, options,
+                     closed_loops=closed_loops, step_observer=step_observer,
+                     controller_period=controller_period, control=control)
     n = m.n
     if start_from is None:
-        x = np.zeros(n)
+        x = np.concatenate([
+            np.zeros(m.n_circuit, dtype=float),
+            m.mapper.initial_state(),
+        ])
     elif isinstance(start_from, PeriodicSteadyStateResult):
         x = np.asarray(start_from.x0, dtype=float).copy()
     else:
@@ -439,8 +536,17 @@ def periodic_steady_state_on(builder, *, period, switch_fn, engine, dt,
     if x.shape != (n,):
         raise _err(f"start_from has {x.size} entries; the state has {n} "
                    f"({m.labels}).")
-    x0, M, mu, history, full, residual, vrun, err_est = solve(
-        m, x, rtol=rtol, max_period_runs=max_period_runs, n_relax=n_relax)
+    solved = False   # any failure (KeyboardInterrupt too) restores the caller's controller state
+    try:
+        x0, M, mu, history, full, residual, vrun, err_est = solve(
+            m, x, rtol=rtol, max_period_runs=max_period_runs, n_relax=n_relax)
+        solved = True
+    finally:
+        if not solved:
+            m.mapper.restore_original()
+    x_ctrl_star = x0[m.n_circuit:].copy()
+    if m.n_ctrl > 0:
+        m.mapper.seed(x_ctrl_star)
     unstable = [(i, complex(v), _classify(v)) for i, v in enumerate(mu)
                 if abs(v) >= 1.0]
     res = PeriodicSteadyStateResult(
@@ -449,5 +555,7 @@ def periodic_steady_state_on(builder, *, period, switch_fn, engine, dt,
         pattern=[], residual=residual, residual_history=history,
         pattern_history=[], n_period_runs=m.n_runs,
         n_engine_steps=m.n_steps, period=m.T, _ctx=m, full_state=full,
-        orbit_error_estimate=err_est)
+        orbit_error_estimate=err_est,
+        controller_state=x_ctrl_star,
+        controller_labels=list(m.ctrl_labels))
     return res

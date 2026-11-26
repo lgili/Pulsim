@@ -82,6 +82,72 @@ rule".
   projection removed; `benchmarks/tools/output_rule_property.py` checks the
   promise at random instants against the same route run on a `dt` grid.
 
+### Validation closeout: loss events, steady state with controller states, guides
+
+#### Added
+
+- `periodic_steady_state` / `steady_state(dt=None)` accept a compiled
+  control graph (`closed_loops`, `step_observer`, `controller_period`,
+  `control`): its discrete states join the shooting unknowns, and a
+  controller whose state the shooting cannot see is refused with a named
+  error instead of returning an orbit of the plant alone.
+- `DeviceLossRecord.has_e_on` / `has_e_off`: whether the in-kernel loss
+  port of that device has a turn-on / turn-off table (a zero-valued table
+  counts as present).
+- Benchmarks: `validation: {type: published}` holds a run to a book's
+  numbers (Erickson buck CCM, R = 5 Ω); closed-loop helper benchmark.
+- Guides: ideal switch (`docs/ideal-switch.md`), electrothermal PLECS
+  buck tutorial (11).
+
+#### Changed
+
+- `device_loss_summary` reads the switching energies and counts of a
+  device with an in-kernel loss port (`CircuitBuilder.set_device_losses`)
+  with an `E_on` or `E_off` table from `result.loss_events` over
+  `[t_from, t_to)` instead of re-estimating them from the samples. A
+  `switch_specs` / `diode_specs` entry for such a device is ignored with a
+  `UserWarning`. Circuits without `set_device_losses`, and conduction-only
+  ports, are unchanged. `device_thermal_summary` follows: such a device
+  without a `switch_specs` entry gets the kernel's `P_sw_avg` (it was 0),
+  so its `T_j` rises.
+- **Refusal:** `periodic_steady_state` (and `steady_state(dt=None)` and
+  the other analyses that call it) refuses with
+  `UnsupportedError(feature="hidden_controller_state")` an open-loop
+  `switch_fn` whose state MOVES: before the solve the gate is evaluated
+  over one period and everything it reaches (attributes, function
+  attributes, closure cells, defaults, the globals it names, its class's
+  attributes) is compared before and after; the message names the first
+  path that changed (`'switch_fn.n_calls' changed`). Also refused, by
+  name: a reachable value with no visible state and no `__eq__` (a
+  `random.Random`, a NumPy `Generator`, an iterator, a native object
+  other than pulsim's gate schedules) and a gate the probe cannot call
+  or snapshot. Accepted as in 2.1.0: a gate that only reads its
+  state (a PWM object with `duty` / `f_sw`, a closure over a float or a
+  list it does not change). 2.1.0 took a gate whose state moved as
+  open-loop and solved for an orbit of a gate that was not periodic.
+- Closed-loop `periodic_steady_state` reads the control graph's state
+  bytes against a layout tag and bounds every count: a C++ extension and
+  Python package from different builds are refused with
+  `UnsupportedError(feature="controller_state_layout")` (an `assert`,
+  which `python -O` removes, was the only guard).
+- `device_loss_summary`: a switch with an in-kernel loss port whose result
+  has no recorded mask and no `switch_fn=` was left out of the summary;
+  its switching energy is now read from `result.loss_events` (they need
+  no mask) and its conduction fields are NaN with
+  `not_measured=("conduction",)` and a `RuntimeWarning`. An ideal
+  branch-form switch in the same case keeps its event switching energy.
+- `simulate(resume_from=...)`, `sweep` and `monte_carlo` look inside
+  tuples, frozensets and frozen dataclasses when deciding whether a
+  controller's closure holds state: a list or array inside a tuple is now
+  refused by name (it was let through and continued from run to run), and
+  a frozen dataclass of immutable fields is now accepted (it was refused).
+- After a closed-loop `periodic_steady_state` succeeds, the caller's
+  control graph is left at the orbit's controller state with its tick
+  counters and recordings cleared (on failure it is restored).
+- `steady_state(dt=None)` forwards `closed_loops`, `step_observer`,
+  `controller_period` and `control` to `periodic_steady_state` (2.1.0
+  raised `ValueError` on any simulate keyword without `dt`).
+
 ## [2.1.0] - 2026-11-25
 
 2.1.0 brings new engines, devices and analyses behind new options that

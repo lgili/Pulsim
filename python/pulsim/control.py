@@ -1516,5 +1516,6 @@ def bind_pi_to_duty_callable(
     def duty_get() -> float:
         return cxx.sink_value("duty")
     duty_get._closed_loop = "bind_pi_to_duty_callable"  # type: ignore[attr-defined]
+    duty_get._graph = graph  # type: ignore[attr-defined]
 
     return duty_get, step_observer, _TickHistory(graph, "duty")

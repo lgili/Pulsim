@@ -160,6 +160,8 @@ public:
             }
             d.rec.device = s.device;
             d.rec.node = node_name;
+            d.rec.has_e_on = static_cast<bool>(s.e_on);
+            d.rec.has_e_off = static_cast<bool>(s.e_off);
             devs_.push_back(std::move(d));
         }
         (void)engine;
