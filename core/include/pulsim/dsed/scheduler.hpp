@@ -658,12 +658,10 @@ public:
                     Real h_ex = std::min(dt_max_, t_target - t);
                     // 10.1 / 10.2 (D8): the fixed-step form steps the grid k·dt_max; a step
                     // cut by an event or an edge reaches the next grid point exactly (modal)
-                    Real g_next = std::numeric_limits<Real>::infinity();
-                    if (fixed_step_) {
-                        g_next = grid_after_(t);
-                        h_ex = std::min(g_next, t_target) - t;
+                    if (fixed_step_) [[unlikely]] {
+                        fixed_g_next_ = grid_after_(t);
+                        h_ex = std::min(fixed_g_next_, t_target) - t;
                     }
-                    const Real h_grid = h_ex;
                     while (fast_k_ < fast_t_.size()
                            && (fast_t_[fast_k_] <= t || near_time(t, fast_t_[fast_k_]))) {
                         ++fast_k_;
@@ -685,12 +683,7 @@ public:
                     const MaskT mask_before = system_.current_mask();
                     // a whole grid cell from a grid point: x <- Phi x + Gamma of (mask, dt_max)
                     // (its length g_next - t is dt_max to an ulp of t)
-                    bool pg_step = false;
-                    if constexpr (requires { system_.exact_fixed_step_into(t, x, h_ex, x_new_); }) {
-                        if (fixed_step_ && h_ex == h_grid && g_next <= t_target && on_grid_(t))
-                            pg_step = system_.exact_fixed_step_into(t, x, dt_max_, x_new_);
-                    }
-                    if (!pg_step) advance_(t, x, h_ex, x_new_);
+                    if (!(fixed_step_ && fixed_pair_step_(t, x, h_ex))) advance_(t, x, h_ex, x_new_);
 
                     std::optional<PredicateEvent> evt;
                     if (predictor_.size() > 0) {
@@ -774,7 +767,7 @@ public:
                         plan_fast_samples_(t, !(system_.current_mask() == mask_before));
                     } else {
                         t += h_ex;
-                        if (fixed_step_ && near_time(t, g_next)) t = g_next;   // on the grid
+                        if (fixed_step_ && near_time(t, fixed_g_next_)) [[unlikely]] t = fixed_g_next_;   // on the grid
                         x.swap(x_new_);
                         const bool on_edge = t_gate < t_end && near_time(t, t_gate);
                         if (on_edge || tick_due_(t)) {
@@ -1240,7 +1233,8 @@ private:
                 // A gate that names no edge is sampled every dt_max/10 and
                 // re-read at each landing; without it a plain Python gate
                 // ran with its t = 0 mask frozen.
-                t_sw = std::min(t_now + dt_max_ * Real{0.1}, t_end);
+                // The fixed-step form polls on its grid (a dt/10 poll would cut every cell)
+                t_sw = std::min(fixed_step_ ? grid_after_(t_now) : t_now + dt_max_ * Real{0.1}, t_end);
                 poll_t_ = t_sw;
             }
         }
@@ -3890,6 +3884,18 @@ private:
     int settle_round_cap_ = 64;
     std::size_t max_steps_ = 10'000'000;
     bool fixed_step_ = false;
+    Real fixed_g_next_ = std::numeric_limits<Real>::infinity();   // the current cell's grid end
+    /// The pair step of a whole cell into x_new_ (false: the caller takes the modal step).
+    /// A start or end a few ulps off the grid (an edge or tick time computed another way)
+    /// still takes the pair: the time error is ~ulps x |dx/dt|. Out of line: the default
+    /// event-driven loop only tests fixed_step_.
+    [[gnu::noinline]] bool fixed_pair_step_(Real t, const Vector& x, Real h) {
+        if constexpr (requires { system_.exact_fixed_step_into(t, x, h, x_new_); }) {
+            if (on_grid_(t) && ulp_close_(t + h, fixed_g_next_))
+                return system_.exact_fixed_step_into(t, x, dt_max_, x_new_);
+        }
+        return false;
+    }
     /// The first grid point k·dt_max past t (not within near_time of it).
     [[nodiscard]] Real grid_after_(Real t) const {
         Real j = std::floor(t / dt_max_) + Real{1};
@@ -3897,8 +3903,12 @@ private:
         while (!(g > t) || near_time(g, t)) g = (j += Real{1}) * dt_max_;
         return g;
     }
+    /// t within a few ulps of a grid point k·dt_max (exactly 0 at the origin).
     [[nodiscard]] bool on_grid_(Real t) const {
-        return t == std::round(t / dt_max_) * dt_max_;
+        return ulp_close_(t, std::round(t / dt_max_) * dt_max_);
+    }
+    [[nodiscard]] static bool ulp_close_(Real a, Real b) noexcept {
+        return std::abs(a - b) <= Real{4} * std::numeric_limits<Real>::epsilon() * std::abs(b);
     }
     // The predicate that fired the last predicate event, and when: only
     // it is skipped as "just fired" at a step starting at that instant.

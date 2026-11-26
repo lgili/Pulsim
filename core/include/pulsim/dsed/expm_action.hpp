@@ -12,6 +12,7 @@
 // with a normest1 of A^p when such a mode must run on the action.
 #pragma once
 
+#include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
 
 #include <Eigen/Sparse>
@@ -154,7 +155,7 @@ struct ExpmAction {
 struct ExactRoute {
     std::string kernel;     // "dense" | "action" | "implicit"
     std::string reason;     // "" | "cost" (the hand-over)
-    Real dense_setup = 0;   // flops: 2 n^3 (6 + log2 ||A h||_1)
+    Real dense_setup = 0;   // dense-step flops: dense_setup_n3 n^3 (measured, 15.4)
     Real dense_step = 0;    // flops: 2 n^2
     Real action_step = 0;   // dense-equivalent flops: 2 nnz m s (the plan's matvecs) x weight
     long matvecs = 0;       // the plan's matvecs per step
@@ -169,6 +170,11 @@ struct ExactRouteCosts {
     // 4.7e-11..8.5e-11 s, ratio 6..17 (DECISIONS phase 3; the [.calib] test case)
     Real action_flop_weight = 8;
     std::size_t dense_budget = std::size_t{1} << 30; // bytes: 48 n^2 cached (V, V^-1, Phi ...)
+    // 15.4: the dense setup (make_exact_lti: eigensolve, refinement, kappa, pair quality) in
+    // dense-step flops per n^3. D13's 2 n^3 (6 + log2 ||Ah||_1) was ~35x low: measured 0.213 /
+    // 1.545 / 13.53 s at n = 151 / 301 / 601 on the snubbed ladder = 1240 / 1130 / 1250 n^3 at
+    // 5e-11 s per dense flop ([.calib] route case)
+    Real dense_setup_n3 = 1200;
 };
 
 /// D13: dense when its setup is repaid over the steps expected in the mode
@@ -180,7 +186,7 @@ struct ExactRouteCosts {
     ExactRoute r;
     const ExpmActionPlan p = expm_action_plan(norm_Ah1);
     r.matvecs = p.matvecs();
-    r.dense_setup = Real{2} * n * n * n * (Real{6} + std::max(Real{0}, std::log2(norm_Ah1)));
+    r.dense_setup = c.dense_setup_n3 * n * n * n;
     r.dense_step = Real{2} * n * n;
     r.action_step = Real{2} * nnz * static_cast<Real>(r.matvecs) * c.action_flop_weight;
     const bool fits = Real{48} * n * n <= static_cast<Real>(c.dense_budget);

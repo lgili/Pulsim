@@ -23,12 +23,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `phi_gamma_bytes` (zero on every other integrator). Every other option's
   results are unchanged.
 
-- **Action of the exponential (kernel only).** `dsed/expm_action.hpp`: the
+- **Action of the exponential, routed per mode.** `dsed/expm_action.hpp`: the
   Al-Mohy–Higham truncated Taylor action on a mode's sparse matrix and the
   D13 route rule (dense / action / implicit 'cost'), tested on the RLC ladder
   (n = 2000: 16 sparse products per 1 µs step; n = 200 within 3.3e-15 of
-  the dense exponential). Not used by the engine yet: every mode still runs
-  the dense propagator.
+  the dense exponential). The engine uses it: a DC-driven mode of 65 states
+  or more takes the cheaper of the dense propagator and the action over the
+  steps expected in it, or hands over with reason `'cost'`; its diode
+  predicates are located on the action's states. `result.exact['routes']`
+  reports the kernel, reason, size and counters per mode. Modes below 65
+  states run as before.
+- **Fixed-step cells a few ulps off the grid** (an edge or tick time computed
+  another way) now take the `(Phi, Gamma)` pair: the CCM buck at T/10 steps
+  400 of 400 cells by the pair (was 352).
 
 ### Typed errors and run diagnostics (add-kernel-simulation-object, group 8)
 

@@ -767,7 +767,7 @@ py::dict ped_result_auto_to_dict(
 template <class AdapterT>
 py::dict exact_report_dict(const AdapterT& adapter,
                            std::size_t n_predicate_evals) {
-    py::list masks;
+    py::list masks, routes;
     for (const auto& r : adapter.exact_report()) {
         py::list bits;
         for (pulsim::Size i = 0; i < r.mask.size(); ++i) {
@@ -785,9 +785,28 @@ py::dict exact_report_dict(const AdapterT& adapter,
         row["balanced"] = r.balanced;
         row["pade_defect"] = r.pade_defect;
         masks.append(row);
+        // add-exact-propagator-strategy 15.2 (D13): the per-mode kernel and its counters
+        py::dict rt;
+        rt["mask"] = bits;
+        // tier 3 (no exact step: the hand-over 'cost', or D2's refusal) is the implicit kernel
+        rt["kernel"] = r.tier == 3 ? std::string{"implicit"}
+                       : r.route.kernel.empty() ? std::string{"dense"} : r.route.kernel;
+        rt["reason"] = !r.route.reason.empty() ? r.route.reason
+                       : r.tier == 3 ? r.reason
+                       : r.route.kernel.empty() ? std::string{"n < route_min_n"} : std::string{};
+        rt["n"] = r.n_aug;
+        rt["nnz"] = r.nnz_aug;
+        rt["norm_Ah1"] = r.norm_Ah;
+        rt["matvecs_planned"] = r.route.matvecs;
+        rt["dense_setup_flops"] = r.route.dense_setup;
+        rt["action_step_flops"] = r.route.action_step;
+        rt["action_steps"] = r.action_steps;
+        rt["action_matvecs"] = r.action_matvecs;
+        routes.append(rt);
     }
     py::dict d;
     d["masks"] = masks;
+    d["routes"] = routes;
     d["n_eig"] = adapter.n_eig();
     d["build_seconds"] = adapter.build_seconds();
     d["n_pade"] = adapter.n_pade();

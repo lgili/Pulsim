@@ -109,6 +109,7 @@ public:
         // `valid == false` (defective basis, e.g. driven exactly at
         // a circuit resonance) falls back to the numeric path.
         ExactLTI exact;
+        ExactRoute route;               // 15.2 (D13): the kernel this mode took and why
         Vector exact_b;                 // reduced, augmented-const b
         std::vector<Real> aug_omegas;   // one per oscillator pair
         // the sines' direct share of the recovered vector, R_b·stamp·amp·(cos φ, sin φ):
@@ -444,7 +445,7 @@ public:
         ensure_current_resolved_();
         ensure_exact_built_(*current_entry_);
         const LTIEntry& e = *current_entry_;
-        if (!e.exact.valid || !pwl_sources_.empty()) return false;
+        if (!e.exact.valid || e.exact.tier == 4 || !pwl_sources_.empty()) return false;
         const PhiGamma* pg = nullptr;
         auto& c = e.exact.pg_cache;
         for (std::size_t i = 0; i < c.size(); ++i)
@@ -454,11 +455,14 @@ public:
                 x.size() + 2 * static_cast<Index>(e.aug_omegas.size()));
             const std::size_t bytes = (N * N + N) * sizeof(Real);
             constexpr std::size_t kPerMask = 4;   // h = dt plus a few edge-cut lengths at most
-            if (c.size() >= kPerMask) {
-                pg_bytes_ -= (static_cast<std::size_t>(c.front().Phi.size()) + c.front().Gamma.size()) * sizeof(Real);
+            // the oldest pair of this mask goes when it holds kPerMask; refuse before evicting
+            const std::size_t freed = c.size() >= kPerMask
+                ? (static_cast<std::size_t>(c.front().Phi.size()) + c.front().Gamma.size()) * sizeof(Real) : 0;
+            if (pg_bytes_ - freed + bytes > pg_budget_) { ++n_pg_refused_; return false; }
+            if (freed > 0) {
+                pg_bytes_ -= freed;
                 c.erase(c.begin());
             }
-            if (pg_bytes_ + bytes > pg_budget_) { ++n_pg_refused_; return false; }
             c.push_back(make_phi_gamma(e.exact, h));
             pg_bytes_ += bytes;
             ++n_pg_builds_;
@@ -1114,6 +1118,13 @@ public:
         int refined;
         bool balanced;
         Real pade_defect;
+        // 15.2 (D13): the route; n and nnz of the augmented matrix, the action's
+        // steps and matvecs taken (0 off tier 4)
+        ExactRoute route;
+        Eigen::Index n_aug;
+        Eigen::Index nnz_aug;
+        std::size_t action_steps;
+        std::size_t action_matvecs;
     };
     [[nodiscard]] std::vector<ExactReportRow> exact_report() const {
         std::vector<ExactReportRow> rows;
@@ -1123,7 +1134,10 @@ public:
                                 e.exact.norm_A1 * h_max_,
                                 e.exact.reason, e.exact.defect, e.exact.backward,
                                 e.exact.refined, e.exact.balanced,
-                                e.exact.pade_defect});
+                                e.exact.pade_defect, e.route, e.A.rows() + 1,
+                                e.exact.action ? e.exact.action->A.nonZeros() : Eigen::Index{0},
+                                e.exact.action_steps,
+                                e.exact.action ? e.exact.action->matvecs : std::size_t{0}});
             }
         }
         return rows;
@@ -1288,6 +1302,7 @@ private:
         entry.exact_built = true;
         if (!has_dynamic_sources_) {
             entry.exact_b = entry.b_constant;
+            if (route_by_cost_(entry)) return;   // D13: the action, or the hand-over
             entry.exact = make_exact_lti(entry.A, entry.exact_b,
                                          energy_scale_(entry, 0), h_max_, horizon_);
             ++n_eig_;
@@ -1319,6 +1334,42 @@ private:
         }
         // a user b_extra_fn: b(t) has no closed form — the numeric
         // path owns it.
+    }
+
+    /// add-exact-propagator-strategy 15.2 (D13): the route of a DC-driven mode at its first
+    /// visit, from the steps expected in it (horizon / h_max: shortcut, not re-evaluated per
+    /// visit; upgrade when a mode's visits are counted). True when the dense build is not
+    /// taken: tier 4 (the action, no eigenbasis) or no exact step (reason 'cost'). Modes below
+    /// route_min_n_ states are dense without a look (12.2's crossover; the default circuits).
+    /// shortcut: sine and piecewise-linear sources stay dense (their augmented / affine forms
+    /// are not wired to the action); upgrade with a large sine-driven circuit.
+    bool route_by_cost_(LTIEntry& entry) const {
+        const auto n = entry.A.rows();
+        if (n < route_min_n_) return false;
+        ExpmAction act{augment_affine(entry.A.sparseView(), entry.exact_b)};
+        const Real h = h_max_;
+        const Real N = horizon_ > Real{0} && h > Real{0} ? std::max(Real{1}, horizon_ / h) : Real{1};
+        entry.route = choose_exact_route(static_cast<Real>(n + 1), static_cast<Real>(act.A.nonZeros()),
+                                         act.norm1 * h, N, route_costs_);
+        if (entry.route.kernel == "dense") return false;
+        if (entry.route.kernel == "implicit" && refuse_implicit_) {
+            // no run that stepped exactly before is refused for cost: dense, the reason kept
+            entry.route.kernel = "dense";
+            entry.route.reason = "cost (dense kept: implicit segments not allowed)";
+            return false;
+        }
+        entry.exact = ExactLTI{};
+        entry.exact.norm_A1 = act.norm1;
+        if (entry.route.kernel == "action") {
+            entry.exact.valid = true;
+            entry.exact.tier = 4;
+            entry.exact.action.emplace(std::move(act));
+            return true;
+        }
+        entry.exact.reason = "cost: the dense setup is not repaid over " + detail::fmt_e(N)
+            + " steps and the action needs " + std::to_string(entry.route.matvecs)
+            + " matvecs per step (m_max " + std::to_string(route_costs_.m_max) + ")";
+        return true;
     }
 
     /// Whether a sine voltage or current source exists (its oscillator
@@ -2146,6 +2197,13 @@ private:
     mutable std::size_t pg_bytes_ = 0, n_pg_builds_ = 0, n_fixed_steps_ = 0, fixed_flops_ = 0,
                         n_pg_refused_ = 0;
     std::size_t pg_budget_ = std::size_t{64} << 20;
+    // 15.2 / 15.4 (D13): the route rule's constants and the size below which a mode is dense
+    ExactRouteCosts route_costs_{};
+    Eigen::Index route_min_n_ = 65;
+public:
+    void set_route_costs(const ExactRouteCosts& c) noexcept { route_costs_ = c; }
+    void set_route_min_n(Eigen::Index n) noexcept { route_min_n_ = n; }
+private:
 };
 
 }  // namespace pulsim::dsed

@@ -97,3 +97,78 @@ def test_fixed_needs_dt():
     b, fn = _buck(1.0, 0.5)
     with pytest.raises(ValueError, match="pass dt"):
         p.simulate(b, t_end=T, engine="exact", switch_fn=fn, integrator="fixed")
+
+
+def _quiet_sim(b, t_end, **kw):
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return p.simulate(b, t_end=t_end, engine="exact", **kw)
+
+
+def test_tier_two_pair_on_a_critically_damped_rlc_meets_the_closed_form():
+    # reviewer item: the tier-2 (Pade) branch of make_phi_gamma. A critically damped series
+    # RLC has a (near-)defective eigenbasis, so D2 refuses tier 1. Closed form from rest:
+    # v_C = V (1 - (1 + a t) e^{-a t}), i = (V / L) t e^{-a t}, a = R / 2L = 1 / sqrt(LC).
+    V, Ll, Cc, dt, nc = 10.0, 1e-3, 1e-6, 1e-6, 300
+    R = 2.0 * np.sqrt(Ll / Cc)
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "a", "gnd", V)
+    b.add_resistor("R", "a", "b", R)
+    b.add_inductor("L", "b", "c", Ll)
+    b.add_capacitor("C", "c", "gnd", Cc)
+    r = _quiet_sim(b, nc * dt, dt=dt, integrator="fixed")
+    assert r.exact["n_pade"] > 0                     # tier 2 took the step
+    t = np.asarray(r.times)
+    a = 1.0 / np.sqrt(Ll * Cc)
+    v_ref = V * (1 - (1 + a * t) * np.exp(-a * t))
+    i_ref = V / Ll * t * np.exp(-a * t)
+    assert np.abs(np.asarray(r.v("c")) - v_ref).max() <= 1e-10 * V
+    assert np.abs(np.asarray(r.i("L")) - i_ref).max() <= 1e-12
+    assert r.exact["n_fixed_steps"] == nc
+
+
+def test_sine_source_through_the_pair_meets_the_closed_form():
+    # reviewer item: the sine states of the pair (task 16.2's circuit through integrator='fixed'):
+    # 100 V 50 Hz into 1 ohm + 1 mH at dt = T/20, 5 periods, every cell a pair step.
+    w, Rl, Ll, dt = 2 * np.pi * 50.0, 1.0, 1e-3, 1e-3
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("V", "a", "gnd", 0.0, 100.0, 50.0)
+    b.add_resistor("R", "a", "b", Rl)
+    b.add_inductor("L", "b", "gnd", Ll)
+    r = _quiet_sim(b, 0.1, dt=dt, integrator="fixed")
+    t = np.asarray(r.times)
+    Z = Rl + 1j * w * Ll
+    ph = np.angle(Z)
+    ref = 100.0 / abs(Z) * (np.sin(w * t - ph) + np.sin(ph) * np.exp(-Rl / Ll * t))
+    assert np.abs(np.asarray(r.i("L")) - ref).max() <= 1e-10
+    assert r.exact["n_fixed_steps"] == 100
+
+
+class _Tick:
+    """A closed loop that only counts its ticks (period = dt): each tick ends a step."""
+
+    switch_fn = None
+
+    def __init__(self, period):
+        self.period = period
+        self.seen = []
+
+    def step_observer(self, t, x):
+        self.seen.append(t)
+
+
+def test_edges_and_ticks_a_few_ulps_off_the_grid_still_take_the_pair():
+    # reviewer item: a cell starting at an edge (or a tick) a few ulps off the grid k*dt took the
+    # modal step (352 of 400 pair steps at T/10). Now every cell is a pair step, with a tick
+    # period equal to dt too, and the state is unchanged (1e-12 against the run without ticks,
+    # 1e-10 against the 50-digit reference).
+    dt = T / 10
+    a = _run(1.0, 0.5, 40 * T, dt=dt, integrator="fixed")
+    assert a.exact["n_fixed_steps"] == 400
+    tick = _Tick(dt)
+    b = _run(1.0, 0.5, 40 * T, dt=dt, integrator="fixed", closed_loops=[tick])
+    assert len(tick.seen) >= 400
+    assert b.exact["n_fixed_steps"] == 400
+    for get, ref in ((lambda r: r.i("L"), I_CCM), (lambda r: r.v("vout"), V_CCM)):
+        assert abs(np.asarray(get(b))[-1] - np.asarray(get(a))[-1]) < 1e-12
+        assert abs(np.asarray(get(b))[-1] - ref) < 1e-10

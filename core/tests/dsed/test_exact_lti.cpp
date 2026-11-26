@@ -886,3 +886,44 @@ TEST_CASE("Exact: the fixed-step pair equals the modal step (tier 1, DC and sine
         REQUIRE(ad.exact_fixed_step_into(t, x, h, y));       // the cached one still steps
     }
 }
+
+// Reviewer item (phase 3): the pair cache's eviction under a byte budget of four pairs, on an
+// RC whose step has a closed form x(t+h) = x e^{-h/tau} + V (1 - e^{-h/tau}).
+TEST_CASE("Exact: the fixed-step pair cache evicts the oldest length and stays exact",
+          "[v2][dsed][exact_lti][fixed_step]") {
+    const Real V = 10.0, R = 1e3, C = 1e-6, tau = R * C;
+    builder::CircuitBuilder b;
+    b.add_voltage_source("V", "in", "gnd", V);
+    b.add_resistor("R", "in", "o", R);
+    b.add_capacitor("C", "o", "gnd", C);
+    pwl::PwlStateSpaceCache cache{b.graph(), b.pool()};
+    dsed::NativeCircuitBuilderAdapter<> ad{b.graph(), b.pool(), cache};
+    ad.set_mask(topology::SwitchStateMask(0));
+    REQUIRE(ad.has_exact_step());
+    REQUIRE(ad.n_state() == 1);
+    const std::size_t pair = 2 * sizeof(Real);            // N = 1: Phi 1x1, Gamma 1
+    ad.set_phi_gamma_budget(4 * pair);
+    Vector x = Vector::Zero(1), y(1);
+    Real t = 0, x_ref = 0, err = 0;
+    // lengths 1..5, then 1 again: the fifth evicts the first, the sixth (1) evicts the second
+    for (const int k : {1, 2, 3, 4, 5, 1}) {
+        const Real h = k * 1e-4;
+        REQUIRE(ad.exact_fixed_step_into(t, x, h, y));
+        x_ref = x_ref * std::exp(-h / tau) + V * (1 - std::exp(-h / tau));
+        err = std::max(err, std::abs(y[0] - x_ref));
+        x = y;
+        t += h;
+        REQUIRE(ad.phi_gamma_bytes() <= 4 * pair);
+    }
+    INFO("max |x - closed form| " << err);
+    REQUIRE(err <= 1e-13 * V);
+    REQUIRE(ad.n_phi_gamma_builds() == 6);
+    REQUIRE(ad.phi_gamma_bytes() == 4 * pair);
+    REQUIRE(ad.n_phi_gamma_refused() == 0);
+    // a budget below one pair refuses (nothing evicted, nothing written) and the caller steps
+    ad.set_phi_gamma_budget(pair - 1);
+    REQUIRE_FALSE(ad.exact_fixed_step_into(t, x, 7e-4, y));
+    REQUIRE(ad.n_phi_gamma_refused() == 1);
+    REQUIRE(ad.phi_gamma_bytes() == 4 * pair);
+    REQUIRE(ad.exact_fixed_step_into(t, x, 1e-4, y));       // still cached (no eviction on refusal)
+}
