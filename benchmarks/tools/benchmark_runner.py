@@ -894,6 +894,13 @@ def run_benchmarks(
                         )
 
                     times, series = load_csv_series(output_path)
+                    # the first stored sample of an algebraic node is not solved (a gate or a
+                    # bus reads 0 there: KNOWN_LIMITATIONS): no KPI reads it, or a switch that
+                    # is ON from t = 0 counts a turn-on with a made-up V_DS (the buck reference
+                    # read ZVS 1/25 from it, the LLC's S_hi 32 uJ of switching energy on trbdf2).
+                    # Only the switching KPIs drop it; the others are unchanged.
+                    sw_times = times[1:]
+                    sw_series = {k: v[1:] for k, v in series.items()}
                     sample_rate = (1.0 / (times[1] - times[0])) if len(times) > 1 else 0.0
 
                     # Metrics that use a single `observable` field as the
@@ -956,9 +963,9 @@ def run_benchmarks(
                                 thr_v = float(kpi_entry.get("threshold_v", 1.0))
                                 lookback = int(kpi_entry.get("lookback_samples", 1))
                                 if (isinstance(sw_obs, str) and isinstance(v_obs, str)
-                                        and sw_obs in series and v_obs in series):
-                                    sw_states = [bool(s > 0.5) for s in series[sw_obs]]
-                                    r = compute_zvs_fraction(sw_states, series[v_obs], thr_v, lookback)
+                                        and sw_obs in sw_series and v_obs in sw_series):
+                                    sw_states = [bool(s > 0.5) for s in sw_series[sw_obs]]
+                                    r = compute_zvs_fraction(sw_states, sw_series[v_obs], thr_v, lookback)
                                     for k, v in r.items():
                                         kpis[f"kpi__{k}__{label}"] = v
                             elif metric == "zcs_fraction":
@@ -971,9 +978,9 @@ def run_benchmarks(
                                 thr_a = float(kpi_entry.get("threshold_a", 0.1))
                                 lookback = int(kpi_entry.get("lookback_samples", 1))
                                 if (isinstance(sw_obs, str) and isinstance(i_obs, str)
-                                        and sw_obs in series and i_obs in series):
-                                    sw_states = [bool(s > 0.5) for s in series[sw_obs]]
-                                    r = compute_zcs_fraction(sw_states, series[i_obs], thr_a, lookback)
+                                        and sw_obs in sw_series and i_obs in sw_series):
+                                    sw_states = [bool(s > 0.5) for s in sw_series[sw_obs]]
+                                    r = compute_zcs_fraction(sw_states, sw_series[i_obs], thr_a, lookback)
                                     for k, v in r.items():
                                         kpis[f"kpi__{k}__{label}"] = v
                             elif metric == "junction_temperature":
@@ -1019,10 +1026,10 @@ def run_benchmarks(
                                 i_obs = kpi_entry.get("current_observable")
                                 if (isinstance(sw_obs, str) and isinstance(v_obs, str)
                                         and isinstance(i_obs, str)
-                                        and sw_obs in series and v_obs in series and i_obs in series):
-                                    sw_states = [bool(s > 0.5) for s in series[sw_obs]]
+                                        and sw_obs in sw_series and v_obs in sw_series and i_obs in sw_series):
+                                    sw_states = [bool(s > 0.5) for s in sw_series[sw_obs]]
                                     r = compute_switching_loss_per_event(
-                                        sw_states, series[v_obs], series[i_obs], times,
+                                        sw_states, sw_series[v_obs], sw_series[i_obs], sw_times,
                                         float(kpi_entry["window_s"]),
                                     )
                                     for k, v in r.items():
