@@ -36,6 +36,7 @@
 // damping `eig` returns an "invertible" basis with κ ≈ 1e9 and the
 // modal formula is 1e-6 off (probes/dsed_baseline.py).
 
+#include "pulsim/dsed/expm_action.hpp"
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
 
@@ -47,6 +48,7 @@
 #include <cstdio>
 #include <limits>
 #include <numbers>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -58,10 +60,19 @@ inline constexpr Real kExactRoundoff = std::numeric_limits<Real>::epsilon();
 /// The accepted error level of tiers 1 and 2 (`u·κ`, `u·‖Ah‖₁`).
 inline constexpr Real kExactTierBound = Real{1e-10};
 
+/// add-exact-propagator-strategy 10.1 (D8): the fixed-step pair of one
+/// step length h, x(t+h) = Φ·x + Γ (Γ for the b the propagator was built
+/// with), dense and real.
+struct PhiGamma {
+    Real h = 0;
+    DenseMatrix Phi;
+    Vector Gamma;
+};
+
 /// The propagator of one mode.
 struct ExactLTI {
-    bool valid = false;        // tier 1 or 2: an exact step exists
-    int tier = 3;
+    bool valid = false;        // tier 1, 2 or 4: an exact step exists
+    int tier = 3;              // 4: the action of the exponential (D13), no eigenbasis
     Real kappa = std::numeric_limits<Real>::infinity();  // κ₂(Ṽ)
     Real norm_A1 = Real{0};    // ‖Ã‖₁ (energy coordinates)
     std::string reason;        // why not tier 1 (empty on tier 1)
@@ -84,9 +95,17 @@ struct ExactLTI {
     mutable std::vector<std::pair<Real, DenseMatrix>> pade_cache;
     mutable std::size_t n_pade = 0;       // Padé exponentials evaluated
     mutable std::size_t n_pade_hits = 0;  // cache hits
+    // 10.1: the (Φ, Γ) pairs of this mode, keyed on h (bitwise); the
+    // owner's byte budget decides whether a pair is kept (fixed-step form)
+    mutable std::vector<PhiGamma> pg_cache;
 
     // Workspaces: a step allocates nothing.
     mutable Vector z_re, z_im, zn_re, zn_im, y, c1_re, c1_im;
+    // tier 4 (add-exact-propagator-strategy 15.2, D13): e^{[[A, b], [0, 0]] h}·[x; 1] by the
+    // truncated Taylor action on the sparse augmented matrix; its workspaces
+    std::optional<ExpmAction> action;
+    mutable Vector act_in, act_out;
+    mutable std::size_t action_steps = 0;
 
     // The output rule's per-mode data (exact_chord_step), built on its first
     // call: |V_jk|, and the modes ordered by their saturation level s_k
@@ -640,11 +659,57 @@ inline constexpr Real kPadeTheta13 = 5.371920351148152;
     return e.pade_cache.back().second;
 }
 
+/// 10.1 (D8): the pair (Φ, Γ) of a step h. Tier 1 from the modal form,
+/// Φ = Re(V·diag(e^{λh})·V⁻¹), Γ = Re(V·(h·φ₁(λh) ∘ w)); tier 2 from the
+/// augmented exponential, unscaled out of the energy coordinates.
+[[nodiscard]] inline PhiGamma make_phi_gamma(const ExactLTI& e, Real h) {
+    PhiGamma out;
+    out.h = h;
+    if (e.tier == 2) {
+        const auto n = e.As.rows();
+        const DenseMatrix& E = pade_exp(e, h);
+        out.Phi = e.d.cwiseInverse().asDiagonal() * E.topLeftCorner(n, n) * e.d.asDiagonal();
+        out.Gamma = E.topRightCorner(n, 1).cwiseQuotient(e.d);
+        return out;
+    }
+    const auto n = e.V_re.rows();
+    Eigen::MatrixXcd V(n, n), Vinv(n, n);
+    V.real() = e.V_re;
+    V.imag() = e.V_im;
+    Vinv.real() = e.Vinv_re;
+    Vinv.imag() = e.Vinv_im;
+    Eigen::VectorXcd ex(n), g(n);
+    for (Eigen::Index i = 0; i < n; ++i) {
+        const std::complex<Real> s = e.lambda[i] * h;
+        ex[i] = std::exp(s);
+        g[i] = h * phi1(s) * e.w[i];
+    }
+    out.Phi = (V * ex.asDiagonal() * Vinv).real();
+    out.Gamma = (V * g).real();
+    return out;
+}
+
+/// One fixed step x ← Φ·x + Γ into `out` (distinct from x): n² + n
+/// multiply-adds, no allocation.
+inline void phi_gamma_step_into(const PhiGamma& pg, const Vector& x, Vector& out) {
+    out.noalias() = pg.Phi * x;
+    out += pg.Gamma;
+}
+
 /// Advance `x` by `h` into `out` (same size; no allocation after the
 /// first call on tier 1).
 inline void exact_advance_into(const ExactLTI& e, const Vector& x, Real h,
                                Vector& out) {
     const auto n = x.size();
+    if (e.tier == 4) {
+        e.act_in.resize(n + 1);
+        e.act_in.head(n) = x;
+        e.act_in[n] = Real{1};
+        e.action->apply(e.act_in, h, e.act_out);
+        out = e.act_out.head(n);
+        ++e.action_steps;
+        return;
+    }
     if (e.tier == 2) {
         const DenseMatrix& E = pade_exp(e, h);
         e.y.noalias() = E.topLeftCorner(n, n) * e.d.cwiseProduct(x);

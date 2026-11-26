@@ -6,6 +6,38 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Exact engine, phase 3 slice (add-exact-propagator-strategy groups 7, 10)
+
+- **Coupled inductors with |k| = 1 are refused by name.** The exact engine's
+  extraction raises `UnsupportedError(feature='extraction',
+  device='T.p+T.s', kind='InductorCoupling')` naming the windings (it was an
+  untyped error wrapped without a device). New tests: two coupled 1 mH
+  windings (k = 0.9) against the closed form within 1e-10 A; a flyback
+  against `trbdf2` (rtol 1e-9) within 1e-5 relative (measured 3.2e-7).
+- **`integrator='fixed'` on `engine='exact'`** (needs `dt`): the exact engine
+  on the grid k·dt. A full cell is `x <- Phi x + Gamma` from a cache keyed on
+  (mode, dt), 64 MiB byte budget; a diode event between grid points is
+  located on the analytic trajectory and the cell finished by an exact
+  sub-step. `result.exact` gains `n_fixed_steps`, `n_phi_gamma_builds`,
+  `n_phi_gamma_refused`, `fixed_step_flops` (n² + n per pair step),
+  `phi_gamma_bytes` (zero on every other integrator). Every other option's
+  results are unchanged.
+
+- **Action of the exponential, routed per mode.** `dsed/expm_action.hpp`: the
+  Al-Mohy–Higham truncated Taylor action on a mode's sparse matrix and the
+  D13 route rule (dense / action / implicit 'cost'), tested on the RLC ladder
+  (n = 2000: 16 sparse products per 1 µs step; n = 200 within 3.3e-15 of
+  the dense exponential). The engine uses it: a DC-driven mode of 65 states
+  or more takes the cheaper of the dense propagator and the action over the
+  steps expected in it, or hands over with reason `'cost'`; its diode
+  predicates are located on the action's states, scanned and settled on the mode's
+  eigenvalues (kept without eigenvectors) like a dense mode. `result.exact['routes']`
+  reports the kernel, reason, size and counters per mode. Modes below 65
+  states run as before.
+- **Fixed-step cells a few ulps off the grid** (an edge or tick time computed
+  another way) now take the `(Phi, Gamma)` pair: the CCM buck at T/10 steps
+  400 of 400 cells by the pair (was 352).
+
 ### Typed errors and run diagnostics (add-kernel-simulation-object, group 8)
 
 - **One base class.** Every error pulsim raises on purpose is a

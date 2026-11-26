@@ -84,6 +84,7 @@ if(PULSIM_BUILD_TESTS)
         tests/dsed/test_switch_state_record.cpp  # per-sample stamped mask
         tests/dsed/test_trbdf2_stage_coeffs.cpp
         tests/dsed/test_exact_lti.cpp
+        tests/dsed/test_expm_action.cpp  # D13: action of the exponential, route rule
         tests/dsed/test_convergence_failure.cpp  # typed give-up sites
         tests/dsed/test_exact_queue_ticks.cpp  # ticks, monitors, step hooks on the queue
         tests/dsed/test_exact_resume.cpp  # snapshot / resume (session 24)
