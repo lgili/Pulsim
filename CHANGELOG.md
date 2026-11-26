@@ -47,6 +47,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   another way) now take the `(Phi, Gamma)` pair: the CCM buck at T/10 steps
   400 of 400 cells by the pair (was 352).
 
+### Power MOSFET as one f/q device — opt-in (add-power-mosfet-datasheet-device, group 5)
+
+- **`add_power_mosfet(..., fq_device=True)`** (opt-in; the default is
+  still the composite, and no default number changes) builds ONE device
+  for the channel, C_gd, C_ds (charge laws and constants) and the body
+  diode: an in-process model on the external-device f/q contract,
+  Jacobian by forward AD of the residual. R_d, R_g, L_s and C_gs stay
+  linear elements; a Lauritzen body diode adds one internal unknown.
+  Sub-elements: `{name}`, `{name}.rd/.rg/.ls/.cgs`. Its `components()`
+  params carry `fq_device: True`. On `pwl` it matches the composite to
+  ~1e-9 of scale; on `trbdf2` the step controller sees the device's pin
+  charge rows, so the grid differs (energies within the engine's tolerance).
+- With `fq_device=True`: **`res.i("Q1")`** is the drain-terminal current
+  and **`device_loss_summary`** lists the device (`v_DS · i_D` of the
+  external pins). DC, the kernel AC sweep and `to_yaml` / `from_yaml`
+  (with its hashes) carry it. `dsed` / `bdf1` refuse it by name.
+- **`p.ChannelTable(v_gs, v_ds, I)`** and `add_power_mosfet(channel=,
+  fq_device=True)`: a tabulated output characteristic (bicubic Hermite
+  with monotone tangents, C¹; third quadrant by terminal swap). A
+  non-monotone table, a non-zero `I(V_GS, 0)` or an unsorted axis raises
+  `pulsim.NetlistError` naming the point; a table without `fq_device` and
+  temperature coefficients with a table are refused.
+
 ### Typed errors and run diagnostics (add-kernel-simulation-object, group 8)
 
 - **One base class.** Every error pulsim raises on purpose is a

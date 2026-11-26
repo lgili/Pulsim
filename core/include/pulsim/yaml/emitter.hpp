@@ -28,6 +28,7 @@
 #include "pulsim/models/flux_table.hpp"
 #include "pulsim/models/jiles_atherton.hpp"
 #include "pulsim/models/power_mosfet.hpp"
+#include "pulsim/models/power_mosfet_device.hpp"
 #include "pulsim/numeric/parse_real.hpp"
 
 #include <yaml-cpp/yaml.h>
@@ -302,6 +303,17 @@ namespace yaml_detail {
         const auto& dev = devs[static_cast<std::size_t>(bi)];
         const auto& prm = pool.params_of(bi);
         where = std::format("device \"{}\"", dev.name);
+        if (const auto* pm = b.power_mosfet_record(bi);
+            kind == K::ExternalDevice && pm && pm->params.fq_device) {
+            // the power MOSFET f/q device: its law is rebuilt from the
+            // power_mosfets record; the entry keeps its place and pins
+            const auto& xp = std::get<pwl::DevicePool::ExternalDeviceParams>(prm).pins;
+            std::string pins = "[";
+            for (std::size_t p = 0; p < xp.size(); ++p) pins += (p ? ", " : "") + node(xp[p]);
+            o += "  - " + Map{}.add("kind", std::string{"external_device"})
+                .add("name", quote(dev.name)).add("pins", pins + "]").str() + "\n";
+            continue;
+        }
         if (kind == K::ExternalDevice) {
             // add-external-device-abi: its law is native code the YAML cannot carry
             throw std::invalid_argument(where + ": an external device is not written to YAML "
@@ -521,6 +533,15 @@ namespace yaml_detail {
                 .add("lauritzen", sub_fields(p.lauritzen, K::LauritzenDiode))
                 .add("T_j", num(p.T_j)).add("rds_tc1", num(p.rds_tc1))
                 .add("rds_tc2", num(p.rds_tc2)).add("vt_tc", num(p.vt_tc));
+            if (p.fq_device) mm.add("fq_device", std::string{"true"});
+            if (p.channel) {
+                std::vector<Real> flat;
+                for (const auto& row : p.channel->current_grid()) {
+                    flat.insert(flat.end(), row.begin(), row.end());
+                }
+                mm.add("channel_table", Map{}.add("v_gs", nums(p.channel->v_gs()))
+                    .add("v_ds", nums(p.channel->v_ds())).add("I", nums(flat)).str());
+            }
             o += "  - " + mm.str() + "\n";
         }
     }
@@ -707,8 +728,11 @@ struct YamlIo {
                 p.name = text(d["name"], ks, "name");
                 const auto pins = d["pins"];
                 const auto want = yaml_detail::pin_count(kind);
-                if (!pins || !pins.IsSequence() || pins.size() != want) {
-                    fail(p.name, std::format("a {} needs {} pins", ks, want));
+                // the power MOSFET f/q device (the only external device written) has 3
+                if (!pins || !pins.IsSequence() ||
+                    pins.size() != (kind == K::ExternalDevice ? 3 : want)) {
+                    fail(p.name, std::format("a {} needs {} pins", ks,
+                                             kind == K::ExternalDevice ? 3 : want));
                 }
                 auto role = yaml_detail::default_role(kind);
                 if (const auto r = d["role"]) {
@@ -822,7 +846,16 @@ struct YamlIo {
         std::vector<Pending> pend;
         for (const auto& d : root["devices"]) pend.push_back(begin_entry_(b, d, pin));
         // Pass 2: the pool, in branch order (its counters follow it).
-        for (const auto& p : pend) add_device_(b, p.n, p.kind, p.name, p.branches, pin);
+        // power MOSFET records first: an fq_device entry is rebuilt from its record
+        for (const auto& pm : root["power_mosfets"]) read_power_mosfet_(b, pm);
+        for (const auto& p : pend) {
+            const auto* pm = b.power_mosfet_record(p.branches.front());
+            if (p.kind == K::ExternalDevice && pm && pm->params.fq_device) {
+                add_power_mosfet_device_(b, *pm, p, pin);
+            } else {
+                add_device_(b, p.n, p.kind, p.name, p.branches, pin);
+            }
+        }
 
         for (const auto& cp : root["couplings"]) {
             keys(cp, "a coupling", {"primary", "secondary", "L_p", "L_s", "k"});
@@ -905,7 +938,6 @@ struct YamlIo {
             b.set_alias(nm, nd ? std::optional<std::string_view>{*nd} : std::nullopt,
                         br ? std::optional<std::string_view>{*br} : std::nullopt);
         }
-        for (const auto& pm : root["power_mosfets"]) read_power_mosfet_(b, pm);
         for (const auto& c : root["composites"]) {
             keys(c, "a composite", {"kind", "name", "anchor", "members"});
             const auto nm = text(c["name"], "a composite", "name");
@@ -1080,7 +1112,7 @@ private:
                                    "K_eff", "V_T_eff", "R_d_eff", "K", "V_T", "lambda",
                                    "kappa", "R_d", "C_gs", "C_gd", "C_ds", "R_g", "L_s",
                                    "body", "shockley", "lauritzen", "T_j", "rds_tc1",
-                                   "rds_tc2", "vt_tc"});
+                                   "rds_tc2", "vt_tc", "fq_device", "channel_table"});
         m::PowerMosfet::Record r;
         r.name = text(n["name"], "a power MOSFET", "name");
         const auto& w = r.name;
@@ -1114,8 +1146,39 @@ private:
         p.lauritzen = std::get<m::LauritzenDiode::Params>(la);
         p.T_j = real(n["T_j"], w, "T_j"); p.rds_tc1 = real(n["rds_tc1"], w, "rds_tc1");
         p.rds_tc2 = real(n["rds_tc2"], w, "rds_tc2"); p.vt_tc = real(n["vt_tc"], w, "vt_tc");
+        if (n["fq_device"]) p.fq_device = n["fq_device"].as<bool>();
+        if (const auto t = n["channel_table"]) {
+            keys(t, w, {"v_gs", "v_ds", "I"});
+            auto vgs = reals(t["v_gs"], w, "channel_table.v_gs");
+            auto vds = reals(t["v_ds"], w, "channel_table.v_ds");
+            const auto flat = reals(t["I"], w, "channel_table.I");
+            if (flat.size() != vgs.size() * vds.size()) fail(w, "channel_table.I is not v_gs x v_ds");
+            std::vector<std::vector<Real>> I;
+            for (std::size_t i = 0; i < vgs.size(); ++i) {
+                I.emplace_back(flat.begin() + static_cast<std::ptrdiff_t>(i * vds.size()),
+                               flat.begin() + static_cast<std::ptrdiff_t>((i + 1) * vds.size()));
+            }
+            p.channel = std::make_shared<const m::ChannelTable>(std::move(vgs), std::move(vds),
+                                                                std::move(I));
+        }
         const Index ch = b.branch_id_of(text(n["channel"], w, "channel"));
         b.power_mosfets_.emplace(ch, std::move(r));
+    }
+
+    /// Pass 2 of a power MOSFET f/q device entry: the device from its record.
+    template <class Pin>
+    static void add_power_mosfet_device_(builder::CircuitBuilder& b,
+                                         const models::PowerMosfet::Record& r,
+                                         const Pending& pd, Pin& pin) {
+        keys(pd.n, pd.name, {"kind", "name", "pins"});
+        auto [model, prm] = models::power_mosfet_device::make_model(
+            models::power_mosfet_device::core_of(r));
+        pwl::DevicePool::ExternalDeviceParams x;
+        x.inst = std::make_shared<const xdev::Instance>(pd.name, std::move(model), std::move(prm));
+        x.record = true;
+        for (const auto& q : pd.n["pins"]) x.pins.push_back(pin(q, pd.name));
+        x.branches = pd.branches;
+        b.pool_.add_external_device(std::move(x));
     }
 };
 

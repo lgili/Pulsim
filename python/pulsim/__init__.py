@@ -364,7 +364,7 @@ from .spice_import import (
     spice_to_builder,
 )
 # add-power-mosfet-datasheet-device: charge laws, double pulse, fitters.
-from ._pulsim import ChargeLaw, ChargeTable  # type: ignore[import-not-found]
+from ._pulsim import ChannelTable, ChargeLaw, ChargeTable  # type: ignore[import-not-found]
 from ._pulsim import FluxMapDQ  # type: ignore[import-not-found]
 # add-in-kernel-event-losses: kernel datasheet tables (LossTable.to_kernel()).
 from ._pulsim import ConductionTable, LossTable3D  # type: ignore[import-not-found]
@@ -811,6 +811,7 @@ __all__ = [
     "parse_spice_netlist",
     "spice_to_builder",
     "ChargeLaw",
+    "ChannelTable",
     "ChargeTable",
     "FluxMapDQ",
     "LossTable3D",
@@ -1251,6 +1252,18 @@ def _result_i(self, name: str, t=None, *, port=None):
                 f"result.i({name!r}, port={port!r}): `port` is 1 or 2 and "
                 f"only for a gyrator (this branch is "
                 f"{kinds.get(b_id)!r}).")
+
+    # ------------- power MOSFET f/q device: the drain-terminal current -------------
+    # add-power-mosfet-datasheet-device 5.3 (fq_device=True only; the default
+    # composite keeps its channel-branch reading). Every C_gd / C_ds is inside
+    # the device, so its drain-pin current (f + dq/dt, recorded every accepted
+    # step) is the whole current at d' (= R_d's current when there is one).
+    # Before the state fast path: a Lauritzen body diode's charge is on this branch.
+    if getattr(self, "_xdev_trace", None) is not None and any(
+            d.get("kind") == "power_mosfet" and int(d.get("branch_id", -1)) == int(b_id)
+            and d.get("params", {}).get("fq_device") for d in builder.components()):
+        col = _np.asarray(_rec_mod.result_device_output(self, name, "i(d)"), dtype=float)
+        return col if t is None else col[t]
 
     # ---- Fast path: state-vector-native kinds (inductor, VS family) ----
     # Try inductor first (most common case), then the source family

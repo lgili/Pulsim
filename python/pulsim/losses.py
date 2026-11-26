@@ -2455,6 +2455,43 @@ def device_loss_summary(
             })
             continue
 
+        if kind == "power_mosfet" and desc.get("params", {}).get("fq_device"):
+            # add-power-mosfet-datasheet-device 5.3 (fq_device only): v_DS · i_D across the
+            # EXTERNAL drain / source pins (switching + conduction loss, R_d
+            # included; the gate drive is not). i_D = res.i(name).
+            # shortcut: the device is continuous, so i_D's right limit is
+            # its sample; a switch event elsewhere moves only v's right limit
+            pins = desc.get("pins", (None, None))
+            nodes = (builder.node_id_of(pins[0]), builder.node_id_of(pins[1]))
+            i_full = np.asarray(result.i(name), float)
+            if i_full.shape[0] == states.shape[0] + 1:   # solved_part dropped row 0
+                i_full = i_full[1:]
+            if i_full.shape[0] != states.shape[0]:
+                # shortcut: an inner-event row inserted by with_inner_events has no
+                # device reading; skip rather than guess (upgrade: read it there)
+                warnings.warn(f"device_loss_summary: {name!r} (power_mosfet) is left "
+                              "out: the result carries inner-event rows the device "
+                              "trace does not.", UserWarning, stacklevel=2)
+                continue
+            v_D, v_D_s = win.cont(_branch_v(states, nodes), _branch_v(states_s, nodes))
+            i_D, i_D_s = win.cont(i_full, i_full)
+            if times.size > 1 and T > 0:
+                i_avg = _views.pl_integral(times_w, i_D, i_D_s) / T
+                E = _views.pl_integral_product(times_w, v_D, i_D, v_D_s, i_D_s)
+            else:
+                i_avg, E = float(i_D.mean()), 0.0
+            summary.append({
+                "branch_id": int(bid), "kind": kind, "name": name,
+                "i_avg": float(i_avg),
+                "i_rms": _time_weighted_rms(i_D, times_w, i_D_s),
+                "i_peak": float(max(np.abs(i_D).max(), np.abs(i_D_s).max()))
+                if i_D.size else 0.0,
+                "P_avg": (float(E) / T if times.size > 1 and T > 0
+                          else float((v_D * i_D).mean())),
+                "E_total": float(E),
+            })
+            continue
+
         if kind in ("mosfet_level1", "igbt_level1", "nonlinear_diode",
                     "excess_loss"):
             # add-unified-device-interface 9.3: the static Newton kinds'
