@@ -49,19 +49,21 @@ STORED = dict(discontinuity_restart=False)
 
 
 @pytest.mark.parametrize("kw", [STORED, pytest.param({}, marks=pytest.mark.xfail(strict=True, reason=(
-    "release finding F-Z-8: the right-limit row of a cut-set edge holds the pre-collapse state (i_L continuous through R_off: node sw 2.4e12 V), so the stored-row check fires before the record's named impulse check")))], ids=["stored", "impulse"])
+    "release finding F-Z-15: a restart-rule cut is named (F-Z-8 fixed) but judged at its right-limit row's i*R_off (2.4e12 V at sw), not at |lambda|/dt (2.4e5 V = 5000 x 48 V): voltage_sanity_factor cannot silence it and the kernel twin's peak is not L*i/dt; same with discontinuity_restart=True explicit")))], ids=["stored", "impulse"])
 def test_the_megavolt_is_named(kw):
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         res = p.simulate(opening_inductor(), t_end=1e-3, dt=1e-8,
                           switch_fn=_sw, **kw)
-    hits = [w for w in caught if "largest voltage any source" in
+    # rule off: the stored megavolt; rule on: the cut is named instead (F-Z-8, 3e61b05d / 1abf156f)
+    hits = [w for w in caught if ("largest voltage any source" if kw else "cut the") in
             str(w.message)]
     assert len(hits) == 1
     msg = str(hits[0].message)
     assert "sw" in msg                    # the node
-    assert "48" in msg                    # the scale it is judged against
-    assert "snubber" in msg               # and what to do about it
+    if kw:
+        assert "48" in msg                # the scale it is judged against
+        assert "snubber" in msg           # and what to do about it
 
     v = np.asarray(res.v("sw"))
     if kw:
@@ -74,14 +76,14 @@ def test_the_megavolt_is_named(kw):
         cuts = [r for r in res.reinit_records if r.kind == "cut_set"]
         assert len(cuts) == 10 and cuts[0].states == ["L"] and cuts[0].devices == ["S"]
         assert abs(cuts[0].lambda_) == pytest.approx(2.4e-3, rel=1e-3)
-        assert "'S' cut the current of 'L'" in msg and "reinit_records" in msg
+        assert "'S' cut the 2.4 A current of 'L'" in msg and "reinit_records" in msg
         assert res._implausible_voltage.peak == pytest.approx(2.4e5, rel=1e-3)
         assert res._implausible_voltage.source_scale == pytest.approx(48.0)
     assert res._implausible_voltage.node >= 0
 
 
 @pytest.mark.xfail(strict=True, reason=(
-    "release finding F-Z-8: the right-limit row of a cut-set edge holds the pre-collapse state (i_L continuous through R_off: 2.4e12 V on sw, one extra warning), so the stored-row check fires before the record's named impulse check"))
+    "release finding F-Z-15: a restart-rule cut is named (F-Z-8 fixed) but judged at its right-limit row's i*R_off (2.4e12 V at sw), not at |lambda|/dt (2.4e5 V = 5000 x 48 V): voltage_sanity_factor cannot silence it and the kernel twin's peak is not L*i/dt; same with discontinuity_restart=True explicit"))
 def test_an_impulse_below_the_factor_says_nothing():
     """The impulse is judged as the stored spike was (|lambda| / dt against
     factor x the source scale): 2.4e5 V is 5000 x 48 V; a factor above that

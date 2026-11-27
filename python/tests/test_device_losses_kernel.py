@@ -266,11 +266,6 @@ def test_energy_balance_electrical_heat_record():
     assert network == pytest.approx(ledger, rel=2 * 1e-5 / t_end)
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "release finding F-Z-10: under the restart rule the t = 0 start jump has no right-limit row, "
-    "so device_loss_summary trapezoids the first step from the left limit (0 A): 0.23994 J "
-    "against the kernel's 0.24 = 12 W x 0.02 s (h/2 x 12 W = 6e-5 J low, rel 2.5e-4); the same "
-    "with discontinuity_restart=True, enable_substep_state_correction=False explicit"))
 def test_loss_summary_reads_the_start_right_limit():
     """The stored-sample summary equals the kernel's record (1e-12), as it
     did on the restart-less engine (both 0.23994 there)."""

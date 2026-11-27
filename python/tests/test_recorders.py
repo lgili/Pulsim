@@ -265,13 +265,6 @@ def test_in_loop_feeding_equals_the_stored_array_pass(eng, case, request):
     next line from the same settled state as an event row: the rectifier's
     windows differ there by ~5e-10 relative."""
     from pulsim._recorders import record_result
-    if (eng, case) == ("pwl", "buck"):
-        request.applymarker(pytest.mark.xfail(strict=True, reason=(
-            "release finding F-Z-12: under the restart rule the in-loop record of the PWM buck "
-            "differs from the stored-array pass: v(vout) window integral 3.5e-7 rel (3.9e-7 with "
-            "the rule alone, 0 without the restart), i(L) period integral 1.4e-4 of rms*span; "
-            "the in-loop feed reads 1034 rows where the stored view has 1001 + 24 event rows. "
-            "Same with the options explicit")))
     fac, te, probes, win, per, off = _CASES[case]
     rec = p.Recorder("r", probes, windows=win, period=per, offset=off)
     built = fac()
@@ -286,7 +279,7 @@ def test_in_loop_feeding_equals_the_stored_array_pass(eng, case, request):
     # trbdf2 stores its settled post-event probe as a sample: the line from
     # the left limit to it (stored) vs from the settled state (in-loop)
     rtol = 1e-6 if eng == "trbdf2" and case in ("rect", "buck") else 1e-9
-    if eng == "pwl-rule":
+    if eng in ("pwl", "pwl-rule"):   # release: plain pwl runs the restart rule (F-Z-12, cc3446e0)
         _rule_feeds_agree(res, a, b, probes, 1e-6)
         return
     for q in probes:

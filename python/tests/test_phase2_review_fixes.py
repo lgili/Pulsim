@@ -79,7 +79,11 @@ def test_the_retry_says_it_happened():
     assert "dt_retries" in str(hits[0].message)
 
 
-def test_the_voltage_check_survives_warnings_as_errors():
+@pytest.mark.parametrize("rule, msg", [
+    (False, "largest voltage"),                  # restart-less (2.1.0's default, named): the stored kV row
+    (None, r"'S' cut the .* current of 'L'"),    # the release default (restart rule): the cut is named (F-Z-8)
+])
+def test_the_voltage_check_survives_warnings_as_errors(rule, msg):
     """The detector sat inside `except Exception: pass`, so under
     -W error its own warning became an exception and was swallowed —
     no warning AND no attribute. The user who asked for warnings to
@@ -96,12 +100,10 @@ def test_the_voltage_check_survives_warnings_as_errors():
 
     with warnings.catch_warnings():
         warnings.simplefilter("error")
-        with pytest.raises(UserWarning, match="largest voltage"):
-            p.simulate(b, t_end=1e-3, dt=1e-8, switch_fn=sw)
+        with pytest.raises(UserWarning, match=msg):
+            p.simulate(b, t_end=1e-3, dt=1e-8, switch_fn=sw, discontinuity_restart=rule)
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "release finding F-Z-8: the right-limit row of a cut-set edge holds the pre-collapse state (i_L continuous through R_off: 48 V boost, R_off 1e12: 2.4e12 V > 1e9 x 48 V), so the stored-row check fires before the record's named impulse check"))
 def test_the_voltage_factor_is_reachable():
     """The bound is a judgement, so it has to be tunable from the
     entry point users actually call — not only from the binding."""
@@ -121,6 +123,8 @@ def test_the_voltage_factor_is_reachable():
                     voltage_sanity_factor=1e9)
     assert [w for w in caught
             if "largest voltage" in str(w.message)] == []
+    # F-Z-8 (fixed 3e61b05d / 1abf156f): under the restart rule the cut is named, not read as a stored megavolt
+    assert any("cut the" in str(w.message) and "'L'" in str(w.message) for w in caught)
 
 
 # --- D: a dependent source defeats the bound -----------------------
@@ -143,6 +147,8 @@ def test_an_op_amp_circuit_is_not_falsely_accused():
         res = p.simulate(b, t_end=1e-4, dt=1e-7)
     assert [w for w in caught
             if "largest voltage" in str(w.message)] == []
+    # F-Z-8 (fixed 3e61b05d / 1abf156f): under the restart rule the cut is named, not read as a stored megavolt
+    assert any("cut the" in str(w.message) and "'L'" in str(w.message) for w in caught)
     assert getattr(res, "_implausible_voltage", None) is None
     assert np.isfinite(np.asarray(res.states)).all()
 

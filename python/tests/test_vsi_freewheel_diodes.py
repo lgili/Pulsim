@@ -226,7 +226,7 @@ def test_a_locator_residual_does_not_warn():
 
 
 @pytest.mark.xfail(strict=True, reason=(
-    "release finding F-Z-8: the right-limit row of a cut-set edge holds the pre-collapse state (i_L continuous through R_off: node ua -6.628e9 V = 13.256 A x R_off at t = 3e-4 s, at both dt; sim.diagnostics), so the stored-row check fires before the record's named impulse check"))
+    "release finding F-Z-15: a restart-rule cut is named (F-Z-8 fixed) but judged at its right-limit row's i*R_off (-6.6e9 V at ua), not at |lambda|/dt (1.3e4 / 1.3e5 V at dt 2e-6 / 2e-7): voltage_sanity_factor cannot silence it and the kernel twin's peak is not L*i/dt; same with discontinuity_restart=True explicit"))
 @pytest.mark.parametrize("dt,warns", [(2e-6, False), (2e-7, True)])
 def test_the_kernel_object_reads_the_cut_set_records_too(dt, warns):
     """The C++ twin of the voltage check (`sim::Simulation::check_voltage_`)
