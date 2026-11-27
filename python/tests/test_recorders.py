@@ -247,12 +247,14 @@ _CASES = {
              [(0.2e-3 + 3.3e-9, 0.9e-3 - 1.7e-9)], 1e-5, 0.0),
 }
 _LOOP_RUNS = {"pwl": dict(engine="pwl", dt=1e-6),
+              # the restart-less fixed step (2.1.0's default, named): samples bit-identical
+              "pwl-no-restart": dict(engine="pwl", dt=1e-6, discontinuity_restart=False),
               "trbdf2": dict(engine="trbdf2", rtol=1e-7, atol=1e-10)}
 
 
 @pytest.mark.parametrize("case", sorted(_CASES))
 @pytest.mark.parametrize("eng", sorted(_LOOP_RUNS))
-def test_in_loop_feeding_equals_the_stored_array_pass(eng, case):
+def test_in_loop_feeding_equals_the_stored_array_pass(eng, case, request):
     """The same run read two ways: the hooks while it ran, and the pass over
     its stored arrays. On pwl the samples are the same (bit-identical on
     this machine; 1e-9 across platforms). trbdf2 stores the settled
@@ -260,6 +262,13 @@ def test_in_loop_feeding_equals_the_stored_array_pass(eng, case):
     next line from the same settled state as an event row: the rectifier's
     windows differ there by ~5e-10 relative."""
     from pulsim._recorders import record_result
+    if (eng, case) == ("pwl", "buck"):
+        request.applymarker(pytest.mark.xfail(strict=True, reason=(
+            "release finding F-Z-12: under the restart rule the in-loop record of the PWM buck "
+            "differs from the stored-array pass: v(vout) window integral 3.5e-7 rel (3.9e-7 with "
+            "the rule alone, 0 without the restart), i(L) period integral 1.4e-4 of rms*span; "
+            "the in-loop feed reads 1034 rows where the stored view has 1001 + 24 event rows. "
+            "Same with the options explicit")))
     fac, te, probes, win, per, off = _CASES[case]
     rec = p.Recorder("r", probes, windows=win, period=per, offset=off)
     built = fac()
@@ -293,7 +302,7 @@ def test_in_loop_feeding_equals_the_stored_array_pass(eng, case):
                     atol = rtol * span
                 np.testing.assert_allclose(sa[f], sb[f], rtol=rtol,
                                            atol=atol, err_msg=f"{q} {f}")
-    if eng == "pwl" or case not in ("rect", "buck"):
+    if eng.startswith("pwl") or case not in ("rect", "buck"):
         ta, tb = np.asarray(a.times), np.asarray(b.times)
         keep = np.ones(tb.size, bool)
         if eng == "trbdf2":

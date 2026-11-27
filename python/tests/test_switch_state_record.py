@@ -150,8 +150,11 @@ def test_record_is_parallel_to_times_and_follows_mask_indices(engine):
     # step's start on the fixed engine (the restart rule samples the gate
     # there since the release; it read the step's end before), its
     # midpoint on TR-BDF2.
+    # On pwl it is the gate's RIGHT limit at the step start: the PWM edges fall on
+    # grid points (dt = T/200), where pwm(t_start) itself reads the left value for
+    # 46 of the 200 edges (t % T rounds just below 0.5 T); read 1e-6 dt inside.
     t = np.asarray(r.times)
-    q = np.concatenate(([t[0]], t[:-1] if engine == "pwl"
+    q = np.concatenate(([t[0]], t[:-1] + 1e-6 * T / 200 if engine == "pwl"
                         else 0.5 * (t[:-1] + t[1:])))
     expect = np.array([pwm(float(x)).get(0) for x in q])
     assert np.array_equal(S[1:, 0], expect[1:])

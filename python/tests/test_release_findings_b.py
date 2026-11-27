@@ -119,13 +119,30 @@ def test_f54_f55_pwl_restart_steps_close_the_bridge_charge(V_th):
     quadrature-exact identity is the in-loop recorder's (its window charge
     is C·dv to 1e-11 of scale, test_release_findings_b2). Left limits alone:
     4.9e-3 / 1.0e-3 / 1.2e-3 at V_th = 0.7 (they do not converge)."""
+    # V_th = 0: the table above is the settle's (mode_selection='legacy', named since the
+    # release default 'auto' picks the LCP for this bridge; test_..._under_the_lcp below)
+    ms = dict(mode_selection="legacy") if V_th == 0.0 else {}
     e = []
     for dt in (1e-6, 5e-7):
         b = _bridge(V_th)
-        r = _quiet(p.simulate, b, 0.06, **dict(PWL_REL, dt=dt))
+        r = _quiet(p.simulate, b, 0.06, **dict(PWL_REL, dt=dt, **ms))
         q_in, q_dc = _charges(p.with_event_limits(r))
         e.append(abs(q_in / q_dc - 1))
     assert e[0] <= 4e-4 and e[0] / e[1] >= 3.5, e
+
+
+def test_f54_f55_bridge_charge_closes_at_second_order_under_the_lcp():
+    """The release default (mode_selection='auto' -> the LCP) at V_th = 0: the
+    ideal bridge's ties are decided by the LCP, not the settle, and the charge
+    error is a plain second order: measured 2.39e-5 / 7.28e-6 / 1.83e-6 at dt
+    1 / 0.5 / 0.25 us (ratios 3.28, 3.97 -> 4; the settle's 6.1 / 8.4 is
+    faster than its order). The asymptotic ratio is asserted."""
+    e = []
+    for dt in (1e-6, 5e-7, 2.5e-7):
+        r = _quiet(p.simulate, _bridge(0.0), 0.06, **dict(PWL_REL, dt=dt))
+        q_in, q_dc = _charges(p.with_event_limits(r))
+        e.append(abs(q_in / q_dc - 1))
+    assert e[0] <= 4e-4 and e[1] / e[2] >= 3.5, e
 
 
 # ---------------------------------------------------------------------------

@@ -138,15 +138,22 @@ def _perturbed(fam, k):
     return B.Family(fam, parts, f.run).builder(0.0, form="branch")
 
 
+@pytest.mark.parametrize("cfg", ["rule", "split"])
 @pytest.mark.parametrize("mode", [None, "lcp"], ids=["default", "lcp"])
 @pytest.mark.parametrize("fam", ["bridge1_vf0", "bridge1_vf07", "bridge3_cfilter"])
-def test_rounding_fuzz_gives_one_mode_sequence(fam, mode):
+def test_rounding_fuzz_gives_one_mode_sequence(fam, mode, cfg):
     """20 last-bit perturbations of the circuit (C and R +-1..10 ulp) give one waveform and one
     diode mode sequence, up to ties: on the single-phase bridges a few samples (<= 6 of 4001, from
     t = 5.11 ms) label a diode differently while every diode carries the leak current only
     (< 1e-7 A measured: g_off * 100 V) -- the LCP and the settle both see a tie there (the survey's
-    'both' disagreements). The waveform stays within rounding (2.7e-11 V measured)."""
+    'both' disagreements). Unsplit ('rule': the restart rule alone, named since the split became
+    the default) the waveform stays within rounding (2.7e-11 V measured). Split (the release
+    default) a perturbation moves a located commutation within the locator's resolution,
+    split_snap * dt = 1e-6 * 1e-5 s, so the waveform moves by at most max|dw/dt| times that
+    (bridge1_vf0: 1.32e-7 V measured)."""
     kw = {"mode_selection": mode} if mode else {}
+    if cfg == "rule":
+        kw.update(RESTART)
     names = [d[1] for d in B.FAMILIES[fam].parts if d[0] == "D"]
 
     def run(k):
@@ -155,9 +162,10 @@ def test_rounding_fuzz_gives_one_mode_sequence(fam, mode):
                 np.asarray(r.v("p")) - np.asarray(r.v("n")),
                 np.max(np.abs([np.asarray(r.i(n)) for n in names]), axis=0))
     s0, w0, i0 = run(0)
+    tol = 1e-9 if cfg == "rule" else max(1e-9, np.max(np.abs(np.diff(w0))) / 1e-5 * 1e-6 * 1e-5)
     for k in [s * m for m in range(1, 11) for s in (1, -1)]:
         s, w, i = run(k)
-        assert np.max(np.abs(w - w0)) <= 1e-9
+        assert np.max(np.abs(w - w0)) <= tol
         rows = np.where((s != s0).any(axis=1))[0]
         if fam == "bridge3_cfilter":
             assert rows.size == 0
@@ -244,14 +252,26 @@ def test_guard_repairs_a_settle_left_in_a_wrong_mode(conductance):
     """The floating single-phase bridge (V_f = 0) ends two settles without a fixed point in a mode
     that violates D1's law (9.9e-7 V); the guard re-decides them. The waveform moves by 4.5e-13 V
     (the repaired steps carry ~0 current) and the end value is unchanged."""
+    pn = lambda r: np.asarray(r.v("p")) - np.asarray(r.v("n"))  # noqa: E731
+    # the restart-less engine (the pre-release default this was measured on, named since the
+    # restart became the default): 2 repairs, the waveform moves 4.5e-13 V
+    legacy = {"discontinuity_restart": False, **SETTLE}
     b = B.FAMILIES["bridge1_vf0"].builder(0.0)
-    off = _sim(b, 0.2, 1e-5, guard=False, **SETTLE)
-    on = _sim(B.FAMILIES["bridge1_vf0"].builder(0.0), 0.2, 1e-5, **SETTLE)
+    off = _sim(b, 0.2, 1e-5, guard=False, **legacy)
+    on = _sim(B.FAMILIES["bridge1_vf0"].builder(0.0), 0.2, 1e-5, **legacy)
     g = on.diagnostics["mode_guard"]
     assert g["repairs"] >= 1 and len(list(off.event_iteration_breaches)) >= g["repairs"]
     assert all(v > 0 for v in g["repair_violations"])
-    pn = lambda r: np.asarray(r.v("p")) - np.asarray(r.v("n"))  # noqa: E731
     assert np.max(np.abs(pn(on) - pn(off))) <= 1e-9
+    # the release default (restart + split): 24 repairs, each a real violation; a repaired
+    # step takes the restart's stages instead of the trapezoid, so mid-run the waveform moves
+    # by that path's local error (2.9e-7 V of 95 V, with the rule alone too); the end value
+    # is unchanged (2.4e-12 V measured)
+    off = _sim(B.FAMILIES["bridge1_vf0"].builder(0.0), 0.2, 1e-5, guard=False, **SETTLE)
+    on = _sim(B.FAMILIES["bridge1_vf0"].builder(0.0), 0.2, 1e-5, **SETTLE)
+    g = on.diagnostics["mode_guard"]
+    assert g["repairs"] >= 1 and all(v > 0 for v in g["repair_violations"])
+    assert abs(pn(on)[-1] - pn(off)[-1]) <= 1e-9
 
 
 @pytest.mark.parametrize("kw", [{"discontinuity_restart": True}, SPLIT], ids=["restart", "split"])

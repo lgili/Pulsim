@@ -74,14 +74,20 @@ def test_orbit_is_a_fixed_point_and_stays_one():
     # probe_scale=0.1: the period map is affine, so a probe well above the
     # restart engine's per-period round-off gives the exact columns (measured
     # residual 2.0e-11; the default 1e-4 probe: 1.9e-8, finding F-6-1 below)
-    r = p.steady_state(b, period=T, dt=DT, switch_fn=_grid_gate(b), probe_scale=0.1)
+    # release: the grid gate flips at round(t/DT), i.e. mid-step; the default event split
+    # locates that flip by bisection, where round-half-even of t/DT differs period to period
+    # (drift 4.13e-9 split, 8.7e-13 unsplit): the gate is T-periodic only for an engine that
+    # samples it on the grid, so the restart rule runs unsplit here (named). The default's
+    # orbit: test_the_split_makes_the_float_gate_periodic
+    rule = dict(discontinuity_restart=True, enable_substep_state_correction=False)
+    r = p.steady_state(b, period=T, dt=DT, switch_fn=_grid_gate(b), probe_scale=0.1, **rule)
     assert r.residual < 1e-10
     assert r.drift < 1e-10
     assert 0.0 < r.floquet_radius < 1.0     # a stable orbit
     # 100 periods from it must not move.
     far = p.simulate(b, t_end=r.snapshot.t + 100 * T, dt=DT,
                       switch_fn=_grid_gate(b),
-                      resume_from=r.snapshot)
+                      resume_from=r.snapshot, **rule)
     h_far = np.asarray(list(far.final_snapshot.history))
     assert np.abs(h_far - r.history).max() < 1e-10
 
@@ -143,7 +149,24 @@ def test_a_schedule_that_is_not_grid_periodic_is_named():
     would be a confident wrong number."""
     b = _buck()
     with pytest.raises(ValueError, match="not exactly"):
-        p.steady_state(b, period=T, dt=DT, switch_fn=_float_gate(b))
+        # the premise is the on-grid sampling of the restart-less step (named since the
+        # release); under the default split the edge is located: the test below
+        p.steady_state(b, period=T, dt=DT, switch_fn=_float_gate(b),
+                       discontinuity_restart=False)
+
+
+def test_the_split_makes_the_float_gate_periodic():
+    """Release default (restart + split): the float gate's edge at 0.42 T is
+    located inside its step, so the system is T-periodic and the orbit is
+    the grid gate's on the unsplit restart rule (the same edge, at step 210):
+    measured residual / drift 2.8e-12, orbits equal to 1.9e-12 of 5.04."""
+    b = _buck()
+    f = p.steady_state(b, period=T, dt=DT, switch_fn=_float_gate(b))
+    assert f.residual < 1e-10 and f.drift < 1e-10
+    b = _buck()
+    g = p.steady_state(b, period=T, dt=DT, switch_fn=_grid_gate(b), probe_scale=0.1,
+                       discontinuity_restart=True, enable_substep_state_correction=False)
+    np.testing.assert_allclose(f.history, g.history, rtol=0, atol=1e-10)
 
 
 def test_the_one_period_answer_can_still_be_asked_for():

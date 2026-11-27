@@ -34,7 +34,10 @@ CELLS = {
         # plain pwl's error on the conduction intervals: its left values at D1's events
         # (limits 0.020) and the same error in RMS (smooth 0.010)
         "pwl rule off": ("pwl", OFF, 0.0, 0.06, "limits"),   # 0.0204
-        "pwl": ("pwl", {}, 0.0, 0.05, "limits"),            # release default: 0.0161
+        # release default (restart + split): 2.32e-4, 88x below the rule-off cell; the event
+        # limits are now as good as the RMS between events (limits 2.27e-4 vs smooth 2.32e-4),
+        # so the worst part is 'smooth' (the rule alone, unsplit: 6.67e-4, also 'smooth')
+        "pwl": ("pwl", {}, 0.0, 1e-3, "smooth"),
         "trbdf2": ("trbdf2", {}, 0.0, 1e-5, "limits"),      # 2.6e-7
     },
     "circuits/switching/isolated/flyback_converter.yaml": {

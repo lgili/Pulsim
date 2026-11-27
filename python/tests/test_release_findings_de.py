@@ -230,17 +230,19 @@ def test_the_c_block_fires_on_every_tick_before_t_end_under_state_ticks(tmp_path
 def test_the_default_probe_finds_the_orbit_to_1e_8_on_the_restart_engine():
     """F-6-1: the columns carry the period map's round-off over the probe
     (1.9e-8 at the default probe on the restart engine). One chord step on
-    the verify run's residual takes the answer to the map's floor."""
+    the verify run's residual takes the answer to the map's floor. The
+    restart engine of F-6-1 is the rule alone (named since the split follows
+    it by default: the grid gate flips mid-step, test_steady_state)."""
     import test_steady_state as S
     b = S._buck()
     r = p.steady_state(b, period=S.T, dt=S.DT, switch_fn=S._grid_gate(b),
-                       discontinuity_restart=True)
+                       discontinuity_restart=True, enable_substep_state_correction=False)
     assert r.residual < 1e-10
     assert r.drift < 1e-10
     # the same orbit at a probe 1000x larger (the columns' error 1000x smaller)
     big = p.steady_state(S._buck(), period=S.T, dt=S.DT,
                          switch_fn=S._grid_gate(b), probe_scale=0.1,
-                         discontinuity_restart=True)
+                         discontinuity_restart=True, enable_substep_state_correction=False)
     np.testing.assert_allclose(r.history, big.history, rtol=0, atol=1e-10)
 
 

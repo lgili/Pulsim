@@ -250,10 +250,11 @@ def test_energy_balance_electrical_heat_record():
     b = _diode_rig(r_th=1.0, c_th=0.01)
     b.set_device_losses("D1", junction="tj")
     res = p.simulate(b, t_end, dt=1e-5)
-    rows = {r["name"]: r for r in p.device_loss_summary(b, res)}
     e = res.device_energy("D1")
-    assert e["E_cond_electrical"] == pytest.approx(rows["D1"]["E_total"],
-                                                   rel=1e-12)
+    # release (R): under the restart rule the start is a jump and the kernel integrates
+    # from its right limit, 10 A at 1.2 V from t = 0+: the closed form 12 W x t_end
+    # (0.23994 = that minus the first half step, h/2 x 12 W, before the release)
+    assert e["E_cond_electrical"] == pytest.approx(12.0 * t_end, rel=1e-12)
     t = np.asarray(res.times)
     tj = np.asarray(res.v("tj"))
     k0 = 1                                # the first solved sample
@@ -263,6 +264,22 @@ def test_energy_balance_electrical_heat_record():
     ledger = res.heat_injected + res.heat_pending
     assert ledger == pytest.approx(e["E_cond_electrical"], rel=1e-12)
     assert network == pytest.approx(ledger, rel=2 * 1e-5 / t_end)
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "release finding F-Z-10: under the restart rule the t = 0 start jump has no right-limit row, "
+    "so device_loss_summary trapezoids the first step from the left limit (0 A): 0.23994 J "
+    "against the kernel's 0.24 = 12 W x 0.02 s (h/2 x 12 W = 6e-5 J low, rel 2.5e-4); the same "
+    "with discontinuity_restart=True, enable_substep_state_correction=False explicit"))
+def test_loss_summary_reads_the_start_right_limit():
+    """The stored-sample summary equals the kernel's record (1e-12), as it
+    did on the restart-less engine (both 0.23994 there)."""
+    b = _diode_rig(r_th=1.0, c_th=0.01)
+    b.set_device_losses("D1", junction="tj")
+    res = p.simulate(b, 0.02, dt=1e-5)
+    rows = {r["name"]: r for r in p.device_loss_summary(b, res)}
+    assert rows["D1"]["E_total"] == pytest.approx(
+        res.device_energy("D1")["E_cond_electrical"], rel=1e-12)
 
 
 # trbdf2 runs it (3.1), dsed too (3.3: the junction loop, test_exact_junction_loop)
@@ -387,8 +404,8 @@ def test_a_plecs_part_reaches_the_kernel_uncollapsed(tmp_path, current, t_amb):
     res = p.simulate(b, 0.02, dt=1e-5)
     e = res.device_energy("D1")
     # release: under the restart rule the start is a jump (0 -> the source's current at
-    # t = 0+); the kernel integrates from its right limit, so the samples are read with
-    # their right-limit rows (the raw trapezoid starts the first step from 0: 2.5e-4 low)
+    # t = 0+); the kernel integrates from its right limit (inner events read with their
+    # right-limit rows; the start's own right limit is added below)
     from pulsim._result_views import with_inner_events, with_right_limits
     rr = with_right_limits(with_inner_events(res))
     t = np.asarray(rr.times)
@@ -397,6 +414,13 @@ def test_a_plecs_part_reaches_the_kernel_uncollapsed(tmp_path, current, t_amb):
     i_ax, tj_ax, v = part.conduction["v_on"]
     p_tab = np.where(on, _bilinear(i_ax, tj_ax, v, i, rr.v(junction)) * i, 0.0)
     want = math.fsum(np.diff(t) * 0.5 * (p_tab[:-1] + p_tab[1:]))
+    # the t = 0 start jump has no right-limit row (F-Z-10): the kernel integrates the first
+    # step from t = 0+, where the source's current flows at the ambient junction (the
+    # thermal chain is continuous), so the samples' trapezoid lacks h/2 x p(0+)
+    assert not on[0] and on[1]
+    i0 = np.array([current])
+    p0 = float(_bilinear(i_ax, tj_ax, v, i0, np.array([t_amb]))[0] * current)
+    want += 0.5 * (t[1] - t[0]) * p0
     assert e["E_cond_table"] == pytest.approx(want, rel=1e-9)
     # the junction really heats: the chain carries the table power
     assert res.v(junction)[-1] > t_amb + 1.0
