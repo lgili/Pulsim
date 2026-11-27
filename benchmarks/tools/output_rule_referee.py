@@ -291,21 +291,24 @@ def referee(case, res, info, cols, rt, config: str = "auto+next") -> dict:
     # controller lives in its Python objects and continues across windows). Streamed (F-R-1):
     # a window is read once the next one is known (a jump of the reference at the seam belongs
     # to both), then released; only the event times and jump instants are kept.
-    b, sw, obs = case.build()
-    args = dict(engine=eng, t_start=case.t_start)
-    if sw is not None:
-        args["switch_fn"] = sw
-    if obs is not None:
-        args["step_observer"] = obs
-    if not case.uic:
-        b0, sw0, _ = case.build()
-        x0 = case._dc_start(b0, sw0)
-        if x0 is not None:
-            args["initial_state"] = x0
     eg_all, jumps_tg, pending, last = [], np.zeros(0), None, None
     snap, n_windows, n_ref, n_seams, t_prev = None, 0, 0, 0, None
     with warnings.catch_warnings(), nd.builder_form(spec["form"]), nd.plan_defaults(spec.get("plan", False)):
         warnings.simplefilter("ignore")
+        # built under the cell's builder form (as run_cell builds the rule run): built outside
+        # it, the reference was another circuit form with another column set, and no stored
+        # column was read (cl_buck_pi: 13 columns against 11)
+        b, sw, obs = case.build()
+        args = dict(engine=eng, t_start=case.t_start)
+        if sw is not None:
+            args["switch_fn"] = sw
+        if obs is not None:
+            args["step_observer"] = obs
+        if not case.uic:
+            b0, sw0, _ = case.build()
+            x0 = case._dc_start(b0, sw0)
+            if x0 is not None:
+                args["initial_state"] = x0
         kw = ({k: v for k, v in nd.profile_kwargs(eng).items() if k != "output_rtol"}
               if spec.get("profile") else dict(spec.get("kw") or {}))
         kw.pop("output_rtol", None)
