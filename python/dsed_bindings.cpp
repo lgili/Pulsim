@@ -931,6 +931,9 @@ void init_module(py::module_& m) {
                 ? py::int_(nr["n_output_samples"]) : py::int_(0);
             og["n_output_floored"] = nr.contains("n_output_floored")
                 ? py::int_(nr["n_output_floored"]) : py::int_(0);
+            // of them, the calls certified only by the basis-inconsistency floor (F-X-8)
+            og["n_output_inconsistent"] = nr.contains("n_output_inconsistent")
+                ? py::int_(nr["n_output_inconsistent"]) : py::int_(0);
             const auto fr = vec("output_floor_row");
             double fmax = 0.0;   // numpy's max: a NaN propagates
             for (std::size_t j = 0; j < fr.size(); ++j) {
@@ -1799,6 +1802,7 @@ void init_module(py::module_& m) {
                 d["n_output_unbounded"] = sim.n_output_unbounded();
                 d["output_budget_t"] = sim.output_budget_t();
                 d["n_output_floored"] = sim.n_output_floored();
+                d["n_output_inconsistent"] = sim.n_output_inconsistent();
                 const auto& fr = sim.output_floor_row();
                 d["output_floor_row"] = std::vector<double>(fr.data(), fr.data() + fr.size());
                 d["n_projections"] = sim.n_projections();

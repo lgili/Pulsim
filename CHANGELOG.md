@@ -51,6 +51,27 @@ above.
   does (|lambda| / dt). The kernel design evaluator hands a period with a
   cut-set record to the Python path.
 
+### Fixed engine: the restart after a split sliver probes at the next grid step
+
+- **A gate edge a tiny fraction of dt before a grid point no longer leaves a
+  stiff mode ringing** (`pwl`, `discontinuity_restart` + event split, F-Z-3).
+  The split cut the step at the edge, so the event's restart probe spanned only
+  γ·(the sliver after it): a 1 ps mode of a hard-switched capacitor, gated
+  1e-5·dt (1e-3·dt) before the grid point, rang ±2.25 A under trapezoid (max
+  deviation 1.022 A / 0.362 A; the rule alone 1.8e-15 A). When a split's last
+  event piece is shorter than γ·dt (the restart's own stage 1), the next grid
+  step is a restart whose impulse probe reads what is left as a jump at its
+  start; where the probe finds none it is the plain restart, bit for bit on a
+  linear circuit (with Newton devices the probe also runs the edge-mode
+  decision). Split-off runs are byte-identical. The anchor is carried by
+  `SolverSnapshot.restart_anchor_at_end` across an in-process resume and the
+  periodic-steady-state period map; it is not pickled: a resume from a
+  pickled copy taken on such a step probes it as a plain window step, and its
+  first sample is wrong (the hard-switched capacitor test: switch current
+  ~470 A off at the first resumed step; every later row bit-identical). The split also
+  reuses the previous step's end gate read as the step's start (one
+  `switch_fn` call per step fewer, results identical).
+
 ### TR-BDF2: a turn-off landing commits its diode
 
 - **A diode turn-off landed within round-off of its zero now switches at the
@@ -94,6 +115,23 @@ above.
   allocate. A step that retries after a failed Newton solve allocates about
   10 to 16 times, for the failure's error message. A test holds that bound;
   the allocation itself is not fixed yet.
+
+### Exact engine output rule
+
+- **The rule's cost no longer follows the last bit (F-X-8).** Under
+  `output_rtol`, a fast mode whose content does not decay as its own closed
+  form says (the eigenbasis's error, 0.4 ps modes of paralleled branch-form
+  bridges) was re-read as a fresh transient at every call and cut each
+  interval to ~1 ps until the 4096-sample cap: seven bridges took 660 934
+  samples on macOS and 14 113 on Linux; ten took 1 877 398 on Windows
+  (2185 s). That part is now measured between two instants of one flow and
+  taken out of the bound of a step it cuts; where that lengthens the step the
+  bound with it is the row's floor there (`output_floor_by_column`), counted in
+  `diagnostics['output_grid']['n_output_inconsistent']` with a RuntimeWarning
+  (`output_inconsistent`). Seven bridges: 12 795 samples, no capped interval;
+  ten: 16 264; last-bit perturbations of `t_end` / amplitudes stay within
+  12 795–20 726. Rule off: unchanged (byte-identical). The win32 skip of
+  `test_fx1_ten_branch_form_bridges_run_under_the_rule` is removed.
 
 ### Exact engine, phase 3 slice (add-exact-propagator-strategy groups 7, 10)
 

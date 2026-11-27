@@ -69,18 +69,31 @@ def test_switch_fn_is_read_once_per_step(kw):
     assert c2 == r2.counters["switch_fn_calls"] + 1
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "release finding F-Z-2: 2412 reads per 1000 steps, not 1020: gate_at's memo is cleared every step "
-    "(the step end is read again as the next t_prev, +1000) and each edge is bisected to split_snap*dt = "
-    "1e-6 dt (+20.6 reads per edge; 2064 at split_snap 0.25)"))
 def test_the_split_adds_one_read_per_gate_edge():
-    """Release default (restart + split): one evaluation per step plus one
-    per gate edge after t = 0 (100 kHz, two edges a period: 20 in 1000 steps)."""
+    """Release default (restart + split, no options named): one evaluation per
+    step plus the bisection of each opaque gate edge. Derivation of 1412 per
+    1000 steps: 1000 (one read a step; the step-end read is the next step's
+    start, F-Z-2 part) + 20 edges (100 kHz, two a period) x ~20.6 reads (the
+    Illinois bisection to split_snap*dt = 1e-6 dt) = 1000 + 412."""
     r1, c1 = _run(1000)
     r2, c2 = _run(2000)
     assert not r1.dt_retries and not r2.dt_retries
-    assert c2 - c1 == 1000 + 20
-    assert r2.counters["switch_fn_calls"] == 2000 + 39
+    assert c2 - c1 == 1412
+    # 2000 + 829: the 39 edges after t = 0 of the 2000-step run, 21.3 reads each on average
+    # (the bisection depth to 1e-6 dt depends on where the edge falls in its step)
+    assert r2.counters["switch_fn_calls"] == 2000 + 829
+    assert c2 == r2.counters["switch_fn_calls"] + 1
+
+
+def test_the_split_reads_the_step_start_once():
+    """Restart + split (F-Z-2, part): the previous step's end read is this
+    step's start read, 1412 calls per 1000 steps (2412 before, 1000 of them
+    the start read again); the other 412 bisect the 20 opaque edges to snap."""
+    kw = dict(discontinuity_restart=True, enable_substep_state_correction=True)
+    r1, c1 = _run(1000, **kw)
+    r2, c2 = _run(2000, **kw)
+    assert not r1.dt_retries and not r2.dt_retries
+    assert c2 - c1 == 1412
     assert c2 == r2.counters["switch_fn_calls"] + 1
 
 

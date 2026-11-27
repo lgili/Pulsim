@@ -1600,7 +1600,7 @@ reviewer on 79330ab7..5613abbe (scoping + lazy root error came after the review)
   (`interpolable` in the test, release branch); the 4 "events differ" referee units and
   boost_pfc_open_loop's DiodeModeInconsistentError under the rule's referee route.
 
-## Windows: ten bridges under the rule (orchestrator, 2026-11-26) — OPEN
+## Windows: ten bridges under the rule (orchestrator, 2026-11-26) — CLOSED (F-X-8, 2026-11-27)
 
 CI on PR #150 head a5a1f19b: `test_fx1_ten_branch_form_bridges_run_under_the_rule[constant]`
 hit the 900 s test timeout on `windows-latest` under Python 3.10, 3.11, 3.12 and 3.13, in the
@@ -1661,3 +1661,61 @@ should be far smaller than 4096 and 2e6 for a chord bound that keeps hitting the
 case's sample count is bounded on every platform, and the skip can come off. Not measured:
 which column or row drives the capped intervals after 15.27 ms; why the Windows engine is
 2.75x slower (no profile was taken).
+
+### F-X-8: the cause and the fix (branch `fix/core-output-rule-capped-intervals`, 2026-11-27)
+
+Reproduced on macOS with seven bridges (660 934 samples, 158 capped). Instrumenting the capped
+intervals (every 256th cut past 3000 in an interval): every one of 1264 readings is the same
+row, recovered row 5 (bounded row 29 of 152; state n = 24), and the bisection returns 0.99 ps.
+The bound there is all saturation part (`S` = 4.3e-3 against a tolerance of 1.66e-3): modes
+18 / 19 / 14, λ = −2.5e12 /s (0.4 ps), |V_jk| = 2.6e10 on that row, |z_k| = 3.6e-14, w_k = 0.
+|z_k| is not the rounding of V⁻¹x (|z| / (u·Σ|V⁻¹_ki||x_i|) = 8.7e5), and it is CONSTANT: the
+same 3.631e-14 at cut 3072, 3328, 3584, 3840 (250 ps, where its own closed form says e^-625)
+and in the next interval. So it is not a transient: it is the eigenbasis's (or the
+propagator's) inconsistency, ~2e-10 of the slow state read along a computed fast mode, re-read
+as a fresh transient at every call; a 0.4 ps transient needs ~1 ps cuts, so the interval
+cut to the cap. Its size follows the last bits of the eigensolver (hence 10–25× between
+platforms in `output_floor_max`), and the cap turned that into thousands of samples.
+
+Why the existing floor did not catch it: the rounding floor 16·u·Σ|O||V||z| scales with |z|,
+which is the noise itself (2.9e-6 there); a floor from u·|V⁻¹||x| is 1e6 too small.
+
+Fix (exact_lti.hpp `exact_chord_step`, the scheduler resets it): within one LTI flow
+z̈_k(t) = z̈_k(t_p)·e^{λ_k(t − t_p)} exactly. At each counted rule call the previous distinct
+instant of the same flow (same mode, same interval: reset at every event, time event, state
+kick; not on the deferral's re-checks) gives, per mode with |ρ| = |e^{λΔ}| ≤ 1/2, the constant
+part c_k = (z̈_k − ρ z̈_k(t_p)) / (1 − ρ) (a constant part leaves exactly this residue). The step
+is solved first with the measured z̈ (unchanged); only a step it cuts is solved again with
+g_k = z̈_k − c_k, and when that step is longer, the measured bound AT that step is the row's
+floor (`output_floor_row` / `output_floor_by_column`), counted in `n_output_inconsistent`, with
+a RuntimeWarning `output_inconsistent` once per run. So every stored line is within
+max(rtol·range, reported floor) of the bound's own model. A measured floor, not a futility
+stop: a mode that decays as it should has c ≈ 0, and a step the measured bound does not cut,
+or whose length g does not change, is bit-identical. (A first version added Σ|P_jk| s_k ν_k
+to the tolerance; the reviewer showed it could excuse other modes' curvature when mode k is
+in the curvature set: replaced.)
+
+| case (macOS arm64, rule on, `t_end` 0.02) | before: samples / capped / s | after: samples / capped / inconsistent / s |
+|---|---|---|
+| 7 bridges | 660 934 / 158 / 147.5 | 12 795 / 0 / 206 / 9.1 |
+| 7, `t_end`·(1 + 1e-15) | 660 934 / 158 / 154.9 | 12 795 / 0 / 206 / 9.1 |
+| 7, `t_end`·(1 − 1e-15) | 660 934 / 158 / 155.4 | 12 795 / 0 / 206 / 9.2 |
+| 7, amplitude·(1 + 1e-15) | 14 118 / 0 / 9.1 | 14 104 / 0 / 370 / 9.6 |
+| 7, amplitude·(1 − 1e-15) | 13 356 / 0 / 9.3 | 13 355 / 0 / 29 / 9.4 |
+| 6 / 8 bridges | 12 237 / 0, 15 213 / 0 | 12 236 / 0, 15 213 / 0 |
+| 10 bridges (the test's case) | 16 264 / 0 / 22.8 (Linux 216 675 / 49, Windows 1 877 398 / 454) | 16 264 / 0 / 270 / 23.3 |
+| 10, `t_end`·(1 ± 1e-15) | | 16 264 / 0 / 23.2, 16 264 / 0 / 23.2 |
+| 10, amplitude·(1 ± 1e-15) | | 16 328 / 0 / 22.6, 20 726 / 0 / 25.1 |
+| 9 / 11 bridges | | 17 515 / 0 / 17.3, 19 486 / 0 / 29.6 |
+
+Every perturbation lands within 12 795–20 726 samples, 0 capped (final code, `.scratch/orule/stageA2.log`). Rule off: byte-identical on
+7 and 10 bridges and on the 100 property units (`.scratch/f4/prop_units_all.txt`, exact engine,
+times + states hashed). Rule on, the 100 units: 99 byte-identical; active_clamp_forward
+differs (same 62 418 samples, 7 inconsistent calls): its chords against a dense rule-on run
+(rtol 1e-7, same 674 events) read 0.999817 of the promise before and after (the referee
+itself cannot read this unit: "reference events differ: 674 vs 675", before and after). The
+bridges' uncapped runs lose 0–14 samples where the ν-floor applied (14 118 → 14 104).
+
+State: CLOSED on macOS evidence; the win32 skip is removed and the 10-bridge test asserts
+`n_output_capped == 0`. Verification on 104ff594 (macOS): exact files 144 passed; referee 100 units, 93 comparable, worst 0.99991, none above 1, same as session 10; ctest 1105/1105; pytest 7538 passed (the ten-bridge case 56.7 s per gate); `-m reference` 414 passed; ruff, stubs and openspec clean. Windows: CI run 45934328900, not read yet. Not measured: why the Windows engine is 2.75×
+slower rule-free.

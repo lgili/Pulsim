@@ -22,7 +22,7 @@ EXPECTED_SOLVE_POINT = {"run_transient.hpp": 7, "trbdf2_transient.hpp": 5}
 def test_every_direct_solve_is_tagged():
     for name, n_point in EXPECTED_SOLVE_POINT.items():
         untagged, points = [], 0
-        for k, line in enumerate((SOLVER / name).read_text().splitlines(), 1):
+        for k, line in enumerate((SOLVER / name).read_text(encoding="utf-8").splitlines(), 1):
             code = line.split("//", 1)[0]
             if not CALL.search(code):
                 continue
