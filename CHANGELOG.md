@@ -6,6 +6,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Device interface: the nonlinear capacitor stamps as its hand stamp, to the bit (F-Z-7)
+
+- With `device_path='interface'` the `NonlinearCapacitor` (C_oss) law's residual was assembled as `a·q + r` (`q/h − q_n/h`), rounding relative to `a·Q` instead of the step's increment: an `eps·Q/h` Newton floor that reached ~1e-6 A on a sub-femtosecond `esdirk43` stage (the release line's case A aborted at h_min at `t_end` 4.5951e-6 s). The q-only rows now take the hand stamp's increment form `a·(q − q_n)` (and `(c1·q + c2·q_γ + c3·q_n)/h` in the BDF2 stage), the junction tangent the model's `C0/(1+u)^m`, the BDF2 conductance `c1·C/h` and the backward-Euler commit `(q − q_n)/h`. Case A now runs to the same bits on both device paths (41 of 41 seeded run lengths, `trbdf2` and `esdirk43`; before: 0 of 41). Runs on the default `device_path='legacy'` are unchanged.
+
 ### Recorders: under the restart rule, integrals by the method, samples by the states (F-Z-12)
 
 - With `discontinuity_restart=True` a restart step is fed to an in-loop recorder twice: its integral-type fields (`integral`, `avg`, `rms`) take the step's SDIRK stage quadrature as before (so `∫i_C dt = C·Δv` and the energy ledgers close to round-off), and its sample-type outputs (kept rows, `min` / `max` and their times, requested times, event rows) take states of the trajectory only — step ends and the limits at events. Before, the quadrature line starts and held other-mode stage rows leaked into the samples: a PWM buck's window max read 21.5298249 V, a value no state had (now 21.5294326), and every restart step's line start was reported as a jump row (123 event rows against 41 real events).

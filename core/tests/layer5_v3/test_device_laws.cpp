@@ -244,6 +244,74 @@ TEST_CASE("the Coss law stamps, commits and captures as the hand stamp",
     }
 }
 
+TEST_CASE("the Coss law's residual at an esdirk43 stage is the hand stamp's, "
+          "to round-off of the increment", "[device][laws]") {
+    // F-Z-7: a stage of h ~ 1e-16 s from a base ψ next to Q(v). The hand
+    // stamp rounds (q − ψ)/h relative to the increment; the law took
+    // q/h − ψ/h, eps·Q/h apart: 1e-6 A at 400 V on case A, Newton at h_min.
+    // Same operations now: the residual is the hand stamp's to the bit.
+    const auto jn = models::NonlinearCapacitor::junction(1e-9, 25.0, 0.5);
+    const std::array<models::NonlinearCapacitor::Params, 3> laws{
+        jn, models::NonlinearCapacitor::vdmos_cgd(2e-9, 1e-10, 0.3),
+        models::NonlinearCapacitor::tanh_law(2e-6, 1e-7, 5.0)};
+    for (std::size_t law = 0; law < laws.size(); ++law) {
+        INFO("law " << law);
+        Lcg rng{101u + law};
+        for (int t = 0; t < 100; ++t) {
+            Vector x(2);
+            x[0] = rng(0.0, 400.0);
+            x[1] = 0.0;
+            const Real q = models::NonlinearCapacitor::charge(laws[law], x[0]);
+            for (Real h : {1e-16, 1e-12, 1e-9}) {
+                pwl::NonlinearCapacitorHistory hist;
+                pwl::NonlinearCapacitorHistory::Entry e{};
+                e.from = 0;
+                e.to = 1;
+                e.params = laws[law];
+                e.i_prev = rng(-10.0, 10.0);
+                hist.mutable_entries().push_back(e);
+                hist.mutable_q_gamma().assign(1, q * (1.0 + rng(-1e-9, 1e-9)));
+                const Real psi = q * (1.0 + rng(-1e-12, 1e-12));
+                const Real dpsi = psi - q;
+                hist.stage_base(&psi, &dpsi);   // the stage's base, as ed_stages sets it
+                for (auto st : {pwl::TrBdf2Stage::BackwardEuler,
+                                pwl::TrBdf2Stage::Trapezoidal,
+                                pwl::TrBdf2Stage::Bdf2Stage2}) {
+                    INFO("h " << h << " stage " << static_cast<int>(st));
+                    sparse::Matrix Jh(2, 2), Ji(2, 2);
+                    Vector fh = Vector::Zero(2), fi = Vector::Zero(2);
+                    pwl::refresh_nonlinear_capacitors(x, Jh, fh, hist, h,
+                                                      pwl::coss_stage_of(st),
+                                                      &hist.q_gamma());
+                    pwl::iface::stamp(hist, x, Ji, fi, h, st, false);
+                    CHECK(fi[0] == fh[0]);
+                    CHECK(fi[1] == fh[1]);
+                    for (Index r = 0; r < 2; ++r) {
+                        for (Index c = 0; c < 2; ++c) {
+                            // the junction's C0/(1+u)^m is the model's to the bit;
+                            // VDMOS's AD tangent and tanh's sech² to ulps
+                            if (law == 0) {
+                                CHECK(dense(Ji, r, c) == dense(Jh, r, c));
+                            } else {
+                                CHECK(close(dense(Ji, r, c), dense(Jh, r, c),
+                                            dense(Jh, r, c), 4));
+                            }
+                        }
+                    }
+                    // commit: the same increment; the hand BE commit divides
+                    // by h where its stamp multiplies by 1/h (one rounding)
+                    auto hl = hist, hi = hist;
+                    hl.commit(x, h, st);
+                    pwl::iface::commit(hi, x, h, st);
+                    const Real il = hl.entries()[0].i_prev;
+                    CHECK(close(hi.entries()[0].i_prev, il, il, 2));
+                    CHECK(hi.entries()[0].q_prev == hl.entries()[0].q_prev);
+                }
+            }
+        }
+    }
+}
+
 TEST_CASE("the saturable-inductor law stamps, commits and captures as the "
           "hand stamp", "[device][laws]") {
     models::SaturableInductor::Params atan;
