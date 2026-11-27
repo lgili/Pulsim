@@ -17,6 +17,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   tolerance level (a diode that turned off one 2.2e-15 s step after the
   landing now turns off at it).
 
+### Fixed step: the event split's re-initialisation record (F-Z-1)
+
+- **With the event split (`enable_substep_state_correction=True`) a cut-set /
+  capacitor-loop record is taken at the located edge** — its time and the
+  state there (i_L(t_e-)), not the step start's t_prev and x_prev. The state
+  was already cut at the edge; only the record (and the loss tracker's
+  impulse it books) read the step start: an edge at 99.999 h was recorded at
+  99 h with i_L(99 h). Without the split nothing changes.
+
 ### TR-BDF2: edge probes and the floating-point fixed point
 
 - **An edge probe that passes only as a floating-point fixed point is retaken

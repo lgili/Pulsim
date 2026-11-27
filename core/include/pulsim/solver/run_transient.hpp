@@ -1908,6 +1908,11 @@ inline SimulationResult run_transient(
         bool ev_overflow = false;
         bool capture_first = false;
         Real gate_t0 = Real{0};
+        // F-Z-1: the split instant a step's last mode change was taken at and
+        // the state there (its left limit), for the dependent-mode record.
+        // NaN: none this step (the record reads t_prev and x_prev).
+        Real mode_ev_t = std::numeric_limits<Real>::quiet_NaN();
+        Vector mode_ev_x, mode_ev_x_scratch;
         topology::SwitchStateMask mask_pre;
         Size iters = 0;
         bool flipped = false;
@@ -3793,6 +3798,7 @@ inline SimulationResult run_transient(
             // t (the next step's; a source jump is read at its left
             // limit by this step's last solve).
             n_ev = 0;
+            mode_ev_t = std::numeric_limits<Real>::quiet_NaN();
             ev_overflow = false;
             capture_first = false;   // keep the first solve (diode split)
             if (split) {
@@ -4351,7 +4357,14 @@ inline SimulationResult run_transient(
             }
             lines.m_a = stamped_mask;   // the mode the (sub)step starts in
             lines.end_own = false;
+            const auto mode_in = stamped_mask;
+            const bool split_in = split && inner;   // (the split off: the step start, as before)
+            if (split_in) mode_ev_x_scratch = x;
             run_restart(run_event_iteration, a, h, loc, ev);
+            if (split_in && !(stamped_mask == mode_in)) {   // a split event changed the mode
+                mode_ev_t = a;
+                std::swap(mode_ev_x, mode_ev_x_scratch);
+            }
             if (inner && j >= StepLines::kMax) return;
             if (inner) {   // the event's right limit (state value)
                 lines.held[j] = false;
@@ -4487,6 +4500,9 @@ inline SimulationResult run_transient(
             const Size ip0 = impulse_pending.size(), fb0 = result.n_right_limit_fallbacks;
             const Size ij0 = ideal_pending.size();
             const Real erl0 = event_rl_t;
+            const Real mev0 = mode_ev_t;
+            Vector mevx0;
+            if (!std::isnan(mev0)) mevx0 = mode_ev_x;
             const Real rlt0 = rl_loc.t;   // the only field consumed (event_right_limit)
             const Real owner0 = lines.owner;
             const Size n0 = lines.n;
@@ -4521,6 +4537,8 @@ inline SimulationResult run_transient(
                 ideal_pending.resize(ij0);
                 result.n_right_limit_fallbacks = fb0;
                 event_rl_t = erl0;
+                mode_ev_t = mev0;
+                if (!std::isnan(mev0)) mode_ev_x = mevx0;
                 rl_loc.t = rlt0;
                 lines.owner = owner0;
                 lines.n = n0;
@@ -5235,6 +5253,7 @@ inline SimulationResult run_transient(
                         L->owner = t_step;
                     }
                     split_events.clear();
+                    mode_ev_t = std::numeric_limits<Real>::quiet_NaN();
                     rs_first_valid = false;
                     impulse_pending.clear();
                     ideal_pending.clear();
@@ -5922,13 +5941,15 @@ inline SimulationResult run_transient(
             }
             // add-branch-form-ideal-switch D4 (task 5.1): a dependent mode
             // entered this step was re-initialised by the SDIRK x3 restart;
-            // record the explicit projection from the step's start state.
-            // shortcut: x- is the state at the step start (with the event
-            // split, not the split instant); the record's t is t_prev.
+            // record the explicit projection from the state the mode was
+            // entered from: with the event split, the left limit at the
+            // split instant that changed the mode (F-Z-1), else the step start.
             if (structure.active()) {
+                const bool at_ev = !std::isnan(mode_ev_t);
+                const Real t_in = at_ev ? mode_ev_t : t_prev;
                 const auto& now = structure.check(stamped_mask, true);
-                refuse_dependent(now, stamped_mask, t_prev);
-                reinit.record(structure, stamped_mask, x_prev, x, t_prev,
+                refuse_dependent(now, stamped_mask, t_in);
+                reinit.record(structure, stamped_mask, at_ev ? mode_ev_x : x_prev, x, t_in,
                               k % opts.store_every == 0
                                   ? static_cast<long>(result.times.size()) - 1
                                   : -1L,
