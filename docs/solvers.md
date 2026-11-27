@@ -38,6 +38,11 @@ Pulsim's transient kernel supports two **fixed-step** integrators
   event, then the SDIRK window from it. Edges off the grid become
   second order (buck D = 0.4567, `v_C` at T/50: 8.08e-2 V snapped,
   1.07e-6 V split); `res.n_split_steps` counts the split steps.
+  `split_snap` (a fraction of dt, default 1e-6; 2.1.0's was 0.01) is the
+  split's snap band: an event that close to a grid point is taken at it
+  instead of cutting a sliver, and events that close merge. Pass
+  `split_snap=0.01` for 2.1.0's behaviour; it must lie in [1e-12, 0.25] and
+  needs the split on (`OptionsError` otherwise).
   A jump the restart finds (or an ideal element's) is reported by
   `res.reinit_records`; an in-loop recorder's lines start from the
   post-jump state, so a window integral is the regular part, as on

@@ -150,6 +150,7 @@ engine accepts a keyword and ignores it. The defaults are
 | `newton_roundoff_budget` | yes | yes | refused | 130 |
 | `enable_substep_state_correction` | yes | refused | refused | False |
 | `discontinuity_restart` | yes | refused | refused | False |
+| `split_snap` | yes | refused | refused | 1e-6 (2.1.0: 0.01) |
 | `resolution_diagnostics` | yes | refused | refused | False |
 | `on_impulse` | yes | yes | yes | 'record' |
 | `inductor_freeze_di_max` | yes | refused | refused | None (off) |

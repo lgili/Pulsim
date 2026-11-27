@@ -1919,6 +1919,9 @@ class SolverOptions:
     # Fixed engine: three SDIRK(2,2) steps after every discontinuity,
     # gate sampled at the step start (None = off).
     discontinuity_restart: Optional[bool] = None
+    # Fixed engine: the event split's snap, a fraction of dt in
+    # [1e-12, 0.25]; needs the split on (None = 1e-6; 2.1.0: 0.01).
+    split_snap: Optional[float] = None
     # Fixed engine: record res.resolution and warn once
     # (ResolutionWarning) when dt does not resolve the circuit
     # (None = on).
@@ -2311,7 +2314,7 @@ _SOLVER_KW = ("enable_nonlinear_refresh", "max_newton_iterations",
               "max_event_iterations", "store_every", "auto_regularize",
               "tol_newton_dx", "tol_newton_res", "enable_newton_line_search",
               "enable_newton_lm", "enable_substep_state_correction",
-              "discontinuity_restart", "resolution_diagnostics",
+              "discontinuity_restart", "split_snap", "resolution_diagnostics",
               "inductor_freeze_di_max", "inductor_abs_clamp", "integrator",
               "rtol", "atol", "dt_init")
 
@@ -2429,6 +2432,7 @@ def simulate(
     newton_roundoff_budget: Optional[int] = None,
     enable_substep_state_correction: Optional[bool] = None,
     discontinuity_restart: Optional[bool] = None,
+    split_snap: Optional[float] = None,
     resolution_diagnostics: Optional[bool] = None,
     on_impulse: str = "record",
     device_path: str = "legacy",
@@ -2887,7 +2891,7 @@ def simulate(
             max_dt_halvings, voltage_sanity_factor, store_every, auto_regularize,
             tol_newton_dx, tol_newton_res, enable_newton_line_search) + (
             enable_newton_lm, newton_roundoff_budget,
-            enable_substep_state_correction, discontinuity_restart,
+            enable_substep_state_correction, discontinuity_restart, split_snap,
             resolution_diagnostics, on_impulse, device_path,
             inductor_freeze_di_max, inductor_abs_clamp, progress, initial_state,
             should_continue, closed_loops, live_stream, mmc_arms, on_cache,
@@ -3478,8 +3482,8 @@ def _plan_run(
     voltage_sanity_factor, store_every, auto_regularize, tol_newton_dx,
     tol_newton_res, enable_newton_line_search, enable_newton_lm,
     newton_roundoff_budget, enable_substep_state_correction,
-    discontinuity_restart, resolution_diagnostics, on_impulse, device_path,
-    inductor_freeze_di_max, inductor_abs_clamp, progress, initial_state,
+    discontinuity_restart, split_snap, resolution_diagnostics, on_impulse,
+    device_path, inductor_freeze_di_max, inductor_abs_clamp, progress, initial_state,
     should_continue, closed_loops, live_stream, mmc_arms, on_cache,
     controller_period, resume_from, control_tick, solver, sensitivities,
     mode_selection, allow_implicit_segments, undriven, recorders, output_rtol,
@@ -3496,7 +3500,7 @@ def _plan_run(
         max_dt_halvings, voltage_sanity_factor, store_every, auto_regularize,
         tol_newton_dx, tol_newton_res, enable_newton_line_search) + (
         enable_newton_lm, newton_roundoff_budget,
-        enable_substep_state_correction, discontinuity_restart,
+        enable_substep_state_correction, discontinuity_restart, split_snap,
         resolution_diagnostics, on_impulse, device_path,
         inductor_freeze_di_max, inductor_abs_clamp, progress, initial_state,
         should_continue, closed_loops, live_stream, mmc_arms, on_cache,
@@ -3567,7 +3571,7 @@ def _plan_run(
                 max_event_iterations, store_every, auto_regularize,
                 tol_newton_dx, tol_newton_res, enable_newton_line_search,
                 enable_newton_lm, enable_substep_state_correction,
-                discontinuity_restart, resolution_diagnostics,
+                discontinuity_restart, split_snap, resolution_diagnostics,
                 inductor_freeze_di_max, inductor_abs_clamp, integrator, rtol,
                 atol, dt_init)
         if enable_nonlinear_refresh is None:
@@ -3598,6 +3602,8 @@ def _plan_run(
                 solver.enable_substep_state_correction)
         if discontinuity_restart is None:
             discontinuity_restart = solver.discontinuity_restart
+        if split_snap is None:
+            split_snap = solver.split_snap
         if resolution_diagnostics is None:
             resolution_diagnostics = solver.resolution_diagnostics
         if inductor_freeze_di_max is None:
@@ -3617,7 +3623,7 @@ def _plan_run(
             max_event_iterations, store_every, auto_regularize,
             tol_newton_dx, tol_newton_res, enable_newton_line_search,
             enable_newton_lm, enable_substep_state_correction,
-            discontinuity_restart, resolution_diagnostics,
+            discontinuity_restart, split_snap, resolution_diagnostics,
             inductor_freeze_di_max, inductor_abs_clamp, integrator, rtol,
             atol, dt_init))
 
@@ -3679,6 +3685,7 @@ def _plan_run(
         "max_dt_halvings": max_dt_halvings, "store_every": store_every,
         "enable_substep_state_correction": enable_substep_state_correction,
         "discontinuity_restart": discontinuity_restart,
+        "split_snap": split_snap,
         "resolution_diagnostics": resolution_diagnostics,
         "inductor_freeze_di_max": inductor_freeze_di_max,
         "inductor_abs_clamp": inductor_abs_clamp, "progress": progress,
@@ -4118,6 +4125,7 @@ def _plan_run(
             newton_roundoff_budget=newton_roundoff_budget,
             enable_substep_state_correction=enable_substep_state_correction,
             discontinuity_restart=discontinuity_restart, on_impulse=on_impulse,
+            split_snap=split_snap,
             mode_selection=mode_selection, mode_guard=_PWL_MODE_GUARD,
             device_path=device_path,
             control_tick=control_tick,
