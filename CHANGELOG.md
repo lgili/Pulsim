@@ -6,6 +6,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Recorders: under the restart rule, integrals by the method, samples by the states (F-Z-12)
+
+- With `discontinuity_restart=True` a restart step is fed to an in-loop recorder twice: its integral-type fields (`integral`, `avg`, `rms`) take the step's SDIRK stage quadrature as before (so `∫i_C dt = C·Δv` and the energy ledgers close to round-off), and its sample-type outputs (kept rows, `min` / `max` and their times, requested times, event rows) take states of the trajectory only — step ends and the limits at events. Before, the quadrature line starts and held other-mode stage rows leaked into the samples: a PWM buck's window max read 21.5298249 V, a value no state had (now 21.5294326), and every restart step's line start was reported as a jump row (123 event rows against 41 real events).
+- The stored-array pass sees states only and integrates their trapezoid. The two feeds now agree bit for bit on every sample-type output and event row; integral-type fields are identical off restart steps and differ on a restart piece of length h by `|γ − 1/4|·h³·|y″| + O(h⁴)` on a smooth stretch (γ = 1 − 1/√2), at most `h·(2(1−γ) − 1/2)·2·max|y|` on a mixed-mode step. See the recorders section of `docs/api-reference.md`. Rule off, trbdf2 and exact: byte-identical outputs.
+
 ### Restart rule: an inconsistent start publishes its right limit at t = 0
 
 - **A run that starts from a state that is not a solution of the network at

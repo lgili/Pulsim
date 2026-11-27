@@ -46,13 +46,19 @@ The numbers are in the `Known limitations` part of the 2.1.0 entry of the
   energy reads about −10 % of the exact truth (the C_oss collapse row;
   strict xfail in `python/tests/test_soft_switching_kpi.py`,
   [Soft switching](SOFT_SWITCHING.md)).
-* **Restart rule, recorders** (finding F-Z-12): the in-loop recorder feed
-  and the stored-array pass integrate different functions across an edge.
-  The in-loop window integral of i(L) is −1.98e-4 relative to the truth,
-  the stored arrays' +2.9e-5. Cause: the stored right limits are the true
-  x(t⁺) while the in-loop feed keeps the quadrature line starts and held
-  rows. A fix is in progress; the gaps are strict xfails in
-  `python/tests/test_release_findings_b2.py`.
+* **Restart rule, recorders** (finding F-Z-12): the in-loop feed and the
+  stored-array pass agree bit for bit on every sample-type output (kept
+  rows, `min` / `max` and their times) and on the event rows. The
+  integral-type readings (`integral`, `avg`, `rms`) are two different
+  quadratures: the in-loop record is the method's own SDIRK quadrature,
+  which keeps `∫i_C dt = C·Δv` and the energy ledgers exact; the
+  stored-array pass is the trapezoid of the state values. They are equal
+  off restart steps and differ on a restart step by at most the bound
+  derived in the recorders section of [API reference](api-reference.md).
+  On the measured DCM buck the stored trapezoid was the closer of the two
+  to the truth: the window integral of i(L) is +2.9e-5 relative to the
+  closed form from the stored arrays, −1.98e-4 in the loop (on a smooth
+  gate-switched RL cell the two agree to 1e-9) (`python/tests/test_release_findings_b2.py`).
 * **Event splitting** (with the restart rule): a retried step is re-taken
   without its interior events; an even number of edges of an opaque
   `switch_fn` inside one step is not seen. A diode turn-on that falls one

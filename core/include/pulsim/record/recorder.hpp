@@ -168,8 +168,11 @@ public:
         stats_ = !spec_.windows.empty() || spec_.period > 0;
         slow_ = stats_ || (spec_.keep != RecorderSpec::Keep::Every &&
                            spec_.keep != RecorderSpec::Keep::None);
+        slow0_ = slow_;
         left_.resize(np);
         start_.resize(np);
+        part_start_.resize(np);
+        part_left_.resize(np);
         right_.resize(np);
         row_.resize(np);
     }
@@ -341,6 +344,29 @@ public:
     /// right limit, its settled post-event state at the instant, or a
     /// bracket within one step (`event_bracket`).
     enum class Resolution : std::uint8_t { Exact = 0, Settled = 1, WithinDt = 2 };
+
+    /// F-Z-12: a step fed in two parts (events::FeedPart, same values).
+    /// `Integrals`: the samples and events up to the next part move the line
+    /// and feed the windows' integrals (∫y, ∫y²) only: no kept row, event row,
+    /// requested time, min or max. `Samples`: back to the line as it was at
+    /// `Integrals`, then the min / max, kept rows, times and event rows only.
+    /// `All` (the default): everything.
+    enum class Part : std::uint8_t { All = 0, Integrals = 1, Samples = 2 };
+    void begin_part(Part p) {
+        if (p == Part::Integrals) {
+            part_t_ = t_prev_;
+            part_ns_ = n_samples_;
+            part_start_ = start_;
+            part_left_ = left_;
+        } else if (p == Part::Samples) {
+            t_prev_ = part_t_;
+            n_samples_ = part_ns_;
+            std::copy(part_start_.begin(), part_start_.end(), start_.begin());
+            std::copy(part_left_.begin(), part_left_.end(), left_.begin());
+        }
+        part_ = p;
+        slow_ = slow0_ || p != Part::All;
+    }
     /// The right limit at the last sample's instant (after its settle):
     /// the next step starts from it.
     void event(std::span<const Real> readings_right, Resolution res = Resolution::Exact) {
@@ -351,7 +377,7 @@ public:
         } else {
             eval_into(readings_right, right_);
         }
-        push_event(t_prev_, res);
+        if (part_ != Part::Integrals) push_event(t_prev_, res);
         std::copy(right_.begin(), right_.end(), start_.begin());   // same size: no vector assign
     }
 
@@ -364,6 +390,7 @@ public:
     void event_bracket(Real t_right, std::span<const Real> readings_right) {
         require_bound(readings_right);
         if (n_samples_ == 0) throw std::logic_error("recorder: event before any sample");
+        if (part_ == Part::Integrals) return;
         eval_into(readings_right, right_);
         push_event(t_right, Resolution::WithinDt);
     }
@@ -551,7 +578,12 @@ private:
     bool plain_ = false;      // every probe is plain (src_ has no kNotPlain)
     bool bound_ = false;
     bool stats_ = false;      // declared windows or periods
-    bool slow_ = false;       // stats_, or kept rows other than every / none
+    bool slow_ = false;       // stats_, or kept rows other than every / none, or a part
+    bool slow0_ = false;      // slow_ outside a part
+    Part part_ = Part::All;
+    Real part_t_ = 0;         // begin_part(Integrals)'s copy of the line
+    Size part_ns_ = 0;
+    std::vector<Real> part_start_, part_left_;
     // Period fast path: the window holding the last piece's end (its
     // first entry, k * n_probes) and the open interval in which a piece
     // can only touch that window, without a snap (see piece()).
@@ -573,6 +605,10 @@ private:
     // sample_row's statistics and its kept rows other than every / none:
     // out of line, so the common sample keeps its registers
     PULSIM_RECORD_NOINLINE void sample_slow(Real t) {
+        if (part_ != Part::All) [[unlikely]] {
+            sample_part(t);
+            return;
+        }
         if (stats_ && n_samples_ > 0 && t > t_prev_) {
             if (spec_.windows.empty() && in_fast_window(t_prev_, t)) {
                 accumulate_window(t_prev_, t);
@@ -580,6 +616,28 @@ private:
                 piece(t_prev_, t);
             }
         }
+        if (spec_.keep == RecorderSpec::Keep::Every) {
+            keep_row(t, left_);
+        } else if (spec_.keep == RecorderSpec::Keep::Times) {
+            emit_times(t);
+        } else if (spec_.keep == RecorderSpec::Keep::Decimate &&
+                   n_samples_ % spec_.every_n == 0) {
+            keep_row(t, left_);
+        }
+    }
+
+    // sample_slow inside a part: the integral part feeds the windows' ∫y and
+    // ∫y² only, the sample part everything else
+    PULSIM_RECORD_NOINLINE void sample_part(Real t) {
+        const bool integ = part_ == Part::Integrals;
+        if (stats_ && n_samples_ > 0 && t > t_prev_) {
+            if (integ) {
+                piece<Part::Integrals>(t_prev_, t);
+            } else {
+                piece<Part::Samples>(t_prev_, t);
+            }
+        }
+        if (integ) return;
         if (spec_.keep == RecorderSpec::Keep::Every) {
             keep_row(t, left_);
         } else if (spec_.keep == RecorderSpec::Keep::Times) {
@@ -691,7 +749,9 @@ private:
 
     // The piece (ta, tb] runs from start_ (at ta) to left_ (at tb).
     // Probe p; with a segment source, its closed form over [lo, hi].
+    template <Part P = Part::All>
     void accumulate(WindowStat& w, Size p, Real ta, Real tb, Real ya, Real yb) noexcept {
+        constexpr bool kInt = P != Part::Samples, kExt = P != Part::Integrals;
         snap(w.t0, ta, tb);
         snap(w.t1, ta, tb);
         const Real lo = std::max(w.t0, ta), hi = std::min(w.t1, tb);
@@ -702,16 +762,18 @@ private:
             // min / max: the samples at the step's ends, the closed form at a clip
             a = lo == ta ? ya : cf[2];
             b = hi == tb ? yb : cf[3];
-            w.integral += cf[0];
-            if (std::isnan(cf[1])) {   // the source closed ∫y only: ∫y² is the line
-                const Real la = lo == ta ? ya : lerp(ta, ya, tb, yb, lo);
-                const Real lb = hi == tb ? yb : lerp(ta, ya, tb, yb, hi);
-                w.sq3 += (la * la + la * lb + lb * lb) * (hi - lo);
-            } else {
-                w.sq3 += 3 * cf[1];
+            if constexpr (kInt) {
+                w.integral += cf[0];
+                if (std::isnan(cf[1])) {   // the source closed ∫y only: ∫y² is the line
+                    const Real la = lo == ta ? ya : lerp(ta, ya, tb, yb, lo);
+                    const Real lb = hi == tb ? yb : lerp(ta, ya, tb, yb, hi);
+                    w.sq3 += (la * la + la * lb + lb * lb) * (hi - lo);
+                } else {
+                    w.sq3 += 3 * cf[1];
+                }
             }
             // the trajectory's extremes inside the piece, where the source has them (F-Y-3)
-            if (Real ex[4]; seg_->extrema(seg_rec_, p, lo, hi, ex)) {
+            if (Real ex[4]; kExt && seg_->extrema(seg_rec_, p, lo, hi, ex)) {
                 if (ex[0] < w.min) { w.min = ex[0]; w.t_min = ex[1]; }
                 if (ex[2] > w.max) { w.max = ex[2]; w.t_max = ex[3]; }
             }
@@ -719,13 +781,17 @@ private:
             a = lo == ta ? ya : lerp(ta, ya, tb, yb, lo);
             b = hi == tb ? yb : lerp(ta, ya, tb, yb, hi);
             const Real h = hi - lo;
-            w.integral += 0.5 * (a + b) * h;
-            w.sq3 += (a * a + a * b + b * b) * h;
+            if constexpr (kInt) {
+                w.integral += 0.5 * (a + b) * h;
+                w.sq3 += (a * a + a * b + b * b) * h;
+            }
         }
-        if (a < w.min) { w.min = a; w.t_min = lo; }
-        if (b < w.min) { w.min = b; w.t_min = hi; }
-        if (a > w.max) { w.max = a; w.t_max = lo; }
-        if (b > w.max) { w.max = b; w.t_max = hi; }
+        if constexpr (kExt) {
+            if (a < w.min) { w.min = a; w.t_min = lo; }
+            if (b < w.min) { w.min = b; w.t_min = hi; }
+            if (a > w.max) { w.max = a; w.t_max = lo; }
+            if (b > w.max) { w.max = b; w.t_max = hi; }
+        }
         w.seen_t0 = w.seen_t0 || lo == w.t0;
         w.seen_t1 = w.seen_t1 || hi == w.t1;
     }
@@ -737,9 +803,11 @@ private:
     [[nodiscard]] PULSIM_RECORD_INLINE bool in_fast_window(Real ta, Real tb) const noexcept {
         return kc_np_ != kNoWindow && ta > fast_lo_ && tb < fast_hi_;
     }
+    template <Part P = Part::All>
     PULSIM_RECORD_INLINE void accumulate_window(Real ta, Real tb) noexcept {
+        constexpr bool kInt = P != Part::Samples, kExt = P != Part::Integrals;
         if (seg_ != nullptr) [[unlikely]] {
-            accumulate_window_seg(ta, tb);
+            accumulate_window_seg<P>(ta, tb);
             return;
         }
         const Size np = probes_.size();
@@ -750,32 +818,40 @@ private:
         for (Size p = 0; p < np; ++p) {
             WindowStat& w = ws[p];
             const Real a = st[p], b = lf[p];
-            w.integral += 0.5 * (a + b) * h;
-            w.sq3 += (a * a + a * b + b * b) * h;
-            if (a < w.min) { w.min = a; w.t_min = ta; }
-            if (b < w.min) { w.min = b; w.t_min = tb; }
-            if (a > w.max) { w.max = a; w.t_max = ta; }
-            if (b > w.max) { w.max = b; w.t_max = tb; }
+            if constexpr (kInt) {
+                w.integral += 0.5 * (a + b) * h;
+                w.sq3 += (a * a + a * b + b * b) * h;
+            }
+            if constexpr (kExt) {
+                if (a < w.min) { w.min = a; w.t_min = ta; }
+                if (b < w.min) { w.min = b; w.t_min = tb; }
+                if (a > w.max) { w.max = a; w.t_max = ta; }
+                if (b > w.max) { w.max = b; w.t_max = tb; }
+            }
         }
     }
 
     // accumulate_window with a segment source: accumulate() on that window
     // (its snaps and clips do nothing there, as the fast path assumes)
+    template <Part P = Part::All>
     PULSIM_RECORD_NOINLINE void accumulate_window_seg(Real ta, Real tb) noexcept {
         WindowStat* const ws = periodic_.data() + kc_np_;
-        for (Size p = 0; p < probes_.size(); ++p) accumulate(ws[p], p, ta, tb, start_[p], left_[p]);
+        for (Size p = 0; p < probes_.size(); ++p) {
+            accumulate<P>(ws[p], p, ta, tb, start_[p], left_[p]);
+        }
     }
 
+    template <Part P = Part::All>
     void piece(Real ta, Real tb) {
         const Size np = probes_.size();
         for (Size w = 0; w < spec_.windows.size(); ++w) {
             for (Size p = 0; p < np; ++p) {
-                accumulate(declared_[w * np + p], p, ta, tb, start_[p], left_[p]);
+                accumulate<P>(declared_[w * np + p], p, ta, tb, start_[p], left_[p]);
             }
         }
         if (spec_.period <= 0 || tb <= spec_.offset) return;
         if (in_fast_window(ta, tb)) {
-            accumulate_window(ta, tb);
+            accumulate_window<P>(ta, tb);
             return;
         }
         const Real T = spec_.period;
@@ -793,7 +869,7 @@ private:
                 continue;
             }
             for (Size p = 0; p < np; ++p) {
-                accumulate(periodic_[k * np + p], p, ta, tb, start_[p], left_[p]);
+                accumulate<P>(periodic_[k * np + p], p, ta, tb, start_[p], left_[p]);
             }
         }
         // The window that holds tb strictly inside it is the fast path's

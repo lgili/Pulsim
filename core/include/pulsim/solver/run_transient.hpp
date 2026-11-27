@@ -5831,10 +5831,15 @@ inline SimulationResult run_transient(
         // F-4-4: a step taken on lines to the in-loop recorder line by line
         // (StepHooks::line), each point with its capacitor currents; the
         // `on_step` functions see the whole step.
-        auto feed_lines = [&](Real t_prev, Real t) {
+        // F-Z-12: fed twice. The integral-type readings (FeedPart::Integrals)
+        // take the step's lines as the method integrates them: quadrature
+        // starts and the held-pieces row, so ∫i_C = C·Δv and the ledgers hold.
+        // The sample-type readings (FeedPart::Samples) take the states only:
+        // the right limits record_lines stores (rl_*) and no held row, the
+        // rows the stored-array pass reads.
+        auto cap = [](const std::vector<Real>& c) { return c.empty() ? nullptr : c.data(); };
+        auto feed_quadrature = [&](Real t_prev, Real t) {
             const StepLines& lines = *L;
-            hooks->step_fns(t_prev, x_prev, mask_start, t, x, stamped_mask);
-            auto cap = [](const std::vector<Real>& c) { return c.empty() ? nullptr : c.data(); };
             Real ta = t_prev;
             const Vector* xa = lines.start ? &lines.x_start : &x_prev;
             const topology::SwitchStateMask* ma = lines.start ? &lines.m_start : &mask_start;
@@ -5850,6 +5855,45 @@ inline SimulationResult run_transient(
             }
             hooks->line(ta, *xa, *ma, t, x, stamped_mask, ca,
                         lines.end_own ? cap(lines.c_end) : nullptr);
+        };
+        auto feed_states = [&](Real t_prev, Real t) {
+            const StepLines& lines = *L;
+            Real ta = t_prev;
+            const bool s_rl = lines.rl_start_ok && !lines.rl_start_left;
+            const Vector* xa = s_rl ? &lines.rl_start : &x_prev;
+            const topology::SwitchStateMask* ma =
+                lines.rl_start_ok ? &lines.rl_m_start : &mask_start;
+            const Real* ca = lines.start ? cap(lines.c_start) : nullptr;
+            for (Size j = 0; j < lines.n; ++j) {
+                if (lines.held[j]) continue;
+                hooks->line(ta, *xa, *ma, lines.t[j], lines.left[j], lines.m_left[j], ca,
+                            cap(lines.c_left[j]));
+                ta = lines.t[j];
+                const bool r = lines.rl_right_ok[j];
+                xa = r ? &lines.rl_right[j] : &lines.left[j];
+                ma = r ? &lines.rl_m_right[j] : &lines.m_left[j];
+                ca = cap(lines.right_ok[j] ? lines.c_right[j] : lines.c_left[j]);
+            }
+            hooks->line(ta, *xa, *ma, t, x, stamped_mask, ca,
+                        lines.end_own ? cap(lines.c_end) : nullptr);
+        };
+        auto feed_lines = [&](Real t_prev, Real t) {
+            using P = events::FeedPart;
+            hooks->step_fns(t_prev, x_prev, mask_start, t, x, stamped_mask);
+            const bool parts = hooks->takes_parts();
+            if (parts) hooks->part(P::Integrals);
+            if (!L->empty()) {
+                feed_quadrature(t_prev, t);
+            } else {
+                hooks->sink_step(t_prev, x_prev, mask_start, t, x, stamped_mask);
+            }
+            if (!parts) return;
+            hooks->part(P::Samples);
+            // as lines even with none stored (one line from the stored right
+            // limit): the sink places the commutation on its jump row, the
+            // run's first row on its start (review)
+            feed_states(t_prev, t);
+            hooks->part(P::All);
         };
         auto step_record = [&](Size k) PULSIM_STEP_PHASE {
             const Real t = t_step;
@@ -6006,7 +6050,8 @@ inline SimulationResult run_transient(
                     hooks->event(t_prev, x_prev, mask_start, x, stamped_mask);
                 }
                 if (hook_step) {
-                    if (L && L->owner == t && L->ok && !L->empty() && hooks->takes_lines()) [[unlikely]] {
+                    const bool lined = L && L->owner == t && L->ok && hooks->takes_lines();
+                    if (lined && (!L->empty() || L->rl_start_ok)) [[unlikely]] {
                         feed_lines(t_prev, t);
                     } else {
                         hooks->step(t_prev, x_prev, mask_start, t, x, stamped_mask, hook_contig);
