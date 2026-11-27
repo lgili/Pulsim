@@ -135,8 +135,10 @@ def test_a_conductance_form_cut_keeps_the_models_right_limit_and_warns():
         m = p.SwitchStateMask(1)
         m.set(0, t < T_E)
         return m
+    # F-Z-15: the cut is judged by |λ|/dt = L·i/dt = 1.2e-4 V·s / 0.5 us = 240 V
+    # (5 x 48 V, silent at the default 100): factor 2 lets it name the cut
     with pytest.warns(UserWarning, match="'S' cut the .* current of 'L'"):   # F-Z-8
-        r = p.simulate(b, t_end=6e-6, dt=DT, switch_fn=sf, **RULE)
+        r = p.simulate(b, t_end=6e-6, dt=DT, switch_fn=sf, voltage_sanity_factor=2.0, **RULE)
     assert len(r.reinit_records) == 1
     v, t, k = _limits(r)
     (j,) = k
