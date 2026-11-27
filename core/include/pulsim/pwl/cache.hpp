@@ -1956,13 +1956,15 @@ public:
     /// round-off bounds read |J| here instead of re-assembling.
     [[nodiscard]] const sparse::Matrix* resident_event_matrix(
         const topology::SwitchStateMask& mask, Real dt,
-        const Vector** b_constant) const noexcept {
+        const Vector** b_constant,
+        const sparse::DirectSolver** factor = nullptr) const noexcept {
         const auto it = event_entries_.find(mask);
         if (dt == dt_ || it == event_entries_.end()
             || it->second.current_dt != dt) {
             return nullptr;
         }
         *b_constant = &it->second.b_constant;
+        if (factor) *factor = it->second.solver.get();   // one lookup for both
         return &it->second.J;
     }
 

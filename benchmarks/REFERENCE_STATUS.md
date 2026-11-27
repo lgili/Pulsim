@@ -26,13 +26,13 @@ fails when its err_rms grows past 2x the frozen `known_err:`.
 
 | circuit | tol | pwl | pwl+restart | pwl+split |
 |---|---:|---:|---:|---:|
-| closed_loop/cl_boost_pi.yaml | 0.02 | 0.0582 | 0.0511 | 7.23e-05 |
+| closed_loop/cl_boost_pi.yaml | 0.02 | 0.0582 | 0.0511 | 7.2e-05 |
 | closed_loop/ll14_buck_closed_loop.yaml | 0.02 | 0.249 | 0.144 | 0.126 |
 | closed_loop/ll15_boost_closed_loop.yaml | 0.02 | 0.22 | 0.0484 | 0.0279 |
 | closed_loop/ll16_flyback_closed_loop.yaml | 0.02 | 0.112 | 0.113 | 0.0942 |
 | linear/current_source_rl_step.yaml | 0.001 | 0.00577 | 3.99e-05 | 3.99e-05 |
 | linear/rl_natural_response.yaml | 0.001 | 0.00577 | 3.98e-05 | 3.98e-05 |
-| magnetics/half_bridge_transformer_dc.yaml | 0.02 | 0.101 | 7.71e-06 | 7.7e-06 |
+| magnetics/half_bridge_transformer_dc.yaml | 0.02 | 0.101 | 7.71e-06 | 7.66e-06 |
 | magnetics/transformer_leakage.yaml | 0.001 | 0.0041 | 0.00409 | 0.00409 |
 | stress/high_q_rlc_ringdown.yaml | 0.02 | 0.0229 | 0.0149 | 0.0149 |
 | switching/basic/vcswitch_resistor.yaml | 0.02 | 0.0332 | 0.005 | 0.0332 |
@@ -148,7 +148,7 @@ cell disagrees by edge timing; edge err above it: the states differ.
 
 | circuit | pwl | pwl+restart | pwl+split | trbdf2 | dsed |
 |---|---:|---:|---:|---:|---:|
-| closed_loop/cl_boost_pi.yaml | 0.0582 | 0.0511 | 7.23e-05 | 1.32e-06 | 1.29e-06 |
+| closed_loop/cl_boost_pi.yaml | 0.0582 | 0.0511 | 7.2e-05 | 1.32e-06 | 1.29e-06 |
 | closed_loop/cl_buck_aggressive_pi.yaml | 0.00662 | 0.00619 | 0.00404 | 3.72e-05 | 3.24e-05 |
 | closed_loop/cl_buck_pi.yaml | 0.0121 | 0.0044 | 0.00049 | 1.88e-05 | 1.77e-05 |
 | closed_loop/ll14_buck_closed_loop.yaml | 0.249 | 0.144 | 0.126 | 0.000543 | refused |
@@ -181,7 +181,7 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | linear/voltage_divider_3stage.yaml | 0 | 0 | 0 | 0 | 0 |
 | magnetics/core_loss_steinmetz_sine.yaml | 0.000228 | 0.000227 | 0.000227 | 0.000123 | 3.5e-06 |
 | magnetics/coupled_inductor_step.yaml | 0.00032 | 0.00032 | 0.00032 | 3.76e-06 | 6.72e-06 |
-| magnetics/half_bridge_transformer_dc.yaml | 0.101 | 7.71e-06 | 7.7e-06 | 2.08e-05 | 1.22e-06 |
+| magnetics/half_bridge_transformer_dc.yaml | 0.101 | 7.71e-06 | 7.66e-06 | 2.08e-05 | 1.22e-06 |
 | magnetics/inductor_chain_step.yaml | 0.00231 | 5.34e-06 | 5.34e-06 | 9.05e-07 | 4.89e-07 |
 | magnetics/transformer_leakage.yaml | 0.0041 | 0.00409 | 0.00409 | 0.000231 | 3.11e-05 |
 | magnetics/transformer_step_up.yaml | 4.64e-06 | 4.64e-06 | 4.64e-06 | 0 | 5.1e-06 |
@@ -215,7 +215,7 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | switching/boost/ll12_pfc_boost_continuous.yaml | 0.083 | 0.0753 | 0.0753 | 0.000115 | refused |
 | switching/boost/synchronous_boost.yaml | 6.31e-05 | 2.88e-07 | 2.88e-07 | 8.33e-08 | 3.02e-07 |
 | switching/boost/textbook_erickson_boost_ccm.yaml | 0.000313 | 4.09e-07 | 3.94e-07 | 9.53e-06 | 6.92e-07 |
-| switching/boost/two_phase_interleaved_boost.yaml | 0.00019 | 4.69e-07 | 4.33e-07 | 5.56e-06 | 6.59e-07 |
+| switching/boost/two_phase_interleaved_boost.yaml | 0.00019 | 4.69e-07 | 4.32e-07 | 5.56e-06 | 6.59e-07 |
 | switching/buck/buck_dcm.yaml | 0.00183 | 9.92e-07 | 9.91e-07 | 7.7e-06 | 6e-07 |
 | switching/buck/buck_hard_switching_reference.yaml | 0.00102 | 7.6e-07 | 7.6e-07 | 2.27e-06 | 8.29e-07 |
 | switching/buck/buck_mosfet_nonlinear.yaml | 0.00841 | 3.87e-05 | 4.07e-07 | 5.08e-07 | refused |

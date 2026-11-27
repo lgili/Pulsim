@@ -928,7 +928,7 @@ inline SimulationResult run_transient(
     // the nonlinear capacitors consistent_start carried: (k, v0, q0) at x0
     std::vector<std::tuple<Size, Real, Real>> rl_nc0, rl_sl0;
     std::vector<Real> ip_hist_p, rl_hist, rl_hw, rl_hcur;
-    Vector rl_x1, rl_b0, rl_b, rl_bs, rl_h, rl_xa, rl_xb;
+    Vector rl_x1, rl_b0, rl_b, rl_bs, rl_h, rl_xa, rl_xb, rl_rr, rl_dx;
     std::vector<Real> rl_ncq, rl_slq;
     std::vector<Size> rl_pin;
     std::vector<std::pair<Size, Real>> rl_dep_x;
@@ -3049,7 +3049,12 @@ inline SimulationResult run_transient(
                                      Vector& out, topology::SwitchStateMask& m_out)
                                      PULSIM_STEP_DRIVER -> int {
             const bool at_loc = t_from == rl_loc.t;
-            if (!(ev || ip_jump || at_loc)) return 0;
+            // F-Z-10: the run's start (not a resume seam) is re-initialised:
+            // row 0 is the user's state, x(0+) is published only when the
+            // re-initialisation moved it beyond the noise band (below)
+            const bool at_start = !(ev || ip_jump || at_loc) && t_from == opts.t_start &&
+                                  resume_snap == nullptr && !result.states.empty();
+            if (!(ev || ip_jump || at_loc || at_start)) return 0;
             rl_loc.t = std::numeric_limits<Real>::quiet_NaN();   // consumed (no stale time)
             m_out = stamped_mask;
             bool count = false;
@@ -3103,6 +3108,11 @@ inline SimulationResult run_transient(
             // the run's Newton round-off budget and its counters are not the
             // right limit's (a tiny-ε Newton solve stagnates at round-off)
             const auto nr_s = newton_roundoff_run;
+            // the right limit (opt-in rule, new on this line) judges a fixed
+            // point at its own scale, as it did when it came in (ll13: 12
+            // fallbacks, 19 without); the run's steps keep 2.1.0's test
+            // (nr_s puts the flag back with the budget)
+            newton_roundoff_run.judge_own_scale = true;
             const auto nr_n = result.newton_roundoff_accepts;
             const auto nr_w = result.newton_roundoff_omega_max;
             const auto nr_r = result.newton_roundoff_row;
@@ -3158,6 +3168,7 @@ inline SimulationResult run_transient(
             // source edge inside the step is not landed (loc = 0)
             const Real t_src = t_from + (ev && split && !at_loc ? loc : Real{0});
             Real e_src = -1;   // the ε rl_bs holds the sources of
+            Real e_last = 0;   // the last solve's ε (refined)
             auto solve_eps = [&](Real e) {
                 if (e != e_src) {   // the post side of an edge at t_src (lb = 0)
                     rl_bs = rl_b;
@@ -3177,6 +3188,38 @@ inline SimulationResult run_transient(
                     x = rl_x1;
                     rei(t_from + e, Real{2} * e, true, true);
                 }
+                e_last = e;
+            };
+            // F-Z-4: the published row, one step of iterative refinement on the
+            // last ε solve's factor. L/ε (1e7 Ω for 1 mH) beside 1e5 Ω rows: the
+            // LU's backward error left 4.6e-11 A in a divider node's KCL; one
+            // step makes it componentwise (Skeel). Once per row, linear mode.
+            // The correction solve is skipped when r already meets that bound,
+            // |r_i| <= n·eps·(|J|·|x|)_i (the KCL tests allow 4x that).
+            auto refined = [&]() -> const Vector& {
+                const Vector* bc = nullptr;
+                const sparse::DirectSolver* f = nullptr;
+                const auto* J = lin ? cache.resident_event_matrix(stamped_mask, Real{2} * e_last,
+                                                                  &bc, &f)
+                                    : nullptr;
+                if (J && f) {
+                    rl_rr = -(*bc + b_extra);
+                    rl_dx.setZero(x.size());   // (|J|·|x|) until the solve overwrites it
+                    for (Eigen::Index c = 0; c < J->outerSize(); ++c) {
+                        for (sparse::Matrix::InnerIterator it(*J, c); it; ++it) {
+                            const Real a = it.value() * x[it.col()];
+                            rl_rr[it.row()] -= a;
+                            rl_dx[it.row()] += std::abs(a);
+                        }
+                    }
+                    const Real tol = static_cast<Real>(J->rows())
+                                     * std::numeric_limits<Real>::epsilon();
+                    if ((rl_rr.array().abs() > tol * rl_dx.array()).any()) {
+                        f->solve(rl_rr, rl_dx);   // factor-reuse
+                        x += rl_dx;
+                    }
+                }
+                return x;
             };
             // a state's value in x (C: node difference; L: its branch)
             auto state_of = [&](Size k) -> Real {
@@ -3439,7 +3482,7 @@ inline SimulationResult run_transient(
                         }
                         rl_dep.clear();
                         c = pinned(Real{1e-3} * kGamma * opts.dt) && c;
-                        out = x;
+                        out = refined();
                         return c;
                     };
                     bool conv = elim_solve();
@@ -3447,9 +3490,9 @@ inline SimulationResult run_transient(
                     unheld = unheld || !conv;
                 } else {
                     bool conv = pinned(eps, !ip_jump && !ip_moved);
-                    out = x;
+                    out = refined();
                     // stage 1's slope is the old mode's: no prediction
-                    hold_mode([&] { const bool c = pinned(eps); out = x; return c; }, conv, nullptr);
+                    hold_mode([&] { const bool c = pinned(eps); out = refined(); return c; }, conv, nullptr);
                     unheld = unheld || !conv;
                 }
             } catch (const std::runtime_error&) {
@@ -3462,8 +3505,21 @@ inline SimulationResult run_transient(
             aux_events.reset();
             restart_factorizations = rf_s;
             if (ok && !out.allFinite()) unheld = true;   // no state: counted
-            if ((ok && count) || unheld) ++result.n_right_limit_fallbacks;
+            // a start row is due only when it differs from row 0, unknown
+            // when its solve failed: not counted as a fallback
+            if (((ok && count) || unheld) && !at_start) ++result.n_right_limit_fallbacks;
             if (unheld) ok = 0;
+            if (ok && at_start) {
+                // the noise band of the jump test (consistent_start's
+                // 1e-8·(1 + |a0| + |a1|)): above the pin's 1e-9 of scale
+                const Vector& x0 = result.states.front();
+                bool moved = false;
+                for (Index i = 0; i < out.size() && !moved; ++i) {
+                    moved = std::abs(out[i] - x0[i]) >
+                            Real{1e-8} * (Real{1} + std::abs(out[i]) + std::abs(x0[i]));
+                }
+                if (!moved) ok = 0;
+            }
             history.restore(rl_hcur);
             if (!lin) {
                 hs.restore(rl_hs);
@@ -3620,6 +3676,18 @@ inline SimulationResult run_transient(
                 // converged: the bracket, or two successive trial instants,
                 // within snap
                 auto narrow = [&](const events::Bracket& q) { return q.tb - q.ta <= snap; };
+                // F-Z-2: stop on the signal. t_cur is taken when the root of
+                // the bracket's raw chord is within snap of it (|s(t_cur)| <=
+                // snap * the chord's slope: the time tolerance through the
+                // signal), and the bracket's far end the same way before any
+                // trial (a crossing on the grid point). Not its start: a piece
+                // after a cut starts at s ~ 0 by design, and a signal that dips
+                // and comes back crosses inside. A cut at the last trial's
+                // instant solves at its dt: the factor the trial left is the
+                // piece's.
+                auto chord = [](const events::Bracket& q) {
+                    return q.ta - q.sa_raw * (q.tb - q.ta) / (q.sb_raw - q.sa_raw);
+                };
                 // one trapezoidal trial from the step start under the start bits
                 auto trial = [&](Real t_loc) {
                     x = x_prev;
@@ -3637,7 +3705,10 @@ inline SimulationResult run_transient(
                 };
                 Real t_cur = a, t_was = hi;
                 bool failed = false;
-                const int n_trials = events::illinois(br, 40,
+                const Real c0 = chord(br);
+                const bool at_end = hi - c0 <= snap;
+                if (at_end) t_cur = hi;
+                const int n_trials = at_end ? 0 : events::illinois(br, 40,
                     [&](Real, const events::Bracket& q) { return narrow(q); },
                     [&](Real t_loc, Real& sm) {
                         t_was = t_cur;
@@ -3652,12 +3723,16 @@ inline SimulationResult run_transient(
                     [](events::BracketEnd) {},
                     [&](const events::Bracket& q) {
                         return narrow(q) || std::abs(t_cur - t_was) <= snap ||
-                               q.sa_raw == Real{0} || q.sb_raw == Real{0};
+                               q.sa_raw == Real{0} || q.sb_raw == Real{0} ||
+                               std::abs(chord(q) - t_cur) <= snap;
                     });
                 result.split_locator_trials += static_cast<Size>(n_trials);
                 if (failed || (n_trials >= 40 && !narrow(br))) ++result.split_locator_giveups;
-                // the root of the final bracket's unweighted chord
-                const Real t_new = br.sa_raw == Real{0} ? br.ta
+                // the root of the final bracket's unweighted chord, or the
+                // last trial (or bracket end) within snap of it
+                const Real t_new = at_end || (!failed && n_trials > 0 &&
+                                              std::abs(chord(br) - t_cur) <= snap) ? t_cur
+                    : br.sa_raw == Real{0} ? br.ta
                     : br.sb_raw == Real{0} ? br.tb
                     : std::clamp(br.ta - br.sa_raw * (br.tb - br.ta) / (br.sb_raw - br.sa_raw),
                                  br.ta, br.tb);
@@ -3996,6 +4071,13 @@ inline SimulationResult run_transient(
             auto narrow = [&](const events::Bracket& q) { return q.tb - q.ta <= snap; };
             Real t_cur = t1, t_was = t2;
             bool failed = false;
+            // F-Z-2: stop on the signal, as locate_islands (no end shortcut:
+            // t2 is refused below, and near t1 a curved signal may cross
+            // inside). The split's only: the rule alone reaches this cut too,
+            // unchanged.
+            auto chord = [](const events::Bracket& q) {
+                return q.ta - q.sa_raw * (q.tb - q.ta) / (q.sb_raw - q.sa_raw);
+            };
             const int n_trials = events::illinois(br, 40,
                 [&](Real, const events::Bracket& q) { return narrow(q); },
                 [&](Real t_loc, Real& sm) {
@@ -4011,14 +4093,16 @@ inline SimulationResult run_transient(
                 [](events::BracketEnd) {},
                 [&](const events::Bracket& q) {
                     return narrow(q) || std::abs(t_cur - t_was) <= snap ||
-                           q.sa_raw == Real{0} || q.sb_raw == Real{0};
+                           q.sa_raw == Real{0} || q.sb_raw == Real{0} ||
+                           (split && std::abs(chord(q) - t_cur) <= snap);
                 });
             result.split_locator_trials += static_cast<Size>(n_trials);
             if (failed) {
                 ++result.split_locator_giveups;
                 return nan;
             }
-            const Real t_new = br.sa_raw == Real{0} ? br.ta
+            const Real t_new = split && n_trials > 0 && std::abs(chord(br) - t_cur) <= snap ? t_cur
+                : br.sa_raw == Real{0} ? br.ta
                 : br.sb_raw == Real{0} ? br.tb
                 : std::clamp(br.ta - br.sa_raw * (br.tb - br.ta) / (br.sb_raw - br.sa_raw),
                              br.ta, br.tb);

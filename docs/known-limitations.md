@@ -38,11 +38,36 @@ The numbers are in the `Known limitations` part of the 2.1.0 entry of the
   42.750 V 0.1 us after the edge, 42.114 V at 0.4 us against 41.48 V). On 2.1.0 the rule is off by default; with it on, compare
   against `trbdf2` before trusting it on a converter whose diode commutates
   right after a gate edge.
+  Without event splitting, a sample of an algebraic signal that is
+  discontinuous at a rounded edge is the pre-edge value: `scr_halfwave_r`
+  on `pwl` with the rule reads 0.0271 against its analytic truth (1.47e-16
+  with the rule off).
+* **Restart rule, switching energy**: the PSFB reference's S3 switching
+  energy reads about −10 % of the exact truth (the C_oss collapse row;
+  strict xfail in `python/tests/test_soft_switching_kpi.py`,
+  [Soft switching](SOFT_SWITCHING.md)).
+* **Restart rule, recorders** (finding F-Z-12): the in-loop integrals
+  (`integral`, `avg`, `rms`) are the restart steps' SDIRK quadrature,
+  which keeps `∫i_C = C·Δv` and the energy ledgers exact; the stored-array
+  pass takes the trapezoid of the states. On a DCM buck the method's
+  quadrature (held other-mode stage over w1·h on a mixed step) is the less
+  accurate of the two: the in-loop window integral of i(L) is −1.98e-4
+  relative to the closed form, the stored arrays' +2.9e-5. Sample-type
+  outputs and event rows are states in both feeds and agree bit for bit
+  (`python/tests/test_release_findings_b2.py`).
 * **Event splitting** (with the restart rule): a retried step is re-taken
   without its interior events; an even number of edges of an opaque
-  `switch_fn` inside one step is not seen.
+  `switch_fn` inside one step is not seen. A diode turn-on that falls one
+  or two steps after a located turn-off is taken at a grid point, up to
+  0.936·dt late (`python/tests/test_split_locator_reconduction.py`, strict
+  xfail). Locating an event costs trial solves, each a factorisation: 4–6
+  trials per located event.
 * **Exact engine output rule** (`engine='exact', output_rtol=...`): a
   thermal summary read from stored samples depends on the output grid.
+  The first line after an event (within 2 ps of it) can exceed the rule:
+  59× the bound on a DCM switch node, 1491 such lines on `cl_buck_pi`.
+  Closed-loop units sit at the promise (ratio ~1.0, `cl_buck_pi` 1.02),
+  not clearly under it.
 * **Sensitivities** are refused by name at a recorded cut-set jump (a
   DCM buck on `pwl` with splitting that returned a number before).
 * **Exact engine**: twelve paralleled bridges are refused by name; the
@@ -150,6 +175,7 @@ engine accepts a keyword and ignores it. The defaults are
 | `newton_roundoff_budget` | yes | yes | refused | 130 |
 | `enable_substep_state_correction` | yes | refused | refused | False |
 | `discontinuity_restart` | yes | refused | refused | False |
+| `split_snap` | yes | refused | refused | 1e-6 (2.1.0: 0.01) |
 | `resolution_diagnostics` | yes | refused | refused | False |
 | `on_impulse` | yes | yes | yes | 'record' |
 | `inductor_freeze_di_max` | yes | refused | refused | None (off) |
@@ -261,6 +287,7 @@ event where the signal jumps.
 | **A floating diode bridge has an undetermined common mode on TR-BDF2.** A V_th = 0 bridge whose DC bus is tied to ground only through 1 MΩ has no defined common mode once every diode is off. | 325 V, 1 mH line, 470 µF, 100 Ω: v(dp) − v(dn) agrees with `pwl` (`dt = 1e-6`) to 0.017 V at rtol 1e-5, 0.007 V at 1e-6 and 0.0015 V at 1e-7, but v(dp) alone differs by up to 41 V, 265 V and 32 V. (It ground to `max_steps` at rtol 1e-6 and 1e-7 before the TR-BDF2 roundoff-floor fix.) | Measure the bus as v(dp) − v(dn), or ground one DC rail. |
 | **TR-BDF2 can miss PWL-diode commutations.** Guide trap 13. | 230 V rms bridge, 0.1 Ω, 470 µF, 1 kΩ. With `V_th = 0` it runs half-wave: 318.79 V and 12.91 V pp, against 322.06 V and 6.38 V pp with `dt=1e-6`. With `V_th = 0.7` and 1 mH of line, D2 and D4 are held OFF while forward-biased for one sample at 75.92 ms; V_dc is 321.80 V against 321.82 V. Snubbed boost (24 V, 220 µH, 50 kHz, D = 0.5, 1 nF across D1, 100 µF, 30 Ω), V_out over 2-3 ms: with `V_th = 0`, 24.64 V on `trbdf2` and `auto`, against 54.89 V with `dt = 1e-8`. With `V_th = 0.7` on `auto`, 56.18 V against 54.89 V (+2.3 %), and D1 is held ON while reverse-biased on 106 samples. | Pass `dt`. Rerun with `dt` whenever `simulate` warns that a diode "rode its conduction boundary", or `res.i` warns that one was held "in a state its commutation rule forbids". |
 | **TR-BDF2 does not converge on a converter with no capacitance at its switch / rectifier nodes and a leakage inductance in series with a winding.** Each OFF device in series with an inductance leaves a femtosecond mode, and the node between the leakage inductance and the winding carries only inductors, so its voltage is solved to round-off at the smallest steps. It shows as many forced-accept warnings and a result that does not settle as `rtol` tightens. Every forced accept is blamed on a current of the primary's inductor cut-set (`L_leak`, `T1.p`, `T1.s`), at a gate edge (h = 2e-14 s) or inside the 100 ns dead time that follows it (h = 2e-10 s, the body diodes' zero-current commutation), with the estimate 20 to 3000 times its tolerance: the femtosecond mode makes that current change within any step, so the error estimate is right and cannot be fixed there. Record: DECISIONS #21 of `update-trbdf2-post-event-restart`, DECISIONS 11 of `update-trbdf2-error-control`. | `examples/phase_shift_full_bridge.yaml`, V_out averaged over 1.8-2.0 ms (2026-11-19): 23.975, 23.991 and 23.964 V at `rtol` 1e-5, 1e-6 and 1e-8, with 2.3 k to 6.6 k forced accepts; `integrator='esdirk43'` gives 23.964, 23.966 and 23.961 V. `engine='exact'` gives 24.0661693 V. | Model the devices' output / junction capacitance and the winding capacitance (with both, the run settles as `rtol` tightens), or use `engine='exact'`, which handles the capacitance-free circuit. |
+| **TR-BDF2 allocates on a step whose Newton solve is retried.** Accepted and rejected steps do not allocate; the retry builds the failure's error message (DECISIONS 27 of `refactor-unified-transient-stepper`). | About 10 to 16 allocations per retried step, held by a test as a bound. | None needed for results; it costs time only on runs with many Newton retries. |
 | The sliding-mode warning says `engine='auto'` even when `engine='trbdf2'` was requested. | Seen on the `V_th = 0` bridge above. | None needed: the warning describes the TR-BDF2 run. |
 | **`trbdf2` and `auto` can crash the Python process.** | The saturable-primary PSFB of the mask-chatter row, with no `dt`. With `t_end = 0.2 ms` it raises `SimulationAborted` at t = 0 (`h_min`). With `t_end = 2 ms` the process dies with a segmentation fault (exit code 139). | Pass `dt`. Run variable-step jobs you cannot vet in a subprocess. |
 | **A rectifier whose DC side floats cannot start on `engine='auto'`.** Guide trap 8. | 100 V bridge with the DC rails not connected to ground. It aborts with `factorize failed (numerically singular) ... (dt=6e-14) ... node dcn`. A 1 MΩ or 1 GΩ resistor from `dcn` to ground does not help. | Ground one DC rail (92.83 V on TR-BDF2), or pass `dt` (92.54 V at `dt=1e-5`). |
@@ -340,7 +367,7 @@ event where the signal jumps.
 | Limitation | Measured | Workaround |
 |---|---|---|
 | **`add_power_mosfet` (default composite): no `res.i` of the device and no loss row.** | `res.i("Q1")` raises like `mosfet_level1`; `device_loss_summary` omits it. | `fq_device=True`, `p.double_pulse_test` (sense resistor), or a 1 mΩ resistor in series. |
-| **`add_power_mosfet(fq_device=True)`'s loss row is `v_DS · i_D` of the external drain / source pins.** The gate-drive energy is not in it, and at a switch event elsewhere in the circuit the device current's right limit is taken as its sample (the device itself is continuous). | `res.i("Q1")` is the drain-terminal current (within 1e-9 of a 1 mΩ sense resistor). | For gate loss, read `res.i("Q1.rg")`. |
+| **`add_power_mosfet(fq_device=True)`'s loss row is `v_DS · i_D` of the external drain / source pins.** The gate-drive energy is not in it, and at a switch event elsewhere in the circuit the device current's right limit is taken as its sample (the device itself is continuous). | `res.i("Q1")` is the drain-terminal current: within 1e-9 of a 1 mΩ sense resistor on `pwl`; on `trbdf2` 4.35e-9 of the peak (strict xfail in `python/tests/test_power_mosfet.py`). | For gate loss, read `res.i("Q1.rg")`. |
 | **The level-1 MOSFET has a negative slope near threshold.** The triode polynomial at small or negative overdrive makes dI/dV_DS < 0 at V_DS = 0 for V_OV in (≈ −0.72/κ, 0), and just past saturation onset (down to −0.040 S for K = 1.43, κ = 15); there `i·v` reaches −0.29 mW. The zero-voltage leak `α(1−β)·K·V_OV²` is gone since 2026-11-19: zero current at V_DS = 0, C¹ across it (add-unified-device-interface DECISIONS #44). | K = 1.43, κ = 15: min dI/dV_DS −0.040 S; min i·v −0.29 mW at V_OV = −0.20 V, V_DS = −0.21 V. | Drive the gate well past threshold (κ·V_OV ≫ 1), or raise `kappa`. |
 | **`add_power_mosfet` non-goals:** p-channel, live T_j inside the law (T_j is run-constant), drain inductance and package networks, avalanche, SiC/GaN effects; a table channel (`channel=p.ChannelTable(...)`) is taken at the T_j it was measured at (temperature coefficients refused with it). | - | - |
 | **A gate transient on `pwl` needs a step that resolves it.** | The 400 V / 10 A double pulse with a 65 ns plateau: 7501 steps at `dt` = 0.2 ns; `trbdf2` takes about 1200. | `engine="trbdf2"`. |

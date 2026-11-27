@@ -71,7 +71,7 @@ struct OptionSpec {
 /// the order refusals are listed in). Python reads it through
 /// `pulsim._pulsim.run_option_table()`; a test asserts its names equal
 /// simulate()'s parameters.
-inline constexpr std::array<OptionSpec, 52> kRunOptionTable{{
+inline constexpr std::array<OptionSpec, 53> kRunOptionTable{{
     {"engine", kEvery, Unset::Always, "'auto'", ""},
     {"rtol", kTrBdf2 | kExact, Unset::None, "1e-5 (trbdf2), 1e-6 (exact)",
      "rtol bounds a variable step's error estimate; a fixed step has none"},
@@ -133,6 +133,8 @@ inline constexpr std::array<OptionSpec, 52> kRunOptionTable{{
      "enable_substep_state_correction is the fixed-step commutation split"},
     {"discontinuity_restart", kPwl, Unset::Falsy, "False",
      "discontinuity_restart is the fixed-step engine's restart rule"},
+    {"split_snap", kPwl, Unset::None, "1e-6 (2.1.0: 0.01)",
+     "split_snap is the fixed-step event split's snap band"},
     {"resolution_diagnostics", kPwl, Unset::Falsy, "False",
      "resolution_diagnostics estimates a fixed step's truncation"},
     {"on_impulse", kEvery, Unset::Always, "'record'", ""},
@@ -241,6 +243,8 @@ struct RunOptions {
     bool start_from_dc_op = false;
     std::optional<bool> enable_substep_state_correction;
     std::optional<bool> discontinuity_restart;
+    /// The split's snap, a fraction of dt (None: the driver's 1e-6).
+    std::optional<Real> split_snap;
     std::optional<bool> resolution_diagnostics;
     std::optional<Real> inductor_freeze_di_max, inductor_abs_clamp;
 
@@ -292,6 +296,7 @@ requested_options(const RunOptions& o) {
     on(o.enable_substep_state_correction.value_or(false),
        "enable_substep_state_correction");
     on(o.discontinuity_restart.value_or(false), "discontinuity_restart");
+    on(o.split_snap.has_value(), "split_snap");
     on(o.resolution_diagnostics.value_or(false), "resolution_diagnostics");
     on(o.inductor_freeze_di_max.has_value(), "inductor_freeze_di_max");
     on(o.inductor_abs_clamp.has_value(), "inductor_abs_clamp");
@@ -362,6 +367,21 @@ to_simulation_options(const RunOptions& o) {
     }
     if (o.control_tick_state) s.split_snap = Defaults::split_snap_state;
     if (o.discontinuity_restart) s.discontinuity_restart = *o.discontinuity_restart;
+    if (o.split_snap) {
+        // run_transient's own range; !(>=) also refuses NaN.
+        if (!(*o.split_snap >= Real{1e-12} && *o.split_snap <= Real{0.25})) {
+            throw OptionsError("split_snap",
+                "simulate(split_snap=...): must be a finite fraction of dt in "
+                "[1e-12, 0.25] (None keeps the default, 1e-6; 2.1.0's was 0.01)");
+        }
+        if (!s.enable_substep_state_correction) {
+            throw OptionsError("split_snap",
+                "simulate(split_snap=...): event splitting is off "
+                "(enable_substep_state_correction is not True), so the snap "
+                "would do nothing; turn the split on or drop split_snap");
+        }
+        s.split_snap = *o.split_snap;
+    }
     s.on_impulse_error = o.on_impulse == OnImpulse::Error;
     s.mode_selection = static_cast<int>(o.mode_selection);
     s.mode_guard = o.mode_guard;

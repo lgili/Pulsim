@@ -442,7 +442,7 @@ r.feeding, res.recorder_feed                       # 'in-loop' | 'stored-arrays'
   record from the snapshot's recorder state.
   `keep="decimate"` keeps fewer rows with statistics from every step.
 - **The restart rule (`engine='pwl'`, `discontinuity_restart=True`): the
-  in-loop record is the accurate one.** A restart step is an SDIRK step
+  in-loop record is the method's own.** A restart step is an SDIRK step
   (stage 1 backward Euler over `γh`, `γ = 1 − 1/√2`). The in-loop feed gives
   the integral-type fields (`integral`, `avg`, `rms`) that step's integral
   as the method takes it — `h[(1−γ)·y(X₁) + γ·y(X₂)]`, the held
@@ -456,8 +456,13 @@ r.feeding, res.recorder_feed                       # 'in-loop' | 'stored-arrays'
   windows without a restart step, and on a restart piece of length `h` on a
   smooth stretch they differ by `|γ − 1/4|·h³·|y″| + O(h⁴)` (0.043·h³·|y″|;
   the trapezoid's own error is h³·|y″|/12, the stage quadrature's
-  `|1/3 − γ|·h³·|y″|` = 0.040·h³·|y″|). Rule off, and on trbdf2, the two
-  feeds are one function.
+  `|1/3 − γ|·h³·|y″|` = 0.040·h³·|y″|); on a mixed-mode step (stage 1 under
+  the other mode) by up to `h·(2(1−γ) − 1/2)·2·max|y|`. Neither is closer to
+  the closed form in general: the state errors dominate both (a gated RL:
+  1.36e-9 in-loop vs 0.98e-9 stored at 1 µs; a DCM buck's i(L) window:
+  −1.98e-4 vs +2.9e-5, the held other-mode stages; see
+  [Known limitations](known-limitations.md)). Rule off, and on trbdf2, the
+  two feeds are one function.
 - `steady_state_stats(result, "name")` looks the name up as a node
   (`result.v`) and as a branch (`result.i`); a name that is both raises
   and asks for `kind='v'` / `kind='i'`. An array must be sampled on

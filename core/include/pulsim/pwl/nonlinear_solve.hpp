@@ -201,6 +201,10 @@ struct NewtonRoundoffAcceptance {
     /// solve between them. Accepts are for isolated solves; a run of
     /// them is a state the solver is not tracking (BUDGET in DECISIONS).
     Size max_consecutive = Size{130};
+    /// Also judge a floating-point fixed point at its own magnitudes
+    /// (DECISIONS 12). Off: the 2.1.0 test (start-state scale only), which
+    /// the fixed-step engine keeps; the variable-step engine turns it on.
+    bool judge_own_scale = false;
     bool accepted = false;
     /// The accepted iterate passed only at its own magnitudes (the
     /// floating-point fixed point of DECISIONS 12), not at the start's.
@@ -804,7 +808,8 @@ inline void solve_with_newton_in_place(
         // down to h_min. A diverging iterate never takes a step at its own
         // rounding (10a stands for it); the stagnation windows and the dx
         // cap still apply.
-        if (stagnated && ro_dx[0] <= dx_cap && !(omega <= roundoff->omega_max)) {
+        if (roundoff->judge_own_scale && stagnated && ro_dx[0] <= dx_cap
+            && !(omega <= roundoff->omega_max)) {
             bool fixed_point = true;
             for (Index i = 0; i < static_cast<Index>(n); ++i) {
                 const Real d = std::abs(dx[i]);

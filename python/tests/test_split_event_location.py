@@ -193,7 +193,8 @@ def test_two_independent_diodes_in_one_step_the_earlier_is_located():
 @pytest.mark.xfail(strict=True, reason=(
     "open (restart line STATUS, item 2): a crossing in the sub-step AFTER a located "
     "event is not located (the locator runs on the trapezoidal interval 0 only): D1 "
-    "is taken at the step end 11 us"))
+    "is taken at the step end 11 us: measured 2026-11-27, the nearest sample is "
+    "2.5e-7 s (0.25 dt) from its truth 10.75 us, bound 1e-10 s"))
 def test_two_independent_diodes_in_one_step_the_later_is_located_too():
     b, r = _two_diodes()
     v = p.with_event_limits(r)

@@ -770,6 +770,7 @@ inline SimulationResult run_transient_trbdf2(
     // result at the end.
     pwl::NewtonRoundoffAcceptance newton_roundoff;
     newton_roundoff.enabled = opts.newton_roundoff_acceptance;
+    newton_roundoff.judge_own_scale = true;   // DECISIONS 12; pwl keeps 2.1.0's test
     newton_roundoff.max_consecutive = opts.newton_roundoff_budget;
     Size ro_accepts = 0;
     Real ro_omega_max = 0;

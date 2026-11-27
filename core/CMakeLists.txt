@@ -528,6 +528,7 @@ if(PULSIM_BUILD_TESTS)
         tests/layer5_v3/test_power_mosfet_device.cpp
         tests/layer5_v3/test_substep_correction.cpp
         tests/layer5_v3/test_resolution_diagnostics.cpp
+        tests/layer5_v3/test_cut_wording.cpp
     )
     target_link_libraries(pulsim_core_layer5_v3_tests
         PRIVATE

@@ -6,10 +6,82 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Recorders: under the restart rule the in-loop record is the accurate one (F-Z-12)
+### Recorders: under the restart rule, integrals by the method, samples by the states (F-Z-12)
 
 - With `discontinuity_restart=True` a restart step is fed to an in-loop recorder twice: its integral-type fields (`integral`, `avg`, `rms`) take the step's SDIRK stage quadrature as before (so `∫i_C dt = C·Δv` and the energy ledgers close to round-off), and its sample-type outputs (kept rows, `min` / `max` and their times, requested times, event rows) take states of the trajectory only — step ends and the limits at events. Before, the quadrature line starts and held other-mode stage rows leaked into the samples: a PWM buck's window max read 21.5298249 V, a value no state had (now 21.5294326), and every restart step's line start was reported as a jump row (123 event rows against 41 real events).
 - The stored-array pass sees states only and integrates their trapezoid. The two feeds now agree bit for bit on every sample-type output and event row; integral-type fields are identical off restart steps and differ on a restart piece of length h by `|γ − 1/4|·h³·|y″| + O(h⁴)` on a smooth stretch (γ = 1 − 1/√2), at most `h·(2(1−γ) − 1/2)·2·max|y|` on a mixed-mode step. See the recorders section of `docs/api-reference.md`. Rule off, trbdf2 and exact: byte-identical outputs.
+### Restart rule: an inconsistent start publishes its right limit at t = 0
+
+- **A run that starts from a state that is not a solution of the network at
+  t = 0 now carries a right-limit row there** (`pwl`, `discontinuity_restart`,
+  F-Z-10; user-visible under the rule). Row 0 stays the user's initial state
+  (e.g. zeros with a source on); when the start's re-initialisation moves the
+  state beyond the noise band (1e-8·(1 + |x0| + |x0+|), the jump test's), x(0+)
+  is published in `right_limit_index` / `right_limit_states` like any edge's,
+  so `with_right_limits`, `with_event_limits` and `device_loss_summary` see it.
+  The loss summary missed h/2·p(0+) without it (0.23994 J for the kernel's
+  exact 0.24 J on a diode forced at 10 A from t = 0). A consistent start
+  (`start_from_dc_op`, zeros with every source at zero) and a resume seam
+  publish no start row; plain rows and rule-off runs are unchanged.
+- **A right-limit row satisfies the post-edge network's KCL to round-off**
+  (`pwl`, `discontinuity_restart`, F-Z-4). The row's linear ε solve carries
+  L/ε (1e7 Ω for 1 mH) beside 1e5 Ω rows, and the LU's backward error left a
+  divider node 1e-7–2e-6 V off its KCL (4.6e-11 A on ll09's 100 kΩ node on the
+  release line). One step of iterative refinement on the same factor (no new
+  factorization, right-limit solves only) makes the residual componentwise
+  round-off; the rows move by that round-off. The correction solve is skipped
+  when the residual already meets that bound (|r_i| ≤ n·eps·(|J|·|x|)_i).
+
+### Restart rule: a cut is named as the cut; the snapshot pickle keeps the anchor
+
+- **A switch cutting an inductor current under the restart rule is reported as
+  the cut, not as an implausible node voltage** (`pwl`, `discontinuity_restart`,
+  F-Z-8). The right-limit row at the cut is the conductance-form model's own
+  limit (i·R_off across the switch for its unresolved L/R_off mode: 6.6e9 V on
+  the diode-less VSI leg), and the voltage check scanned it first, so the
+  generic "largest voltage any source" warning fired and the cut was never
+  named. A row at an impulse record's instant is now judged apart: when it
+  alone trips the bound the warning names the switch, the inductor, the current
+  and the energy ½·L·i² the record booked once (`simulate()` and the kernel
+  `Simulation` object read the same check). The stored rows, the readers and
+  the loss records are unchanged; a run with the rule off is byte-identical.
+  The named state is the record's own kind: an inductor for a cut set (the
+  record's states list every state the jump moved, and a divider capacitor
+  listed first was named as "the current of 'Cdiv1'" on
+  `half_bridge_transformer_dc`), a capacitor for a capacitor loop (worded as
+  a voltage jump by charge sharing, with its energy); when no listed state is
+  of that kind the message names neither a current nor a voltage. Of several
+  records at one instant, a row is read against the one whose devices touch its
+  node, a cut set first; a capacitor loop's row is reported as a finding to
+  check, not as an artefact.
+- **`SolverSnapshot` pickles `restart_anchor_at_end` and `invalid_reason`**
+  (field 20, written only when either is set, so every other pickle is byte for
+  byte as before; an older pickle loads them as `False` / `""`). A resume from a
+  pickled copy taken on a split-sliver step is now bit-identical to the
+  in-process one (its first sample was ~470 A off), and a pickled invalid
+  snapshot keeps the reason its resume refuses by.
+
+### Fixed engine: `simulate(split_snap=...)`
+
+- **Added** `simulate(split_snap=...)` (and `SolverOptions.split_snap`,
+  `RunOptions.split_snap`): the event split's snap band as a fraction of dt
+  (`pwl`). Its default moved from 0.01 to 1e-6 on this line (an edge is no
+  longer moved by up to dt/100); `split_snap=0.01` restores 2.1.0's value.
+  `None` (the default) changes nothing. A value outside [1e-12, 0.25] or NaN,
+  or one passed with event splitting off, is an `OptionsError`; `trbdf2` and
+  the exact engine refuse it by name (`UnsupportedError`), as they refuse
+  `enable_substep_state_correction`, and it routes `engine='auto'` to `pwl`.
+
+### Fixed engine: the event split's locators stop on the signal (F-Z-2)
+
+- **Fewer refactorisations per located diode event** (`pwl`,
+  `discontinuity_restart` + event split). A trial is accepted when its
+  bracket's chord root is within `split_snap*dt` of it, and the cut is taken
+  at that trial's instant, so the piece reuses the trial's factor; a crossing
+  on the step's far end (a grid point) takes no trial. `event_refactors`
+  209 / 935 / 223 → 144 / 663 / 165 on buck_dcm / three-phase / diode-bridge
+  rectifiers. Located times move within `split_snap*dt`; the split off is
+  bit-identical.
 
 ### Fixed engine: the restart after a split sliver probes at the next grid step
 
@@ -25,10 +97,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   linear circuit (with Newton devices the probe also runs the edge-mode
   decision). Split-off runs are byte-identical. The anchor is carried by
   `SolverSnapshot.restart_anchor_at_end` across an in-process resume and the
-  periodic-steady-state period map; it is not pickled: a resume from a
-  pickled copy taken on such a step probes it as a plain window step, and its
-  first sample is wrong (the hard-switched capacitor test: switch current
-  ~470 A off at the first resumed step; every later row bit-identical). The split also
+  periodic-steady-state period map and in its pickle. The split also
   reuses the previous step's end gate read as the step's start (one
   `switch_fn` call per step fewer, results identical).
 
@@ -54,6 +123,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### TR-BDF2: edge probes and the floating-point fixed point
 
+- **A Newton solve that stalls at a floating-point fixed point is judged at
+  the iterate's own magnitudes** (`trbdf2` / `esdirk43`, and the restart
+  rule's right-limit solve that is new on this line; no other solve). When the
+  stagnation windows and the dx cap hold and every component of the last
+  Newton step is within `tol_newton_dx` or 4 eps of the iterate, the round-off
+  acceptance's row backward error is taken against the larger of the start
+  state's scale and the iterate's, so such a solve can be accepted (counted in
+  `newton_roundoff_accepts` and the run budget like any round-off accept).
 - **An edge probe that passes only as a floating-point fixed point is retaken
   longer** (`trbdf2` / `esdirk43`, counted in `n_probe_newton_retries`), as a
   stalled probe was in 2.1.0. `ll13_active_clamp_forward` at rtol 1e-8 /
@@ -350,6 +427,36 @@ rule".
   (its solve throws, or is not finite) is now counted in
   `n_right_limit_fallbacks`; it was dropped silently (the active-clamp
   forward's 19 main-switch turn-offs: 0 counted, now 19).
+
+### Soft-switching KPIs against exact truths (benchmarks; add-soft-switching-validation)
+
+Benchmark tooling only: the wheel's API and results do not change.
+
+- **Added** `benchmarks/tools/soft_switching_truth.py` (mpmath, never imports
+  pulsim): per switch, the left limit of V_DS at every turn-on, the ZVS fraction
+  and the switching energy of each KPI window, exact, plus the same windows by the
+  trapezoid on a trace's own grid; `baseline` writes the truth on a netlist's grid
+  with both limits at every event.
+- **Added** the LLC half-bridge and phase-shifted full-bridge ZVS references
+  (`circuits/switching/isolated/{llc_half_bridge_zvs,psfb_full_bridge_zvs}.yaml`),
+  their truth baselines, and `benchmarks/manifests/soft_switching.yaml` (plain
+  fixed engine and `trbdf2`). The runner reports their KPIs as `kpi__*` columns
+  (ZVS fraction, switching energy per switch); `python/tests/test_soft_switching_kpi.py`
+  holds each column to the truth, the energy to the truth's trapezoid on the
+  engine's own grid. Published numbers and known disagreements (strict xfails:
+  plain `pwl` on the LLC/PSFB/buck, the PSFB S3 energy about −10 % under the
+  restart rule, `trbdf2`'s PSFB start): `docs/SOFT_SWITCHING.md`.
+- **Changed** `buck_hard_switching_reference`: its baseline is now the exact truth
+  (mpmath; it was a Pulsim run), so the bench is graded against the truth (plain
+  `pwl` 0.051 V on V(out), `trbdf2` 5.05e-5 V, threshold 0.1 V unchanged). Its KPIs
+  follow the documented probe convention, V_DS = V(vcc, sw) and I_D = I(SH) of the
+  high-side switch; it read V(sw) and I(L1), which counted the hard turn-ons as
+  soft ("ZVS" 42 %; the truth is 0 of 24).
+- **Changed** the switching-loss KPI window starts at the first sample that shows
+  the new switch state (it started one sample earlier: on a variable grid the
+  conduction before the edge was booked, PSFB S3 on `trbdf2` 2.55e-10 J against the
+  exact 3.18e-11 J, now 3.66e-11 J); the runner's switching KPIs skip the first
+  stored sample, which is not solved (a made-up t = 0 turn-on).
 
 ### Fixed
 - Variable-step engine (`trbdf2`, `integrator='esdirk43'`) with a MOSFET's nonlinear output
