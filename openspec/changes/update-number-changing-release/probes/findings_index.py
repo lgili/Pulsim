@@ -230,7 +230,7 @@ F = [
      "record at 100 h, sample 101 (enable_substep_state_correction=False)",
      "record t = 99.000 h with i_L(99 h); the state itself was cut at the edge (n_gate_events_bisected = 1)"),
     # ---- R9 (2026-11-27 night, triage slice 3)
-    ("F-Z-2", "A", "C", "the event split's locators cost one factorisation per Illinois trial (to split_snap*dt = 1e-6 dt) and an opaque schedule two reads per step [owner: restart line, the split]",
+    ("F-Z-2", "A", "C", "the event split's locators cost one factorisation per Illinois trial (to split_snap*dt = 1e-6 dt); the schedule's two reads per step are fixed (integration 45ee5844 line, merged 668e1428: 1412 per 1000 steps) [owner: restart line, the split]",
      "benchmarks/tools/counters.py buck_dcm / three_phase_diode_rectifier / diode_bridge_rectifier on pwl (release default, "
      "or run_transient with discontinuity_restart + enable_substep_state_correction set explicitly: same counts, so it is "
      "integration-line code); test_fixed_step_loop_bookkeeping `_run` (100 kHz buck, opaque switch_fn, dt 1e-7)",
@@ -244,7 +244,8 @@ F = [
      "again as the next t_prev) + 20.6 per edge (bisection to 1e-6 dt: log2(1e6) = 19.9); 2064 at split_snap 0.25. To avoid: "
      "carry the step-end gate_at entry across the reset (-1000 reads per 1000 steps, bit-identical); locate a diode crossing "
      "on the step's Hermite interpolant before any trial solve, or stop Illinois on a signal tolerance instead of 1e-6 dt; "
-     "reuse the last trial's factor for the split's sub-step at t_new (it solves trial(t_new) again)"),
+     "reuse the last trial's factor for the split's sub-step at t_new (it solves trial(t_new) again). R10 (668e1428): reads 1412 "
+     "= 1000 + 20 x ~20.6 (the step-end entry is carried); the refactor counts are unchanged (counter gates stay xfail)"),
     ("F-Z-3", "A", "W", "an edge split just before a grid point spends the restart's L-stable stages on the short sub-step; the next full step rings a stiff mode [owner: restart line, the split]",
      "test_fixed_step_discontinuity_order `_caploop(1e-9)` (100 V, 10 ohm, switch 1e3 S / 1e-9 S across 1 nF, tau_on = 1 ps, "
      "opaque switch_fn closing at (k + 0.5 - 1e-9) TB, TB = 10 us = an edge 1e-5 dt before a grid point); also raw "
@@ -307,11 +308,46 @@ F = [
      "1.99e-9 / 3.12e-9 V off at 10 / 20 us (rel 4e-7 of the value, inside rtol_exact 1e-6 but above the cell's 1e-9 V); "
      "unchanged with device_path='legacy', discontinuity_restart=False, output_rtol=0: the release's mode selection "
      "(pass mode_selection='auto' on the integration line to reproduce)"),
+    ("F-Z-10", "B", "W", "under the restart rule the t = 0 start jump has no right-limit row: stored-sample readers (device_loss_summary) trapezoid the first step from the left limit [owner: restart line, event limits / losses]",
+     "test_device_losses_kernel::test_loss_summary_reads_the_start_right_limit (10 A source into a PWL diode V_f 0.7 V, "
+     "g_on 20 S, dt 1e-5, t_end 0.02)",
+     "E = 12 W x 0.02 s = 0.24 J (the kernel's record E_cond_electrical: 0.24 to 1e-12)",
+     "discontinuity_restart=False: kernel and summary both 0.23994 (the old first-half-step loss, consistent)",
+     "device_loss_summary 0.23994 J against the kernel's 0.24 (h/2 x 12 W = 6e-5 J low, rel 2.5e-4); with_right_limits("
+     "with_inner_events(res)) has no t = 0+ row either (the PLECS-table test adds h/2 p(0+) by hand). Same with "
+     "discontinuity_restart=True, enable_substep_state_correction=False explicit: integration-line code. Fix: store the "
+     "start jump's right limit as an event row (or let the summary read x(0+))"),
+    ("F-Z-11", "B", "W", "the restart rule's stages depend on the formulation: a gapped magnetic core and its equivalent inductor differ by 6.4e-9 rel [owner: restart line / magnetics]",
+     "test_permeance_magnetic::test_gapped_core_in_a_switching_buck_equals_its_inductor[pwl-kw1-1e-09] and [pwl-default] "
+     "(buck 100 kHz, D 0.5, dt 1e-7, 1 ms; v(out) on 500 points)",
+     "the model identity L = N^2 / (R_c + R_g): the two runs agree to rounding",
+     "discontinuity_restart=False: 3.67e-12 (same grid, 224 events)",
+     "rule alone 6.43e-9 rel (max 1.38e-7 V, first > 1e-10 V at t = 0.2494 ms) with both runs' 225 events at the same "
+     "instants (2.4e-18 s) and the same 703 restart steps; split 2.05e-8 (events 3.4e-13 s apart). Same with the options "
+     "explicit: integration-line code. Suspect: the restart's L-stable stages start the magnetic nodes (algebraic) from a "
+     "different consistent value than the inductor branch"),
+    ("F-Z-12", "B", "W", "under the restart rule the in-loop recorder of a PWM buck disagrees with the stored-array pass [owner: restart line / recorders]",
+     "test_recorders::test_in_loop_feeding_equals_the_stored_array_pass[pwl-buck] (MOSFET buck 100 kHz, dt 1e-6, 1 ms, "
+     "window 0.2 .. 0.9 ms, period 1e-5)",
+     "the same run read two ways gives the same statistics (bit-identical before the release)",
+     "discontinuity_restart=False: 0 difference (new cell [pwl-no-restart-buck] passes)",
+     "v(vout) window integral 3.5e-7 rel (3.9e-7 rule alone), i(L) period integral 1.4e-4 of rms*span, p(RL) 9e-7; the "
+     "in-loop feed reads 1034 rows, the stored view 1001 + 24 event rows (1248 with right limits); unchanged with "
+     "device_path / mode_selection legacy. Same with the options explicit: integration-line code. Which side is right is "
+     "not settled (closed-form check owed)"),
 ]
 
 # Closed by a fix merged into the release branch: id -> where and the measured result.
 # A closed finding leaves the open tables and is listed under "Closed".
 FIXED = {
+    "F-Z-3": "integration line 8baa0153 + 6634be3c (merged 668e1428, R10): the restart after a split sliver probes at the "
+             "next grid step; `_caploop(1e-9)` max dev 1.022 A -> 1.78e-15 A, P 0.045982 W (closed form 0.0460); "
+             "`test_hard_switched_capacitor_at_a_finer_step[default]` mark removed, test_split_sliver_restart passes",
+    "F-Z-5": "not an engine defect (corrected R10): the 1e-9 cell moved with the release default form='branch' of add_diode, "
+             "the engine and the test are byte-identical to the integration line. dc/dR rel error at rtol 1e-9 / 1e-11: "
+             "conductance 2.1e-7 / 1.4e-8, branch 1.55e-6 / 4.6e-9, unchanged by every other release default; it falls "
+             "with rtol on both forms (the guarded defect is O(h), 7.4e-4). The 1e-9 cell names form='conductance', "
+             "the 1e-11 cell runs the default branch form",
     "F-4-6": "group H, `release/h-call-overhead` 26d059b0 (merged 1b3f7ecc): fixed step 3057 -> 2800 bytecodes "
              "(ceiling 2890); `test_simulate_overhead.py` no longer xfail",
     "F-X-2": "group H, `release/h-call-overhead` 26d059b0 (merged 1b3f7ecc): no-dt call on the exact route "
