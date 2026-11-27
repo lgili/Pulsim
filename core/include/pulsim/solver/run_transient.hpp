@@ -4113,7 +4113,7 @@ inline SimulationResult run_transient(
             auto chord = [](const events::Bracket& q) {
                 return q.ta - q.sa_raw * (q.tb - q.ta) / (q.sb_raw - q.sa_raw);
             };
-            const int n_trials = events::illinois(br, 40,
+            auto run_illinois = [&]() { return events::illinois(br, 40,
                 [&](Real, const events::Bracket& q) { return narrow(q); },
                 [&](Real t_loc, Real& sm) {
                     t_was = t_cur;
@@ -4130,7 +4130,29 @@ inline SimulationResult run_transient(
                     return narrow(q) || std::abs(t_cur - t_was) <= snap ||
                            q.sa_raw == Real{0} || q.sb_raw == Real{0} ||
                            (split && std::abs(chord(q) - t_cur) <= snap);
-                });
+                }); };
+            int n_trials = run_illinois();
+            // F-Z-17: t1's sign is stage 1's backward-Euler state, not the trial's.
+            // A bracket that never left t1 may have its trial crossing before t1
+            // (the snubbed DCM boost: v_D 0.65 V at stage 1, 0.70-0.75 V on the
+            // trial just past t1, the cut's left limit OFF above V_th): re-bracket
+            // on the trial's own value at t1, from the (sub)step start.
+            if (split && !from_start && !failed && n_trials > 0 && br.ta == t1) {
+                ++n_trials;
+                if (!trial(t1 - t_from)) {
+                    failed = true;
+                } else if (const Real s_t1 = signal(x); !(s_t1 > Real{0})) {
+                    const Real s_0 = signal(rs_cut.x0);
+                    if (!(s_0 > Real{0})) {
+                        result.split_locator_trials += static_cast<Size>(n_trials);
+                        return nan;   // no sign change on the trial's own curve: uncut
+                    }
+                    br = events::Bracket{t_from, s_0, t1, s_t1, s_0, s_t1, 0};
+                    t_cur = t_from;
+                    t_was = t1;
+                    n_trials += run_illinois();
+                }
+            }
             result.split_locator_trials += static_cast<Size>(n_trials);
             if (failed) {
                 ++result.split_locator_giveups;

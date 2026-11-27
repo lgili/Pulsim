@@ -60,3 +60,50 @@ def test_a_switched_capacitor_loop_still_records_its_jump():
     assert on[0].kind == "capacitor_loop" and list(on[0].states) == ["Cj"]
     assert on[0].lambda_ == pytest.approx(off[0].lambda_, rel=1e-6)
     assert on[0].dW == pytest.approx(off[0].dW, rel=1e-6)
+
+
+def _snubbed_dcm_boost(form=None):
+    """F-Z-17's cell (test_switch_state_record's): the DCM boost with an RC snubber and
+    10 nH in series with D1 (V_th 0.7 V); Q1 at 100 kHz, 50 %."""
+    b = p.CircuitBuilder()
+    fk = dict(form=form) if form else {}
+    b.add_voltage_source("Vin", "vin", "gnd", 12.0)
+    b.add_inductor("L1", "vin", "sw", 100e-6)
+    b.add_switch("Q1", "sw", "gnd", g_on=100.0, g_off=1e-9, **fk)
+    b.add_diode("D1", "sw", "x", 1e3, 1e-9, V_th=0.7, **fk)
+    b.add_inductor("Ld", "x", "out", 10e-9)
+    b.add_resistor("Rs", "sw", "sm", 10.0)
+    b.add_capacitor("Cs", "sm", "x", 1e-9)
+    b.add_capacitor("C1", "out", "gnd", 47e-6)
+    b.add_resistor("RL", "out", "gnd", 500.0)
+    q = b.switch_index_of("Q1")
+
+    def pwm(t):
+        m = p.SwitchStateMask(b.graph.num_switches)
+        m.set(q, (t % 1e-5) < 5e-6)
+        return m
+    return b, pwm
+
+
+@pytest.mark.parametrize("form", [None, "branch"])
+def test_a_located_turn_on_just_past_stage_1_keeps_the_diode_law(form):
+    """F-Z-17: D1's turn-on 1.29 dt after Q1's turn-off (dt = T/200) falls inside the
+    restart step's stage 1. The locator's bracket started at t1 = t + gamma*h with
+    stage 1's backward-Euler v_D (0.65 V) while its SDIRK trial just past t1 already
+    read 0.70-0.75 V: the cut landed at t1 and its left limit (an inner-event row)
+    held D1 OFF above V_th, 18 rows by up to 0.0497 V. It now re-brackets on the
+    trial's own value at t1, from the step start (max left-limit v_D 0.70055 V)."""
+    from pulsim import _result_views as views
+    from pulsim._diode_state import diode_state_traces
+    b, pwm = _snubbed_dcm_boost(form)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(b, 2e-3, dt=5e-8, switch_fn=pwm, **SPLIT)
+    (d,) = [t for t in diode_state_traces(b, views.with_inner_events(r)).values() if t.name == "D1"]
+    assert d.n_rule_violations == 0, (d.violation_t_range, d.max_violation_V)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        (e,) = [x for x in p.device_loss_summary(b, r, diode_specs={"D1": {"Q_rr": 100e-9}})
+                if x["name"] == "D1"]
+    assert not [w for w in caught if issubclass(w.category, RuntimeWarning)]
+    assert e["n_turn_off_events"] == 200

@@ -9,6 +9,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Event split: what a located diode crossing books (F-Z-16, F-Z-17, F-Z-14)
 
 - F-Z-16: with the split on, a diode crossing the split locates where only `V_f = 0` diodes flip is a continuity point (both laws meet at `v = i = 0`); the restart's impulse probe no longer runs there. It had read the new mode's own fast transient as a jump: a 1 mΩ diode clamping a 0.2 nF junction booked a `capacitor_loop` record of 2.46e-13 C (`i_L·R_on·C`, 10× the probe's `split_snap·dt` allowance). A switched-capacitor loop (a gate edge closing on a charged capacitor) records as before. Split off: byte-identical.
+- F-Z-17: a crossing the restart cut locates just past stage 1 is bracketed on the SDIRK trial's own value at `t1`, not stage 1's backward-Euler state. The bracket had kept stage 1's sign (D1 at 0.65 V while the trial read 0.70–0.75 V), so the cut landed at `t1`, and its left limit (an inner-event row) held D1 OFF above V_th: 18 rows on the snubbed DCM boost at T/200, by up to 0.0497 V, which `device_loss_summary` warned about. Now there are none. At `split_snap=0.01` the remaining rows (139, down from 157) sit within the locator's stated `split_snap·dt` tolerance. Split off: byte-identical.
 
 ### Recorders: under the restart rule, integrals by the method, samples by the states (F-Z-12)
 
