@@ -3620,6 +3620,18 @@ inline SimulationResult run_transient(
                 // converged: the bracket, or two successive trial instants,
                 // within snap
                 auto narrow = [&](const events::Bracket& q) { return q.tb - q.ta <= snap; };
+                // F-Z-2: stop on the signal. t_cur is taken when the root of
+                // the bracket's raw chord is within snap of it (|s(t_cur)| <=
+                // snap * the chord's slope: the time tolerance through the
+                // signal), and the bracket's far end the same way before any
+                // trial (a crossing on the grid point). Not its start: a piece
+                // after a cut starts at s ~ 0 by design, and a signal that dips
+                // and comes back crosses inside. A cut at the last trial's
+                // instant solves at its dt: the factor the trial left is the
+                // piece's.
+                auto chord = [](const events::Bracket& q) {
+                    return q.ta - q.sa_raw * (q.tb - q.ta) / (q.sb_raw - q.sa_raw);
+                };
                 // one trapezoidal trial from the step start under the start bits
                 auto trial = [&](Real t_loc) {
                     x = x_prev;
@@ -3637,7 +3649,10 @@ inline SimulationResult run_transient(
                 };
                 Real t_cur = a, t_was = hi;
                 bool failed = false;
-                const int n_trials = events::illinois(br, 40,
+                const Real c0 = chord(br);
+                const bool at_end = hi - c0 <= snap;
+                if (at_end) t_cur = hi;
+                const int n_trials = at_end ? 0 : events::illinois(br, 40,
                     [&](Real, const events::Bracket& q) { return narrow(q); },
                     [&](Real t_loc, Real& sm) {
                         t_was = t_cur;
@@ -3652,12 +3667,16 @@ inline SimulationResult run_transient(
                     [](events::BracketEnd) {},
                     [&](const events::Bracket& q) {
                         return narrow(q) || std::abs(t_cur - t_was) <= snap ||
-                               q.sa_raw == Real{0} || q.sb_raw == Real{0};
+                               q.sa_raw == Real{0} || q.sb_raw == Real{0} ||
+                               std::abs(chord(q) - t_cur) <= snap;
                     });
                 result.split_locator_trials += static_cast<Size>(n_trials);
                 if (failed || (n_trials >= 40 && !narrow(br))) ++result.split_locator_giveups;
-                // the root of the final bracket's unweighted chord
-                const Real t_new = br.sa_raw == Real{0} ? br.ta
+                // the root of the final bracket's unweighted chord, or the
+                // last trial (or bracket end) within snap of it
+                const Real t_new = at_end || (!failed && n_trials > 0 &&
+                                              std::abs(chord(br) - t_cur) <= snap) ? t_cur
+                    : br.sa_raw == Real{0} ? br.ta
                     : br.sb_raw == Real{0} ? br.tb
                     : std::clamp(br.ta - br.sa_raw * (br.tb - br.ta) / (br.sb_raw - br.sa_raw),
                                  br.ta, br.tb);
@@ -3996,6 +4015,13 @@ inline SimulationResult run_transient(
             auto narrow = [&](const events::Bracket& q) { return q.tb - q.ta <= snap; };
             Real t_cur = t1, t_was = t2;
             bool failed = false;
+            // F-Z-2: stop on the signal, as locate_islands (no end shortcut:
+            // t2 is refused below, and near t1 a curved signal may cross
+            // inside). The split's only: the rule alone reaches this cut too,
+            // unchanged.
+            auto chord = [](const events::Bracket& q) {
+                return q.ta - q.sa_raw * (q.tb - q.ta) / (q.sb_raw - q.sa_raw);
+            };
             const int n_trials = events::illinois(br, 40,
                 [&](Real, const events::Bracket& q) { return narrow(q); },
                 [&](Real t_loc, Real& sm) {
@@ -4011,14 +4037,16 @@ inline SimulationResult run_transient(
                 [](events::BracketEnd) {},
                 [&](const events::Bracket& q) {
                     return narrow(q) || std::abs(t_cur - t_was) <= snap ||
-                           q.sa_raw == Real{0} || q.sb_raw == Real{0};
+                           q.sa_raw == Real{0} || q.sb_raw == Real{0} ||
+                           (split && std::abs(chord(q) - t_cur) <= snap);
                 });
             result.split_locator_trials += static_cast<Size>(n_trials);
             if (failed) {
                 ++result.split_locator_giveups;
                 return nan;
             }
-            const Real t_new = br.sa_raw == Real{0} ? br.ta
+            const Real t_new = split && n_trials > 0 && std::abs(chord(br) - t_cur) <= snap ? t_cur
+                : br.sa_raw == Real{0} ? br.ta
                 : br.sb_raw == Real{0} ? br.tb
                 : std::clamp(br.ta - br.sa_raw * (br.tb - br.ta) / (br.sb_raw - br.sa_raw),
                              br.ta, br.tb);

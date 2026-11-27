@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed engine: the event split's locators stop on the signal (F-Z-2)
+
+- **Fewer refactorisations per located diode event** (`pwl`,
+  `discontinuity_restart` + event split). A trial is accepted when its
+  bracket's chord root is within `split_snap*dt` of it, and the cut is taken
+  at that trial's instant, so the piece reuses the trial's factor; a crossing
+  on the step's far end (a grid point) takes no trial. `event_refactors`
+  209 / 935 / 223 → 144 / 663 / 165 on buck_dcm / three-phase / diode-bridge
+  rectifiers. Located times move within `split_snap*dt`; the split off is
+  bit-identical.
+
 ### Fixed engine: the restart after a split sliver probes at the next grid step
 
 - **A gate edge a tiny fraction of dt before a grid point no longer leaves a
