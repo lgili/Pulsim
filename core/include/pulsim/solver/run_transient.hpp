@@ -3163,6 +3163,7 @@ inline SimulationResult run_transient(
             // source edge inside the step is not landed (loc = 0)
             const Real t_src = t_from + (ev && split && !at_loc ? loc : Real{0});
             Real e_src = -1;   // the ε rl_bs holds the sources of
+            Real e_last = 0;   // the last solve's ε (refined)
             auto solve_eps = [&](Real e) {
                 if (e != e_src) {   // the post side of an edge at t_src (lb = 0)
                     rl_bs = rl_b;
@@ -3178,21 +3179,27 @@ inline SimulationResult run_transient(
                 b_extra = rl_bs + rl_h;
                 if (lin) {
                     cache.solve_at(stamped_mask, Real{2} * e, b_extra, x);   // solve-exempt: restart-line re-solve (DECISIONS 22)
-                    // F-Z-4: one step of iterative refinement on the same factor.
-                    // L/ε (1e7 Ω for 1 mH) beside 1e5 Ω rows: the LU's backward
-                    // error left 4.6e-11 A in a divider node's KCL; one step
-                    // makes it componentwise (Skeel). Right-limit solves only.
-                    const Vector* bc = nullptr;
-                    if (const auto* J = cache.resident_event_matrix(stamped_mask, Real{2} * e, &bc)) {
-                        rl_rr = -(*bc + b_extra);
-                        rl_rr.noalias() -= *J * x;
-                        cache.resident_factor(stamped_mask, Real{2} * e).solve(rl_rr, rl_dx);   // factor-reuse
-                        x += rl_dx;
-                    }
                 } else {
                     x = rl_x1;
                     rei(t_from + e, Real{2} * e, true, true);
                 }
+                e_last = e;
+            };
+            // F-Z-4: the published row, one step of iterative refinement on the
+            // last ε solve's factor. L/ε (1e7 Ω for 1 mH) beside 1e5 Ω rows: the
+            // LU's backward error left 4.6e-11 A in a divider node's KCL; one
+            // step makes it componentwise (Skeel). Once per row, linear mode.
+            auto refined = [&]() -> const Vector& {
+                const Vector* bc = nullptr;
+                const auto* J = lin ? cache.resident_event_matrix(stamped_mask, Real{2} * e_last, &bc)
+                                    : nullptr;
+                if (J) {
+                    rl_rr = -(*bc + b_extra);
+                    rl_rr.noalias() -= *J * x;
+                    cache.resident_factor(stamped_mask, Real{2} * e_last).solve(rl_rr, rl_dx);   // factor-reuse
+                    x += rl_dx;
+                }
+                return x;
             };
             // a state's value in x (C: node difference; L: its branch)
             auto state_of = [&](Size k) -> Real {
@@ -3455,7 +3462,7 @@ inline SimulationResult run_transient(
                         }
                         rl_dep.clear();
                         c = pinned(Real{1e-3} * kGamma * opts.dt) && c;
-                        out = x;
+                        out = refined();
                         return c;
                     };
                     bool conv = elim_solve();
@@ -3463,9 +3470,9 @@ inline SimulationResult run_transient(
                     unheld = unheld || !conv;
                 } else {
                     bool conv = pinned(eps, !ip_jump && !ip_moved);
-                    out = x;
+                    out = refined();
                     // stage 1's slope is the old mode's: no prediction
-                    hold_mode([&] { const bool c = pinned(eps); out = x; return c; }, conv, nullptr);
+                    hold_mode([&] { const bool c = pinned(eps); out = refined(); return c; }, conv, nullptr);
                     unheld = unheld || !conv;
                 }
             } catch (const std::runtime_error&) {
