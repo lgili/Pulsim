@@ -281,3 +281,40 @@ def test_fy3_a_window_max_inside_one_exact_step_is_the_trajectory_peak():
     wo = {k: float(np.asarray(v)[0]) for k, v in off.recorded["r"].windows["v(c)"].items()}
     assert "n_extrema_closed" not in off.recorder_feed["closed_form"]
     assert wo["max"] <= peak and vmin2 > 0
+
+
+def test_f_r_1_the_referee_keeps_one_window_not_the_chain(monkeypatch):
+    """F-R-1 (rehearsal on cbdce080): the referee kept every window of its rule-off reference
+    (+25 MB per 30 us window; lc_low_pass_sine 8.1 GB, the machine froze). It now reads each
+    window once the next is known and releases it: the traced peak stays a few windows
+    whatever their number (diode_half_wave_rl_load, 13 windows of <= 21 MB: 300 MB before,
+    104 MB after). tracemalloc sees numpy's buffers on every platform (no ``resource``)."""
+    import tracemalloc
+
+    import next_defaults_rehearsal as R
+    import output_rule_referee as F
+
+    import differential_runner as dr
+    unit = "circuits/diodes/diode_half_wave_rl_load.yaml"
+    warnings.simplefilter("ignore")
+    case = v1_reader.load(R.ROOT / unit)
+    cols = dr.observables_of(case)
+    kind, res, _, _, info = R.run_cell(case, "auto+next")
+    assert kind == "ran"
+    sizes, orig = [], p.simulate
+
+    def spy(*a, **k):
+        g = orig(*a, **k)
+        sizes.append(np.asarray(g.states).nbytes + np.asarray(g.times).nbytes)
+        return g
+    monkeypatch.setattr(p, "simulate", spy)
+    tracemalloc.start()
+    try:
+        fr = F.referee(case, res, info, cols, R._rule_rtol(res), "auto+next")
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert fr["comparable"] and fr["n_windows"] == len(sizes) >= 10, fr
+    # the verdict of the whole-run referee on this line (2.1.0 defaults), measured before the fix
+    assert fr["ratio"] == pytest.approx(0.9673700784363157, rel=1e-12)
+    assert peak < 8 * max(sizes), (peak, max(sizes), sum(sizes))
