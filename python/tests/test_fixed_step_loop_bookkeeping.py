@@ -61,6 +61,18 @@ def test_switch_fn_is_read_once_per_step(kw):
     assert c2 == r2.counters["switch_fn_calls"] + 1
 
 
+def test_the_split_reads_the_step_start_once():
+    """Restart + split (F-Z-2, part): the previous step's end read is this
+    step's start read, 1412 calls per 1000 steps (2412 before, 1000 of them
+    the start read again); the other 412 bisect the 20 opaque edges to snap."""
+    kw = dict(discontinuity_restart=True, enable_substep_state_correction=True)
+    r1, c1 = _run(1000, **kw)
+    r2, c2 = _run(2000, **kw)
+    assert not r1.dt_retries and not r2.dt_retries
+    assert c2 - c1 == 1412
+    assert c2 == r2.counters["switch_fn_calls"] + 1
+
+
 def test_segment_memo_absorbs_repeated_lookups():
     """Default engine: 81 searches for 2000 steps (one per solve, >= 2000,
     before); with the restart rule 40. A search happens only when the
