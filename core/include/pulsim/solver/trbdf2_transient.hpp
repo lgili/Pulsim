@@ -111,7 +111,9 @@
 #include "pulsim/solver/step/esdirk43.hpp"
 #include "pulsim/solver/step/integrators.hpp"
 #include "pulsim/solver/step/sensitivity.hpp"
+#include "pulsim/solver/step/source_accumulator.hpp"
 #include "pulsim/solver/step/stepper.hpp"
+#include "pulsim/solver/step/stepper_core.hpp"
 #include "pulsim/solver/run_transient.hpp"   // combine_masks, SimulationAborted
 #include "pulsim/sources/pwm_b_extra.hpp"
 #include "pulsim/sources/current_waveform_b_extra.hpp"
@@ -720,38 +722,14 @@ inline SimulationResult run_transient_trbdf2(
         }
     }
 
-    // Built-in time-varying source census + reusable buffers
-    // (same pattern as run_transient).
-    bool has_pwm = false, has_sine = false, has_pulse = false;
-    for (Index b_id = 0; b_id < graph.num_branches(); ++b_id) {
-        if (graph.branch(b_id).kind != topology::BranchKind::Source) {
-            continue;
-        }
-        switch (pool.kind_of(b_id)) {
-        case pwl::DevicePool::StoredKind::PWMVoltageSource:
-            has_pwm = true; break;
-        case pwl::DevicePool::StoredKind::SineVoltageSource:
-            has_sine = true; break;
-        case pwl::DevicePool::StoredKind::PulseVoltageSource:
-            has_pulse = true; break;
-        default: break;
-        }
-    }
-    Vector be_pwm, be_sine, be_pulse, b_src, b_stage, x_g, x_1,
-        x_trial;
-    std::vector<std::pair<Index, Index>> sine_vars;   // (branch, source row)
-    for (Index b_id = 0; b_id < graph.num_branches(); ++b_id) {
-        const auto& br = graph.branch(b_id);
-        if (br.kind == topology::BranchKind::Source
-            && pool.kind_of(br.id)
-                   == pwl::DevicePool::StoredKind::SineVoltageSource) {
-            sine_vars.emplace_back(br.id,
-                                   pool.branch_var_id_for_source(br.id, graph));
-        }
-    }
-    const bool has_iwave =
-        sources::has_current_waveform_sources(pool, graph);
-    Vector be_iwave;
+    // The built-in sources' rows (refactor-unified-transient-stepper
+    // group 1): step::SourceAccumulator, shared with run_transient and the
+    // DSED adapter. Its per-row `0 + (−v)` adds equal the dense per-kind
+    // passes this replaced bit for bit: `out` is a zeroed buffer plus
+    // b_extra_fn, never −0.0 (DECISIONS 21).
+    step::SourceAccumulator src_acc{pool, graph};
+    Vector b_src, b_stage, x_g, x_1, x_trial;
+    const bool has_iwave = src_acc.has_current_waveforms();
 
     // Source-only overlay at time `at_t` (no history terms).
     auto accumulate_sources = [&](Real at_t, Vector& out) {
@@ -759,31 +737,7 @@ inline SimulationResult run_transient_trbdf2(
         if (b_extra_fn) {
             out += b_extra_fn(at_t);
         }
-        if (has_pwm) {
-            sources::compute_pwm_b_extra(pool, graph, at_t, be_pwm);
-            out += be_pwm;
-        }
-        if (has_sine) {
-            // compute_sine_b_extra's arithmetic on the sine branches found
-            // once (it scanned every branch with a pool lookup per call:
-            // 9 % of the bridge rectifier's run time).
-            be_sine.setZero(static_cast<Index>(state_size));
-            for (const auto& [b_id, var] : sine_vars) {
-                be_sine[var] += -models::SineVoltageSource::value_at(
-                    pool.sine_voltage_source_params(b_id), at_t);
-            }
-            out += be_sine;
-        }
-        if (has_pulse) {
-            sources::compute_pulse_b_extra(pool, graph, at_t,
-                                            be_pulse);
-            out += be_pulse;
-        }
-        if (has_iwave) {
-            sources::compute_current_waveform_b_extra(pool, graph, at_t,
-                                                      be_iwave);
-            out += be_iwave;
-        }
+        src_acc.add(pool, graph, out, at_t, Real{0});
         if (lt) lt->inject(out);   // the heat owed, on every solve
         if (lines) lines->inject(out, at_t);   // the waves tau ago (D18)
     };
@@ -869,10 +823,9 @@ inline SimulationResult run_transient_trbdf2(
     auto solve_dispatch = [&](const topology::SwitchStateMask& m,
                                Real dt_use, const Vector& b_ex,
                                Vector& out_x) -> bool {
-        if (!nl_effective) {
-            cache.solve_at(m, dt_use, b_ex, out_x);
-            return true;
-        }
+        return step::dispatch_solve(static_cast<bool>(nl_effective),
+            [&] { cache.solve_at(m, dt_use, b_ex, out_x); },   // solve-point
+            [&]() -> bool {
         if (!nl_seg_valid || nl_seg_dt != dt_use
             || !(nl_seg_mask == m)) {
             seg_asm.assemble(graph, pool, m, dt_use, nl_seg.J,
@@ -883,7 +836,7 @@ inline SimulationResult run_transient_trbdf2(
             nl_seg_valid = true;
         }
         try {
-            out_x = pwl::solve_with_newton_b_extra(
+            out_x = pwl::solve_with_newton_b_extra(   // solve-point
                 nl_seg, nl_effective, graph, pool, /*x_init=*/out_x,
                 b_ex, opts.max_newton_iterations,
                 opts.tol_newton_dx, opts.tol_newton_res,
@@ -913,16 +866,16 @@ inline SimulationResult run_transient_trbdf2(
             // it is re-measured by one more solve from the converged state.
             const std::string first_error = newton_last_error;
             try {
-                cache.solve_at(m, dt_use, b_ex, nl_start_x);
+                cache.solve_at(m, dt_use, b_ex, nl_start_x);   // solve-point
                 if (!nl_start_x.allFinite()) return false;
-                out_x = pwl::solve_with_newton_b_extra(
+                out_x = pwl::solve_with_newton_b_extra(   // solve-point
                     nl_seg, nl_effective, graph, pool, nl_start_x, b_ex,
                     opts.max_newton_iterations, opts.tol_newton_dx,
                     opts.tol_newton_res, opts.enable_newton_line_search,
                     opts.enable_newton_lm, &newton_ws, &newton_roundoff);
                 if (newton_roundoff.accepted) {
                     nl_start_x = out_x;
-                    out_x = pwl::solve_with_newton_b_extra(
+                    out_x = pwl::solve_with_newton_b_extra(   // solve-point
                         nl_seg, nl_effective, graph, pool, nl_start_x, b_ex,
                         opts.max_newton_iterations, opts.tol_newton_dx,
                         opts.tol_newton_res, opts.enable_newton_line_search,
@@ -946,6 +899,7 @@ inline SimulationResult run_transient_trbdf2(
             }
         }
         return true;
+            });
     };
 
     // D3 on mode `m` (cached per mode): a floating island or an ideal
@@ -1024,12 +978,16 @@ inline SimulationResult run_transient_trbdf2(
         // solve's return value. Setting it here, at the one
         // choke point all trapezoidal solves pass through, is the
         // same fix run_transient applies to its `step_ctx`.
-        step_ctx = step::Trapezoidal::stage(dt).ctx();
-        step_ctx.t = t0 + dt;   // the external devices' ctx->t
-        history.compute_b_extra(dt, b_stage);
-        accumulate_sources(t0 + dt, b_src);
-        b_stage += b_src;
-        const bool ok = solve_dispatch(m, dt, b_stage, out_x);
+        // the single solve point (refactor-unified-transient-stepper
+        // group 2): the stage's step context (t0 + dt: the external
+        // devices' ctx->t), then the right-hand side and the dispatch
+        const bool ok = step::solve_stage(
+            step_ctx, step::Trapezoidal::stage(dt), t0 + dt, [&] {
+                history.compute_b_extra(dt, b_stage);
+                accumulate_sources(t0 + dt, b_src);
+                b_stage += b_src;
+                return solve_dispatch(m, dt, b_stage, out_x);
+            });
         if (stats_out) { ++stats_out->n_solves; }
         return ok;
     };
@@ -1191,9 +1149,9 @@ inline SimulationResult run_transient_trbdf2(
         pn_r = J->cwiseAbs() * xs.cwiseAbs();
         pn_r += bc->cwiseAbs() + b_stage.cwiseAbs();
         pn_rhs = -pn_r;
-        cache.solve_at(m, dt, pn_rhs, pn_y);
+        cache.solve_at(m, dt, pn_rhs, pn_y);   // factor-reuse
         pn_rhs.setZero(static_cast<Index>(state_size));
-        cache.solve_at(m, dt, pn_rhs, pn_y0);
+        cache.solve_at(m, dt, pn_rhs, pn_y0);   // factor-reuse
         pn_y -= pn_y0;
         const auto ents = diodes.entries();
         pn_bound.assign(ents.size(), Real{0});
@@ -1456,7 +1414,7 @@ inline SimulationResult run_transient_trbdf2(
                             d.settle_consistent = pwl::judge_mode(
                                 diodes, mode_settled, x_trial, sc, mode_selector.tol,
                                 &d.settle_violation);
-                        cache.solve_at(mode_mask_at(m_site, sel.on), dt_site, mode_bx,
+                        cache.solve_at(mode_mask_at(m_site, sel.on), dt_site, mode_bx,   // factor-reuse
                                        mode_xj);
                         d.lcp_consistent = pwl::judge_mode(
                             diodes, sel.on, mode_xj, sc, mode_selector.tol,
@@ -2165,8 +2123,7 @@ inline SimulationResult run_transient_trbdf2(
         if (lin && (dtp > hp * Real{1.0001} || probe_moved() || m_probe == x_mask) && commit
             && t_plus < opts.t_end - h_min
             && t_plus < queue.next_of(events::Kind::ControlTick) - h_min) {
-            history.update_from_state(x_trial, dtp);
-            hs.commit(x_trial, dtp, pwl::TrBdf2Stage::Trapezoidal);
+            step::commit(history, hs, x_trial, dtp, pwl::TrBdf2Stage::Trapezoidal);
             if (learn_gates) {
                 gate.learn_toggles(diodes.num_gated() > 0 ? switch_fn(t_gates)
                                                           : m_probe, t);
@@ -2367,7 +2324,7 @@ inline SimulationResult run_transient_trbdf2(
     // set to the stage's base: the same factor, no new history method.
     // The stateful kinds' q rows take the same BE stages (ed_sdirk_base /
     // ed_hs_commit, shared with esdirk43): every circuit can restart.
-    const Real gs = Real{1} - Real{1} / std::sqrt(Real{2});
+    const Real gs = step::Sdirk22::restart_gamma();
     // ---- the SDIRK restart after a diode turn-off on a linear circuit ----
     // A diode with g_off > 0 that turns off leaves the inductor it carried
     // on a g_off path: an L*g_off mode (tau ~ 2e-13 s on the DCM buck) the
@@ -2635,8 +2592,8 @@ inline SimulationResult run_transient_trbdf2(
         history.compute_b_extra(dt, b_filt);
         history.restore(hist_snap);
         b_zero.setZero(static_cast<Index>(state_size));
-        cache.solve_at(m, dt, b_filt, x_filt);
-        cache.solve_at(m, dt, b_zero, x_filt0);
+        cache.solve_at(m, dt, b_filt, x_filt);   // factor-reuse
+        cache.solve_at(m, dt, b_zero, x_filt0);   // factor-reuse
         x_filt -= x_filt0;
         for (Size i = 0; i < hist_f.size(); ++i) {
             const auto& e = hist_f[i];
@@ -3481,7 +3438,7 @@ inline SimulationResult run_transient_trbdf2(
                     }
                     const Real sc = opts.atol + opts.rtol
                         * std::max(std::abs(y_old), std::abs(y_new));
-                    est_v[i] = h * (Real{1} - gs) * (k1 - k2);
+                    est_v[i] = step::Sdirk22::lte(h, gs, k1, k2);
                     est_sc[i] = sc;
                     // The re-initialisation step: a dependent state jumps
                     // (flux / charge conserved by the BE stages at any h),
@@ -3609,7 +3566,7 @@ inline SimulationResult run_transient_trbdf2(
                     if (q_atol[r] < Real{0}) continue;   // an external row with no q entry
                     Real ee, q0, q1;
                     if (sdirk) {
-                        ee = ed_sdpsi5[r] - (Real{1} - gs) / gs * q_d1[r];
+                        ee = step::Sdirk22::lte_q(ed_sdpsi5[r], q_d1[r], gs);
                         q0 = ed_sq0[r];
                         q1 = ed_spsi5[r] + q_d1[r];
                     } else if constexpr (kE) {
@@ -3688,9 +3645,9 @@ inline SimulationResult run_transient_trbdf2(
                 if (kE || opts.roundoff_floor == 1) {
                     for (Index k = 1; k < noise_rhs.size(); k += 2) noise_rhs[k] = -noise_rhs[k];
                 }
-                cache.solve_at(mask_step, hg, noise_rhs, noise_y);
+                cache.solve_at(mask_step, hg, noise_rhs, noise_y);   // factor-reuse
                 noise_rhs.setZero(static_cast<Index>(state_size));
-                cache.solve_at(mask_step, hg, noise_rhs, noise_y0);
+                cache.solve_at(mask_step, hg, noise_rhs, noise_y0);   // factor-reuse
                 noise_y = (noise_y - noise_y0).cwiseAbs()
                           * std::numeric_limits<Real>::epsilon();
                 const Real kc = (Real{4} / hg) / (gamma * (Real{1} - gamma))

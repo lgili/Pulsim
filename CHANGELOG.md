@@ -35,6 +35,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   after the 1.5 us turn-off and then aborted at h_min; it runs again. ll13's
   own trajectories at other tolerances move (fewer roundoff accepts).
 
+### Transient engines on one step driver (refactor-unified-transient-stepper)
+
+- **No result changes.** The `pwl` and `trbdf2` engines now share the step
+  driver and its pieces in `core/include/pulsim/solver/step/` (see
+  "For developers: where the stepper lives" in `docs/solvers.md`). Results and
+  counters are byte-identical to before, checked against stored baselines.
+- **No legacy engine name.** The old TR-BDF2 loop was never exposed as a
+  public `trbdf2-legacy` engine. It was kept behind an internal switch for
+  one slice and then deleted, so there is nothing to migrate and no removal
+  date.
+- **Zero-allocation test for TR-BDF2.** Accepted and rejected steps do not
+  allocate. A step that retries after a failed Newton solve allocates about
+  10 to 16 times, for the failure's error message. A test holds that bound;
+  the allocation itself is not fixed yet.
+
 ### Exact engine, phase 3 slice (add-exact-propagator-strategy groups 7, 10)
 
 - **Coupled inductors with |k| = 1 are refused by name.** The exact engine's

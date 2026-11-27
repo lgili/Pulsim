@@ -185,6 +185,42 @@ Error control:
 `n_refresh_probes` and `h_post_event_min` (smallest accepted first
 step after a refreshed edge).
 
+### For developers: where the stepper lives
+
+Both transient engines (`pwl`, fixed step, in `solver/run_transient.hpp`;
+`trbdf2`, variable step, in `solver/trbdf2_transient.hpp`) run on one
+step driver. The shared pieces are in `core/include/pulsim/solver/step/`:
+
+| header | what it holds |
+|---|---|
+| `stepper.hpp` | `step::run<I>(clock, body)`: the loop over the engine's phases (poll, attempt, accept or reject, commit, end) |
+| `controllers.hpp` | `FixedClock`, `LteController` (step proposal, `reject_factor`) and `ControllerState`, the controller's part of a snapshot |
+| `integrators.hpp` | stage tables: `Trapezoidal`, `BackwardEuler`, `TrBdf2`, `Sdirk22` (incl. the restart estimate `restart_gamma` / `lte` / `lte_q`) |
+| `esdirk43.hpp` | the `Esdirk43` table |
+| `policies.hpp` | `HalvingLadder` (fixed-step sub-step retry), `GuardPolicy` (inductor freeze, then clamp), `RestartPolicy` (the fixed engine's SDIRK restart steps) |
+| `stepper_core.hpp` | `commit`, `snapshot_into`, `restore`, `seed`: accept, rollback and seeding over the history and the devices |
+| `source_accumulator.hpp` | the source vector of a step |
+| `sensitivity.hpp` | forward sensitivities along the stages |
+
+What each engine still owns, and why (the decisions are in
+`openspec/changes/refactor-unified-transient-stepper/DECISIONS.md`):
+
+- **Its solve point** (DECISIONS 22). The fixed engine writes its one
+  Newton call per segment out in the event iteration, because a closure
+  on its step path cost more than the 0.5 % budget; TR-BDF2 keeps
+  `solve_stage` / `dispatch_solve`.
+- **The step decisions** (DECISIONS 15, 25): reject, forced accept, the
+  chatter guard, the event iteration (`run_event_iteration`) and the
+  TR-BDF2 probe / landing phases stay in the engine's body. As free
+  functions they would take the engine's whole state; they move when the
+  event-driven loop owns that state (task groups 14 and 15).
+- **The W⁻¹ restart filter** (DECISIONS 24): two solves on the step's
+  factor, so it stays with the other solves in `run_transient_trbdf2`.
+
+Changes here are behaviour-preserving by contract: results, counters
+included, are checked byte for byte against stored baselines
+(`benchmarks/tools/pwl_identity.py`, `benchmarks/tools/trbdf2_identity.py`).
+
 ## Tuning guide
 
 | Knob | DormandPrince5 | RadauIIA3 | Effect |

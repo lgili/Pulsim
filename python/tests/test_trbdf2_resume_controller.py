@@ -72,3 +72,68 @@ def test_an_explicit_h_init_still_wins():
     resumed = _run(2e-4, resume_from=first.final_snapshot, dt_init=1e-9)
     tr = np.asarray(resumed.times)
     assert tr[1] - tr[0] == pytest.approx(1e-9, rel=1e-6)
+
+
+# Task 12.2. A split run is bit-identical where the controller block is the
+# whole loop state (an RLC: no gates, no diodes). The switched buck is not
+# (DECISIONS 12: its gate-learning and hold state are loop locals the
+# snapshot does not carry; DECISIONS 28).
+def _rlc():
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("V", "in", "gnd", 0.0, 10.0, 1e4)
+    b.add_resistor("R", "in", "a", 2.0)
+    b.add_inductor("L", "a", "out", 1e-4)
+    b.add_capacitor("C", "out", "gnd", 1e-6)
+    b.add_resistor("RL", "out", "gnd", 20.0)
+    return b
+
+
+def _rlc_run(engine, t_end, **kw):
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return p.simulate(_rlc(), t_end=t_end, engine=engine,
+                          dt=1e-7 if engine == "pwl" else 4e-7, **kw)
+
+
+@pytest.mark.parametrize("k_after", [5, 40])
+def test_split_rlc_run_is_bit_identical(k_after):
+    full = _rlc_run("trbdf2", 4e-4)
+    tf, xf = np.asarray(full.times), np.asarray(full.states)
+    i0 = int(np.searchsorted(tf, 2e-4)) + k_after
+    first = _rlc_run("trbdf2", float(tf[i0]))
+    assert first.final_snapshot.controller_state[0] == 2   # LTE block
+    resumed = _rlc_run("trbdf2", 4e-4, resume_from=first.final_snapshot)
+    np.testing.assert_array_equal(np.asarray(resumed.times), tf[i0:])
+    np.testing.assert_array_equal(np.asarray(resumed.states), xf[i0:])
+
+
+def _without_controller(snap):
+    st = list(snap.__getstate__())
+    st[14] = None   # the controller (kind, values) slot of the pickle
+    out = type(snap).__new__(type(snap))
+    out.__setstate__(tuple(st))
+    return out
+
+
+def test_a_snapshot_without_controller_state_resumes_to_tolerance():
+    full = _rlc_run("trbdf2", 4e-4)
+    snap = _without_controller(_rlc_run("trbdf2", 2e-4).final_snapshot)
+    assert snap.controller_state is None
+    resumed = _rlc_run("trbdf2", 4e-4, resume_from=snap)
+    assert np.asarray(resumed.times)[0] == pytest.approx(2e-4, rel=1e-12)
+    assert np.allclose(np.asarray(resumed.states)[-1],
+                       np.asarray(full.states)[-1], rtol=1e-5, atol=1e-6)
+
+
+@pytest.mark.parametrize("first_engine, then_engine",
+                         [("pwl", "trbdf2"), ("trbdf2", "pwl")])
+def test_a_snapshot_resumes_across_the_fixed_and_lte_controllers(
+        first_engine, then_engine):
+    # engine='pwl' writes no controller block, so 'trbdf2' restarts its LTE
+    # controller from it; 'pwl' ignores the LTE block of a 'trbdf2' snapshot
+    snap = _rlc_run(first_engine, 2e-4).final_snapshot
+    assert (snap.controller_state is None) == (first_engine == "pwl")
+    resumed = _rlc_run(then_engine, 4e-4, resume_from=snap)
+    ref = _rlc_run(then_engine, 4e-4)
+    assert np.allclose(np.asarray(resumed.states)[-1],
+                       np.asarray(ref.states)[-1], rtol=1e-5, atol=1e-6)

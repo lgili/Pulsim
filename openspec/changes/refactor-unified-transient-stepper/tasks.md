@@ -13,33 +13,35 @@ at equal times or time-weighted measures, never sample means.
 ## 0. Preconditions and baseline
 - [ ] 0.1 Merged: `restore-reference-benchmark-harness`, `add-engine-conformance-matrix`, `add-unified-device-interface` sections 1–3, `add-unified-event-queue` sections 2, 5 and 8
   - Open: `add-unified-event-queue` sections 5 and 8 are open (2 done); the harness change is 23/33. The slices ran on the integration tree instead
-- [ ] 0.2 Record on `main`: goldens; TR-BDF2 step sequences of the harness; counter gate values; ns/step for audit rows 1–3 and 5–9; extension build time
-  - Open: baselines were recorded per slice at each slice's base commit on the integration tree (DECISIONS 2), never on `main`; ns/step rows and build time not recorded
+- [x] 0.2 Record on `main`: goldens; TR-BDF2 step sequences of the harness; counter gate values; ns/step for audit rows 1–3 and 5–9; extension build time
+  - Recorded at each slice's base commit on the integration tree instead (DECISIONS 2, 21); groups 1–3: `400011ee`, every compare suite, instructions per step (not ns/step), peak RSS of one `bindings.cpp` compile 3.76 GB / 60 s (not the whole build time)
 - [x] 0.3 Owner decision on `add-adaptive-runge-kutta-solvers` (design Open Question 1) — DECIDED 2026-11-23 (the project's decisions are the orchestrator's): the in-kernel coupling of DOPRI5 / Radau is not built; ESDIRK4(3) on the stepper is the high-order method; the Python integrators are deprecated then deleted by 11.2 (see `add-adaptive-runge-kutta-solvers/tasks.md`, Resolution)
   - Open: no owner decision recorded here
 
 ## 1. Extract the source accumulation
-- [ ] 1.1 `solver/step/source_accumulator.hpp`: one implementation of `run_transient.hpp:777-793`, `trbdf2_transient.hpp:480-500` and the DSED adapter's overlay
-  - Open: a number change (the two drivers associate the sums differently, DECISIONS 7): waits for the number-changing release
-- [ ] 1.2 Both MNA drivers and the DSED adapter call it
-- [ ] 1.3 Oracle: goldens bit-identical; TR-BDF2 step-identical; DSED tests green
+- [x] 1.1 `solver/step/source_accumulator.hpp`: one implementation of `run_transient.hpp:777-793`, `trbdf2_transient.hpp:480-500` and the DSED adapter's overlay
+  - Done for the source terms (`step::SourceAccumulator`); each caller keeps its own association with the history and `b_extra_fn`, which is the number change of DECISIONS 7 and still waits (DECISIONS 21)
+- [x] 1.2 Both MNA drivers and the DSED adapter call it
+- [x] 1.3 Oracle: goldens bit-identical; TR-BDF2 step-identical; DSED tests green
+  - Every compare suite of DECISIONS 21 byte-identical (pwl 399/399, trbdf2 380/380, DSED 36/36 default + shadow, exact outputs); C++ step / mode / dsed tests pass; instructions per step −1.2 … +0.05 % (bridge3 −62 %, active-clamp forward −31 %: the DSED dense passes scanned every branch per call)
 
 ## 2. Extract the single solve point
-- [ ] 2.1 `solver/step/stepper_core.hpp`: `StageSpec`, `StepperCore::solve_stage` (step context, history right-hand side, sources, linear or Newton dispatch)
-  - Open: `StageSpec` exists (da7b750e, DECISIONS 3); `StepperCore::solve_stage` is not written
+- [x] 2.1 `solver/step/stepper_core.hpp`: `StageSpec`, `StepperCore::solve_stage` (step context, history right-hand side, sources, linear or Newton dispatch)
+  - Done as a free function (DECISIONS 22): `step::solve_stage` / `step::dispatch_solve` in `solver/step/stepper_core.hpp`; the history right-hand side and the sources stay the engines' (DECISIONS 7); byte-identical on every compare suite, cost within gate (DECISIONS 22a)
 - [ ] 2.2 TR-BDF2: `trap_solve`, `probe_solve`, the stage solves and the settle call `solve_stage`; fixed engine: `run_event_iteration`, the retry sub-steps and the sub-step correction call it
-  - Open: each engine still calls its own solves
-- [ ] 2.3 Test: a grep-based check that neither driver calls `cache.solve`, `cache.solve_at` or the Newton solver except through `solve_stage`
-- [ ] 2.4 Oracle: goldens bit-identical; step-identical; `n_solves` identical; `test_trbdf2_stateful_with_diodes.py`, `test_stateful_device_stamps_compose.py`
+  - Partial: TR-BDF2 `trap_solve` → `solve_stage`, `solve_dispatch` → `dispatch_solve`; the stage solves keep setting their context at the stage start. Fixed engine: the event iteration's solve is written out (one Newton call, the inline linear branch), not `solve_stage` — a dispatch lambda cost +0.8 … +1.1 % instructions per step (DECISIONS 22a)
+- [x] 2.3 Test: a grep-based check that neither driver calls `cache.solve`, `cache.solve_at` or the Newton solver except through `solve_stage`
+  - `python/tests/test_single_solve_point.py`: every direct call is tagged `solve-point` / `factor-reuse` / `solve-exempt` (DECISIONS 22)
+- [x] 2.4 Oracle: goldens bit-identical; step-identical; `n_solves` identical; `test_trbdf2_stateful_with_diodes.py`, `test_stateful_device_stamps_compose.py`
 
 ## 3. Extract commit, rollback and seeding
-- [ ] 3.1 `StepperCore::commit`, `snapshot_into`, `restore`, `seed(InitialCondition)`; both drivers call them
-  - Open: commit / rollback / seeding are still each engine's own phases (the skeleton has no rollback, DECISIONS 15)
-- [ ] 3.2 Oracle: goldens; step-identical; `test_snapshot_resume.py`, `test_snapshot_resume_stateful.py`, `test_initial_conditions_across_engines.py`, `test_first_step_order.py` (its xfails keep their status)
+- [x] 3.1 `StepperCore::commit`, `snapshot_into`, `restore`, `seed(InitialCondition)`; both drivers call them
+  - Free functions `step::commit` / `snapshot_into` / `restore` / `seed` in `solver/step/stepper_core.hpp` (DECISIONS 23); every adjacent history + stateful-histories pair of both drivers calls them; the non-adjacent ones (initial-state seeds, TR-BDF2 stage commits, single-history rollbacks) stay, with the reasons in DECISIONS 23
+- [x] 3.2 Oracle: goldens; step-identical; `test_snapshot_resume.py`, `test_snapshot_resume_stateful.py`, `test_initial_conditions_across_engines.py`, `test_first_step_order.py` (its xfails keep their status)
 
 ## 4. Integrators as stage tables
-- [ ] 4.1 `solver/step/integrators.hpp`: `Trapezoidal`, `BackwardEuler`, `TrBdf2` (`stage`, `lte` moved from `trbdf2_transient.hpp:1286-1375`)
-  - Done: the stage tables; `TrBdf2::lte` (the per-component estimate, called by the driver); `err_exponent`; `Sdirk22`; `hermite` dense output. Open: the driver's embedded SDIRK estimate (its γs = γ/2, DECISIONS 4) and the W⁻¹ filter
+- [x] 4.1 `solver/step/integrators.hpp`: `Trapezoidal`, `BackwardEuler`, `TrBdf2` (`stage`, `lte` moved from `trbdf2_transient.hpp:1286-1375`)
+  - Done: the stage tables; `TrBdf2::lte` (the per-component estimate, called by the driver); `err_exponent`; `Sdirk22`; `hermite` dense output; the driver's embedded SDIRK restart estimate as `Sdirk22::restart_gamma` / `lte` / `lte_q` (`integrators.hpp:124-140`, called at `trbdf2_transient.hpp:2315,3429,3557`). The W⁻¹ filter stays a driver solve (DECISIONS 24)
 - [x] 4.2 Both drivers obtain their `StageSpec`s from the tables (fixed: `step::Trapezoidal::stage` / `BackwardEuler::on_factor` for every solve's step context; TR-BDF2: `step::TrBdf2::stage`)
 - [x] 4.3 Unit tests: both TR-BDF2 stages return the same `factor_dt`; `BackwardEuler::stage(h/2)` returns `factor_dt == h`; every stage's `h_elapsed` sums to `h` (as `t_off`: the last stage ends at `h`, DECISIONS 3; `core/tests/step/test_integrators.cpp`)
 - [x] 4.4 Oracle: goldens; step-identical; counter gate equal
@@ -48,8 +50,9 @@ at equal times or time-weighted measures, never sample means.
 ## 5. Controllers and policies as types
 - [x] 5.1 `solver/step/controllers.hpp`: `Fixed` (integer counter), `Lte` (moved from `trbdf2_transient.hpp:1710-1810` with the step memory), `ControllerState` (`FixedClock` is the fixed engine's grid; `LteController` the TR-BDF2 step memory and factor laws; both drivers use them)
 - [ ] 5.2 `solver/step/policies.hpp`: `IterateAtStepEnd`, `Localize`, `HalvingLadder`, `ShrinkAndRepeat`, `GuardPolicy`, `RestartPolicy` (`None` plus whatever Phase 2 has landed), each extracted in place and called by its driver
-  - Open: the policies are still inside the engines' phases (task groups 14–15 move the decisions)
-- [ ] 5.3 Oracle: goldens; step-identical; `dt_retries`, `event_iteration_breaches`, `inductor_guard_actions` records identical
+  - Done (DECISIONS 25): `HalvingLadder`, `GuardPolicy`, `RestartPolicy` in `solver/step/policies.hpp`, called by the fixed engine (`run_transient.hpp`: restart constants, the halving loop and its message, the guard walk); `ShrinkAndRepeat` is `LteController::reject_factor` (`controllers.hpp`). Open: `IterateAtStepEnd`, `Localize` (loops over the engine's state; groups 14–15)
+- [x] 5.3 Oracle: goldens; step-identical; `dt_retries`, `event_iteration_breaches`, `inductor_guard_actions` records identical
+  - Group 5 (DECISIONS 25): goldens 22/22, steps 29/29, pwl 399/399, trbdf2 380/380 identical; the three records byte-identical over 606 results of 11 test files (`poldump_plugin.py`; 4 / 4 / 29 results carry `dt_retries` / `inductor_guard_actions` / `event_iteration_breaches`)
 
 ## 6. The variable-step stepper
 - [x] 6.1 `solver/step/stepper.hpp`: `Stepper<I, C>`; instantiate `Stepper<TrBdf2, Lte>`; hidden engine name `trbdf2-next`
@@ -57,15 +60,15 @@ at equal times or time-weighted measures, never sample means.
   - Skeleton done (`solver/step/stepper.hpp`, DECISIONS 10), proven on a toy body only
   - Slice 3b (DECISIONS 15): the TR-BDF2 loop cut in place into eight phase lambdas that the legacy loop and the twin `step::run<TrBdf2>(BodyClock, phase_body(...))` both call (internal `PULSIM_TRBDF2_STEPPER_TWIN=1`, not an engine name); the skeleton grew a deciding-body branch (one ATTEMPT per call; `Verdict::Reject` restarts at poll with no rollback; `End`). Identity: see DECISIONS 15. Cost gate met after DECISIONS 16 (both drivers forced inline; default +0.10–0.35 % over the base, twin ≤ 1.0007× default). Open: `trbdf2-next` name / route; the decision (reject, forced accept, chatter guard) still in the body, not in the controller; a skeleton-owned rollback
 - [ ] 6.2 Equality proof: `trbdf2-next` step-identical to `trbdf2` on every harness circuit and every suite circuit that runs on `trbdf2`; runner job added
-  - Open: proved locally (twin identity 327/327 + 50/50, DECISIONS 15/18; since 3d `benchmarks/tools/trbdf2_identity.py` against a stored baseline); no runner job
+  - Open: proved locally (twin identity 327/327 + 50/50, DECISIONS 15/18; since 3d `benchmarks/tools/trbdf2_identity.py` against a stored baseline, 380/380 at every group of this change); no runner job, by DECISIONS 26 (byte hashes are per toolchain; CI keeps the counter gate and the goldens)
 - [ ] 6.3 Zero-alloc test for the variable-step stepper (accepted, rejected and Newton-retried steps)
-  - Open: no variable-step zero-allocation case yet
+  - Un-hidden (DECISIONS 27): an inductor-fed Shockley diode on TR-BDF2. Accepted + rejected steps O(1) (117 -> 125 news for 3,158 -> 11,626 accepted / 331 -> 1,256 rejected); Newton-retried steps NOT zero, 10–16 news per retry (a failed Newton throws a formatted `std::runtime_error`), held by a per-retry bound. Open until the failure report stops allocating (groups 14–15)
 - [x] 6.4 Switch `engine='trbdf2'` and `engine='auto'` without `dt` to the stepper; keep `engine='trbdf2-legacy'`
   - Slice 3c (DECISIONS 17): the skeleton driver is the default of `run_transient_trbdf2` (so of every route that reaches it); the old loop is kept only behind the internal `PULSIM_TRBDF2_STEPPER_LEGACY=1`, NOT as a public `trbdf2-legacy` name (orchestrator's brief: no public option). Default byte-identical to the previous default; identity tool at full counts
 - [ ] 6.5 Oracle: matrix equal for `trbdf2` and `trbdf2-legacy`; counter gate equal; ns/step rows 5–9 not above 0.2
-  - Open: no `trbdf2-legacy` name to run the matrix against; cost measured as instructions per step (DECISIONS 16/18/20), not ns/step
-- [ ] 6.6 Docs: `docs/solvers.md`, CHANGELOG (the legacy name and its removal date)
-  - Open: docs not written
+  - Open by DECISIONS 26: no `trbdf2-legacy` name to run the matrix against (the stored-baseline identity stands in, 380/380); cost measured as instructions per step (DECISIONS 16/18/20), not ns/step
+- [x] 6.6 Docs: `docs/solvers.md`, CHANGELOG (the legacy name and its removal date)
+  - `docs/solvers.md` "For developers: where the stepper lives"; CHANGELOG: no public legacy name existed (DECISIONS 17), so no removal date
 
 ## 7. The fixed-step stepper, feature by feature
 - [x] 7.1 `Stepper<Trapezoidal, Fixed>` as `pwl-next` for plain runs (linear, switches, PWL diodes, Newton devices, `should_continue`, `b_extra_fn`, `initial_state`, `resume_from`)
@@ -124,7 +127,9 @@ at equal times or time-weighted measures, never sample means.
   - C++ side done (`SolverSnapshot::controller`, written and read by the TR-BDF2 engine; DECISIONS 8); the pickle bump waits for the device-interface pickle v4
 - [ ] 12.2 Tests: a split variable-step run is bit-identical to the continuous one; a snapshot without controller state resumes to tolerance; a fixed-step snapshot resumes on the LTE controller and the reverse
   - Open: a split variable-step run is NOT bit-identical on the buck (0/44, DECISIONS 12: gate-learning and hold state are loop locals)
-- [ ] 12.3 Docs: snapshot page
+  - Added (DECISIONS 28): RLC split bit-identical (2 splits), a snapshot without controller state resumes to tolerance, pwl -> trbdf2 and trbdf2 -> pwl resume to tolerance (`test_trbdf2_resume_controller.py`); the buck part needs a snapshot-format change, deferred to groups 14–15
+- [x] 12.3 Docs: snapshot page
+  - `docs/result-reference.md` "Snapshots: `final_snapshot` and `resume_from`"
 
 ## 13. Delete the legacy drivers (one release after 8.3)
 - [x] 13.1 Delete `pwl-legacy`, `trbdf2-legacy`, the hidden names, the bodies of `run_transient` and `run_transient_trbdf2`

@@ -63,8 +63,11 @@
 #include "pulsim/solver/result.hpp"
 #include "pulsim/solver/step/controllers.hpp"
 #include "pulsim/solver/step/integrators.hpp"
+#include "pulsim/solver/step/policies.hpp"
 #include "pulsim/solver/step/stepper.hpp"
+#include "pulsim/solver/step/stepper_core.hpp"
 #include "pulsim/solver/step/sensitivity.hpp"
+#include "pulsim/solver/step/source_accumulator.hpp"
 #include "pulsim/solver/unsupported.hpp"
 #include "pulsim/sources/pulse_b_extra.hpp"
 #include "pulsim/sources/current_waveform_b_extra.hpp"
@@ -313,9 +316,9 @@ inline SimulationResult run_transient(
 
         if (b_extra_fn) {
             const Vector b_extra = b_extra_fn(t);
-            cache.solve(mask, b_extra, x);
+            cache.solve(mask, b_extra, x);   // solve-exempt: V0 overload (task 11.1)
         } else {
-            cache.solve(mask, zero_b_extra, x);
+            cache.solve(mask, zero_b_extra, x);   // solve-exempt: V0 overload (task 11.1)
         }
 
         // Record the sample. `x` is copied into the result so the
@@ -814,11 +817,11 @@ inline SimulationResult run_transient(
         }();
         if (structure.active()) (void)check_mode(dc.mask, false, opts.t_start);
         x = std::move(dc.x);
-        history.seed_from_dc_op(x);
-        // every stateful kind on its DC curve: PMSM λ, i, θ at the held
-        // point (D19), external charges, Lauritzen q_M, IGBT tail Q,
-        // nonlinear-capacitor q, saturable flux (empty kinds: no-op)
-        hs.seed_from_dc_op(x);
+        // the linear companions, then every stateful kind on its DC curve:
+        // PMSM λ, i, θ at the held point (D19), external charges, Lauritzen
+        // q_M, IGBT tail Q, nonlinear-capacitor q, saturable flux (empty
+        // kinds: no-op)
+        step::seed(history, hs, x);
         seed_held_machine_capacitors(graph, pool, dc.mask, opts.t_start, x,
                                      hs.get<pwl::PmsmMnaHistory>(), history);
         initial_mask = dc.mask;
@@ -1411,7 +1414,7 @@ inline SimulationResult run_transient(
                     const auto sc = mode_ports->scale(mode_x0);
                     d.settle_consistent = pwl::judge_mode(
                         diodes, mode_settled, x, sc, mode_selector.tol, &d.settle_violation);
-                    cache.solve_at(combine_masks(gates, mode_mask_of(sel.on), diode_owned),
+                    cache.solve_at(combine_masks(gates, mode_mask_of(sel.on), diode_owned),   // factor-reuse
                                    for_dt, bx, mode_xj);
                     d.lcp_consistent = pwl::judge_mode(
                         diodes, sel.on, mode_xj, sc, mode_selector.tol, &d.lcp_violation);
@@ -1476,68 +1479,23 @@ inline SimulationResult run_transient(
     // PWM/sine/pulse helpers otherwise allocate + zero a state-size vector AND
     // scan every branch on every step; detect ONCE which kinds the circuit
     // contains, then reuse buffers and skip absent kinds in the hot loops.
-    // update-fixed-step-loop-bookkeeping: the (branch, row) lists are
-    // built once, in the branch order of the dense passes, and each step
-    // writes its rows directly. `b[row] += (0 + (−v))` is the dense pass's
-    // `out[row] += −v` on a zeroed buffer followed by `b += out`, bit for
-    // bit; the rows a source does not own skip `b + (+0.0)`, which only
-    // differs from `b` for a −0.0 entry (checked by byte comparison).
-    using SrcRows = std::vector<std::pair<Index, Index>>;
-    SrcRows pwm_rows, sine_rows, pulse_rows;
-    for (Index b_id = 0; b_id < graph.num_branches(); ++b_id) {
-        const auto& br = graph.branch(b_id);
-        if (br.kind != topology::BranchKind::Source) {
-            continue;
-        }
-        switch (pool.kind_of(br.id)) {
-        case pwl::DevicePool::StoredKind::PWMVoltageSource:
-            pwm_rows.emplace_back(br.id,
-                pool.branch_var_id_for_source(br.id, graph)); break;
-        case pwl::DevicePool::StoredKind::SineVoltageSource:
-            sine_rows.emplace_back(br.id,
-                pool.branch_var_id_for_source(br.id, graph)); break;
-        case pwl::DevicePool::StoredKind::PulseVoltageSource:
-            pulse_rows.emplace_back(br.id,
-                pool.branch_var_id_for_source(br.id, graph)); break;
-        default:
-            break;
-        }
-    }
+    // The (branch, row) lists and the per-row adds live in
+    // step::SourceAccumulator (refactor-unified-transient-stepper group 1),
+    // shared with the TR-BDF2 engine and the DSED adapter; this engine keeps
+    // its own association with the history and b_extra_fn (DECISIONS 7, 21).
+    step::SourceAccumulator src_acc{pool, graph};
     // add-controlled-source-set: sine / pulse / table current sources
     // (node rows, two per source: kept on the dense helper).
-    const bool has_iwave =
-        sources::has_current_waveform_sources(pool, graph);
+    const bool has_iwave = src_acc.has_current_waveforms();
     Vector be_iwave;
-    const bool has_pwm = !pwm_rows.empty();
-    const bool has_pulse = !pulse_rows.empty();
+    const bool has_pwm = src_acc.has_pwm();
+    const bool has_pulse = src_acc.has_pulse();
     // `src_t`: PWM/pulse sample time; `sine_t`: the sine's; `lb`: a
     // jumping source at `src_t` reads value_at(src_t − lb) (as the dense
     // passes did).
     auto add_source_rows = [&](Vector& b, Real src_t, Real sine_t,
                                Real lb) {
-        const auto read_t = [&](Index id) {
-            const bool jumps = lb > Real{0} &&
-                sources::source_jumps_at(pool, id, src_t);
-            // src_t != sine_t: a jump snapped to the step end; only the
-            // source that jumps there is re-timed (review: a ramped
-            // pulse was read up to 0.01 dt early).
-            if (src_t != sine_t && !jumps) {
-                return sine_t;
-            }
-            return jumps ? src_t - lb : src_t;
-        };
-        for (const auto& [id, row] : pwm_rows) {
-            b[row] += Real{0} + -models::PWMVoltageSource::value_at(
-                pool.pwm_voltage_source_params(id), read_t(id));
-        }
-        for (const auto& [id, row] : sine_rows) {
-            b[row] += Real{0} + -models::SineVoltageSource::value_at(
-                pool.sine_voltage_source_params(id), sine_t);
-        }
-        for (const auto& [id, row] : pulse_rows) {
-            b[row] += Real{0} + -models::PulseVoltageSource::value_at(
-                pool.pulse_voltage_source_params(id), read_t(id));
-        }
+        src_acc.add_voltage_rows(pool, b, src_t, sine_t, lb);
     };
 
     // Is a smaller step even capable of helping? Reachability to
@@ -1822,8 +1780,8 @@ inline SimulationResult run_transient(
         // step and the next two (kRestartSteps). A run that does not
         // start consistent owes them from its first step; a resume
         // carries its own count.
-        constexpr Size kRestartSteps = 3;
-        constexpr Real kGamma = Real{1} - Real{0.70710678118654752440};
+        constexpr Size kRestartSteps = step::RestartPolicy::kSteps;
+        constexpr Real kGamma = step::RestartPolicy::kGamma;
         Size restart_left =
             !restart_rule ? Size{0}
             : resume_snap != nullptr ? resume_snap->restart_steps_left
@@ -1967,8 +1925,7 @@ inline SimulationResult run_transient(
             mask_start_known = stamped_known;
         }
         auto commit_backward_euler = [&](Real h_e) {
-            history.update_from_state_backward_euler(x, h_e);
-            hs.commit(x, h_e, pwl::TrBdf2Stage::BackwardEuler);
+            step::commit(history, hs, x, h_e, pwl::TrBdf2Stage::BackwardEuler);
         };
         // add-parameter-sensitivities group 6: the calls into the recurrence
         // (solver/step/sensitivity.hpp) from the event and restart paths; the
@@ -2167,8 +2124,7 @@ inline SimulationResult run_transient(
             const Real dt_loc = (iters_1 > 1 || breach_1) ? std::max(loc, h_s) : loc;
             ip_x1 = x;
             ip_b = b_extra;
-            history.snapshot_into(ip_hist);
-            hs.snapshot_into(ip_hs);
+            step::snapshot_into(history, hs, ip_hist, ip_hs);
             const Size iters_s = iters;
             const bool flipped_s = flipped;
             const bool cycle_s = mask_cycle;
@@ -2226,8 +2182,7 @@ inline SimulationResult run_transient(
             // One more BE stage of γh, from y (the histories at y), the
             // sources shifted by *s (nullptr: frozen); x: its start, its end.
             auto stage_from = [&](const Vector& y, const Vector* s, Real at) {
-                history.restore(ip_hist);
-                hs.restore(ip_hs);
+                step::restore(history, hs, ip_hist, ip_hs);
                 history.extrapolate_previous(y, Real{1});
                 hs.extrapolate_previous(y, Real{1});
                 history.compute_b_extra_backward_euler(h_s, ip_h1);
@@ -2254,8 +2209,7 @@ inline SimulationResult run_transient(
             } else {
                 ip_x2m = ip_x2;
             }
-            history.restore(ip_hist);
-            hs.restore(ip_hs);
+            step::restore(history, hs, ip_hist, ip_hs);
             event_rl_x = Real{2} * ip_x1 - ip_x2m;
             ip_x3m = x;   // the reading's x3 (the series' later stages reuse x)
             // Per state (C or L): the jump x0+ − x0, the rule's bound;
@@ -2404,8 +2358,7 @@ inline SimulationResult run_transient(
                     const auto stamped_1 = stamped_mask;
                     const bool cycle_1 = mask_cycle;
                     diodes.restore_on_bits(rs_bits0);
-                    history.restore(ip_hist);
-                    hs.restore(ip_hs);
+                    step::restore(history, hs, ip_hist, ip_hs);
                     b_extra = ip_b;
                     x = ip_x1;
                     bool m1_ok = true, y3_ok = false;
@@ -2426,8 +2379,7 @@ inline SimulationResult run_transient(
                         if (!y3_ok) x = ip_y2;
                         solved = true;
                     }
-                    history.restore(ip_hist);   // x0's histories: s0 below
-                    hs.restore(ip_hs);
+                    step::restore(history, hs, ip_hist, ip_hs);   // x0's histories: s0 below
                     if (m1_ok) {
                         // per state, over one stage of the start mode: a smooth move
                         // (no jump of that mode by the rule's d-test, |Δ1 − Δ2| ≤ |Δ2|/γ
@@ -2472,8 +2424,7 @@ inline SimulationResult run_transient(
                         }
                     }
                     diodes.restore_on_bits(ip_bits1);
-                    history.restore(ip_hist);
-                    hs.restore(ip_hs);
+                    step::restore(history, hs, ip_hist, ip_hs);
                     stamped_mask = stamped_1;
                     mask_cycle = cycle_1;
                     if (m1_ok) {
@@ -2737,8 +2688,7 @@ inline SimulationResult run_transient(
                     for (Size i = 0; i < ip_f0.size(); ++i) ip_js[i] = static_cast<Size>(ip_f0[i]);
                     (void)series(false);
                 }
-                history.restore(ip_hist);
-                hs.restore(ip_hs);
+                step::restore(history, hs, ip_hist, ip_hs);
             }
             Real e_jump = 0;
             Size dom = 0;
@@ -3215,7 +3165,7 @@ inline SimulationResult run_transient(
                 history.compute_b_extra_backward_euler(e, rl_h);
                 b_extra = rl_bs + rl_h;
                 if (lin) {
-                    cache.solve_at(stamped_mask, Real{2} * e, b_extra, x);
+                    cache.solve_at(stamped_mask, Real{2} * e, b_extra, x);   // solve-exempt: restart-line re-solve (DECISIONS 22)
                 } else {
                     x = rl_x1;
                     rei(t_from + e, Real{2} * e, true, true);
@@ -3666,8 +3616,7 @@ inline SimulationResult run_transient(
                 // one trapezoidal trial from the step start under the start bits
                 auto trial = [&](Real t_loc) {
                     x = x_prev;
-                    history.restore(history_snap);
-                    hs.restore(hs_snap);
+                    step::restore(history, hs, history_snap, hs_snap);
                     diodes.restore_on_bits(diodes_snap);
                     try {
                         accumulate_b_extra(t_loc, t_loc - a);
@@ -3937,8 +3886,7 @@ inline SimulationResult run_transient(
             // enable_substep_state_correction is true.
             if (may_roll_back) {
                 ++result.rollback_snapshots;
-                history.snapshot_into(history_snap);
-                hs.snapshot_into(hs_snap);
+                step::snapshot_into(history, hs, history_snap, hs_snap);
                 if (has_diodes) {
                     diodes.snapshot_on_bits_into(diodes_snap);
                 } else {
@@ -3977,8 +3925,7 @@ inline SimulationResult run_transient(
                 if (rs_bits[q] != rs_bits2[q] && !rs_bits[q]) return nan;   // a turn-on
             }
             auto trial = [&](Real tau) {
-                history.restore(rs_hist);
-                hs.restore(rs_hs);
+                step::restore(history, hs, rs_hist, rs_hs);
                 diodes.restore_on_bits(rs_bits);
                 x = rs_x1;
                 const Real ts = kGamma * tau;
@@ -4173,8 +4120,7 @@ inline SimulationResult run_transient(
                     rs_bits_first = rs_bits;   // (word copy; assign() walks bits)
                     rs_first_valid = true;
                 }
-                history.snapshot_into(rs_hist);
-                hs.snapshot_into(rs_hs);   // keeps the capacity
+                step::snapshot_into(history, hs, rs_hist, rs_hs);   // keeps the capacity
             }
             const bool cycle_1 = mask_cycle;
             constexpr Real c = (Real{1} - kGamma) / kGamma;
@@ -4233,8 +4179,7 @@ inline SimulationResult run_transient(
                 const auto stamped_2 = stamped_mask;
                 rs_solved2 = last_solved_bits;
                 auto histories_at_x0 = [&] {
-                    history.restore(rs_hist);
-                    hs.restore(rs_hs);
+                    step::restore(history, hs, rs_hist, rs_hs);
                 };
                 x = rs_x1;
                 diodes.restore_on_bits(rs_bits);
@@ -4491,8 +4436,7 @@ inline SimulationResult run_transient(
             }
             StepLines& lines = *L;
             rs_cut.x0 = x;
-            history.snapshot_into(rs_cut.h0);
-            hs.snapshot_into(rs_cut.hs0);
+            step::snapshot_into(history, hs, rs_cut.h0, rs_cut.hs0);
             diodes.snapshot_on_bits_into(rs_cut.b0);
             rs_cut.lsb0 = last_solved_bits;
             const bool cycle0 = mask_cycle, known0 = stamped_known, flipped0 = flipped;
@@ -4526,8 +4470,7 @@ inline SimulationResult run_transient(
             auto restore0 = [&]() {
                 flipped = flipped0;
                 x = rs_cut.x0;
-                history.restore(rs_cut.h0);
-                hs.restore(rs_cut.hs0);
+                step::restore(history, hs, rs_cut.h0, rs_cut.hs0);
                 diodes.restore_on_bits(rs_cut.b0);
                 last_solved_bits = rs_cut.lsb0;
                 mask_cycle = cycle0;
@@ -4640,15 +4583,15 @@ inline SimulationResult run_transient(
                                   Real for_dt, bool be, Vector& out) {
                 if (restart_rule && (for_dt == restart_dt || be)) {
                     const auto m0 = cache.metrics();
-                    cache.solve_at(mask, for_dt, b_extra, out);
+                    cache.solve_at(mask, for_dt, b_extra, out);   // solve-point
                     const auto m1 = cache.metrics();
                     restart_factorizations += static_cast<Size>(
                         (m1.event_builds - m0.event_builds) +
                         (m1.event_refactors - m0.event_refactors));
                 } else if (for_dt == opts.dt && for_dt == cache.dt()) {
-                    cache.solve_segment(nominal_segment(mask), b_extra, out);
+                    cache.solve_segment(nominal_segment(mask), b_extra, out);   // solve-point
                 } else {
-                    cache.solve_at(mask, for_dt, b_extra, out);
+                    cache.solve_at(mask, for_dt, b_extra, out);   // solve-point
                 }
             };
 
@@ -4769,43 +4712,37 @@ inline SimulationResult run_transient(
                     mask_cycle = true;
                     break;
                 }
+                // The solve point of the event iteration (refactor-unified-
+                // transient-stepper group 2, DECISIONS 22): x under `mask`.
+                // Written out here, not as a dispatch lambda: the captured
+                // closure cost ~1 % instructions per step (DECISIONS 22a).
                 if (nl_refresh_effective) {
+                    // Newton, warm-started from x, on the nominal segment or
+                    // (off-nominal dt) a companion assembled for this step —
+                    // no factorization is wasted: Newton refactorizes
+                    // J_lin + J_nl every iteration, the segment only carries
+                    // J and b.
+                    const pwl::PwlSegment* nl_seg = &retry_seg;
                     if (for_dt == opts.dt && !newton_only_rows) {
-                        const auto& seg = nominal_segment(mask);
-                        sens_J_lin = &seg.J;
-                        x = pwl::solve_with_newton_b_extra(
-                            seg, nl_refresh_effective, graph, pool,
-                            /*x_init=*/x, b_extra,
-                            opts.max_newton_iterations,
-                            opts.tol_newton_dx,
-                            opts.tol_newton_res,
-                            opts.enable_newton_line_search,
-                            opts.enable_newton_lm,
-                            &newton_ws, &newton_roundoff);
-                        note_roundoff();
+                        nl_seg = &nominal_segment(mask);
                     } else {
-                        // Off-nominal dt: assemble the companion
-                        // system for this step size. No factorization
-                        // is wasted — Newton refactorizes
-                        // J_lin + J_nl every iteration anyway, so the
-                        // segment is only a carrier for J and b.
                         pwl::assemble_segment(
                             graph, pool, mask, for_dt,
                             retry_seg.J, retry_seg.b_constant);
                         sparse::compress_in_place(retry_seg.J);
                         retry_seg.state_size = state_size;
-                        sens_J_lin = &retry_seg.J;
-                        x = pwl::solve_with_newton_b_extra(
-                            retry_seg, nl_refresh_effective, graph,
-                            pool, /*x_init=*/x, b_extra,
-                            opts.max_newton_iterations,
-                            opts.tol_newton_dx,
-                            opts.tol_newton_res,
-                            opts.enable_newton_line_search,
-                            opts.enable_newton_lm,
-                            &newton_ws, &newton_roundoff);
-                        note_roundoff();
                     }
+                    sens_J_lin = &nl_seg->J;
+                    x = pwl::solve_with_newton_b_extra(   // solve-point
+                        *nl_seg, nl_refresh_effective, graph, pool,
+                        /*x_init=*/x, b_extra,
+                        opts.max_newton_iterations,
+                        opts.tol_newton_dx,
+                        opts.tol_newton_res,
+                        opts.enable_newton_line_search,
+                        opts.enable_newton_lm,
+                        &newton_ws, &newton_roundoff);
+                    note_roundoff();
                 } else {
                     // `solve_at` delegates to `solve` bit-identically
                     // when the dt matches, so the nominal path costs
@@ -4814,16 +4751,16 @@ inline SimulationResult run_transient(
                     // stages (dt_eq = 2γ·h_sub) included (review L8b).
                     if (restart_rule && (for_dt == restart_dt || backward_euler)) {
                         const auto m0 = cache.metrics();
-                        cache.solve_at(mask, for_dt, b_extra, x);
+                        cache.solve_at(mask, for_dt, b_extra, x);   // solve-point
                         const auto m1 = cache.metrics();
                         restart_factorizations += static_cast<Size>(
                             (m1.event_builds - m0.event_builds) +
                             (m1.event_refactors - m0.event_refactors));
                     } else if (for_dt == opts.dt && for_dt == cache.dt()) {
                         // == solve_at's delegation to solve(mask, …)
-                        cache.solve_segment(nominal_segment(mask), b_extra, x);
+                        cache.solve_segment(nominal_segment(mask), b_extra, x);   // solve-point
                     } else {
-                        cache.solve_at(mask, for_dt, b_extra, x);
+                        cache.solve_at(mask, for_dt, b_extra, x);   // solve-point
                     }
                 }
                 // The mask x was just solved under — what the
@@ -4962,8 +4899,7 @@ inline SimulationResult run_transient(
                     // the window for the next two grid steps explicitly: their
                     // masks equal the post-event one, so no trigger would.
                     auto commit_trap = [&](Real h) {
-                        history.update_from_state(x, h);
-                        hs.commit(x, h, pwl::TrBdf2Stage::Trapezoidal);
+                        step::commit(history, hs, x, h, pwl::TrBdf2Stage::Trapezoidal);
                     };
                     auto split_step = [&]() {
                         split_events.clear();
@@ -5050,8 +4986,7 @@ inline SimulationResult run_transient(
                                     // b (keep the pre-event solve, flip there) or
                                     // inside (split).
                                     x = x_prev;
-                                    history.restore(history_snap);
-                                    hs.restore(hs_snap);
+                                    step::restore(history, hs, history_snap, hs_snap);
                                     diodes.restore_on_bits(diodes_snap);
                                     mask_cycle = false;
                                     // Post-event bits: the diodes that cross
@@ -5176,8 +5111,7 @@ inline SimulationResult run_transient(
                         // that is a discontinuity too. Back to the step
                         // start, and re-take it as a restart step.
                         x = x_prev;
-                        history.restore(history_snap);
-                        hs.restore(hs_snap);
+                        step::restore(history, hs, history_snap, hs_snap);
                         if (has_diodes) {
                             diodes.restore_on_bits(diodes_snap);
                         }
@@ -5223,9 +5157,8 @@ inline SimulationResult run_transient(
                 // option is read/write from Python and unchecked by
                 // SimulationOptions::valid(), so clamp at the point
                 // of use.
-                constexpr Size kMaxHalvings = Size{20};
                 const Size halving_cap =
-                    std::min(opts.max_dt_halvings, kMaxHalvings);
+                    step::HalvingLadder::cap(opts.max_dt_halvings);
                 for (Size h = 1; h <= halving_cap; ++h) {
                     // Back to the state at t_prev. Note what is NOT
                     // restored: `sat_history`, which this step has
@@ -5233,8 +5166,7 @@ inline SimulationResult run_transient(
                     // and the cache, whose contents are a function of
                     // the circuit rather than of the run.
                     x = x_prev;
-                    history.restore(history_snap);
-                    hs.restore(hs_snap);
+                    step::restore(history, hs, history_snap, hs_snap);
                     if (has_diodes) {
                         diodes.restore_on_bits(diodes_snap);
                     }
@@ -5259,9 +5191,8 @@ inline SimulationResult run_transient(
                     ideal_pending.clear();
                     event_rl_t = std::numeric_limits<Real>::quiet_NaN();
 
-                    const Size n_sub = Size{1} << h;
-                    const Real sub_dt =
-                        opts.dt / static_cast<Real>(n_sub);
+                    const Size n_sub = step::HalvingLadder::n_sub(h);
+                    const Real sub_dt = step::HalvingLadder::sub_dt(opts.dt, h);
                     bool all_ok = true;
                     for (Size j = 0; j < n_sub; ++j) {
                         const Real t_sub =
@@ -5321,9 +5252,7 @@ inline SimulationResult run_transient(
                         if (j + 1 < n_sub && sub_restart) {
                             commit_backward_euler(be_commit_h);
                         } else if (j + 1 < n_sub) {
-                            history.update_from_state(x, sub_dt);
-                            hs.commit(x, sub_dt,
-                                      pwl::TrBdf2Stage::Trapezoidal);
+                            step::commit(history, hs, x, sub_dt, pwl::TrBdf2Stage::Trapezoidal);
                         } else {
                             committed_dt = sub_dt;
                             committed_be = sub_restart;
@@ -5358,10 +5287,9 @@ inline SimulationResult run_transient(
                         "otherwise; more likely the circuit needs a "
                         "snubber, a softer device model, or a look at "
                         "the device the message above names.{}",
-                        t, Size{1} << halving_cap,
-                        opts.dt / static_cast<Real>(
-                            Size{1} << halving_cap),
-                        Size{1} << halving_cap, why,
+                        t, step::HalvingLadder::n_sub(halving_cap),
+                        step::HalvingLadder::sub_dt(opts.dt, halving_cap),
+                        step::HalvingLadder::n_sub(halving_cap), why,
                         newton_failed
                             ? "\nIf PWL diodes (add_diode) share the "
                               "circuit with a Newton device (saturable "
@@ -5564,31 +5492,17 @@ inline SimulationResult run_transient(
                     // start-of-step state across both sub-steps.
                     const Real i_prev_step =
                         x_prev[e.inductor_branch_var_id];
-                    Real i_new = x[e.inductor_branch_var_id];
-                    const Real i_solved = i_new;
-                    bool froze = false;
-                    bool clamped = false;
-                    // Step-to-step jump guard: snap back to the pre-step
-                    // current when the solver emits an unphysical kilo-amp
-                    // delta (rectifier in DCM, etc.).
-                    if (opts.inductor_freeze_di_max > Real{0}) {
-                        const Real di  = i_new - i_prev_step;
-                        const Real adi = di < Real{0} ? -di : di;
-                        if (adi > opts.inductor_freeze_di_max) {
-                            i_new = i_prev_step;
-                            froze = true;
-                        }
-                    }
-                    // Absolute clamp: catches the *slow drift* form
-                    // of the same failure where the per-step delta
-                    // stays below the freeze threshold but i_L walks
-                    // monotonically past physical bounds over many
-                    // line cycles.
-                    if (opts.inductor_abs_clamp > Real{0}) {
-                        const Real lim = opts.inductor_abs_clamp;
-                        if (i_new >  lim) { i_new =  lim; clamped = true; }
-                        if (i_new < -lim) { i_new = -lim; clamped = true; }
-                    }
+                    const Real i_solved = x[e.inductor_branch_var_id];
+                    // Step-to-step jump guard (snap back to the pre-step
+                    // current on an unphysical kilo-amp delta: rectifier in
+                    // DCM), then the absolute clamp (the slow-drift form of
+                    // the same failure): step::GuardPolicy.
+                    const auto guard = step::GuardPolicy::apply(
+                        i_prev_step, i_solved, opts.inductor_freeze_di_max,
+                        opts.inductor_abs_clamp);
+                    const Real i_new = guard.i;
+                    const bool froze = guard.froze;
+                    const bool clamped = guard.clamped;
                     // v2.0 Phase 2: a guard that fires REPLACES the
                     // solver's answer with a number the user
                     // configured. Say so. Silently reporting the
@@ -5640,8 +5554,7 @@ inline SimulationResult run_transient(
             if (committed_be) {
                 commit_backward_euler(be_commit_h);
             } else {
-            history.update_from_state(x, committed_dt);
-            hs.commit(x, committed_dt, pwl::TrBdf2Stage::Trapezoidal);
+            step::commit(history, hs, x, committed_dt, pwl::TrBdf2Stage::Trapezoidal);
             }
             if (restart) {
                 ++result.n_restart_steps;
@@ -6133,7 +6046,7 @@ inline SimulationResult run_transient(
             if (diodes.num_gated() > 0) gated_prev_stamp = stamped_mask;
             const bool mode_site_s = mode_ports.has_value() && !nl_refresh_effective;
             auto solve_s = [&](const topology::SwitchStateMask& m, Vector& out) {
-                cache.solve_segment(nominal_segment(m), b_extra_user, out);
+                cache.solve_segment(nominal_segment(m), b_extra_user, out);   // solve-exempt: static path (DECISIONS 22)
             };
             if (mode_site_s) mode_begin();
             if (mode_site_s && opts.mode_selection == 2) {
@@ -6163,7 +6076,7 @@ inline SimulationResult run_transient(
                 }
                 if (nl_refresh_effective) {
                     const auto& seg = nominal_segment(mask);
-                    x = pwl::solve_with_newton_b_extra(
+                    x = pwl::solve_with_newton_b_extra(   // solve-exempt: static path (DECISIONS 22)
                         seg, nl_refresh_effective, graph, pool,
                         /*x_init=*/x, b_extra_user,
                         opts.max_newton_iterations,
@@ -6172,7 +6085,7 @@ inline SimulationResult run_transient(
                         opts.enable_newton_line_search,
                         opts.enable_newton_lm, &newton_ws);
                 } else {
-                    cache.solve_segment(nominal_segment(mask), b_extra_user, x);
+                    cache.solve_segment(nominal_segment(mask), b_extra_user, x);   // solve-exempt: static path (DECISIONS 22)
                 }
                 stamped_mask = mask;
                 stamped_known = true;
