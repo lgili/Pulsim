@@ -5805,12 +5805,10 @@ inline SimulationResult run_transient(
             }
             if (!parts) return;
             hooks->part(P::Samples);
-            if (!L->empty()) {
-                feed_states(t_prev, t);
-            } else {   // a plain step from the stored right limit
-                hooks->sink_step(t_prev, L->rl_start_left ? x_prev : L->rl_start, L->rl_m_start,
-                                 t, x, stamped_mask);
-            }
+            // as lines even with none stored (one line from the stored right
+            // limit): the sink places the commutation on its jump row, the
+            // run's first row on its start (review)
+            feed_states(t_prev, t);
             hooks->part(P::All);
         };
         auto step_record = [&](Size k) PULSIM_STEP_PHASE {

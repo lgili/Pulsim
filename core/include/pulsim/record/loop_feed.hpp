@@ -494,6 +494,8 @@ private:
     }
 
     void on_start(const Vector& x0, const topology::SwitchStateMask& m0) {
+        // a run that threw inside a two-part step left its part set
+        for (auto& r : recs_) r.begin_part(Recorder::Part::All);
         // bounds of every column a reading reads, once per run (the
         // per-step reads are unchecked)
         const auto in = [&](Index c) { return c >= -1 && c < x0.size(); };
