@@ -39,7 +39,7 @@ fails when its err_rms grows past 2x the frozen `known_err:`.
 | switching/boost/boost_pfc_open_loop.yaml | 0.02 | 0.0304 | 0.0191 | 1.05e-05 |
 | switching/boost/ll07_boost_vcswitch.yaml | 0.02 | 0.0983 | 0.0445 | 0.0445 |
 | switching/boost/ll12_pfc_boost_continuous.yaml | 0.02 | 0.083 | 0.0753 | 0.0753 |
-| switching/buck/ll06_buck_vcswitch.yaml | 0.02 | 0.078 | 0.0792 | 0.0434 |
+| switching/buck/ll06_buck_vcswitch.yaml | 0.02 | 0.0781 | 0.0792 | 0.0434 |
 | switching/buck/ll08_buck_mosfet.yaml | 0.02 | 0.228 | 0.0659 | 0.0652 |
 | switching/inverter/ll09_half_bridge_inverter_leg.yaml | 0.02 | 0.0707 | 0.0102 | 0.0102 |
 | switching/inverter/ll10_full_bridge_inverter_lc.yaml | 0.02 | 0.05 | 0.000127 | 0.000127 |
@@ -122,7 +122,7 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | switching/boost/ll12_pfc_boost_continuous.yaml | pwl | 0.02 | 0.083 | V(ctrl) | 0.000125 | 3.3% | 2.3e-07 | 0.92 |
 | switching/boost/ll12_pfc_boost_continuous.yaml | pwl+restart | 0.02 | 0.0753 | V(ctrl) | 0.0413 | 0.0% | 1.2e-07 | 0.46 |
 | switching/boost/ll12_pfc_boost_continuous.yaml | pwl+split | 0.02 | 0.0753 | V(ctrl) | 1.29e-05 | 3.0% | 2.3e-07 | 0.92 |
-| switching/buck/ll06_buck_vcswitch.yaml | pwl | 0.02 | 0.078 | V(ctrl) | 0.021 | 2.8% | 2e-05 | 99 |
+| switching/buck/ll06_buck_vcswitch.yaml | pwl | 0.02 | 0.0781 | V(ctrl) | 0.021 | 2.8% | 2e-05 | 99 |
 | switching/buck/ll06_buck_vcswitch.yaml | pwl+restart | 0.02 | 0.0792 | V(sw) | 0.0384 | 0.9% | 1.3e-07 | 0.64 |
 | switching/buck/ll06_buck_vcswitch.yaml | pwl+split | 0.02 | 0.0434 | V(sw) | 0.0068 | 1.9% | 2e-05 | 99 |
 | switching/buck/ll08_buck_mosfet.yaml | pwl | 0.02 | 0.228 | V(sw) | 0.156 | 3.2% | 3.9e-07 | 2 |
@@ -142,7 +142,7 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | switching/multilevel/flying_capacitor_3level.yaml | pwl | 0.02 | 0.0466 | V(out) | 0.00528 | 2.0% | 3.2e-13 | 1.6e-06 |
 | switching/multilevel/mmc_4cell_chain.yaml | pwl | 0.02 | 0.0268 | V(out) | 1.54e-08 | 0.4% | 1e-12 | 5e-06 |
 | switching/multilevel/t_type_3level_halfbridge.yaml | pwl | 0.02 | 0.0782 | V(out) | 0.000801 | 2.0% | 1.2e-13 | 6.1e-07 |
-| three_phase/three_phase_diode_rectifier.yaml | pwl | 0.02 | 1.51 | V(out) | 0.323 | 7.7% | 0.071 | 1.4e+03 |
+| three_phase/three_phase_diode_rectifier.yaml | pwl | 0.02 | 1.51 | V(out) | 0.323 | 8.0% | 0.071 | 1.4e+03 |
 
 ### All cells (err_rms or outcome)
 
@@ -160,7 +160,7 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | diodes/diode_half_wave_rl_load.yaml | 0.0186 | 0.000586 | 0.000586 | 1.58e-05 | 6.92e-06 |
 | diodes/diode_rectifier.yaml | 0.0139 | 0.00157 | 0.00135 | 0.000183 | 1.26e-05 |
 | diodes/half_wave_rectifier_sine.yaml | 0.000393 | 6.24e-05 | 4.11e-05 | 2.36e-05 | 4.6e-06 |
-| diodes/voltage_doubler.yaml | 0.000222 | 3e-05 | 3.01e-05 | 5.05e-06 | 5.84e-07 |
+| diodes/voltage_doubler.yaml | 0.000222 | 3e-05 | 3.02e-05 | 5.06e-06 | 6.01e-07 |
 | linear/bridge_resistive_pure.yaml | 0 | 0 | 0 | 0 | 1.33e-13 |
 | linear/capacitor_natural_discharge.yaml | 0.000798 | 7.52e-07 | 7.52e-07 | 5.63e-06 | 6.11e-07 |
 | linear/current_divider_3way.yaml | 0 | 0 | 0 | 0 | 0 |
@@ -223,7 +223,7 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | switching/buck/buck_with_current_sense.yaml | 0.00131 | 1.05e-06 | 1.05e-06 | 3.15e-06 | 1.33e-06 |
 | switching/buck/cascaded_buck_buck.yaml | 0.00126 | 1.16e-06 | 1.16e-06 | 1.42e-05 | 1.46e-06 |
 | switching/buck/high_freq_gan_buck.yaml | 0.00103 | 6.2e-06 | 6.2e-06 | 8.55e-05 | 5.1e-06 |
-| switching/buck/ll06_buck_vcswitch.yaml | 0.078 | 0.0792 | 0.0434 | 8.05e-05 | 0.00017 |
+| switching/buck/ll06_buck_vcswitch.yaml | 0.0781 | 0.0792 | 0.0434 | 7.94e-05 | 0.000171 |
 | switching/buck/ll08_buck_mosfet.yaml | 0.228 | 0.0659 | 0.0652 | 0.00011 | refused |
 | switching/buck/sync_buck_500khz.yaml | 0.00167 | 3.77e-06 | 3.77e-06 | 1.71e-05 | 1.98e-06 |
 | switching/buck/synchronous_buck.yaml | 0.00132 | 1.05e-06 | 1.05e-06 | 3.14e-06 | 1.35e-06 |
