@@ -649,7 +649,8 @@ def test_res_i_and_loss_row_against_a_sense_resistor(engine, dev, request):
     i_s = np.asarray(r.i("Rsense"))
     # from sample 1: the start is inconsistent (i0 = 10 A against zero
     # node voltages), so the capacitor currents AT t = 0 are undefined
-    # measured 2026-11-26 (laws): pwl <= 1e-9, trbdf2 1.3e-9 of scale. "linear"
+    # measured 2026-11-27 (laws): pwl 1.0e-11, trbdf2 4.35e-9 of scale (the
+    # strict xfail above; 1.3e-9 before the batch-7 trbdf2 lines). "linear"
     # (constant C_gd at the drain, no R_d) was 2.5 A off on pwl / 0.042 A on
     # trbdf2 while that C_gd was an MNA capacitor read through its ladder
     # measured 2026-11-26 (linear, trbdf2): 3.03e-9 of scale, at the sliver step

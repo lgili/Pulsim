@@ -4,8 +4,8 @@ dt = 1 ns) gated a fraction of dt before a grid point: the step is cut at the
 edge and the event's restart probe spans only gamma * (the piece), so the mode
 was neither damped nor projected and rang +-2.25 A on under trapezoid (max
 deviation 1.022 A at 1e-5 dt, 0.362 A at 1e-3 dt). The next grid step's restart
-now probes it with the event before its start. Options explicit: split_snap
-is reachable only through run_transient."""
+now probes it with the event before its start. Options explicit, on
+run_transient (simulate(split_snap=...) is the same option)."""
 
 from __future__ import annotations
 
@@ -132,9 +132,10 @@ def test_two_slivers_in_consecutive_steps_both_damped():
 
 
 def test_resume_across_the_sliver_anchor():
-    """A run stopped on the step that ends with a sliver resumes it: in
-    process bit for bit; a pickled copy drops the anchor (not pickled): its
-    first step probes as a plain window step and that one sample is wrong."""
+    """A run stopped on the step that ends with a sliver resumes it bit for
+    bit, in process and from a pickled copy (the anchor is pickled: before,
+    the copy dropped it and its first resumed sample was ~470 A off). A
+    pickle without the field (an older build's) loads it as False."""
     import pickle
 
     t_end = 4 * TB + 1e-12
@@ -158,15 +159,31 @@ def test_resume_across_the_sliver_anchor():
     assert np.array_equal(tr, tf[k:k + tr.size]) and tr[-1] == tf[-1]
     assert np.array_equal(xr, xf[k:])
     cold = pickle.loads(pickle.dumps(snap))
-    assert not cold.restart_anchor_at_end
+    assert cold.restart_anchor_at_end
     assert cold.restart_steps_left == snap.restart_steps_left
     rest_p = _run(cache1, b1, o2, sw1, resume_from=cold)
-    # shortcut seen: the first resumed sample misses the anchor's probe (the
-    # sliver's 1 ps mode is still in x: switch current ~470 A off at
-    # t0 + dt); the restart window damps it, every later row is bit-identical
-    d = np.abs(np.asarray(rest_p.states) - xf[k:]).max(axis=1)
-    assert np.flatnonzero(d).tolist() == [1]
-    assert d[1] * GON > 100.0
+    assert np.array_equal(np.asarray(rest_p.times), tr)
+    assert np.array_equal(np.asarray(rest_p.states), xr)
+    # an older build's pickle (no field 20): the neutral value, no error
+    state = snap.__getstate__()
+    assert len(state) == 21
+    legacy = p._pulsim.SolverSnapshot.__new__(p._pulsim.SolverSnapshot)
+    legacy.__setstate__(state[:20])
+    assert not legacy.restart_anchor_at_end
+    assert legacy.restart_steps_left == snap.restart_steps_left
+
+
+def test_snapshot_pickle_carries_every_field():
+    """Every SolverSnapshot field survives pickling: a field the pickle drops
+    is a silent wrong answer on a cross-process resume (the anchor above).
+    The invalid snapshot's reason too (a resume refuses by it)."""
+    import pickle
+
+    s = p._pulsim.SolverSnapshot()
+    s.invalid_reason = "kept none: the reason"
+    c = pickle.loads(pickle.dumps(s))
+    assert c.invalid_reason == "kept none: the reason" and not c.valid
+    assert pickle.loads(pickle.dumps(p._pulsim.SolverSnapshot())).invalid_reason == ""
 
 
 def test_period_map_copies_the_anchor():

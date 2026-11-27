@@ -245,6 +245,7 @@ void init_module(py::module_& m) {
         .def_readwrite("enable_substep_state_correction",
                        &RunOptions::enable_substep_state_correction)
         .def_readwrite("discontinuity_restart", &RunOptions::discontinuity_restart)
+        .def_readwrite("split_snap", &RunOptions::split_snap)
         .def_readwrite("resolution_diagnostics",
                        &RunOptions::resolution_diagnostics)
         .def_readwrite("inductor_freeze_di_max", &RunOptions::inductor_freeze_di_max)
@@ -351,6 +352,7 @@ void init_module(py::module_& m) {
             else if (key == "tol_newton_res") o.tol_newton_res = real(key, v);
             else if (key == "inductor_freeze_di_max") o.inductor_freeze_di_max = real(key, v);
             else if (key == "inductor_abs_clamp") o.inductor_abs_clamp = real(key, v);
+            else if (key == "split_snap") o.split_snap = real(key, v);
             else if (key == "voltage_sanity_factor") o.voltage_sanity_factor = real(key, v);
             else if (key == "enable_nonlinear_refresh") o.enable_nonlinear_refresh = flag(key, v);
             else if (key == "enable_newton_line_search") o.enable_newton_line_search = flag(key, v);

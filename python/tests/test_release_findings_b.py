@@ -31,13 +31,6 @@ PWL_REL = dict(engine="pwl", discontinuity_restart=True,
                enable_substep_state_correction=True)
 EXACT_REL = dict(engine="dsed", output_rtol=1e-5)
 
-F_44 = pytest.mark.xfail(strict=True, reason=(
-    "release finding F-4-4, rest: the window integrals are the integrator's quadrature "
-    "(test_release_findings_b2: step-end windows C·dv to 1e-11), but a window END inside "
-    "a restart step (or AT an event, keep='times' reading the right limit) reads the line's "
-    "start value 2·w1·X1 + (1 − 2·w1)·X2, the right limit to O(h²) only: buck window 0 "
-    "7.4e-4 at dt = 1 us (1.9e-4 at 0.5 us). Needs a true right limit (group A's "
-    "consistent start x0+) and a mid-step row keeping the quadrature"))
 
 def _quiet(fn, *a, **kw):
     with warnings.catch_warnings():
@@ -345,11 +338,11 @@ def test_f57_pwl_duty_credits_the_part_of_a_step_before_a_commutation(V_th):
 # F-4-4: the in-loop recorder's window integrals on restart steps
 # ---------------------------------------------------------------------------
 
-@F_44
 def test_f44_recorder_window_charge_on_restart_steps():
     """∫i_C over a window = C·Δv_C (the integrator's own identity; 2e-4 is
-    the trapezoidal engine's residue at the window ends). Restart rule:
-    4e-4 off on this buck."""
+    the trapezoidal engine's residue at the window ends). Restart rule: was
+    7.4e-4 off on this buck while keep='times' read a restart line's
+    quadrature start as v_C; it reads states since F-Z-12."""
     import test_recorder_device_readings as m
     b, fn, t_end, _, _ = m._buck()
     wins = [(0.07 * t_end + 1.234e-9, 0.29 * t_end + 4.321e-9),

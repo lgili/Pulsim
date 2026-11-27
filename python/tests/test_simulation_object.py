@@ -97,6 +97,7 @@ _ASK = {
     "tol_newton_res": 1e-8, "enable_newton_line_search": True,
     "enable_newton_lm": True, "newton_roundoff_budget": 50,
     "enable_substep_state_correction": True, "discontinuity_restart": True,
+    "split_snap": 0.01,
     "resolution_diagnostics": True, "inductor_freeze_di_max": 1e3,
     "inductor_abs_clamp": 1e3, "progress": True,
     "should_continue": lambda: True, "on_cache": lambda cache: None,
@@ -397,7 +398,7 @@ def test_simulation_object_reads_device_path_monitors_and_the_tick_grid():
 
 def test_the_trbdf2_route_rows_are_the_blockers_own():
     # simulate() hands _trbdf2_blockers its _opt_values: the pseudo-engine
-    # must judge only the 13 routing rows (h_bdf2 is refused on a dt-less
+    # must judge only the 14 routing rows (h_bdf2 is refused on a dt-less
     # 'auto' run, not routed; integrator is a trbdf2 row since 'esdirk43').
     vals = {"progress": True, "mode_selection": "lcp", "rtol": 1e-6,
             "store_every": 2, "integrator": "rk45", "h_bdf2": 1e-7}

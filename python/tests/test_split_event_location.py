@@ -181,23 +181,23 @@ def test_two_independent_diodes_in_one_step_the_earlier_is_located():
     and D2 taken at D1's instant (+0.55 h), held OFF since 10.20 us, with no
     counter. Every other crosser is now checked at the refined instant: D2
     is located at its truth and D1 stays OFF through it (its own turn-on
-    lies in the sub-step after the split; see the strict xfail below)."""
+    lies in the sub-step after the split: located too, F-Z-11, below)."""
     b, r = _two_diodes()
     v = p.with_event_limits(r)
     t = np.asarray(v.times)
     k2 = b.switch_index_of("D2")
     (got,) = [x for x, on in _flips(r, k2) if on and 10e-6 < x < 11e-6]
     assert got == pytest.approx(_truth2(2), abs=1e-4 * 1e-6)
-    (j,) = [j for j in np.flatnonzero(t[1:] == np.nextafter(t[:-1], np.inf)) if 10e-6 < t[j] < 11e-6]
+    (j,) = [j for j in np.flatnonzero(t[1:] == np.nextafter(t[:-1], np.inf))
+            if abs(t[j] - got) < 1e-12]   # D2's own right-limit row
     assert abs(np.asarray(v.i("D1"))[j + 1]) < 1e-6   # D1 off at D2's right limit
     assert r.counters["split_locator_giveups"] == 0
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "open (restart line STATUS, item 2): a crossing in the sub-step AFTER a located "
-    "event is not located (the locator runs on the trapezoidal interval 0 only): D1 "
-    "is taken at the step end 11 us"))
 def test_two_independent_diodes_in_one_step_the_later_is_located_too():
+    # F-Z-11: the crossing in the restart sub-step after the located event is
+    # cut there too (before: D1 at the step end 11 us, nearest sample 2.5e-7 s
+    # = 0.25 dt from its truth; measured 2026-11-27 after: 2.7e-14 s)
     b, r = _two_diodes()
     v = p.with_event_limits(r)
     t = np.asarray(v.times)

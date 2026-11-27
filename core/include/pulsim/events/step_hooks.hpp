@@ -37,6 +37,7 @@
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/topology/switch_state.hpp"
 
+#include <cstdint>
 #include <functional>
 #include <stdexcept>
 #include <vector>
@@ -73,6 +74,12 @@ struct Commutation {
 /// stateful devices' histories, and the step of the last post-event
 /// probe (TR-BDF2: the probe that produced an event's right side).
 /// Set by the engine once per run; null where an engine has none.
+/// F-Z-12: which readings a sink call feeds. A restart step is fed twice:
+/// its integral (the method's quadrature lines) to the integral-type
+/// readings, then its states (step ends, right limits) to the sample-type
+/// ones. `All`: every other step, fed once.
+enum class FeedPart : std::uint8_t { All, Integrals, Samples };
+
 struct StepRunView {
     const pwl::HistoryState* history = nullptr;
     const pwl::StatefulHistories* stateful = nullptr;
@@ -180,7 +187,9 @@ public:
     /// `start()` drops them).
     using StepBatchFn = void (*)(void* ctx, const Real* rows, Size n, Size stride,
                                  const topology::SwitchStateMask& mask);
-    void set_step_sink(StepSinkFn f, void* ctx, StepBatchFn batch = nullptr) {
+    using StepPartFn = void (*)(void* ctx, FeedPart part);
+    void set_step_sink(StepSinkFn f, void* ctx, StepBatchFn batch = nullptr,
+                       StepPartFn part = nullptr) {
         flush_steps();   // rows held for the sink being replaced go to it
         if (sink_ != nullptr && f != nullptr) {
             throw std::logic_error("StepHooks: a step sink is already set (one per hooks)");
@@ -188,6 +197,22 @@ public:
         sink_ = f;
         sink_ctx_ = ctx;
         batch_fn_ = f != nullptr ? batch : nullptr;
+        part_fn_ = f != nullptr ? part : nullptr;
+    }
+    /// The sink takes a step in two parts (`part`, F-Z-12).
+    [[nodiscard]] bool takes_parts() const noexcept { return part_fn_ != nullptr; }
+    /// The sink calls up to the next `part` feed `p` (All ends the parts).
+    void part(FeedPart p) {
+        if (part_fn_ == nullptr) return;
+        flush_steps();
+        part_fn_(sink_ctx_, p);
+    }
+    /// The sink alone (no `on_step` function), a step with its start.
+    void sink_step(Real t_prev, const Vector& x_start, const topology::SwitchStateMask& mask_start,
+                   Real t, const Vector& x_end, const topology::SwitchStateMask& mask_end) {
+        if (sink_ == nullptr) return;
+        flush_steps();
+        sink_(sink_ctx_, t_prev, &x_start, &mask_start, t, x_end, mask_end);
     }
     /// Any step listener (an `on_step` function or the sink).
     [[nodiscard]] bool has_step() const noexcept { return !step_.empty() || sink_ != nullptr; }
@@ -351,6 +376,7 @@ private:
     StepSinkFn sink_ = nullptr;
     void* sink_ctx_ = nullptr;
     StepBatchFn batch_fn_ = nullptr;
+    StepPartFn part_fn_ = nullptr;
     bool sink_lines_ = true;
     static constexpr Size kBatchRows = 128;
     std::vector<Real> batch_;

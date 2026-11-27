@@ -5036,9 +5036,15 @@ void init_module(py::module_& m) {
                 // 19 the transmission lines' past (add-realistic-passives
                 // D18), appended only when present: a snapshot without a
                 // line pickles exactly as before
-                if (s.line_state.empty()) return base;
+                // 20 (restart_anchor_at_end, invalid_reason), appended only
+                // when either is set (field 19 then written, maybe empty):
+                // without them a pickle is byte for byte as before, and an
+                // older pickle loads them as false / "" (their neutral values)
+                const bool extra = s.restart_anchor_at_end || !s.invalid_reason.empty();
+                if (s.line_state.empty() && !extra) return base;
                 py::list all(base);
                 all.append(py::cast(s.line_state));
+                if (extra) all.append(py::make_tuple(s.restart_anchor_at_end, s.invalid_reason));
                 return py::tuple(all);
             },
             [](py::tuple t) {
@@ -5050,13 +5056,13 @@ void init_module(py::module_& m) {
                     if (t[0].cast<std::string>() != "SolverSnapshot"
                         || !((ver == 3 && (n == 12 || n == 13))
                              || (ver == 4 && n >= 13 && n <= 15)
-                             || (ver == 5 && n >= 17 && n <= 20))) {
+                             || (ver == 5 && n >= 17 && n <= 21))) {
                         throw std::runtime_error(
                             "SolverSnapshot: pickle version "
                             + std::to_string(ver) + " with "
                             + std::to_string(n)
                             + " fields; this Pulsim reads version 3 "
-                              "(12 or 13 fields), 4 (13 to 15) and 5 (17 to 20)");
+                              "(12 or 13 fields), 4 (13 to 15) and 5 (17 to 21)");
                     }
                     // Where each block sits (npos = absent). Version 4's
                     // variants differ in field 12: a bool there is the
@@ -5128,8 +5134,19 @@ void init_module(py::module_& m) {
                     if (ver == 5 && n >= 18) {
                         s.loss_state = t[17].cast<std::vector<Real>>();
                     }
-                    if (ver == 5 && n == 20) {
+                    if (ver == 5 && n >= 20) {
                         s.line_state = t[19].cast<std::vector<Real>>();
+                    }
+                    if (ver == 5 && n == 21) {
+                        const auto ex = t[20].cast<py::tuple>();
+                        if (ex.size() != 2) {
+                            throw std::runtime_error(
+                                "SolverSnapshot: field 20 has "
+                                + std::to_string(ex.size())
+                                + " values, expected 2 (restart_anchor_at_end, invalid_reason)");
+                        }
+                        s.restart_anchor_at_end = ex[0].cast<bool>();
+                        s.invalid_reason = ex[1].cast<std::string>();
                     }
                     if (ver == 5 && n >= 19 && !t[18].is_none()) {
                         const auto rs = t[18].cast<py::tuple>();
