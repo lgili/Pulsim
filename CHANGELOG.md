@@ -6,6 +6,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Recorders: a right-limit row reads a capacitor's current of the post-jump network (F-Z-13)
+
+- Under `discontinuity_restart=True` an in-loop recorder's right-limit rows (the x(0⁺) row of an inconsistent start, an event's right side) read a capacitor's current from the restart step's stage quadrature: a bridge rectifier's start row read i(Cf) = 1.109 A where 0.0046 A is right (KCL at the node off by 1.1 A), a buck's i(C) = 4.19e-4 A where 0 is right. Such a row now reads the companion current of the right limit's own solve, so KCL closes there to the solve's round-off (3.3e-12 A / 7.7e-11 A on those cells); a capacitor switched onto 10 V through 1 kΩ from 2 V reads (V − v_C)/R = 8 mA. Integral-type fields (∫i_C = C·Δv) still take the quadrature and are unchanged; rule off: byte-identical. Still open with the split on: a diode's reading on one located turn-on row of that rectifier (2 mA, KCL at the node off by it).
+
 ### Fixed engine: a branch-form diode's commutation is booked where the conductance form books it (F-Z-14)
 
 - `engine='pwl'` booked a `form='branch'` diode's flip at the step end: a start-up turn-on at t = dt (the conductance form books none), and on a 1e-4 s grid a sine rectifier's zeros at 100 / 200 / 400·dt as 101 / 201 / 401·dt, though the two forms' states agree to 3.6e-15 V. A flip at no gate edge is now booked on the conductance form's chord of v_d − V_on, and a turn-on from a start already at or above V_on books nothing; a flip at a gate edge keeps its instant (the edge under the restart rule, the step end without it). On that rectifier the two forms' event lists are now identical (to 6.9e-15 s with the split); in a DCM buck the natural turn-offs moved one step earlier, onto the conductance form's times. States are unchanged; conductance-form runs are byte-identical. An ideal branch diode (R_on = 0) reads no chord while ON and its natural turn-off stays at the step end.

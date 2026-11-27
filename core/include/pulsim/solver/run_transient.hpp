@@ -3083,7 +3083,8 @@ inline SimulationResult run_transient(
         // Called with stage 1 solved (x, its b_extra, its bits); everything
         // it touches is put back. Out of line, once per run.
         auto event_right_limit = [&](auto& rei, Real t_from, Real h_s, Real loc, bool ev,
-                                     Vector& out, topology::SwitchStateMask& m_out)
+                                     Vector& out, topology::SwitchStateMask& m_out,
+                                     std::vector<Real>& c_out)
                                      PULSIM_STEP_DRIVER -> int {
             const bool at_loc = t_from == rl_loc.t;
             // F-Z-10: the run's start (not a resume seam) is re-initialised:
@@ -3556,6 +3557,20 @@ inline SimulationResult run_transient(
                             Real{1e-8} * (Real{1} + std::abs(out[i]) + std::abs(x0[i]));
                 }
                 if (!moved) ok = 0;
+            }
+            if (ok == 1) {
+                // F-Z-13: the capacitors' currents at the row, the last ε
+                // solve's backward-Euler companion (its histories still in
+                // place): the post-jump network's KCL at t_e+
+                c_out.assign(ents.size(), Real{0});
+                for (Size k = 0; k < ents.size(); ++k) {
+                    const auto& e = ents[k];
+                    if (e.kind != pwl::DevicePool::StoredKind::Capacitor) continue;
+                    c_out[k] = models::Capacitor::g_eq(Real{2} * e_last,
+                                                       models::Capacitor::Params{e.C_or_L}) *
+                               (stamping::read_node_voltage(out, e.from) -
+                                stamping::read_node_voltage(out, e.to) - e.v_prev);
+                }
             }
             history.restore(rl_hcur);
             if (!lin) {
@@ -4260,7 +4275,7 @@ inline SimulationResult run_transient(
                 // F-SB-1: the right limit, only where something happens
                 // (the caller's event, a probed jump)
                 const int rl = event_right_limit(run_event_iteration, t_from, h_s, loc,
-                                                 ev, L->rl_x, L->rl_m);
+                                                 ev, L->rl_x, L->rl_m, L->rl_c);
                 L->rl_ok = rl != 0;
                 L->rl_left = rl == 2;
             }
@@ -4531,11 +4546,13 @@ inline SimulationResult run_transient(
                 lines.held[j] = false;
                 lines.rl_right_jump[j] = ip_jump;
                 lines.rl_right_ok[j] = lines.rl_ok;
+                lines.rl_left_right[j] = lines.rl_left;
                 if (lines.rl_ok) {
                     if (lines.rl_left) {   // a continuity point: the left
                         lines.rl_right[j] = lines.left[j];
                     } else {
                         std::swap(lines.rl_right[j], lines.rl_x);
+                        std::swap(lines.rl_c_right[j], lines.rl_c);
                     }
                     lines.rl_m_right[j] = lines.rl_m;
                 }
@@ -4545,6 +4562,7 @@ inline SimulationResult run_transient(
                 lines.rl_start_left = lines.rl_left;
                 if (lines.rl_ok) {
                     std::swap(lines.rl_start, lines.rl_x);
+                    std::swap(lines.rl_c_start, lines.rl_c);
                     lines.rl_m_start = lines.rl_m;
                 }
             }
@@ -5999,16 +6017,21 @@ inline SimulationResult run_transient(
             const Vector* xa = s_rl ? &lines.rl_start : &x_prev;
             const topology::SwitchStateMask* ma =
                 lines.rl_start_ok ? &lines.rl_m_start : &mask_start;
-            const Real* ca = lines.start ? cap(lines.c_start) : nullptr;
+            // F-Z-13: a row's capacitor currents are its state's: the right
+            // limit's own (rl_c_*), the left's at a continuity point or with
+            // no right limit, the committed i_prev at x_prev — never the
+            // quadrature's (c_start / c_right: feed_quadrature's)
+            const Real* ca = s_rl ? cap(lines.rl_c_start) : nullptr;
             for (Size j = 0; j < lines.n; ++j) {
                 if (lines.held[j]) continue;
                 hooks->line(ta, *xa, *ma, lines.t[j], lines.left[j], lines.m_left[j], ca,
                             cap(lines.c_left[j]));
                 ta = lines.t[j];
                 const bool r = lines.rl_right_ok[j];
+                const bool own = r && !lines.rl_left_right[j];
                 xa = r ? &lines.rl_right[j] : &lines.left[j];
                 ma = r ? &lines.rl_m_right[j] : &lines.m_left[j];
-                ca = cap(lines.right_ok[j] ? lines.c_right[j] : lines.c_left[j]);
+                ca = cap(own ? lines.rl_c_right[j] : lines.c_left[j]);
             }
             hooks->line(ta, *xa, *ma, t, x, stamped_mask, ca,
                         lines.end_own ? cap(lines.c_end) : nullptr);
