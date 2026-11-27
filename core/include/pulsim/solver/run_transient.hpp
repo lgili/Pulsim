@@ -3108,6 +3108,11 @@ inline SimulationResult run_transient(
             // the run's Newton round-off budget and its counters are not the
             // right limit's (a tiny-ε Newton solve stagnates at round-off)
             const auto nr_s = newton_roundoff_run;
+            // the right limit (opt-in rule, new on this line) judges a fixed
+            // point at its own scale, as it did when it came in (ll13: 12
+            // fallbacks, 19 without); the run's steps keep 2.1.0's test
+            // (nr_s puts the flag back with the budget)
+            newton_roundoff_run.judge_own_scale = true;
             const auto nr_n = result.newton_roundoff_accepts;
             const auto nr_w = result.newton_roundoff_omega_max;
             const auto nr_r = result.newton_roundoff_row;

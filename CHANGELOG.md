@@ -120,7 +120,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### TR-BDF2: edge probes and the floating-point fixed point
 
 - **A Newton solve that stalls at a floating-point fixed point is judged at
-  the iterate's own magnitudes** (`trbdf2` / `esdirk43` only). When the
+  the iterate's own magnitudes** (`trbdf2` / `esdirk43`, and the restart
+  rule's right-limit solve that is new on this line; no other solve). When the
   stagnation windows and the dx cap hold and every component of the last
   Newton step is within `tol_newton_dx` or 4 eps of the iterate, the round-off
   acceptance's row backward error is taken against the larger of the start
