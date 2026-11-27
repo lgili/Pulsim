@@ -151,16 +151,20 @@ def test_engine_warnings_with_recorders_point_at_the_callers_line():
         # (integrator= on trbdf2 used to warn; the option table now refuses
         # it by name. An undriven switch warned next, until the release made
         # undriven='refuse' the default and an explicit policy silent; the
-        # warning here is the split's: an opaque gate edge off the grid)
+        # warning here is the split's: nine opaque gate edges in one step, more
+        # than the eight its locator takes; a single off-grid edge is bisected
+        # since F-SB-2 and warns no more)
         b = p.CircuitBuilder()
         b.add_voltage_source("V", "in", "gnd", 1.0)
-        b.add_switch("S", "in", "out", 1e3, 1e-9)
+        for k in range(9):
+            b.add_switch(f"S{k}", "in", "out", 1e3, 1e-9)
         b.add_resistor("R", "out", "gnd", 1.0)
         n = b.graph.num_switches
 
         def gate(t):
             m = p.SwitchStateMask(n)
-            m.set(0, t >= 3.5e-6)
+            for k in range(n):
+                m.set(k, t >= 3.05e-6 + 0.1e-6 * k)
             return m
         p.simulate(b, t_end=1e-5, dt=1e-6, engine="pwl", switch_fn=gate,
                    recorders=[p.Recorder("x", ["v(out)"])])
