@@ -18,6 +18,7 @@ engine's window statistics on a piecewise-linear circuit.
 
 from __future__ import annotations
 
+import functools
 import sys
 import warnings
 from pathlib import Path
@@ -144,7 +145,8 @@ def test_in_loop_and_stored_array_feeds_agree():
     (F-SB-1), a subset of the loop's jump rows (the loop's lines start at
     every restart step, at the quadrature start). The windows therefore
     differ: the loop's are the integrator's quadrature, the stored pass's
-    the trapezoid of state values (second order; not compared here)."""
+    the trapezoid of state values (second order): compared, as strict
+    xfails with their measured gaps (F-Z-12), in the test below."""
     from pulsim._recorders import record_result
     b, fn, t_end, _, _ = m._buck()
     probes = ["v(out)", "i(L)", "i(R)", "v(sw)", "i(S1)", "i(D1)", "v(out)*i(L)"]
@@ -163,6 +165,59 @@ def test_in_loop_and_stored_array_feeds_agree():
     for q in probes:
         scale = max(np.max(np.abs(loop[q])), 1e-300)
         np.testing.assert_allclose(loop[q], arr[q], rtol=0, atol=1e-12 * scale)
+
+
+_FEED_PROBES = ["v(out)", "i(L)", "i(R)", "v(sw)", "i(S1)", "i(D1)", "v(out)*i(L)"]
+
+
+@functools.lru_cache(maxsize=1)
+def _feeds():
+    from pulsim._recorders import record_result
+    b, fn, t_end, _, _ = m._buck()
+    wins = [(m.A, m.B), (0.05e-3 + 7e-10, 0.95e-3)]
+    recs = [p.Recorder("w", _FEED_PROBES, keep="every", windows=wins, period=1e-4)]
+    res = _quiet(p.simulate, b, t_end, switch_fn=fn, dt=1e-6, **RULE, recorders=recs)
+    return res.recorded["w"], _quiet(record_result, res, recs)["w"]
+
+
+def _f_z_12(gap):
+    return pytest.mark.xfail(strict=True, reason=(
+        "F-Z-12 (open, fix on another branch): under the restart rule the in-loop feed "
+        "keeps the quadrature line starts and held rows, the stored pass the true "
+        "x(t+) right limits (452c2556). Measured 2026-11-27, worst probe: " + gap))
+
+
+# The comparisons 452c2556 dropped from the test above, back as what they are
+# today: each fails by far more than its 1e-12 bound (F-Z-12).
+@pytest.mark.parametrize("what", [
+    pytest.param("event_t", marks=_f_z_12("the loop has 123 jump rows, the stored "
+                                          "pass 41 (all 41 among the loop's)")),
+    pytest.param("event_right", marks=_f_z_12("v(sw) 0.404 of scale at a shared "
+                                              "instant; the other probes <= 1.6e-4")),
+    pytest.param("windows.integral", marks=_f_z_12("v(sw) 1.21e-4 relative; i(L) 3.0e-7")),
+    pytest.param("windows.avg", marks=_f_z_12("v(sw) 1.21e-4 relative; i(L) 3.0e-7")),
+    pytest.param("windows.rms", marks=_f_z_12("v(sw) 3.24e-5 relative; i(L) 2.2e-6")),
+    pytest.param("periods.integral", marks=_f_z_12("v(sw) 1.07e-3 relative; i(L) 2.7e-6")),
+    pytest.param("periods.avg", marks=_f_z_12("v(sw) 1.07e-3 relative; i(L) 2.7e-6")),
+    pytest.param("periods.rms", marks=_f_z_12("v(sw) 2.9e-4 relative; i(L) 3.2e-6")),
+])
+def test_in_loop_and_stored_array_feeds_agree_on_events_and_windows(what):
+    loop, arr = _feeds()
+    jumps = loop.event_resolution != "within_dt"
+    if what == "event_t":
+        np.testing.assert_array_equal(loop.event_t[jumps], arr.event_t)
+        return
+    for q in _FEED_PROBES:
+        scale = max(np.max(np.abs(loop[q])), 1e-300)
+        if what == "event_right":
+            lt = loop.event_t[jumps]
+            first = [np.flatnonzero(lt == t)[0] for t in arr.event_t]
+            np.testing.assert_allclose(loop.event_right[q][jumps][first], arr.event_right[q],
+                                       rtol=1e-12, atol=1e-12 * scale, err_msg=q)
+            continue
+        kind, f = what.split(".")
+        np.testing.assert_allclose(getattr(loop, kind)[q][f], getattr(arr, kind)[q][f],
+                                   rtol=1e-12, atol=1e-15 * scale, err_msg=(q, f))
 
 
 def test_window_integrals_converge_second_order():

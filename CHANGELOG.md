@@ -119,6 +119,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### TR-BDF2: edge probes and the floating-point fixed point
 
+- **A Newton solve that stalls at a floating-point fixed point is judged at
+  the iterate's own magnitudes** (`trbdf2` / `esdirk43` only). When the
+  stagnation windows and the dx cap hold and every component of the last
+  Newton step is within `tol_newton_dx` or 4 eps of the iterate, the round-off
+  acceptance's row backward error is taken against the larger of the start
+  state's scale and the iterate's, so such a solve can be accepted (counted in
+  `newton_roundoff_accepts` and the run budget like any round-off accept).
 - **An edge probe that passes only as a floating-point fixed point is retaken
   longer** (`trbdf2` / `esdirk43`, counted in `n_probe_newton_retries`), as a
   stalled probe was in 2.1.0. `ll13_active_clamp_forward` at rtol 1e-8 /
@@ -415,6 +422,36 @@ rule".
   (its solve throws, or is not finite) is now counted in
   `n_right_limit_fallbacks`; it was dropped silently (the active-clamp
   forward's 19 main-switch turn-offs: 0 counted, now 19).
+
+### Soft-switching KPIs against exact truths (benchmarks; add-soft-switching-validation)
+
+Benchmark tooling only: the wheel's API and results do not change.
+
+- **Added** `benchmarks/tools/soft_switching_truth.py` (mpmath, never imports
+  pulsim): per switch, the left limit of V_DS at every turn-on, the ZVS fraction
+  and the switching energy of each KPI window, exact, plus the same windows by the
+  trapezoid on a trace's own grid; `baseline` writes the truth on a netlist's grid
+  with both limits at every event.
+- **Added** the LLC half-bridge and phase-shifted full-bridge ZVS references
+  (`circuits/switching/isolated/{llc_half_bridge_zvs,psfb_full_bridge_zvs}.yaml`),
+  their truth baselines, and `benchmarks/manifests/soft_switching.yaml` (plain
+  fixed engine and `trbdf2`). The runner reports their KPIs as `kpi__*` columns
+  (ZVS fraction, switching energy per switch); `python/tests/test_soft_switching_kpi.py`
+  holds each column to the truth, the energy to the truth's trapezoid on the
+  engine's own grid. Published numbers and known disagreements (strict xfails:
+  plain `pwl` on the LLC/PSFB/buck, the PSFB S3 energy about −10 % under the
+  restart rule, `trbdf2`'s PSFB start): `docs/SOFT_SWITCHING.md`.
+- **Changed** `buck_hard_switching_reference`: its baseline is now the exact truth
+  (mpmath; it was a Pulsim run), so the bench is graded against the truth (plain
+  `pwl` 0.051 V on V(out), `trbdf2` 5.05e-5 V, threshold 0.1 V unchanged). Its KPIs
+  follow the documented probe convention, V_DS = V(vcc, sw) and I_D = I(SH) of the
+  high-side switch; it read V(sw) and I(L1), which counted the hard turn-ons as
+  soft ("ZVS" 42 %; the truth is 0 of 24).
+- **Changed** the switching-loss KPI window starts at the first sample that shows
+  the new switch state (it started one sample earlier: on a variable grid the
+  conduction before the edge was booked, PSFB S3 on `trbdf2` 2.55e-10 J against the
+  exact 3.18e-11 J, now 3.66e-11 J); the runner's switching KPIs skip the first
+  stored sample, which is not solved (a made-up t = 0 turn-on).
 
 ### Fixed
 - Variable-step engine (`trbdf2`, `integrator='esdirk43'`) with a MOSFET's nonlinear output
