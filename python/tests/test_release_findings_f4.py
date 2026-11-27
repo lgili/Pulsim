@@ -316,9 +316,11 @@ def test_f_r_1_the_referee_keeps_one_window_not_the_chain(monkeypatch):
         tracemalloc.stop()
     assert fr["comparable"] and fr["n_windows"] == len(sizes) >= 10, fr
     # the verdict on this line with every stored column read (the reference built under the
-    # cell's builder form; 0.96737 was read with the columns hidden). 1e-9: Linux and Windows CI
-    # differ from macOS in the last bits
-    assert fr["ratio"] == pytest.approx(0.9955495667041186, rel=1e-9)
+    # cell's builder form; 0.96737 was read with the columns hidden). Measured on CI at 7616cf79:
+    # macOS 0.9955495667041186, Linux 0.9955495496565577, Windows 0.9955495498565944 (spread
+    # 1.7e-8 relative: the reference windows' last bits); rel 1e-7 holds all three with margin 6
+    assert fr["ratio"] == pytest.approx(0.9955495667041186, rel=1e-7)
+    assert fr["ratio"] < 1.0
     assert peak < 8 * max(sizes), (peak, max(sizes), sum(sizes))
 
 
