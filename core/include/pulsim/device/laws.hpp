@@ -229,6 +229,10 @@ struct NonlinearCapacitor {
         models::ChargeLawKind law = models::ChargeLawKind::Junction;
         Real v_floor = Real{-0.9};
         const models::ChargeTable* table = nullptr;
+        /// The junction tangent in the hand stamp's operations: the Coss
+        /// kind's interface stamp (its hand stamp's J to the bit, F-Z-7);
+        /// the power MOSFET's external device keeps the one-log1p form.
+        bool hand_tangent = false;
     };
     [[nodiscard]] static Params<Real> from(const models::NonlinearCapacitor::Params& m) {
         return {m.C0, m.V0, m.m, m.cgd_max, m.cgd_min, m.a};
@@ -280,7 +284,8 @@ struct NonlinearCapacitor {
         }
         // Junction: Q = C0·V0/(1−m)·expm1((1−m)·log1p(u)), u = v/V0 clamped
         // at the floor; dQ/dv = C0·exp(−m·log1p(u)) — one log1p for value
-        // and tangent. expm1, not (1+u)^(1−m) − 1: that cancels near 0 V to
+        // and tangent (`hand_tangent`: C0/(1+u)^m, the model's capacitance()).
+        // expm1, not (1+u)^(1−m) − 1: that cancels near 0 V to
         // C0·V0·eps absolute, a Newton residual floor over a femtosecond
         // step (F-S-5; the model's charge() takes the same form). Below the
         // floor Q is flat and the tangent stays C(floor), as the hand
@@ -292,7 +297,8 @@ struct NonlinearCapacitor {
             if (u < a.v_floor) u = a.v_floor;
             const Real l = std::log1p(u);
             const Real q = p.C0 * p.V0 / (Real{1} - p.m) * std::expm1((Real{1} - p.m) * l);
-            return ad::chain(v, q, p.C0 * std::exp(-p.m * l));
+            return ad::chain(v, q, a.hand_tangent ? p.C0 / std::pow(Real{1} + u, p.m)
+                                                  : p.C0 * std::exp(-p.m * l));
         } else {
             T u = v / p.V0;
             if (u < a.v_floor) u = T(a.v_floor);

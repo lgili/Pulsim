@@ -98,6 +98,26 @@ struct Bdf2Weights { Real c1, c2, c3; };
     return Real{0};
 }
 
+/// a·q + r of one PIN q row taken as an increment, in the hand stamps'
+/// operation order (refresh_nonlinear_capacitors): a·(q − q_n) [− q̇_n], and
+/// (c1·q + c2·q_γ + c3·q_n)/h in the BDF2 stage. a·q + r rounds relative to
+/// a·q: an eps·Q/h residual floor that grows as h shrinks (F-Z-7: case A's
+/// esdirk43 Newton at h_min, eps·Q/(γh) ~ 1e-6 A at 400 V and h ~ 1e-16 s),
+/// where the increment form rounds relative to the step's own a·(q − q_n).
+[[nodiscard]] inline Real formula_rate(const StepCtx& c, Real a, Real q, Real q_n,
+                                       Real qdot_n, Real q_gamma) noexcept {
+    switch (c.formula) {
+    case Formula::Dc:            return Real{0};
+    case Formula::BackwardEuler: return a * (q - q_n);
+    case Formula::Trapezoidal:   return a * (q - q_n) - qdot_n;
+    case Formula::Bdf2Stage2: {
+        const auto w = bdf2_weights();
+        return (w.c1 * q + w.c2 * q_gamma + w.c3 * q_n) / c.h;
+    }
+    }
+    return Real{0};
+}
+
 /// `history_term` for every row at once, the formula switch taken once (the
 /// same operations per row, so the same values).
 template <std::size_t R>
@@ -265,13 +285,15 @@ PULSIM_DEVICE_INLINE inline Real assemble(
         return worst;
     }
     const Real a = formula_a(c);
-    if constexpr (!hf) {
-        const auto hist = history_terms<R>(c, q_n, qdot_n, q_gamma);
+    if constexpr (!hf) {   // charge only (the Coss): pin rows, increment form (dq unused)
         Real worst = Real{0};
+        const bool bdf2 = c.formula == Formula::Bdf2Stage2;
+        const Real c1 = bdf2_weights().c1;
         for (std::size_t r = 0; r < R; ++r) {
-            F[r] = a * qv(r) + hist[r];
-            if constexpr (WithJ)
-                for (std::size_t k = 0; k < R; ++k) J[r][k] = a * qd(r, k);
+            F[r] = formula_rate(c, a, qv(r), q_n[r], qdot_n[r], q_gamma[r]);
+            if constexpr (WithJ)   // the hand stamp's c1·C/h in the BDF2 stage
+                for (std::size_t k = 0; k < R; ++k)
+                    J[r][k] = bdf2 ? c1 * qd(r, k) / c.h : a * qd(r, k);
             worst = std::max(worst, std::abs(F[r]));
         }
         return worst;
@@ -440,7 +462,9 @@ PULSIM_DEVICE_INLINE inline Out<Real, rows_v<D>> commit_fq(const aux_t<D>& aux,
     for (std::size_t r = 0; r < rows_v<D>; ++r) {
         const Real qd = r >= D::n_pins
             ? -o.f[r]
-            : a * o.q[r] + history_term(c, q_n[r], qdot_n[r], q_gamma[r]);
+            : c.formula == Formula::BackwardEuler   // the hand commit divides
+                ? (o.q[r] - q_n[r]) / c.h
+                : formula_rate(c, a, o.q[r], q_n[r], qdot_n[r], q_gamma[r]);
         q_n[r] = o.q[r];
         qdot_n[r] = qd;
     }
