@@ -441,6 +441,23 @@ r.feeding, res.recorder_feed                       # 'in-loop' | 'stored-arrays'
   full run's) and is refused by name otherwise; `resume_from` continues the
   record from the snapshot's recorder state.
   `keep="decimate"` keeps fewer rows with statistics from every step.
+- **The restart rule (`engine='pwl'`, `discontinuity_restart=True`): the
+  in-loop record is the accurate one.** A restart step is an SDIRK step
+  (stage 1 backward Euler over `γh`, `γ = 1 − 1/√2`). The in-loop feed gives
+  the integral-type fields (`integral`, `avg`, `rms`) that step's integral
+  as the method takes it — `h[(1−γ)·y(X₁) + γ·y(X₂)]`, the held
+  other-mode stage on a mixed step — so `∫i_C dt = C·Δv` and the energy
+  ledgers close to round-off; it gives the sample-type outputs (`min`,
+  `max`, their times, kept rows, requested times, event rows) only states
+  of the trajectory: step ends and the limits at events. The stored-array
+  pass sees states only and takes the trapezoid of them. So the two feeds
+  agree as follows: kept rows, `min` / `max`, event rows (times and both
+  limits) are bit-identical; `integral` / `avg` / `rms` are identical on
+  windows without a restart step, and on a restart piece of length `h` on a
+  smooth stretch they differ by `|γ − 1/4|·h³·|y″| + O(h⁴)` (0.043·h³·|y″|;
+  the trapezoid's own error is h³·|y″|/12, the stage quadrature's
+  `|1/3 − γ|·h³·|y″|` = 0.040·h³·|y″|). Rule off, and on trbdf2, the two
+  feeds are one function.
 - `steady_state_stats(result, "name")` looks the name up as a node
   (`result.v`) and as a branch (`result.i`); a name that is both raises
   and asks for `kind='v'` / `kind='i'`. An array must be sampled on

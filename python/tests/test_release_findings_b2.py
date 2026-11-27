@@ -18,6 +18,7 @@ engine's window statistics on a piecewise-linear circuit.
 
 from __future__ import annotations
 
+import functools
 import sys
 import warnings
 from pathlib import Path
@@ -95,14 +96,16 @@ def test_window_charge_over_mid_step_windows():
     Buck: window 0 starts 1.2 ns into the restart step after the 70 us
     gate edge, and window 1 ends AT the 970 us edge, where keep='times'
     reads the right limit; both read the restart line's start value
-    (2·w1·X1 + (1 − 2·w1)·X2, the right limit to O(h²)) as v_C: second
-    order (7.4e-4 / 1.7e-3 at 1 us, 1.9e-4 / 4.2e-4 at 0.5 us). A true
-    right limit there needs the consistent start of release group A
-    (fixes/group-b2.md)."""
+    (2·w1·X1 + (1 − 2·w1)·X2, the right limit to O(h²)) as v_C until
+    F-Z-12 (7.4e-4 / 1.7e-3 at 1 us). Now keep='times' reads states (the
+    right limit, the states' line), while ∫i_C is the step's quadrature,
+    whose line holds the other-mode stage 1 over w1·h on a mixed step: a
+    window end δ into it misses C·(v_q(a+δ) − v_s(a+δ)) = C·O(|v(X1) − v0|)
+    = O(h), first order — 4.6e-6 / 2.6e-5 at 1 us, half that at 0.5 us."""
     r = _mid_step_residue(m._rectifier, 1e-6)
     assert np.all(r <= 2e-4), r
     r1, r2 = _mid_step_residue(m._buck, 1e-6), _mid_step_residue(m._buck, 5e-7)
-    assert np.all(r1 / r2 > 3.0) and np.all(r1 <= 2e-3), (r1, r2)
+    assert np.all(r1 / r2 > 1.8) and np.all(r1 <= 2e-3), (r1, r2)
 
 
 def _energy(dt):
@@ -137,34 +140,78 @@ def test_buck_energy_balance_from_recorder_outputs():
     assert abs(react) <= 1e-4 * supplied, react / supplied
 
 
-def test_in_loop_and_stored_array_feeds_agree():
-    """The same recorder over the same rule run: fed in the loop, and
-    fed from the stored arrays. The samples agree; the stored pass's event
-    rows are the result's right limits, STATE VALUES at the events only
-    (F-SB-1), a subset of the loop's jump rows (the loop's lines start at
-    every restart step, at the quadrature start). The windows therefore
-    differ: the loop's are the integrator's quadrature, the stored pass's
-    the trapezoid of state values (second order; not compared here)."""
+_FEED_PROBES = ["v(out)", "i(L)", "i(R)", "v(sw)", "i(S1)", "i(D1)", "v(out)*i(L)"]
+# SDIRK restart steps: stage 1 backward Euler over gamma*h
+_GAMMA = 1.0 - 1.0 / np.sqrt(2.0)
+
+
+@functools.lru_cache(maxsize=1)
+def _feeds():
     from pulsim._recorders import record_result
     b, fn, t_end, _, _ = m._buck()
-    probes = ["v(out)", "i(L)", "i(R)", "v(sw)", "i(S1)", "i(D1)", "v(out)*i(L)"]
     wins = [(m.A, m.B), (0.05e-3 + 7e-10, 0.95e-3)]
-    recs = [p.Recorder("w", probes, keep="every", windows=wins, period=1e-4)]
+    recs = [p.Recorder("w", _FEED_PROBES, keep="every", windows=wins, period=1e-4)]
     res = _quiet(p.simulate, b, t_end, switch_fn=fn, dt=1e-6, **RULE, recorders=recs)
+    return res, res.recorded["w"], _quiet(record_result, res, recs)["w"]
+
+
+def test_in_loop_and_stored_array_feeds_agree():
+    """The same recorder over the same rule run: fed in the loop, and
+    fed from the stored arrays (F-Z-12). Sample-type outputs (kept rows,
+    min / max, event rows) are states of the trajectory in both feeds:
+    bit for bit equal. Integral-type outputs: the test below."""
+    res, loop, arr = _feeds()
     assert res.recorder_feed["mode"] == "in-loop", res.recorder_feed
     assert len(res.inner_events["times"]) > 0       # the split's events are fed
-    loop = res.recorded["w"]
-    arr = _quiet(record_result, res, recs)["w"]
     np.testing.assert_array_equal(loop.times, arr.times)
     jumps = loop.event_resolution != "within_dt"
     assert np.all(jumps), "a lined step's commutation is its jump rows, no bracket"
-    # F-Z-12: the loop's lines run through the stored right limits; it adds
-    # zero-width rows only where a capacitor reading's line starts
-    assert 0 < arr.event_t.size <= loop.event_t.size
-    assert np.all(np.isin(arr.event_t, loop.event_t[jumps]))
-    for q in probes:
-        scale = max(np.max(np.abs(loop[q])), 1e-300)
-        np.testing.assert_allclose(loop[q], arr[q], rtol=0, atol=1e-12 * scale)
+    assert arr.event_t.size > 0
+    for q in _FEED_PROBES:
+        np.testing.assert_array_equal(loop[q], arr[q], err_msg=q)
+        for kind in ("windows", "periods"):
+            for f in ("min", "t_min", "max", "t_max"):
+                np.testing.assert_array_equal(getattr(loop, kind)[q][f],
+                                              getattr(arr, kind)[q][f], err_msg=(q, kind, f))
+
+
+@pytest.mark.parametrize("what", [
+    "event_t", "event_right", "windows.integral", "windows.avg", "windows.rms",
+    "periods.integral", "periods.avg", "periods.rms"])
+def test_in_loop_and_stored_array_feeds_agree_on_events_and_windows(what):
+    """F-Z-12. Events are facts of the run: the same rows in both feeds
+    (before the fix the loop reported every restart step's quadrature start
+    as a jump: 123 rows against the stored pass's 41). Integrals: the loop
+    takes each restart step's SDIRK quadrature (held other-mode stage on a
+    mixed step), the stored pass the trapezoid of the states. On a step of
+    length h they differ by h*(w1*(Y1 - y0) + (1/2 - w1)*(Y2 - y0)), w1 <=
+    1 - gamma: at most h*(2(1 - gamma) - 1/2)*2*max|y| when the stage
+    values lie within the record's range; summed over the run's restart
+    steps (measured slack >= 337x, v(sw) periods' rms)."""
+    res, loop, arr = _feeds()
+    if what == "event_t":
+        np.testing.assert_array_equal(loop.event_t, arr.event_t)
+        np.testing.assert_array_equal(loop.event_t_right, arr.event_t_right)
+        return
+    dt, nr = 1e-6, res.n_restart_steps
+    assert nr > 0
+    c = nr * dt * (2.0 * (1.0 - _GAMMA) - 0.5) * 2.0
+    for q in _FEED_PROBES:
+        if what == "event_right":
+            np.testing.assert_array_equal(loop.event_left[q], arr.event_left[q], err_msg=q)
+            np.testing.assert_array_equal(loop.event_right[q], arr.event_right[q], err_msg=q)
+            continue
+        big = float(np.max(np.abs(arr[q])))
+        kind, f = what.split(".")
+        a, b = getattr(loop, kind)[q], getattr(arr, kind)[q]
+        span = b["t1"] - b["t0"]
+        if f == "integral":
+            assert np.all(np.abs(a[f] - b[f]) <= c * big), (q, f)
+        elif f == "avg":
+            assert np.all(np.abs(a[f] - b[f]) <= c * big / span), (q, f)
+        else:   # rms: |r_a^2 - r_b^2| * span is the integrals' gap of y^2
+            gap = np.abs(a[f] ** 2 - b[f] ** 2) * span
+            assert np.all(gap <= c * big * big), (q, f)
 
 
 def test_window_integrals_converge_second_order():

@@ -58,6 +58,7 @@
 #include "pulsim/topology/graph.hpp"
 #include "pulsim/topology/switch_state.hpp"
 
+#include <array>
 #include <bit>
 #include <cassert>
 #include <cstdint>
@@ -197,8 +198,6 @@ public:
             }
             d.entry = -1;
         }
-        has_cap_ = false;
-        for (const auto& r : readings_) has_cap_ = has_cap_ || r.dev.law == L::Capacitor;
         graph_ = &graph;
         pool_ = &pool;
         if (view_of_ != nullptr) set_lines_(*view_of_);   // attached before the circuit
@@ -237,7 +236,8 @@ public:
         settled_ = kind == Events::Settled;
         bool batch = general_.empty() && !settled_;
         for (const auto& r : recs_) batch = batch && !r.streams();
-        hooks.set_step_sink(&LoopFeed::sink_step, this, batch ? &LoopFeed::sink_batch : nullptr);
+        hooks.set_step_sink(&LoopFeed::sink_step, this, batch ? &LoopFeed::sink_batch : nullptr,
+                            &LoopFeed::sink_part);
         set_lines_(hooks);
         hooks.on_event([this](Real t, const Vector& xl, const topology::SwitchStateMask& ml,
                               const Vector& xr, const topology::SwitchStateMask& mr) {
@@ -381,13 +381,18 @@ private:
     Vector x_last_, x_seed_, x_row_;
     std::vector<Real> seed_;
     bool seeded_ = false, restored_ = false;
-    bool has_cap_ = false;   ///< a capacitor reading: a line's start current is its own row
     const topology::Graph* graph_ = nullptr;
     const pwl::DevicePool* pool_ = nullptr;
     events::StepHooks* view_of_ = nullptr;
     topology::SwitchStateMask mask_last_, mask_pending_, mask_seed_;
     bool started_ = false, has_pending_ = false, attached_ = false, settled_ = false;
     bool event_at_last_ = false;  // a settled event row at the last sample
+    // on_part's copy of the line's state at a two-part step's start
+    Vector part_x_;
+    topology::SwitchStateMask part_m_;
+    std::array<bool, 4> part_flags_{};
+    std::array<Size, 4> part_n_{};
+    Real part_t_ = 0;
     // A stored sample that is not a step (StepHooks::sample), read when the
     // engine stored it and held until a step ends after it.
     bool has_held_ = false;
@@ -622,6 +627,35 @@ private:
                           const topology::SwitchStateMask& me) {
         static_cast<LoopFeed*>(self)->on_step(t0, xs, ms, t, xe, me);
     }
+    // F-Z-12: a step fed in two parts. Integrals first, from the line's
+    // state at the step start; Samples then again from that state (the
+    // first part's jumps, events and counters are not the run's).
+    static void sink_part(void* self, events::FeedPart p) {
+        static_cast<LoopFeed*>(self)->on_part(p);
+    }
+    void on_part(events::FeedPart p) {
+        using P = events::FeedPart;
+        if (p == P::Integrals) {
+            part_x_ = x_last_;
+            part_m_ = mask_last_;
+            part_flags_ = {started_, has_pending_, event_at_last_, has_held_};
+            part_t_ = t_last_;
+            part_n_ = {n_steps_, n_jumps_, n_events_, n_dropped_};
+        } else if (p == P::Samples) {
+            x_last_ = part_x_;
+            mask_last_ = part_m_;
+            started_ = part_flags_[0];
+            has_pending_ = part_flags_[1];
+            event_at_last_ = part_flags_[2];
+            has_held_ = part_flags_[3];
+            t_last_ = part_t_;
+            n_steps_ = part_n_[0];
+            n_jumps_ = part_n_[1];
+            n_events_ = part_n_[2];
+            n_dropped_ = part_n_[3];
+        }
+        for (auto& r : recs_) r.begin_part(static_cast<Recorder::Part>(p));
+    }
     static void sink_batch(void* self, const Real* rows, Size n, Size stride,
                            const topology::SwitchStateMask& m) {
         static_cast<LoopFeed*>(self)->on_batch(rows, n, stride, m);
@@ -778,13 +812,9 @@ private:
             for (auto& r : recs_) r.sample(t_pending_, pending_left_);
             settled_event(pending_);
             mask_last_ = mask_pending_;
-        } else if (!event_at_last_ && (!(ms == mask_last_) || !same(xs, x_last_) ||
-                                       (has_cap_ && view.line && view.cap_start != nullptr))) {
+        } else if (!event_at_last_ && (!(ms == mask_last_) || !same(xs, x_last_))) {
             // the engine restarted from another state than it committed
-            // (a restart step's line: its start right limit). F-Z-12: a line
-            // from a continuous state still starts a capacitor's current at
-            // the stage currents' combination (C·Δv); the states' row there
-            // has both limits equal (zero width)
+            // (a restart step's line: its start right limit)
             eval(t0, xs, ms, row_, false, view.cap_start);
             for (auto& r : recs_) r.event(row_, Recorder::Resolution::Settled);
             ++n_jumps_;

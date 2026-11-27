@@ -6,9 +6,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Recorders: the in-loop feed reads the restart rule's stored rows (F-Z-12, WIP)
+### Recorders: under the restart rule the in-loop record is the accurate one (F-Z-12)
 
-- Under `discontinuity_restart=True` the fixed engine's in-loop recorder fed its lines from the quadrature starts and the held-pieces rows; the stored-array pass reads the stored right limits. The lines now run through the stored rows (right limits, split pieces, no held row): state readings of both feeds are bit-identical (PWM buck: i(L) window integral 2.3e-4 rel apart before, now 0; window max no longer a fictitious extrapolated value). Rule off and trbdf2: byte-identical. WIP: the capacitor-charge identity (`∫i_C = C·Δv`) of the in-loop feed is still off by up to 1.2e-4 on restart steps (test_release_findings_b2/b).
+- With `discontinuity_restart=True` a restart step is fed to an in-loop recorder twice: its integral-type fields (`integral`, `avg`, `rms`) take the step's SDIRK stage quadrature as before (so `∫i_C dt = C·Δv` and the energy ledgers close to round-off), and its sample-type outputs (kept rows, `min` / `max` and their times, requested times, event rows) take states of the trajectory only — step ends and the limits at events. Before, the quadrature line starts and held other-mode stage rows leaked into the samples: a PWM buck's window max read 21.5298249 V, a value no state had (now 21.5294326), and every restart step's line start was reported as a jump row (123 event rows against 41 real events).
+- The stored-array pass sees states only and integrates their trapezoid. The two feeds now agree bit for bit on every sample-type output and event row; integral-type fields are identical off restart steps and differ on a restart piece of length h by `|γ − 1/4|·h³·|y″| + O(h⁴)` on a smooth stretch (γ = 1 − 1/√2), at most `h·(2(1−γ) − 1/2)·2·max|y|` on a mixed-mode step. See the recorders section of `docs/api-reference.md`. Rule off, trbdf2 and exact: byte-identical outputs.
 
 ### Fixed engine: the restart after a split sliver probes at the next grid step
 
