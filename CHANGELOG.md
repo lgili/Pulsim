@@ -6,6 +6,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Event split: what a located diode crossing books (F-Z-16, F-Z-17, F-Z-14)
+
+- F-Z-16: with the split on, a diode crossing the split locates where only `V_f = 0` diodes flip is a continuity point (both laws meet at `v = i = 0`); the restart's impulse probe no longer runs there. It had read the new mode's own fast transient as a jump: a 1 mΩ diode clamping a 0.2 nF junction booked a `capacitor_loop` record of 2.46e-13 C (`i_L·R_on·C`, 10× the probe's `split_snap·dt` allowance). A switched-capacitor loop (a gate edge closing on a charged capacitor) records as before. Split off: byte-identical.
+
 ### Recorders: under the restart rule, integrals by the method, samples by the states (F-Z-12)
 
 - With `discontinuity_restart=True` a restart step is fed to an in-loop recorder twice: its integral-type fields (`integral`, `avg`, `rms`) take the step's SDIRK stage quadrature as before (so `∫i_C dt = C·Δv` and the energy ledgers close to round-off), and its sample-type outputs (kept rows, `min` / `max` and their times, requested times, event rows) take states of the trajectory only — step ends and the limits at events. Before, the quadrature line starts and held other-mode stage rows leaked into the samples: a PWM buck's window max read 21.5298249 V, a value no state had (now 21.5294326), and every restart step's line start was reported as a jump row (123 event rows against 41 real events).

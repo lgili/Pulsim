@@ -2132,6 +2132,18 @@ inline SimulationResult run_transient(
                 hs.get<pwl::NonlinearCapacitorHistory>().entries().empty()) {
                 return false;
             }
+            // F-Z-16: a located crossing where only V_f = 0 diodes flip (their laws
+            // meet at v = i = 0, event_right_limit's continuity point) and stage 1
+            // kept those bits: x(t_e) is consistent in the new mode, nothing can
+            // jump. What the probe would read is that mode's own fast transient (a
+            // 1 mΩ diode clamping a 0.2 nF junction: i_L·R_on·C = 2.4e-13 C, 10×
+            // the snap allowance), a kink, integrated by the restart.
+            // (the split's only: the rule alone's turn-off cut stays as it was)
+            if (split && has_diodes && t_from == rl_loc.t && rl_loc.pure && iters_1 == 1 && !breach_1 &&
+                !(rl_loc.at_b && rs_trig_t == t_from && !rs_trig_dio)) {
+                diodes.snapshot_on_bits_into(ip_bits1);
+                if (ip_bits1 == rl_loc.bits) return false;
+            }
             // a stage-1 diode flip (iters_1 > 1: the event iteration changed
             // the bits; breach_1 alone is an unsettled iteration)
             const Real dt_loc = (iters_1 > 1 || breach_1) ? std::max(loc, h_s) : loc;
