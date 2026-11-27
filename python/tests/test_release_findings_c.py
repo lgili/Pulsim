@@ -54,10 +54,9 @@ def _forward_biased_off(b, r):
 
 
 @pytest.mark.parametrize("floating", [
-    pytest.param(False, id="F-2-3", marks=pytest.mark.xfail(strict=True, reason=(
-        "release finding F-2-3: under the restart rule (the release default) BR__D1 is stored "
-        "OFF while forward-biased above V_th = 0 by 0.0299 V on 1 sample (t = 7.07107e-07 s, the "
-        "start); no sample with discontinuity_restart=False"))),
+    # F-2-3 (closed, merge 0261b7dc): BR__D1 was stored OFF forward-biased by 0.0299 V on
+    # 1 sample (the start); raw max v_D over OFF samples now 6.5e-4 V (< the 1 mV law band)
+    pytest.param(False, id="F-2-3"),
     pytest.param(True, id="F-5-9", marks=pytest.mark.xfail(strict=True, reason=(
         "release finding F-5-9: with event splitting (the release default) BR__D2 is stored OFF "
         "forward-biased above V_th = 0.7 V by 3.95 mV on 1 sample (t = 14.4373 ms) and BR__D3 by "

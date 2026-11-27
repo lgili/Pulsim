@@ -223,6 +223,12 @@ F = [
      "71.182 C at dt 1e-6 (discontinuity_restart=False; 0.035 K from the limit)",
      "71.014 / 71.075 / 71.116 / 71.131 C at dt 1e-6 / 5e-7 / 2e-7 / 1e-7 (first order); the energies agree with dt 1e-7 "
      "to 5e-4 and the event currents to 1e-6, so the error is in the junction's response, not in the booked heat"),
+    # ---- R7 / R8 (2026-11-26/27 nights)
+    ("F-Z-1", "A", "W", "with the event split a bisected gate edge's cut-set record is taken at the step start [owner: restart line, the split]",
+     "test_branch_form_reinit `_cutset(**RULE)` (10 V, 1 ohm, L 1 mH, ideal switch opened by an oracle-less gate at 99.999 h, h = tau/20)",
+     "record at the located edge 99.999 h, lambda = L i_L(t_e-), sample 100",
+     "record at 100 h, sample 101 (enable_substep_state_correction=False)",
+     "record t = 99.000 h with i_L(99 h); the state itself was cut at the edge (n_gate_events_bisected = 1)"),
 ]
 
 # Closed by a fix merged into the release branch: id -> where and the measured result.
@@ -286,12 +292,26 @@ FIXED = {
     "F-Y-3": "merge of feat/core-integration-next (R5, 41970372; the fix is 306efc60: a window's min / max inside an "
              "exact step from its closed form): `test_resume_and_fresh_t_start_match_the_uninterrupted_tail[buck-auto]` "
              "passes under the release defaults; mark removed",
+    "F-Z-1": "restart line e09405a1 (merged 1337e3f0, R8): the split's record and its booked impulse take the located "
+             "edge's time and state; `test_split_cutset_record_at_the_located_edge` (7 offsets, closed form 10(1 - e^-t/tau) "
+             "to 2e-5) and the five `test_capacitor_loop_jump_and_conduction_partition_the_pulse_step_at_any_dt` cells pass",
+    "F-Y-2": "restart line 03c64ac5 (a saturable core's jump tested and carried in flux, item N), merged 0261b7dc (R7): "
+             "the rectifier runs on the default fixed step with no record, DC output 6.34071 V against the restart-less "
+             "6.34090 V (atan; gapped 6.32890 / 6.32909); the DCM freewheel's core ends at 1.8e-9 A, no record",
+    "F-Y-4": "restart line (located-residual cells 6622b81c pass there), merged 0261b7dc (R7): `_freewheel_into(51.5 / 55, "
+             "split)` and the DCM freewheel write no record (was lambda 6.3e-11 / 1.2e-10 / 3.09e-11 V*s); the traces hold "
+             "the closed form to 1e-6 i0",
+    "F-2-3": "merge 0261b7dc (R7): the AC-floating bridge at V_th = 0 stores no diode OFF forward-biased; raw max v_D over "
+             "OFF samples 6.5e-4 V (BR__D1 / D3; was 0.0299 V at the start), no warning; the 325 V reference bridge at "
+             "V_th 0.7 warns on neither engine",
+    "F-Y-9": "merge 0261b7dc (R7): the snubbed DCM boost at T/1000 with the split: raw max v_D1 - V_th over OFF samples "
+             "-0.242 V (was +5.48 mV on 156 samples), split and unsplit v(out) 46.17951 / 46.17947 V, no warning",
     "F-X-1": "merge of the PR line (R3): ten paralleled bridges run on the exact engine under the default output rule on "
              "both selections; `test_ten_paralleled_bridges_agree_with_pwl` holds the rule-off run to 1e-3 V of pwl + split "
              "and the default run to that plus the rule's promise (measured 2.6e-3 V); mark removed",
 }
 
-PAT = re.compile(r"release finding (F-[0-9X]+-[0-9]+)")
+PAT = re.compile(r"release finding (F-[0-9XYZ]+-[0-9]+)")
 
 
 def parked(paths):

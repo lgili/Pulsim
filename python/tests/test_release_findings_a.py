@@ -512,7 +512,7 @@ def _freewheel_into(i0, split, L=1e-6, V=100.0, dt=1e-7):
 
 @pytest.mark.parametrize("split", [False, True])
 @pytest.mark.parametrize("i0", [12.0, 15.0, 22.0, 51.5, 55.0])
-def test_a_diode_turning_an_inductor_off_at_zero_current_is_not_an_impulse(i0, split, request):
+def test_a_diode_turning_an_inductor_off_at_zero_current_is_not_an_impulse(i0, split):
     """Truth (closed form, R_on = 1 mOhm of the ON diode): i(t) = (i0 + V/R) e^(-Rt/L) - V/R
     until it reaches 0, then 0. The stop inside stage 1 of a window step (t_c = 1.2, 1.5,
     2.2 dt) read as a jump of up to 3.1 uJ; it is the motion gamma*h*V/L of an unlocated
@@ -524,13 +524,10 @@ def test_a_diode_turning_an_inductor_off_at_zero_current_is_not_an_impulse(i0, s
     t_c = -L / R * np.log((V / R) / (i0 + V / R))
     far = np.abs(t - t_c) > 1e-7   # the step that holds the crossing is first order
     assert np.max(np.abs(i - ic)[far]) < 1e-6 * i0, np.max(np.abs(i - ic)[far])
-    if split and i0 > 50:
-        request.applymarker(pytest.mark.xfail(strict=True, reason=(
-            "release finding F-Y-4: under control_tick='state' (the release default) the split "
-            "step that locates the stop (t_c = 5.15 / 5.50 dt) writes a cut-set record of the "
-            "location's residual: lambda = 6.3e-11 / 1.2e-10 V*s (6e-5 A of 51.5 A), dW = 2.0e-15 / "
-            "7.8e-15 J of 1.3e-3 J; none with control_tick='label'")))
-    assert list(r.reinit_records) == []   # (last: the trace above is checked on every cell)
+    # F-Y-4 (closed by the restart line, merged 0261b7dc): the split step that locates the
+    # stop (t_c = 5.15 / 5.50 dt) wrote a cut-set record of the location's residual
+    # (lambda 6.3e-11 / 1.2e-10 V*s); no record since
+    assert list(r.reinit_records) == []
 
 
 @pytest.mark.xfail(strict=True, reason=(
@@ -576,18 +573,12 @@ def _buck_freewheel(saturable, split, edge_at=None):
 @pytest.mark.parametrize("split", [False, True])
 @pytest.mark.parametrize("saturable", [False, True])
 @pytest.mark.parametrize("edge_at", [None, 0.8e-6])
-def test_a_dcm_freewheel_is_neither_recorded_nor_refused(saturable, split, edge_at, request):
+def test_a_dcm_freewheel_is_neither_recorded_nor_refused(saturable, split, edge_at):
     """Truth (closed form, R_on = 1 mOhm neglected: < 1e-3 relative): i rises at
     (100 - 49.08)/L to 20.368 A at 0.4 us, falls at 49.08/L to 0 at 0.815 us and stays
-    there. The saturable core (linear here) was refused by name at the turn-off."""
-    if split and edge_at is None:
-        request.applymarker(pytest.mark.xfail(strict=True, reason=(
-            "release finding F-Y-2: the located stop's residual (3.09e-5 A of 20.4 A at "
-            "t = 0.8148 us) is refused as 'the event moves saturable_inductor L in an instant'"
-            if saturable else
-            "release finding F-Y-4: under control_tick='state' the located stop at 0.8148 us "
-            "writes a cut-set record of the location's residual (lambda = 3.09e-11 V*s, "
-            "dW = 4.8e-16 J); none with control_tick='label'")))
+    there. The saturable core (linear here) was refused by name at the turn-off
+    (F-Y-2: 3.09e-5 A of 20.4 A at 0.8148 us); the split's located stop wrote a record
+    of its residual (F-Y-4: 3.09e-11 V*s). Both closed by the restart line (0261b7dc)."""
     r = _buck_freewheel(saturable, split, edge_at)
     assert list(r.reinit_records) == []
     t, i = np.asarray(r.times), np.asarray(r.i("L"))

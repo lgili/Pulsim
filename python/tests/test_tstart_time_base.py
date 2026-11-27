@@ -129,15 +129,10 @@ DSED_ROUTES = {"dsed_rk45": dict(engine="dsed", integrator="rk45"), "dsed_auto":
 
 @pytest.mark.parametrize("route", [*ENGINES, *DSED_ROUTES])
 @pytest.mark.parametrize("name", INPUTS)
-def test_every_input_is_read_at_absolute_time(name, route, request):
-    if (name, route) == ("python_gate", "pwl"):
-        request.applymarker(pytest.mark.xfail(strict=True, reason=(
-            "finding F-SB-2 (the restart rule's arm): a gate with no edge oracle is taken at the "
-            "next grid point, and the grid time of an on-grid edge is one ulp short of it "
-            "(1000 * 1e-7 = 9.999999999999999e-05 < 1e-4), so the edge is placed a whole step "
-            "late: the samples at 1.001e-4 and 1.301e-4 read the old gate (1.0 off); with "
-            "discontinuity_restart=False, an oracle or a schedule: 0 samples off. The time base "
-            "itself is held by test_an_oracle_less_gate_is_read_at_absolute_time_off_its_placement_step")))
+def test_every_input_is_read_at_absolute_time(name, route):
+    # (python_gate, pwl) was F-SB-2: an on-grid edge one ulp short of its grid point was
+    # placed a whole step late; closed by the restart line's gate read 0.5001 dt before the
+    # step end (2f9fec67, fc52d7ba)
     b, kw, f = _input(name)
     opts = {**ENGINES, **DSED_ROUTES}[route]
     exact = opts["engine"] in ("dsed", "exact")

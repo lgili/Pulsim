@@ -40,6 +40,7 @@ devices' former diode chatter is gone (6 events in 3 cycles).
 """
 
 import math
+import warnings
 
 import numpy as np
 import pytest
@@ -156,13 +157,19 @@ def _dc(t, y, t0):
 
 
 @pytest.mark.parametrize("kind", ["atan", "gapped"])
-@pytest.mark.xfail(strict=True, raises=p.UnsupportedError, reason=(
-    "release finding F-Y-2: the fixed-step run is refused under the restart rule (the release "
-    "default): 'the event moves saturable_inductor Lc by -4.52e-07 A in an instant' at "
-    "t = 0.5312 ms (atan; gapped: -2.79e-07 A at 0.5353 ms) — the residual of a located diode "
-    "turn-off, of a 15 A current"))
 def test_the_fixed_step_default_runs_a_flux_device_behind_a_diode(kind):
-    _run(kind, "pwl", 3e-3)
+    """F-Y-2 (closed by the restart line's flux-form jump test, 03c64ac5, merged 0261b7dc): the
+    default run was refused ('the event moves saturable_inductor Lc by -4.52e-07 A in an
+    instant' at 0.5312 ms; gapped -2.79e-07 A) - the residual of a located diode turn-off.
+    Truth: the diode turns the core off at zero current, no jump: no record, and the DC output
+    is the restart-less step's (measured 3.0e-5 relative apart, atan 6.34071 / 6.34090 V)."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(_rectifier(kind), t_end=3e-3, engine="pwl", dt=2e-7)
+    assert list(r.reinit_records) == []
+    t_ref, v_ref, _ = _run(kind, "pwl", 3e-3, discontinuity_restart=False)
+    dc = _dc(np.asarray(r.times), np.asarray(r.v("o")), 2e-3)
+    assert _rel(dc, _dc(t_ref, v_ref, 2e-3)) < 1e-4
 
 
 @pytest.mark.parametrize("kind", ["linear", "atan", "gapped"])
@@ -172,7 +179,7 @@ def test_switched_diode_turn_off_with_series_inductor_on_trbdf2(kind):
     (this once reported 839,262 diode events for `atan` and 93,998 for
     `gapped`; it is 6 for all three now, which is 3 cycles x on+off)."""
     # release: the subject is trbdf2; its fixed-step reference with a flux
-    # device is the restart-less step (the default refuses it: F-Y-2 above)
+    # device is the restart-less step (the default agrees with it: F-Y-2 above)
     t_ref, v_ref, _ = _run(kind, "pwl", 3e-3, **(
         {} if kind == "linear" else {"discontinuity_restart": False}))
     t_var, v_var, _ = _run(kind, "trbdf2", 3e-3)

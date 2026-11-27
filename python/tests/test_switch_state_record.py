@@ -818,7 +818,6 @@ def _ref_run(V_th: float, engine: str, dt: float = 1e-6):
     return _report(b, r, BRIDGE) + (r,)
 
 
-@pytest.mark.xfail(strict=True, reason=F23)
 def test_reference_bridge_agrees_across_engines_at_v_th_0_7():
     """auto vs a converged pwl run (dt = 0.1 µs) at the helper defaults
     (V_th = 0.7). Measured: D1 rms 10.253 / 10.244 A, P_avg 0.10520 /
@@ -1112,7 +1111,7 @@ def test_recovery_energy_does_not_follow_the_step_size():
     1.059e-4 (pwl T/1000), 1.367e-4 (T/200), 2.406e-4 (T/50),
     8.734e-4 J (T/20), no warning. At t_off + t_rr: 1.302e-4, 1.253e-4
     and 1.332e-4 J (auto) on the grids that resolve t_rr = 100 ns."""
-    ref, _ = _snubbed_report(1000)   # (its diode-law warning: the parked test below)
+    ref, _ = _snubbed_report(1000)
     assert ref["n_turn_off_events"] == 200
     for div in (200, "auto"):
         d, msgs = _snubbed_report(div)
@@ -1123,12 +1122,9 @@ def test_recovery_energy_does_not_follow_the_step_size():
                                                 rel=0.08), div
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "release finding F-Y-9: with event splitting (the release default) the snubbed DCM boost at "
-    "dt = T/1000 holds D1 OFF while forward-biased above V_th = 0.7 V by up to 5.48 mV on 156 of "
-    "200001 samples (t = 0.435 .. 1.995 ms; warned by device_loss_summary); with "
-    "enable_substep_state_correction=False, and at T/200 with it, no sample breaks the law"))
 def test_the_recovery_reference_run_keeps_the_diode_law():
+    """F-Y-9 (closed, merge 0261b7dc): with the split D1 was held OFF forward-biased by up to
+    5.48 mV on 156 samples; raw max v_D - V_th over OFF samples now -0.242 V, split or not."""
     _, m_ref = _snubbed_report(1000)
     assert not m_ref, m_ref
 

@@ -47,11 +47,10 @@ def _run(fac, recs, **kw):
 
 
 @pytest.mark.parametrize("circ", [
-    pytest.param("buck", marks=pytest.mark.xfail(strict=True, reason=(
-        "release finding F-4-4: under control_tick='state' (the release default: a gate edge is "
-        "placed inside its step) the recorder's window charge of the buck's capacitor misses "
-        "C dv of the stored samples by 1.07e-6 of scale in two of three windows (-1.99242230e-05 C "
-        "against -1.99243747e-05 C); 1.9e-16 with control_tick='label'"))),
+    # was parked under F-4-4: the buck's window charge missed C dv by 1.07e-6 of scale under
+    # control_tick='state'; within the 1e-11 below since merge 0261b7dc (F-4-4 stays open
+    # for its mid-step / right-limit cells: test_release_findings_b, test_recorder_device_readings)
+    "buck",
     "rectifier"])
 def test_window_charge_is_c_dv_at_step_ends(circ):
     """Windows whose ends are stored samples: ∫i_C = C·(v_C(b) − v_C(a))
