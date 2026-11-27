@@ -4477,11 +4477,13 @@ inline SimulationResult run_transient_trbdf2(
                     // t, a path sensitivities refuse — which of the two ran
                     // was decided by round-off (libm). Forcing cross_idx's
                     // bit alone left a bridge partner ON at zero current.
+                    bool land_probed = false;   // the probes refactor mask_step's entry
                     if (!flipped && !nl_effective) {
                         const auto& ce_l = diodes.entries()[cross_idx];
                         if (models::SwitchedDiode::decide(
                                 ce_l.is_on, ce_l.law_voltage(x, ce_l.is_on), ce_l.params())
                             != ce_l.is_on) {
+                            land_probed = true;
                             for (const Real h_first : {h_probe_floor, dt_floor}) {
                                 (void)events::settle(opts.max_event_iterations, [&](Size it2) {
                                     gates_decided = mask_at(t);
@@ -4541,9 +4543,12 @@ inline SimulationResult run_transient_trbdf2(
                             sens.refuse_step(t, "a diode event of a Newton solve");
                         }
                         // the landing's own factor, or any of its mode (an
-                        // interpolated landing solved nothing)
+                        // interpolated landing solved nothing; a probed one's
+                        // entry was refactored at a probe's dt). ẋ⁻ is the
+                        // bordered solve's, independent of the factor's dt
+                        // when a = 2/that dt (G·y = ḃ, C/2·y = q̇⁻).
                         Real sens_fac_dt = dt_land;
-                        const auto* sens_fac = interp_land
+                        const auto* sens_fac = (interp_land || land_probed)
                             ? cache.any_resident_factor(mask_step, sens_fac_dt)
                             : &cache.resident_factor(mask_step, dt_land);
                         if (sens_fac == nullptr) {
