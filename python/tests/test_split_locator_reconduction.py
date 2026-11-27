@@ -1,8 +1,8 @@
 """F-Z-2 follow-up: a diode that turns off and conducts again soon after.
 Cell: a sine with an offset, 9 + 10 sin(2 pi 5 kHz t), through an ideal-ish
-diode into R. The source dips below zero for 28.5 us per period, so each
+diode into R. The source dips below zero for 28.7 us per period, so each
 period is a turn-off at the downward zero and a turn-on at the upward one
-28.5 us later; the circuit is algebraic, so both are the source's zeros
+28.7 us later; the circuit is algebraic, so both are the source's zeros
 (closed form). Rule and split explicit (split_snap is reachable only
 through run_transient). A dip that starts and ends inside one step is not
 seen by any step-end check (the step is ON at both ends) and is not counted.
@@ -10,8 +10,8 @@ seen by any step-end check (the step is ON at both ends) and is not counted.
 Measured (macOS, 2026-11-27; identical on 87a4f6bb before F-Z-2, so not the
 stop rule): every turn-off is located within 1e-6 dt at every dt; the
 turn-on is located when the dip spans >= 3 steps (dt = 9.25 us: 10 / 10
-within 1e-6 dt) and is NOT located when it follows within ~2 steps of the
-located turn-off: dt = 37 us 8 / 8 and dt = 18.5 us 10 / 10 turn-ons sit on
+within 1e-6 dt) and is NOT located when it falls in the next step or the one
+after the located turn-off's (dip = 0.78 / 1.55 steps): dt = 37 us 8 / 8 and dt = 18.5 us 10 / 10 turn-ons sit on
 a grid point, max error 0.936 dt / 0.873 dt (n_split_steps = the number of
 turn-offs: the turn-on step is not split)."""
 
@@ -70,6 +70,8 @@ def test_every_turn_off_is_located_and_counted(dt):
     res = _run(dt)
     te = _times(res, False)
     assert len(te) == _visible(dt) >= 8
+    # every turn-on is seen too (located or not: see the xfail below)
+    assert len(_times(res, True)) == _visible(dt)
     # within snap of the final chord's root, within snap of the root: 2 snap
     assert _err_over_dt(te, OFF, dt).max() <= 2 * SNAP
     assert res.counters["split_locator_giveups"] == 0
@@ -81,8 +83,9 @@ def test_a_turn_on_three_steps_later_is_located_against_a_fine_rule_alone_run():
     te = _times(res, True)
     assert len(te) == _visible(dt) >= 8
     assert _err_over_dt(te, ON, dt).max() <= 2 * SNAP
-    # the rule alone at dt/1000 takes each event on a fine grid point next to
-    # the crossing: within dt_f of it, so within dt_f + 2 snap dt of the split's
+    # the rule-alone path agrees: at dt/1000 it takes each event on a fine
+    # grid point next to the crossing, within dt_f of it, so within
+    # dt_f + 2 snap dt of the split's (a check of the rule alone's count and times)
     dt_f = dt / 1000
     fine = _run(dt_f, split=False)
     for on, mine in ((False, _times(res, False)), (True, te)):
@@ -92,12 +95,11 @@ def test_a_turn_on_three_steps_later_is_located_against_a_fine_rule_alone_run():
 
 
 @pytest.mark.xfail(strict=True, reason=(
-    "a turn-on within ~2 steps of a located turn-off is taken at a grid point, "
+    "a turn-on in the next 1-2 steps after a located turn-off is taken at a grid point, "
     "not located: dt=37us 8/8 max 0.936 dt, dt=18.5us 10/10 max 0.873 dt "
     "(pre-existing on 87a4f6bb, not the F-Z-2 stop rule)"))
 @pytest.mark.parametrize("dt", [3.7e-5, 1.85e-5])
 def test_a_turn_on_soon_after_a_located_turn_off_is_located(dt):
     res = _run(dt)
-    te = _times(res, True)
-    assert len(te) == _visible(dt)
-    assert _err_over_dt(te, ON, dt).max() <= 2 * SNAP
+    # the count is asserted (passing) above: only the location is expected to fail
+    assert _err_over_dt(_times(res, True), ON, dt).max() <= 2 * SNAP
