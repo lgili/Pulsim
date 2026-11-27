@@ -997,3 +997,64 @@ def test_the_loss_summary_books_the_start_jump_once():
     E = r.device_energy("D1")["E_cond_electrical"]
     assert row["E_total"] == pytest.approx(E, rel=1e-12)
     assert E == pytest.approx(12.0 * 0.02, rel=1e-12)
+
+
+def _kcl_mid_bound(vcc, vm, il, n):
+    """|KCL| at the 100k/100k divider node mid (it sees only the divider and the
+    inductor): after one refinement step of the right-limit solve the residual is
+    componentwise backward stable (Skeel), |r| <= n·eps·(|A|·|x|)_mid, with no
+    condition factor (L/ε = 1e7 Ω beside 1e5 Ω rows only enters the forward error).
+    The factor 4 is the margin over the n·eps of the bound itself."""
+    eps = np.finfo(float).eps
+    return 4 * n * eps * (abs(vcc) / 1e5 + abs(vm) * 2e-5 + abs(il))
+
+
+@pytest.mark.parametrize("split", [False, True])
+@pytest.mark.parametrize("L_h", [1e-3, 1e-6])
+def test_a_right_limit_row_satisfies_kcl_of_the_post_edge_network(split, L_h):
+    """F-Z-4: a 100 V source with a 100k/100k divider (mid) feeding L -> 12 Ω, and a
+    1 µF capacitor switched onto the source at T_E. Before, the right-limit row read
+    V(mid) 1.0e-7 V (split 2.0e-6 V) off 50 - 5e4·i_L for 1 mH (1e-9 V for 1 µH,
+    the round-off of L/ε): a non-solution of the post-edge network."""
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "vcc", "gnd", 100.0)
+    b.add_resistor("R1", "vcc", "mid", 1e5)
+    b.add_resistor("R2", "mid", "gnd", 1e5)
+    b.add_inductor("L", "mid", "lm", L_h)
+    b.add_resistor("RL", "lm", "gnd", 12.0)
+    b.add_switch("S", "vcc", "c", 1e3, 1e-9)
+    b.add_capacitor("C", "c", "gnd", 1e-6, 0.0)
+    k, ns = b.switch_index_of("S"), b.graph.num_switches
+
+    def fn(t):
+        m = p.SwitchStateMask(ns)
+        m.set(k, t >= T_E)
+        return m
+    r = _quiet(p.simulate, b, t_end=6e-6, dt=DT, switch_fn=fn, start_from_dc_op=True,
+               enable_substep_state_correction=split, **RULE)
+    v, t, kk = _limits(r)
+    assert len(kk) == 1
+    n = np.asarray(r.states).shape[1]
+    j = kk[0] + 1
+    vcc, vm, il = (float(np.asarray(v.v("vcc"))[j]), float(np.asarray(v.v("mid"))[j]),
+                   float(np.asarray(v.i("L"))[j]))
+    kcl = (vcc - vm) / 1e5 - vm / 1e5 - il
+    assert abs(kcl) <= _kcl_mid_bound(vcc, vm, il, n)
+
+
+def test_ll09_right_limit_rows_satisfy_kcl_at_mid(monkeypatch):
+    """F-Z-4 on ll09 itself (the finding's 4.6e-11 A at mid on the release line)."""
+    monkeypatch.syspath_prepend(str(ROOT / "benchmarks" / "tools"))
+    pytest.importorskip("yaml")
+    import v1_reader
+
+    case = v1_reader.load(ROOT / "benchmarks/circuits/switching/inverter/"
+                          "ll09_half_bridge_inverter_leg.yaml")
+    r = _quiet(case.run, "pwl", discontinuity_restart=True)
+    v, t, k = _limits(r)
+    n = np.asarray(r.states).shape[1]
+    vcc, vm, il = (np.asarray(v.v("vcc"))[k + 1], np.asarray(v.v("mid"))[k + 1],
+                   np.asarray(v.i("Lload"))[k + 1])
+    kcl = (vcc - vm) / 1e5 - vm / 1e5 + il   # Lload's current runs load_mid -> mid
+    assert len(k) > 0
+    assert np.all(np.abs(kcl) <= _kcl_mid_bound(vcc, vm, il, n))

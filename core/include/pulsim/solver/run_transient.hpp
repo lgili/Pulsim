@@ -928,7 +928,7 @@ inline SimulationResult run_transient(
     // the nonlinear capacitors consistent_start carried: (k, v0, q0) at x0
     std::vector<std::tuple<Size, Real, Real>> rl_nc0, rl_sl0;
     std::vector<Real> ip_hist_p, rl_hist, rl_hw, rl_hcur;
-    Vector rl_x1, rl_b0, rl_b, rl_bs, rl_h, rl_xa, rl_xb;
+    Vector rl_x1, rl_b0, rl_b, rl_bs, rl_h, rl_xa, rl_xb, rl_rr, rl_dx;
     std::vector<Real> rl_ncq, rl_slq;
     std::vector<Size> rl_pin;
     std::vector<std::pair<Size, Real>> rl_dep_x;
@@ -3178,6 +3178,17 @@ inline SimulationResult run_transient(
                 b_extra = rl_bs + rl_h;
                 if (lin) {
                     cache.solve_at(stamped_mask, Real{2} * e, b_extra, x);   // solve-exempt: restart-line re-solve (DECISIONS 22)
+                    // F-Z-4: one step of iterative refinement on the same factor.
+                    // L/ε (1e7 Ω for 1 mH) beside 1e5 Ω rows: the LU's backward
+                    // error left 4.6e-11 A in a divider node's KCL; one step
+                    // makes it componentwise (Skeel). Right-limit solves only.
+                    const Vector* bc = nullptr;
+                    if (const auto* J = cache.resident_event_matrix(stamped_mask, Real{2} * e, &bc)) {
+                        rl_rr = -(*bc + b_extra);
+                        rl_rr.noalias() -= *J * x;
+                        cache.resident_factor(stamped_mask, Real{2} * e).solve(rl_rr, rl_dx);   // factor-reuse
+                        x += rl_dx;
+                    }
                 } else {
                     x = rl_x1;
                     rei(t_from + e, Real{2} * e, true, true);

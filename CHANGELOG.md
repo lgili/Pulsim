@@ -19,6 +19,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   exact 0.24 J on a diode forced at 10 A from t = 0). A consistent start
   (`start_from_dc_op`, zeros with every source at zero) and a resume seam
   publish no start row; plain rows and rule-off runs are unchanged.
+- **A right-limit row satisfies the post-edge network's KCL to round-off**
+  (`pwl`, `discontinuity_restart`, F-Z-4). The row's linear ε solve carries
+  L/ε (1e7 Ω for 1 mH) beside 1e5 Ω rows, and the LU's backward error left a
+  divider node 1e-7–2e-6 V off its KCL (4.6e-11 A on ll09's 100 kΩ node on the
+  release line). One step of iterative refinement on the same factor (no new
+  factorization, right-limit solves only) makes the residual componentwise
+  round-off; the rows move by that round-off.
 
 ### Restart rule: a cut is named as the cut; the snapshot pickle keeps the anchor
 
