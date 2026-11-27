@@ -84,13 +84,14 @@ def _charges(view):
 
 
 def test_f54_exact_two_limit_trace_closes_the_bridge_charge():
-    """F-5-4 (exact engine): the left-limit samples miss every V_th turn-on
-    jump (-1.2e-3); with both limits the trapezoid closes the charge to the
-    output rule's interpolation tolerance (measured 1.1e-4)."""
+    """F-5-4 (exact engine): with both limits the trapezoid closes the charge
+    to the output rule's interpolation tolerance (measured 1.1e-4). The stored
+    trace alone closes it too since F-X-7 stores the flow 2 ps past every
+    turn-on (3.5e-6; the left limits alone read -1.2e-3 before)."""
     _, r = _bridge_run(0.7, "exact")
     q_raw, q_dc = _charges(r)
     q_in, q_dc2 = _charges(p.with_event_limits(r))
-    assert abs(q_raw / q_dc - 1) > 1e-3          # the left limits alone
+    assert abs(q_raw / q_dc - 1) <= 3e-4, (q_raw, q_dc)   # F-X-7's 2 ps samples
     assert abs(q_in / q_dc2 - 1) <= 3e-4, (q_in, q_dc2)
 
 
@@ -110,14 +111,21 @@ def test_f56_exact_summary_peak_is_a_value_of_the_two_limit_trace():
 
 @pytest.mark.parametrize("V_th", (0.7, 0.0))
 def test_f54_f55_pwl_restart_steps_close_the_bridge_charge(V_th):
-    """F-5-4 / F-5-5 (fixed engine, restart rule + split): integrated by
-    the quadrature of the steps that produced them, the stored samples
-    close the DC-side charge to round-off, as the restart-less trapezoidal
-    engine did (3e-12); measured on the left-limit samples alone: 4.9e-3
-    (V_th = 0.7), 1.3e-5 (V_th = 0)."""
-    _, r = _bridge_run(V_th, "pwl")
-    q_in, q_dc = _charges(p.with_event_limits(r))
-    assert abs(q_in / q_dc - 1) <= 1e-9, (q_in, q_dc)
+    """F-5-4 / F-5-5 (fixed engine, restart rule + split). The two-limit
+    trace holds STATE VALUES at its events (F-SB-1: no longer the restart
+    lines' quadrature starts), so its trapezoid closes the DC-side charge at
+    second order, not to round-off: measured 3.1e-4 / 5.6e-5 / 9.3e-6 at dt
+    1 / 0.5 / 0.25 us (V_th = 0.7), 1.5e-5 / 2.4e-6 / 2.8e-7 (V_th = 0). The
+    quadrature-exact identity is the in-loop recorder's (its window charge
+    is C·dv to 1e-11 of scale, test_release_findings_b2). Left limits alone:
+    4.9e-3 / 1.0e-3 / 1.2e-3 at V_th = 0.7 (they do not converge)."""
+    e = []
+    for dt in (1e-6, 5e-7):
+        b = _bridge(V_th)
+        r = _quiet(p.simulate, b, 0.06, **dict(PWL_REL, dt=dt))
+        q_in, q_dc = _charges(p.with_event_limits(r))
+        e.append(abs(q_in / q_dc - 1))
+    assert e[0] <= 4e-4 and e[0] / e[1] >= 3.5, e
 
 
 # ---------------------------------------------------------------------------
@@ -127,8 +135,9 @@ def test_f54_f55_pwl_restart_steps_close_the_bridge_charge(V_th):
 def test_f62_exact_time_average_of_the_two_limit_trace_is_the_summary():
     """The right limit of each turn-on (13.6 A) is stored; read with it,
     time_average equals the summary's i_avg (which integrates each step
-    from its right limit) and steady_state_stats reads it too. The left
-    limits alone read -0.21 %."""
+    from its right limit) and steady_state_stats reads it too. The stored
+    trace reads it within 4.3e-9 since F-X-7 stores the flow 2 ps past each
+    turn-on (the left limits alone read -0.21 % before)."""
     b = p.CircuitBuilder()
     b.add_sine_voltage_source("Vac", "ac", "n", 0.0, 230 * np.sqrt(2), 50.0)
     b.add_resistor("Rline", "ac", "x", 0.1)
@@ -144,7 +153,7 @@ def test_f62_exact_time_average_of_the_two_limit_trace_is_the_summary():
     st = p.steady_state_stats(r, "BR__D1", t_from=0.08, kind="i")
     assert st.mean == pytest.approx(avg, rel=1e-12)
     raw = p.time_average(r.times, r.i("BR__D1"), t_from=0.08)
-    assert raw < avg * (1 - 1e-3)
+    assert raw == pytest.approx(avg, rel=1e-7)   # F-X-7's 2 ps samples
 
 
 # ---------------------------------------------------------------------------

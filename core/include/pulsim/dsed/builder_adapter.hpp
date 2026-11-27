@@ -43,6 +43,7 @@
 #include "pulsim/events/mode_selector.hpp"
 #include "pulsim/pwl/cache.hpp"
 #include "pulsim/pwl/device_pool.hpp"
+#include "pulsim/solver/step/source_accumulator.hpp"
 #include "pulsim/solver/unsupported.hpp"
 #include "pulsim/sources/pulse_b_extra.hpp"
 #include "pulsim/sources/current_waveform_b_extra.hpp"
@@ -109,8 +110,12 @@ public:
         // `valid == false` (defective basis, e.g. driven exactly at
         // a circuit resonance) falls back to the numeric path.
         ExactLTI exact;
+        ExactRoute route;               // 15.2 (D13): the kernel this mode took and why
         Vector exact_b;                 // reduced, augmented-const b
         std::vector<Real> aug_omegas;   // one per oscillator pair
+        // the sines' direct share of the recovered vector, R_b·stamp·amp·(cos φ, sin φ):
+        // one (sin ωt, cos ωt) column pair per oscillator (n_mna × 2k; the output rule's rows)
+        DenseMatrix recover_osc;
         // Z_ω = (iωI − A)⁻¹(q_cos − i·q_sin), one column per ω: the states'
         // forced (sinusoidal steady-state) response. The augmented propagator
         // carries the oscillator states, which reach x as this particular
@@ -430,6 +435,71 @@ public:
         out = aug_out_.head(n);
     }
 
+    /// add-exact-propagator-strategy 10.1 (D8): one full grid step of
+    /// length h as x ← Φ·x + Γ from the (mask, h) cache (the mask is the
+    /// entry, h the key, bitwise). False, nothing written, where the pair
+    /// does not apply: no exact step, a piecewise-linear source (its level
+    /// changes per piece: shortcut, the caller takes the modal step; upgrade
+    /// when a pulse-driven fixed run needs the n² step), or the byte budget
+    /// spent on other pairs.
+    bool exact_fixed_step_into(Real t, const Vector& x, Real h, Vector& out) const {
+        ensure_current_resolved_();
+        ensure_exact_built_(*current_entry_);
+        const LTIEntry& e = *current_entry_;
+        if (!e.exact.valid || e.exact.tier == 4 || !pwl_sources_.empty()) return false;
+        const PhiGamma* pg = nullptr;
+        auto& c = e.exact.pg_cache;
+        for (std::size_t i = 0; i < c.size(); ++i)
+            if (c[i].h == h) { pg = &c[i]; break; }
+        if (pg == nullptr) {
+            const auto N = static_cast<std::size_t>(
+                x.size() + 2 * static_cast<Index>(e.aug_omegas.size()));
+            const std::size_t bytes = (N * N + N) * sizeof(Real);
+            constexpr std::size_t kPerMask = 4;   // h = dt plus a few edge-cut lengths at most
+            // the oldest pair of this mask goes when it holds kPerMask; refuse before evicting
+            const std::size_t freed = c.size() >= kPerMask
+                ? (static_cast<std::size_t>(c.front().Phi.size()) + c.front().Gamma.size()) * sizeof(Real) : 0;
+            if (pg_bytes_ - freed + bytes > pg_budget_) { ++n_pg_refused_; return false; }
+            if (freed > 0) {
+                pg_bytes_ -= freed;
+                c.erase(c.begin());
+            }
+            c.push_back(make_phi_gamma(e.exact, h));
+            pg_bytes_ += bytes;
+            ++n_pg_builds_;
+            pg = &c.back();
+        }
+        const auto n = x.size();
+        const auto k = static_cast<Index>(e.aug_omegas.size());
+        if (k == 0) {
+            phi_gamma_step_into(*pg, x, out);
+        } else {
+            aug_in_.resize(n + 2 * k);
+            aug_out_.resize(n + 2 * k);
+            aug_in_.head(n) = x;
+            for (Index j = 0; j < k; ++j) {
+                const Real w = e.aug_omegas[static_cast<Size>(j)];
+                aug_in_[n + 2 * j]     = std::sin(w * t);
+                aug_in_[n + 2 * j + 1] = std::cos(w * t);
+            }
+            phi_gamma_step_into(*pg, aug_in_, aug_out_);
+            out = aug_out_.head(n);
+        }
+        const auto N = static_cast<std::size_t>(pg->Gamma.size());
+        ++n_fixed_steps_;
+        fixed_flops_ += N * N + N;
+        return true;
+    }
+    /// 10.4 counters: fixed (Φ, Γ) steps, pairs built, multiply-adds of
+    /// those steps, cells the budget sent to the modal step (a count of
+    /// steps, not of pairs); the budget in bytes.
+    [[nodiscard]] std::size_t n_fixed_steps() const noexcept { return n_fixed_steps_; }
+    [[nodiscard]] std::size_t n_phi_gamma_builds() const noexcept { return n_pg_builds_; }
+    [[nodiscard]] std::size_t fixed_step_flops() const noexcept { return fixed_flops_; }
+    [[nodiscard]] std::size_t n_phi_gamma_refused() const noexcept { return n_pg_refused_; }
+    [[nodiscard]] std::size_t phi_gamma_bytes() const noexcept { return pg_bytes_; }
+    void set_phi_gamma_budget(std::size_t bytes) noexcept { pg_budget_ = bytes; }
+
     /// The first corner of a piecewise-linear source strictly after t
     /// (+∞ when there is none): a time event of the scheduler, so no
     /// exact step straddles a change of a source's piece (D14).
@@ -670,6 +740,7 @@ public:
         const LTIEntry& e = *current_entry_;
         const auto n = x.size();
         const auto k = static_cast<Index>(e.aug_omegas.size());
+        w.t = t;   // the basis-inconsistency floor's flow instant (exact_chord_step)
         w.xa.resize(n + 2 * k);
         w.ta.resize(n + 2 * k);
         w.xa.head(n) = x;
@@ -680,8 +751,30 @@ public:
             w.xa[n + 2 * j + 1] = std::cos(om * t);
             w.ta[n + 2 * j] = w.ta[n + 2 * j + 1] = rtol;
         }
+        // the recovered vector's rows too (the stored samples are it): y = R·x + R_osc·(s, c)
+        // + the piecewise-linear sources' share (linear in τ: no chord error), so its chord
+        // error is O·(the augmented state's), O = [R, R_osc], bounded in the same modal form
+        if (w.ty.size() == e.recover_from_state.rows() && w.ty.size() > 0 && e.exact.valid
+            && e.exact.tier == 1) {
+            if (e.exact.chord_P_re.rows() != n + 2 * k + w.ty.size()) {
+                const auto m = w.ty.size();
+                DenseMatrix O = DenseMatrix::Zero(n + 2 * k + m, n + 2 * k);
+                O.topRows(n + 2 * k).setIdentity();
+                O.bottomLeftCorner(m, n) = e.recover_from_state;
+                if (k > 0 && e.recover_osc.rows() == m) O.bottomRightCorner(m, 2 * k) = e.recover_osc;
+                e.exact.chord_P_re = O * e.exact.V_re;
+                e.exact.chord_P_im = O * e.exact.V_im;
+                e.exact.chord_M = O.cwiseAbs()
+                                  * e.exact.V_re.binaryExpr(e.exact.V_im,
+                                                            [](Real a, Real b) { return std::hypot(a, b); });
+            }
+            w.ta.conservativeResize(n + 2 * k + w.ty.size());
+            w.ta.tail(w.ty.size()) = w.ty;   // floored in exact_chord_step (w.tyf)
+        }
         if (pwl_sources_.empty()) {
-            return exact_chord_step(e.exact, w.xa, nullptr, nullptr, w.ta, h, bounded, w);
+            const Real d = exact_chord_step(e.exact, w.xa, nullptr, nullptr, w.ta, h, bounded, w);
+            if (w.tyf.size() == w.ty.size()) w.ty = w.ty.cwiseMax(w.tyf);
+            return d;
         }
         const auto m = static_cast<Index>(pwl_sources_.size());
         w.v.resize(m);
@@ -695,7 +788,9 @@ public:
         }
         w.c0.head(n).noalias() = e.pwl_cols * w.v;
         w.c1.head(n).noalias() = e.pwl_cols * w.s;
-        return exact_chord_step(e.exact, w.xa, &w.c0, &w.c1, w.ta, h, bounded, w);
+        const Real d = exact_chord_step(e.exact, w.xa, &w.c0, &w.c1, w.ta, h, bounded, w);
+        if (w.tyf.size() == w.ty.size()) w.ty = w.ty.cwiseMax(w.tyf);   // the deferral check's
+        return d;
     }
 
     /// The current mode's settle length for decisions (exact_settle_length).
@@ -724,6 +819,7 @@ public:
             e.exact_built = false;
             e.exact = ExactLTI{};
         }
+        pg_bytes_ = 0;   // the pairs went with the propagators
     }
 
     /// The run's length: tier 1's propagator_defect is stated over it
@@ -738,6 +834,7 @@ public:
             e.exact_built = false;
             e.exact = ExactLTI{};
         }
+        pg_bytes_ = 0;   // the pairs went with the propagators
     }
 
     /// Consistent reinitialisation onto the current mode's slow
@@ -753,6 +850,24 @@ public:
         }
         x = project_onto_slow_manifold(e.A, b_vector(t), x,
                                        fast_threshold);
+    }
+
+    /// The slowest time constant of the cluster project_slow removes
+    /// (modes with Re λ < −fast_threshold): 1 / min(−Re λ); 0 when none.
+    [[nodiscard]] Real fast_cluster_tau(Real fast_threshold) const {
+        ensure_current_resolved_();
+        ensure_exact_built_(*current_entry_);
+        const LTIEntry& e = *current_entry_;
+        if (e.A.rows() == 0) return Real{0};   // no state (a resistive clipper): EigenSolver of 0x0 segfaults
+        // the mode's own eigenvalues (once per mode); with sines they are the augmented
+        // matrix's, A's plus the oscillators' ±iω (Re 0: never in the cluster). A dense
+        // eigensolve only where the exact build has none (its eig failed)
+        Eigen::VectorXcd lam = e.exact.lambda;
+        if (lam.size() < e.A.rows()) lam = Eigen::EigenSolver<DenseMatrix>(e.A, false).eigenvalues();
+        Real slow = std::numeric_limits<Real>::infinity();
+        for (Eigen::Index i = 0; i < lam.size(); ++i)
+            if (lam[i].real() < -fast_threshold) slow = std::min(slow, -lam[i].real());
+        return std::isfinite(slow) ? Real{1} / slow : Real{0};
     }
 
     /// Dependent states: project x onto the current mode's constraint
@@ -1005,6 +1120,13 @@ public:
         int refined;
         bool balanced;
         Real pade_defect;
+        // 15.2 (D13): the route; n and nnz of the augmented matrix, the action's
+        // steps and matvecs taken (0 off tier 4)
+        ExactRoute route;
+        Eigen::Index n_aug;
+        Eigen::Index nnz_aug;
+        std::size_t action_steps;
+        std::size_t action_matvecs;
     };
     [[nodiscard]] std::vector<ExactReportRow> exact_report() const {
         std::vector<ExactReportRow> rows;
@@ -1014,7 +1136,10 @@ public:
                                 e.exact.norm_A1 * h_max_,
                                 e.exact.reason, e.exact.defect, e.exact.backward,
                                 e.exact.refined, e.exact.balanced,
-                                e.exact.pade_defect});
+                                e.exact.pade_defect, e.route, e.A.rows() + 1,
+                                e.exact.action ? e.exact.action->A.nonZeros() : Eigen::Index{0},
+                                e.exact.action_steps,
+                                e.exact.action ? e.exact.action->matvecs : std::size_t{0}});
             }
         }
         return rows;
@@ -1179,6 +1304,7 @@ private:
         entry.exact_built = true;
         if (!has_dynamic_sources_) {
             entry.exact_b = entry.b_constant;
+            if (route_by_cost_(entry)) return;   // D13: the action, or the hand-over
             entry.exact = make_exact_lti(entry.A, entry.exact_b,
                                          energy_scale_(entry, 0), h_max_, horizon_);
             ++n_eig_;
@@ -1210,6 +1336,45 @@ private:
         }
         // a user b_extra_fn: b(t) has no closed form — the numeric
         // path owns it.
+    }
+
+    /// add-exact-propagator-strategy 15.2 (D13): the route of a DC-driven mode at its first
+    /// visit, from the steps expected in it (horizon / h_max: shortcut, not re-evaluated per
+    /// visit; upgrade when a mode's visits are counted). True when the dense build is not
+    /// taken: tier 4 (the action, no eigenbasis) or no exact step (reason 'cost'). Modes below
+    /// route_min_n_ states are dense without a look (12.2's crossover; the default circuits).
+    /// shortcut: sine and piecewise-linear sources stay dense (their augmented / affine forms
+    /// are not wired to the action); upgrade with a large sine-driven circuit.
+    bool route_by_cost_(LTIEntry& entry) const {
+        const auto n = entry.A.rows();
+        if (n < route_min_n_) return false;
+        ExpmAction act{augment_affine(entry.A.sparseView(), entry.exact_b)};
+        const Real h = h_max_;
+        const Real N = horizon_ > Real{0} && h > Real{0} ? std::max(Real{1}, horizon_ / h) : Real{1};
+        entry.route = choose_exact_route(static_cast<Real>(n + 1), static_cast<Real>(act.A.nonZeros()),
+                                         act.norm1 * h, N, route_costs_);
+        if (entry.route.kernel == "dense") return false;
+        if (entry.route.kernel == "implicit" && refuse_implicit_) {
+            // no run that stepped exactly before is refused for cost: dense, the reason kept
+            entry.route.kernel = "dense";
+            entry.route.reason = "cost (dense kept: implicit segments not allowed)";
+            return false;
+        }
+        entry.exact = ExactLTI{};
+        entry.exact.norm_A1 = act.norm1;
+        if (entry.route.kernel == "action") {
+            entry.exact.valid = true;
+            entry.exact.tier = 4;
+            entry.exact.action.emplace(std::move(act));
+            // the spectrum only (no eigenvectors, ~10 n^3 against the dense setup's ~1200 n^3):
+            // the scan step, the settle at a diode decision and the fast samples read it
+            if (n > 0) entry.exact.lambda = Eigen::EigenSolver<DenseMatrix>(entry.A, false).eigenvalues();
+            return true;
+        }
+        entry.exact.reason = "cost: the dense setup is not repaid over " + detail::fmt_e(N)
+            + " steps and the action needs " + std::to_string(entry.route.matvecs)
+            + " matvecs per step (m_max " + std::to_string(route_costs_.m_max) + ")";
+        return true;
     }
 
     /// Whether a sine voltage or current source exists (its oscillator
@@ -1458,6 +1623,7 @@ private:
         // Distinct frequencies, amplitude+phase folded per source.
         std::vector<Real> omegas;
         std::vector<Vector> q_sin, q_cos;    // reduced coupling cols
+        std::vector<Vector> r_sin, r_cos;    // recovered-vector cols (recover_from_b · stamp)
         for (const auto& sn : sines) {
             Index j = kInvalidIndex;
             for (Size m = 0; m < omegas.size(); ++m) {
@@ -1470,6 +1636,8 @@ private:
                 omegas.push_back(sn.omega);
                 q_sin.push_back(Vector::Zero(n));
                 q_cos.push_back(Vector::Zero(n));
+                r_sin.push_back(Vector::Zero(n_mna));
+                r_cos.push_back(Vector::Zero(n_mna));
                 j = static_cast<Index>(omegas.size() - 1);
             }
             // −amp·sin(ωt+φ) on the source row, reduced through
@@ -1485,9 +1653,19 @@ private:
                 += col * (sn.amp * std::cos(sn.phase));
             q_cos[static_cast<Size>(j)]
                 += col * (sn.amp * std::sin(sn.phase));
+            if (entry.recover_from_b.rows() == n_mna) {
+                const Vector rc = entry.recover_from_b * stamp;
+                r_sin[static_cast<Size>(j)] += rc * (sn.amp * std::cos(sn.phase));
+                r_cos[static_cast<Size>(j)] += rc * (sn.amp * std::sin(sn.phase));
+            }
         }
 
         const auto k = static_cast<Index>(omegas.size());
+        entry.recover_osc = DenseMatrix::Zero(n_mna, 2 * k);
+        for (Index j = 0; j < k; ++j) {
+            entry.recover_osc.col(2 * j) = r_sin[static_cast<Size>(j)];
+            entry.recover_osc.col(2 * j + 1) = r_cos[static_cast<Size>(j)];
+        }
         entry.forced_z = Eigen::MatrixXcd::Zero(n, k);
         for (Index j = 0; j < k; ++j) {
             const auto js = static_cast<Size>(j);
@@ -1909,13 +2087,11 @@ private:
     [[nodiscard]] const Vector& build_time_varying_b_extra_(Real t, Real left_by = Real{0}) const {
         if (bx_valid_ && t == bx_t_ && left_by == bx_left_) return bx_;
         Vector& b = bx_;
-        sources::compute_pwm_b_extra(pool_, graph_, t, b, left_by);
-        b += sources::compute_sine_b_extra(pool_, graph_, t);
-        Vector& w = bx_w_;
-        sources::compute_pulse_b_extra(pool_, graph_, t, w, left_by);
-        b += w;
-        sources::compute_current_waveform_b_extra(pool_, graph_, t, w, left_by);
-        b += w;
+        // step::SourceAccumulator (refactor-unified-transient-stepper
+        // group 1): the per-kind dense passes' sums bit for bit on a zeroed
+        // buffer (DECISIONS 21); b_extra_fn last, as before.
+        b.setZero(static_cast<Index>(pool_.state_size(graph_)));
+        src_acc_.add(pool_, graph_, b, t, left_by);
         if (b_extra_fn_) {
             b += b_extra_fn_(t);
         }
@@ -1924,7 +2100,7 @@ private:
         bx_valid_ = !b_extra_fn_;
         return b;
     }
-    mutable Vector bx_, bx_w_;
+    mutable Vector bx_;
     mutable Real bx_t_ = Real{0}, bx_left_ = Real{0};
     mutable bool bx_valid_ = false;
 
@@ -1996,6 +2172,8 @@ private:
 
     const topology::Graph&    graph_;
     const pwl::DevicePool&    pool_;
+    // after graph_ / pool_: its initializer reads them
+    mutable step::SourceAccumulator src_acc_{pool_, graph_};
     pwl::PwlStateSpaceCache&  cache_;
     std::vector<ReinitRecord> reinit_log_;
     std::function<Vector(Real)> b_extra_fn_;
@@ -2020,6 +2198,26 @@ private:
     mutable std::size_t n_eig_ = 0;
     mutable Real build_seconds_ = 0;
     mutable Vector aug_in_, aug_out_;
+    // 10.1: the fixed-step pairs' bytes over every mask, and their budget (64 MiB)
+    mutable std::size_t pg_bytes_ = 0, n_pg_builds_ = 0, n_fixed_steps_ = 0, fixed_flops_ = 0,
+                        n_pg_refused_ = 0;
+    std::size_t pg_budget_ = std::size_t{64} << 20;
+    // 15.2 / 15.4 (D13): the route rule's constants and the size below which a mode is dense
+    ExactRouteCosts route_costs_{};
+    Eigen::Index route_min_n_ = 65;
+public:
+    // the route is decided at a mode's first build: a new rule rebuilds the modes
+    void set_route_costs(const ExactRouteCosts& c) { route_costs_ = c; drop_exact_(); }
+    void set_route_min_n(Eigen::Index n) { route_min_n_ = n; drop_exact_(); }
+private:
+    void drop_exact_() {
+        for (auto& [m, e] : mask_cache_) {
+            e.exact_built = false;
+            e.exact = ExactLTI{};
+        }
+        pg_bytes_ = 0;
+    }
+private:
 };
 
 }  // namespace pulsim::dsed

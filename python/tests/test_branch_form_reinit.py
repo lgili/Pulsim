@@ -74,10 +74,11 @@ def test_cutset_is_reinitialised_and_recorded():
     assert rec.dW == pytest.approx(49.3291e-3, rel=1e-5)   # prototype's run: 49.3120 mJ
     assert rec.projection_gap == 0.0
     assert rec.sample == k0 + 1                                    # the pulse sample
-    # the pulse sample carries the impulse: about -L*i/(h*(1-gamma)) scale
-    # scaled to this run's i_L(t-): the prototype's first-step sample
-    # 959.018799 V (test_ideal_switch_reference) is linear in i_L(t-)
-    assert va[k0 + 1] == pytest.approx(959.018799 * iL[k0] / o["iL_minus"], rel=1e-6)
+    # the pulse sample is REGULAR (restart line, item C): the impulse is the
+    # record's; after the cut i_L = 0 and v_a = 0 (KCL at a: no current, R to
+    # ground). It carried the SDIRK projection's residue, about
+    # -L*i/(h*(1-gamma)) = 959 V (the prototype's first-step sample).
+    assert abs(va[k0 + 1]) <= 1e-9
 
 
 def test_on_impulse_error_names_the_switch_and_the_inductor():
@@ -173,3 +174,38 @@ def test_trbdf2_runs_a_cutset_open_from_the_start():
 def test_on_impulse_value_checked_on_every_engine(engine):
     with pytest.raises(ValueError, match="on_impulse"):
         p.simulate(_cutset_builder(), t_end=1e-4, engine=engine, on_impulse="bogus")
+
+
+# F-Z-1: with the event split the cut-set record is taken AT the located
+# edge: its time, and i_L(t_e-) from the run (closed form 10(1 - e^{-t/tau}),
+# the run's own trapezoid error ~7e-6 rel at h = tau/20), not t_prev and
+# i_L(t_prev). An edge within split_snap (1e-6 h) of a boundary is taken
+# at the nearer one. Without the split the edge goes to the nearer grid point.
+@pytest.mark.parametrize("off", [1e-7, 0.001, 0.25, 0.5, 0.75, 0.999, 1 - 1e-7])
+def test_split_cutset_record_at_the_located_edge(off):
+    b = _cutset_builder()
+    h = TAU / 20
+    k = b.switch_index_of("S")
+    te = (99 + off) * h
+
+    def fn(t):
+        m = p.SwitchStateMask(1)
+        m.set(k, t < te)
+        return m
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(b, t_end=106 * h + 1e-3 * h, dt=h, engine="pwl", switch_fn=fn,
+                       discontinuity_restart=True, enable_substep_state_correction=True)
+    t, iL = np.asarray(r.times), np.asarray(r.i("L"))
+    snapped = off < 1e-6 or off > 1 - 1e-6
+    t_cut = round(99 + off) * h if snapped else te
+    assert len(r.reinit_records) == 1
+    rec = r.reinit_records[0]
+    assert rec.kind == "cut_set" and list(rec.states) == ["L"]
+    assert abs(rec.t - t_cut) <= 1e-6 * h
+    i_minus = abs(rec.lambda_) / 1e-3
+    assert i_minus == pytest.approx(10 * (1 - math.exp(-t_cut / TAU)), rel=2e-5)
+    assert rec.dW == pytest.approx(0.5 * 1e-3 * i_minus ** 2, rel=1e-9)
+    k_post = int(np.searchsorted(t, t_cut + 1e-9 * h))   # the first sample after the cut
+    assert rec.sample == k_post
+    assert np.all(iL[k_post:] == 0.0) and iL[k_post - 1] > 9.9

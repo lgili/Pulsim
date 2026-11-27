@@ -43,7 +43,9 @@
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/topology/graph.hpp"
 
+#include <algorithm>
 #include <cmath>
+#include <limits>
 #include <memory>
 
 namespace pulsim::models {
@@ -174,6 +176,62 @@ struct SaturableInductor {
     [[nodiscard]] static Real inductance(Real i_L, const Params& p) noexcept {
         if (p.table) return p.table->inductance(i_L);
         return current<Real>(&i_L, p);
+    }
+
+    /// i(λ): the inverse of the stateless laws (atan, table), the twin of
+    /// NonlinearCapacitor::voltage_of_charge — bracketed Newton from
+    /// i_guess. NaN when no current reaches λ (L_residual = 0 saturates the
+    /// atan law at ±(π/2)·L_0·I_sat; a table's flat end).
+    [[nodiscard]] static Real current_of_flux(const Params& p, Real lam,
+                                              Real i_guess) noexcept {
+        const Real step0 = Real{1e-3} * std::max(std::abs(i_guess), std::abs(p.I_sat));
+        Real lo = i_guess, hi = i_guess, step = step0;
+        for (int k = 0; flux(lo, p) > lam; ++k, step *= 2) {
+            if (k == 200) return std::numeric_limits<Real>::quiet_NaN();
+            lo -= step;
+        }
+        step = step0;
+        for (int k = 0; flux(hi, p) < lam; ++k, step *= 2) {
+            if (k == 200) return std::numeric_limits<Real>::quiet_NaN();
+            hi += step;
+        }
+        Real i = std::clamp(i_guess, lo, hi);
+        for (int k = 0; k < 100; ++k) {
+            const Real f = flux(i, p) - lam;
+            if (f == Real{0}) return i;
+            (f > Real{0} ? hi : lo) = i;
+            Real in = i - f / inductance(i, p);
+            if (!(in > lo && in < hi)) in = Real{0.5} * (lo + hi);
+            if (std::abs(in - i) <= Real{1e-15} * (Real{1} + std::abs(i))) return in;
+            i = in;
+        }
+        return i;
+    }
+
+    /// The energy a flux-conserving jump a → b (currents) dissipates in the
+    /// path that takes it: ∫ₐᵇ (λ(i) − λ(a)) di (½·L·(b − a)² for a linear
+    /// law; a → 0 gives the stored ∫ i dλ). The twin of
+    /// NonlinearCapacitor::jump_energy, same quadrature.
+    /// shortcut: fixed Gauss–Legendre (5 points × 32 panels), no error
+    /// estimate; upgrade to adaptive if a table's kinks need it.
+    [[nodiscard]] static Real jump_energy(const Params& p, Real a, Real b) noexcept {
+        constexpr Real xg[5] = {0.0, -0.5384693101056831, 0.5384693101056831,
+                                -0.9061798459386640, 0.9061798459386640};
+        constexpr Real wg[5] = {0.5688888888888889, 0.4786286704993665,
+                                0.4786286704993665, 0.2369268850561891,
+                                0.2369268850561891};
+        constexpr int n = 32;
+        const Real hp = (b - a) / n;
+        const Real la = flux(a, p);
+        Real s = 0;
+        for (int j = 0; j < n; ++j) {
+            const Real c = a + (j + Real{0.5}) * hp;
+            for (int g = 0; g < 5; ++g) {
+                const Real u = c + Real{0.5} * hp * xg[g];
+                s += wg[g] * (p.table ? flux(u, p) - la : flux_increment(u, a, p));
+            }
+        }
+        return Real{0.5} * hp * s;
     }
 };
 

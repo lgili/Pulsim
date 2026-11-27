@@ -84,6 +84,7 @@ if(PULSIM_BUILD_TESTS)
         tests/dsed/test_switch_state_record.cpp  # per-sample stamped mask
         tests/dsed/test_trbdf2_stage_coeffs.cpp
         tests/dsed/test_exact_lti.cpp
+        tests/dsed/test_expm_action.cpp  # D13: action of the exponential, route rule
         tests/dsed/test_convergence_failure.cpp  # typed give-up sites
         tests/dsed/test_exact_queue_ticks.cpp  # ticks, monitors, step hooks on the queue
         tests/dsed/test_exact_resume.cpp  # snapshot / resume (session 24)
@@ -145,6 +146,7 @@ if(PULSIM_BUILD_TESTS)
     add_executable(pulsim_core_step_tests
         tests/step/test_integrators.cpp
         tests/step/test_controllers.cpp
+        tests/step/test_policies.cpp
         tests/step/test_stepper.cpp
         tests/step/test_esdirk43.cpp  # add-high-order-stiff-integrator
         tests/step/test_sensitivity.cpp  # add-parameter-sensitivities group 5
@@ -523,8 +525,10 @@ if(PULSIM_BUILD_TESTS)
         tests/layer5_v3/test_snapshot_restore.cpp
         tests/layer5_v3/test_device_interface.cpp
         tests/layer5_v3/test_device_laws.cpp
+        tests/layer5_v3/test_power_mosfet_device.cpp
         tests/layer5_v3/test_substep_correction.cpp
         tests/layer5_v3/test_resolution_diagnostics.cpp
+        tests/layer5_v3/test_cut_wording.cpp
     )
     target_link_libraries(pulsim_core_layer5_v3_tests
         PRIVATE

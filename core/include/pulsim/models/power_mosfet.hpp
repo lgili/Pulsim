@@ -4,10 +4,11 @@
 // Pulsim — datasheet power MOSFET (composite parameters)
 // =============================================================================
 //
-// add-power-mosfet-datasheet-device, steps 1–2. The device is built by
-// `CircuitBuilder::add_power_mosfet` as a COMPOSITE of kinds that already
-// pass their tests — no new kernel device, no new history class, no new
-// wrapper in the Newton refresh chain:
+// add-power-mosfet-datasheet-device. `CircuitBuilder::add_power_mosfet`
+// builds a COMPOSITE of existing kinds by default; with `fq_device` (task
+// 5.2, opt-in) R_d, R_g, L_s and C_gs stay MNA elements and the channel,
+// C_gd, C_ds and the body diode are ONE f/q device
+// (models/power_mosfet_device.hpp):
 //
 //     D ─ R_d ─ d' ─┬─ channel (d' → s')      G ─ R_g ─ g'
 //                   ├─ C_ds(v_d's')           C_gd between g' and d'
@@ -15,8 +16,9 @@
 //     s' ─ L_s ─ S
 //
 // An internal node exists only when its element is non-zero. Sub-element
-// names: `{name}` (Level-1 channel), `{name}.rd`, `{name}.rg`,
-// `{name}.ls`, `{name}.cgs`, `{name}.cgd`, `{name}.cds`, `{name}_body`.
+// names: `{name}` (Level-1 channel, or the f/q device), `{name}.rd`,
+// `{name}.rg`, `{name}.ls`, `{name}.cgs`; composite only: `{name}.cgd`,
+// `{name}.cds`, `{name}_body`.
 //
 // C_gd and C_ds are either a number (a linear capacitor, stamped exactly
 // as `add_capacitor` stamps it) or a `NonlinearCapacitor` charge law. C_gd
@@ -27,6 +29,7 @@
 //     V_T → V_T + vt_tc·ΔT,
 // so the small-signal R_DS(on) = R_d + 1/(2K·V_OV) scales by exactly r.
 
+#include "pulsim/models/channel_table.hpp"
 #include "pulsim/models/lauritzen_diode.hpp"
 #include "pulsim/models/nonlinear_capacitor.hpp"
 #include "pulsim/models/shockley_diode.hpp"
@@ -34,6 +37,7 @@
 
 #include <cmath>
 #include <format>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -66,6 +70,12 @@ struct PowerMosfet {
         Real rds_tc1 = Real{0};      //!< [1/K]
         Real rds_tc2 = Real{0};      //!< [1/K²]
         Real vt_tc   = Real{0};      //!< [V/K]
+        /// Tabulated channel (task 5.1); replaces K, V_T, lambda, kappa.
+        /// Needs fq_device.
+        std::shared_ptr<const ChannelTable> channel;
+        /// Opt-in (task 5.2): build the channel, every C_gd / C_ds and the
+        /// body diode as ONE f/q device instead of the composite (default).
+        bool fq_device = false;
     };
 
     [[nodiscard]] static Real r_of_T(const Params& p) noexcept {
@@ -116,6 +126,19 @@ struct PowerMosfet {
                 "effect. Give C_gs (and C_gd) or drop R_g.", name, p.R_g));
         }
         if (!std::isfinite(p.T_j)) bad("T_j", p.T_j, "must be finite");
+        if (p.channel && !p.fq_device) {
+            throw std::invalid_argument(std::format(
+                "add_power_mosfet(\"{}\"): a channel table needs fq_device = true "
+                "(the composite's channel is the Level-1 law).", name));
+        }
+        // shortcut: a table is taken at the T_j it was measured at; scaling
+        // it with T_j needs a second table (or a rule), not asked for yet
+        if (p.channel && (p.rds_tc1 != Real{0} || p.rds_tc2 != Real{0} || p.vt_tc != Real{0})) {
+            throw std::invalid_argument(std::format(
+                "add_power_mosfet(\"{}\"): a channel table carries its own "
+                "temperature; rds_tc1 = {}, rds_tc2 = {}, vt_tc = {} must be 0 with it.",
+                name, p.rds_tc1, p.rds_tc2, p.vt_tc));
+        }
         const Real r = r_of_T(p);
         if (!(r > Real{0}) || !std::isfinite(r)) {
             throw std::invalid_argument(std::format(

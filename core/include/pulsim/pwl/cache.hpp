@@ -19,6 +19,7 @@
 // Switch). Capacitor/Inductor (trapezoidal companion + history) and
 // nonlinear devices (per-segment Newton) are V1+ extensions.
 
+#include "pulsim/sim/error.hpp"   // SingularError
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/dictionary.hpp"
 #include "pulsim/numeric/types.hpp"
@@ -251,6 +252,7 @@ public:
         bump_generation_();
         segments_.clear();
         event_entries_.clear();
+        aux_event_entries_.clear();
         const Size num_switches = graph_.num_switches();
         for (auto mask :
              topology::enumerate_switch_states(num_switches)) {
@@ -274,6 +276,7 @@ public:
         bump_generation_();
         segments_.clear();
         event_entries_.clear();
+        aux_event_entries_.clear();
     }
 
     /// Currently-built dt. Returns 0 for static-only builds.
@@ -299,7 +302,7 @@ public:
             if (r.error().kind == CacheError::Kind::MaskNotBuilt) {
                 throw std::out_of_range(r.error().what());
             }
-            throw std::runtime_error(r.error().what());
+            throw SingularError(r.error().what());   // the two singular kinds
         }
         return **r;
     }
@@ -663,6 +666,34 @@ public:
     /// * `h_a`, `h_b` are legacy recovery step sizes, retained for
     ///   API compatibility only — the exact split (v2.0 Phase 1)
     ///   ignores them.
+    /// add-exact-propagator-strategy 7.1: |k| = 1 (the inductance matrix
+    /// not positive definite) is refused by name: the coupled windings
+    /// (k != 0), joined by '+'.
+    [[noreturn]] void throw_coupling_not_pd_() const {
+        // the pairs with |k| = 1 to rounding when there are any (a group of three or more
+        // windings can be singular with every pair below 1: then every coupled winding)
+        std::string names;
+        for (const bool unit_only : {true, false}) {
+            for (const auto& tc : pool_.transformer_couplings()) {
+                const Real M = models::TwoWindingTransformer::mutual_inductance(tc.params);
+                if (M == Real{0}) continue;
+                if (unit_only && std::abs(M) < (Real{1} - Real{1e-9}) * std::sqrt(tc.params.L_p * tc.params.L_s))
+                    continue;
+                for (const Index b : {tc.primary_branch_id, tc.secondary_branch_id}) {
+                    if (!names.empty()) names += "+";
+                    names += std::string(graph_.branch_name(b));
+                }
+            }
+            if (!names.empty()) break;
+        }
+        throw UnsupportedError(
+            "dsed", "extraction", names, "InductorCoupling",
+            "compute_lti_state_space: the coupled-inductor matrix of " + names
+            + " is not positive definite (|k| >= 1 on a transformer / "
+            "coupled-inductor pair): the winding currents are not "
+            "independent states.");
+    }
+
     [[nodiscard]] ContinuousLTI
     compute_lti_state_space(
         const topology::SwitchStateMask& mask,
@@ -961,11 +992,7 @@ public:
                 const Eigen::LLT<DenseMatrix> ellt(En);
                 if (!dinv.allFinite() || ellt.info() != Eigen::Success
                     || ellt.matrixL().toDenseMatrix().diagonal().minCoeff() <= Real{1e-6}) {
-                    throw std::runtime_error(
-                        "compute_lti_state_space: the coupled-inductor "
-                        "matrix is not positive definite (|k| >= 1 on a "
-                        "transformer / coupled-inductor pair): the winding "
-                        "currents are not independent states.");
+                    throw_coupling_not_pd_();
                 }
             }
             // G_aa: rank-revealing. The structural path found it singular
@@ -1064,7 +1091,7 @@ public:
                             where = info.label;
                         }
                     }
-                    throw std::runtime_error(
+                    throw SingularError(
                         "compute_lti_state_space: algebraic block G_aa is numerically "
                         "singular at " + (where.empty() ? std::string{"a node group"} : where)
                         + ": a direction it cannot resolve (a node group tied to "
@@ -1675,11 +1702,7 @@ public:
             if (llt.info() != Eigen::Success
                 || llt.matrixL().toDenseMatrix().diagonal().minCoeff()
                        <= Real{1e-6} * std::sqrt(lmax)) {
-                throw std::runtime_error(
-                    "compute_lti_state_space: the coupled-inductor "
-                    "matrix is not positive definite (|k| >= 1 on a "
-                    "transformer / coupled-inductor pair): the winding "
-                    "currents are not independent states.");
+                throw_coupling_not_pd_();
             }
             A.middleRows(n_cap, n_ind) =
                 -llt.solve(DenseMatrix(A.middleRows(n_cap, n_ind)));
@@ -1788,7 +1811,7 @@ public:
                 pool_.state_size(graph_), sparse::Backend::Auto);
             const sparse::Matrix& J = e.J;
             if (!analyze_shared_(*e.solver, J, dt > Real{0})) {
-                throw std::runtime_error(std::format(
+                throw SingularError(std::format(
                     "PwlStateSpaceCache::solve_at: analyze failed "
                     "(structurally singular) for mask {} (dt={}){}",
                     mask.to_string(), dt,
@@ -1796,7 +1819,7 @@ public:
                                       e.solver.get())));
             }
             if (!e.solver->factorize(J)) {
-                throw std::runtime_error(std::format(
+                throw SingularError(std::format(
                     "PwlStateSpaceCache::solve_at: factorize failed "
                     "(numerically singular) for mask {} (dt={}){}",
                     mask.to_string(), dt,
@@ -1886,6 +1909,21 @@ public:
             "{} at dt = {}", mask.to_string(), dt));
     }
 
+    /// An out-of-band event table: the restart rule's right-limit solves
+    /// (F-SB-1, run_transient's event_right_limit) take another dt at every
+    /// event; swapped in around them they leave the run's event factors and
+    /// counters exactly as its own solves make them. Call twice (in, out).
+    void swap_aux_events() const {
+        event_entries_.swap(aux_event_entries_);
+        std::atomic<std::uint64_t>* c[4] = {&event_hits_, &event_refactors_,
+                                            &event_builds_, &event_evictions_};
+        for (int i = 0; i < 4; ++i) {
+            const std::uint64_t v = c[i]->load(std::memory_order_relaxed);
+            c[i]->store(aux_counters_[i], std::memory_order_relaxed);
+            aux_counters_[i] = v;
+        }
+    }
+
     /// Any factor of `mask` resident now (the event entry's, else the
     /// segment's at the cache dt), read-only like `resident_factor`; its dt
     /// in `dt_out`. nullptr when none is (add-parameter-sensitivities 6.3:
@@ -1918,13 +1956,15 @@ public:
     /// round-off bounds read |J| here instead of re-assembling.
     [[nodiscard]] const sparse::Matrix* resident_event_matrix(
         const topology::SwitchStateMask& mask, Real dt,
-        const Vector** b_constant) const noexcept {
+        const Vector** b_constant,
+        const sparse::DirectSolver** factor = nullptr) const noexcept {
         const auto it = event_entries_.find(mask);
         if (dt == dt_ || it == event_entries_.end()
             || it->second.current_dt != dt) {
             return nullptr;
         }
         *b_constant = &it->second.b_constant;
+        if (factor) *factor = it->second.solver.get();   // one lookup for both
         return &it->second.J;
     }
 
@@ -2011,13 +2051,13 @@ public:
             rank1_solver_ = sparse::make_default_solver(
                 pool_.state_size(graph_), rank1_backend_hint_);
             if (!analyze_shared_(*rank1_solver_, J, dt_ > Real{0})) {
-                throw std::runtime_error(std::format(
+                throw SingularError(std::format(
                     "PwlStateSpaceCache::solve_rank1: initial analyze "
                     "failed (structurally singular) for mask {}",
                     mask.to_string()));
             }
             if (!rank1_solver_->factorize(J)) {
-                throw std::runtime_error(std::format(
+                throw SingularError(std::format(
                     "PwlStateSpaceCache::solve_rank1: initial factorize "
                     "failed (numerically singular) for mask {} (dt={})",
                     mask.to_string(), dt_));
@@ -2105,7 +2145,7 @@ public:
                 // is identical across all switch states (only conductance
                 // values change), so analyze() does NOT need to re-run.
                 if (!rank1_solver_->factorize(J)) {
-                    throw std::runtime_error(std::format(
+                    throw SingularError(std::format(
                         "PwlStateSpaceCache::solve_rank1: full refactor "
                         "fallback failed (numerically singular) for mask "
                         "{} (dt={})",
@@ -2305,6 +2345,7 @@ public:
         // solve_at rebuilds from the updated pool. (The v1.x aux
         // cache silently kept STALE factors here.)
         event_entries_.clear();
+        aux_event_entries_.clear();
 
         // 1. Push the updates into the pool. Each `update_*` mutator
         //    dispatches on the stored device kind; mismatched kinds
@@ -2458,6 +2499,9 @@ private:
         const topology::SwitchStateMask& mask, Real dt) {
         auto r = try_make_segment(mask, dt);
         if (!r) {
+            if (r.error().kind != CacheError::Kind::MaskNotBuilt) {
+                throw SingularError(r.error().what());
+            }
             throw std::runtime_error(r.error().what());
         }
         return std::move(*r);
@@ -2651,7 +2695,7 @@ private:
 
         if (!refactored_via_partial) {
             if (!solver->factorize(new_J)) {
-                throw std::runtime_error(
+                throw SingularError(
                     "PwlStateSpaceCache::refactor_parametric: full "
                     "factorize fallback failed (numerically singular). "
                     "Check the updated parameter values.");
@@ -2825,6 +2869,10 @@ private:
 
     mutable numeric::Dictionary<topology::SwitchStateMask,
                                  EventEntry> event_entries_;
+    // swap_aux_events: the out-of-band table and its counters
+    mutable numeric::Dictionary<topology::SwitchStateMask,
+                                 EventEntry> aux_event_entries_;
+    mutable std::uint64_t aux_counters_[4] = {0, 0, 0, 0};
 
     // Monotonic recency clock shared by the event-entry LRU and
     // the lazy segment LRU. `mutable` — bumped from const solve

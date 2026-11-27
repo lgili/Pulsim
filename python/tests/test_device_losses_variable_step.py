@@ -214,3 +214,32 @@ def test_loss_ports_are_in_the_circuit_hash():
     assert h(Tj=25.0, E_on=_kvi(2 * KON))[1] != a[1]       # a table value
     assert h(Tj=125.0, E_on=_kvi(KON))[1] != a[1]          # the temperature
     assert h(Tj=25.0, E_off=_kvi(KON))[0] != a[0]          # which table
+
+
+# ---- an unflipped device's right limit at a diode landing (gate-edge line) --
+# 325 V / 50 Hz half-wave rectifier, RC load; Q3 is never gated (g_off 1e-2 S)
+# across the diode, so every diode landing is an event Q3 does not flip. Truth:
+# engine='pwl' + loss port at dt 1e-6 / 5e-7 / 2.5e-7 reads 96.470079186 /
+# 96.470079394 / 96.470079366 J. Writing Q3's right-limit reading at once
+# made the landing step (booked after the event) end on it: -1.57e-4 J on
+# trbdf2, -4.6e-5 J on esdirk43; pending until the next step: -1.75e-5 /
+# -2.0e-6 J (= the 14f numbers).
+@pytest.mark.parametrize(("kw", "tol"), [
+    (dict(engine="trbdf2"), 5e-5),
+    (dict(engine="trbdf2", integrator="esdirk43"), 1e-5),
+], ids=["trbdf2", "esdirk43"])
+def test_unflipped_device_conduction_across_diode_landings(kw, tol):
+    b = p.CircuitBuilder()
+    b.add_sine_voltage_source("Vs", "a", "gnd", 0.0, 325.0, 50.0)
+    b.add_resistor("Rs", "a", "a2", 0.5)
+    b.add_diode("D1", "a2", "k", 1e3, 1e-9)
+    b.add_capacitor("C", "k", "gnd", 470e-6)
+    b.add_resistor("RL", "k", "gnd", 100.0)
+    b.add_switch("Q3", "a2", "k", 1e3, 1e-2)
+    b.set_device_losses("Q3", Tj=25.0)
+    fn = p.make_combined_switch_fn(b.graph.num_switches, [])
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(b, t_end=0.1, switch_fn=fn, **kw)
+    assert len(r.commutation_events) == 9
+    assert abs(r.device_energy("Q3")["E_cond_electrical"] - 96.4700794) < tol

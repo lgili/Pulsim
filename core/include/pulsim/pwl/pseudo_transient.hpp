@@ -26,6 +26,7 @@
 // was repelled from the solution: a 10 V, 1 kΩ / 5 kΩ divider ended
 // at ||F|| = 1.4e84 after 500 iterations instead of 8.3333 V.
 
+#include "pulsim/sim/error.hpp"   // SingularError
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/device_pool.hpp"
@@ -153,7 +154,7 @@ namespace pulsim::pwl {
         // 5. Solve J_pt · dx = -F.
         auto solver = sparse::make_default_solver();
         if (!solver->analyze(J_pt)) {
-            throw std::runtime_error(std::format(
+            throw SingularError(std::format(
                 "pseudo_transient_solve: J_pt is "
                 "structurally singular at iter {}{}",
                 iter,

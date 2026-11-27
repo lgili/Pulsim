@@ -3,8 +3,10 @@
 
 The storage convention (release group B): a stored sample at an event is the
 LEFT limit and ``result.right_limit_states`` holds the RIGHT limit, the
-state where the next step starts; ``pulsim.with_event_limits`` inserts it one
-ulp after the event as a value of the trajectory.
+state value one instant after the event; ``pulsim.with_event_limits``
+inserts it one ulp after the event as a value of the trajectory. F-SB-1 (the
+quadrature line's start stored as the right limit) is fixed:
+test_restart_right_limit.py.
 """
 
 from __future__ import annotations
@@ -15,12 +17,6 @@ import numpy as np
 import pytest
 
 import pulsim as p
-
-F_SB_1 = pytest.mark.xfail(strict=True, reason=(
-    "finding F-SB-1: under the restart rule the fixed engine records as the right limit "
-    "the start of the restart step's quadrature line, 2·w1·X1 + (1 − 2·w1)·X2, at every "
-    "restart step (the event's and the window's next two): a capacitor voltage, continuous, "
-    "reads 0 V left / 0.163 V right at the closing and jumps at two instants with no event"))
 
 
 def _rc_closing():
@@ -42,7 +38,6 @@ def _rc_closing():
                           discontinuity_restart=True)
 
 
-@F_SB_1
 def test_a_continuous_state_has_equal_left_and_right_limits():
     r = _rc_closing()
     assert r.right_limit_index is not None and len(r.right_limit_index) > 0
@@ -93,8 +88,8 @@ F_SB_2 = pytest.mark.xfail(strict=True, reason=(
     "(+0.995 h); control_tick='state' with the split rule places it exactly"))
 
 
-@F_SB_2
-@pytest.mark.parametrize("kw", [SPLIT, RESTART], ids=["split", "restart"])
+# closed on the restart line for the split rule (split-event-location: the edge is located, 0 h)
+@pytest.mark.parametrize("kw", [SPLIT, pytest.param(RESTART, marks=F_SB_2)], ids=["split", "restart"])
 def test_a_scheduled_switch_edge_is_placed_at_the_edge(kw):
     edge, h = 20.0005e-6, 1e-7                      # vcswitch_resistor: 1 ns ramp, threshold at its middle
     b = p.CircuitBuilder()
@@ -121,11 +116,11 @@ F_SB_3 = pytest.mark.xfail(strict=True, reason=(
     "collapsed transient"))
 
 
-@F_SB_3
+# ll06-split: closed on the restart line (the row is the state value x(t_e+), F-SB-1)
 @pytest.mark.parametrize("rel,engine,kw,t_end,col,scale", [
-    ("circuits/switching/buck/ll06_buck_vcswitch.yaml", "pwl", RESTART, 2e-3, "sw", 48.0),
+    pytest.param("circuits/switching/buck/ll06_buck_vcswitch.yaml", "pwl", RESTART, 2e-3, "sw", 48.0, marks=F_SB_3),
     ("circuits/switching/buck/ll06_buck_vcswitch.yaml", "pwl", SPLIT, 3e-5, "sw", 48.0),
-    ("circuits/diodes/diode_half_wave_rl_load.yaml", "dsed", {}, 0.012, "out", 10.0),
+    pytest.param("circuits/diodes/diode_half_wave_rl_load.yaml", "dsed", {}, 0.012, "out", 10.0, marks=F_SB_3),
 ], ids=["ll06-restart", "ll06-split", "rl_load-dsed"])
 def test_a_collapsed_transient_at_a_turn_off_is_recorded(rel, engine, kw, t_end, col, scale):
     case = _netlist(rel, t_end)
@@ -143,14 +138,7 @@ def test_a_collapsed_transient_at_a_turn_off_is_recorded(rel, engine, kw, t_end,
         assert abs(right - left) <= 1e-3 * scale or reported, (te, left, right)
 
 
-F_SB_4 = pytest.mark.xfail(strict=True, reason=(
-    "finding F-SB-4: the split rule locates diode_rectifier's D1 turn-on 0.227 h late (24.6028 us "
-    "against the truth's 24.3754 us, dt = 1 us; the exact engine: within 1e-12 h); V(out) is "
-    "continuous there, so the instants part prices it 0 and the limits part reads the drift over "
-    "the displacement (0.016 of span)"))
-
-
-@F_SB_4
+# F-SB-4 closed on the restart line (every crosser is refined on trial solves): the mark is gone
 def test_the_split_rule_locates_a_diode_turn_on():
     case = _netlist("circuits/diodes/diode_rectifier.yaml", 3e-5)
     b, _, _ = case.build()

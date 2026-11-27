@@ -38,6 +38,11 @@ Pulsim's transient kernel supports two **fixed-step** integrators
   event, then the SDIRK window from it. Edges off the grid become
   second order (buck D = 0.4567, `v_C` at T/50: 8.08e-2 V snapped,
   1.07e-6 V split); `res.n_split_steps` counts the split steps.
+  `split_snap` (a fraction of dt, default 1e-6; 2.1.0's was 0.01) is the
+  split's snap band: an event that close to a grid point is taken at it
+  instead of cutting a sliver, and events that close merge. Pass
+  `split_snap=0.01` for 2.1.0's behaviour; it must lie in [1e-12, 0.25] and
+  needs the split on (`OptionsError` otherwise).
   A jump the restart finds (or an ideal element's) is reported by
   `res.reinit_records`; an in-loop recorder's lines start from the
   post-jump state, so a window integral is the regular part, as on
@@ -185,6 +190,42 @@ Error control:
 `n_refresh_probes` and `h_post_event_min` (smallest accepted first
 step after a refreshed edge).
 
+### For developers: where the stepper lives
+
+Both transient engines (`pwl`, fixed step, in `solver/run_transient.hpp`;
+`trbdf2`, variable step, in `solver/trbdf2_transient.hpp`) run on one
+step driver. The shared pieces are in `core/include/pulsim/solver/step/`:
+
+| header | what it holds |
+|---|---|
+| `stepper.hpp` | `step::run<I>(clock, body)`: the loop over the engine's phases (poll, attempt, accept or reject, commit, end) |
+| `controllers.hpp` | `FixedClock`, `LteController` (step proposal, `reject_factor`) and `ControllerState`, the controller's part of a snapshot |
+| `integrators.hpp` | stage tables: `Trapezoidal`, `BackwardEuler`, `TrBdf2`, `Sdirk22` (incl. the restart estimate `restart_gamma` / `lte` / `lte_q`) |
+| `esdirk43.hpp` | the `Esdirk43` table |
+| `policies.hpp` | `HalvingLadder` (fixed-step sub-step retry), `GuardPolicy` (inductor freeze, then clamp), `RestartPolicy` (the fixed engine's SDIRK restart steps) |
+| `stepper_core.hpp` | `commit`, `snapshot_into`, `restore`, `seed`: accept, rollback and seeding over the history and the devices |
+| `source_accumulator.hpp` | the source vector of a step |
+| `sensitivity.hpp` | forward sensitivities along the stages |
+
+What each engine still owns, and why (the decisions are in
+`openspec/changes/refactor-unified-transient-stepper/DECISIONS.md`):
+
+- **Its solve point** (DECISIONS 22). The fixed engine writes its one
+  Newton call per segment out in the event iteration, because a closure
+  on its step path cost more than the 0.5 % budget; TR-BDF2 keeps
+  `solve_stage` / `dispatch_solve`.
+- **The step decisions** (DECISIONS 15, 25): reject, forced accept, the
+  chatter guard, the event iteration (`run_event_iteration`) and the
+  TR-BDF2 probe / landing phases stay in the engine's body. As free
+  functions they would take the engine's whole state; they move when the
+  event-driven loop owns that state (task groups 14 and 15).
+- **The W⁻¹ restart filter** (DECISIONS 24): two solves on the step's
+  factor, so it stays with the other solves in `run_transient_trbdf2`.
+
+Changes here are behaviour-preserving by contract: results, counters
+included, are checked byte for byte against stored baselines
+(`benchmarks/tools/pwl_identity.py`, `benchmarks/tools/trbdf2_identity.py`).
+
 ## Tuning guide
 
 | Knob | DormandPrince5 | RadauIIA3 | Effect |
@@ -220,3 +261,47 @@ step after a refreshed edge).
   you need adaptive stepping today without waiting for v1.6.0.
 - `openspec/changes/add-adaptive-runge-kutta-solvers/` — proposal +
   design + delta spec.
+
+## The exact engine's output rule (`output_rtol`)
+
+With `engine='exact'`, no `dt`, `store_every` or recorders, `output_rtol`
+chooses the stored samples: every event instant (both limits of a jump),
+and between events only the samples a tolerance needs. The promise: the
+straight line between two consecutive stored samples is within
+`max(output_rtol * range, atol, floor)` of the exact solution at every
+instant of the line, for every stored column (states, node voltages,
+branch currents). `range` is the column's range over the run so far
+(through the end of the exact step holding the line, at least 1e-3 of
+its peak); `atol` is the run's absolute tolerance (default 1e-9). No
+column is promised below its own rounding floor (`floor`, 16·eps times
+the sum of the magnitudes of the terms it is evaluated from): a column
+whose bound only fits through its floor is certified constant up to
+rounding at that floor and counted in `res.diagnostics['output_grid']`
+(`n_output_floored`, `output_floor_max`, `output_floor_by_column`). A
+fast mode whose content does not decay between two instants of one flow
+as its own closed form says (the eigenbasis's error, not a transient) is
+taken out of the bound of a step it cuts; where that lengthens the step the
+bound with it is the column's floor there: counted in `n_output_inconsistent`, with one RuntimeWarning
+(`output_inconsistent`). A source corner (a pulse or PWM edge) is always a stored sample. The sample
+stored at an event is its left limit (the right limit is
+`res.right_limit_states`, `pulsim.with_event_limits`); after an event
+that changed the mode or a source's piece the solution 2 ps later is a
+stored sample as well, so plain interpolation of `res.times` draws a
+jump of a node voltage as a jump (over those 2 ps, the one line the
+promise does not cover) and not as a ramp to the next sample. The
+"exact solution" of the promise is the flow WITH the parasitic cluster
+projected at each event: modes whose time constant is below 1e-6 of the
+run's resolved time scale are settled at the event instant (the rule-off
+run lets them decay; a diode turn-off's ~1 ns mode read 0.31 V apart for
+a few ns). Every projection is recorded in `diagnostics['output_grid']`:
+`n_projections`, `projection_max_by_column` (per stored column the largest
+amplitude a projection moved it by) and `projections` (the first 1000:
+instant `t`, largest `amplitude`, its `column`, the cluster's slowest time
+constant `tau`). Recorders on such a run read a window's min / max inside
+each exact step from its closed form where one exists (a constant plus one
+damped sinusoid or at most two real exponentials); elsewhere the step ends
+are kept and counted (`res.recorder_feed['closed_form']['n_extrema_ends']`). Where the
+4096-sample cap per interval, a mode without a diagonalising basis, or
+the run's 2e6-sample budget suspends the promise, the diagnostics say
+so and the run warns. `benchmarks/tools/output_rule_referee.py` checks
+the promise on the benchmark set.

@@ -72,11 +72,12 @@ from ._builder_ergonomics import RetiredDeviceError
 from ._control_state import point_kwargs as _point_kwargs
 from ._control_state import sweep_points as _sweep_points
 from ._refusal import UnsupportedError
+from .errors import NetlistError
 
 # Configuration refusals hold for every point: they propagate out of
 # sweep() / monte_carlo() on every backend. Anything else a job raises
 # is a per-job failure, recorded in `failed` on every backend.
-_REFUSALS = (UnsupportedError, RetiredDeviceError)
+_REFUSALS = (UnsupportedError, RetiredDeviceError, NetlistError)
 
 
 __all__ = [
@@ -1073,7 +1074,7 @@ def _make_options(t_end: float, dt: float, **simulate_kwargs):
     for k in ("max_newton_iterations", "max_event_iterations"):
         if simulate_kwargs.get(k) is not None:  # None = the kernel default
             setattr(opts, k, int(simulate_kwargs[k]))
-    for k in ("tol_newton_dx", "tol_newton_res"):
+    for k in ("tol_newton_dx", "tol_newton_res", "split_snap"):
         if k in simulate_kwargs and simulate_kwargs[k] is not None:
             setattr(opts, k, float(simulate_kwargs[k]))
     for k in ("enable_newton_line_search", "enable_newton_lm",

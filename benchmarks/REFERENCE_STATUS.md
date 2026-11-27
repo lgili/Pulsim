@@ -12,71 +12,69 @@ graded against the trbdf2 reference is a SELF-CONSISTENCY check (default vs rtol
 is graded. Every configuration has its own `known:` freeze; a frozen `disagree`
 fails when its err_rms grows past 2x the frozen `known_err:`.
 
-## Differential matrix (111 circuits)
+## Differential matrix (112 circuits)
 
 | configuration | agree | disagree | error | refused | unverified |
 |---|---:|---:|---:|---:|---:|
-| pwl | 81 | 29 | 1 | 0 | 0 |
-| pwl+restart | 99 | 11 | 1 | 0 | 0 |
-| pwl+split | 102 | 8 | 1 | 0 | 0 |
-| trbdf2 | 108 | 2 | 1 | 0 | 0 |
-| dsed | 102 | 0 | 0 | 9 | 0 |
+| pwl | 82 | 29 | 1 | 0 | 0 |
+| pwl+restart | 102 | 9 | 1 | 0 | 0 |
+| pwl+split | 102 | 9 | 1 | 0 | 0 |
+| trbdf2 | 109 | 2 | 1 | 0 | 0 |
+| dsed | 103 | 0 | 0 | 9 | 0 |
 
 ### Fixed engine: restart rule and split (circuits where any of the three does not agree)
 
 | circuit | tol | pwl | pwl+restart | pwl+split |
 |---|---:|---:|---:|---:|
-| closed_loop/cl_boost_pi.yaml | 0.02 | 0.0582 | 0.0579 | 8.56e-05 |
-| closed_loop/ll14_buck_closed_loop.yaml | 0.02 | 0.249 | 0.139 | 0.119 |
-| closed_loop/ll15_boost_closed_loop.yaml | 0.02 | 0.22 | 0.0485 | 0.0275 |
-| closed_loop/ll16_flyback_closed_loop.yaml | 0.02 | 0.112 | 0.143 | 0.0937 |
-| linear/current_source_rl_step.yaml | 0.001 | 0.00577 | 3.67e-05 | 3.67e-05 |
-| linear/rl_natural_response.yaml | 0.001 | 0.00577 | 3.66e-05 | 3.66e-05 |
-| magnetics/half_bridge_transformer_dc.yaml | 0.02 | 0.101 | 2.81e-06 | 2.97e-06 |
-| magnetics/transformer_leakage.yaml | 0.001 | 0.0041 | 0.00408 | 0.00408 |
+| closed_loop/cl_boost_pi.yaml | 0.02 | 0.0582 | 0.0511 | 7.2e-05 |
+| closed_loop/ll14_buck_closed_loop.yaml | 0.02 | 0.249 | 0.144 | 0.126 |
+| closed_loop/ll15_boost_closed_loop.yaml | 0.02 | 0.22 | 0.0484 | 0.0279 |
+| closed_loop/ll16_flyback_closed_loop.yaml | 0.02 | 0.112 | 0.113 | 0.0942 |
+| linear/current_source_rl_step.yaml | 0.001 | 0.00577 | 3.99e-05 | 3.99e-05 |
+| linear/rl_natural_response.yaml | 0.001 | 0.00577 | 3.98e-05 | 3.98e-05 |
+| magnetics/half_bridge_transformer_dc.yaml | 0.02 | 0.101 | 7.71e-06 | 7.66e-06 |
+| magnetics/transformer_leakage.yaml | 0.001 | 0.0041 | 0.00409 | 0.00409 |
 | stress/high_q_rlc_ringdown.yaml | 0.02 | 0.0229 | 0.0149 | 0.0149 |
-| switching/basic/vcswitch_resistor.yaml | 0.02 | 0.0332 | 0.0546 | 0.0193 |
-| switching/boost/boost_pfc_open_loop.yaml | 0.02 | 0.0304 | 0.0304 | 1.06e-05 |
-| switching/boost/ll07_boost_vcswitch.yaml | 0.02 | 0.0984 | 0.0548 | 0.0445 |
-| switching/boost/ll12_pfc_boost_continuous.yaml | 0.02 | 0.083 | 0.0785 | 0.0753 |
-| switching/buck/ll06_buck_vcswitch.yaml | 0.02 | 0.0781 | 0.0907 | 0.0426 |
-| switching/buck/ll08_buck_mosfet.yaml | 0.02 | 0.228 | 0.0568 | 0.0652 |
+| switching/basic/vcswitch_resistor.yaml | 0.02 | 0.0332 | 0.005 | 0.0332 |
+| switching/boost/boost_pfc_open_loop.yaml | 0.02 | 0.0304 | 0.0191 | 1.05e-05 |
+| switching/boost/ll07_boost_vcswitch.yaml | 0.02 | 0.0983 | 0.0445 | 0.0445 |
+| switching/boost/ll12_pfc_boost_continuous.yaml | 0.02 | 0.083 | 0.0753 | 0.0753 |
+| switching/buck/ll06_buck_vcswitch.yaml | 0.02 | 0.0781 | 0.0792 | 0.0434 |
+| switching/buck/ll08_buck_mosfet.yaml | 0.02 | 0.228 | 0.0659 | 0.0652 |
 | switching/inverter/ll09_half_bridge_inverter_leg.yaml | 0.02 | 0.0707 | 0.0102 | 0.0102 |
 | switching/inverter/ll10_full_bridge_inverter_lc.yaml | 0.02 | 0.05 | 0.000127 | 0.000127 |
-| switching/isolated/flyback_converter.yaml | 0.02 | 0.949 | 5.63e-06 | 5.63e-06 |
-| switching/isolated/forward_converter.yaml | 0.02 | 0.707 | 6.05e-06 | 6.08e-06 |
-| switching/isolated/full_bridge_dc.yaml | 0.02 | 0.0828 | 2.66e-05 | 2.66e-05 |
+| switching/isolated/flyback_converter.yaml | 0.02 | 0.949 | 8.98e-06 | 8.98e-06 |
+| switching/isolated/forward_converter.yaml | 0.02 | 0.707 | 9.75e-06 | 9.74e-06 |
+| switching/isolated/full_bridge_dc.yaml | 0.02 | 0.0828 | 2.67e-05 | 2.67e-05 |
 | switching/isolated/ll11_llc_resonant_converter.yaml | 0.02 | error | error | error |
-| switching/isolated/ll13_active_clamp_forward.yaml | 0.02 | 4.51 | 0.00165 | 0.00165 |
-| switching/isolated/llc_half_bridge_zvs.yaml | 0.02 | 0.021 | 0.000585 | 0.000586 |
-| switching/isolated/psfb_full_bridge_zvs.yaml | 0.02 | 0.0211 | 0.00158 | 0.0017 |
-| switching/isolated/synchronous_flyback.yaml | 0.02 | 0.207 | 1.29e-06 | 1.29e-06 |
+| switching/isolated/ll13_active_clamp_forward.yaml | 0.02 | 4.51 | 0.00197 | 0.00197 |
+| switching/isolated/llc_half_bridge_zvs.yaml | 0.02 | 0.021 | 0.00059 | 0.00059 |
+| switching/isolated/psfb_full_bridge_zvs.yaml | 0.02 | 0.0211 | 0.0017 | 0.0017 |
+| switching/isolated/synchronous_flyback.yaml | 0.02 | 0.207 | 1.62e-05 | 1.62e-05 |
 | switching/multilevel/cascaded_h_bridge_5level.yaml | 0.02 | 0.0274 | 5.69e-05 | 5.69e-05 |
-| switching/multilevel/flying_capacitor_3level.yaml | 0.02 | 0.0466 | 3.71e-05 | 3.71e-05 |
+| switching/multilevel/flying_capacitor_3level.yaml | 0.02 | 0.0466 | 3.74e-05 | 3.74e-05 |
 | switching/multilevel/mmc_4cell_chain.yaml | 0.02 | 0.0268 | 5.74e-05 | 5.74e-05 |
 | switching/multilevel/t_type_3level_halfbridge.yaml | 0.02 | 0.0782 | 4.24e-05 | 4.24e-05 |
-| three_phase/three_phase_diode_rectifier.yaml | 0.02 | 1.51 | 0.00572 | 0.00571 |
+| three_phase/three_phase_diode_rectifier.yaml | 0.02 | 1.51 | 0.00766 | 0.00766 |
 
 ### Every cell that differs from its frozen `known:` entry (every configuration)
 
 | circuit | config | frozen | now | err_rms | why |
 |---|---|---|---|---:|---|
 | closed_loop/ll16_flyback_closed_loop.yaml | pwl | disagree (0.261) | disagree | 0.112 | improved 0.261 -> 0.112: re-freeze |
-| closed_loop/ll16_flyback_closed_loop.yaml | pwl+split | disagree (0.245) | disagree | 0.0937 | improved 0.245 -> 0.0937: re-freeze |
-| switching/basic/vcswitch_resistor.yaml | pwl+split | disagree (0.0332) | agree | 0.0193 | now agree: drop the freeze |
+| closed_loop/ll16_flyback_closed_loop.yaml | pwl+split | disagree (0.245) | disagree | 0.0942 | improved 0.245 -> 0.0942: re-freeze |
+| switching/basic/vcswitch_resistor.yaml | pwl+restart | disagree (0.0682) | agree | 0.005 | now agree: drop the freeze |
+| switching/boost/boost_pfc_open_loop.yaml | pwl+restart | disagree (0.0304) | agree | 0.0191 | now agree: drop the freeze |
+| switching/boost/ll07_boost_vcswitch.yaml | pwl+restart | disagree (0.0997) | disagree | 0.0445 | improved 0.0997 -> 0.0445: re-freeze |
 | switching/boost/ll07_boost_vcswitch.yaml | pwl+split | disagree (0.0997) | disagree | 0.0445 | improved 0.0997 -> 0.0445: re-freeze |
-| switching/inverter/ll09_half_bridge_inverter_leg.yaml | pwl+restart | disagree (0.0587) | agree | 0.0102 | now agree: drop the freeze |
-| switching/inverter/ll09_half_bridge_inverter_leg.yaml | pwl+split | disagree (0.0587) | agree | 0.0102 | now agree: drop the freeze |
 | switching/inverter/ll10_full_bridge_inverter_lc.yaml | pwl+restart | disagree (0.05) | agree | 0.000127 | now agree: drop the freeze |
 | switching/inverter/ll10_full_bridge_inverter_lc.yaml | pwl+split | disagree (0.05) | agree | 0.000127 | now agree: drop the freeze |
-| switching/isolated/full_bridge_dc.yaml | pwl+restart | disagree (0.0815) | agree | 2.66e-05 | now agree: drop the freeze |
-| switching/isolated/full_bridge_dc.yaml | pwl+split | disagree (0.0815) | agree | 2.66e-05 | now agree: drop the freeze |
-| switching/isolated/ll13_active_clamp_forward.yaml | pwl+restart | disagree (0.335) | agree | 0.00165 | now agree: drop the freeze |
-| switching/isolated/ll13_active_clamp_forward.yaml | pwl+split | disagree (0.335) | agree | 0.00165 | now agree: drop the freeze |
+| switching/isolated/full_bridge_dc.yaml | pwl+restart | disagree (0.0815) | agree | 2.67e-05 | now agree: drop the freeze |
+| switching/isolated/full_bridge_dc.yaml | pwl+split | disagree (0.0815) | agree | 2.67e-05 | now agree: drop the freeze |
 | switching/multilevel/cascaded_h_bridge_5level.yaml | pwl+restart | disagree (0.0269) | agree | 5.69e-05 | now agree: drop the freeze |
 | switching/multilevel/cascaded_h_bridge_5level.yaml | pwl+split | disagree (0.0269) | agree | 5.69e-05 | now agree: drop the freeze |
-| switching/multilevel/flying_capacitor_3level.yaml | pwl+restart | disagree (0.05) | agree | 3.71e-05 | now agree: drop the freeze |
-| switching/multilevel/flying_capacitor_3level.yaml | pwl+split | disagree (0.05) | agree | 3.71e-05 | now agree: drop the freeze |
+| switching/multilevel/flying_capacitor_3level.yaml | pwl+restart | disagree (0.05) | agree | 3.74e-05 | now agree: drop the freeze |
+| switching/multilevel/flying_capacitor_3level.yaml | pwl+split | disagree (0.05) | agree | 3.74e-05 | now agree: drop the freeze |
 | switching/multilevel/mmc_4cell_chain.yaml | pwl+restart | disagree (0.0264) | agree | 5.74e-05 | now agree: drop the freeze |
 | switching/multilevel/mmc_4cell_chain.yaml | pwl+split | disagree (0.0264) | agree | 5.74e-05 | now agree: drop the freeze |
 | switching/multilevel/t_type_3level_halfbridge.yaml | pwl+restart | disagree (0.0738) | agree | 4.24e-05 | now agree: drop the freeze |
@@ -97,78 +95,77 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | circuit | config | tol | err_rms | worst observable | edge err | excluded | timing (s) | timing (steps) |
 |---|---|---:|---:|---|---:|---:|---:|---:|
 | closed_loop/cl_boost_pi.yaml | pwl | 0.02 | 0.0582 | V(out) | undersampled | 11.8% | 1.5e-06 | 2.9 |
-| closed_loop/cl_boost_pi.yaml | pwl+restart | 0.02 | 0.0579 | V(out) | 0.0537 | 1.3% | 1.4e-06 | 2.7 |
+| closed_loop/cl_boost_pi.yaml | pwl+restart | 0.02 | 0.0511 | V(out) | 0.0459 | 1.8% | 0.0013 | 2.6e+03 |
 | closed_loop/ll14_buck_closed_loop.yaml | pwl | 0.02 | 0.249 | V(sw) | undersampled | 10.0% | 4.9e-07 | 0.98 |
-| closed_loop/ll14_buck_closed_loop.yaml | pwl+restart | 0.02 | 0.139 | V(sw) | 0.132 | 0.0% | 4.9e-07 | 0.98 |
-| closed_loop/ll14_buck_closed_loop.yaml | pwl+split | 0.02 | 0.119 | V(sw) | 0.0289 | 2.8% | 5e-07 | 0.99 |
+| closed_loop/ll14_buck_closed_loop.yaml | pwl+restart | 0.02 | 0.144 | I(L1) | 0.135 | 0.0% | 3.5e-07 | 0.7 |
+| closed_loop/ll14_buck_closed_loop.yaml | pwl+split | 0.02 | 0.126 | V(sw) | 0.0441 | 2.8% | 5e-07 | 1 |
 | closed_loop/ll15_boost_closed_loop.yaml | pwl | 0.02 | 0.22 | V(sw) | undersampled | 20.0% | 2.5e-07 | 0.5 |
-| closed_loop/ll15_boost_closed_loop.yaml | pwl+restart | 0.02 | 0.0485 | V(sw) | 0.0454 | 0.0% | 2.5e-07 | 0.5 |
-| closed_loop/ll15_boost_closed_loop.yaml | pwl+split | 0.02 | 0.0275 | V(sw) | 0.00501 | 10.0% | 2.5e-07 | 0.5 |
+| closed_loop/ll15_boost_closed_loop.yaml | pwl+restart | 0.02 | 0.0484 | V(sw) | 0.0453 | 0.0% | 2.5e-07 | 0.5 |
+| closed_loop/ll15_boost_closed_loop.yaml | pwl+split | 0.02 | 0.0279 | V(sw) | 0.00569 | 10.0% | 2.5e-07 | 0.5 |
 | closed_loop/ll16_flyback_closed_loop.yaml | pwl | 0.02 | 0.112 | V(drain) | 0.0403 | 7.5% | 2.4e-07 | 0.96 |
-| closed_loop/ll16_flyback_closed_loop.yaml | pwl+restart | 0.02 | 0.143 | V(drain) | 0.143 | 0.0% | 2.4e-07 | 0.96 |
-| closed_loop/ll16_flyback_closed_loop.yaml | pwl+split | 0.02 | 0.0937 | V(drain) | 0.00654 | 6.2% | 2.5e-07 | 0.99 |
+| closed_loop/ll16_flyback_closed_loop.yaml | pwl+restart | 0.02 | 0.113 | V(drain) | 0.113 | 0.0% | 1.3e-07 | 0.5 |
+| closed_loop/ll16_flyback_closed_loop.yaml | pwl+split | 0.02 | 0.0942 | V(drain) | 0.00645 | 6.3% | 2.5e-07 | 1 |
 | linear/current_source_rl_step.yaml | pwl | 0.001 | 0.00577 | V(out) | 0.00563 | 0.0% |  |  |
 | linear/rl_natural_response.yaml | pwl | 0.001 | 0.00577 | V(node) | 0.00563 | 0.0% |  |  |
 | magnetics/half_bridge_transformer_dc.yaml | pwl | 0.02 | 0.101 | V(out) | chatter | 5.6% | 1.1e-05 | 1.1e+02 |
 | magnetics/transformer_leakage.yaml | pwl | 0.001 | 0.0041 | V(sec) | 0.0041 | 0.0% |  |  |
-| magnetics/transformer_leakage.yaml | pwl+restart | 0.001 | 0.00408 | V(sec) | 0.00408 | 0.0% |  |  |
-| magnetics/transformer_leakage.yaml | pwl+split | 0.001 | 0.00408 | V(sec) | 0.00408 | 0.0% |  |  |
+| magnetics/transformer_leakage.yaml | pwl+restart | 0.001 | 0.00409 | V(sec) | 0.00409 | 0.0% |  |  |
+| magnetics/transformer_leakage.yaml | pwl+split | 0.001 | 0.00409 | V(sec) | 0.00409 | 0.0% |  |  |
 | stress/high_q_rlc_ringdown.yaml | pwl | 0.02 | 0.0229 | V(out) | 0.0229 | 0.0% |  |  |
 | stress/high_q_rlc_ringdown.yaml | trbdf2 | 0.001 | 0.00566 | V(out) | 0.00566 | 0.0% |  |  |
 | switching/basic/vcswitch_resistor.yaml | pwl | 0.02 | 0.0332 | V(out) | 1.13e-21 | 0.3% | 9.9e-08 | 0.99 |
-| switching/basic/vcswitch_resistor.yaml | pwl+restart | 0.02 | 0.0546 | V(out) | 0.0546 | 0.0% | 9.9e-08 | 0.99 |
+| switching/basic/vcswitch_resistor.yaml | pwl+split | 0.02 | 0.0332 | V(out) | 1.13e-21 | 0.3% | 9.9e-08 | 0.99 |
 | switching/boost/boost_pfc_open_loop.yaml | pwl | 0.02 | 0.0304 | V(out) | chatter | 22.4% | 0.0016 | 8e+02 |
-| switching/boost/boost_pfc_open_loop.yaml | pwl+restart | 0.02 | 0.0304 | V(out) | 0.0288 | 2.0% | 0.0012 | 6.2e+02 |
-| switching/boost/ll07_boost_vcswitch.yaml | pwl | 0.02 | 0.0984 | V(ctrl) | 0.00217 | 3.2% | 1.9e-07 | 0.97 |
-| switching/boost/ll07_boost_vcswitch.yaml | pwl+restart | 0.02 | 0.0548 | V(ctrl) | 0.0128 | 0.0% | 1e-07 | 0.5 |
-| switching/boost/ll07_boost_vcswitch.yaml | pwl+split | 0.02 | 0.0445 | V(ctrl) | 3.36e-05 | 1.6% | 1e-07 | 0.5 |
+| switching/boost/ll07_boost_vcswitch.yaml | pwl | 0.02 | 0.0983 | V(ctrl) | 0.00217 | 3.2% | 1.9e-07 | 0.97 |
+| switching/boost/ll07_boost_vcswitch.yaml | pwl+restart | 0.02 | 0.0445 | V(ctrl) | 0.0128 | 0.0% | 1.9e-07 | 0.97 |
+| switching/boost/ll07_boost_vcswitch.yaml | pwl+split | 0.02 | 0.0445 | V(ctrl) | 3.3e-05 | 1.6% | 1.9e-07 | 0.97 |
 | switching/boost/ll12_pfc_boost_continuous.yaml | pwl | 0.02 | 0.083 | V(ctrl) | 0.000125 | 3.3% | 2.3e-07 | 0.92 |
-| switching/boost/ll12_pfc_boost_continuous.yaml | pwl+restart | 0.02 | 0.0785 | V(ctrl) | 0.0558 | 0.0% | 2.3e-07 | 0.92 |
-| switching/boost/ll12_pfc_boost_continuous.yaml | pwl+split | 0.02 | 0.0753 | V(ctrl) | 1.3e-05 | 3.0% | 2.3e-07 | 0.92 |
-| switching/buck/ll06_buck_vcswitch.yaml | pwl | 0.02 | 0.0781 | V(ctrl) | 0.0211 | 2.8% | 2e-05 | 99 |
-| switching/buck/ll06_buck_vcswitch.yaml | pwl+restart | 0.02 | 0.0907 | V(sw) | 0.0404 | 0.6% | 2e-05 | 99 |
-| switching/buck/ll06_buck_vcswitch.yaml | pwl+split | 0.02 | 0.0426 | V(sw) | 0.00194 | 1.9% | 2e-05 | 99 |
+| switching/boost/ll12_pfc_boost_continuous.yaml | pwl+restart | 0.02 | 0.0753 | V(ctrl) | 0.0413 | 0.0% | 1.2e-07 | 0.46 |
+| switching/boost/ll12_pfc_boost_continuous.yaml | pwl+split | 0.02 | 0.0753 | V(ctrl) | 1.29e-05 | 3.0% | 2.3e-07 | 0.92 |
+| switching/buck/ll06_buck_vcswitch.yaml | pwl | 0.02 | 0.0781 | V(ctrl) | 0.021 | 2.8% | 2e-05 | 99 |
+| switching/buck/ll06_buck_vcswitch.yaml | pwl+restart | 0.02 | 0.0792 | V(sw) | 0.0384 | 0.9% | 1.3e-07 | 0.64 |
+| switching/buck/ll06_buck_vcswitch.yaml | pwl+split | 0.02 | 0.0434 | V(sw) | 0.0068 | 1.9% | 2e-05 | 99 |
 | switching/buck/ll08_buck_mosfet.yaml | pwl | 0.02 | 0.228 | V(sw) | 0.156 | 3.2% | 3.9e-07 | 2 |
-| switching/buck/ll08_buck_mosfet.yaml | pwl+restart | 0.02 | 0.0568 | V(gate) | 0.0149 | 1.8% | 1.3e-07 | 0.66 |
-| switching/buck/ll08_buck_mosfet.yaml | pwl+split | 0.02 | 0.0652 | V(gate) | 0.00265 | 3.1% | 2e-07 | 0.98 |
+| switching/buck/ll08_buck_mosfet.yaml | pwl+restart | 0.02 | 0.0659 | V(sw) | 0.0173 | 3.2% | 2.1e-07 | 1.1 |
+| switching/buck/ll08_buck_mosfet.yaml | pwl+split | 0.02 | 0.0652 | V(gate) | 0.00445 | 3.2% | 2e-07 | 1 |
 | switching/inverter/ll09_half_bridge_inverter_leg.yaml | pwl | 0.02 | 0.0707 | V(ctrl_hi) | 0.0104 | 2.0% | 2.3e-12 | 9.1e-06 |
 | switching/inverter/ll10_full_bridge_inverter_lc.yaml | pwl | 0.02 | 0.05 | V(ctrl_a_lo) | 0.000195 | 1.0% | 3e-12 | 1.2e-05 |
 | switching/isolated/flyback_converter.yaml | pwl | 0.02 | 0.949 | V(out) | chatter | 19.1% | 2e-05 | 2e+02 |
 | switching/isolated/forward_converter.yaml | pwl | 0.02 | 0.707 | V(out) | chatter | 6.2% | 9.9e-06 | 99 |
 | switching/isolated/full_bridge_dc.yaml | pwl | 0.02 | 0.0828 | V(load_p) | 3.54e-06 | 4.0% | 1e-07 | 0.5 |
 | switching/isolated/ll13_active_clamp_forward.yaml | pwl | 0.02 | 4.51 | V(clamp_node) | 0.642 | 5.0% | 5e-11 | 0.001 |
-| switching/isolated/ll13_active_clamp_forward.yaml | trbdf2 | 0.001 | 0.00115 | V(ctrl_main) | 3.31e-05 | 0.0% | 5e-11 |  |
+| switching/isolated/ll13_active_clamp_forward.yaml | trbdf2 | 0.001 | 0.00108 | V(ctrl_clamp) | 3.32e-05 | 0.0% | 5e-11 |  |
 | switching/isolated/llc_half_bridge_zvs.yaml | pwl | 0.02 | 0.021 | V(mid) | chatter | 18.8% | 8.5e-06 | 8.5e+02 |
 | switching/isolated/psfb_full_bridge_zvs.yaml | pwl | 0.02 | 0.0211 | V(b) | chatter | 39.2% | 7e-06 | 7e+02 |
 | switching/isolated/synchronous_flyback.yaml | pwl | 0.02 | 0.207 | V(out) | 0.143 | 1.0% | 9.9e-13 | 9.9e-06 |
 | switching/multilevel/cascaded_h_bridge_5level.yaml | pwl | 0.02 | 0.0274 | V(out) | 1.43e-08 | 0.4% | 1e-12 | 5e-06 |
-| switching/multilevel/flying_capacitor_3level.yaml | pwl | 0.02 | 0.0466 | V(out) | 0.00528 | 2.0% | 3.1e-13 | 1.6e-06 |
+| switching/multilevel/flying_capacitor_3level.yaml | pwl | 0.02 | 0.0466 | V(out) | 0.00528 | 2.0% | 3.2e-13 | 1.6e-06 |
 | switching/multilevel/mmc_4cell_chain.yaml | pwl | 0.02 | 0.0268 | V(out) | 1.54e-08 | 0.4% | 1e-12 | 5e-06 |
 | switching/multilevel/t_type_3level_halfbridge.yaml | pwl | 0.02 | 0.0782 | V(out) | 0.000801 | 2.0% | 1.2e-13 | 6.1e-07 |
-| three_phase/three_phase_diode_rectifier.yaml | pwl | 0.02 | 1.51 | V(out) | 0.323 | 7.7% | 0.071 | 1.4e+03 |
+| three_phase/three_phase_diode_rectifier.yaml | pwl | 0.02 | 1.51 | V(out) | 0.323 | 8.0% | 0.071 | 1.4e+03 |
 
 ### All cells (err_rms or outcome)
 
 | circuit | pwl | pwl+restart | pwl+split | trbdf2 | dsed |
 |---|---:|---:|---:|---:|---:|
-| closed_loop/cl_boost_pi.yaml | 0.0582 | 0.0579 | 8.56e-05 | 1.31e-06 | 1.29e-06 |
-| closed_loop/cl_buck_aggressive_pi.yaml | 0.00662 | 0.00709 | 0.00404 | 3.72e-05 | 3.24e-05 |
-| closed_loop/cl_buck_pi.yaml | 0.0121 | 0.0123 | 0.00049 | 1.88e-05 | 1.77e-05 |
-| closed_loop/ll14_buck_closed_loop.yaml | 0.249 | 0.139 | 0.119 | 0.000547 | refused |
-| closed_loop/ll15_boost_closed_loop.yaml | 0.22 | 0.0485 | 0.0275 | 0.000264 | refused |
-| closed_loop/ll16_flyback_closed_loop.yaml | 0.112 | 0.143 | 0.0937 | 0.000363 | refused |
+| closed_loop/cl_boost_pi.yaml | 0.0582 | 0.0511 | 7.2e-05 | 1.32e-06 | 1.29e-06 |
+| closed_loop/cl_buck_aggressive_pi.yaml | 0.00662 | 0.00619 | 0.00404 | 3.72e-05 | 3.24e-05 |
+| closed_loop/cl_buck_pi.yaml | 0.0121 | 0.0044 | 0.00049 | 1.88e-05 | 1.77e-05 |
+| closed_loop/ll14_buck_closed_loop.yaml | 0.249 | 0.144 | 0.126 | 0.000543 | refused |
+| closed_loop/ll15_boost_closed_loop.yaml | 0.22 | 0.0484 | 0.0279 | 0.000264 | refused |
+| closed_loop/ll16_flyback_closed_loop.yaml | 0.112 | 0.113 | 0.0942 | 0.000361 | refused |
 | diodes/back_to_back_diodes_sine.yaml | 1.14e-05 | 1.14e-05 | 1.14e-05 | 0 | 1.15e-05 |
-| diodes/diode_bridge_rectifier.yaml | 0.000216 | 0.000176 | 0.000172 | 3.22e-05 | 6.58e-06 |
+| diodes/diode_bridge_rectifier.yaml | 0.000216 | 0.000177 | 0.000172 | 3.22e-05 | 6.58e-06 |
 | diodes/diode_clamp_overvoltage.yaml | 0.00565 | 0.00565 | 0.00565 | 0 | 6.01e-12 |
-| diodes/diode_half_wave_rl_load.yaml | 0.0186 | 6.12e-05 | 6.16e-05 | 1.58e-05 | 6.92e-06 |
-| diodes/diode_rectifier.yaml | 0.0139 | 0.00159 | 0.00132 | 0.000183 | 1.26e-05 |
-| diodes/half_wave_rectifier_sine.yaml | 0.000393 | 0.000107 | 4.05e-05 | 2.36e-05 | 4.6e-06 |
-| diodes/voltage_doubler.yaml | 0.000222 | 3e-05 | 3.01e-05 | 5.05e-06 | 5.84e-07 |
-| linear/bridge_resistive_pure.yaml | 0 | 1e-14 | 1e-14 | 0 | 1.33e-13 |
-| linear/capacitor_natural_discharge.yaml | 0.000798 | 7.51e-07 | 7.51e-07 | 5.63e-06 | 6.11e-07 |
-| linear/current_divider_3way.yaml | 0 | 1.02e-14 | 1.02e-14 | 0 | 0 |
+| diodes/diode_half_wave_rl_load.yaml | 0.0186 | 0.000586 | 0.000586 | 1.58e-05 | 6.92e-06 |
+| diodes/diode_rectifier.yaml | 0.0139 | 0.00157 | 0.00135 | 0.000183 | 1.26e-05 |
+| diodes/half_wave_rectifier_sine.yaml | 0.000393 | 6.24e-05 | 4.11e-05 | 2.36e-05 | 4.6e-06 |
+| diodes/voltage_doubler.yaml | 0.000222 | 3e-05 | 3.02e-05 | 5.06e-06 | 6.01e-07 |
+| linear/bridge_resistive_pure.yaml | 0 | 0 | 0 | 0 | 1.33e-13 |
+| linear/capacitor_natural_discharge.yaml | 0.000798 | 7.52e-07 | 7.52e-07 | 5.63e-06 | 6.11e-07 |
+| linear/current_divider_3way.yaml | 0 | 0 | 0 | 0 | 0 |
 | linear/current_source_rc.yaml | 5.66e-10 | 4.07e-10 | 4.07e-10 | 0 | 3.58e-10 |
-| linear/current_source_rl_step.yaml | 0.00577 | 3.67e-05 | 3.67e-05 | 2.14e-06 | 6.04e-07 |
+| linear/current_source_rl_step.yaml | 0.00577 | 3.99e-05 | 3.99e-05 | 2.14e-06 | 6.04e-07 |
 | linear/lc_low_pass_sine.yaml | 3.26e-05 | 3.26e-05 | 3.26e-05 | 0.000118 | 1.14e-06 |
 | linear/ll01_resistive_divider_dc.yaml | 2.85e-10 | 3.41e-10 | 3.41e-10 | 0 | 1.08e-09 |
 | linear/ll02_rc_pulse_charge.yaml | 6.92e-08 | 6.97e-08 | 6.97e-08 | 1.48e-07 | 4.54e-07 |
@@ -176,17 +173,17 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | linear/pulse_voltage_rl.yaml | 0.0199 | 0.0199 | 0.0199 | 3.04e-05 | 5.12e-06 |
 | linear/rc_dc.yaml | 0.000159 | 4.39e-07 | 4.39e-07 | 6.84e-07 | 4.29e-07 |
 | linear/rc_step.yaml | 0.000159 | 5.65e-07 | 5.65e-07 | 6.84e-07 | 4.29e-07 |
-| linear/rl_natural_response.yaml | 0.00577 | 3.66e-05 | 3.66e-05 | 6.66e-06 | 6.04e-07 |
+| linear/rl_natural_response.yaml | 0.00577 | 3.98e-05 | 3.98e-05 | 6.66e-06 | 6.04e-07 |
 | linear/rl_step.yaml | 0.00112 | 1.8e-06 | 1.8e-06 | 1.75e-06 | 4.98e-07 |
 | linear/rlc_series_resonant.yaml | 0.00033 | 0.00033 | 0.00033 | 0.000354 | 3.41e-06 |
 | linear/sine_voltage_rc.yaml | 4.42e-05 | 4.42e-05 | 4.42e-05 | 0.000111 | 3.06e-06 |
-| linear/two_stage_rc_lowpass.yaml | 0.00145 | 8.75e-06 | 8.75e-06 | 3.44e-06 | 4.62e-07 |
+| linear/two_stage_rc_lowpass.yaml | 0.00145 | 1.01e-05 | 1.01e-05 | 3.44e-06 | 4.62e-07 |
 | linear/voltage_divider_3stage.yaml | 0 | 0 | 0 | 0 | 0 |
 | magnetics/core_loss_steinmetz_sine.yaml | 0.000228 | 0.000227 | 0.000227 | 0.000123 | 3.5e-06 |
 | magnetics/coupled_inductor_step.yaml | 0.00032 | 0.00032 | 0.00032 | 3.76e-06 | 6.72e-06 |
-| magnetics/half_bridge_transformer_dc.yaml | 0.101 | 2.81e-06 | 2.97e-06 | 2.08e-05 | 1.22e-06 |
-| magnetics/inductor_chain_step.yaml | 0.00231 | 5.2e-06 | 5.2e-06 | 9.05e-07 | 4.89e-07 |
-| magnetics/transformer_leakage.yaml | 0.0041 | 0.00408 | 0.00408 | 0.000231 | 3.11e-05 |
+| magnetics/half_bridge_transformer_dc.yaml | 0.101 | 7.71e-06 | 7.66e-06 | 2.08e-05 | 1.22e-06 |
+| magnetics/inductor_chain_step.yaml | 0.00231 | 5.34e-06 | 5.34e-06 | 9.05e-07 | 4.89e-07 |
+| magnetics/transformer_leakage.yaml | 0.0041 | 0.00409 | 0.00409 | 0.000231 | 3.11e-05 |
 | magnetics/transformer_step_up.yaml | 4.64e-06 | 4.64e-06 | 4.64e-06 | 0 | 5.1e-06 |
 | motors/motor_dc_brush_step_load.yaml | 0.000289 | 4.5e-07 | 4.5e-07 | 6.06e-06 | 3.62e-07 |
 | motors/motor_induction_locked_rotor.yaml | 2.25e-06 | 2.25e-06 | 2.25e-06 | 5.1e-05 | 1.63e-06 |
@@ -195,73 +192,74 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | resonance/driven_lc_series_resonance.yaml | 0.000771 | 0.000771 | 0.000771 | 0.000217 | 2.13e-06 |
 | resonance/lc_resonant_tank.yaml | 0.00585 | 0.000312 | 0.000312 | 5.29e-05 | 4.29e-06 |
 | resonance/ll04_rlc_underdamped.yaml | 0.00592 | 0.00592 | 0.00592 | 2.99e-05 | 7.34e-07 |
-| resonance/rl_high_pass_sine.yaml | 0.000735 | 0.000735 | 0.000735 | 7.56e-05 | 7.54e-06 |
-| resonance/rlc_overdamped_step.yaml | 0.00179 | 1.34e-05 | 1.34e-05 | 5.77e-06 | 5.58e-07 |
-| resonance/rlc_parallel_step.yaml | 0.00778 | 0.000314 | 0.000314 | 1.61e-05 | 1.02e-05 |
-| resonance/rlc_step.yaml | 0.00043 | 9.16e-07 | 9.16e-07 | 1.31e-05 | 1.94e-07 |
+| resonance/rl_high_pass_sine.yaml | 0.000735 | 0.000736 | 0.000736 | 7.56e-05 | 7.54e-06 |
+| resonance/rlc_overdamped_step.yaml | 0.00179 | 1.12e-05 | 1.12e-05 | 5.77e-06 | 5.58e-07 |
+| resonance/rlc_parallel_step.yaml | 0.00778 | 0.000404 | 0.000404 | 1.61e-05 | 1.02e-05 |
+| resonance/rlc_step.yaml | 0.00043 | 9.23e-07 | 9.23e-07 | 1.31e-05 | 1.94e-07 |
 | stress/high_q_rlc_ringdown.yaml | 0.0229 | 0.0149 | 0.0149 | 0.00566 | 5.58e-05 |
-| stress/periodic_rc_pwm.yaml | 0.0119 | 0.00379 | 0.000284 | 2e-07 | 4.38e-07 |
-| stress/stiff_rc_high_freq_switching.yaml | 0.00267 | 1.98e-05 | 1.98e-05 | 1.43e-05 | 1.1e-05 |
+| stress/periodic_rc_pwm.yaml | 0.0119 | 0.00378 | 0.000284 | 2e-07 | 4.38e-07 |
+| stress/stiff_rc_high_freq_switching.yaml | 0.00267 | 2.03e-05 | 2.03e-05 | 1.43e-05 | 1.1e-05 |
 | stress/stiff_rlc.yaml | 3.97e-09 | 3.72e-09 | 3.72e-09 | 0 | 3.56e-09 |
-| stress/stiff_two_timescale_rc.yaml | 7.85e-05 | 1.2e-06 | 1.2e-06 | 7.79e-07 | 4.64e-07 |
+| stress/stiff_two_timescale_rc.yaml | 7.85e-05 | 3.31e-06 | 3.31e-06 | 7.79e-07 | 4.64e-07 |
 | switching/basic/chopper_with_rc_snubber.yaml | 0.0187 | 0.000162 | 0.000162 | 3.81e-05 | 2.91e-05 |
-| switching/basic/mosfet_nmos_dc.yaml | 3.55e-15 | 5.02e-15 | 5.02e-15 | 0 | refused |
-| switching/basic/pwm_voltage_rc.yaml | 0.000883 | 4.67e-08 | 4.67e-08 | 8.98e-09 | 1.15e-07 |
-| switching/basic/pwm_voltage_rl_filter.yaml | 0.00429 | 6.77e-06 | 6.77e-06 | 6.53e-05 | 2.26e-06 |
+| switching/basic/mosfet_nmos_dc.yaml | 3.55e-15 | 0 | 0 | 0 | refused |
+| switching/basic/pwm_voltage_rc.yaml | 0.000883 | 9.98e-09 | 9.98e-09 | 8.98e-09 | 1.15e-07 |
+| switching/basic/pwm_voltage_rl_filter.yaml | 0.00429 | 6.93e-06 | 6.93e-06 | 6.53e-05 | 2.26e-06 |
 | switching/basic/snubber_rc.yaml | 0.000561 | 0.000561 | 0.000561 | 1.65e-07 | 1.73e-07 |
-| switching/basic/vcswitch_resistor.yaml | 0.0332 | 0.0546 | 0.0193 | 0 | 3.16e-06 |
-| switching/boost/boost_classic.yaml | 0.000313 | 1.04e-06 | 3.98e-07 | 9.53e-06 | 7.02e-07 |
-| switching/boost/boost_pfc_open_loop.yaml | 0.0304 | 0.0304 | 1.06e-05 | 1.72e-07 | 4.47e-07 |
-| switching/boost/boost_switching_complex.yaml | 0.00192 | 0.000334 | 2.93e-05 | 1.05e-05 | 2.99e-05 |
-| switching/boost/cascaded_boost_buck.yaml | 0.000399 | 3.94e-06 | 2.21e-06 | 5.95e-05 | 2.24e-06 |
-| switching/boost/ll07_boost_vcswitch.yaml | 0.0984 | 0.0548 | 0.0445 | 0.000117 | 0.000181 |
-| switching/boost/ll12_pfc_boost_continuous.yaml | 0.083 | 0.0785 | 0.0753 | 0.000115 | refused |
-| switching/boost/synchronous_boost.yaml | 6.31e-05 | 2.93e-07 | 2.93e-07 | 8.19e-08 | 3.07e-07 |
-| switching/boost/textbook_erickson_boost_ccm.yaml | 0.000313 | 1.04e-06 | 3.98e-07 | 9.53e-06 | 7.02e-07 |
-| switching/boost/two_phase_interleaved_boost.yaml | 0.00019 | 1.04e-06 | 4.37e-07 | 5.56e-06 | 6.63e-07 |
-| switching/buck/buck_dcm.yaml | 0.00183 | 3.41e-06 | 3.1e-06 | 7.7e-06 | 6e-07 |
-| switching/buck/buck_hard_switching_reference.yaml | 0.00102 | 1.44e-06 | 7.66e-07 | 2.27e-06 | 8.28e-07 |
-| switching/buck/buck_mosfet_nonlinear.yaml | 0.00841 | 0.00232 | 4.08e-07 | 5.08e-07 | refused |
-| switching/buck/buck_switching.yaml | 0.00168 | 9.68e-07 | 9.6e-07 | 1.36e-06 | 1.03e-06 |
-| switching/buck/buck_with_current_sense.yaml | 0.00131 | 1.06e-06 | 1.06e-06 | 3.15e-06 | 1.33e-06 |
+| switching/basic/vcswitch_resistor.yaml | 0.0332 | 0.005 | 0.0332 | 0 | 3.16e-06 |
+| switching/boost/boost_classic.yaml | 0.000313 | 4.09e-07 | 3.94e-07 | 9.53e-06 | 6.92e-07 |
+| switching/boost/boost_pfc_open_loop.yaml | 0.0304 | 0.0191 | 1.05e-05 | 1.7e-07 | 4.39e-07 |
+| switching/boost/boost_switching_complex.yaml | 0.00192 | 0.000334 | 3.15e-05 | 1.05e-05 | 2.99e-05 |
+| switching/boost/cascaded_boost_buck.yaml | 0.000399 | 2.27e-06 | 2.24e-06 | 5.95e-05 | 2.24e-06 |
+| switching/boost/ll07_boost_vcswitch.yaml | 0.0983 | 0.0445 | 0.0445 | 0.000117 | 0.000179 |
+| switching/boost/ll12_pfc_boost_continuous.yaml | 0.083 | 0.0753 | 0.0753 | 0.000115 | refused |
+| switching/boost/synchronous_boost.yaml | 6.31e-05 | 2.88e-07 | 2.88e-07 | 8.33e-08 | 3.02e-07 |
+| switching/boost/textbook_erickson_boost_ccm.yaml | 0.000313 | 4.09e-07 | 3.94e-07 | 9.53e-06 | 6.92e-07 |
+| switching/boost/two_phase_interleaved_boost.yaml | 0.00019 | 4.69e-07 | 4.32e-07 | 5.56e-06 | 6.59e-07 |
+| switching/buck/buck_dcm.yaml | 0.00183 | 9.92e-07 | 9.91e-07 | 7.7e-06 | 6e-07 |
+| switching/buck/buck_hard_switching_reference.yaml | 0.00102 | 7.6e-07 | 7.6e-07 | 2.27e-06 | 8.29e-07 |
+| switching/buck/buck_mosfet_nonlinear.yaml | 0.00841 | 3.87e-05 | 4.07e-07 | 5.08e-07 | refused |
+| switching/buck/buck_switching.yaml | 0.00168 | 9.7e-07 | 9.53e-07 | 1.36e-06 | 1.03e-06 |
+| switching/buck/buck_with_current_sense.yaml | 0.00131 | 1.05e-06 | 1.05e-06 | 3.15e-06 | 1.33e-06 |
 | switching/buck/cascaded_buck_buck.yaml | 0.00126 | 1.16e-06 | 1.16e-06 | 1.42e-05 | 1.46e-06 |
-| switching/buck/high_freq_gan_buck.yaml | 0.00103 | 6.14e-06 | 6.14e-06 | 8.55e-05 | 5.1e-06 |
-| switching/buck/ll06_buck_vcswitch.yaml | 0.0781 | 0.0907 | 0.0426 | 8.21e-05 | 0.000171 |
-| switching/buck/ll08_buck_mosfet.yaml | 0.228 | 0.0568 | 0.0652 | 0.00011 | refused |
-| switching/buck/sync_buck_500khz.yaml | 0.00167 | 3.76e-06 | 3.76e-06 | 1.71e-05 | 1.98e-06 |
-| switching/buck/synchronous_buck.yaml | 0.00132 | 1.06e-06 | 1.06e-06 | 3.14e-06 | 1.35e-06 |
-| switching/buck/textbook_erickson_buck_ccm.yaml | 0.000771 | 1.76e-06 | 4.21e-07 | 9.87e-06 | 4.3e-07 |
-| switching/buck/triple_sync_buck.yaml | 0.00132 | 1.04e-06 | 1.04e-06 | 3.18e-06 | 1.3e-06 |
-| switching/buck_boost/bidirectional_buck_boost.yaml | 0.00132 | 1.06e-06 | 1.06e-06 | 3.15e-06 | 1.34e-06 |
-| switching/buck_boost/buck_boost.yaml | 0.00072 | 9.16e-07 | 6.37e-07 | 7.97e-06 | 1.06e-06 |
-| switching/buck_boost/cuk_converter.yaml | 0.000854 | 7.85e-06 | 6.2e-06 | 9.25e-05 | 2.51e-06 |
-| switching/buck_boost/sepic.yaml | 0.00186 | 6.03e-06 | 1.72e-06 | 2.96e-05 | 1.51e-06 |
-| switching/inverter/half_bridge_inverter.yaml | 0.000376 | 1.16e-06 | 1.16e-06 | 9.06e-07 | 1.2e-06 |
-| switching/inverter/half_bridge_inverter_lc.yaml | 0.00103 | 7.92e-06 | 7.92e-06 | 0.000303 | 3.89e-06 |
-| switching/inverter/half_bridge_lc_filter.yaml | 0.00131 | 1.12e-06 | 1.12e-06 | 5e-06 | 1.48e-06 |
-| switching/inverter/lcc_resonant_inverter.yaml | 0.00565 | 0.000227 | 0.000227 | 8.37e-05 | 8.81e-05 |
-| switching/inverter/ll09_half_bridge_inverter_leg.yaml | 0.0707 | 0.0102 | 0.0102 | 4.27e-05 | 0.000167 |
-| switching/inverter/ll10_full_bridge_inverter_lc.yaml | 0.05 | 0.000127 | 0.000127 | 9.18e-05 | 0.000127 |
-| switching/isolated/active_clamp_forward.yaml | 0.00425 | 0.00375 | 0.00374 | 0.000117 | 1.24e-06 |
-| switching/isolated/dual_active_bridge.yaml | 0.000265 | 2.35e-06 | 2.35e-06 | 3.49e-05 | 1.86e-06 |
-| switching/isolated/flyback_converter.yaml | 0.949 | 5.63e-06 | 5.63e-06 | 4.29e-05 | 1.13e-06 |
-| switching/isolated/forward_converter.yaml | 0.707 | 6.05e-06 | 6.08e-06 | 2.17e-05 | 1.12e-06 |
-| switching/isolated/full_bridge_dc.yaml | 0.0828 | 2.66e-05 | 2.66e-05 | 0.000141 | 2.66e-05 |
+| switching/buck/high_freq_gan_buck.yaml | 0.00103 | 6.2e-06 | 6.2e-06 | 8.55e-05 | 5.1e-06 |
+| switching/buck/ll06_buck_vcswitch.yaml | 0.0781 | 0.0792 | 0.0434 | 7.94e-05 | 0.000171 |
+| switching/buck/ll08_buck_mosfet.yaml | 0.228 | 0.0659 | 0.0652 | 0.00011 | refused |
+| switching/buck/sync_buck_500khz.yaml | 0.00167 | 3.77e-06 | 3.77e-06 | 1.71e-05 | 1.98e-06 |
+| switching/buck/synchronous_buck.yaml | 0.00132 | 1.05e-06 | 1.05e-06 | 3.14e-06 | 1.35e-06 |
+| switching/buck/textbook_erickson_buck_ccm.yaml | 0.000771 | 5.02e-07 | 4.21e-07 | 9.87e-06 | 4.29e-07 |
+| switching/buck/textbook_erickson_buck_ccm_r5.yaml | 0.0014 | 8.04e-06 | 8.05e-06 | 1.08e-05 | 5.43e-07 |
+| switching/buck/triple_sync_buck.yaml | 0.00132 | 1.03e-06 | 1.03e-06 | 3.17e-06 | 1.31e-06 |
+| switching/buck_boost/bidirectional_buck_boost.yaml | 0.00132 | 1.05e-06 | 1.05e-06 | 3.15e-06 | 1.34e-06 |
+| switching/buck_boost/buck_boost.yaml | 0.00072 | 6.39e-07 | 6.21e-07 | 7.96e-06 | 1.04e-06 |
+| switching/buck_boost/cuk_converter.yaml | 0.000854 | 6.59e-06 | 6.2e-06 | 9.25e-05 | 2.51e-06 |
+| switching/buck_boost/sepic.yaml | 0.00186 | 1.8e-06 | 1.73e-06 | 2.96e-05 | 1.51e-06 |
+| switching/inverter/half_bridge_inverter.yaml | 0.000376 | 1.15e-06 | 1.15e-06 | 9.1e-07 | 1.19e-06 |
+| switching/inverter/half_bridge_inverter_lc.yaml | 0.00103 | 7.91e-06 | 7.91e-06 | 0.000303 | 3.89e-06 |
+| switching/inverter/half_bridge_lc_filter.yaml | 0.00131 | 1.11e-06 | 1.11e-06 | 5.01e-06 | 1.48e-06 |
+| switching/inverter/lcc_resonant_inverter.yaml | 0.00565 | 0.000232 | 0.000232 | 8.37e-05 | 8.81e-05 |
+| switching/inverter/ll09_half_bridge_inverter_leg.yaml | 0.0707 | 0.0102 | 0.0102 | 4.26e-05 | 0.000167 |
+| switching/inverter/ll10_full_bridge_inverter_lc.yaml | 0.05 | 0.000127 | 0.000127 | 9.15e-05 | 0.000127 |
+| switching/isolated/active_clamp_forward.yaml | 0.00425 | 0.00378 | 0.00374 | 0.000117 | 1.25e-06 |
+| switching/isolated/dual_active_bridge.yaml | 0.000265 | 2.4e-06 | 2.4e-06 | 3.49e-05 | 1.86e-06 |
+| switching/isolated/flyback_converter.yaml | 0.949 | 8.98e-06 | 8.98e-06 | 4.29e-05 | 1.13e-06 |
+| switching/isolated/forward_converter.yaml | 0.707 | 9.75e-06 | 9.74e-06 | 2.17e-05 | 1.12e-06 |
+| switching/isolated/full_bridge_dc.yaml | 0.0828 | 2.67e-05 | 2.67e-05 | 0.000141 | 2.67e-05 |
 | switching/isolated/ll11_llc_resonant_converter.yaml | error | error | error | error | refused |
-| switching/isolated/ll13_active_clamp_forward.yaml | 4.51 | 0.00165 | 0.00165 | 0.00115 | refused |
-| switching/isolated/llc_half_bridge_zvs.yaml | 0.021 | 0.000585 | 0.000586 | 2.9e-05 | 2.98e-05 |
-| switching/isolated/psfb_full_bridge_zvs.yaml | 0.0211 | 0.00158 | 0.0017 | 1.62e-05 | 0.000127 |
-| switching/isolated/synchronous_flyback.yaml | 0.207 | 1.29e-06 | 1.29e-06 | 9.15e-06 | 1.02e-06 |
+| switching/isolated/ll13_active_clamp_forward.yaml | 4.51 | 0.00197 | 0.00197 | 0.00108 | refused |
+| switching/isolated/llc_half_bridge_zvs.yaml | 0.021 | 0.00059 | 0.00059 | 2.9e-05 | 2.98e-05 |
+| switching/isolated/psfb_full_bridge_zvs.yaml | 0.0211 | 0.0017 | 0.0017 | 1.62e-05 | 0.000127 |
+| switching/isolated/synchronous_flyback.yaml | 0.207 | 1.62e-05 | 1.62e-05 | 9.15e-06 | 1.02e-06 |
 | switching/multilevel/cascaded_h_bridge_5level.yaml | 0.0274 | 5.69e-05 | 5.69e-05 | 0 | 5.69e-05 |
-| switching/multilevel/flying_capacitor_3level.yaml | 0.0466 | 3.71e-05 | 3.71e-05 | 6.78e-05 | 3.71e-05 |
+| switching/multilevel/flying_capacitor_3level.yaml | 0.0466 | 3.74e-05 | 3.74e-05 | 6.75e-05 | 3.74e-05 |
 | switching/multilevel/mmc_4cell_chain.yaml | 0.0268 | 5.74e-05 | 5.74e-05 | 0 | 5.74e-05 |
-| switching/multilevel/npc_three_level_halfbridge.yaml | 0.00319 | 5.08e-06 | 5.08e-06 | 7.9e-06 | 5.09e-06 |
+| switching/multilevel/npc_three_level_halfbridge.yaml | 0.00319 | 5.06e-06 | 5.06e-06 | 7.9e-06 | 5.09e-06 |
 | switching/multilevel/t_type_3level_halfbridge.yaml | 0.0782 | 4.24e-05 | 4.24e-05 | 0.000112 | 4.24e-05 |
 | thermal/electrothermal_resistor_self_heating.yaml | 0 | 0 | 0 | 0 | 0 |
-| thermal/long_run_drift_buck.yaml | 0.000603 | 9.41e-06 | 9.41e-06 | 2.58e-06 | 1.07e-05 |
-| three_phase/interleaved_buck_3ph.yaml | 0.00217 | 0.00249 | 1.75e-06 | 6.64e-08 | 2.2e-07 |
-| three_phase/three_phase_balanced_rl_load.yaml | 1.82e-06 | 1.82e-06 | 1.82e-06 | 4.22e-05 | 6.01e-07 |
-| three_phase/three_phase_diode_rectifier.yaml | 1.51 | 0.00572 | 0.00571 | 5.51e-05 | 0.00034 |
+| thermal/long_run_drift_buck.yaml | 0.000603 | 1.12e-05 | 1.12e-05 | 2.58e-06 | 1.07e-05 |
+| three_phase/interleaved_buck_3ph.yaml | 0.00217 | 0.00245 | 1.72e-06 | 6.63e-08 | 1.98e-07 |
+| three_phase/three_phase_balanced_rl_load.yaml | 1.82e-06 | 1.83e-06 | 1.83e-06 | 4.22e-05 | 6.01e-07 |
+| three_phase/three_phase_diode_rectifier.yaml | 1.51 | 0.00766 | 0.00766 | 5.51e-05 | 0.00034 |
 
 ## Analytic set (27 cases; agree = within the frozen ceiling, 1e-3 when none)
 
@@ -293,11 +291,11 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | pwl_diode_drop | 0 | 0 | 0 | 0 | 1.85e-16 |
 | halfwave_r | 5.38e-09 | 5.38e-09 | 5.38e-09 | 2.59e-08 | 5.38e-09 |
 | igbt_knee | 0 | 0 | 0 | 0 | refused |
-| scr_halfwave_r | 1.46e-16 | 0.0271 ✗ | 1.47e-16 | 1.3e-11 | refused |
+| scr_halfwave_r | 1.46e-16 | 0.0271 ✗ | 1.47e-16 | 1.39e-11 | refused |
 | halfwave_rl | 9.65e-06 | 1.44e-06 | 1.44e-06 | 3.76e-06 | 5.69e-09 |
 | hard_switched_rc | 0.01 ✗ | 1.13e-05 | 1.13e-05 | 2.22e-06 | 7.58e-14 |
-| buck_ccm | 0.000256 | 1.23e-08 | 1.23e-08 | 3.37e-07 | 3.92e-15 |
-| buck_dcm | 0.000538 | 5.32e-08 | 1.87e-08 | 5.62e-07 | 7.34e-10 |
+| buck_ccm | 0.000256 | 1.23e-08 | 1.23e-08 | 3.36e-07 | 3.92e-15 |
+| buck_dcm | 0.000538 | 2.1e-08 | 1.87e-08 | 5.65e-07 | 7.34e-10 |
 | im_locked_rotor | 1.35e-06 | 1.35e-06 | 1.35e-06 | 4.32e-06 | refused |
 | im_free_acceleration | 9.62e-05 | 6e-06 | 6e-06 | 1.87e-05 | refused |
 | gapped_core_rl | 0.00159 | 1.84e-06 | 1.84e-06 | 2.26e-07 | 4.37e-16 |

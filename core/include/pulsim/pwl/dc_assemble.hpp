@@ -19,6 +19,7 @@
 // `compute_dc_op` solves the DC system and returns the state
 // vector. Throws on singular matrices.
 
+#include "pulsim/sim/error.hpp"   // SingularError
 #include "pulsim/models/current_source.hpp"
 #include "pulsim/models/induction_machine_mna.hpp"
 #include "pulsim/models/pmsm_mna.hpp"
@@ -1096,7 +1097,7 @@ inline Vector compute_dc_op(const topology::Graph& graph,
         const auto defect =
             dc_structural_defect(graph, pool, mask, {}, t_eval);
         if (defect.present) {
-            throw std::runtime_error(std::format(
+            throw SingularError(std::format(
                 "compute_dc_op: DC matrix structurally singular for "
                 "mask {}{}",
                 mask.to_string(), defect.detail));
@@ -1112,7 +1113,7 @@ inline Vector compute_dc_op(const topology::Graph& graph,
 
     auto solver = sparse::make_default_solver();
     if (!solver->analyze(J)) {
-        throw std::runtime_error(std::format(
+        throw SingularError(std::format(
             "compute_dc_op: DC matrix structurally singular for "
             "mask {}{}",
             mask.to_string(),
@@ -1124,7 +1125,7 @@ inline Vector compute_dc_op(const topology::Graph& graph,
         // that it failed. Capacitors are open at DC, so a node hung
         // off nothing but a capacitor produces a genuinely empty
         // column here — by far the most common cause, and now named.
-        throw std::runtime_error(std::format(
+        throw SingularError(std::format(
             "compute_dc_op: DC matrix numerically singular for "
             "mask {}{}",
             mask.to_string(),
@@ -1184,7 +1185,7 @@ inline Vector compute_dc_op_newton(
         const auto defect =
             dc_structural_defect(graph, pool, mask, refresh, t_eval);
         if (defect.present) {
-            throw std::runtime_error(std::format(
+            throw SingularError(std::format(
                 "compute_dc_op_newton: DC system structurally "
                 "singular for mask {}{}",
                 mask.to_string(), defect.detail));

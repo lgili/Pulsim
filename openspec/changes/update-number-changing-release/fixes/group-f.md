@@ -553,6 +553,481 @@ output_rtol 1e-4/1e-5/1e-6 on 100 benchmark circuits (26 skipped by the tool), f
 and active clamp included. Not run: Eigen 3.4.0, Windows/MSVC, a second reviewer pass on the
 review fixes.
 
+## Session 4 — branch `fix/core-release-f4-chord-bound` (from 6cb51c00, C++ ffdf5007)
+
+### Item 1 — the output rule's promise: the diagnosis (evidence before code)
+
+`.scratch/f4/both.py` (auto+next cell, the 100 circuit units with a rule cell): the
+rule ratio against the harness's reference (trbdf2 rtol 1e-8, read linearly between its
+steps) and against the engine's OWN exact flow (the same cell at output_rtol/100, event
+times asserted bit-equal on all 100). Base tip ffdf5007:
+
+| | ratio vs trbdf2 ref > 1 | ratio vs exact flow > 1 |
+|---|---:|---:|
+| cells | 54 | 6 (ll06 635, lcc_resonant_inverter, active_clamp_forward, half_bridge_inverter_lc 6.4, chopper_with_rc_snubber 1.42; flying_capacitor 1.0002) |
+
+* **48 of the 54 are the reference's own error**, not the rule: against the exact flow
+  they sit at 0.96..0.9997 (high_q_rlc_ringdown 12.4 → 0.9998: the trbdf2 reference had
+  2 points in the chord the flow resolves with 80; sine_voltage_rc 3.11 → 0.19 (0 reference
+  points in the chord); ll09 59.6 → 0.988; ll10 93.5 → 0.982; ll07 8.16 → 0.995; the
+  rectifiers 3..5.4 → 0.96..0.998). The "34 cells within 1.25×" are this: the bound is
+  TIGHT (0.98–0.9997 of its tolerance against the flow), so any reference error tips them
+  over. Not a constant in d²/8, not the midpoint (the bound holds for every τ), not the
+  range (the engine's range so far ⊆ the run's range: its tolerance is the smaller one).
+* **The genuine violations are not the second derivative read at the interval start.** The
+  bound in `exact_chord_step` was already the rigorous per-mode form the brief asks for
+  (Σ_k |V_jk||z̈_k| max(1, e^{Re λ d}) with the exact-at-τ=0 refinements, Peano kernel ≤ d²/8)
+  — but per STATE. The stored samples are the RECOVERED vector y = R·x + R_osc·(sin, cos) +
+  R_b·b_pwl(t) (node voltages, branch currents). ll06, at the worst chord (28.38 µs, 5.47 ns):
+  I(L1) 0.82 of its tolerance, V(out) 1e-5, but V(sw) = V(n_l) **596 ×**: with switch and
+  diode both off V(sw) = (48 g_s − I(L1))/(g_s + g_d), 5 kΩ, so I(L1)'s admissible chord
+  error 5.75e-5 A reads 0.29 V on a node whose tolerance is 4.8e-4 V (32.76 V chord vs
+  33.0475 V flow; the dense flow's max|ÿ|·d²/8 = 723 × tol). Same cause on the inverter
+  LC / snubber nodes.
+* Two smaller defects found on the way: (a) a rule chord a sliver short of a step end was
+  STRETCHED to it by `near_time`'s 1e-12 s floor (ll06, a 1.46e-10 s chord after a diode
+  event: 1.007 ×); (b) the harness read the flow across a jump's right-limit row (one ulp
+  after the event) and across source corners (pulse edges) — its own artifacts (104 × on
+  the active clamp, 5e6 on a 1 ns pulse edge), not the engine.
+
+### Item 1 — the fix
+
+* `exact_chord_step` bounds the rows of a row map P = O·V cached on the mode
+  (`ExactLTI::chord_P_re/im`; empty: P = V as before), O = [I; R, R_osc] built by the
+  adapter (`LTIEntry::recover_osc` = R_b·stamp·amp·(cos φ, sin φ) per oscillator, next to
+  q_sin / q_cos). The piecewise-linear sources' direct share is linear in τ (no chord
+  error); the sines' direct share is an oscillator mode like any other (its |λ|² = ω²
+  enters the same sums). The scheduler tracks each recovered row's range
+  (`output_ylo_/yhi_`) and passes its tolerance in `ChordWork::ty` (same rule: rtol ×
+  max(range, 1e-3·peak), floored at atol, and at the row's own evaluation error
+  16·u·κ·(|R||x| + |R_osc|) — a balanced three-phase neutral, exactly 0 with 3.4e-7 V of
+  rounding, held to atol spent the whole 2e6-sample budget).
+* The deferred-end gap check (F-X-4) also on the recovered rows (floored at the rounding).
+* `push_output_samples_`: no chord stretched past its bound to reach the step end — the
+  rest is halved; same for the thermal path's rule-cut step at a time event.
+* Harness: `metrics.rule_ratio_flow` — the rule's ratio against the exact flow: the same
+  cell at output_rtol × 0.05 (× 0.2 when the per-interval cap cuts it; capped twice or other
+  event times = not comparable, listed), read at each chord's midpoint by the quadratic
+  through the dense samples INSIDE the chord and the chord's two ends (one smooth piece).
+  The old reading against trbdf2 is kept as `rule_ratio_ref` (information).
+
+### Session 4 reviewer (fresh context, opus, read only) — fixed / left
+
+The reviewer fuzzed a numpy port of `exact_chord_step` (400 random systems with growing
+modes, output rows up to 1e3, ramps: worst 0.9994 × tol; monotone in d on 3000 cases),
+checked the sine stamp convention of `recover_osc` against `compute_sine_b_extra` /
+`current_stamp_` (right), and found the rule-off path byte-identical by construction.
+* FIXED (medium) — the sliver halving could still stretch: with near_time's 1e-12 s floor
+  and d < h/2 it stepped h/2 > d (a 1e11 rad/s ring, d ≈ 9e-14 s). Now `min(d, h/2)`, also
+  on the thermal path.
+* FIXED (medium) — the first rounding floor (16·u·κ·|R||x|) was far too loose (κ is a
+  worst case): it let ll06 / ll09 / rlc_parallel_step back to 16 / 11 / 3. The floor is now
+  the row's actual evaluation magnitude, 16·u·Σ_k |P_jk||z_k| (computed in
+  `exact_chord_step`, `ChordWork::tyf`); the deferral check reads the same floor.
+* FIXED (low) — a bisection whose 1e-12·h probe does not fit returned it as a certified
+  step; it is now `bounded = false` (counted in `n_output_unbounded`, the chord is the step).
+* FIXED (harness) — a dense flow with `n_output_unbounded` > 0 is not a flow (not compared).
+* LEFT (low) — the time-resolution floor `max(d, 64·u·max(1,|t|))` stretches a chord at
+  large t (a 1 GHz ring at t = 100 s, rtol 1e-6) with no counter. Not seen on the set.
+* LEFT (medium, stated) — when the rounding floor binds, the promise is
+  max(rtol·range, atol, the row's own rounding); no counter reports it.
+* LEFT (harness, decided bar) — `rule_ratio_flow` reads chord MIDPOINTS (the bar of
+  DECISIONS 6); for a fast decaying mode the maximum is nearer the start (the midpoint reads
+  0.5–0.62 of it). The property tool reads random instants, which covers it.
+
+### Session 4 — state at hand-off (context budget reached)
+
+Measured (auto+next, the 100 circuit units with a rule cell; `.scratch/f4/after2.jsonl`,
+tip before the reviewer fixes, harness `rule_ratio_flow` with its first stencil):
+* ratio vs the exact flow ≤ 1 on 97 / 100 comparable; the three over 1 were re-read after the
+  stencil fixes (bracketing, linear on a lopsided stencil): ll06 0.998, rlc_parallel_step
+  0.981 — and **ll09_half_bridge_inverter_leg 7.3 (OPEN, genuine)**: the chord
+  [24.013458 µs, 25 µs] starts 13 ns after the 24 µs event, where a fast mode is still
+  alive (V(out) rises 0.82 mV in the first 1.8 ns of the chord, then 0.16 mV over the rest);
+  the chord reads 47.61979 → 47.62077 V straight, the flow 47.62061 V at +1.8 ns. The STATE
+  row I(Lload) reads 6.9 × too, so this is not the recovered-row defect: the bound (or the
+  path that stores the chord: the fast-sample step ends of `plan_fast_samples_`, the F-X-4
+  deferral) let a 1 µs chord through with the fast mode's amplitude 2|γ| ≈ 1.6 mV above
+  the tolerance (≈ 7e-5). NEXT STEP: print, in `push_output_samples_` / the deferral block,
+  (t0, t1, d, output_certified_, out_defer) for ll09 between 24.0 and 24.1 µs; check whether
+  the chord came from the deferral check (`output_step_(ts, states.back(), …, false)`) with
+  a stale `ts` / tolerance, or from a step whose rule call returned h uncounted.
+* sample counts after / before (ratio): min 1.00, median 1.00, p75 1.25, p90 4.65, max 14.2
+  (19 of 100 above 2×: boost_pfc_open_loop 13 531 → 191 771, buck_dcm 891 → 8 590,
+  textbook_erickson_buck_ccm 6 946 → 48 104, ll06 2 943 → 18 251, cl_buck_pi 20 228 →
+  97 726 …: the switch-node / high-impedance rows that were never held before — the buck
+  DCM's V(sw) ring binds at 0.991 of its tolerance). three_phase_balanced_rl_load 5 153 →
+  8 038 (after the rounding floor; 2.1e6 without it). ladder500 NOT re-measured.
+* property tool (`benchmarks/tools/output_rule_property.py`, dt grid = median chord / 100,
+  200 random grid instants per circuit, events within 1e-12 s): on the earlier tip 26 of 34
+  comparable, worst 0.9968, none over 1 (8 not comparable: event offsets 1e-17..1e-13 s —
+  now accepted below 1e-12 s — and two with other events, half_bridge_transformer_dc /
+  forward_converter, rule-off projection). The `--truth` (mpmath) run on six solved
+  circuits (`.scratch/f4/truth_units.txt`) and the 30-circuit re-run on the final tip were
+  NOT run. `.scratch/f4/run3.sh` runs all of it plus the output_rtol events gate
+  (`.scratch/f4/evgate.py`).
+* NOT run on the final tip: the rehearsal tool itself (its rule column now reads
+  `rule_ratio_flow`, the old one is `rule_ratio_ref`), goldens / dsed bit-identity /
+  scoreboard default cells (rule-off is unchanged by construction: every change sits behind
+  output_rtol > 0 — the reviewer confirmed — but not measured), `pulsim_core_dsed_tests`
+  (tree configured at `.scratch/build-ctest`, not built; the new C++ case is in
+  test_exact_lti.cpp), full pytest, instructions per run.
+* Item 2 (certificate cost, the sines in the certificate — coordinator's addition: the
+  three-phase bridge with line inductance, D2 ON at 5.000000250912935 ms with D5 still ON,
+  D5 OFF at 5.001350943090826 ms; the engine flips both at the D2 instant) and item 3 (the
+  t_end-dependent parasitic cut): NOT started. For item 2 the shared object is ready: the
+  certificate's row q_k = c·V_k is a `chord_P` row; `exact_chord_step`'s second-order form
+  (|Σ q z̈| + δ|Σ q z̈ λ| + δ²/2 Σ|q z̈||λ|²) with z̈(a) = z̈(t0)e^{λτ} is the sharper E; for the
+  sines the predicate's direct oscillator share is (recover_osc[from] − recover_osc[to]) ×
+  its gain, which lets `exact_scan_modes` drop its `aug_omegas.empty()` refusal.
+
+## Session 5 — output rule (branch `fix/core-release-f4-chord-bound`; stopped by the coordinator at its context budget)
+
+### Item 1 — ll09's 7.3x: a HARNESS artifact, fixed (fe78e327)
+
+* The chord is [24.013458151530692 µs, 25 µs] of V(out) / V(load_mid) (and the I(Lload) chord
+  [1.050278676 ms, 1.074 ms]). The dense flow (output_rtol × 0.05) has exactly ONE sample inside
+  it, at 24.0152271 µs (1.8 ns after the chord's start, where the post-edge fast mode is still
+  alive). `metrics.rule_ratio_flow` applied its lopsided-stencil guard only when the chord held
+  ≥ 2 dense samples; with one it fitted the quadratic through (start, +1.8 ns, end) and
+  extrapolated the fast piece's curvature over 985 ns: 5.8 (V(out)) / 6.9 (I(Lload)).
+* The engine's chord is within its promise: tolerance = 1e-5 × 1960 V (V(out)'s range includes the
+  −979 V right after the 24 µs edge) = 0.0196 V; the chord's midpoint error against the dense flow
+  is 4.1e-4 V (0.02 of it). Every ll09 chord read against the dense flow LINEARLY at 14 fractions
+  (1e-3 … 0.997) of each chord: worst 0.989 (V(mid)/V(out)/V(load_mid)), 0.942 (I(Lload)).
+  No engine path emitted an uncertified chord; no flag was wrong. (The predecessor's 10.8 in
+  after2.jsonl was the tip before the reviewer's rounding-floor fix; on 075feac9 the engine part
+  was already gone and only the stencil artifact remained.)
+* Fix: the guard also for a one-sample stencil (`ts.size >= 3`); test
+  `test_f4_rule_ratio_flow_never_extrapolates_one_short_dense_piece`.
+* Rule vs exact flow on 075feac9 (after.py, auto+next, the 100 circuit units): 99 comparable,
+  98 ≤ 1 (worst ≤ 0.99988), ll09 7.27 = the artifact above (now ≤ 0.989); 1 not comparable
+  (three_phase_balanced_rl_load: the dense flow hit its 2e6-sample budget at 4.53 ms). NOT re-run
+  with the fixed harness on the 100.
+* Paths that emit a chord, audited BY READING `scheduler.hpp` (no hole found): regular step
+  (`push_output_samples_`: each cut certified by `output_step_`, the last chord's certification
+  returned; uncertified = cap / budget / unbounded → the end is stored and counted); the chord
+  into an event (t1 = located root, end stored as the event sample, state = the same flow);
+  the first chord after an event (starts at the stored post-settle state, which is `x`); slivers
+  (halved, `min(d, h/2)`, also on the thermal path); deferred step ends (`output_pend_`: bound
+  re-evaluated from the last STORED sample over [ts, t1] in the current mode, only when the step
+  had no event, `out_transparent` (no mask/state change at a poll), no kick, not at t_end, plus the
+  state and recovered-row gap checks; ticks / zero-length edges / numeric steps flush first);
+  the last chord of the run (stored, never deferred near t_end); a resumed run's first chord
+  (ranges restart, so the tolerance is tighter; no chord crosses the resume). Not checked by a
+  test: the deferral after a `ControlTick` that fires without a mask change (flushed at the top
+  of the loop by `tick_due_`).
+
+### Item 3 — WIP in the tree at this tip (built, NOT verified)
+
+* `chord_row_bound` (exact_lti.hpp): exact_chord_step's bound for ONE row (F split, three forms,
+  growing modes); the event scan's certificate now uses it (z̈(a) = z̈(t0)e^{λτ}, complex). It is
+  ≤ the old certificate bound everywhere (same F part, S part min of three forms instead of the
+  triangle one), so fewer halvings, never a certificate the old bound refused for a wrong reason.
+  C++ test "the scan certificate's row bound is the output rule's bound" (test_exact_lti.cpp)
+  pins it to exact_chord_step's `w.eb` per row — NOT built / run.
+* Sine sources: `exact_scan_modes` no longer refuses augmented modes (z, z̈ on (x, sin, cos));
+  the predicate's direct sine share is `node_pair_osc(from, to)` (recover_osc rows; an ON
+  branch-form diode reads its current row `var`), added to the probed row; the affine check
+  subtracts that share's value at t0. Shortcut: assumes the diode predicate is v_D − const
+  (gain 1, `crossing_signal`); a predicate of another gain would get a wrong sine share.
+* THE THREE-PHASE BRIDGE IS NOT A CERTIFICATE DEFECT (evidence on this build, debug print since
+  removed): truth (fa4b5c71's exact_truth, to 6 ms): events 0.3719356718626846 ms (D1),
+  1.490258218668964 ms (D5), 5.000000250912935 ms (D2 ON), 5.001350943090825 ms (D6 OFF — the
+  notes' "D5" is D6). The engine: the settle at 5.0000002509 ms keeps D6 ON (v_D = 1.6e-7 V,
+  band 5.4e-10, next = ON), then the MODE GUARD repairs it: `diagnostics['mode_guard']` repairs 1
+  at 0.005000000250912887, diode D6, violation 0.12 V — `judge_` reads the settled mode at
+  1e2·h_e and 1e4·h_e (capped at the next time event) and calls D6's legitimate turn-off 1.35 µs
+  later a violation of the mode, and the LCP turns D6 OFF at once. `mode_selection='lcp'` merges
+  them too. The fix belongs in `judge_` / `guard_check_` (a law that holds significantly at t+
+  and breaks later is a crossing the scan locates, not a violation) — settle territory, not done.
+  Also seen: the engine's D1 event 0.3719354704753909 ms vs truth 0.3719356718626846 ms (2e-10 s).
+
+### Build being waited for at the stop
+
+The extension build of this tip (item 3 WIP, debug print removed). It was meant to check
+`dsedall` (the 243 default cells) tip vs base — the base hashes are recorded in
+`.scratch/f4/dsedall_base5.json` (base = 075feac9's extension saved in `.scratch/base075/`).
+Also recorded with that base: goldens + dsed bit-identity (`.scratch/golden_s5base`,
+`.scratch/bitid_s5base.npz`; check: `BASE=s5base zsh .scratch/bitid5.sh check`). Chain script for
+the rest: `.scratch/f4/chain1.sh` (dsedall cmp, bitid, cost vs base075, run5.sh = rule vs flow on
+100, property test on 100 + `--truth` on six with fa4b5c71's truth tool in `.scratch/f4/truthtool`,
+events gate).
+
+### Item 2 acceptance — status at this tip
+
+| check | status |
+|---|---|
+| property test ≥ 30 circuits, 200 random instants | NOT run (tool ready: `.scratch/f4/prop_truth.py`, 100 units in `prop_units_all.txt`) |
+| `--truth` on six | NOT run |
+| rehearsal tool auto+next / dsed:output_grid / dsed+next, analytic 22 | NOT run |
+| evgate 1e-4/1e-5/1e-6 on 100 | NOT run |
+| goldens / dsed bit-identity 36/36 default + shadow | baseline recorded, check NOT run |
+| scoreboard exact-engine row 81/77/70 | default cells RUN on e88a06dc's build: dsedall tip vs base (075feac9) — 243 same, 0 moved (81 circuits × dsed / dsed+next / no-dt rule off: times, states, events, reinit hashes); so the row cannot have moved. Scoreboard itself not re-rendered |
+| samples before/after, ladder500 | NOT run |
+| instructions (rule on, five circuits; rule off ±0.5 %) | NOT run |
+| pulsim_core_dsed_tests (Eigen 5) | NOT built |
+| exact test files, `-m reference`, full pytest | NOT run (only test_release_findings_f4.py: 3 passed) |
+| ruff | run on the two harness files: clean |
+| openspec validate --strict | NOT run |
+| rule vs exact flow on 100 (075feac9, old harness) | run: 99 comparable, 98 ≤ 1, ll09 = harness artifact |
+
+### Next steps (successor)
+
+1. DONE on e88a06dc: `dsedall` 243 same / 0 moved (the sine certificate and the sharper bound move
+   no default cell on the scoreboard set). Still to run: the goldens / bit-identity check
+   (`BASE=s5base zsh .scratch/bitid5.sh check`).
+2. Build + run `pulsim_core_dsed_tests` (tree `.scratch/build-ctest`): the new chord_row_bound case
+   and the recovered-row case.
+3. Cost (`.scratch/f3/cost10.sh <tip python> .scratch/base075`): the forward converters' certificate
+   cost vs the old certificate; the ≤ 3 % target is vs pre-certificate (b08f4e4e), not built here.
+4. The three-phase bridge: fix the mode guard's judge horizon (above), then the strict xfail of
+   fix/core-exact-integrals-sources with the two truth instants.
+5. Item 2's list above on the final tip; then item 4 only if context remains.
+
+## Session 6 — acceptance of the output rule (verification only; logs in `.scratch/f7/`)
+
+Tip at start dde945bd (extension = e88a06dc's C++, `build/python/pulsim` is a symlink to
+`python/pulsim`, the same .so).
+
+* **Rule off unchanged.** Goldens ALL IDENTICAL; dsed bit-identity 36/36 default and 36/36
+  shadow (`bitid_goldens_ruleoff.log`). `dsedall` tip vs 075feac9: 243 same, 0 moved
+  (`dsedall_cmp_vs_075.log`).
+* **`pulsim_core_dsed_tests` (Eigen 5, `.scratch/build-ctest`)**: first build of the two new
+  cases. The `chord_row_bound` case PASSES. The recovered-row case (c83fe230) FAILED at its
+  precondition (`e.tier == 1`: 3 — `[0 1; -4e12 -2e5]` has a near-defective eigenbasis, the
+  case had never been built). Fixed in the test (f8babadc: same ring, x2 scaled by 1/ω; the
+  bound still binds, worst > 0.5 every step). After: 144 cases / 41 365 assertions pass
+  (`ctest_dsed_run_eigen5.log`, `..._after_testfix.log`).
+* **NEW, OPEN, blocks the full pytest — ten paralleled bridges under the rule.**
+  `test_release_findings_f.py::test_f67_event_states_do_not_depend_on_the_output_grid` (ten
+  bridges, 3 ms, output_rtol 1e-4/1e-5/1e-6) did not finish in 18 CPU-minutes (killed).
+  `bridges10.py` (1e-4 s, output_rtol 1e-5): EVERY one of the 100 intervals capped
+  (`n_output_capped` 100, 409 600 rule samples, 409 701 stored), 2.386e12 instructions —
+  identical on base075 (075feac9, 2.386e12) and on the tip, so it is NOT e88a06dc; the test
+  passed in session 3's full pytest on ffdf5007, so it came with session 4's recovered-row
+  bound (`bridges10_1e-5.log`). Likely cause (not confirmed in source): a diode node between
+  two OFF diodes reads i(L)/(2·g_off); the fast mode's F share 2|q z| is d-independent, so no
+  chord certifies while it is above the node's tolerance. Not a few-line fix: reported.
+* **e88a06dc STAYS**: no gate failed because of it (rule off 243/243 + 36/36, its C++ case
+  passes, the two defects below are identical on base075 = 075feac9).
+* **Rule vs exact flow, 100 units, fixed harness (`.scratch/f4/run5.sh f7`,
+  `rule_vs_exact_flow_100.jsonl`)**: 99 comparable, 0 above 1, worst 0.99988
+  (high_freq_gan_buck; then sync_buck_500khz 0.99983, stiff_rc_high_freq_switching 0.99983,
+  high_q_rlc_ringdown 0.99982). Not comparable: three_phase_balanced_rl_load — and NOT only the
+  dense flow: the RULE CELL ITSELF spends its 2 000 000-sample budget by 4.5295 ms
+  (`output_budget_t`, 2 100 001 stored; 8 038 on the pre-reviewer tip of session 4, 5 153
+  rule-free). It came with 075feac9's per-row rounding floor (after_t0.jsonl, 075feac9: same
+  2 100 001). To be comparable the floating balanced neutral's row needs a floor that
+  certifies a row that is 0 up to rounding (the old 16·u·κ floor did, at 8 038 samples) —
+  the reviewer of session 4 found that floor too loose for ll06/ll09; a floor for rows whose
+  exact value is constant is the open design question.
+* **Property test, 100 units × 200 random grid instants (`property_100x200.jsonl`)**: 95
+  comparable (5 not: event counts differ against the rule-off dt grid — cl_boost_pi,
+  half_bridge_transformer_dc, boost_pfc_open_loop, flyback_converter, forward_converter).
+  94 ≤ 0.9976. **ONE GENUINE VIOLATION: diode_clamp_overvoltage V(out) 9.64 × at 2.5162 ms**
+  (`clamp_probe.log`): the rule stores 11 samples; the chord [1.02 ms, 2.533 ms] reads
+  5.0004999 → 5.0000125 V straight across the pulse's fall corner at 2.52 ms, where V(out) is
+  still 5.0005 V; at 2.5162 ms the chord reads 5.0000179 V (error 4.8e-4, tol 5.0e-5). The
+  dense flow (×0.05) stores the SAME 11 samples, so `rule_ratio_flow` read 0 inside that chord:
+  the exact-flow referee cannot see a defect the dense run shares. Same on base075. Likely
+  path (by reading scheduler.hpp:600–765, not instrumented): the rule-off run steps every
+  1 µs = the no-edge gate poll (dt_max/10); at 2.52 ms the poll and the corner coincide, so
+  `at_corner = t_gate < t_sw` is false, the landing counts as `out_transparent`, the end is
+  deferred, and the next deferral check bounds [ts, t1] in the post-corner piece. A fix
+  (`out_transparent` also requires the landing not be a source corner — a tie test against
+  the corner queue; rule-on only) is a few lines but needs an extension rebuild and a full
+  re-acceptance: NOT done in this session.
+* **`--truth` (mpmath, six circuits, fa4b5c71's tool verified byte-equal)**
+  (`property_truth_mpmath_6.jsonl`): 6/6 comparable, worst 0.9406 vs the dt grid and
+  0.9406 vs the truth (pwm_voltage_rc); the grid and the truth agree to 1e-6 of a tolerance.
+* **Events gate** (`events_gate_output_rtol.log`): event times and states bit-equal across
+  output_rtol 1e-4/1e-5/1e-6: 100 same, 0 diff, 0 skipped.
+* **Stored samples, 6cb51c00 (before.jsonl) → tip** (`samples_before_after.log`): min 1.00,
+  p25 1.00, median 1.00, p75 1.25, p90 4.84, max 407.5; 20 of 100 above 2×; total 879 412 →
+  3 617 402. Ten largest: three_phase_balanced_rl_load 407.5× (5 153 → 2 100 001, the budget),
+  boost_pfc_open_loop 14.2×, buck_dcm 9.6×, textbook_erickson_buck_ccm 6.9×,
+  ll06_buck_vcswitch 6.2×, buck_boost 6.0×, two_phase_interleaved_boost 5.4×,
+  buck_hard_switching_reference 4.9×, textbook_erickson_boost_ccm 4.9×, boost_classic 4.9×.
+* **Instructions per run, rule OFF, e88a06dc's build vs base075** (`.scratch/f3/cost10.sh`, min
+  of six, minus an import-only run; `cost_ruleoff_instructions_vs_base075.log`): buck_ccm
+  +1.80 %, bridge3 +5.08 %, active_clamp_forward +4.26 %, forward_converter +2.28 %,
+  boost_pfc_open_loop +7.65 % — the 0.5 % gate FAILS on all five, and the only C++ difference
+  between the two builds is e88a06dc (no default number moved: the extra work is the sharper
+  certificate / the sine modes now scanned). base075 already contains the certificate's own
+  cost (+11–13 % on the two forward converters against the pre-certificate build); this
+  measured only what came after it.
+* **DECISION: e88a06dc REVERTED (7d7f3bf6)** — the gate failed because of it and the fix is
+  not a few lines. core/ = 075feac9's + the test fix f8babadc; the extension in
+  `python/pulsim` is base075's .so (byte-identical; e88a06dc's saved in
+  `.scratch/so_e88a06dc/`), so the rule-off cost of the tip equals base075's by construction.
+  `pulsim_core_dsed_tests` on the reverted tip (Eigen 5): 143 cases / 41 326 assertions pass
+  (`ctest_dsed_run_eigen5_reverted.log`). The two defects above (ten bridges, diode clamp)
+  were measured on base075 too, so they hold on the reverted tip. Re-run chain:
+  `.scratch/f7/chain_reverted.sh` (logs `R_*`).
+* **Re-run on the reverted tip (7d7f3bf6 / aaf0174c, .so = base075's)**: goldens ALL IDENTICAL,
+  bit-identity 36/36 default + 36/36 shadow (`R_bitid_goldens_ruleoff.log`); dsedall vs
+  075feac9 243 same / 0 moved; rule vs exact flow 99 comparable, 0 above 1, worst 0.99988,
+  stored sample counts equal to e88a06dc's build on 100/100 (`R_after_f7r.jsonl`); property
+  95/100 comparable, diode_clamp_overvoltage 9.64 × (same), all others ≤ 0.9976; `--truth`
+  6/6, worst 0.9406 (truth 0.9406); events gate 100 same / 0 diff (`R_events_gate.log`).
+* **ladder500_rc, rule on** (`R_ladder500.log`, `.scratch/f/fx3.py 500 2e-5`): finishes,
+  3 093 stored (3 072 rule samples), n_output_capped 0, no warning; 2.923e11 vs 1.623e11
+  instructions rule off (1.80 ×); wall 25.7 s vs 10.3 s (2.49 ×, loaded host).
+* Not run: the rehearsal tool (auto+next / dsed:output_grid / dsed+next, analytic 22) — its
+  cache was backed up to `.scratch/rehearsal_pre_f7` and `.scratch/f7/drop_rule_cells.py`
+  drops the three rule configurations so `next_defaults_rehearsal.py run` re-measures them
+  (render with `R.OUT` pointed into `.scratch`: `render()` writes the tracked
+  NEXT_DEFAULTS_REHEARSAL.md).
+* **Full pytest on the reverted tip (`R_pytest_full.log`, `--timeout=900`, still running at the
+  hand-off, chain PID 43140; the `-m reference` run follows it in the same chain)**: 0 failures up
+  to 80 %, then in test_release_findings_f.py TWO TIMEOUT FAILURES so far —
+  `test_f67_event_states_do_not_depend_on_the_output_grid` and
+  `test_fx1_ten_branch_form_bridges_run_under_the_rule[constant]` ([python] was running) — the
+  ten-bridges cap above. The full pytest is NOT green.
+* Also: ruff `python/` + the four harness tools clean (`ruff.log`); `openspec validate
+  update-number-changing-release --strict` valid (`openspec_validate.log`); stubs not needed (no
+  binding source changed since 6cb51c00).
+* **Reviewer (fresh context, opus, read only)**: no under-reading of `exact_chord_step` /
+  `chord_row_bound` found (numpy port, 20 000 random systems, worst 1.0001 = float cancellation
+  in the test); sine share of the certificate correct for today's predicates. One plausible
+  uncounted chord: `at_corner = t_gate < t_sw` false when a source corner ties with a gate
+  edge / poll → `out_transparent` → the corner deferred (the diode-clamp violation above is
+  this, with the no-edge poll). Harness blind spots: a NaN rule ratio passes as not-worse in the
+  rehearsal; the flow referee is the engine against itself (a chord with no dense sample inside
+  reads 0 — the diode clamp is exactly this); only declared observables are read; the first chord
+  after a jump-free event is excluded; midpoint-only reading; the denominator rtol·rng + atol.
+  Stated gaps: the 1e-3·peak range floor and y(t+h) in the range are not in the docstring; the
+  docstring still says "every STATE".
+
+### Session 6 verdict
+NOT MERGEABLE. The promise holds against the exact flow on 99/99 comparable circuits and against
+the rule-off grid on 94/95, but (1) diode_clamp_overvoltage violates it 9.64 × (a source corner
+deferred; the flow referee cannot see it), (2) three_phase_balanced_rl_load spends the whole
+2e6-sample budget (the promise is suspended after 4.53 ms), (3) ten paralleled bridges cap every
+interval and three tests time out — (2) and (3) arrived with session 4's recovered-row bound /
+075feac9's rounding floor. e88a06dc reverted (rule-off cost +1.8..+7.6 %).
+* Hand-off correction: the re-run chain was terminated (SIGTERM, exit 143) during the full pytest
+  at 80 % (after the two timeouts in test_release_findings_f.py; `[python]` unfinished). The
+  full pytest did NOT complete and `-m reference` did NOT run on this tip.
+
+## Session 7 — the three defects of session 6 (logs in `.scratch/f8/`, prefix `S7_`)
+
+F7's background chain (PID 43140 + its pytest 48697) stopped by PID before the rebuild.
+
+### D-1 — a source corner deferred (FIXED, d365c847)
+
+* Instrumented (env-guarded print, removed): the rule-on run's landings near 2.52 ms —
+  `t = 2.5199999999999966e-3, t_gate = t_sw = the poll, corner pending 2.52e-3, at_corner 0,
+  out_defer 1, transparent 1` — the no-edge gate poll lands 3.4e-18 s SHORT of the pulse's fall
+  corner (not on it): `at_corner = t_gate < t_sw` is false, the landing is "transparent", the
+  end is deferred, and the next step treats the corner as passed. F7's reading confirmed (the
+  tie is a near-tie, not an exact one).
+* Fix: `corner_at_(t)` — the landing is never deferred when the corner pending in the queue is
+  at its instant (`near_time`, finite only: `near_time(t, inf)` is true). Rule-on only (behind
+  `out_defer`).
+* Numbers (`.scratch/f8/clamp_check.py`, rule-on line vs a 1e-7 s rule-off grid): unfixed
+  9.67 × at 2.52 ms, corner not stored; fixed: corner stored (10 samples), worst 0.000.
+  **PR head 8c921c81 (so_8c921c81 + `git archive 8c921c81 python/pulsim`): YES, the same
+  defect, 9.666 × at 2.52 ms, 9 samples, corner not stored.**
+* Test: `test_f8_a_source_corner_is_always_a_stored_sample` (the four corners stored; the
+  referee's ratio ≤ 1).
+
+### The referee (benchmarks/tools/output_rule_referee.py, new)
+
+* The flow is the same route with the rule off, run as a CHAIN of windows that tile the run at
+  stored instants (`resume_from` the previous window's snapshot; one build, so a closed loop's
+  Python controller continues); each window's dt = its shortest stored line / 6, so every line
+  of non-zero length holds ≥ 5 reference instants wherever they fall. A line with none, a NaN,
+  other events, a window without a snapshot, a suspended rule (cap / unbounded / budget), a
+  floored column without a floor mapping: a harness FAILURE (`comparable` false, the reason).
+  Denominator: `max(rtol·range, atol, floor of that column)` (range: the run's, ≥ 1e-3 of the
+  peak; floor: `output_floor_by_column` mapped through the observable), no other slack. The
+  first line after an event counts (both limits of a jump are in the trace; only reference
+  instants within 1e-12 s of an event are skipped).
+* On the clamp: unfixed engine 9.666 (`S7_referee_clamp_unfixed.jsonl`), fixed 3.6e-7
+  (`S7_referee_clamp_fixed.jsonl`). Test `test_f8_the_referee_fails_a_line_it_cannot_read`.
+
+### Session 7, as found by session 8 (F8 stopped before writing these)
+
+* D-2 / D-3 are 6835fd6c (floor = 16·u·Σ|O||V||z|; rows certified by their floor counted):
+  ten bridges 409 600 capped samples -> 926, three_phase_balanced_rl_load 2 100 001 -> 5 290;
+  tests `test_f8_ten_bridges_rows_at_rounding_do_not_cut_the_samples`,
+  `test_f8_a_balanced_neutral_does_not_spend_the_budget`; C++ case "a variation 1.2x the
+  floor is refined, 0.25x is certified" (`S7_ctest_dsed_run_eigen5.log`: 144 cases pass).
+* F8's chain logs (`.scratch/f8/S7_*`): bit-identity 36/36 + 36/36, dsedall 243 same, events
+  gate 100 same, property 95 comparable worst 0.9976, truth 6/6, ladder500 27.8 s.
+  **`S7_referee_100.jsonl` holds 38 of 100 units** (the process died at
+  driven_lc_series_resonance, empty log) and one of them read **2904x**
+  (diode_half_wave_rl_load): see session 8.
+
+## Session 8 — F-X-7, the merge of the PR line, the referee (logs in `.scratch/f9/`, prefix `S8_`)
+
+Tips: 7fc6ed97 (merge of origin/feat/core-integration 7188a9e1: only this file conflicted, both
+sides kept; the dsed headers merged without conflict), b78d5a01 (F-X-7), bdabb1e9 (referee).
+
+### F-X-7 — NOT the recovered-row bound: a jump drawn as a ramp (FIXED, b78d5a01)
+
+* On the merged tip before the fix (`S8_fx7_merged_before.log`, bridge3_overlap branch form,
+  bus = v(p) − v(n) by `np.interp` over `res.times` at 4001 instants, truth pwl + restart +
+  split at dt 1e-7): rule off 0.010659 V; output_rtol 1e-5 **34.182 V at t = 0.12 ms**; 1e-7
+  22.36 V. So this branch's bound on recovered rows did not fix it.
+* Cause (`S8_fx7_twosided_before.log`): the sample stored at an event is its LEFT limit. The
+  bus jumps 132.6096 -> 173.063 V at the commutation at 119.3798 us; with the rule on the next
+  stored sample was 4 us later, so plain interpolation drew the jump as a 4 us ramp. With the
+  rule off a fast sample 1e-10 s after the event hid it. Read two-sided
+  (`with_right_limits`) the SAME rule-on run reads 0.010675 V (1e-5) / 0.010661 V (1e-7): the
+  chord bound held on every line.
+* Fix (rule on only, `output_jump_`): after an event that changed the mode or a source's piece
+  the exact flow 2 ps later is a stored sample (evaluated from the step's start: no state,
+  step or event moves); a step too short to hold it keeps its end. +1 sample per such event
+  (the bridge: 3352 -> 3368).
+* After (`S8_fx7_after.log`): 1e-5 **0.010674 V**, 1e-7 **0.01066 V**, rule off 0.010659 V.
+  Every stored column against the rule-off run's own exact samples (`S8_fx7_columns.log`):
+  worst 0.9971 of its tolerance at 1e-5, 0.44 at 1e-7 (floored columns 0.06). The bus is a
+  difference of two columns: its bound is the sum of theirs (it read 1.11x ONE range's
+  tolerance, which is not a violation).
+* Test `test_fx7_a_jump_of_an_output_is_stored_on_both_sides` (the 4001-instant reading
+  <= 3e-2 V at both tolerances; a sample 2 ps after every event; every stored column within
+  its promise). Docstring and docs/solvers.md state the 2 ps line.
+* The rule moves an event by picoseconds against the rule-off run (2.2e-12 s at 15 ms).
+
+### The referee (bdabb1e9)
+
+* diode_half_wave_rl_load **2904x** is not a chord: the rule's event projection settles the
+  parasitic cluster at once (V(out) −0.31385 -> −3.1e-6 V at 10.0999 ms) while the rule-off
+  reference lets that ~1 ns mode decay (−0.2994 V 47 ps after the event). Reference instants
+  within `SETTLE` = 4e-5 of the run after an event are read apart: `ratio` 0.967,
+  `ratio_incl_settle` 2904. **Open (design, not fixed): inside that window the rule-on result
+  is the settled solution, not the exact one; the option's text says "removes only the
+  parasitic cluster" but the promise's "exact solution" does not carry that exception.**
+* Denominator: the run's range (as sessions 6–7). The promise's range is "so far, through
+  the end of the exact step holding the line"; the stored trace does not show the steps, so
+  the so-far reading through each line's end sample is reported beside it
+  (`ratio_range_so_far`, stricter than the engine's: rc_step 3.51 at t = 1.4e-7 s against 0.957).
+* Every stored column is read against its own floor when the dt reference stores the same
+  columns (`ratio_stored_columns`); a dt run of several circuits stores one column fewer
+  (6 vs 5 on the diode circuits): there only the declared observables are read (said in the row).
+* One process per unit (`.scratch/f9/ref1.sh`): a crash is a recorded failure.
+
+### The settle window — orchestrator's decision, and what is NOT done
+
+Decision: (1) the promise is stated against the flow with the parasitic cluster projected at
+the event — DONE in the option's docstring and docs/solvers.md (cut: time constants below
+`kParasiticFraction` = 1e-6 of the run's resolved time scale, `exact_settle_length`);
+(3) the referee reads the post-event window apart and reports the unprojected reading beside
+it — DONE (bdabb1e9). **(2) NOT DONE, for a successor (needs C++ + binding + rebuild):** each
+projected event writes a projection record — the instant, the largest projected amplitude per
+recorded quantity (|y(before the projection) − y(after)| on the recovered vector, new mode),
+the cluster's slowest time constant — into `diagnostics['output_grid']` (`n_projections`,
+`projection_max`, the records under a cap). Where: `settle_and_project_` in
+dsed/scheduler.hpp, rule-on path only (`output_rtol_ > 0`), next to the reinit records;
+surfaced through dsed_bindings.cpp + `_dsed_dispatch.py` like `output_floor_by_column`; stubs
+regenerated. Test to write: diode_half_wave_rl_load, the record at 10.0999172 ms carries
+V(out) amplitude 0.31384 V (= −0.31384758 − (−3.138e-6), `.scratch/f9/hw.py`) and the
+referee's `ratio_incl_settle` (2904) is explained by it. Also needed by scoreboard finding F-SB-3.
+
+
 ## Session 5 — branch `fix/core-release-f5-settle-decisions` (from 6cb51c00): two settle decisions
 
 Base for every "before": the extension built at 6cb51c00 (`.scratch/f5/base_py`). Truth: the
@@ -720,3 +1195,527 @@ rule-on boost_pfc 7.36e-10 → 2.95e-12; this revert restores that C++ exactly.
 Verified on 738acf8f: full pytest 6246 passed / 110 skipped / 12 xfailed; `-m reference` 383 passed;
 C++ dsed tests (Eigen 5) green; ruff check clean. Not run: Eigen 3.4.0, g++, full ctest, a second
 reviewer on 79330ab7..5613abbe (scoping + lazy root error came after the review).
+
+## Session 9 — the projection record, F-Y-3, the acceptance (logs in `.scratch/f10/`, prefix `S9_`)
+
+* Merge of origin/feat/core-integration 527e644d (sensitivities through events): cbe1430f,
+  `--no-ff`, no conflict (no dsed header touched by it; `_pulsim.pyi` did not conflict).
+* Truth for the projection record (`.scratch/f10/hw_truth.py`, mpmath `exact_truth.solve`, no
+  pulsim; `S9_hw_truth.log`): diode_half_wave_rl_load turns D1 off at 10.0999171950244 ms;
+  V(out) just after it −0.313847548 V, then −0.28398 V at +0.1 ns, −0.11546 V at +1 ns,
+  −2.05e-5 V at +10 ns, −6.27970e-6 V at +20 ns and −6.27968e-6 V at +40 ns: one ~1.0 ns mode,
+  projected amplitude 0.31384127 V (the predecessor's 0.31384 confirmed; its settled value
+  −3.1e-6 V is the engine's, the truth's is −6.28e-6 V).
+* The other tool's dsed commits (origin/gemini/wip-2026-11-24, read only, not taken):
+  4cbab009 replaced `exact_chord_step`'s bound by a per-mode cap for decaying modes
+  (|V_jk z̈_k| / |λ_k|², ×2 for a complex pair: a stiff mode with a tiny residual no longer
+  collapses the chord to rounding) plus a "peeled" cancellation set, and stopped a no-edge gate
+  poll from resetting the per-interval sample cap; 0c9172e0 reverted the scheduler half only.
+
+### Step 1 — the projection record (rule on only)
+
+* `project_` (scheduler.hpp), under the rule: the recovered vector before and after
+  `project_slow` in the settled mode; `note_projection_` keeps one record per instant (a settle
+  round restarted from the held state replaces it; a round that re-projects the previous round's
+  result adds its amplitude, an upper bound over the chain), the cluster's slowest time constant
+  from `fast_cluster_tau` (builder_adapter.hpp: 1/min(−Re λ) over Re λ < −threshold). Committed
+  when a projection at another instant comes, or read pending at the end.
+  `diagnostics['output_grid']`: `n_projections`, `projection_max_by_column`, `projections` (first
+  1000: `t`, `amplitude`, `column`, `tau`). Rule off: nothing computed (one `if` on `output_rtol_`).
+* diode_half_wave_rl_load at output_rtol 1e-5: the record at 10.099917195024 ms, largest
+  amplitude 0.3138476 V on the column of V(n_l) (the R–L midpoint), V(out)'s column
+  0.31384 V (truth 0.31384127 V, within 2e-4), tau 9.9999e-10 s (truth: the ~1.0 ns mode).
+  Test `test_f9_every_projection_of_the_parasitic_cluster_is_recorded`.
+
+### Step 2 — F-Y-3, a window's min / max inside an exact step (rule on only)
+
+* `SegmentMode::extremum` (segment_integrals.hpp): a degree-1 probe in the modal form,
+  y(s) = Re Σ α_i e^{μ_i s}; past the constant and terms below 64u·Σ|α|, the stationary points
+  are closed form for one real mode (none), two real modes (one root) or one conjugate pair
+  (s_k = (π/2 − φ + kπ)/ω, first and last two). Else the step ends stay and the piece is COUNTED
+  (`recorder_feed['closed_form']['n_extrema_ends']`; `n_extrema_closed` the others). The recorder
+  asks the source (`SegmentSource::extrema`, default: none) after a closed piece; the exact
+  engine's source answers only when the run has the rule on (`set_extrema`), so rule off is
+  unchanged.
+* Series RLC from rest (10 V, 2 Ω, 1 mH, 1 µF; `S9_fy3_rlc.log`): rule on max 19.053844735147337 V
+  at 9.9395592885069e-5 s against the closed form 19.053844735147347 at 9.9395592885069e-5
+  (−5.6e-16 relative); rule off (step ends) 19.053136 (−3.7e-5). Test
+  `test_fy3_a_window_max_inside_one_exact_step_is_the_trajectory_peak`.
+* The release's buck (`S9_fy3_buck.log`, test_tstart_time_base `_buck`, window [0.5, 0.9] ms):
+  output_rtol 1e-5 **max 19.897853 / min 7.034291** (320 pieces, all closed); rule off
+  19.836086 / 7.045884 (= the release's reading, unchanged); trbdf2 rtol 1e-10 19.897835 /
+  7.034297 (its own step ends, so below the trajectory's max).
+
+### Session 9 reviewer (fresh context, opus medium, read only; diff 527e644d..306efc60) — fixed / left
+
+* FIXED — rule-off diagnostics keys: `recorder_feed['closed_form']` gained `n_extrema_closed` /
+  `n_extrema_ends` (0) on every exact run with recorders; now emitted only under the rule (test:
+  the rule-off run has no such key).
+* FIXED — a projection under the rule on a step with no exact propagator (rk45 mode) was not
+  recorded: every rule-on `project_slow` now records. Each event's decision commits the
+  previous record (`decide_modes_`), so a restart inside one settle replaces only its own
+  event's record, and two events at one instant keep two.
+* FIXED — a projection row that is not a stored column reads `column: None` (was a negative
+  index).
+* FIXED (referee) — the settle window was 4e-5 of the run span after EVERY event (a 100 kHz,
+  0.25 s run would read nothing and pass with ratio 0): now one window per projected event,
+  [t, t + 40·tau] from the projection record; events without a record have none; past the
+  record's cap (1000) the old window for the later events, flagged `settle_fallback`. Reading
+  no instant raises (no vacuous pass). The tolerance's range is the rule run's own (projected)
+  trace, not widened by the unprojected reference's parasitic excursion.
+* LEFT (stated) — the verdict uses the run's range, not the range so far through the end of the
+  exact step holding the line (the promise's); `ratio_range_so_far` (stricter: through the
+  line's end sample) stays reported beside it. An exact judge needs the engine's per-line
+  tolerance exported: not done.
+* LEFT — `fast_cluster_tau` runs a dense eigensolve per projection when the mode has sine
+  sources (rule-on cost only).
+* Checked clean by the reviewer: the interior-extremum formula (2000 random damped pairs with a
+  constant and an offset against a 1e5-point grid: 0 missed), the two-real-mode root, the
+  dropped small terms' bound, every other rule-off path (no bit can change).
+  Verdict: it attacked the chord collapse on stiff decaying modes (the ten-bridges / ladder
+  symptom). This branch already covers the measured cases by D-2 / D-3 (a row at its rounding
+  floor certified constant, counted: ten bridges 409 600 capped samples → 926, balanced neutral
+  2 100 001 → 5 290) and F-X-3 (atol as an absolute floor); the per-mode cap is a valid,
+  tighter bound (|e^{λτ} − chord| ≤ 1 real / 2 complex for Re λ ≤ 0) worth a later look as a
+  sample-count item only — it moves every rule-on sample count and was written on a tree 377
+  commits old, without the projection or floor changes; the scheduler half was wrong (the
+  per-target cap reset) and its author reverted it. Nothing taken.
+* FIXED (referee, found here) — S8's referee run (`.scratch/f9/S8_referee_100.jsonl`, never
+  written up) read **1e5 ×** on pwm_voltage_rc / pwm_voltage_rl_filter, on the PWM source's
+  stored column x[0] at 40 / 50 µs: the rule run stores the corner's two limits at
+  3.9999999999999976e-5 (0 V) and 3.9999999999999983e-5 (10 V), the reference's own sample
+  at 4e-5 is its LEFT limit (0 V), read inside the rule's post-jump line. A source corner is no
+  event, so EVENT_TOL never excluded it. Now reference instants within 1e-12 s of a jump of
+  either trace are not read (fa03bfcf): pwm_voltage_rc 0.9508 (V(out)), diode_half_wave_rl_load
+  0.9674 with 3 per-projection settle windows (`ratio_incl_settle` 2904 kept beside it).
+
+### Acceptance (tip fa03bfcf; .so built from it, LTO OFF; baseline = a build of 527e644d in `.scratch/build-base527`, .so saved in `.scratch/so_527e644d/`)
+
+* (a) rule OFF against the PR head (`.scratch/f10/base.sh`, `S9_ruleoff_compare.log`): goldens
+  ALL IDENTICAL; exact bit-identity 36/36 default + 36/36 shadow.
+  The exact dumps of every `python/tests/test_exact_*.py` (the same files on both sides: `git
+  diff 527e644d HEAD` is empty for them; `S9_ruleoff_exdump.log`): 312 passed both sides;
+  **rule-off calls 0 diffs**; 420/441 calls identical, the 21 others are rule-on runs (stored
+  samples: D-1's corners, F-X-7's 2 ps samples), 0 call-count mismatches.
+
+### Step 3 — test_boost_dcm_recovery_voltage_is_v_out_minus_v_in[auto] on this tip (`S9_boost_dcm.log`)
+
+* The default route (`auto`) runs trbdf2 on the PR line: 100 turn-offs after 2 ms, worst
+  0.20 % (V_R 33.6306 against 33.6989 V): PASSES. engine='exact' rule off: worst 2.9e-5: passes.
+* engine='exact', output_rtol 1e-5 (and 1e-7: identical): 99 of 100 turn-offs off by > 1 %,
+  worst **16.8 % (V_R 27.8714 against 33.4977 V at 2.98679 ms)**. NOT the engine: the test calls
+  the private reader `_diode_turn_offs(tr, t)` without `interpolable=True`, so it pairs the
+  rule's samples into step midpoints across the event's left limit and its 2 ps sample; with
+  `interpolable=True` — what `device_loss_summary` passes on a rule run (losses.py:2499,
+  `_rule_held`) — the same run reads worst 5.8e-6, 0 above 1 %. The release's parked reading
+  (39.49 against 34.30 V under the default rule) is this test-side call; the fix belongs in the
+  test (pass `interpolable` from the run's `output_grid` as the summary does), not in the engine.
+* (b) `pulsim_core_dsed_tests` (`S9_ctest_dsed.log`): Eigen 5 (`.scratch/build-ctest`) **152 test
+  cases / 41 469 assertions pass**; Eigen 3.4.0 (`.scratch/build-e34ct`, new, 200 eigen-3.4.0
+  include refs in its build.ninja) **152 / 41 469 pass**.
+* The rest of the acceptance runs as ONE sequential chain, `.scratch/f10/chain_all.sh` (started
+  09:38, PID 45028; progress lines in `S9_chain.log`, one per item): (g) cost → `S9_cost.log`;
+  (h) exact-engine files + test_release_findings_f4 → `S9_pytest_exact.log`, ONE full pytest
+  (`--timeout=900 --durations=40`, the ten-bridges walls are in its durations) →
+  `S9_pytest_full.log`, ruff → `S9_ruff.log`; (c)(e)(f) `chain_s9.sh` → `S9_referee_100.jsonl`
+  (summarise with `refsum.py`), `S9_samples.jsonl`, `S9_property_100x200.jsonl`,
+  `S9_property_truth_6.jsonl`, `S9_events_gate.log`, `S9_ladder500.log`; (d) the rehearsal
+  (rule cells dropped from `.scratch/rehearsal`, backup in `.scratch/f10/rehearsal_backup_pre_s9`)
+  → `S9_rehearsal_run.log`, rendered into `S9_NEXT_DEFAULTS_REHEARSAL.md` (not the tracked file).
+* openspec `validate --all --strict`: 79 passed, 0 failed (`S9_openspec.log`); stubs `--check`: up
+  to date (`S9_stubs.log`).
+* (g) rule-off cost, tip vs a build of 527e644d, both LTO OFF (`S9_cost.log`). Four standard
+  cases, instructions per accepted step, min of 3 rounds: buck_pwl 3025.8 vs 3023.6 (+0.07 %),
+  vsi_pwl 4687.5 vs 4696.4 (−0.19 %), buck_trbdf2 11113.7 vs 11121.0 (−0.07 %), bridge_trbdf2
+  12878.9 vs 12864.6 (+0.11 %): within 0.5 %. Five exact-engine cases (instructions per run, min
+  of 6 interleaved): buck_ccm −4.49 %, bridge3 −0.04 %, **active_clamp_forward +0.89 %**,
+  forward_converter −6.67 %, boost_pfc_open_loop −2.29 %. The 0.5 % gate FAILS on
+  active_clamp_forward. Not attributed: this session's rule-off work is one bool test per event
+  decision and per projection (and a virtual call per closed recorder piece, no recorders here);
+  the spread (−6.7 % … +0.9 %) on identical results looks like code layout of the branch's
+  larger scheduler (sessions 4–8 included: the base is the PR head, not this session's start).
+  To attribute it: build fd1765ab+merge (cbe1430f) and compare the three.
+* (h) the exact-engine test files + test_release_findings_f4 (`S9_pytest_exact.log`): **327 passed,
+  3 xfailed**.
+
+* (h) full pytest on 6fca24a4 (`S9_pytest_full.log`, 618 s): **3 failed, 7215 passed, 137
+  skipped, 42 xfailed**; ruff: all checks passed. Ten-bridges walls: f67 85.3 s, fx1 [constant]
+  56.9 s, [python] 56.5 s. The three failures, all rule-on, all pass on the PR head 527e644d
+  (`S9_3fail_at_527.log`) and fail on 6fca24a4 (`S9_3fail_at_tip.log`):
+  * `test_dcdc_engine_matches_orbit[buck_R10-dsed]` (output_rtol 1e-6): **a defect of F-X-7**
+    (b78d5a01). Its 2 ps sample was pushed before the step's chord samples, which still started
+    at the event, so the rule stored the event's fast mode at +0.37, +0.74 … ps AFTER the +2 ps
+    sample: t[1823] < t[1822] by 1.63e-12 s, once per period (4 of 8081 samples), and
+    time_average refused the trace. Fixed in **9d6dc0c4**: the chords start at the stored 2 ps
+    sample (still evaluated from the step's start). All 25 orbit cells pass.
+  * `test_f54_exact_two_limit_trace_closes_the_bridge_charge`,
+    `test_f62_exact_time_average_of_the_two_limit_trace_is_the_summary`: their control assertion
+    ("the left limits alone miss the turn-on jump") is what F-X-7 changed on purpose: the flow
+    2 ps past each turn-on is stored (12 of 12 bridge events, `f54why.py`), so the stored trace
+    closes the charge to 3.5e-6 (was −1.2e-3) and reads the summary's i_avg within 4.3e-9 (was
+    −0.21 %). The controls now assert that (9d6dc0c4).
+  * After 9d6dc0c4: exact files + f4 + release_findings_b + textbook **389 passed, 6 xfailed**
+    (`S9_pytest_fx7order.log`); ruff clean. The full pytest was NOT re-run on 9d6dc0c4.
+* The chain was stopped by PID at the referee's 4th unit (its readings were of the pre-fix
+  .so) and restarted on 9d6dc0c4 as `chain_rest.sh` (dsed ctest on Eigen 5, then (c)(e)(f),
+  then (d)); progress in `S9_chain.log` after the "REST start" line.
+
+* `chain_rest.sh` on 9d6dc0c4: dsed ctest Eigen 5 **152 / 41 469 pass**. Then two more
+  defects found by its readings:
+  * **SIGSEGV under the rule on stateless circuits** (session 9's projection record):
+    `fast_cluster_tau` ran an EigenSolver of a 0×0 A (back_to_back_diodes_sine: a sine, R, two
+    diodes; also transformer_step_up, driven_lc_series_resonance in the referee; the rehearsal's
+    "worker exit -11" cells: back_to_back_diodes_sine, transformer_step_up, analytic halfwave_r,
+    ideal_transformer, vcvs_gain2). Samples / property / events gate stopped at unit 4 of 100.
+    Fixed in **3058a87c** (no state: no cluster), test
+    `test_f9_a_stateless_circuit_runs_under_the_rule`; f4 file 11 passed.
+  * **The referee refused 45 of 100 units** on 9d6dc0c4 (6 on the session 8 run,
+    `.scratch/f9/S8_referee_100.jsonl`): fa03bfcf counted every pair ≤ 2 ps apart of either trace
+    as a jump and skipped instants within 1 ps of it, so a reference grid finer than 2 ps read
+    nothing ("N line(s) without a reference instant"). A jump is now a pair within 64 ulps
+    (**70526766**): rlc_step 0.9646, pwm_voltage_rc 0.9508, pwm_voltage_rl_filter 0.9929,
+    boost_classic 0.9997, stiff_two_timescale_rc 0.9454 (`.scratch/f10/refdbg/`). Of the 55
+    comparable units on the refused run: above 1: none; incl. settle: diode_half_wave_rl_load
+    2904 (the projected cluster, inside its window).
+* `chain_rest2.sh` (3058a87c) and `chain_rest3.sh` (the referee, 3eef29a5 = 70526766 + docs):
+  * (c) referee, 100 units (`S9_referee_100b.jsonl`): **89 comparable, above 1: none**, worst
+    0.99991 (high_q_rlc_ringdown x[3]); incl. settle: diode_half_wave_rl_load 2904 (the projected
+    1 ns cluster, inside its window); settle_fallback 0. Not comparable (11): events differ 4
+    (half_bridge_transformer_dc, active_clamp_forward, flyback_converter, forward_converter),
+    DiodeModeInconsistentError boost_pfc_open_loop, no floor mapping three_phase_balanced_rl_load,
+    driven_lc_series_resonance (the referee process ended without a line; samples / property /
+    `--truth` run it fine), and 4 with one or two ~2 ps lines left unread (ll02_rc_pulse_charge
+    [2e-6, 2.000002e-6], ll03_rl_step, ll04_rlc_underdamped, snubber_rc): F-X-7's line after a
+    source corner, its reference instants inside EVENT_TOL of the corner — a referee limit, open.
+  * property 100×200 (`S9_property_100x200.jsonl`): **95 comparable, worst 0.99758, above 1:
+    none**; 5 events differ (cl_boost_pi, half_bridge_transformer_dc, boost_pfc_open_loop,
+    flyback_converter, forward_converter).
+  * `--truth` 6/6 ran: rule ratio / truth ratio rlc_series_resonant 0.49558 / 0.49558,
+    driven_lc 0.49862 / 0.49862, rl_natural 0.91659 / 0.91659, half_wave_rectifier_sine
+    0.91264 / 0.91264, pwm_voltage_rc 0.94091 / 0.94090, chopper_with_rc_snubber 4.9e-4 / 4.9e-4.
+  * (e) events gate: **same 100, diff 0, skipped 0**.
+  * (f) samples: 100/100 ran, 1 554 426 in all; three_phase_balanced_rl_load 5 290 (609 rule
+    samples, 1 projection); driven_lc 80 743. ladder500 (on 9d6dc0c4, untouched since): rule off 21
+    samples 24.2 s 139 MB; rule 1e-5 3 093 samples 80.9 s 166 MB, 0 capped / unbounded / floored.
+  * (d) rehearsal (`S9_NEXT_DEFAULTS_REHEARSAL.md`): no worker crash left. Engine-class rows:
+    three auto+next **timeouts (300 s)** on the routed engine's profile (driven_lc_series_resonance,
+    high_q_rlc_ringdown, three_phase_diode_rectifier — not the exact engine); **analytic
+    hard_switched_rc on dsed:output_grid: disagree, err_rms 0.0676** (tracked rehearsal 2.5e-10).
+    Cause, measured (`hsrc.py`): the closing switch gives the capacitor a 1 ps mode, which the
+    rule's event projection settles at once; F-X-7's sample 2 ps past each closing stores the
+    PROJECTED flow (0.0100 V) where the unprojected closed form reads 13.54 V, and err_rms's
+    trapezoid weights that one sample over half the next 5 µs line. The promise is against the
+    projected flow (decision in force) and the projection is recorded, so no engine change here;
+    but the rehearsal gate now reads this cell as wrong — for the orchestrator.
+
+* (h) full pytest on c20d61a1 (`S9_pytest_full_b.log`): **7219 passed, 137 skipped, 42
+  xfailed, 0 failed** (1978 s under the owner's Chrome load + the 2.1.0 chain). Ten-bridges walls
+  under that load: f67 214.9 s, fx1 [constant] 198.0 s, [python] 189.3 s (85 / 57 / 56 s on the
+  morning's quieter machine: load, not attributed to the code).
+* The C++ dsed tests were run on 9d6dc0c4 (152 / 41 469), not after 3058a87c (a one-line guard
+  in the adapter); Eigen 3.4.0 not re-run after 9d6dc0c4. Rule off: 9d6dc0c4 and 3058a87c
+  touch rule-on paths only (output_jump_ is set only under the rule; fast_cluster_tau runs only
+  from the rule's projection record); goldens / bit identity were not re-run on them.
+
+### Session 9 — what is left
+
+1. The rehearsal's analytic hard_switched_rc on dsed:output_grid (err_rms 0.0676, the 2 ps
+   sample of the projected flow against the unprojected closed form): decide whether the
+   rehearsal's analytic gate should read the projected flow, or F-X-7 should skip the sample
+   when the event was projected.
+2. The referee's 4 units with an unread ~2 ps line after a source corner, and
+   driven_lc_series_resonance's referee run ending without a line (not diagnosed: stopped after
+   > 15 min under load).
+3. The cost gate on active_clamp_forward (+0.89 %): attribute it (see (g)) or decide.
+4. test_diode_state_reconstruction's rule-on reading (step 3): pass `interpolable` in the test
+   when the release flips the rule on (release branch work, not this line).
+5. Clean up: `.scratch/build-e34ct` (Eigen 3.4.0 test tree), `.scratch/base527` +
+   `.scratch/build-base527` (keep `.scratch/so_527e644d/` for cost reruns), `.scratch/f10/base`
+   (537 MB of baseline dumps) once the orchestrator has read the logs.
+
+## Session 10 — the projected analytic gate, the cost gate, re-measures (logs in `.scratch/f10/`, prefix `S10_`)
+
+### Step 1 — the rehearsal's analytic gate reads the projected flow (DECISIONS 8)
+
+* `metrics.projected_reference(exact, records)` (benchmarks/tools/metrics.py): on each projection
+  record's window `(t, t + 40 tau]` the closed form minus its own fast part `D e^{-(s-t)/tau}`;
+  `D` from the closed form (minus its slow part extrapolated from `t + 40 tau`, `t + 80 tau`), a
+  record whose `tau` the closed form does not decay at is not applied; no applied record: the
+  closed form itself (same object). `analytic_worker` uses it for err_rms and `rule_ratio` and
+  writes `n_projected` only when a record applied.
+* hard_switched_rc, dsed, output_rtol 1e-5 (`hsrc3.py`): 5 records, 5 applied; err_rms
+  unprojected **0.0676** (control: still disagree), projected **1.31e-10** (ceiling 1e-6); the
+  projected form at +2 ps 0.00999900487 against the closed switch's settled value
+  100/10/(0.1 + 1000) = 0.00999900010 (4.8e-7 relative: the float time offset t − t_e at 5 µs
+  against tau = 1 ps); a record with 10 × tau: not applied; rule_ratio (events excluded) 0.99521,
+  unchanged; stored times monotone. Test `test_the_analytic_gate_reads_the_projected_flow`.
+* Rehearsal, every analytic unit's three rule cells re-measured by the worker (`ana_rerun.py`,
+  `S10_ana_rerun.log`, pre-run cache in `.scratch/f10/rehearsal_cells_pre_s10`): 81 cells, **78
+  identical** to the cache (wall_s ignored), the 3 others are hard_switched_rc (auto+next,
+  dsed:output_grid, dsed+next): disagree 0.0676 → **agree 1.31e-10**, `n_projected` 5. Circuit
+  cells: code path unchanged (circuit_worker not touched).
+* pytest test_exact_output_grid + test_next_defaults + test_benchmark_harness: 412 passed; ruff clean.
+
+### Step 2 — the cost gate (rule off; both sides LTO OFF; base = `.scratch/base527` with the saved 527e644d .so)
+
+* Method changed for the five exact-engine cases: session 9 read the whole PROCESS's
+  `instructions retired` minus an import-only process (one cold run each; `cost.sh`). That
+  reading is noisy: re-run as-is (`cost1.sh`, `S10_cost_acf1.log`) active_clamp_forward read tip
+  799.1 / 750.6 / 749.0 / 773.7 M against base 760.5 / 746.4 / 744.9 / 747.2 M (±3 % per process).
+  Now `instr_ex.py`: `ri_instructions` (libproc) around `simulate()` in the process, min of 3
+  calls after a warm-up — the same method as the four standard cases' `instr1.py` — plus the
+  whole call (case load, DC start, simulate) and the cold first call, reported beside it.
+* Attribution (`S10_cost_mid.log`): a third build, cbe1430f (sessions 4–8 + the PR head; its
+  dsed headers + dsed_bindings.cpp put into `.scratch/base527`, built incrementally, .so saved in
+  `.scratch/so_cbe1430f/`, the base tree's sources and .so restored to 527e644d afterwards).
+  Simulate only, min of 3 rounds: buck_ccm tip 1747.18 M / cbe1430f 1744.86 M / base 1741.86 M
+  (+0.31 % / +0.17 %); active_clamp_forward 572.90 / 573.07 / 571.91 M (+0.17 % / +0.20 %).
+  The third round ran ~1 % higher on all three builds (the count includes kernel-mode
+  instructions: machine load moves it). No change is attributable above that noise; the
+  session-9 +0.89 % does not reproduce. Every rule-off path added since 527e644d is a
+  branch on `output_rtol_` (read through the diff); no allocation or eigensolve runs with the
+  rule off.
+* The projection record's eigensolve (rule on only): `fast_cluster_tau` ran a dense
+  EigenSolver per projection when the mode had sines; now it reads the exact build's
+  eigenvalues (once per mode; the augmented ones are A's plus ±iω) (**821983a5**). Its tau on
+  diode_half_wave_rl_load is now tested against L/(R + 1/g_off) = 9.99990e-10 s to 1e-9.
+  Rule-on cost there (6 projections): 1320.4 / 1327.8 M vs 1326.7 / 1326.9 M before
+  (`S10_cost_tau_ruleon.log`): no measurable change at that count.
+* Final cost table on 821983a5 (`S10_cost_std.log`, `S10_cost_ex_final.log`, summary
+  `costsum.py`), min of 3 interleaved rounds:
+
+  | case | tip vs 527e644d |
+  |---|---|
+  | buck_pwl (per step) | +0.20 % |
+  | vsi_pwl | +0.12 % |
+  | buck_trbdf2 | −0.19 % |
+  | bridge_trbdf2 | −0.13 % |
+  | buck_ccm (exact, simulate / whole call / cold) | +0.46 % / +0.46 % / +0.79 % |
+  | bridge3 | +0.11 % / +0.11 % / +0.16 % |
+  | active_clamp_forward | +0.26 % / +0.23 % / +1.17 % |
+  | forward_converter | −0.04 % / −0.01 % / −5.23 % |
+  | boost_pfc_open_loop | +0.31 % / +0.30 % / −0.02 % |
+
+  The 0.5 % gate holds on the warm counts (the standard method). buck_ccm at +0.46 % is inside
+  this method's own spread (base alone: 1737.9 … 1766.6 M across rounds), so "under 0.5 %" is
+  not resolved better than ±0.5 %. The cold first call is one sample per process and moves
+  −5 % … +1 % on identical code paths: not a gate reading.
+
+### Step 3 — rule off against the PR head, on 821983a5 (`S10_ruleoff_compare.log`, `S10_ruleoff_exdump.log`)
+
+* `base.sh compare`: goldens **ALL IDENTICAL**; bit identity **36/36 default, 36/36 shadow**.
+  Its exact-dump part is vacuous (299 errors: the base tree's tests run against the tip's
+  package, "common=0" — also so in session 9's log); the dumps are read by `cmp_ex.sh` instead.
+* `cmp_ex.sh` (the tip's own `test_exact_*.py`, against the 527e644d dumps in `.scratch/f10/base`):
+  313 passed, 3 xfailed; **rule-off diffs 0**, rule-on diffs 21 (the same 21 as session 9: D-1's
+  corners, F-X-7's 2 ps samples), 0 call-count mismatches; 221 common tests (+1 new on the tip),
+  420/441 exact calls identical.
+
+### Step 5 — fresh reviewer (opus, medium, read only; diff 6fca24a4..821983a5, code only)
+
+* No correctness defect found. Areas reported clean: eigensolves (0×0 guarded; the exact
+  build's eigenvalues are those of D·A·D⁻¹ or the block-triangular augmented matrix: A's plus
+  ±iω; no stale entry), rule-off paths (all behind `output_rtol_ > 0`; `out_from` NaN), test
+  circularity (the analytic test grades against `_caploop_exact` with negative controls).
+* FIXED (metrics.py) — the gate's independence: only `t` and `tau` come from the engine, but an
+  engine that projected a RESOLVED mode away would pass, since the closed form does decay at
+  that tau. `projected_reference(..., tau_max=)`: the rehearsal passes 1e-6 of the case's span
+  (the engine's cluster is below 1e-6 of its resolved scale, ≤ the span), a record above it is
+  not applied. Also: records within one tau of an applied one are the same mode (two records a
+  few ulps apart were subtracted twice — fail-safe, but wrong); the decay check uses the float
+  offsets actually read (at t ≈ 1 s, tau/64 = 1 ps/64 is ~70 ulps). Tests added to
+  `test_the_analytic_gate_reads_the_projected_flow`.
+* LEFT (recorded) — scheduler.hpp ~698/737: with `store_every > 1` a deferred step start
+  (`output_pend_`) and a jump (`output_jump_`) can both be set; the 2 ps sample is pushed before
+  the deferred start is flushed: times would go back. Unreachable from `simulate()` (it turns the
+  rule off when `store_every != 1`, python/pulsim/__init__.py); only the private
+  `run_ped_native_builder(store_every=k, output_rtol=...)` reaches it. Fix when touched next:
+  flush `output_pend_` before the 2 ps sample, or refuse the pair in the binding.
+* LEFT — the referee's jump test is relative (64 ulps): two limits further apart than 64 ulps but
+  inside 2 ps (a corner at small t) would be read across — a false failure, never a false pass.
+* LEFT — `fast_cluster_tau`'s fallback EigenSolver (only where the exact build has no
+  eigenvalues) does not check `info()`; it affects only the reported tau.
+* After the review fixes (`S10_ana_rerun2.log`): the analytic rule cells again **78 identical**,
+  hard_switched_rc's three now **7.58e-14** (the float offsets read: was 1.31e-10); the test
+  passes; `hsrc3.py` unprojected 0.0676 (control unchanged).
+
+### Step 3 (cont.) — C++ dsed tests on 821983a5 (`S10_ctest_dsed.log`)
+
+* Eigen 5 (`.scratch/build-ctest`): **152 test cases / 41 469 assertions pass**. Eigen 3.4.0
+  (`.scratch/build-e34ct`, 200 eigen-3.4.0 refs in build.ninja): **152 / 41 469 pass**.
+
+### Step 4 — the referee's holes
+
+* The four "~2 ps line unread" units (`refhole.py`, `S10_refhole*.log`): not the event tolerance
+  alone. The reference is a chain of windows that tile the run at stored instants; each resumed
+  window's first sample repeats the previous window's last one (every value bit-equal), and the
+  jump test (70526766: a pair within 64 ulps) read that seam as a jump and skipped ±1 ps around
+  it. F-X-7's 2 ps line after a source corner lies between two seams (ll03_rl_step: the pulse's
+  ramp ends at 100 ns; seams at 9.9999999999999995e-08 and 1.00002e-07; the rule run has NO event
+  there, `event_times` empty), so all of it was skipped. Fixed (**a72d3d26**): bit-equal seam
+  duplicates are dropped before the jump test (`n_seams` in the row). Now comparable:
+  ll02_rc_pulse_charge **0.99849**, ll03_rl_step **0.99261**, ll04_rlc_underdamped **0.98732**,
+  snubber_rc **0.93168**.
+* driven_lc_series_resonance (run alone, `/usr/bin/time -l`, 40 min alarm, `S10_dlc.err`): the
+  referee process grew to a **17.9 GB peak footprint** (455 GB virtual) in 8 minutes; system
+  memory pressure went to 4 (critical) and the process was stopped by PID (rc 143). The plan
+  (`dlc_plan.py`): 80 743 rule samples → 648 reference windows, **1.96e7 planned reference
+  instants** (40 000 per window), 5 state columns; the exact engine's dt runs store more than the
+  plan (gate polls) and every window's states and observables are kept until the end. This is
+  the session-9 "process ended without a line": the OS killed it (no Python error is written on
+  SIGKILL). Not fixed: reading it needs a streaming referee (each window graded and dropped) —
+  recorded as a referee limit; the unit is excluded from the 100-unit run (it would freeze the
+  machine). Also seen: its shortest stored line is 6.5e-16 s (above 64 ulps at t ≈ 1e-2 s, so
+  read as a line; its window gets dt = 1e-16 s).
+* Referee on a72d3d26 over the 100 units minus driven_lc (`S10_referee_99.jsonl`, `refsum.py`):
+  **99 ran, 93 comparable, above 1: none**, worst 0.99991 (high_q_rlc_ringdown x[3]); incl.
+  settle: diode_half_wave_rl_load 2904 (the projected 1 ns cluster, inside its window);
+  settle_fallback 0; the four former holes comparable (seams dropped: 4 / 5 / 11 / 5). Not
+  comparable (6): events differ 4 (half_bridge_transformer_dc 373 vs 262, active_clamp_forward
+  674 vs 675, flyback_converter 296 vs 200, forward_converter 404 vs 381), boost_pfc_open_loop
+  DiodeModeInconsistentError, three_phase_balanced_rl_load no floor mapping for I(L_a) — the same
+  six as session 9. Peaks of 2.8–3.5 GB RSS per unit were seen (diode_rectifier,
+  rlc_series_resonant), memory pressure 2 at times, never 4.
+* stubs `--check` (with the engine-robustness venv, which has pybind11-stubgen): up to date
+  (`S10_stubs.log`); openspec `validate --all --strict`: 79 passed, 0 failed (`S10_openspec.log`).
+
+### Step 6 — final tip (C++ and Python of a72d3d26; docs after)
+
+* Full pytest (`S10_pytest_full.log`, 610 s): **7220 passed, 137 skipped, 42 xfailed, 0 failed**.
+  ruff (`python/ benchmarks/`): all checks passed. stubs and openspec: above.
+* Cleaned: `.scratch/build-e34ct`, `.scratch/base527`, `.scratch/build-base527`, `.scratch/f10/base`
+  (rm -rf on those paths only; base527's `build/python/pulsim` was a symlink, its target kept).
+  Kept: `.scratch/so_527e644d/`, `.scratch/so_cbe1430f/`, `.scratch/so_pre_tau/` (the .so files
+  for cost reruns; a base tree must be rebuilt to re-run the rule-off identity or the dsed
+  tests on Eigen 3.4.0).
+
+### Session 10 — not run / left
+
+* NOT run: the strict-xfail `--runxfail` sweep; the property / samples / events-gate /
+  rehearsal (circuit cells) chains on the final tip (the C++ changed since session 9 only in
+  `fast_cluster_tau`, rule on); the referee on driven_lc_series_resonance (its 17.9 GB footprint).
+* Left: the streaming referee (driven_lc); the `store_every > 1` + rule ordering hole in the
+  private binding (Step 5); the referee's 64-ulp jump test at small t; the cost gate's
+  resolution (±0.5 % in-process noise on buck_ccm, +0.46 % measured); test_diode_state_reconstruction
+  (`interpolable` in the test, release branch); the 4 "events differ" referee units and
+  boost_pfc_open_loop's DiodeModeInconsistentError under the rule's referee route.
+
+## Windows: ten bridges under the rule (orchestrator, 2026-11-26) — CLOSED (F-X-8, 2026-11-27)
+
+CI on PR #150 head a5a1f19b: `test_fx1_ten_branch_form_bridges_run_under_the_rule[constant]`
+hit the 900 s test timeout on `windows-latest` under Python 3.10, 3.11, 3.12 and 3.13, in the
+rule-on run (`output_rtol=1e-5`, ten branch-form bridges, `t_end = 0.02`). The same commit
+passes on `ubuntu-24.04` in 166 s per case and on `macos-15` in 109 s per case.
+
+Not known: whether Windows is more than 5x slower or does not terminate. This test's own
+docstring records that the Windows C runtime takes different parasitic cuts on this circuit
+(5.3e-9 V against 1e-12 V on the bus), so a chatter that the other platforms do not see is
+the first suspect.
+
+State: the test is skipped on `win32` with this reason (a timeout kills the whole pytest
+session, so it cannot be an xfail). `output_rtol` is off by default, so a default run is not
+affected.
+
+### Measured (branch `ci/windows-ten-bridges-diag`, 2026-11-26)
+
+A temporary workflow ran the case in subprocesses with hard timeouts on `windows-latest`
+(MSVC, Visual Studio 18 2026 generator, `/O2 /Ob2`) and `ubuntu-24.04` (GCC 13, `-O3`),
+Python 3.12, built as `ci.yml` builds it (runs 45908947259 and 45913710837; macOS arm64
+local for a third column). Times are the `simulate()` call only.
+
+| case (exact engine, `t_end` 0.02 unless noted) | Linux | Windows | macOS |
+|---|---|---|---|
+| 1 / 2 / 4 bridges, rule on | 0.13 / 0.40 / 1.7 s | 0.48 / 1.3 / 5.2 s | 0.11 / 0.40 / 1.9 s |
+| 10 bridges, rule OFF | 28.8 s | 79.7 s | 33.4 s |
+| 7 bridges, rule on: samples / capped intervals | 9.8 s: 14 113 / 0 | 24.2 s: 14 112 / 0 | 147.5 s: 660 934 / 158 |
+| 10 bridges, rule on, `t_end` 5 ms: samples | 4.5 s: 417 | 15.6 s: 1 212 | 4.6 s: 1 323 |
+| 10 bridges, rule on, output budget 1e5 | 109 s, budget out at 15.266068 ms | 163 s, budget out at 15.266065 ms | |
+| **10 bridges, rule on (the test's case)**: samples / capped / unbounded | **193 s**: 216 675 / 49 / 648 | **2185 s**: 1 877 398 / 454 / 499 | |
+| 10 bridges, rule on, Python gate | 104 s: 216 675 / 49 | > 1800 s (killed at 15.69 ms) | 23.8 s: 16 264 / 0 |
+
+Every rule-free quantity is the same on all three platforms: 20 908 accepted steps, 111 events,
+190 modes, 112 projections, the bus at 200.010575446 V; the predicate and LCP counters agree to
+a few in 2.5e6. Only the output rule's own decisions differ.
+
+Reading:
+
+1. Not a hang. The Windows run terminates (2185 s), below the run's 2e6-sample budget
+   (`OUTPUT_BUDGET`), which bounds it in any case.
+2. The engine itself is 2.75x slower on Windows (rule-free 79.7 s against 28.8 s, the same
+   counters). A rule sample costs about the same on both (0.83 ms against 0.80 ms, from the 1e5
+   budget runs: (run − rule-free) / 1e5). On Linux these two factors would take the case to
+   about 300 s, not 2185 s.
+3. The cause is the rule's sample count. Up to 15.27 ms both platforms take the same 100 000
+   samples (their budgets run out 3e-9 s apart). After that, Windows' chord bound hits the
+   4096-sample cap per interval 454 times, Linux's 49 times: 8.7x the samples. The count is
+   chaotic, not a Windows defect. macOS hits the cap 158 times on 7 bridges, where Linux and
+   Windows hit it 0 times, and 0 times on the 10-bridge Python-gate run, where Linux hits it
+   49 times. The floored-row maximum (`output_floor_max`) differs by 10x to 25x between
+   platforms on the same run (7 bridges: 0.0078 macOS, 0.19 Linux, 0.059 Windows), so the
+   rounding-floor and unbounded decisions on this 1e8-spread system follow the C runtime's last
+   bits, and the cap turns a small difference into thousands of samples.
+
+State: OPEN, skip kept with these numbers. The fix belongs to the output rule, not to Windows:
+a capped interval should stop cutting earlier, or the per-interval cap and the run budget
+should be far smaller than 4096 and 2e6 for a chord bound that keeps hitting them. Then this
+case's sample count is bounded on every platform, and the skip can come off. Not measured:
+which column or row drives the capped intervals after 15.27 ms; why the Windows engine is
+2.75x slower (no profile was taken).
+
+### F-X-8: the cause and the fix (branch `fix/core-output-rule-capped-intervals`, 2026-11-27)
+
+Reproduced on macOS with seven bridges (660 934 samples, 158 capped). Instrumenting the capped
+intervals (every 256th cut past 3000 in an interval): every one of 1264 readings is the same
+row, recovered row 5 (bounded row 29 of 152; state n = 24), and the bisection returns 0.99 ps.
+The bound there is all saturation part (`S` = 4.3e-3 against a tolerance of 1.66e-3): modes
+18 / 19 / 14, λ = −2.5e12 /s (0.4 ps), |V_jk| = 2.6e10 on that row, |z_k| = 3.6e-14, w_k = 0.
+|z_k| is not the rounding of V⁻¹x (|z| / (u·Σ|V⁻¹_ki||x_i|) = 8.7e5), and it is CONSTANT: the
+same 3.631e-14 at cut 3072, 3328, 3584, 3840 (250 ps, where its own closed form says e^-625)
+and in the next interval. So it is not a transient: it is the eigenbasis's (or the
+propagator's) inconsistency, ~2e-10 of the slow state read along a computed fast mode, re-read
+as a fresh transient at every call; a 0.4 ps transient needs ~1 ps cuts, so the interval
+cut to the cap. Its size follows the last bits of the eigensolver (hence 10–25× between
+platforms in `output_floor_max`), and the cap turned that into thousands of samples.
+
+Why the existing floor did not catch it: the rounding floor 16·u·Σ|O||V||z| scales with |z|,
+which is the noise itself (2.9e-6 there); a floor from u·|V⁻¹||x| is 1e6 too small.
+
+Fix (exact_lti.hpp `exact_chord_step`, the scheduler resets it): within one LTI flow
+z̈_k(t) = z̈_k(t_p)·e^{λ_k(t − t_p)} exactly. At each counted rule call the previous distinct
+instant of the same flow (same mode, same interval: reset at every event, time event, state
+kick; not on the deferral's re-checks) gives, per mode with |ρ| = |e^{λΔ}| ≤ 1/2, the constant
+part c_k = (z̈_k − ρ z̈_k(t_p)) / (1 − ρ) (a constant part leaves exactly this residue). The step
+is solved first with the measured z̈ (unchanged); only a step it cuts is solved again with
+g_k = z̈_k − c_k, and when that step is longer, the measured bound AT that step is the row's
+floor (`output_floor_row` / `output_floor_by_column`), counted in `n_output_inconsistent`, with
+a RuntimeWarning `output_inconsistent` once per run. So every stored line is within
+max(rtol·range, reported floor) of the bound's own model. A measured floor, not a futility
+stop: a mode that decays as it should has c ≈ 0, and a step the measured bound does not cut,
+or whose length g does not change, is bit-identical. (A first version added Σ|P_jk| s_k ν_k
+to the tolerance; the reviewer showed it could excuse other modes' curvature when mode k is
+in the curvature set: replaced.)
+
+| case (macOS arm64, rule on, `t_end` 0.02) | before: samples / capped / s | after: samples / capped / inconsistent / s |
+|---|---|---|
+| 7 bridges | 660 934 / 158 / 147.5 | 12 795 / 0 / 206 / 9.1 |
+| 7, `t_end`·(1 + 1e-15) | 660 934 / 158 / 154.9 | 12 795 / 0 / 206 / 9.1 |
+| 7, `t_end`·(1 − 1e-15) | 660 934 / 158 / 155.4 | 12 795 / 0 / 206 / 9.2 |
+| 7, amplitude·(1 + 1e-15) | 14 118 / 0 / 9.1 | 14 104 / 0 / 370 / 9.6 |
+| 7, amplitude·(1 − 1e-15) | 13 356 / 0 / 9.3 | 13 355 / 0 / 29 / 9.4 |
+| 6 / 8 bridges | 12 237 / 0, 15 213 / 0 | 12 236 / 0, 15 213 / 0 |
+| 10 bridges (the test's case) | 16 264 / 0 / 22.8 (Linux 216 675 / 49, Windows 1 877 398 / 454) | 16 264 / 0 / 270 / 23.3 |
+| 10, `t_end`·(1 ± 1e-15) | | 16 264 / 0 / 23.2, 16 264 / 0 / 23.2 |
+| 10, amplitude·(1 ± 1e-15) | | 16 328 / 0 / 22.6, 20 726 / 0 / 25.1 |
+| 9 / 11 bridges | | 17 515 / 0 / 17.3, 19 486 / 0 / 29.6 |
+
+Every perturbation lands within 12 795–20 726 samples, 0 capped (final code, `.scratch/orule/stageA2.log`). Rule off: byte-identical on
+7 and 10 bridges and on the 100 property units (`.scratch/f4/prop_units_all.txt`, exact engine,
+times + states hashed). Rule on, the 100 units: 99 byte-identical; active_clamp_forward
+differs (same 62 418 samples, 7 inconsistent calls): its chords against a dense rule-on run
+(rtol 1e-7, same 674 events) read 0.999817 of the promise before and after (the referee
+itself cannot read this unit: "reference events differ: 674 vs 675", before and after). The
+bridges' uncapped runs lose 0–14 samples where the ν-floor applied (14 118 → 14 104).
+
+State: CLOSED on macOS evidence; the win32 skip is removed and the 10-bridge test asserts
+`n_output_capped == 0`. Verification on 104ff594 (macOS): exact files 144 passed; referee 100 units, 93 comparable, worst 0.99991, none above 1, same as session 10; ctest 1105/1105; pytest 7538 passed (the ten-bridge case 56.7 s per gate); `-m reference` 414 passed; ruff, stubs and openspec clean. Windows: CI run 45934328900, not read yet. Not measured: why the Windows engine is 2.75×
+slower rule-free.

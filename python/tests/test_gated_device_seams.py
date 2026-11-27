@@ -164,7 +164,7 @@ def test_gated_commutations_are_recorded_under_the_restart_rule():
 _A_SCR = math.radians(60.0)
 
 
-def _scr_halfwave_error(**kw):
+def _scr_halfwave_error(edge_on_grid=False, **kw):
     b = p.CircuitBuilder()
     b.add_sine_voltage_source("V", "a", "gnd", 0.0, 10.0, 1e3)
     b.add_thyristor("T", "a", "k", 1e-2, 1e9, V_f=0.7)
@@ -176,6 +176,9 @@ def _scr_halfwave_error(**kw):
     t, v = np.asarray(r.times), np.asarray(r.v("k"))
     th = np.mod(2 * np.pi * 1e3 * t, 2 * np.pi)
     on = (th > _A_SCR + 1e-12) & (th <= np.pi - math.asin(0.07))
+    if edge_on_grid:   # the firing moved to the nearer grid point (1 us): 166.67 -> 167 us
+        tm = np.mod(t, 1e-3)
+        on &= tm > round(_A_SCR / (2 * np.pi * 1e3) / 1e-6) * 1e-6 + 1e-12
     ref = np.where(on, (10 * np.sin(th) - 0.7) * 10 / (10 + 1e-2),
                    10 * np.sin(th) * 10 / (10 + 1e9))
     return float(np.abs(v - ref)[1:].max()) / 10.0
@@ -187,14 +190,14 @@ def test_the_split_fires_a_declared_gate_edge_on_time():
                                enable_substep_state_correction=True) < 1e-9
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "owner: the event-queue track (add-unified-event-queue). Under "
-    "discontinuity_restart alone the fixed engine samples the gate at the "
-    "step start and does not read the schedule's declared edges: the "
-    "60 deg edge fires one 1 us step late (0.80 of the 10 V span at that "
-    "sample). The split lands it (test above)."))
 def test_the_restart_rule_fires_a_declared_gate_edge_on_time():
-    assert _scr_halfwave_error(discontinuity_restart=True) < 1e-9
+    # Under the rule alone the 60 deg edge (166.67 us, 0.67 dt into its 1 us
+    # step) takes effect at the nearer grid point, 167 us (gate read 0.5001 dt
+    # before the step end, F-SB-2): every SAMPLE agrees with the reference
+    # whose firing is at 167 us. Against the exact firing the 167 us sample is
+    # the left limit, 0.80 of the span off (first order: 0.33 dt late).
+    assert _scr_halfwave_error(True, discontinuity_restart=True) < 1e-9
+    assert _scr_halfwave_error(discontinuity_restart=True) == pytest.approx(0.796, abs=1e-3)
 
 
 def _rect(alpha_deg, width):

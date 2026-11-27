@@ -480,8 +480,9 @@ def test_a_restart_edge_is_read_at_its_right_limit(split):
     2.9e-3 high after a whole one. The kernel reads the event's right limit,
     the row device_loss_summary reads (they agreed at 1e-9 with the rule
     off only). E_on is linear in i, so the booked energy is the current.
-    split=False: the gate is read at a step's start, so the edge acts from
-    the first step that starts after it, 34 us (measured: 7.11768 A)."""
+    split=False: the gate of a step is read 0.5001 dt before its end (F-SB-2),
+    so the edge acts at the nearer grid point: 33.7 us is 0.7 dt into
+    (33, 34] us, taken at 34 us."""
     g_on, R, L, V, t_e = 1e4, 10.0, 1e-3, 100.0, 33.7e-6
     b = p.CircuitBuilder()
     b.add_voltage_source("V", "vdc", "gnd", V)
@@ -496,7 +497,7 @@ def test_a_restart_edge_is_read_at_its_right_limit(split):
                      discontinuity_restart=True, enable_substep_state_correction=split)
     k = res.device_energy("S")
     assert k["n_on"] == 1
-    t_read = t_e if split else 34e-6
+    t_read = t_e if split else 34e-6   # the nearer grid point
     truth = 10.0 * math.exp(-t_read * (R + 1.0 / g_on) / L)
     assert k["E_on"] == pytest.approx(truth, rel=2e-5)        # the end of the step: 1.2e-3 / 2.9e-3 high
     row = {r["name"]: r for r in p.device_loss_summary(

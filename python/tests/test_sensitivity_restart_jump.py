@@ -58,3 +58,43 @@ def test_the_same_circuit_before_the_jump_returns_a_true_number(split):
     fd = (float(np.asarray(_run(t_end, split, R=R0 + h).v("c1"))[-1])
           - float(np.asarray(_run(t_end, split, R=R0 - h).v("c1"))[-1])) / (2 * h)
     assert s == pytest.approx(fd, rel=1e-6) and abs(s) > 1e-4, (s, fd)
+
+
+@pytest.mark.parametrize("split", [False, True])
+def test_an_ideal_jump_that_moves_stage_2s_start_is_refused_by_name(split):
+    """C1 1 uF (10 V) -ideal S- C2 50 nF || RL: the restart line restarts the
+    step from the states the ideal jump moved (x0 + J, an impulsive start; item
+    A); the recurrence does not carry that move, so it refuses it by name. The
+    control: the same run without sensitivities shares the charge (closed form
+    10*C1/(C1 + C2) at the row)."""
+    def build():
+        b = p.CircuitBuilder()
+        b.add_capacitor("C1", "a", "gnd", 1e-6, 10.0)
+        b.add_ideal_switch("S", "a", "c", 0.0, 0.0)
+        b.add_capacitor("C2", "c", "gnd", 50e-9, 0.0)
+        b.add_resistor("RL", "c", "gnd", 5.0)
+        k = b.switch_index_of("S")
+
+        def fn(t):
+            m = p.SwitchStateMask(1)
+            m.set(k, t >= 2.25e-6)
+            return m
+        return b, fn
+
+    kw = dict(t_end=6e-6, dt=0.5e-6, engine="pwl", discontinuity_restart=True,
+              enable_substep_state_correction=split)
+    b, fn = build()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = p.simulate(b, switch_fn=fn, **kw)
+    v = p.with_event_limits(r)
+    t = np.asarray(v.times)
+    (j,) = np.flatnonzero(t[1:] == np.nextafter(t[:-1], np.inf))
+    vl = float(np.asarray(v.v("a"))[j])
+    assert float(np.asarray(v.v("c"))[j + 1]) == pytest.approx(vl * 1e-6 / (1e-6 + 50e-9), rel=1e-6)
+    b, fn = build()
+    with pytest.raises(p.UnsupportedError) as ei:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            p.simulate(b, switch_fn=fn, sensitivities=["RL.R"], **kw)
+    assert "restarted from a state its event moved" in str(ei.value)

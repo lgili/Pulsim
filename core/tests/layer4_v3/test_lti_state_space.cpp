@@ -506,6 +506,15 @@ TEST_CASE("compute_lti_state_space extracts magnetically coupled circuits",
     c1.build(Real{1e-6});
     REQUIRE_THROWS_WITH(c1.compute_lti_state_space(m),
                         Catch::Matchers::ContainsSubstring("positive definite"));
+    // refused by name (add-exact-propagator-strategy 7.1): the windings, typed
+    try {
+        (void)c1.compute_lti_state_space(m);
+        FAIL("k = 1 extracted");
+    } catch (const pulsim::UnsupportedError& e) {
+        CHECK(e.device() == "T1.p+T1.s");
+        CHECK(e.feature() == "extraction");
+        CHECK(e.kind() == "InductorCoupling");
+    }
 
     // The same circuit must still simulate perfectly well on the
     // fixed-step PWL path the message points at — the guard is

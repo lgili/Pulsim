@@ -451,6 +451,10 @@ def _rc_far(rs=10.0, line=True):
     return b
 
 
+# A source corner no longer commits its probe on a linear circuit: the
+# post-edge right limit is a stored sample, and the lines' past must hold
+# it too (without it the 5/9 plateau read 0.5555555631: the front launched
+# at the corner reached the far end as a ramp over the first step).
 @pytest.mark.parametrize("rtol", [1e-4, 1e-8])
 def test_trbdf2_lattice_and_the_step_bound(rtol):
     # dt is trbdf2's step ceiling; 10 tau is clamped to tau by the line

@@ -110,6 +110,55 @@ def _rms(g, d2, exclude):
     return float(np.sqrt(seg[keep].sum() / window))
 
 
+PROJECTION_WINDOW_TAUS = 40.0   # the referee's SETTLE_TAUS
+
+
+def projected_reference(ref: Callable, projections=(), tau_max: float = np.inf) -> Callable:
+    """The closed form of the flow the output rule promises (DECISIONS 8): at each
+    projection the exact engine records under the rule (``diagnostics['output_grid']
+    ['projections']``: ``t``, ``tau``) the parasitic mode it settled is removed from
+    the closed form on ``(t, t + 40 tau]``: ``ref(s) - D exp(-(s - t)/tau)``.
+
+    Only ``t`` and ``tau`` come from the engine. ``D`` is the closed form's own fast
+    part, ``ref`` minus its slow part extrapolated linearly from ``t + 40 tau`` and
+    ``t + 80 tau``, read at ``t + tau/64``; a record whose ``tau`` the closed form
+    does not decay at (its fast part at ``t + tau`` against the one at ``t + tau/64``,
+    the float offsets as stored, within 1e-3) is not applied, so the gate never reads
+    the engine's projection as truth; nor is a record whose ``tau`` is above
+    ``tau_max`` (the caller's own bound on a parasitic mode: an engine that projected
+    a resolved mode away is graded against the unprojected form). One mode per instant
+    (records within one ``tau`` of an applied one are skipped); no applicable record:
+    ``ref`` itself."""
+    recs = []
+    for p in projections:
+        t0, tau = float(p["t"]), float(p["tau"])
+        if (not (0.0 < tau <= tau_max and np.isfinite(tau))
+                or any(abs(t0 - r[0]) <= max(tau, r[1]) for r in recs)):
+            continue
+        w = PROJECTION_WINDOW_TAUS * tau
+        q = np.array([t0 + tau / 64, t0 + tau, t0 + w, t0 + 2 * w])
+        s1, s2, a, b = (float(v) for v in ref(q))
+        o1, o2, ow = q[0] - t0, q[1] - t0, q[2] - t0   # the offsets the closed form was read at
+        slope = (b - a) / (q[3] - q[2])   # the slow part: a + (s - t0 - ow) * slope
+        f1 = s1 - (a + (o1 - ow) * slope)
+        f2 = s2 - (a + (o2 - ow) * slope)
+        if not (o1 > 0 and o2 > o1) or f1 == 0.0 or abs(f2 / f1 - np.exp(-(o2 - o1) / tau)) > 1e-3:
+            continue
+        recs.append((t0, tau, w, f1 * np.exp(o1 / tau)))
+    if not recs:
+        return ref
+
+    def projected(t):
+        t = np.asarray(t, dtype=float)
+        out = np.array(ref(t), dtype=float)
+        for t0, tau, w, d in recs:
+            m = (t > t0) & (t <= t0 + w)
+            out[m] -= d * np.exp(-(t[m] - t0) / tau)
+        return out
+    projected.n_applied = len(recs)
+    return projected
+
+
 def err_rms_symmetric(a: tuple, b: tuple, *, abs_scale: float = 0.0, exclude=()) -> float:
     """:func:`err_rms` with neither trace the reference, for a DIAGNOSTIC:
     ``err_rms_symmetric(a, b) == err_rms_symmetric(b, a)`` bit for bit.
@@ -141,7 +190,9 @@ def rule_ratio(t, y, ref: Reference, *, rtol: float, atol: float, exclude=()) ->
     its peak; a sum, not a max, of the two tolerances, so the reference's own error
     near atol is absorbed). Intervals of zero length or overlapping an ``exclude``
     interval (a recorded switch-state change: the rule promises nothing across an
-    event) are skipped. <= 1 is within the promise; nan when no interval is left."""
+    event) are skipped. <= 1 is within the promise; nan when no interval is left.
+    A callable ``ref`` (a closed form) is read at eleven interior instants of every line,
+    against ``max(rtol * range, atol)`` exactly (the promise, no slack)."""
     t = np.asarray(t, dtype=float)
     y = np.asarray(y, dtype=float)
     keep = np.diff(t) > 0
@@ -153,8 +204,16 @@ def rule_ratio(t, y, ref: Reference, *, rtol: float, atol: float, exclude=()) ->
         bad = np.zeros(m.shape, bool)
         for a, b in iv:
             bad |= (lo < b) & (hi > a)
-        m, ym = m[~bad], ym[~bad]
-    if callable(ref):
+        if not callable(ref):
+            m, ym = m[~bad], ym[~bad]
+    if callable(ref):   # a closed form: every line at several interior instants (session 7)
+        lo_, hi_ = t[:-1][keep], t[1:][keep]
+        y0, y1 = y[:-1][keep], y[1:][keep]
+        if len(exclude):
+            lo_, hi_, y0, y1 = lo_[~bad], hi_[~bad], y0[~bad], y1[~bad]
+        f = np.array([1e-3, 1e-2, 0.05, 0.15, 0.3, 0.5, 0.7, 0.85, 0.95, 0.99, 0.999])
+        m = (lo_[:, None] + (hi_ - lo_)[:, None] * f[None, :]).ravel()
+        ym = (y0[:, None] + (y1 - y0)[:, None] * f[None, :]).ravel()
         rm = np.asarray(ref(m), dtype=float)
         rr = np.asarray(ref(t), dtype=float)
     else:
@@ -165,7 +224,59 @@ def rule_ratio(t, y, ref: Reference, *, rtol: float, atol: float, exclude=()) ->
     if not m.size:
         return float("nan")
     rng = max(float(np.ptp(rr)), 1e-3 * float(np.abs(rr).max()))
+    if callable(ref):   # the promise itself: max(rtol·range, atol), no added slack
+        return float(np.abs(ym - rm).max() / max(rtol * rng, atol))
     return float(np.abs(ym - rm).max() / (rtol * rng + atol))
+
+
+def rule_ratio_flow(t, y, td, yd, *, rtol: float, atol: float, exclude=()) -> float:
+    """:func:`rule_ratio` against a DENSE trace of the exact flow (the exact engine at a
+    much smaller ``output_rtol``, the same events): at each chord's midpoint the flow is
+    the quadratic through three samples bracketing it among the dense samples inside
+    the chord and the chord's own two ends (exact samples too) -- one smooth piece: a
+    rule chord holds no event and no source corner. The rule's promise is about the
+    exact trajectory: trbdf2 at rtol 1e-8 read linearly between its steps put 48 of the
+    54 cells past 1 that sit at 0.96..0.9997 against the flow (group F, session 4)."""
+    t = np.asarray(t, dtype=float)
+    y = np.asarray(y, dtype=float)
+    td = np.asarray(td, dtype=float)
+    yd = np.asarray(yd, dtype=float)
+    keep = np.flatnonzero(np.diff(t) > 0)
+    lo, hi = t[keep], t[keep + 1]
+    if len(exclude):
+        bad = np.zeros(lo.shape, bool)
+        for a, b in np.asarray(exclude, dtype=float).reshape(-1, 2):
+            bad |= (lo < b) & (hi > a)
+        keep, lo, hi = keep[~bad], lo[~bad], hi[~bad]
+    if not keep.size:
+        return float("nan")
+    i0 = np.searchsorted(td, lo, side="right")
+    i1 = np.searchsorted(td, hi, side="left")
+    worst = 0.0
+    for q, k in enumerate(keep):
+        m = 0.5 * (lo[q] + hi[q])
+        ts = np.r_[lo[q], td[i0[q]:i1[q]], hi[q]]
+        ys = np.r_[y[k], yd[i0[q]:i1[q]], y[k + 1]]
+        if ts.size >= 3:   # bracket m (never extrapolate): the nearest on each side + the next nearest
+            j = int(np.searchsorted(ts, m))
+            c = [j - 1, j]
+            c.append(j - 2 if j + 1 >= ts.size or (j >= 2 and m - ts[j - 2] < ts[j + 1] - m) else j + 1)
+            c = sorted(c)
+            h1, h2 = ts[c[1]] - ts[c[0]], ts[c[2]] - ts[c[1]]
+            # a lopsided stencil extrapolates a short piece's curvature over a long one:
+            # there the dense run's own chord (its promise: within its smaller rtol) is read
+            # (also with ONE dense sample inside: ll09's 1.8 ns + 985 ns stencil read 5.8x)
+            c = c if max(h1, h2) <= 4.0 * min(h1, h2) else [j - 1, j]
+            ts, ys = ts[c], ys[c]
+        if ts.size < 3:
+            f = ys[0] + (ys[-1] - ys[0]) * (m - ts[0]) / (ts[-1] - ts[0])
+        else:
+            f = (ys[0] * (m - ts[1]) * (m - ts[2]) / ((ts[0] - ts[1]) * (ts[0] - ts[2]))
+                 + ys[1] * (m - ts[0]) * (m - ts[2]) / ((ts[1] - ts[0]) * (ts[1] - ts[2]))
+                 + ys[2] * (m - ts[0]) * (m - ts[1]) / ((ts[2] - ts[0]) * (ts[2] - ts[1])))
+        worst = max(worst, abs(0.5 * (y[k] + y[k + 1]) - f))
+    rng = max(float(np.ptp(yd)), 1e-3 * float(np.abs(yd).max()))
+    return float(worst / (rtol * rng + atol))
 
 
 def err_max(t, y, ref: Reference, *, abs_scale: float = 0.0, exclude_t0: bool = False,
@@ -373,8 +484,10 @@ def exact_parts(t, y, cand, *, span: float, h: float, truth_events=(), engine_ev
       exposes no event record: then the rows carry every timing error.
     limits: ``max |engine − truth|`` over every one-sided value the engine
       records at an instant after the initial one: at a matched event its left
-      (and right) value against the truth's limits at the TRUTH's instant; at
-      an unmatched engine event and at every other right-limit row, against
+      (and right) value against the truth's limits at the TRUTH's instant
+      (a side facing another engine instant matched to the same truth instant
+      is a state between the engine's own flips: against the truth at the
+      ENGINE's instant); at an unmatched engine event and at every other right-limit row, against
       the truth's limits at the engine's instant.
     rule (1), a projected transient: at a matched event where the engine
       reports a projection and records a right value the truth does not
@@ -500,14 +613,27 @@ def exact_parts(t, y, cand, *, span: float, h: float, truth_events=(), engine_ev
 
     # (c) one-sided limits, after the initial instant
     errs = []
+    # a truth instant whose flips the engine makes at several instants: a side facing another of
+    # them is a state between the engine's own flips, graded against the truth at the engine's instant
+    span_of = {}
+    for i, j in pairs:
+        key = next((k for k in span_of if abs(k - truth_events[i][0]) <= 4 * np.spacing(abs(k))),
+                   truth_events[i][0])
+        lo, hi = span_of.get(key, (np.inf, -np.inf))
+        span_of[key] = (min(lo, engine_events[j][0]), max(hi, engine_events[j][0]))
     for i, j in pairs:
         te, _, left, right = engine_events[j][:4]
         if te > t0p:
-            errs.append((te, abs(left - truth_events[i][2])))
+            tl_, tr_ = truth_events[i][2], truth_events[i][3]
+            lo, hi = next(v for k, v in span_of.items() if abs(k - truth_events[i][0]) <= 4 * np.spacing(abs(k)))
+            if len(engine_events[j]) >= 6:
+                tl_ = engine_events[j][4] if te > lo else tl_
+                tr_ = engine_events[j][5] if te < hi else tr_
+            errs.append((te, abs(left - tl_)))
             if j in collapsed:
                 errs.append((te, collapsed[j][2]))
             elif right is not None:
-                errs.append((te, abs(right - truth_events[i][3])))
+                errs.append((te, abs(right - tr_)))
     for j in spurious:
         te, _, left, right, tl, tr = engine_events[j][:6]
         errs.append((te, abs(left - tl)))

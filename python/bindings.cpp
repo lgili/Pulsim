@@ -198,6 +198,13 @@ void init_module(py::module_& m) {
     // the message.
     static py::object budget_exc = py::exception<void>(
         m, "NewtonRoundoffBudgetExceeded", aborted_exc.ptr());
+    // The step failed on a singular matrix (pulsim::SingularError inside
+    // the engine): a SimulationAborted (same payload) whose message names
+    // the rows. A SingularError that escapes without an engine's wrap stays
+    // a plain RuntimeError, so no `except ConvergenceError` handler starts
+    // catching a topology defect it let through before.
+    static py::object singular_exc = py::exception<void>(
+        m, "SingularError", aborted_exc.ptr());
     py::register_exception_translator(
         [](std::exception_ptr pe) {
             if (!pe) {
@@ -206,8 +213,9 @@ void init_module(py::module_& m) {
             try {
                 std::rethrow_exception(pe);
             } catch (const solver::SimulationAborted& e) {
-                py::object& type =
-                    e.roundoff_budget() ? budget_exc : aborted_exc;
+                py::object& type = e.roundoff_budget() ? budget_exc
+                                   : e.singular()      ? singular_exc
+                                                       : aborted_exc;
                 py::object inst = type(e.what());
                 // `partial` is a COPY: the C++ exception is destroyed
                 // as the translator returns, so a reference would
@@ -240,6 +248,12 @@ void init_module(py::module_& m) {
     // An engine broke its own invariant (pulsim::InternalError): a pulsim bug.
     static py::object internal_exc =
         pulsim_error_type("InternalError", PyExc_RuntimeError);
+    // The circuit itself is wrong (pulsim::NetlistError): a ValueError
+    // naming the device and / or node.
+    static py::object netlist_exc =
+        pulsim_error_type("NetlistError", PyExc_ValueError);
+    netlist_exc.attr("device") = "";
+    netlist_exc.attr("node") = "";
     for (const char* a : {"engine", "feature", "device", "kind"}) {
         unsupported_exc.attr(a) = "";
     }
@@ -265,6 +279,11 @@ void init_module(py::module_& m) {
                 PyErr_SetObject(options_exc.ptr(), inst.ptr());
             } catch (const InternalError& e) {
                 PyErr_SetString(internal_exc.ptr(), e.what());
+            } catch (const NetlistError& e) {
+                py::object inst = netlist_exc(e.what());
+                inst.attr("device") = e.device();
+                inst.attr("node") = e.node();
+                PyErr_SetObject(netlist_exc.ptr(), inst.ptr());
             }
         });
 
@@ -655,7 +674,9 @@ void init_module(py::module_& m) {
         .def_readonly("E_cond_table", &thermal::DeviceLossRecord::E_cond_table)
         .def_readonly("E_impulse", &thermal::DeviceLossRecord::E_impulse)
         .def_readonly("n_on", &thermal::DeviceLossRecord::n_on)
-        .def_readonly("n_off", &thermal::DeviceLossRecord::n_off);
+        .def_readonly("n_off", &thermal::DeviceLossRecord::n_off)
+        .def_readonly("has_e_on", &thermal::DeviceLossRecord::has_e_on)
+        .def_readonly("has_e_off", &thermal::DeviceLossRecord::has_e_off);
     m.def("_commutation_points",
         [](const std::vector<std::tuple<bool, Real, Real>>& seq, bool gated,
            Real g_on, Real g_off) {
@@ -734,6 +755,24 @@ void init_module(py::module_& m) {
              py::arg("i_d"), py::arg("i_q"), py::arg("d_d"), py::arg("d_q"),
              "lambda(i + d) - lambda(i), in the increment form the flux row "
              "uses (round-off proportional to |d|).");
+
+    py::class_<models::ChannelTable>(m, "ChannelTable",
+        "Tabulated MOSFET channel I_D(V_GS, V_DS) for add_power_mosfet(channel=): "
+        "a rectilinear grid, V_DS from 0, I_D(V_GS, 0) = 0, non-decreasing in "
+        "both arguments (refused by name otherwise, pulsim.NetlistError); "
+        "bicubic Hermite with monotone per-axis tangents (C1); third quadrant "
+        "by terminal swap i(V_GS, V_DS < 0) = -I(V_GS - V_DS, -V_DS).")
+        .def(py::init<std::vector<Real>, std::vector<Real>, std::vector<std::vector<Real>>>(),
+             py::arg("v_gs"), py::arg("v_ds"), py::arg("I"),
+             "I[i][j] = I_D at (v_gs[i], v_ds[j]) [A].")
+        .def("current", [](const models::ChannelTable& t, Real vgs, Real vds) {
+                 const auto e = t.current(vgs, vds);
+                 return py::make_tuple(e.i, e.di_dvgs, e.di_dvds);
+             }, py::arg("v_gs"), py::arg("v_ds"),
+             "(i, di/dv_gs, di/dv_ds) at one bias point, either sign of v_ds.")
+        .def_property_readonly("v_gs", &models::ChannelTable::v_gs)
+        .def_property_readonly("v_ds", &models::ChannelTable::v_ds)
+        .def_property_readonly("I", &models::ChannelTable::current_grid);
 
     py::class_<models::ChargeTable>(m, "ChargeTable",
         "Monotone charge law Q(v) for a nonlinear capacitor: knots "
@@ -2379,6 +2418,7 @@ void init_module(py::module_& m) {
                           pd["rds_tc2"] = pp.rds_tc2; pd["vt_tc"] = pp.vt_tc;
                           pd["K_eff"] = pm->K_eff; pd["V_T_eff"] = pm->V_T_eff;
                           pd["R_d_eff"] = pm->R_d_eff;
+                          if (pp.fq_device) pd["fq_device"] = true;
                           desc["kind"] = "power_mosfet";
                           desc["params"] = pd;
                           desc["pins"] = py::make_tuple(pm->drain, pm->source, pm->gate);
@@ -2441,7 +2481,9 @@ void init_module(py::module_& m) {
                  Real kappa, Real R_d, Real C_gs, const py::object& C_gd,
                  const py::object& C_ds, Real R_g, Real L_s,
                  const py::object& body_diode, Real T_j, Real rds_tc1,
-                 Real rds_tc2, Real vt_tc) -> builder::CircuitBuilder& {
+                 Real rds_tc2, Real vt_tc,
+                 std::optional<models::ChannelTable> channel,
+                 bool fq_device) -> builder::CircuitBuilder& {
                   using PM = models::PowerMosfet;
                   auto cap = [&](const py::object& o, const char* what)
                       -> PM::Capacitance {
@@ -2519,6 +2561,10 @@ void init_module(py::module_& m) {
                           S.BV = get("BV", S.BV);
                       }
                   }
+                  p.fq_device = fq_device;
+                  if (channel) {
+                      p.channel = std::make_shared<const models::ChannelTable>(std::move(*channel));
+                  }
                   return self.add_power_mosfet(name, drain, source, gate, p);
               },
               py::arg("name"), py::arg("drain"), py::arg("source"),
@@ -2531,6 +2577,7 @@ void init_module(py::module_& m) {
               py::arg("body_diode") = py::none(),
               py::arg("T_j") = 25.0, py::arg("rds_tc1") = 0.0,
               py::arg("rds_tc2") = 0.0, py::arg("vt_tc") = 0.0,
+              py::arg("channel") = py::none(), py::arg("fq_device") = false,
               py::return_value_policy::reference,
               "Datasheet power MOSFET as one call: Level-1 channel (K "
               "[A/V^2], V_T [V], third quadrant by terminal swap), drift "
@@ -2540,8 +2587,12 @@ void init_module(py::module_& m) {
               "body_diode None or {'model': 'lauritzen'|'shockley', ...}. "
               "T_j [degC] is run-constant: R_d *= r, K /= r with r = 1 + "
               "rds_tc1*dT + rds_tc2*dT^2, V_T += vt_tc*dT (dT = T_j - 25). "
-              "Sub-elements: name (channel), name.rd/.rg/.ls/.cgs/.cgd/.cds, "
-              "name_body. Runs on pwl (time step must resolve the gate "
+              "Default: a composite, sub-elements name (channel), "
+              "name.rd/.rg/.ls/.cgs/.cgd/.cds, name_body. fq_device=True (opt-in): "
+              "the channel (or channel= a ChannelTable, replacing K, V_T, lambda_, "
+              "kappa), C_gd, C_ds and the body diode are ONE f/q device 'name' "
+              "(sub-elements name.rd/.rg/.ls/.cgs); res.i(name) is then the "
+              "drain-terminal current and device_loss_summary lists it. Runs on pwl (time step must resolve the gate "
               "transient: ~0.2 ns for a 60 ns plateau) and trbdf2. "
               "components() reports one 'power_mosfet' entry.");
 
@@ -3179,7 +3230,7 @@ void init_module(py::module_& m) {
                         &SimulationOptions::enable_substep_state_correction)
         .def_readwrite("split_snap", &SimulationOptions::split_snap,
                         "Split events within split_snap*dt of a step "
-                        "boundary are taken at it (default 0.01).")
+                        "boundary are taken at it (default 1e-6).")
         .def_readwrite("resolution_diagnostics",
                         &SimulationOptions::resolution_diagnostics,
                         "Record SimulationResult.resolution (truncation "
@@ -3603,6 +3654,10 @@ void init_module(py::module_& m) {
                 d["split_event_overflows"] = r.split_event_overflows;
                 d["n_gate_events"] = r.n_gate_events;
                 d["n_gate_events_unresolved"] = r.n_gate_events_unresolved;
+                d["n_gate_events_bisected"] = r.n_gate_events_bisected;
+                d["split_locator_trials"] = r.split_locator_trials;
+                d["split_locator_giveups"] = r.split_locator_giveups;
+                d["n_restart_cuts"] = r.n_restart_cuts;
                 d["mode_structure_checks"] = r.mode_structure_checks;
                 d["ideal_loop_releases"] = r.ideal_loop_releases;
                 return d;
@@ -3817,12 +3872,12 @@ void init_module(py::module_& m) {
                 r.right_limit_states.assign(a.data(), a.data() + a.size());
             },
             "(len(right_limit_index), n_states): the right limit of each "
-            "of those samples (where the next step starts). On the fixed "
-            "engine under the restart rule it is the start of the line "
-            "whose trapezoid is the restart step's own SDIRK quadrature "
-            "(exact for the step's integral of a quantity linear in the "
-            "state; as a value the right limit to second order, to first "
-            "order after a kept backward-Euler stage 2).")
+            "of those samples: the state value one instant after the "
+            "event (each capacitor / inductor state continuous, or moved "
+            "by an ideal element's jump; the other unknowns solved in the "
+            "event's mode). Recorded only at events; on the fixed engine "
+            "under the restart rule never at a restart window's later "
+            "steps nor at t = 0 unless the start is a probed jump.")
         .def_property("right_limit_switch_states",
             [](const SimulationResult& r) -> py::object {
                 if (!r.has_event_limits) return py::none();
@@ -3977,6 +4032,13 @@ void init_module(py::module_& m) {
                        "crossing inside them "
                        "(enable_substep_state_correction). 0 with the "
                        "split off.")
+        .def_readonly("n_right_limit_fallbacks",
+                       &SimulationResult::n_right_limit_fallbacks,
+                       "Restart rule: event right limits that are not "
+                       "certified: a row whose solve did not converge or "
+                       "whose diode mode does not hold at t_e+ (no row is "
+                       "stored), or a located turn-off solved through g_off "
+                       "(the row is stored). 0 with the rule off.")
         .def_readonly("event_iteration_breaches",
                        &SimulationResult::event_iteration_breaches)
         .def_readonly("newton_roundoff_accepts",
@@ -4855,6 +4917,12 @@ void init_module(py::module_& m) {
             "discontinuity_restart: SDIRK restart steps still owed when "
             "the run ended (the rule takes a discontinuity's step and the "
             "next two); a resumed run takes them first. 0 = none.")
+        .def_readwrite("restart_anchor_at_end",
+            &SolverSnapshot::restart_anchor_at_end,
+            "discontinuity_restart + event split (F-Z-3): the run ended on "
+            "a split step whose last piece was a sliver after an event; a "
+            "resumed run probes its first step as a jump at its start. "
+            "Not pickled (a pickled copy resumes without it).")
         .def_property("_control_state",
             [](const SolverSnapshot& s) -> py::object {
                 if (!s.control_state) return py::none();
@@ -4939,9 +5007,15 @@ void init_module(py::module_& m) {
                 // 19 the transmission lines' past (add-realistic-passives
                 // D18), appended only when present: a snapshot without a
                 // line pickles exactly as before
-                if (s.line_state.empty()) return base;
+                // 20 (restart_anchor_at_end, invalid_reason), appended only
+                // when either is set (field 19 then written, maybe empty):
+                // without them a pickle is byte for byte as before, and an
+                // older pickle loads them as false / "" (their neutral values)
+                const bool extra = s.restart_anchor_at_end || !s.invalid_reason.empty();
+                if (s.line_state.empty() && !extra) return base;
                 py::list all(base);
                 all.append(py::cast(s.line_state));
+                if (extra) all.append(py::make_tuple(s.restart_anchor_at_end, s.invalid_reason));
                 return py::tuple(all);
             },
             [](py::tuple t) {
@@ -4953,13 +5027,13 @@ void init_module(py::module_& m) {
                     if (t[0].cast<std::string>() != "SolverSnapshot"
                         || !((ver == 3 && (n == 12 || n == 13))
                              || (ver == 4 && n >= 13 && n <= 15)
-                             || (ver == 5 && n >= 17 && n <= 20))) {
+                             || (ver == 5 && n >= 17 && n <= 21))) {
                         throw std::runtime_error(
                             "SolverSnapshot: pickle version "
                             + std::to_string(ver) + " with "
                             + std::to_string(n)
                             + " fields; this Pulsim reads version 3 "
-                              "(12 or 13 fields), 4 (13 to 15) and 5 (17 to 20)");
+                              "(12 or 13 fields), 4 (13 to 15) and 5 (17 to 21)");
                     }
                     // Where each block sits (npos = absent). Version 4's
                     // variants differ in field 12: a bool there is the
@@ -5031,8 +5105,19 @@ void init_module(py::module_& m) {
                     if (ver == 5 && n >= 18) {
                         s.loss_state = t[17].cast<std::vector<Real>>();
                     }
-                    if (ver == 5 && n == 20) {
+                    if (ver == 5 && n >= 20) {
                         s.line_state = t[19].cast<std::vector<Real>>();
+                    }
+                    if (ver == 5 && n == 21) {
+                        const auto ex = t[20].cast<py::tuple>();
+                        if (ex.size() != 2) {
+                            throw std::runtime_error(
+                                "SolverSnapshot: field 20 has "
+                                + std::to_string(ex.size())
+                                + " values, expected 2 (restart_anchor_at_end, invalid_reason)");
+                        }
+                        s.restart_anchor_at_end = ex[0].cast<bool>();
+                        s.invalid_reason = ex[1].cast<std::string>();
                     }
                     if (ver == 5 && n >= 19 && !t[18].is_none()) {
                         const auto rs = t[18].cast<py::tuple>();

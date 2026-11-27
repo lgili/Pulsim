@@ -97,6 +97,7 @@ _ASK = {
     "tol_newton_res": 1e-8, "enable_newton_line_search": True,
     "enable_newton_lm": True, "newton_roundoff_budget": 50,
     "enable_substep_state_correction": True, "discontinuity_restart": True,
+    "split_snap": 0.01,
     "resolution_diagnostics": True, "inductor_freeze_di_max": 1e3,
     "inductor_abs_clamp": 1e3, "progress": True,
     "should_continue": lambda: True, "on_cache": lambda cache: None,
@@ -306,8 +307,10 @@ def test_ratchet_untyped_raises_and_broad_handlers_do_not_rise():
     # topology 3; _recorders 22), handlers +4 (_control_state.pickle_payload:
     # any pickling failure becomes the refusal marker; _recorders 3: an
     # unknown device name, and the run's error winning over its warnings).
-    assert _count(r"raise ValueError") <= 562
-    assert _count(r"except Exception|except:\s*$|except BaseException") <= 90
+    # Group 8 (typed errors): simulate()'s own raises typed (561 -> 529),
+    # the 13 broad handlers of __init__.py narrowed to typed catches (90 -> 77).
+    assert _count(r"raise ValueError") <= 529
+    assert _count(r"except Exception|except:\s*$|except BaseException") <= 77
 
 
 # simulate()'s body since add-kernel-simulation-object Stage A: the planner,
@@ -395,7 +398,7 @@ def test_simulation_object_reads_device_path_monitors_and_the_tick_grid():
 
 def test_the_trbdf2_route_rows_are_the_blockers_own():
     # simulate() hands _trbdf2_blockers its _opt_values: the pseudo-engine
-    # must judge only the 13 routing rows (h_bdf2 is refused on a dt-less
+    # must judge only the 14 routing rows (h_bdf2 is refused on a dt-less
     # 'auto' run, not routed; integrator is a trbdf2 row since 'esdirk43').
     vals = {"progress": True, "mode_selection": "lcp", "rtol": 1e-6,
             "store_every": 2, "integrator": "rk45", "h_bdf2": 1e-7}
@@ -477,3 +480,48 @@ def test_simulate_swallows_no_kernel_error():
                 and ast.unparse(h.body[0]) not in allowed:
             swallowing.append((h.lineno, kind or "bare"))
     assert swallowing == []
+
+
+def _matrix_outcome(run):
+    """(refused fields) or (times, states) of one conformance cell run."""
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        try:
+            r = run()
+        except p.UnsupportedError as e:
+            return ("refused", e.engine, e.feature, e.device, e.kind)
+    return (np.asarray(r.times), np.asarray(r.states))
+
+
+@pytest.mark.parametrize("engine", ["pwl", "trbdf2"])
+def test_conformance_matrix_through_the_object_equals_simulate(engine):
+    """10.5: every device cell of the conformance matrix gives the same
+    outcome through pulsim.Simulation as through simulate(): the same
+    refusal (engine, feature, device, kind), or the same samples bit for
+    bit. The exact engine is not on the object (DECISIONS 7 / 16): its
+    column is the object's refusal by name, tested above."""
+    from .test_engine_conformance import CELLS, _switch_fn
+    for kind, (build, _node, _dev, t_end, dt, needs) in CELLS.items():
+        kw = {"dt": dt} if engine == "pwl" else {}
+
+        def via_simulate():
+            b = build(True)
+            return p.simulate(b, t_end, engine=engine,
+                              switch_fn=_switch_fn(b, needs), **kw)
+
+        def via_object():
+            b = build(True)
+            sim = p.Simulation(b.build(), p.RunOptions(
+                t_end=t_end, engine=engine, **kw))
+            sw = _switch_fn(b, needs)
+            if sw is not None:
+                sim.set_switch_fn(sw)
+            return sim.run()
+
+        a, o = _matrix_outcome(via_simulate), _matrix_outcome(via_object)
+        if isinstance(a[0], str) or isinstance(o[0], str):
+            assert a == o, (kind, a[:1], o[:1])
+        else:
+            assert np.array_equal(a[0], o[0]), kind
+            assert np.array_equal(a[1], o[1]), kind

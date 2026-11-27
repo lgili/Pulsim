@@ -219,6 +219,35 @@ def run_cell(case, name):
         return "error", None, time.perf_counter() - t0, f"{type(ex).__name__}: {ex}"[:300], info
 
 
+FLOW_FACTORS = tuple(float(f) for f in os.environ.get("PULSIM_FLOW_FACTORS", "5e-2,2e-1").split(","))   # the dense run's output_rtol / the cell's (read quadratically)
+
+
+def _dense_flow(case, name, res, rt):
+    """(the same cell at output_rtol·f, None) -- the exact flow the rule's promise is
+    about -- for the first f of FLOW_FACTORS whose run is not cut by the sample cap,
+    or (None, why) when none can stand for it (other events, capped)."""
+    orig = nd.profile_kwargs
+    why = None
+    for f in FLOW_FACTORS:
+        def dense(e, only=None, f=f):
+            kw = orig(e, only)
+            return {**kw, "output_rtol": kw["output_rtol"] * f} if "output_rtol" in kw else kw
+        nd.profile_kwargs = dense
+        try:
+            kind, rd, _, msg, _ = run_cell(case, name)
+        finally:
+            nd.profile_kwargs = orig
+        if kind != "ran":
+            return None, f"dense flow {kind}: {msg}"[:200]
+        if not np.array_equal(np.asarray(res.event_times), np.asarray(rd.event_times)):
+            return None, "dense flow: other event times"
+        og = (getattr(rd, "diagnostics", None) or {}).get("output_grid") or {}
+        if not og.get("n_output_capped") and not og.get("n_output_unbounded") and og.get("output_budget_t") is None:
+            return rd, None
+        why = f"dense flow capped at {f}: {og}"[:200]
+    return None, why
+
+
 def circuit_worker(unit, names, emit):
     import exact_scoreboard as sb
     import v1_reader
@@ -255,7 +284,16 @@ def circuit_worker(unit, names, emit):
             dr.classify(rec, res, case, cols, ref, tol, case.dt if eng == "pwl" else None)
             rt = _rule_rtol(res)
             if rt:
-                rec["rule_ratio"] = dr.rule_check(res, ref, cols, rt)
+                rec["rule_ratio_ref"] = dr.rule_check(res, ref, cols, rt)
+                # the referee reads every stored line against the rule-off flow (session 7)
+                import output_rule_referee as F
+                try:
+                    fr = F.referee(case, res, info, cols, rt, name)
+                except Exception as ex:  # noqa: BLE001 - a harness failure, recorded as one
+                    fr = dict(comparable=False, why=f"{type(ex).__name__}: {ex}"[:200])
+                rec["rule_ratio"] = fr["ratio"] if fr["comparable"] else float("nan")
+                if not fr["comparable"]:
+                    rec["rule_note"] = fr["why"]
         dr.mark_suspect(rec, entry)
         if kind == "ran" and sol is not None and g:
             try:
@@ -298,12 +336,19 @@ def analytic_worker(unit, names, emit):
                 with rs.extra_kwargs(kw):
                     r = c.run(eng)
             ceil = rs.ANALYTIC[c.id].get(eng, {}).get("ceiling", 1e-3)
-            e = metrics.err_rms(np.asarray(r.times), c.observe(r), c.exact,
+            # the rule's promise is against the projected flow (DECISIONS 8)
+            og = (getattr(r, "diagnostics", None) or {}).get("output_grid") or {}
+            # a parasitic mode is below 1e-6 of the run's resolved scale (<= its span): the
+            # case's own bound, so a resolved mode the engine projected away is not removed
+            ref = metrics.projected_reference(c.exact, og.get("projections") or (), tau_max=1e-6 * c.t_end)
+            if ref is not c.exact:
+                rec["n_projected"] = ref.n_applied
+            e = metrics.err_rms(np.asarray(r.times), c.observe(r), ref,
                                 abs_scale=c.abs_scale, exclude_t0=c.exclude_t0)
             rec.update(err_rms=e, outcome="agree" if e <= ceil else "disagree", tol=ceil, **_diag(r))
             rt = _rule_rtol(r)
             if rt:
-                rec["rule_ratio"] = metrics.rule_ratio(np.asarray(r.times), c.observe(r), c.exact, rtol=rt,
+                rec["rule_ratio"] = metrics.rule_ratio(np.asarray(r.times), c.observe(r), ref, rtol=rt,
                                                      atol=1e-9, exclude=dr.event_steps(r))
         except dr.REFUSAL as ex:
             rec.update(outcome="refused", message=f"{type(ex).__name__}: {ex}"[:300])
@@ -447,14 +492,9 @@ def judge(a, b):
         # no class change (above) and within what the rule promises -- never "2x the
         # base": the base's extra samples (the 1 us poll) are not a promise
         r = b["rule_ratio"]
-        if r == r:
-            return ("worse", "rule") if r > 1 else (None, None)
-        # NaN: no interval between switching steps to read the chord on; the truth
-        # (`exact`, below) still judges, the 2x reference bar does not
-        ea, eb = a.get("exact"), b.get("exact")
-        if ea is not None and eb is not None and max(ea, eb) > 1e-12 and eb > 2 * ea:
-            return "worse", "truth"
-        return None, None
+        # NaN: the referee could not read every line (rule_note says why) -- a failure,
+        # never a pass (session 7: a NaN passed as not-worse)
+        return ("worse", "rule") if not r <= 1 else (None, None)
     sa, sb = a.get("err_rms"), b.get("err_rms")
     big = sa is not None and sb is not None and max(sa, sb) > (b.get("tol") or 1e-3) / 100
     up, down = big and sb > 2 * sa, big and sa > 2 * sb

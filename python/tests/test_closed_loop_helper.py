@@ -218,3 +218,30 @@ class TestDutyCallable:
         assert len(history) >= 100
         # Final duty close to ideal.
         assert 0.35 < history[-1][1] < 0.5
+
+
+class TestBenchmarkParity:
+    def test_helper_and_hand_rolled_runners_match_exactly(self):
+        import importlib.util
+        from pathlib import Path
+
+        bench_path = (
+            Path(__file__).resolve().parents[1]
+            / "benchmarks"
+            / "bench_closed_loop_helper.py"
+        )
+        if not bench_path.is_file():
+            pytest.skip("python/benchmarks/bench_closed_loop_helper.py not present")
+
+        spec = importlib.util.spec_from_file_location(
+            "bench_closed_loop_helper", bench_path
+        )
+        assert spec is not None and spec.loader is not None
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        v_helper = mod.run_helper_buck()
+        v_hand = mod.run_hand_rolled_buck()
+        assert np.isfinite(v_helper)
+        assert np.isfinite(v_hand)
+        assert v_helper == pytest.approx(v_hand, rel=1e-9)   # two code paths: not bit-equal

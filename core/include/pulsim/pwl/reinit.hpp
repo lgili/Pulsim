@@ -16,6 +16,7 @@
 // with d = K x(t+h) (the restart leaves the constraint exact). Moved here from
 // run_transient.hpp unchanged (the fixed engine's numbers are bit-identical).
 
+#include "pulsim/numeric/dense.hpp"
 #include "pulsim/pwl/branch_structure.hpp"
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/solver/result.hpp"
@@ -24,6 +25,7 @@
 #include "pulsim/topology/graph.hpp"
 #include "pulsim/topology/switch_state.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <format>
 #include <string>
@@ -111,19 +113,52 @@ public:
     /// After a committed step solved under `stamped` from `x_prev` (at
     /// `t_prev`) to `x`: record each dependent structure the step entered
     /// impulsively (the explicit projection), or raise on 'error'.
-    /// shortcut: x- is the state at the step start (with the fixed engine's
-    /// event split, not the split instant); the record's t is t_prev.
+    /// `x_prev` / `t_prev`: the state and time the mode was entered from (the
+    /// fixed engine's event split passes the split instant's left limit).
     void record(BranchStructureChecker& structure,
                 const topology::SwitchStateMask& stamped, const Vector& x_prev,
                 const Vector& x, Real t_prev, long sample, bool on_impulse_error,
                 const char* engine, solver::SimulationResult& result) {
-        for (const DependentStructure* dp : entering(structure, stamped)) {
+        const auto ent = entering(structure, stamped);
+        const auto& deps = structure.check(stamped, true).dependent;
+        std::vector<char> grouped(deps.size(), 0);
+        for (const DependentStructure* dp : ent) {
             const auto& d = *dp;
             // shortcut: a natural diode commutation in the same step as an
             // unrelated gate edge records its small residual too; upgrade
             // by locating the crossing.
             if (!in_dependent_mode(graph_, pool_, d, x)) continue;
             const bool cut = d.kind == DependentStructure::Kind::CutSet;
+            // Structures of the mode that share a state with d constrain its
+            // projection too (an ideal clamp diode across C2 when S closes
+            // C1 -S- C2: C2 is held, C1 dumps all of its charge — 50 nJ, not
+            // the free share's 2.381 nJ): one joint record for the group.
+            const auto di = static_cast<Size>(dp - deps.data());
+            if (di < deps.size() && grouped[di]) continue;
+            std::vector<Size> grp;
+            if (di < deps.size()) {
+                grp.push_back(di);
+                grouped[di] = 1;
+                for (Size q = 0; q < grp.size(); ++q) {
+                    for (Size o = 0; o < deps.size(); ++o) {
+                        if (grouped[o] || deps[o].kind != d.kind) continue;
+                        bool shares = false;
+                        for (const Index st : deps[grp[q]].states) {
+                            shares = shares || std::find(deps[o].states.begin(), deps[o].states.end(),
+                                                         st) != deps[o].states.end();
+                        }
+                        if (shares) {
+                            grouped[o] = 1;
+                            grp.push_back(o);
+                        }
+                    }
+                }
+            }
+            if (grp.size() > 1) {
+                record_group_(deps, grp, d, cut, stamped, x_prev, x, t_prev, sample,
+                              on_impulse_error, engine, result);
+                continue;
+            }
             std::vector<Real> xa, xb, mm;
             Real kx0 = 0, kx1 = 0, inv_m = 0, scale = 0;
             for (Size j = 0; j < d.states.size(); ++j) {
@@ -204,6 +239,85 @@ public:
     }
 
 private:
+    /// The minimum-energy projection of x_prev onto every constraint of the
+    /// group (rows K, residual r = K x− − K x+, λ = (K M⁻¹ Kᵀ)⁻¹ r, dW =
+    /// λ·r / 2), recorded once for the entering structure `d`.
+    void record_group_(const std::vector<DependentStructure>& deps, const std::vector<Size>& grp,
+                       const DependentStructure& d, bool cut,
+                       const topology::SwitchStateMask& stamped, const Vector& x_prev,
+                       const Vector& x, Real t_prev, long sample, bool on_impulse_error,
+                       const char* engine, solver::SimulationResult& result) {
+        std::vector<Index> st;
+        for (const Size g : grp)
+            for (const Index b : deps[g].states)
+                if (std::find(st.begin(), st.end(), b) == st.end()) st.push_back(b);
+        const auto nu = static_cast<Index>(st.size()), ng = static_cast<Index>(grp.size());
+        Vector xa(nu), xb(nu), mi(nu);
+        Real scale = 0;
+        for (Index j = 0; j < nu; ++j) {
+            const Index b = st[static_cast<Size>(j)];
+            if (cut) {
+                const Index v = pool_.branch_var_id_for_inductor(b, graph_);
+                xa[j] = x_prev[v];
+                xb[j] = x[v];
+                mi[j] = Real{1} / pool_.inductor_params(b).L;
+            } else {
+                const auto& br = graph_.branch(b);
+                xa[j] = stamping::read_node_voltage(x_prev, br.from) -
+                        stamping::read_node_voltage(x_prev, br.to);
+                xb[j] = stamping::read_node_voltage(x, br.from) -
+                        stamping::read_node_voltage(x, br.to);
+                mi[j] = Real{1} / pool_.capacitor_params(b).C;
+            }
+            scale += std::abs(xa[j]) + std::abs(xb[j]);
+        }
+        DenseMatrix k = DenseMatrix::Zero(ng, nu);
+        Index row_d = 0;
+        for (Index g = 0; g < ng; ++g) {
+            const auto& ds = deps[grp[static_cast<Size>(g)]];
+            if (&ds == &d) row_d = g;
+            for (Size j = 0; j < ds.states.size(); ++j) {
+                const auto c = std::find(st.begin(), st.end(), ds.states[j]) - st.begin();
+                k(g, static_cast<Index>(c)) += static_cast<Real>(ds.signs[j]);
+            }
+        }
+        const Vector r = k * (xa - xb);
+        if (r.cwiseAbs().maxCoeff() <= Real{1e-12} * scale) return;   // consistent already
+        const DenseMatrix a = k * mi.asDiagonal() * k.transpose();
+        const Vector lam = a.completeOrthogonalDecomposition().solve(r);   // redundant rows: least norm
+        if (!lam.allFinite()) return;
+        solver::ReinitRecord rec;
+        rec.t = t_prev;
+        rec.kind = cut ? "cut_set" : "capacitor_loop";
+        for (const Size g : grp)
+            for (const Index el : deps[g].elements) {
+                const std::string nm(graph_.branch_name(el));
+                if (std::find(rec.devices.begin(), rec.devices.end(), nm) == rec.devices.end())
+                    rec.devices.push_back(nm);
+            }
+        for (const Index b : st) rec.states.emplace_back(graph_.branch_name(b));
+        rec.lambda = lam[row_d];
+        rec.dW = Real{0.5} * lam.dot(r);
+        const Vector proj = xa - mi.cwiseProduct(k.transpose() * lam);
+        rec.projection_gap = (proj - xb).cwiseAbs().maxCoeff();
+        rec.sample = sample;
+        rec.cause = cause_(d, stamped);
+        if (on_impulse_error) {
+            std::string sts;
+            for (const auto& s : rec.states) sts += (sts.empty() ? "" : ", ") + s;
+            throw UnsupportedError(
+                engine, "impulse", rec.devices.front(),
+                std::string(stored_kind_name(pool_.kind_of(d.elements.front()))),
+                std::format("on_impulse='error': at t = {} '{}' makes {} "
+                            "dependent ({}); re-initialising them moves "
+                            "{:.6g} {} and removes {:.6g} J.",
+                            t_prev, rec.devices.front(), sts,
+                            cut ? "an inductor cut-set" : "a capacitor loop",
+                            rec.lambda, cut ? "V*s" : "C", rec.dW));
+        }
+        result.reinit_records.push_back(std::move(rec));
+    }
+
     /// The element of `d` whose bit changed since the last committed mode,
     /// a gated one first (the gate that entered the mode), else a diode of
     /// `d` that changed, else d's first element. Only `d`'s own elements:

@@ -26,6 +26,7 @@
 #include "pulsim/numeric/types.hpp"
 #include "pulsim/pwl/device_pool.hpp"
 #include "pulsim/pwl/symbolic_plan.hpp"
+#include "pulsim/sim/error.hpp"   // NetlistError
 
 #include <algorithm>
 #include <bit>
@@ -140,7 +141,7 @@ public:
         auto node_name = [&](Index i) { return std::string{g.node(i).name}; };
         auto refuse = [&](std::string_view dev, std::string_view pin, Index nd,
                           std::string_view wants, std::string_view has) {
-            throw std::invalid_argument(std::format(
+            throw NetlistError(std::string(dev), node_name(nd), std::format(
                 "device \"{}\": pin {} ({}) is connected to node \"{}\", which "
                 "is {}", dev, pin, wants, node_name(nd), has));
         };
@@ -330,7 +331,7 @@ public:
         auto b = d_->lowered.clone();
         for (const auto& t : ties) {
             if (t.node < 0 || t.node >= b.graph().num_nodes()) {
-                throw std::invalid_argument(std::format(
+                throw NetlistError(t.name, "", std::format(
                     "with_ties: tie \"{}\" names node {}, which this "
                     "circuit does not have", t.name, t.node));
             }
@@ -557,6 +558,43 @@ private:
             std::visit([&](const auto& p) {
                 using P = std::decay_t<decltype(p)>;
                 if constexpr (std::is_same_v<P, pwl::DevicePool::ExternalDeviceParams>) {
+                    if (const auto* pm = dd.lowered.power_mosfet_record(bi);
+                        pm && pm->params.fq_device) {
+                        // the power MOSFET f/q device: its record by content
+                        // (its parameter vector is a per-process handle)
+                        using K = pwl::DevicePool::StoredKind;
+                        using PMp = models::PowerMosfet;
+                        const auto& q = pm->params;
+                        for (const Real x : {pm->K_eff, pm->V_T_eff, pm->R_d_eff, q.K, q.V_T,
+                                             q.lambda, q.kappa, q.R_d, q.C_gs, q.R_g, q.L_s,
+                                             q.T_j, q.rds_tc1, q.rds_tc2, q.vt_tc}) v.real(x);
+                        v.word(static_cast<std::uint64_t>(q.body));
+                        auto rows = [&](K k, const ParamsVariant& pv) {
+                            for (const auto& fs : fields_of(k)) v.real(fs.get(pv));
+                        };
+                        rows(K::ShockleyDiode, ParamsVariant{q.shockley});
+                        rows(K::LauritzenDiode, ParamsVariant{q.lauritzen});
+                        for (const PMp::Capacitance* c : {&q.C_gd, &q.C_ds}) {
+                            if (const Real* x = std::get_if<Real>(c)) {
+                                v.word(0u); v.real(*x);
+                                continue;
+                            }
+                            const auto& law = std::get<models::NonlinearCapacitor::Params>(*c);
+                            rows(K::NonlinearCapacitor, ParamsVariant{law});
+                            v.word(static_cast<std::uint64_t>(law.law) + 1u);
+                            v.word(law.table ? 1u : 0u);
+                            if (law.table) {
+                                reals(law.table->v_knots()); reals(law.table->q_knots());
+                                reals(law.table->c_knots());
+                            }
+                        }
+                        v.word(q.channel ? 1u : 0u);
+                        if (q.channel) {
+                            reals(q.channel->v_gs()); reals(q.channel->v_ds());
+                            for (const auto& r : q.channel->current_grid()) reals(r);
+                        }
+                        return;
+                    }
                     // the model by name and library path, the values by content
                     for (const char ch : p.inst->model().name()) v.word(static_cast<unsigned char>(ch));
                     for (const char ch : p.inst->model().library_path()) v.word(static_cast<unsigned char>(ch));

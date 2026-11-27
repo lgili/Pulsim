@@ -36,6 +36,7 @@
 // damping `eig` returns an "invertible" basis with κ ≈ 1e9 and the
 // modal formula is 1e-6 off (probes/dsed_baseline.py).
 
+#include "pulsim/dsed/expm_action.hpp"
 #include "pulsim/numeric/dense.hpp"
 #include "pulsim/numeric/types.hpp"
 
@@ -47,6 +48,7 @@
 #include <cstdio>
 #include <limits>
 #include <numbers>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -58,10 +60,19 @@ inline constexpr Real kExactRoundoff = std::numeric_limits<Real>::epsilon();
 /// The accepted error level of tiers 1 and 2 (`u·κ`, `u·‖Ah‖₁`).
 inline constexpr Real kExactTierBound = Real{1e-10};
 
+/// add-exact-propagator-strategy 10.1 (D8): the fixed-step pair of one
+/// step length h, x(t+h) = Φ·x + Γ (Γ for the b the propagator was built
+/// with), dense and real.
+struct PhiGamma {
+    Real h = 0;
+    DenseMatrix Phi;
+    Vector Gamma;
+};
+
 /// The propagator of one mode.
 struct ExactLTI {
-    bool valid = false;        // tier 1 or 2: an exact step exists
-    int tier = 3;
+    bool valid = false;        // tier 1, 2 or 4: an exact step exists
+    int tier = 3;              // 4: the action of the exponential (D13), no eigenbasis
     Real kappa = std::numeric_limits<Real>::infinity();  // κ₂(Ṽ)
     Real norm_A1 = Real{0};    // ‖Ã‖₁ (energy coordinates)
     std::string reason;        // why not tier 1 (empty on tier 1)
@@ -84,9 +95,17 @@ struct ExactLTI {
     mutable std::vector<std::pair<Real, DenseMatrix>> pade_cache;
     mutable std::size_t n_pade = 0;       // Padé exponentials evaluated
     mutable std::size_t n_pade_hits = 0;  // cache hits
+    // 10.1: the (Φ, Γ) pairs of this mode, keyed on h (bitwise); the
+    // owner's byte budget decides whether a pair is kept (fixed-step form)
+    mutable std::vector<PhiGamma> pg_cache;
 
     // Workspaces: a step allocates nothing.
     mutable Vector z_re, z_im, zn_re, zn_im, y, c1_re, c1_im;
+    // tier 4 (add-exact-propagator-strategy 15.2, D13): e^{[[A, b], [0, 0]] h}·[x; 1] by the
+    // truncated Taylor action on the sparse augmented matrix; its workspaces
+    std::optional<ExpmAction> action;
+    mutable Vector act_in, act_out;
+    mutable std::size_t action_steps = 0;
 
     // The output rule's per-mode data (exact_chord_step), built on its first
     // call: |V_jk|, and the modes ordered by their saturation level s_k
@@ -95,6 +114,12 @@ struct ExactLTI {
     mutable std::vector<Eigen::Index> chord_order;
     mutable Vector chord_s;
     mutable Real chord_rho = Real{0};   // max |λ_k|
+    // The rows the rule bounds, in modal form: P = O·V for an output map O
+    // (the adapter: [I; R] — the state and its recovered vector); empty: P = V.
+    mutable DenseMatrix chord_P_re, chord_P_im;
+    // |O|·|V| (complex moduli): each row's evaluation magnitude per mode, its rounding
+    // floor's weights (empty: |P| = chord_vabs, exact when P = V)
+    mutable DenseMatrix chord_M;
     // The event scan's certificate (PEDSimulator::locate_event_exact_): per armed
     // predicate (index), its modal row q_k = c·V_k, built on first use (empty: not yet).
     mutable std::vector<Eigen::VectorXcd> scan_q;
@@ -106,11 +131,24 @@ struct ExactLTI {
 struct ChordWork {
     Vector xa, ta, c0, c1, v, s;            // the adapter's augmented state / sources
     Vector cr, ci, a;                       // V⁻¹c (re, im); |z̈_k| (decaying / zero modes)
+    Vector ty, tyf, te;                     // tolerance of each recovered row (empty: none); its rounding floor; the effective tol
+    Vector fu;                              // per bounded row: the floor the last step's certification needed (0: none)
     Vector gB, gC, gD;                      // the growing modes' terms at one probe
     Vector eb;                              // the bound at one probe
     std::vector<Eigen::Index> grow;         // modes with Re λ > 0
     Eigen::VectorXcd zdd;
     DenseMatrix S, B, C, D, A0, A1;         // n × (n+1) sums per split (exact_chord_step)
+    // The basis-inconsistency floor (F-X-8): z̈ at the last two distinct instants of one
+    // LTI flow (the caller sets `track` on the flow's calls and resets at every event, time
+    // event or state kick); inconsistent: the measured z̈'s bound exceeded a row's tolerance
+    bool track = false, inconsistent = false;
+    Real t = Real{0};                           // the instant of the call (set by the caller)
+    const void* cur_e = nullptr;
+    const void* prev_e = nullptr;
+    Real cur_t = Real{0}, prev_t = Real{0};
+    Eigen::VectorXcd cur_zdd, prev_zdd, gdd;   // gdd: z̈ with the constant parts taken out
+    Vector fu0;
+    void reset_flow() noexcept { cur_e = prev_e = nullptr; }
 };
 
 /// eˢ − 1 for complex s without cancellation at any |s|.
@@ -632,11 +670,57 @@ inline constexpr Real kPadeTheta13 = 5.371920351148152;
     return e.pade_cache.back().second;
 }
 
+/// 10.1 (D8): the pair (Φ, Γ) of a step h. Tier 1 from the modal form,
+/// Φ = Re(V·diag(e^{λh})·V⁻¹), Γ = Re(V·(h·φ₁(λh) ∘ w)); tier 2 from the
+/// augmented exponential, unscaled out of the energy coordinates.
+[[nodiscard]] inline PhiGamma make_phi_gamma(const ExactLTI& e, Real h) {
+    PhiGamma out;
+    out.h = h;
+    if (e.tier == 2) {
+        const auto n = e.As.rows();
+        const DenseMatrix& E = pade_exp(e, h);
+        out.Phi = e.d.cwiseInverse().asDiagonal() * E.topLeftCorner(n, n) * e.d.asDiagonal();
+        out.Gamma = E.topRightCorner(n, 1).cwiseQuotient(e.d);
+        return out;
+    }
+    const auto n = e.V_re.rows();
+    Eigen::MatrixXcd V(n, n), Vinv(n, n);
+    V.real() = e.V_re;
+    V.imag() = e.V_im;
+    Vinv.real() = e.Vinv_re;
+    Vinv.imag() = e.Vinv_im;
+    Eigen::VectorXcd ex(n), g(n);
+    for (Eigen::Index i = 0; i < n; ++i) {
+        const std::complex<Real> s = e.lambda[i] * h;
+        ex[i] = std::exp(s);
+        g[i] = h * phi1(s) * e.w[i];
+    }
+    out.Phi = (V * ex.asDiagonal() * Vinv).real();
+    out.Gamma = (V * g).real();
+    return out;
+}
+
+/// One fixed step x ← Φ·x + Γ into `out` (distinct from x): n² + n
+/// multiply-adds, no allocation.
+inline void phi_gamma_step_into(const PhiGamma& pg, const Vector& x, Vector& out) {
+    out.noalias() = pg.Phi * x;
+    out += pg.Gamma;
+}
+
 /// Advance `x` by `h` into `out` (same size; no allocation after the
 /// first call on tier 1).
 inline void exact_advance_into(const ExactLTI& e, const Vector& x, Real h,
                                Vector& out) {
     const auto n = x.size();
+    if (e.tier == 4) {
+        e.act_in.resize(n + 1);
+        e.act_in.head(n) = x;
+        e.act_in[n] = Real{1};
+        e.action->apply(e.act_in, h, e.act_out);
+        out = e.act_out.head(n);
+        ++e.action_steps;
+        return;
+    }
     if (e.tier == 2) {
         const DenseMatrix& E = pade_exp(e, h);
         e.y.noalias() = E.topLeftCorner(n, n) * e.d.cwiseProduct(x);
@@ -833,11 +917,17 @@ inline constexpr Real kSettleTau = Real{40};
                                            const Vector& tol, Real h, bool& bounded,
                                            ChordWork& w) {
     bounded = e.valid && e.tier == 1;
+    w.inconsistent = false;
     if (!bounded || !(h > Real{0})) return h;
     const auto n = x.size();
+    // the bounded rows: the state, or the caller's output map (chord_P, rows = tol's)
+    const bool rows_p = e.chord_P_re.rows() > 0;
+    const DenseMatrix& Pre = rows_p ? e.chord_P_re : e.V_re;
+    const DenseMatrix& Pim = rows_p ? e.chord_P_im : e.V_im;
+    const auto r = Pre.rows();
     constexpr Real kInf = std::numeric_limits<Real>::infinity();
-    if (e.chord_vabs.rows() != n) {   // per mode, once
-        e.chord_vabs = e.V_re.binaryExpr(e.V_im, [](Real a, Real b) { return std::hypot(a, b); });
+    if (e.chord_vabs.rows() != r || e.chord_s.size() != n) {   // per mode (and row map), once
+        e.chord_vabs = Pre.binaryExpr(Pim, [](Real a, Real b) { return std::hypot(a, b); });
         Vector s(n);
         for (Eigen::Index k = 0; k < n; ++k) {
             const Real r = std::abs(e.lambda[k]);
@@ -870,41 +960,79 @@ inline constexpr Real kSettleTau = Real{40};
         w.ci.noalias() = e.Vinv_im * *c1;
         for (Eigen::Index k = 0; k < n; ++k) w.zdd[k] += std::complex<Real>{w.cr[k], w.ci[k]};
     }
-    // a growing mode's g_k = e^{Re λ_k δ} depends on the probe: its terms are added in fits
-    w.grow.clear();
-    for (Eigen::Index k = 0; k < n; ++k) {
-        const bool grows = e.lambda[k].real() > Real{0};
-        if (grows) w.grow.push_back(k);
-        w.a[k] = grows ? Real{0} : std::abs(w.zdd[k]);
-    }
-    // column i = the split F = chord_order[0, i): S / B / C / A0 as in the bound above
-    w.S.resize(n, n + 1);
-    w.B.resize(n, n + 1);
-    w.C.resize(n, n + 1);
-    w.A0.resize(n, n + 1);
-    w.D.resize(n, n + 1);
-    w.A1.resize(n, n + 1);
-    w.S.col(0).setZero();
-    w.B.col(n).setZero();
-    w.C.col(n).setZero();
-    w.D.col(n).setZero();
-    w.A0.col(n).setZero();
-    w.A1.col(n).setZero();
-    for (Eigen::Index q = n - 1; q >= 0; --q) {
-        const Eigen::Index k = e.chord_order[static_cast<std::size_t>(q)];
-        const std::complex<Real> zl = w.zdd[k] * e.lambda[k];
-        w.B.col(q) = w.B.col(q + 1) + e.chord_vabs.col(k) * w.a[k];
-        w.C.col(q) = w.C.col(q + 1) + e.chord_vabs.col(k) * (w.a[k] * std::abs(e.lambda[k]));
-        w.D.col(q) = w.D.col(q + 1) + e.chord_vabs.col(k) * (w.a[k] * std::norm(e.lambda[k]));
-        w.A0.col(q) = w.A0.col(q + 1) + e.V_re.col(k) * w.zdd[k].real() - e.V_im.col(k) * w.zdd[k].imag();
-        w.A1.col(q) = w.A1.col(q + 1) + e.V_re.col(k) * zl.real() - e.V_im.col(k) * zl.imag();
+    // F-X-8: within one LTI flow a decaying mode's z̈_k(t) = z̈_k(t_p)·e^{λ_k(t − t_p)}
+    // exactly. What of it did not decay by the previous distinct instant of the flow is the
+    // basis's (or the propagator's) inconsistency, not a transient: a 0.4 ps mode of seven
+    // bridges read a constant |z| = 3.6e-14 for 250 ps (its closed form: e^-625), 2.6e10 V
+    // per unit on a recovered row, and cut every chord to 1 ps until the cap. A constant part
+    // c_k leaves the residue z̈ − ρ z̈_p = c_k (1 − ρ), so per mode with |ρ| ≤ 1/2 (it should
+    // have decayed by half) the bound reads the decaying part g_k = z̈_k − c_k instead of z̈_k.
+    // Only a step the measured z̈ cuts is solved again so; when that step is longer, the
+    // measured bound at it is the row's floor (w.fu) and the call is counted (w.inconsistent).
+    bool sub = false;
+    if (w.track) {
+        if (w.cur_e != &e || !(w.t >= w.cur_t)) {
+            w.cur_e = nullptr;
+            w.prev_e = nullptr;
+        } else if (w.t > w.cur_t) {
+            w.prev_e = w.cur_e;
+            w.prev_t = w.cur_t;
+            w.prev_zdd.swap(w.cur_zdd);
+        }
+        w.cur_e = &e;
+        w.cur_t = w.t;
+        w.cur_zdd = w.zdd;   // the measured z̈ (the next call's prediction starts from it)
+        if (w.prev_e == &e && w.prev_t < w.t && w.prev_zdd.size() == n) {
+            const Real dt = w.t - w.prev_t;
+            for (Eigen::Index k = 0; k < n; ++k) {
+                const std::complex<Real> rho = std::exp(e.lambda[k] * dt);
+                if (!(std::abs(rho) <= Real{0.5})) continue;
+                const std::complex<Real> c = (w.zdd[k] - rho * w.prev_zdd[k]) / (Real{1} - rho);
+                if (c == std::complex<Real>{0}) continue;
+                if (!sub) w.gdd = w.zdd;
+                w.gdd[k] -= c;
+                sub = true;
+            }
+        }
     }
     Eigen::Index n_sat = 0;   // modes with a finite s_k (only they can join F)
     while (n_sat < n && e.chord_s[n_sat] < kInf) ++n_sat;
-    for (Eigen::Index q = 0; q < n_sat; ++q) {
-        const Eigen::Index k = e.chord_order[static_cast<std::size_t>(q)];
-        w.S.col(q + 1) = w.S.col(q) + e.chord_vabs.col(k) * (w.a[k] * e.chord_s[q]);
-    }
+    auto sums = [&] {   // the per-step sums from w.zdd
+        // a growing mode's g_k = e^{Re λ_k δ} depends on the probe: its terms are added in fits
+        w.grow.clear();
+        for (Eigen::Index k = 0; k < n; ++k) {
+            const bool grows = e.lambda[k].real() > Real{0};
+            if (grows) w.grow.push_back(k);
+            w.a[k] = grows ? Real{0} : std::abs(w.zdd[k]);
+        }
+        // column i = the split F = chord_order[0, i): S / B / C / A0 as in the bound above
+        w.S.resize(r, n + 1);
+        w.B.resize(r, n + 1);
+        w.C.resize(r, n + 1);
+        w.A0.resize(r, n + 1);
+        w.D.resize(r, n + 1);
+        w.A1.resize(r, n + 1);
+        w.S.col(0).setZero();
+        w.B.col(n).setZero();
+        w.C.col(n).setZero();
+        w.D.col(n).setZero();
+        w.A0.col(n).setZero();
+        w.A1.col(n).setZero();
+        for (Eigen::Index q = n - 1; q >= 0; --q) {
+            const Eigen::Index k = e.chord_order[static_cast<std::size_t>(q)];
+            const std::complex<Real> zl = w.zdd[k] * e.lambda[k];
+            w.B.col(q) = w.B.col(q + 1) + e.chord_vabs.col(k) * w.a[k];
+            w.C.col(q) = w.C.col(q + 1) + e.chord_vabs.col(k) * (w.a[k] * std::abs(e.lambda[k]));
+            w.D.col(q) = w.D.col(q + 1) + e.chord_vabs.col(k) * (w.a[k] * std::norm(e.lambda[k]));
+            w.A0.col(q) = w.A0.col(q + 1) + Pre.col(k) * w.zdd[k].real() - Pim.col(k) * w.zdd[k].imag();
+            w.A1.col(q) = w.A1.col(q + 1) + Pre.col(k) * zl.real() - Pim.col(k) * zl.imag();
+        }
+        for (Eigen::Index q = 0; q < n_sat; ++q) {
+            const Eigen::Index k = e.chord_order[static_cast<std::size_t>(q)];
+            w.S.col(q + 1) = w.S.col(q) + e.chord_vabs.col(k) * (w.a[k] * e.chord_s[q]);
+        }
+    };
+    sums();
     // the bound on |e_j| at step d, per component, into w.eb (false: not finite)
     auto bound = [&](Real d) {
         const Real q = d * d / Real{8};
@@ -920,9 +1048,9 @@ inline constexpr Real kSettleTau = Real{40};
                        .matrix();
             return true;
         }
-        w.gB.setZero(n);
-        w.gC.setZero(n);
-        w.gD.setZero(n);
+        w.gB.setZero(r);
+        w.gC.setZero(r);
+        w.gD.setZero(r);
         for (const Eigen::Index k : w.grow) {   // always in S (s_k = ∞)
             const Real m = std::abs(w.zdd[k]) * std::exp(e.lambda[k].real() * d);
             if (!std::isfinite(m)) return false;
@@ -938,17 +1066,68 @@ inline constexpr Real kSettleTau = Real{40};
                    .matrix();
         return true;
     };
+    // No row is promised below its own rounding floor: its evaluation from the modal
+    // state, 16·u·Σ_i |O_ji| Σ_k |V_ik||z_k| (chord_M = |O|·|V|; |V| itself when P = V),
+    // i.e. ε·Σ|terms| of the recovery y = O·(V·z). Tolerance = max(tol, floor). A row
+    // whose bound only fits through its floor is certified constant up to rounding at
+    // that floor (w.fu, counted by the caller). The old floor Σ_k |P_jk||z_k| took P after
+    // its cancellation: ten paralleled bridges carry a 1.5e11 /s mode at 1e-13 (the state's
+    // own rounding) on a node behind 1/g_off = 3.9e8 Ω, 7.6e-5 V against a 4e-9 tolerance,
+    // and every interval hit the sample cap (group F session 7, D-2).
+    const DenseMatrix& M = e.chord_M.rows() == r ? e.chord_M : e.chord_vabs;
+    w.cr = (e.z_re.array().square() + e.z_im.array().square()).sqrt().matrix();
+    w.fu.noalias() = M * w.cr;
+    w.fu *= Real{16} * kExactRoundoff;
+    w.te = tol.cwiseMax(w.fu);
+    if (rows_p && r > n) w.tyf = w.fu.tail(r - n);
+    else w.tyf.resize(0);
+    const Eigen::Map<const Vector> tol_e(w.te.data(), r);
     // whether step d satisfies the bound for every component
-    auto fits = [&](Real d) { return bound(d) && (w.eb.array() <= tol.array()).all(); };
-    if (fits(h)) return h;
-    // bisect in log d; lo always fits, so the result is a bound whatever the split does
-    Real lo = h * Real{1e-12}, hi = h;
-    if (!fits(lo)) return lo;
-    for (int it = 0; it < 60 && hi > lo * Real{1.01}; ++it) {
-        const Real mid = std::sqrt(lo * hi);
-        (fits(mid) ? lo : hi) = mid;
+    auto fits = [&](Real d) { return bound(d) && (w.eb.array() <= tol_e.array()).all(); };
+    // w.fu: each row's floor where the bound at the step taken needed it, else 0
+    auto floored = [&] {
+        w.fu = (w.eb.array() > tol.array()).select(w.fu, Real{0});
+    };
+    auto solve = [&]() -> Real {
+        if (fits(h)) {
+            floored();
+            return h;
+        }
+        // bisect in log d; lo always fits, so the result is a bound whatever the split does
+        Real lo = h * Real{1e-12}, hi = h;
+        if (!fits(lo)) {   // not even 1e-12·h fits: no bound (counted as unbounded)
+            bounded = false;
+            w.fu.setZero();
+            return h;
+        }
+        for (int it = 0; it < 60 && hi > lo * Real{1.01}; ++it) {
+            const Real mid = std::sqrt(lo * hi);
+            (fits(mid) ? lo : hi) = mid;
+        }
+        bound(lo);
+        floored();
+        return lo;
+    };
+    w.fu0 = w.fu;
+    const Real d = solve();
+    if (!(sub && bounded && d < h)) return d;
+    // F-X-8: the same with the decaying parts g (a step it allows beyond d is counted)
+    w.zdd.swap(w.gdd);
+    sums();
+    w.fu = w.fu0;
+    Real dg = solve();
+    if (!bounded) bounded = true, dg = d;   // g has no bound: keep the measured step
+    w.zdd.swap(w.gdd);   // back to the measured z̈
+    sums();
+    const Real dt = dg > d ? dg : d;
+    if (!bound(dt)) w.eb = w.te;   // a growing term without a finite bound: report the tolerance
+    w.fu = w.fu0;
+    floored();
+    if (dg > d && (w.eb.array() > tol_e.array()).any()) {
+        w.inconsistent = true;   // the measured bound at the step taken is that row's floor
+        w.fu = (w.eb.array() > tol_e.array()).select(w.eb, w.fu);
     }
-    return lo;
+    return dt;
 }
 
 /// A step's error per unit of state, as the propagator states it: tier 1

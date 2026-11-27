@@ -427,6 +427,15 @@ private:
     void route_() {
         switch (opts_.engine) {
             case EngineChoice::Exact:
+                // A device the exact engine cannot run is named first (the
+                // caller learns which device, not only that the object
+                // does not run the engine).
+                if (const auto b = find_unsupported(graph(), pool(), Engine::Dsed)) {
+                    throw unsupported_device(graph(), pool(), Engine::Dsed, *b,
+                        std::format("Simulation: engine 'dsed' cannot simulate "
+                                    "'{}' ({})", graph().branch_name(*b),
+                                    pwl::stored_kind_name(pool().kind_of(*b))));
+                }
                 throw UnsupportedError("dsed", "engine", "", "",
                     "Simulation: the exact (event-driven) engine is composed "
                     "in Python today; use pulsim.simulate(engine='exact'). "

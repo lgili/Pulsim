@@ -986,3 +986,207 @@ says where the implementation departs from them or what it settled.
     slice ran; its `python/tests/test_recorders.py:21-22` skips trbdf2
     in-loop feeds under PULSIM_TRBDF2_STEPPER_LEGACY=1, a variable nothing
     reads after this slice: delete those two lines when merging.
+
+21. **Groups 0–1 (2026-11-26): the baseline is the branch point; only the
+    source terms are shared.** Baseline recorded on `400011ee`
+    (`feat/core-integration-next`), not on `main` (the integration tree is
+    where these engines live; DECISIONS 2): the compare suites of
+    DECISIONS 20 (goldens with counters, stateful, engines, step
+    sequences, seam, pwl identity 399 cells, trbdf2 identity 380 cells,
+    DSED bit identity default + shadow, AC, residuals, recorders, loss,
+    sensitivity, PSS, exact outputs), instructions per accepted step
+    (`h/instr1.py`, LTO off both sides) for the cost and the peak RSS of
+    one `python/bindings.cpp` compile for the build. DECISIONS 7 stands
+    for the WHOLE right-hand side: the three callers keep their own
+    association of history, `b_extra_fn` and sources. What is one
+    implementation now is the source part, `step::SourceAccumulator`
+    (`solver/step/source_accumulator.hpp`): the fixed engine's per-row
+    `b[row] += 0 + (−v)` lists, which the fixed engine had already proved
+    equal to the dense per-kind passes (update-fixed-step-loop-
+    bookkeeping). The TR-BDF2 overlay and the DSED adapter's
+    `build_time_varying_b_extra_` drop their dense passes for it; equal
+    bit for bit because their target is a zeroed buffer (plus
+    `b_extra_fn` on TR-BDF2), never −0.0, so `b + (+0.0)` on the rows a
+    source does not own was always the identity. The fixed engine's
+    current-waveform adds (one of them subtracts) stay on the dense helper
+    they already shared with the other two.
+
+22. **Group 2: the solve point is the step context plus the engine's
+    dispatch; `StepperCore::solve_stage` is a free function.** The
+    design's `solve_stage` folds in the history right-hand side and the
+    sources; doing that moves bits (DECISIONS 7) and needs the engines'
+    state in one object (group 3 holds only the histories). Shipped:
+    `step::solve_stage(ctx, StageSpec, t_end, dispatch)` (sets the
+    devices' step context from the stage table, then runs the engine's
+    dispatch, which builds its right-hand side and solves) and
+    `step::dispatch_solve(nonlinear, linear, newton)`, both forced
+    inline (`solver/step/stepper_core.hpp`). TR-BDF2: `trap_solve` (every
+    probe, landing, settle and event trial goes through it) calls
+    `solve_stage`; `solve_dispatch` (the stage solves, the record solve
+    and the ESDIRK stages call it directly, with the context set at the
+    stage start as before) is `dispatch_solve`. Fixed engine: the event
+    iteration's three inline solves (linear + two Newton) are one
+    `solve_point` lambda over `mode_solve` and `dispatch_solve`; the
+    retry sub-steps and the sub-step correction reach it through
+    `run_event_iteration`, which keeps setting `step_ctx` once per call
+    (the mode settle reads it before the first solve). Every remaining
+    direct call carries a role tag that `test_single_solve_point.py`
+    checks: `factor-reuse` (noise floor, mode judge, LTE filter: solves on
+    an existing factor that produce no state) and `solve-exempt` (the V0
+    overload, deleted by task 11.1; the static path, which has no
+    stateful device; the right-limit restart line's linear re-solve,
+    which runs outside the event iteration on its own BE right-hand
+    side). Moving those three onto the solve point is not an extraction:
+    each has its own counters and right-hand side.
+
+22a. **Group 2, fixed engine: the event iteration's solve point is written
+    out, not a dispatch lambda.** The `solve_point` lambda of DECISIONS 22
+    (over `mode_solve` and `dispatch_solve`, forced inline) was
+    byte-identical but cost +0.80 … +1.11 % instructions per accepted step
+    on every fixed-engine case (gate 0.5 %). Shipped instead, in
+    `run_event_iteration`: one `if (nl_refresh_effective)` whose Newton
+    branch picks the segment (nominal, or the off-nominal companion it
+    assembles) and makes ONE tagged `solve_with_newton_b_extra` call (the
+    two Newton calls merged), and whose linear branch stays the inline
+    three-way choice it was (restart factor count, memoised nominal
+    segment, `solve_at`), tagged `solve-point`; `mode_solve` is no longer
+    forced inline. Same calls with the same arguments in the same order:
+    byte-identical on every suite, and the fixed engine is back to group 1
+    (buck_pwl −0.30 %, vsi_pwl −0.04 %, the restart rows −0.25 / −0.02 %
+    vs base). The fixed engine therefore has seven `solve-point` lines
+    (mode_solve 3, event iteration 1 + 3), not one dispatch; TR-BDF2 keeps
+    `solve_stage` / `dispatch_solve`, within the gate. Compile memory of
+    `python/bindings.cpp`: the 3.76 GB of `rss_before.log` does not
+    reproduce with today's compile command; measured the same way on the
+    same day, base 400011ee 4.20 GB, group 1 4.07 GB, the lambda version
+    4.12 GB, this one 4.18 GB — within ±3 % of base, no regression.
+
+23. **Group 3: commit, rollback and seeding are four free function
+    templates, not a `StepperCore` object.** `step::commit(history,
+    devices, x, h, formula)`, `step::snapshot_into(history, devices, h, d)`,
+    `step::restore(history, devices, h, d)` and `step::seed(history,
+    devices, x)` (`solver/step/stepper_core.hpp`) are each exactly the
+    adjacent pair of calls the drivers made, linear companions first, with
+    explicit arguments (no object holding references, no captured state;
+    the group-2 lambda showed what a closure costs in the step loop,
+    DECISIONS 22a). Replaced: every ADJACENT pair — fixed engine 4 commits
+    (`commit_backward_euler`, `commit_trap`, the sub-step commit, the step
+    commit), 4 snapshots, 13 restores, the DC-point seed; TR-BDF2 the
+    probe-landing commit. Left as they are, on purpose: pairs whose two
+    halves are not one moment — the `initial_state` seeds (the stateful
+    histories are built between the two), single-history snapshots and
+    restores (the restart line, the LTE filter, the record replays, the
+    stage snapshots), the restart line's `hs.restore` under its own
+    condition, and the TR-BDF2 stage commits (`commit_trbdf2` /
+    landing-specific history updates with `hs.commit` lines further on).
+    Byte-identical on every suite; cost within gate (vsi_pwl +0.32 %,
+    the rest ≤ +0.28 % vs base).
+
+24. **Group 4: the TR-BDF2 restart estimate is on the `Sdirk22` table;
+    the W⁻¹ filter stays a driver solve.** The open part of task 4.1 was
+    the driver's embedded SDIRK estimate and the Hosea–Shampine filter.
+    The estimate is a stage-table property, so it moved:
+    `Sdirk22::restart_gamma()` (the driver's own `1 − 1/√2`, kept apart
+    from `Sdirk22::gamma()`'s literal as DECISIONS 4 requires),
+    `Sdirk22::lte(h, γs, k1, k2)` (the state entries) and
+    `Sdirk22::lte_q(Δψ5, Δ1, γs)` (the charge / flux rows), each the
+    expression it replaced; γs is passed, not recomputed, so the driver
+    evaluates it once as before. The filter is not a table value: it is
+    two solves on the step's factor over a history copy with its state
+    slots overwritten (already tagged `factor-reuse`, DECISIONS 22); it
+    stays in `run_transient_trbdf2` with the other solves, and a policy
+    that wants it (task 15.2's restart) calls it there. Task 4.1 is
+    complete with that reading.
+
+25. **Group 5: the policies that are a decision became types; the two
+    that are a loop over the engine's state did not.**
+    `solver/step/policies.hpp`: `HalvingLadder` (`cap` = min(requested,
+    20), `n_sub` = 2^h, `sub_dt` = dt / 2^h), `GuardPolicy::apply` (the
+    freeze then the clamp, returning the current and the two flags the
+    record counts) and `RestartPolicy` (the fixed engine's three SDIRK
+    steps and its γ literal; `None` is `restart_rule` off, a run-time
+    option, so no type). Each is the expression it replaced; the driver
+    keeps the loops that apply them (rollback, sub-steps, the
+    `dt_retries` / `inductor_guard_actions` records). `ShrinkAndRepeat`
+    is `LteController::reject_factor` (controllers.hpp, task 5.1): no
+    second name. Left open: `IterateAtStepEnd` (the event iteration:
+    solves, mode settle, split events and lines interleaved, already the
+    `run_event_iteration` lambda) and `Localize` (the TR-BDF2 probe /
+    landing phases). As free functions they need the engine's whole
+    state as arguments, and the group-2 lambda showed the fixed engine
+    cannot afford a closure on its step path (DECISIONS 22a); they move
+    with the decisions in groups 14–15. Oracle for 5.3: a new dump
+    (`poldump_plugin.py` over the 11 test files that produce the three
+    records: 606 results, 4 with `dt_retries`, 4 with
+    `inductor_guard_actions`, 29 with `event_iteration_breaches`) compared
+    byte for byte against `485337aa`, which is itself byte-identical to
+    the 400011ee baseline on every other suite.
+
+26. **Tasks 6.2 / 6.5: the equality proof is the stored-baseline identity,
+    run locally; no runner job.** The legacy TR-BDF2 loop is deleted
+    (DECISIONS 20, task 13.1) and there is no public `trbdf2-legacy` name
+    (DECISIONS 17), so "`trbdf2-next` equal to `trbdf2`" and "the matrix
+    equal for `trbdf2` and `trbdf2-legacy`" can only be the comparison with
+    a baseline recorded at the branch point:
+    `benchmarks/tools/trbdf2_identity.py compare` (380/380 at every group
+    of this change, `grp_*.txt`) and `pwl_identity.py` (399/399). It is
+    not added to CI. The hashes are SHA-256 of result bytes, which depend
+    on the compiler, libm and Eigen version (CI builds GCC 13, Clang +
+    libc++, MSVC and Eigen 3.4.0; the baseline is macOS clang with Eigen
+    5), so a stored hash set would be one platform's and would need a
+    re-record on every toolchain bump. The repository has no small subset
+    of stored result hashes to reuse: its committed goldens
+    (`benchmarks/tools/goldens.py`, in CI) hash only the integer switch
+    record and compare states to a tolerance, by design ("a bit-exact
+    hash of floating-point output is never the key"). What CI does check is the counter
+    gate (`benchmarks/manifests/perf_counters.yaml`, 1.02x on trbdf2) and
+    the golden suites. The gate stays local and four-part (DECISIONS 2).
+    Cost is instructions per accepted step (DECISIONS 16 / 18 / 20), not
+    ns/step. Both boxes stay open: the runner job is not built, by this
+    decision.
+
+27. **Task 6.3: a Newton-retried TR-BDF2 step allocates, about 10–16
+    operator news each; measured, not fixed.** The hidden case could not
+    reach the retry path: with a short Newton budget the gated IGBT
+    chopper either aborts at h_min at t = 0 or never retries, and a
+    resistive edge into a Shockley diode fails at every h. A 100 V pulse
+    into an inductor-fed Shockley diode (L = 10 µH, RC load) retries all
+    along, because the end-of-step current grows with h. Operator-new
+    counts per run (1/4 span -> full span):
+    | Newton budget | accepted | rejected | retries | news |
+    |---|---|---|---|---|
+    | 50 (default) | 3,158 -> 11,626 | 331 -> 1,256 | 0 | 117 -> 125 |
+    | 20 | 3,172 -> 11,676 | 331 -> 1,310 | 46 -> 245 | 604 -> 2,615 |
+    | 12 | 3,233 -> 11,969 | 444 -> 1,800 | 81 -> 348 | 1,397 -> 5,618 |
+    | 8 | 3,255 -> 12,065 | 474 -> 1,897 | 109 -> 491 | 1,607 -> 7,038 |
+    Accepted and rejected steps are O(1). The retry path is not: about 10
+    news per retry at budget 20 and 16 at budget 12, with no retry left at
+    the default budget. The source is the failure report. `pwl::
+    solve_with_newton_in_place` signals a failed solve by throwing a
+    `std::runtime_error` whose `std::format` message (row labels included)
+    is built on every failure, and `run_transient_trbdf2` catches it and
+    copies `what()` into `newton_last_error`, a message used only if the
+    run later aborts at h_min. A fix is byte-identical on results: a
+    non-throwing failure status, with the message formatted only at the
+    abort. It is not done in this slice. The solver has seven throw sites
+    shared with the fixed engine and the DC path, the abort message text
+    must stay identical, and the change sits on the fixed engine's step
+    path, which is under the cost gate. It belongs with the solve-point
+    work of groups 14–15. The test is un-hidden as two sections: O(1) over
+    accepted and rejected steps (default budget), and a per-retry bound
+    (≤ 24 news per retry) as a regression guard. 6.3 stays open.
+
+28. **Task 12.2: bit-identical split resume where the snapshot is the
+    whole loop state; the switched case waits for the loop, not for a
+    format change.** Added in `test_trbdf2_resume_controller.py`: an RLC
+    split at two step times resumes bit-identically, with times and states
+    `array_equal`. A snapshot whose controller slot is cleared (pickle slot
+    14 -> `None`) resumes to tolerance. A `pwl` snapshot (no controller
+    block) resumes on `trbdf2`, and the reverse, to tolerance (measured
+    1.4e-7 and 1.3e-7 absolute on the final state). A bit-identical buck
+    split (0/44, DECISIONS 12) needs the loop's gate-learning and hold
+    state in the snapshot, which would change what a snapshot contains and
+    its pickle layout. By this slice's rule that is not done here: it
+    comes when the skeleton owns that state (groups 14–15) together with
+    the device-interface pickle (DECISIONS 12). 12.2 stays open on that
+    part. 12.3: the snapshot section is in `docs/result-reference.md`.

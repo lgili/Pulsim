@@ -376,3 +376,60 @@ TEST_CASE("Roundoff acceptance: the DC call sites pass none",
         REQUIRE(ss.str().find("roundoff") == std::string::npos);
     }
 }
+
+TEST_CASE("Roundoff acceptance: a floating-point fixed point is judged at its "
+          "own magnitudes only when judge_own_scale is set",
+          "[v2][newton][roundoff]") {
+    // DECISIONS 12 (ll13 on trbdf2): the start state is cold (x = 0, so the
+    // KCL row has no magnitude at the start's scale: omega = inf there),
+    // the first step lands at 1e9 and Newton then cycles +2, -1, -1 u
+    // (u = ulp(1e9), every step within 4 eps of x_k). At x_k's own scale the
+    // row's residual (12 u) is ~3 eps. trbdf2/esdirk43 set the flag and
+    // accept; the fixed-step engine leaves it off and keeps 2.1.0's outcome:
+    // the throw its caller turns into a halved-dt retry.
+    Graph g;
+    g.add_node("n0");
+    g.add_branch(0, g.ground(), BranchKind::Source);
+    g.add_branch(0, g.ground(), BranchKind::PassiveLinear);
+    DevicePool pool;
+    pool.add_voltage_source(0, {.V = 1e9});
+    pool.add_resistor(1, {.G = 1.0});
+    PwlStateSpaceCache cache(g, pool);
+    cache.build();
+    const auto& seg = cache.lookup(SwitchStateMask(0));
+    const Path cyc({2, -1, -1});
+    const Vector x0 = Vector::Zero(seg.state_size);
+    {
+        NewtonRoundoffAcceptance ro;
+        ro.enabled = true;
+        ro.judge_own_scale = true;
+        (void)solve_with_newton_b_extra(seg, cyc, g, pool, x0,
+                                        Vector::Zero(seg.state_size), 40, 1e-9,
+                                        1e-9, false, false, nullptr, &ro);
+        REQUIRE(ro.accepted);
+        REQUIRE(ro.fixed_point);
+        REQUIRE(ro.omega <= ro.omega_max);
+        REQUIRE(ro.total == 1);
+    }
+    {
+        NewtonRoundoffAcceptance ro;   // the default: as the fixed-step engine
+        ro.enabled = true;
+        REQUIRE_FALSE(ro.judge_own_scale);
+        try {
+            (void)solve_with_newton_b_extra(seg, cyc, g, pool, x0,
+                                            Vector::Zero(seg.state_size), 40,
+                                            1e-9, 1e-9, false, false, nullptr,
+                                            &ro);
+            FAIL("the fixed point was accepted with judge_own_scale off");
+        } catch (const NewtonRoundoffBudgetExceeded&) {
+            FAIL("a decline must not be the budget error");
+        } catch (const std::runtime_error& e) {
+            REQUIRE(std::string(e.what()).find("Roundoff acceptance declined")
+                    != std::string::npos);
+        }
+        REQUIRE_FALSE(ro.accepted);
+        REQUIRE_FALSE(ro.fixed_point);
+        REQUIRE(ro.total == 0);
+        REQUIRE(ro.consecutive == 0);
+    }
+}

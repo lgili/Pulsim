@@ -241,8 +241,12 @@ public:
                               const Vector& xr, const topology::SwitchStateMask& mr) {
             on_event(t, xl, ml, xr, mr);
         });
+        hooks.on_sample([this](Real t, const Vector* x, const topology::SwitchStateMask* m) {
+            on_sample(t, x, m);
+        });
         pending_.resize(names_.size());
         pending_left_.resize(names_.size());
+        held_.resize(names_.size());
         attached_ = true;
     }
 
@@ -381,6 +385,13 @@ private:
     topology::SwitchStateMask mask_last_, mask_pending_, mask_seed_;
     bool started_ = false, has_pending_ = false, attached_ = false, settled_ = false;
     bool event_at_last_ = false;  // a settled event row at the last sample
+    // A stored sample that is not a step (StepHooks::sample), read when the
+    // engine stored it and held until a step ends after it.
+    bool has_held_ = false;
+    Real t_held_ = 0;
+    std::vector<Real> held_;
+    Vector x_held_;
+    topology::SwitchStateMask mask_held_;
     Real t_last_ = 0, t_pending_ = 0;
     Size n_steps_ = 0, n_jumps_ = 0, n_events_ = 0, n_dropped_ = 0;
 
@@ -570,6 +581,39 @@ private:
         has_pending_ = true;
     }
 
+    // release D3: TR-BDF2's post-edge sample, x(t_e+) stored at t_e + h_p.
+    // Its readings are taken now (the histories are the probe's); it is
+    // sampled when a step ends after it, and the line then runs from it: the
+    // next step starts at t_e from the left side, which is no jump (the
+    // edge's event row is already at t_e).
+    void on_sample(Real t, const Vector* x, const topology::SwitchStateMask* m) {
+        if (x == nullptr) {
+            if (has_held_ && t_held_ == t) has_held_ = false;
+            return;
+        }
+        if (has_held_) flush_held(t);   // an earlier edge's, a step before this one
+        if (!started_ || has_held_) ++n_dropped_;
+        if (!started_) return;
+        eval(t, *x, *m, held_);
+        x_held_ = *x;
+        mask_held_ = *m;
+        t_held_ = t;
+        has_held_ = true;
+    }
+    void flush_held(Real t_next) {
+        if (!(t_held_ < t_next)) return;
+        has_held_ = false;
+        if (has_pending_ && t_pending_ < t_held_) {   // an unplaced report before it
+            ++n_dropped_;
+            return;
+        }
+        for (auto& r : recs_) r.sample_row(t_held_, held_.data());
+        x_last_ = x_held_;
+        mask_last_ = mask_held_;
+        t_last_ = t_held_;
+        event_at_last_ = true;
+    }
+
     static void sink_step(void* self, Real t0, const Vector* xs,
                           const topology::SwitchStateMask* ms, Real t, const Vector& xe,
                           const topology::SwitchStateMask& me) {
@@ -621,6 +665,7 @@ private:
     PULSIM_RECORD_INLINE void on_step(Real t0, const Vector* xs,
                                       const topology::SwitchStateMask* ms, Real t,
                                       const Vector& xe, const topology::SwitchStateMask& me) {
+        if (has_held_) [[unlikely]] flush_held(t);
         // The common step: no event report pending, the step solved under
         // the mode the line is in, and either an event row at its start (the
         // line starts from its right side: no jump test, no bracket) or a

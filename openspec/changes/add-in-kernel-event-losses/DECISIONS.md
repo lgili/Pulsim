@@ -389,12 +389,36 @@ Review (fresh-context reader) and what was done with it:
   `classify_nodes_` (a controlled source would be read as passive); no
   shipped circuit puts one on a thermal node.
 
+## 18. Python summaries read `res.loss_events` when present (task 5.1)
+
+Ported from gemini/wip-2026-11-24 38a6e535 + 899b5ff5 (another tool's work, reviewed
+and re-verified on 527e644d).
+
+- `device_loss_summary` maps the result's kernel records by device name; a circuit
+  without `set_device_losses` gets an empty map and the post-hoc path is untouched.
+- A device with a kernel record takes its switching counts and energies from
+  `res.loss_events(name)` over the half-open window `[t_from, t_to)` (adjacent windows
+  partition the events; a resumed run's inherited events fall outside its window),
+  summed with `math.fsum`. It does so with or without `switch_specs` / `diode_specs`:
+  passing both never double-counts, and the ignored spec warns (named device). A port
+  with neither an `E_on` nor an `E_off` table (`DeviceLossRecord.has_e_on` /
+  `has_e_off`, new, false) leaves the device to the post-hoc path: the caller's spec
+  if given, else no switching keys (never a 0 J that nothing measured). A zero-valued
+  table or a ZVS edge keeps the kernel's 0 J.
+- `device_thermal_summary` takes `P_sw_avg` from `device_loss_summary`, so it follows.
+- Evidence: `test_loss_summary_kernel_records.py` (28 cases): fixed-`Tj` parity with
+  the post-hoc path on a twin circuit within 1e-9 (pwl, pwl + restart rule, dsed) and
+  1e-5 (trbdf2); the restart-rule cases were added in the port (STATE lesson: parity
+  runs with the rule on too). A 1e-6 error injected into the kernel read fails 15.
+- Reverse: remove `_kernel_loss_records`, `_use_kernel_switching`,
+  `_kernel_switching_loss` and their three call sites in `losses.py`.
+
 ## Not done / known gaps
 
 The exact engine (`dsed` / `exact`) still refuses a loss port (its exact
 quadratic-form conduction integral and the event booking from its exact
 limits are not wired; `scheduler.hpp` untouched). Task 3.3's dsed column,
-4.x (electrical feedback), 5.1 (summaries reading kernel records), 6.2
+4.x (electrical feedback), 6.2
 (tutorial). A device that flips twice inside one pwl split step records no
 event; a cancelled run (`analysis::Cancelled`) carries no records.
 

@@ -277,10 +277,12 @@ def test_composites_through_a_restart(fn, dts):
 
 
 # --- controller ticks with the rule on ---------------------------------------------
-def test_controller_ticks_are_unchanged_and_the_gate_moves_one_step():
-    """With the rule the gate of step (t_{k-1}, t_k] is switch_fn(t_{k-1}):
-    tick instants, counts and jitter are the flag-off ones; the recorded
-    gate edges move one sample later."""
+def test_controller_ticks_are_unchanged_and_the_gate_stays_on_plain_pwls_side():
+    """With the rule the gate of step (t_{k-1}, t_k] is switch_fn(t_k - 0.5001 dt)
+    (F-SB-2; it was switch_fn(t_{k-1}), one sample later): tick instants,
+    counts and jitter are the flag-off ones; an off-grid PWM edge is recorded
+    at the sample plain pwl records it at when it lies past mid-step (the
+    nearer grid point is then the step end, plain pwl's side)."""
     def run(**kw):
         b = p.CircuitBuilder()
         b.add_voltage_source("Vin", "in", "gnd", 24.0)
@@ -305,7 +307,7 @@ def test_controller_ticks_are_unchanged_and_the_gate_moves_one_step():
     assert r0.control_tick_jitter_max == r1.control_tick_jitter_max == 0.0
     e0 = np.flatnonzero(np.diff(np.asarray(r0.switch_states)[:, 0].astype(int)))
     e1 = np.flatnonzero(np.diff(np.asarray(r1.switch_states)[:, 0].astype(int)))
-    assert e1[0] == e0[0] + 1                  # 12 -> 13 (same duty)
+    assert e1[0] == e0[0] == 12                # same duty, same side
 
 
 # --- snapshot consumers ---------------------------------------------------------------
@@ -319,10 +321,15 @@ def _buck_window_at_boundary():
     b.add_resistor("R", "out", "gnd", 10.0)
     n, k = b.graph.num_switches, b.switch_index_of("Q")
 
-    def fn(t):   # on for steps 99..135 of every 100: an edge 1 step before the boundary
+    def fn(t):   # on for indices 0..35 of every 100
+        # index j holds on [(j - 0.7) dt, (j + 0.3) dt): the turn-on edge sits
+        # 0.3 dt into the period's last step. The rule takes an edge at the
+        # nearer grid point (gate read 0.5001 dt before the step end, F-SB-2):
+        # its start, so the period's last step is the edge step and the
+        # boundary sits inside its window (two steps owed)
         m = p.SwitchStateMask(n)
-        j = int(round(t / 1e-7)) % 100
-        m.set(k, j >= 99 or j < 36)
+        j = int(math.floor(t / 1e-7 + 0.7)) % 100
+        m.set(k, j < 36)
         return m
     return b, fn
 

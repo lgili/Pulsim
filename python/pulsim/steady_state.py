@@ -143,6 +143,9 @@ def _snapshot_like(base, history):
     # An unfinished discontinuity_restart window (the steps after an
     # edge just before the boundary) is part of the period map's state.
     s.restart_steps_left = int(getattr(base, "restart_steps_left", 0))
+    # ... and so is a sliver anchor at the boundary (F-Z-3)
+    s.restart_anchor_at_end = bool(getattr(base, "restart_anchor_at_end",
+                                           False))
     # A TR-BDF2 snapshot on a gate edge keeps its refusal by the fixed
     # engine (the grid is not copied: the history differs, so it restarts).
     s.post_edge_derivatives = bool(getattr(base, "post_edge_derivatives",
@@ -213,6 +216,11 @@ def steady_state(builder, *, period: float, dt: float | None = None,
 
     if dt is None:
         from .periodic_steady_state import periodic_steady_state
+        ctrl_kw = {}
+        for k in ("closed_loops", "step_observer", "controller_period",
+                  "control"):
+            if k in simulate_kwargs:
+                ctrl_kw[k] = simulate_kwargs.pop(k)
         if simulate_kwargs:
             raise ValueError(
                 "steady_state without dt runs periodic_steady_state on "
@@ -221,7 +229,7 @@ def steady_state(builder, *, period: float, dt: float | None = None,
                 "the fixed engine.")
         return periodic_steady_state(builder, period=period,
                                      switch_fn=switch_fn,
-                                     start_from=start_from)
+                                     start_from=start_from, **ctrl_kw)
     if not (period > 0):
         raise ValueError(f"steady_state: period must be > 0, "
                           f"got {period!r}")

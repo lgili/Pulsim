@@ -744,3 +744,186 @@ TEST_CASE("Exact: the output rule's step is a chord bound for every mode structu
                                       1e-4, bounded, w);
     REQUIRE(d1a < 1e-10);
 }
+
+TEST_CASE("Exact: the output rule bounds the rows of an output map (a high-impedance node)",
+          "[v2][dsed][exact_lti][output_rule]") {
+    // group F session 4: the samples are the recovered vector y = O·x. A node read as
+    // 5000 Ω × (x1 − x2) holds x's errors times 5000; bounding x alone let its chord
+    // error reach 596 × its tolerance (ll06_buck_vcswitch's V(sw)).
+    DenseMatrix A(2, 2);
+    // a fast ring: ω = 2e6 rad/s, lightly damped; x2 is scaled by 1/ω so the eigenbasis is
+    // well conditioned (the unscaled [0 1; -4e12 -2e5] is refused: tier 3)
+    A << 0.0, 2e6, -2e6, -2e5;
+    const Vector b = Vector::Zero(2);
+    Vector x(2);
+    x << 1.0, 0.0;
+    DenseMatrix O(1, 2);
+    O << 5000.0, -1000.0;   // y = 5000·x1 − 5e-4·(2e6·x2) (a node behind 5 kΩ)
+    const auto e = make_exact_lti(A, b);
+    INFO("reason: " << e.reason);
+    REQUIRE(e.tier == 1);
+    DenseMatrix P(3, 2);
+    P.topRows(2).setIdentity();
+    P.bottomRows(1) = O;
+    e.chord_P_re = P * e.V_re;
+    e.chord_P_im = P * e.V_im;
+    Vector tol(3);
+    tol << 1e-5 * 2.0, 1e-5 * 2.0, 1e-5 * 2.0;   // the node's range is that of x1's, not 5000×
+    ChordWork w;
+    for (int s = 0; s < 20; ++s) {
+        bool bounded = false;
+        const Real d = exact_chord_step(e, x, nullptr, nullptr, tol, 1e-5, bounded, w);
+        REQUIRE(bounded);
+        const Vector xd = exact_advance(e, x, b, d);
+        Real worst = 0.0;
+        for (int i = 1; i < 400; ++i) {
+            const Real f = i / 400.0;
+            const Vector xt = exact_advance(e, x, b, f * d);
+            const Real yt = (O * xt)(0), y0 = (O * x)(0), y1 = (O * xd)(0);
+            worst = std::max(worst, std::abs(yt - ((1 - f) * y0 + f * y1)) / tol[2]);
+        }
+        INFO("step " << s << " d = " << d);
+        REQUIRE(worst <= 1.0);
+        REQUIRE(worst > 0.5);   // and the bound is not idle: the node sets the step
+        x = xd;
+    }
+}
+
+TEST_CASE("Exact: a row is promised down to its rounding floor, never hiding a variation above it",
+          "[v2][dsed][exact_lti][output_rule]") {
+    // group F session 7 (D-2 / D-3): no row is promised below its own rounding floor,
+    // 16·u·Σ|O||V||z|. y = x2 − x1 with x1 = 1e6 held and x2 relaxing to it at 1e9 /s: the
+    // floor is ~7e-9 (the 1e6 terms), the row's real variation is the fast mode's a.
+    DenseMatrix A(2, 2);
+    A << 0.0, 0.0, 1e9, -1e9;
+    const Vector b = Vector::Zero(2);
+    const auto e = make_exact_lti(A, b);
+    REQUIRE(e.tier == 1);
+    DenseMatrix O(3, 2);
+    O.topRows(2).setIdentity();
+    O.row(2) << -1.0, 1.0;
+    e.chord_P_re = O * e.V_re;
+    e.chord_P_im = O * e.V_im;
+    e.chord_M = O.cwiseAbs() * e.V_re.binaryExpr(e.V_im, [](Real p, Real q) { return std::hypot(p, q); });
+    Vector tol(3);
+    tol << 1.0, 1.0, 1e-12;   // the states never bind; the row is held to 1e-12
+    ChordWork w;
+    auto step = [&](Real a, bool& bounded) {
+        Vector x(2);
+        x << 1e6, 1e6 + a;
+        return exact_chord_step(e, x, nullptr, nullptr, tol, 1e-6, bounded, w);
+    };
+    bool bounded = false;
+    (void)step(0.0, bounded);
+    const Real floor = w.te[2];
+    INFO("floor " << floor);
+    REQUIRE(floor > 1e-9);
+    REQUIRE(floor < 1e-7);
+    // a real variation just above the floor is refined: the 1 ns mode is resolved
+    const Real d_hi = step(1.2 * floor, bounded);
+    REQUIRE(bounded);
+    REQUIRE(d_hi < 1e-8);   // h = 1e-6: cut to the 1 ns mode's scale
+    {
+        Vector x0(2);
+        x0 << 1e6, 1e6 + 1.2 * floor;
+        const Vector x1 = exact_advance(e, x0, b, d_hi);
+        Real worst = 0.0;
+        for (int i = 1; i < 200; ++i) {
+            const Real f = i / 200.0;
+            const Vector xt = exact_advance(e, x0, b, f * d_hi);
+            const Real line = (1 - f) * (x0[1] - x0[0]) + f * (x1[1] - x1[0]);
+            worst = std::max(worst, std::abs((xt[1] - xt[0]) - line));
+        }
+        REQUIRE(worst <= floor);   // the line it stores is within the promise
+    }
+    // below it (the bound's 2|γ| = half the floor) the row is constant up to rounding: the
+    // step is not cut, and the certification is reported (w.fu: the floor it needed)
+    const Real d_lo = step(0.25 * floor, bounded);
+    REQUIRE(bounded);
+    REQUIRE(d_lo == 1e-6);
+    REQUIRE(std::abs(w.fu[2] - floor) <= 1e-6 * floor);
+    REQUIRE(w.fu[0] == 0.0);
+}
+
+// add-exact-propagator-strategy 10.1 / 10.4 (D8): the fixed-step pair
+// x <- Phi x + Gamma of (mask, h) against the modal step it replaces; its
+// counters; the byte budget.
+TEST_CASE("Exact: the fixed-step pair equals the modal step (tier 1, DC and sine)",
+          "[v2][dsed][exact_lti][fixed_step]") {
+    for (const bool sine : {false, true}) {
+        builder::CircuitBuilder b;
+        if (sine) b.add_sine_voltage_source("V", "in", "gnd", 2.0, 5.0, 60.0, 0.7);
+        else b.add_voltage_source("V", "in", "gnd", 10.0);
+        b.add_resistor("R", "in", "a", 5.0);
+        b.add_inductor("L", "a", "o", 100e-6);
+        b.add_capacitor("C", "o", "gnd", 10e-6);
+        b.add_resistor("RL", "o", "gnd", 20.0);
+        pwl::PwlStateSpaceCache cache{b.graph(), b.pool()};
+        dsed::NativeCircuitBuilderAdapter<> ad{b.graph(), b.pool(), cache};
+        ad.set_mask(topology::SwitchStateMask(0));
+        REQUIRE(ad.has_exact_step());
+        const Real h = 1e-6;
+        Vector x = Vector::Zero(ad.n_state()), y(x.size()), z(x.size());
+        const std::size_t eig0 = ad.n_eig();
+        Real t = 0.0;
+        for (int k = 0; k < 200; ++k, t += h) {
+            REQUIRE(ad.exact_fixed_step_into(t, x, h, y));
+            ad.exact_advance_state_into(t, x, h, z);
+            REQUIRE((y - z).cwiseAbs().maxCoeff() <= 1e-13 * std::max(1.0, z.cwiseAbs().maxCoeff()));
+            x = z;
+        }
+        REQUIRE(x.cwiseAbs().maxCoeff() > 0.1);            // the circuit moved
+        const std::size_t N = static_cast<std::size_t>(x.size() + (sine ? 2 : 0));
+        REQUIRE(ad.n_fixed_steps() == 200);
+        REQUIRE(ad.n_phi_gamma_builds() == 1);
+        REQUIRE(ad.fixed_step_flops() == 200 * (N * N + N));
+        REQUIRE(ad.phi_gamma_bytes() == (N * N + N) * sizeof(Real));
+        REQUIRE(ad.n_eig() == eig0);                         // no factorization per step
+        // a second length is a second pair; with the budget spent it is refused
+        ad.set_phi_gamma_budget(ad.phi_gamma_bytes());
+        REQUIRE_FALSE(ad.exact_fixed_step_into(t, x, h / 2, y));
+        REQUIRE(ad.n_phi_gamma_refused() == 1);
+        REQUIRE(ad.exact_fixed_step_into(t, x, h, y));       // the cached one still steps
+    }
+}
+
+// Reviewer item (phase 3): the pair cache's eviction under a byte budget of four pairs, on an
+// RC whose step has a closed form x(t+h) = x e^{-h/tau} + V (1 - e^{-h/tau}).
+TEST_CASE("Exact: the fixed-step pair cache evicts the oldest length and stays exact",
+          "[v2][dsed][exact_lti][fixed_step]") {
+    const Real V = 10.0, R = 1e3, C = 1e-6, tau = R * C;
+    builder::CircuitBuilder b;
+    b.add_voltage_source("V", "in", "gnd", V);
+    b.add_resistor("R", "in", "o", R);
+    b.add_capacitor("C", "o", "gnd", C);
+    pwl::PwlStateSpaceCache cache{b.graph(), b.pool()};
+    dsed::NativeCircuitBuilderAdapter<> ad{b.graph(), b.pool(), cache};
+    ad.set_mask(topology::SwitchStateMask(0));
+    REQUIRE(ad.has_exact_step());
+    REQUIRE(ad.n_state() == 1);
+    const std::size_t pair = 2 * sizeof(Real);            // N = 1: Phi 1x1, Gamma 1
+    ad.set_phi_gamma_budget(4 * pair);
+    Vector x = Vector::Zero(1), y(1);
+    Real t = 0, x_ref = 0, err = 0;
+    // lengths 1..5, then 1 again: the fifth evicts the first, the sixth (1) evicts the second
+    for (const int k : {1, 2, 3, 4, 5, 1}) {
+        const Real h = k * 1e-4;
+        REQUIRE(ad.exact_fixed_step_into(t, x, h, y));
+        x_ref = x_ref * std::exp(-h / tau) + V * (1 - std::exp(-h / tau));
+        err = std::max(err, std::abs(y[0] - x_ref));
+        x = y;
+        t += h;
+        REQUIRE(ad.phi_gamma_bytes() <= 4 * pair);
+    }
+    INFO("max |x - closed form| " << err);
+    REQUIRE(err <= 1e-13 * V);
+    REQUIRE(ad.n_phi_gamma_builds() == 6);
+    REQUIRE(ad.phi_gamma_bytes() == 4 * pair);
+    REQUIRE(ad.n_phi_gamma_refused() == 0);
+    // a budget below one pair refuses (nothing evicted, nothing written) and the caller steps
+    ad.set_phi_gamma_budget(pair - 1);
+    REQUIRE_FALSE(ad.exact_fixed_step_into(t, x, 7e-4, y));
+    REQUIRE(ad.n_phi_gamma_refused() == 1);
+    REQUIRE(ad.phi_gamma_bytes() == 4 * pair);
+    REQUIRE(ad.exact_fixed_step_into(t, x, 1e-4, y));       // still cached (no eviction on refusal)
+}

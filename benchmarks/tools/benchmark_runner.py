@@ -235,8 +235,14 @@ def run_pulsim(
     runtime = _time.perf_counter() - t0
     b, _, _ = case.build()
     cols = [c for c in b.state_var_names() if c.startswith(("V(", "I("))]
-    for c in case.observables + [case.validation.get("observable")]:
-        if c and c not in cols:
+    # every column a KPI entry or a published value reads (V_DS = V(a,b), a switch's I(name))
+    bench = load_yaml(netlist_path).get("benchmark") or {}
+    wanted = [v for e in (bench.get("kpi") or []) if isinstance(e, dict)
+              for k, v in e.items() if k.endswith("observable")]
+    wanted += [s.get("observable") for s in (case.validation.get("values") or {}).values()
+               if isinstance(s, dict)]
+    for c in case.observables + [case.validation.get("observable")] + wanted:
+        if isinstance(c, str) and c and c not in cols:
             cols.append(c)
     data = [v1_reader.observable(res, c) for c in cols]
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -419,6 +425,52 @@ def apply_validation_window(
         raise ValueError("Validation window has fewer than 2 samples")
 
     return filtered_times, filtered_values
+
+
+def validate_published(
+    times: List[float], series: Dict[str, List[float]], validation: Dict[str, Any]
+) -> Tuple[Dict[str, float], str]:
+    """Check a run against numbers printed in a book or paper.
+
+    ``validation: {type: published, source: ..., tolerance_pct: ..., start_time: ...,
+    values: {<key>: {metric: mean | rms | ripple_pkpk, observable: <column>, value: <number>}}}``.
+    Each key is measured over the validation window by the KPI suite and compared with the
+    published number. Returns ``{published__<key>: measured, published__<key>_err_pct: error}``
+    and a message naming every key outside ``tolerance_pct`` (empty when all pass).
+    """
+    try:
+        from kpi import compute_ripple_pkpk, compute_rms, compute_time_average
+    except ImportError:
+        from .kpi import compute_ripple_pkpk, compute_rms, compute_time_average  # type: ignore
+    measure = {
+        "mean": compute_time_average,
+        "rms": compute_rms,
+        "ripple_pkpk": lambda t, v: compute_ripple_pkpk(v, 1.0),
+    }
+    if not validation.get("source"):
+        raise ValueError("published validation needs a 'source' (book, edition, chapter)")
+    tol = float(validation["tolerance_pct"])
+    values = validation.get("values") or {}
+    if not values:
+        raise ValueError("published validation declares no values")
+    out: Dict[str, float] = {}
+    bad: List[str] = []
+    for key, spec in values.items():
+        metric, obs, ref = spec["metric"], spec["observable"], float(spec["value"])
+        if metric not in measure:
+            raise ValueError(f"published value {key!r}: unknown metric {metric!r}")
+        if obs not in series:
+            raise ValueError(f"published value {key!r}: missing observable column {obs}")
+        if ref == 0.0:
+            raise ValueError(f"published value {key!r}: a zero has no percent error")
+        t_w, v_w = apply_validation_window(times, series[obs], validation)
+        got = float(measure[metric](t_w, v_w))
+        err = 100.0 * (got - ref) / abs(ref)
+        out[f"published__{key}"] = got
+        out[f"published__{key}_err_pct"] = err
+        if not abs(err) <= tol:  # a NaN fails
+            bad.append(f"{key} {got:.6g} vs published {ref:.6g} ({err:+.2f} % > {tol:g} %)")
+    return out, "; ".join(bad)
 
 
 def suite_root(manifest_path: Path) -> Path:
@@ -652,7 +704,16 @@ def run_benchmarks(
                 expectations = bench_meta.get("expectations", {})
                 max_threshold = coerce_optional_float(expectations.get("metrics", {}).get("max_error"))
 
-                if validation_type != "none" and not observable:
+                published: Dict[str, float] = {}
+                if validation_type == "published":
+                    try:
+                        published, message = validate_published(
+                            *load_csv_series(output_path), validation)
+                        status = "failed" if message else "passed"
+                    except Exception as exc:
+                        status = "failed"
+                        message = f"published validation error: {exc}"
+                elif validation_type != "none" and not observable:
                     status = "failed"
                     message = "Missing validation observable"
                 elif validation_type == "bode":
@@ -809,7 +870,7 @@ def run_benchmarks(
                 # Phase 23: KPI extraction. If the YAML declares
                 # benchmark.kpi: [...], run each requested metric and
                 # surface the results in the per-scenario record.
-                kpis: Dict[str, float] = {}
+                kpis: Dict[str, float] = dict(published)
                 kpi_block = bench_meta.get("kpi") or []
                 if kpi_block and output_path.exists():
                     try:
@@ -833,6 +894,13 @@ def run_benchmarks(
                         )
 
                     times, series = load_csv_series(output_path)
+                    # the first stored sample of an algebraic node is not solved (a gate or a
+                    # bus reads 0 there: KNOWN_LIMITATIONS): no KPI reads it, or a switch that
+                    # is ON from t = 0 counts a turn-on with a made-up V_DS (the buck reference
+                    # read ZVS 1/25 from it, the LLC's S_hi 32 uJ of switching energy on trbdf2).
+                    # Only the switching KPIs drop it; the others are unchanged.
+                    sw_times = times[1:]
+                    sw_series = {k: v[1:] for k, v in series.items()}
                     sample_rate = (1.0 / (times[1] - times[0])) if len(times) > 1 else 0.0
 
                     # Metrics that use a single `observable` field as the
@@ -895,9 +963,9 @@ def run_benchmarks(
                                 thr_v = float(kpi_entry.get("threshold_v", 1.0))
                                 lookback = int(kpi_entry.get("lookback_samples", 1))
                                 if (isinstance(sw_obs, str) and isinstance(v_obs, str)
-                                        and sw_obs in series and v_obs in series):
-                                    sw_states = [bool(s > 0.5) for s in series[sw_obs]]
-                                    r = compute_zvs_fraction(sw_states, series[v_obs], thr_v, lookback)
+                                        and sw_obs in sw_series and v_obs in sw_series):
+                                    sw_states = [bool(s > 0.5) for s in sw_series[sw_obs]]
+                                    r = compute_zvs_fraction(sw_states, sw_series[v_obs], thr_v, lookback)
                                     for k, v in r.items():
                                         kpis[f"kpi__{k}__{label}"] = v
                             elif metric == "zcs_fraction":
@@ -910,9 +978,9 @@ def run_benchmarks(
                                 thr_a = float(kpi_entry.get("threshold_a", 0.1))
                                 lookback = int(kpi_entry.get("lookback_samples", 1))
                                 if (isinstance(sw_obs, str) and isinstance(i_obs, str)
-                                        and sw_obs in series and i_obs in series):
-                                    sw_states = [bool(s > 0.5) for s in series[sw_obs]]
-                                    r = compute_zcs_fraction(sw_states, series[i_obs], thr_a, lookback)
+                                        and sw_obs in sw_series and i_obs in sw_series):
+                                    sw_states = [bool(s > 0.5) for s in sw_series[sw_obs]]
+                                    r = compute_zcs_fraction(sw_states, sw_series[i_obs], thr_a, lookback)
                                     for k, v in r.items():
                                         kpis[f"kpi__{k}__{label}"] = v
                             elif metric == "junction_temperature":
@@ -958,10 +1026,10 @@ def run_benchmarks(
                                 i_obs = kpi_entry.get("current_observable")
                                 if (isinstance(sw_obs, str) and isinstance(v_obs, str)
                                         and isinstance(i_obs, str)
-                                        and sw_obs in series and v_obs in series and i_obs in series):
-                                    sw_states = [bool(s > 0.5) for s in series[sw_obs]]
+                                        and sw_obs in sw_series and v_obs in sw_series and i_obs in sw_series):
+                                    sw_states = [bool(s > 0.5) for s in sw_series[sw_obs]]
                                     r = compute_switching_loss_per_event(
-                                        sw_states, series[v_obs], series[i_obs], times,
+                                        sw_states, sw_series[v_obs], sw_series[i_obs], sw_times,
                                         float(kpi_entry["window_s"]),
                                     )
                                     for k, v in r.items():

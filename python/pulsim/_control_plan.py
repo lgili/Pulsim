@@ -17,7 +17,6 @@ tick sources.
 from __future__ import annotations
 
 import math
-import warnings
 from dataclasses import dataclass, field
 from typing import Any, Callable, List, Optional, Tuple
 
@@ -26,6 +25,8 @@ from typing import Any, Callable, List, Optional, Tuple
 from ._pulsim import make_combined_switch_fn  # type: ignore[import-not-found]
 from ._control_state import start_run
 from .c_block import _c_graph_observer, static_state_hold
+from ._plan import emit as _emit
+from .errors import options_error
 
 TickFn = Callable[[float, object], None]
 
@@ -276,7 +277,7 @@ def compose_control(builder, closed_loops, step_observer, controller_period,
     plan = ControlPlan(switch_fn=switch_fn)
     gates = [loop.switch_fn for loop in loops if loop.switch_fn is not None]
     if gates:
-        if switch_fn is not None:
+        if switch_fn is not None and not any(switch_fn is g for g in gates):
             gates.append(switch_fn)
         plan.switch_fn = (gates[0] if len(gates) == 1 else
                           make_combined_switch_fn(
@@ -387,14 +388,15 @@ def _check_fixed_periods(periods, dt: float, stacklevel: int = 6) -> None:
     that is not a multiple of dt warns (ticks late by less than dt)."""
     for period in periods:
         if period < dt * (1.0 - 1e-9):
-            raise ValueError(
+            raise options_error(
+                "dt",
                 f"simulate(): controller period {period:.6g} s is "
                 f"shorter than dt = {dt:.6g} s, so two ticks "
                 "would fall in one step. Pass dt <= the period.")
     off = [p for p in periods
            if abs(p / dt - round(p / dt)) > 1e-9 * (p / dt)]
     if off:
-        warnings.warn(
+        _emit("controller_period",
             f"simulate(): controller period(s) {off} are not a "
             f"multiple of dt = {dt:.6g} s; each tick is "
             "delivered at the first step at or after its instant, "

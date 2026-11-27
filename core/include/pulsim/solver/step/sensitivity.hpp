@@ -347,6 +347,21 @@ public:
         if (record) record_(t);
     }
 
+    /// The engine kept its state and took only the derivative slots of the
+    /// one stage solved since `begin_step` (trbdf2's consistent start after
+    /// a gate edge: the probe's trapezoidal slots, x stays the pre-edge
+    /// solve). Mirrored: dq̇/dp and q̇ from that stage; S, dq/dp (with any
+    /// event jump the stage applied), x and t stay; nothing is recorded.
+    [[gnu::noinline]] void adopt_stage_slots() {
+        if (n_stage_ != 1) {
+            throw std::logic_error("StageSensitivity: adopt_stage_slots needs one stage");
+        }
+        dqd_n_ = dqd_st_[0];
+        qdv_n_ = qdv_st_[0];
+        st_solves_[0] = st_iters_[0] = 0;
+        n_stage_ = 0;
+    }
+
     // ---- events (group 6, design D3; DECISIONS 16) ----------------------
     //
     // At an event at τ(p) the differential state q (charges, fluxes) is

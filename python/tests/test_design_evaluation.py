@@ -449,12 +449,15 @@ def _opaque_buck(d):
 
 
 def test_unlocated_gate_edges_are_failed_not_ok():
-    """pwl + sub-step correction with an opaque gate: each edge is taken
-    at the next grid point (up to a whole step of duty error). Before
-    batch 6c this record was ok with v_out = 4.4674 V; the same design
-    with the oracle'd schedule reads 4.3033 V (3.8 % apart). dt = 4e-7
-    sums to 7.999999999999999e-05 over 8 periods: the KPI window must
-    read the run's end (it raised 'reaches outside the simulated span')."""
+    """pwl + sub-step correction with an opaque gate. Before batch 6c each
+    edge was taken at the next grid point and the record was ok with
+    v_out = 4.4674 V; the same design with the oracle'd schedule reads
+    4.3033 V (3.8 % apart). Since the split-location merge an opaque gate
+    is bisected to split_snap*dt: the opaque record is ok and agrees with
+    the oracle'd one. An edge is unlocated only past eight changes in one
+    step: that run warns and counts it. dt = 4e-7 sums to
+    7.999999999999999e-05 over 8 periods: the KPI window must read the
+    run's end (it raised 'reaches outside the simulated span')."""
     kw = dict(period=T, loads=("RL",), output="vout", engine="pwl",
               steady=SteadySpec(method="transient", min_periods=8,
                                 max_periods=8, tol=10.0),
@@ -463,11 +466,29 @@ def test_unlocated_gate_edges_are_failed_not_ok():
     ok = Evaluator(buck, **kw).evaluate(CCM)
     assert ok.status == "ok", ok.reason
     assert ok.kpis["v_out"] == pytest.approx(4.3033, abs=1e-3)
+    rec = Evaluator(_opaque_buck, **kw).evaluate(CCM)
+    assert rec.status == "ok", rec
+    assert rec.kpis["v_out"] == pytest.approx(ok.kpis["v_out"], abs=1e-3)
+    # nine opaque switches, each closing once inside the step (1, 2] us:
+    # nine changes, more than eight
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "in", "gnd", 1.0)
+    b.add_capacitor("C", "o", "gnd", 1e-6, 0.0)
+    for k in range(9):
+        b.add_switch(f"S{k}", "in", "o", 1e3, 1e-9)
+
+    def sf(t):
+        m = p.SwitchStateMask(9)
+        for k in range(9):
+            m.set(k, t >= 1e-6 + 0.1e-6 * (k + 1))
+        return m
     with pytest.warns(UserWarning, match="could not be located"):
-        rec = Evaluator(_opaque_buck, **kw).evaluate(CCM)
-    assert rec.status == "failed", rec
-    assert rec.reason.startswith("unlocated_gate_edges: ")
-    assert rec.kpis == {}
+        r = p.simulate(b, t_end=4e-6, dt=1e-6, switch_fn=sf, engine="pwl",
+                       discontinuity_restart=True, enable_substep_state_correction=True)
+    assert r.counters["unlocated_gate_steps"] > 0
+    from pulsim import design   # a design evaluation fails such a run, by name
+    with pytest.raises(design._Failed, match="unlocated_gate_edges: "):
+        design._raise_if_suspect(r, None)
 
 
 def test_a_floating_subnet_is_failed_and_retries_are_counted():

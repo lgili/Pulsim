@@ -133,6 +133,8 @@ nav:
       - 'Tutorial 08 — Using Pulsim inside an optimiser': tutorials/08-design-optimisation.md
       - 'Tutorial 09 — Magnetic networks': tutorials/09-magnetic-networks.md
       - 'Tutorial 10 — Datasheet to double pulse': tutorials/10-power-mosfet-datasheet.md
+      - 'Tutorial 11 — Electrothermal PLECS buck': tutorials/11-electrothermal-plecs-buck.md
+      - 'Ideal Switch & Diode Complementarity': ideal-switch.md
       - 'Parameter Sensitivities': sensitivities.md
       - 'Soft Switching (ZVS / ZCS probes)': SOFT_SWITCHING.md
       - 'Motors — Induction (Phase 2)': motors-induction.md
@@ -144,6 +146,7 @@ nav:
       - 'Numerical Solvers (Phase 2)': solvers.md
       - API Reference: api-reference.md
       - 'Result Reference': result-reference.md
+      - 'Error Reference': errors.md
       - 'Device Reference': device-reference.md
       - UX Helpers (discover, plot, monitor): helpers.md
       - Gotchas: gotchas.md

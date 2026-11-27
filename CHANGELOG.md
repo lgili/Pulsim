@@ -6,6 +6,480 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Restart rule: an inconsistent start publishes its right limit at t = 0
+
+- **A run that starts from a state that is not a solution of the network at
+  t = 0 now carries a right-limit row there** (`pwl`, `discontinuity_restart`,
+  F-Z-10; user-visible under the rule). Row 0 stays the user's initial state
+  (e.g. zeros with a source on); when the start's re-initialisation moves the
+  state beyond the noise band (1e-8·(1 + |x0| + |x0+|), the jump test's), x(0+)
+  is published in `right_limit_index` / `right_limit_states` like any edge's,
+  so `with_right_limits`, `with_event_limits` and `device_loss_summary` see it.
+  The loss summary missed h/2·p(0+) without it (0.23994 J for the kernel's
+  exact 0.24 J on a diode forced at 10 A from t = 0). A consistent start
+  (`start_from_dc_op`, zeros with every source at zero) and a resume seam
+  publish no start row; plain rows and rule-off runs are unchanged.
+- **A right-limit row satisfies the post-edge network's KCL to round-off**
+  (`pwl`, `discontinuity_restart`, F-Z-4). The row's linear ε solve carries
+  L/ε (1e7 Ω for 1 mH) beside 1e5 Ω rows, and the LU's backward error left a
+  divider node 1e-7–2e-6 V off its KCL (4.6e-11 A on ll09's 100 kΩ node on the
+  release line). One step of iterative refinement on the same factor (no new
+  factorization, right-limit solves only) makes the residual componentwise
+  round-off; the rows move by that round-off. The correction solve is skipped
+  when the residual already meets that bound (|r_i| ≤ n·eps·(|J|·|x|)_i).
+
+### Restart rule: a cut is named as the cut; the snapshot pickle keeps the anchor
+
+- **A switch cutting an inductor current under the restart rule is reported as
+  the cut, not as an implausible node voltage** (`pwl`, `discontinuity_restart`,
+  F-Z-8). The right-limit row at the cut is the conductance-form model's own
+  limit (i·R_off across the switch for its unresolved L/R_off mode: 6.6e9 V on
+  the diode-less VSI leg), and the voltage check scanned it first, so the
+  generic "largest voltage any source" warning fired and the cut was never
+  named. A row at an impulse record's instant is now judged apart: when it
+  alone trips the bound the warning names the switch, the inductor, the current
+  and the energy ½·L·i² the record booked once (`simulate()` and the kernel
+  `Simulation` object read the same check). The stored rows, the readers and
+  the loss records are unchanged; a run with the rule off is byte-identical.
+  The named state is the record's own kind: an inductor for a cut set (the
+  record's states list every state the jump moved, and a divider capacitor
+  listed first was named as "the current of 'Cdiv1'" on
+  `half_bridge_transformer_dc`), a capacitor for a capacitor loop (worded as
+  a voltage jump by charge sharing, with its energy); when no listed state is
+  of that kind the message names neither a current nor a voltage. Of several
+  records at one instant, a row is read against the one whose devices touch its
+  node, a cut set first; a capacitor loop's row is reported as a finding to
+  check, not as an artefact.
+- **`SolverSnapshot` pickles `restart_anchor_at_end` and `invalid_reason`**
+  (field 20, written only when either is set, so every other pickle is byte for
+  byte as before; an older pickle loads them as `False` / `""`). A resume from a
+  pickled copy taken on a split-sliver step is now bit-identical to the
+  in-process one (its first sample was ~470 A off), and a pickled invalid
+  snapshot keeps the reason its resume refuses by.
+
+### Fixed engine: `simulate(split_snap=...)`
+
+- **Added** `simulate(split_snap=...)` (and `SolverOptions.split_snap`,
+  `RunOptions.split_snap`): the event split's snap band as a fraction of dt
+  (`pwl`). Its default moved from 0.01 to 1e-6 on this line (an edge is no
+  longer moved by up to dt/100); `split_snap=0.01` restores 2.1.0's value.
+  `None` (the default) changes nothing. A value outside [1e-12, 0.25] or NaN,
+  or one passed with event splitting off, is an `OptionsError`; `trbdf2` and
+  the exact engine refuse it by name (`UnsupportedError`), as they refuse
+  `enable_substep_state_correction`, and it routes `engine='auto'` to `pwl`.
+
+### Fixed engine: the event split's locators stop on the signal (F-Z-2)
+
+- **Fewer refactorisations per located diode event** (`pwl`,
+  `discontinuity_restart` + event split). A trial is accepted when its
+  bracket's chord root is within `split_snap*dt` of it, and the cut is taken
+  at that trial's instant, so the piece reuses the trial's factor; a crossing
+  on the step's far end (a grid point) takes no trial. `event_refactors`
+  209 / 935 / 223 → 144 / 663 / 165 on buck_dcm / three-phase / diode-bridge
+  rectifiers. Located times move within `split_snap*dt`; the split off is
+  bit-identical.
+
+### Fixed engine: the restart after a split sliver probes at the next grid step
+
+- **A gate edge a tiny fraction of dt before a grid point no longer leaves a
+  stiff mode ringing** (`pwl`, `discontinuity_restart` + event split, F-Z-3).
+  The split cut the step at the edge, so the event's restart probe spanned only
+  γ·(the sliver after it): a 1 ps mode of a hard-switched capacitor, gated
+  1e-5·dt (1e-3·dt) before the grid point, rang ±2.25 A under trapezoid (max
+  deviation 1.022 A / 0.362 A; the rule alone 1.8e-15 A). When a split's last
+  event piece is shorter than γ·dt (the restart's own stage 1), the next grid
+  step is a restart whose impulse probe reads what is left as a jump at its
+  start; where the probe finds none it is the plain restart, bit for bit on a
+  linear circuit (with Newton devices the probe also runs the edge-mode
+  decision). Split-off runs are byte-identical. The anchor is carried by
+  `SolverSnapshot.restart_anchor_at_end` across an in-process resume and the
+  periodic-steady-state period map and in its pickle. The split also
+  reuses the previous step's end gate read as the step's start (one
+  `switch_fn` call per step fewer, results identical).
+
+### TR-BDF2: a turn-off landing commits its diode
+
+- **A diode turn-off landed within round-off of its zero now switches at the
+  landing** (`trbdf2`), by the same probes the next step would have run at that
+  instant. Sensitivity runs of a DCM buck were refused at rtol 1e-10 on Linux /
+  Windows and 1e-9 on macOS ("a diode crossing within the conditioning floor
+  of its start"); they now return the true number. Runs without sensitivities
+  are bit-identical on most circuits. An LLC at rtol 1e-10 moves at the
+  tolerance level (a diode that turned off one 2.2e-15 s step after the
+  landing now turns off at it).
+
+### Fixed step: the event split's re-initialisation record (F-Z-1)
+
+- **With the event split (`enable_substep_state_correction=True`) a cut-set /
+  capacitor-loop record is taken at the located edge** — its time and the
+  state there (i_L(t_e-)), not the step start's t_prev and x_prev. The state
+  was already cut at the edge; only the record (and the loss tracker's
+  impulse it books) read the step start: an edge at 99.999 h was recorded at
+  99 h with i_L(99 h). Without the split nothing changes.
+
+### TR-BDF2: edge probes and the floating-point fixed point
+
+- **A Newton solve that stalls at a floating-point fixed point is judged at
+  the iterate's own magnitudes** (`trbdf2` / `esdirk43`, and the restart
+  rule's right-limit solve that is new on this line; no other solve). When the
+  stagnation windows and the dx cap hold and every component of the last
+  Newton step is within `tol_newton_dx` or 4 eps of the iterate, the round-off
+  acceptance's row backward error is taken against the larger of the start
+  state's scale and the iterate's, so such a solve can be accepted (counted in
+  `newton_roundoff_accepts` and the run budget like any round-off accept).
+- **An edge probe that passes only as a floating-point fixed point is retaken
+  longer** (`trbdf2` / `esdirk43`, counted in `n_probe_newton_retries`), as a
+  stalled probe was in 2.1.0. `ll13_active_clamp_forward` at rtol 1e-8 /
+  atol 1e-12 (the benchmark reference) committed a 2.3 fs probe at 3.5e8 V
+  after the 1.5 us turn-off and then aborted at h_min; it runs again. ll13's
+  own trajectories at other tolerances move (fewer roundoff accepts).
+
+### Transient engines on one step driver (refactor-unified-transient-stepper)
+
+- **No result changes.** The `pwl` and `trbdf2` engines now share the step
+  driver and its pieces in `core/include/pulsim/solver/step/` (see
+  "For developers: where the stepper lives" in `docs/solvers.md`). Results and
+  counters are byte-identical to before, checked against stored baselines.
+- **No legacy engine name.** The old TR-BDF2 loop was never exposed as a
+  public `trbdf2-legacy` engine. It was kept behind an internal switch for
+  one slice and then deleted, so there is nothing to migrate and no removal
+  date.
+- **Zero-allocation test for TR-BDF2.** Accepted and rejected steps do not
+  allocate. A step that retries after a failed Newton solve allocates about
+  10 to 16 times, for the failure's error message. A test holds that bound;
+  the allocation itself is not fixed yet.
+
+### Exact engine output rule
+
+- **The rule's cost no longer follows the last bit (F-X-8).** Under
+  `output_rtol`, a fast mode whose content does not decay as its own closed
+  form says (the eigenbasis's error, 0.4 ps modes of paralleled branch-form
+  bridges) was re-read as a fresh transient at every call and cut each
+  interval to ~1 ps until the 4096-sample cap: seven bridges took 660 934
+  samples on macOS and 14 113 on Linux; ten took 1 877 398 on Windows
+  (2185 s). That part is now measured between two instants of one flow and
+  taken out of the bound of a step it cuts; where that lengthens the step the
+  bound with it is the row's floor there (`output_floor_by_column`), counted in
+  `diagnostics['output_grid']['n_output_inconsistent']` with a RuntimeWarning
+  (`output_inconsistent`). Seven bridges: 12 795 samples, no capped interval;
+  ten: 16 264; last-bit perturbations of `t_end` / amplitudes stay within
+  12 795–20 726. Rule off: unchanged (byte-identical). The win32 skip of
+  `test_fx1_ten_branch_form_bridges_run_under_the_rule` is removed.
+
+### Exact engine, phase 3 slice (add-exact-propagator-strategy groups 7, 10)
+
+- **Coupled inductors with |k| = 1 are refused by name.** The exact engine's
+  extraction raises `UnsupportedError(feature='extraction',
+  device='T.p+T.s', kind='InductorCoupling')` naming the windings (it was an
+  untyped error wrapped without a device). New tests: two coupled 1 mH
+  windings (k = 0.9) against the closed form within 1e-10 A; a flyback
+  against `trbdf2` (rtol 1e-9) within 1e-5 relative (measured 3.2e-7).
+- **`integrator='fixed'` on `engine='exact'`** (needs `dt`): the exact engine
+  on the grid k·dt. A full cell is `x <- Phi x + Gamma` from a cache keyed on
+  (mode, dt), 64 MiB byte budget; a diode event between grid points is
+  located on the analytic trajectory and the cell finished by an exact
+  sub-step. `result.exact` gains `n_fixed_steps`, `n_phi_gamma_builds`,
+  `n_phi_gamma_refused`, `fixed_step_flops` (n² + n per pair step),
+  `phi_gamma_bytes` (zero on every other integrator). Every other option's
+  results are unchanged.
+
+- **Action of the exponential, routed per mode.** `dsed/expm_action.hpp`: the
+  Al-Mohy–Higham truncated Taylor action on a mode's sparse matrix and the
+  D13 route rule (dense / action / implicit 'cost'), tested on the RLC ladder
+  (n = 2000: 16 sparse products per 1 µs step; n = 200 within 3.3e-15 of
+  the dense exponential). The engine uses it: a DC-driven mode of 65 states
+  or more takes the cheaper of the dense propagator and the action over the
+  steps expected in it, or hands over with reason `'cost'`; its diode
+  predicates are located on the action's states, scanned and settled on the mode's
+  eigenvalues (kept without eigenvectors) like a dense mode. `result.exact['routes']`
+  reports the kernel, reason, size and counters per mode. Modes below 65
+  states run as before.
+- **Fixed-step cells a few ulps off the grid** (an edge or tick time computed
+  another way) now take the `(Phi, Gamma)` pair: the CCM buck at T/10 steps
+  400 of 400 cells by the pair (was 352).
+
+### Power MOSFET as one f/q device — opt-in (add-power-mosfet-datasheet-device, group 5)
+
+- **`add_power_mosfet(..., fq_device=True)`** (opt-in; the default is
+  still the composite, and no default number changes) builds ONE device
+  for the channel, C_gd, C_ds (charge laws and constants) and the body
+  diode: an in-process model on the external-device f/q contract,
+  Jacobian by forward AD of the residual. R_d, R_g, L_s and C_gs stay
+  linear elements; a Lauritzen body diode adds one internal unknown.
+  Sub-elements: `{name}`, `{name}.rd/.rg/.ls/.cgs`. Its `components()`
+  params carry `fq_device: True`. On `pwl` it matches the composite to
+  ~1e-9 of scale; on `trbdf2` the step controller sees the device's pin
+  charge rows, so the grid differs (energies within the engine's tolerance).
+- With `fq_device=True`: **`res.i("Q1")`** is the drain-terminal current
+  and **`device_loss_summary`** lists the device (`v_DS · i_D` of the
+  external pins). DC, the kernel AC sweep and `to_yaml` / `from_yaml`
+  (with its hashes) carry it. `dsed` / `bdf1` refuse it by name.
+- **`p.ChannelTable(v_gs, v_ds, I)`** and `add_power_mosfet(channel=,
+  fq_device=True)`: a tabulated output characteristic (bicubic Hermite
+  with monotone tangents, C¹; third quadrant by terminal swap). A
+  non-monotone table, a non-zero `I(V_GS, 0)` or an unsorted axis raises
+  `pulsim.NetlistError` naming the point; a table without `fq_device` and
+  temperature coefficients with a table are refused.
+
+### Typed errors and run diagnostics (add-kernel-simulation-object, group 8)
+
+- **One base class.** Every error pulsim raises on purpose is a
+  `pulsim.PulsimError`; each keeps the standard base it had, so existing
+  `except ValueError` / `RuntimeError` / `KeyError` code is unaffected.
+  New: `pulsim.NetlistError` (a `ValueError`; `.device`, `.node`) for a
+  circuit that is wrong in itself (a pin on the wrong domain, a magnetic
+  network with no reference, a tie on a missing node), and
+  `pulsim.SingularError` (a `SimulationAborted`) when a fixed-step
+  transient step meets a singular matrix (also after its dt-halving
+  retries; the variable-step engine still reports a plain
+  `SimulationAborted`). The classes live in `pulsim.errors` (also
+  `pulsim.<Class>`). Reference: `docs/errors.md`.
+- **`simulate()`'s own refusals are typed.** Its planning and validation
+  raise `OptionsError` (`.option` names the keyword) or `UnsupportedError`
+  instead of a bare `ValueError` / `NotImplementedError`; the messages are
+  unchanged and both stay subclasses of what was raised before (the
+  reserved `integrator=` on `'pwl'` is still a `NotImplementedError`).
+- **Narrower handlers.** The 13 `except Exception` handlers of
+  `pulsim/__init__.py` (name lookups, the post-run voltage check, trace
+  attachment) catch only the errors they were written for; a refusal
+  raised inside them now reaches the caller.
+- **`result.diagnostics["messages"]`.** The warnings a `simulate()` call
+  emits are kept on its result, in order, as records `(code, message,
+  category)`; the warnings themselves (category, text, attributed line)
+  are unchanged. For PulsimGUI: the message panel can read this tuple,
+  and its `BackendRefusal` can catch `pulsim.PulsimError`.
+- **Kernel object.** `pulsim.Simulation(..., engine='exact')` names the
+  first device the exact engine cannot run (`UnsupportedError.device`)
+  before refusing the engine as a whole.
+- **Behaviour that follows from the types (louder, never quieter).**
+  The variable-step route refusal (`engine='auto'` without `dt` on a
+  circuit only the fixed step runs) and the reserved `integrator=` on
+  `'pwl'` are now `UnsupportedError`s, so `sweep()` / `monte_carlo()`
+  propagate them instead of recording each point as failed, design
+  evaluations record them as `"refused"`, and the steady-state
+  capability check reports them as a refusal. A `NetlistError` also
+  propagates out of `sweep()` (it holds for every point) and is no longer
+  retried on the exact engine's fallback bridge. The post-run voltage
+  check and trace attachment still never fail a finished run. Records
+  that print the exception's class name (design evaluations) show
+  `SingularError:` where they showed `SimulationAborted:`.
+
+### The exact engine's output rule: promise, projections, referee (release findings F-4, F-8, F-9, F-X-7, F-Y-3)
+
+Everything below applies only with `output_rtol` set (`engine='exact'`, no
+`dt`, `store_every` or recorders); the default (`output_rtol=None`) keeps
+2.1.0's samples. Reference: `docs/solvers.md`, "The exact engine's output
+rule".
+
+- **The promise covers every stored column**, not only the states: node
+  voltages and branch currents are held to
+  `max(output_rtol * range, atol, floor)`, `range` being the column's range
+  so far. No column is promised below its own rounding floor; a column
+  certified constant at that floor is counted in
+  `diagnostics['output_grid']` (`n_output_floored`, `output_floor_max`,
+  `output_floor_by_column`) and no longer cuts the samples.
+- **A source corner (pulse / PWM edge) is always a stored sample**, and after
+  an event that changed the mode or a source's piece the solution 2 ps later
+  is stored too, with the stored times kept ordered (F-X-7): plain
+  interpolation draws a node voltage's jump as a jump, not a ramp.
+- **Projections are recorded.** The promised "exact solution" is the flow
+  with the parasitic cluster (modes faster than 1e-6 of the run's time
+  scale) settled at each event; every such projection is reported in
+  `diagnostics['output_grid']` (`n_projections`,
+  `projection_max_by_column`, `projections`: the first 1000 as
+  `{t, amplitude, column, tau}`).
+- **Recorders under the rule** read a window's min / max inside an exact
+  step from its closed form where one exists; elsewhere the step ends are
+  kept and counted (`res.recorder_feed['closed_form']['n_extrema_ends']`).
+- **Evidence tooling.** `benchmarks/tools/output_rule_referee.py` checks the
+  promise on the benchmark set at every instant of every stored line;
+  `metrics.projected_reference` is the closed form with each recorded
+  projection removed; `benchmarks/tools/output_rule_property.py` checks the
+  promise at random instants against the same route run on a `dt` grid.
+
+### Validation closeout: loss events, steady state with controller states, guides
+
+#### Added
+
+- `periodic_steady_state` / `steady_state(dt=None)` accept a compiled
+  control graph (`closed_loops`, `step_observer`, `controller_period`,
+  `control`): its discrete states join the shooting unknowns, and a
+  controller whose state the shooting cannot see is refused with a named
+  error instead of returning an orbit of the plant alone.
+- `DeviceLossRecord.has_e_on` / `has_e_off`: whether the in-kernel loss
+  port of that device has a turn-on / turn-off table (a zero-valued table
+  counts as present).
+- Benchmarks: `validation: {type: published}` holds a run to a book's
+  numbers (Erickson buck CCM, R = 5 Ω); closed-loop helper benchmark.
+- Guides: ideal switch (`docs/ideal-switch.md`), electrothermal PLECS
+  buck tutorial (11).
+
+#### Changed
+
+- `device_loss_summary` reads the switching energies and counts of a
+  device with an in-kernel loss port (`CircuitBuilder.set_device_losses`)
+  with an `E_on` or `E_off` table from `result.loss_events` over
+  `[t_from, t_to)` instead of re-estimating them from the samples. A
+  `switch_specs` / `diode_specs` entry for such a device is ignored with a
+  `UserWarning`. Circuits without `set_device_losses`, and conduction-only
+  ports, are unchanged. `device_thermal_summary` follows: such a device
+  without a `switch_specs` entry gets the kernel's `P_sw_avg` (it was 0),
+  so its `T_j` rises.
+- **Refusal:** `periodic_steady_state` (and `steady_state(dt=None)` and
+  the other analyses that call it) refuses with
+  `UnsupportedError(feature="hidden_controller_state")` an open-loop
+  `switch_fn` whose state MOVES: before the solve the gate is evaluated
+  over one period and everything it reaches (attributes, function
+  attributes, closure cells, defaults, the globals it names, its class's
+  attributes) is compared before and after; the message names the first
+  path that changed (`'switch_fn.n_calls' changed`). Also refused, by
+  name: a reachable value with no visible state and no `__eq__` (a
+  `random.Random`, a NumPy `Generator`, an iterator, a native object
+  other than pulsim's gate schedules) and a gate the probe cannot call
+  or snapshot. Accepted as in 2.1.0: a gate that only reads its
+  state (a PWM object with `duty` / `f_sw`, a closure over a float or a
+  list it does not change). 2.1.0 took a gate whose state moved as
+  open-loop and solved for an orbit of a gate that was not periodic.
+- Closed-loop `periodic_steady_state` reads the control graph's state
+  bytes against a layout tag and bounds every count: a C++ extension and
+  Python package from different builds are refused with
+  `UnsupportedError(feature="controller_state_layout")` (an `assert`,
+  which `python -O` removes, was the only guard).
+- `device_loss_summary`: a switch with an in-kernel loss port whose result
+  has no recorded mask and no `switch_fn=` was left out of the summary;
+  its switching energy is now read from `result.loss_events` (they need
+  no mask) and its conduction fields are NaN with
+  `not_measured=("conduction",)` and a `RuntimeWarning`. An ideal
+  branch-form switch in the same case keeps its event switching energy.
+- `simulate(resume_from=...)`, `sweep` and `monte_carlo` look inside
+  tuples, frozensets and frozen dataclasses when deciding whether a
+  controller's closure holds state: a list or array inside a tuple is now
+  refused by name (it was let through and continued from run to run), and
+  a frozen dataclass of immutable fields is now accepted (it was refused).
+- After a closed-loop `periodic_steady_state` succeeds, the caller's
+  control graph is left at the orbit's controller state with its tick
+  counters and recordings cleared (on failure it is restored).
+- `steady_state(dt=None)` forwards `closed_loops`, `step_observer`,
+  `controller_period` and `control` to `periodic_steady_state` (2.1.0
+  raised `ValueError` on any simulate keyword without `dt`).
+
+### Restart rule repairs (fixed engine, `discontinuity_restart=True`)
+
+#### Fixed
+
+- Fixed engine, `discontinuity_restart=True`: an ideal element's charge share
+  whose single states the jump test does not flag (C1 -S- C2 beside an LC, the
+  closing landed on a half step by event splitting) is now read as an ideal
+  jump from its loop sum. Its right-limit row was pinned to the pre-event states,
+  diverged and was dropped (counted); it is now the closed-form share. A
+  three-way share through two ideal switches now gets its row too.
+- Fixed engine, `discontinuity_restart=True`: an event's right-limit row whose
+  diode mode does not hold at t_e+ (a freewheel diode stage 1 holds ON while a
+  node capacitor or an ideal element's jump reverse-biases it) is re-decided and
+  solved again in the mode that holds; a mode that never settles stores no row.
+  The loss ledger booked a turn-on from the reverse-biased row (E_on 14x the
+  bound).
+- Same rule: a right-limit row whose solve did not converge is no longer stored
+  (a three-way ideal share read -37.49 V for 8.78 V); it is counted in
+  `n_right_limit_fallbacks`, whose docstring now says what it counts.
+- Same rule: an ideal element's jump that excites a fast mode (an ideal switch
+  closing two capacitors that sit behind 1 mOhm) restarts from the state after
+  the fast collapse; the stored sample after the edge carried +0.97 % (dt
+  0.5 us) / +1.9 % (with event splitting) of the collapse in the resistor's
+  current. The collapse's own energy is now recorded too: one more reinit
+  record (dW = the collapse, e.g. 23.23 nJ beside the share's 2.381 nJ; the
+  event's 25.61 nJ in total).
+- Same rule (in 2.1.0 too): a diode turn-off inside the second stage of a
+  restart step is located and the step is cut there. The kept stage started
+  the new mode from SDIRK's pseudo-state, stage 1's slope extrapolated past the
+  turn-off: a boost behind a 1 nH inductor read 51.34 V for 42.11 V. Counted
+  in `result.counters["n_restart_cuts"]`.
+- Ideal elements (pwl and trbdf2, in 2.1.0 too): a re-initialisation of
+  dependent structures that share a state is projected jointly. An ideal clamp
+  diode across C2 when an ideal switch closes C1 onto it recorded the free
+  C1-C2 share (2.381 nJ) instead of C1's whole dump (50 nJ).
+- Reference harness and the ZVS KPI's restart cell (`with_right_limits(res,
+  collapse=True)`; `with_event_limits` unchanged): at a
+  re-initialisation record's step under the restart rule, a row one ulp after
+  the right limit holds the step's end sample, the state the engine ran the
+  step from. The right-limit row is x(t_e+) before the recorded fast collapse;
+  a line from it spread the collapse over the whole step: the ZVS switching
+  energy read +12 % (LLC) / +29 % (PSFB S1), now -0.3 % / -0.03 %; the
+  half-bridge leg and active-clamp forward read 0.038 / 0.068 against trbdf2,
+  now 0.0102 / 0.00165 (2.1.0's values). The end sample held over the first
+  step after a turn-on reads a post-collapse slope low: PSFB S3 -10 % against
+  the trapezoid on the same grid (-4 % against the exact energy).
+- Same rule without event splitting (`discontinuity_restart=True`,
+  `enable_substep_state_correction=False`): an off-grid gate edge from a
+  `switch_fn` now takes effect at the NEARER grid point (a tie at mid-step: the
+  step end; the gate is read 0.5001 of a step before its end). It took effect
+  at the grid point before the edge (read at t - dt/100), which dropped every
+  pulse narrower than a step that starts on the grid: a closed-loop boost's
+  0.25 us duty floor in 0.5 us steps never turned the switch on (0.216 against
+  trbdf2, now 0.0484). An edge 0.3 dt into a step now acts at the step start,
+  0.7 dt in at its end; the timing error is at most half a step and symmetric
+  (edges on the grid and the event split are unchanged).
+- Same rule: a right-limit row the engine owes at an event but cannot solve
+  (its solve throws, or is not finite) is now counted in
+  `n_right_limit_fallbacks`; it was dropped silently (the active-clamp
+  forward's 19 main-switch turn-offs: 0 counted, now 19).
+
+### Soft-switching KPIs against exact truths (benchmarks; add-soft-switching-validation)
+
+Benchmark tooling only: the wheel's API and results do not change.
+
+- **Added** `benchmarks/tools/soft_switching_truth.py` (mpmath, never imports
+  pulsim): per switch, the left limit of V_DS at every turn-on, the ZVS fraction
+  and the switching energy of each KPI window, exact, plus the same windows by the
+  trapezoid on a trace's own grid; `baseline` writes the truth on a netlist's grid
+  with both limits at every event.
+- **Added** the LLC half-bridge and phase-shifted full-bridge ZVS references
+  (`circuits/switching/isolated/{llc_half_bridge_zvs,psfb_full_bridge_zvs}.yaml`),
+  their truth baselines, and `benchmarks/manifests/soft_switching.yaml` (plain
+  fixed engine and `trbdf2`). The runner reports their KPIs as `kpi__*` columns
+  (ZVS fraction, switching energy per switch); `python/tests/test_soft_switching_kpi.py`
+  holds each column to the truth, the energy to the truth's trapezoid on the
+  engine's own grid. Published numbers and known disagreements (strict xfails:
+  plain `pwl` on the LLC/PSFB/buck, the PSFB S3 energy about −10 % under the
+  restart rule, `trbdf2`'s PSFB start): `docs/SOFT_SWITCHING.md`.
+- **Changed** `buck_hard_switching_reference`: its baseline is now the exact truth
+  (mpmath; it was a Pulsim run), so the bench is graded against the truth (plain
+  `pwl` 0.051 V on V(out), `trbdf2` 5.05e-5 V, threshold 0.1 V unchanged). Its KPIs
+  follow the documented probe convention, V_DS = V(vcc, sw) and I_D = I(SH) of the
+  high-side switch; it read V(sw) and I(L1), which counted the hard turn-ons as
+  soft ("ZVS" 42 %; the truth is 0 of 24).
+- **Changed** the switching-loss KPI window starts at the first sample that shows
+  the new switch state (it started one sample earlier: on a variable grid the
+  conduction before the edge was booked, PSFB S3 on `trbdf2` 2.55e-10 J against the
+  exact 3.18e-11 J, now 3.66e-11 J); the runner's switching KPIs skip the first
+  stored sample, which is not solved (a made-up t = 0 turn-on).
+
+### Fixed
+- Variable-step engine (`trbdf2`, `integrator='esdirk43'`) with a MOSFET's nonlinear output
+  capacitance: the conduction energy after a gate edge read +3.80 % against its closed form
+  (2.1.0's known limitation, +3.91 % in its notes); +0.057 % now (rtol 1e-6 +3.82 → +0.013 %,
+  rtol 1e-8 +2.22 → +0.007 %, esdirk43 +5.14 → +0.14 %). The step after a gate edge starts from
+  the consistent post-edge point (the new mode's derivative slots at the edge) instead of
+  committing a femtosecond probe step from the pre-edge slot.
+- A gate edge that opens a saturable-inductor cut-set (tau ~2e-13 s, node at ~1e9 V) no longer
+  aborts with `NewtonRoundoffBudgetExceeded` at tight tolerance: the restart is retaken once as
+  one L-stable step across the impulse.
+- Sensitivities through a gate edge follow the consistent post-edge start.
+- A hard turn-on into a conducting freewheel diode (soft-switching case A, rtol 1e-8): the diode
+  the edge turned off no longer turns back on inside the first attoseconds (it chattered and the
+  turn-on energy read +0.27 % on esdirk43, in 2.1.0 too); trbdf2 / esdirk43 now 62.8368 /
+  62.8377 uJ against an ODE truth of 62.8367 uJ. A trbdf2 result now carries the gate edge's
+  right limit (`right_limit_index` / `right_limit_states`) on circuits with a stateful device, so
+  the sampled loss integral starts the first post-edge step from the post-edge powers. That
+  right limit is the consistent state at the edge (the states before it, the new mode's
+  algebraic unknowns), and `simulate()` no longer warns "held diode ... missed commutation" for
+  the attoseconds the turned-off diode needs to fall through V_f. At the defaults case A reads
+  62.8489 / 62.9259 uJ (2.1.0: 62.8490 / 62.9259).
+- Regressions of the unreleased line against 2.1.0, fixed before release: a source corner on a
+  linear circuit commits its probe again (a transmission line's lattice read 0.5555555631 V for
+  5/9 and a matched line took 7 rejects for 2), and the lines' past holds a gate edge's right
+  limit.
+
 ## [2.1.0] - 2026-11-25
 
 2.1.0 brings new engines, devices and analyses behind new options that

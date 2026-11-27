@@ -24,6 +24,8 @@ carries (``result.plan``: circuit, ties, preflight); this plan holds it as
 
 from __future__ import annotations
 
+import warnings
+from contextvars import ContextVar
 from typing import Any, Iterator, Mapping, NamedTuple, Optional
 
 
@@ -116,10 +118,32 @@ class ResolvedFrom(Mapping):
 
 
 class Diagnostic(NamedTuple):
-    """One planning fact a caller may want to read (Stage B routes the
-    warnings through these; Stage A records the route's reasons)."""
+    """One fact of a run a caller may want to read: a planning fact (the
+    route's reasons, on ``plan.diagnostics``) or a warning the run emitted
+    (``result.diagnostics["messages"]``; ``category`` is the warning's
+    class, ``None`` for a planning fact)."""
     code: str
     message: str
+    category: Any = None
+
+
+# The warnings of the simulate() call in progress (None outside one). A
+# ContextVar, so nested runs (sweeps, recorders) and threads each keep their
+# own list.
+RUN_MESSAGES: ContextVar[Optional[list]] = ContextVar("pulsim_run_messages",
+                                                      default=None)
+
+
+def emit(code: str, message: str, category: type = UserWarning,
+         stacklevel: int = 1) -> None:
+    """``warnings.warn(message, category, stacklevel)`` as seen from the
+    caller (same category, text and attributed line), recorded on the run
+    in progress as a :class:`Diagnostic` (add-kernel-simulation-object 8.3).
+    """
+    run = RUN_MESSAGES.get()
+    if run is not None:
+        run.append(Diagnostic(code, str(message), category))
+    warnings.warn(message, category, stacklevel=stacklevel + 1)
 
 
 class NewtonOptions(NamedTuple):

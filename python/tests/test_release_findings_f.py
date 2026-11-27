@@ -202,10 +202,33 @@ def test_fx1_ten_branch_form_bridges_run_under_the_rule(gate):
     assert on.times[-1] == pytest.approx(0.02)
     eon, _, fon = _event_rows(on)
     eoff, _, foff = _event_rows(off)
+    # F-X-8: the rule's cost is not the last bit's (Windows: 454 capped intervals, 2185 s)
+    assert on.diagnostics["output_grid"]["n_output_capped"] == 0
     assert len(eon) == len(eoff) == 111
     assert np.abs(eon - eoff).max() <= 1e-12
     scale = np.abs(np.asarray(off.states)).max(axis=0) + 1e-12
     assert (np.abs(fon - foff) / scale).max() <= 1e-9
+
+
+def test_fx8_seven_bridges_a_non_decaying_fast_mode_does_not_cut_to_its_time_constant():
+    """F-X-8: seven branch-form bridges under the rule took 660 934 samples on macOS (158
+    intervals at the 4096 cap, 147 s) against 14 113 on Linux / Windows: the capped intervals were
+    cut to 1 ps by a 0.4 ps mode whose modal coordinate read a constant 3.6e-14 for 250 ps (its
+    closed form says e^-625), the eigenbasis's error re-read as a fresh transient at every call.
+    That part is now the row's floor, counted (n_output_inconsistent) and said once."""
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        on = p.simulate(_branch_bridges(7), t_end=0.02, engine="exact", output_rtol=1e-5)
+    og = on.diagnostics["output_grid"]
+    assert og["n_output_capped"] == 0
+    assert og["n_output_samples"] < 30_000
+    # The count is platform-dependent (last bits), so check the counter, warning and floor agree.
+    said = [w for w in caught if "did not decay" in str(w.message)]
+    if og["n_output_inconsistent"]:
+        assert len(said) == 1
+        assert og["output_floor_max"] > 0 and np.max(og["output_floor_by_column"]) > 0
+    else:
+        assert not said
 
 
 def _ladder(n):

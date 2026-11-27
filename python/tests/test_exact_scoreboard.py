@@ -41,9 +41,10 @@ CELLS = {
         "dsed": ("dsed", {}, 0.0, 1e-4, "limits"),         # 2.2e-6
     },
     "circuits/switching/basic/vcswitch_resistor.yaml": {
-        # finding F-SB-2: the split rule applies the gate edge from the start of its step,
-        # delta = -0.005 h: instants sqrt(jump^2 |delta| / T) / span = 0.0032
-        "pwl+split F-SB-2": ("pwl", SPLIT, 1e-3, 1e-2, "instants"),
+        # finding F-SB-2 (the split rule applied the gate edge from the start of its step,
+        # delta = -0.005 h: instants 0.0032) is closed on the restart line: the edge is
+        # located, instants 2.0e-9
+        "pwl+split F-SB-2": ("pwl", SPLIT, 0.0, 1e-6, "instants"),
     },
     "circuits/diodes/diode_half_wave_rl_load.yaml": {
         # finding F-SB-3: the right limit of V(out) at D1's turn-off is the projected value
