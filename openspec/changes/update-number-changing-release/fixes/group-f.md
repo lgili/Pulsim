@@ -1614,6 +1614,50 @@ the first suspect.
 
 State: the test is skipped on `win32` with this reason (a timeout kills the whole pytest
 session, so it cannot be an xfail). `output_rtol` is off by default, so a default run is not
-affected. To do: a CI-only diagnostic of the same circuit with a short `t_end` and the event
-/ projection counters printed, on Windows and Linux, to tell slow from non-terminating; then
-the fix. The skip comes off with it.
+affected.
+
+### Measured (branch `ci/windows-ten-bridges-diag`, 2026-11-26)
+
+A temporary workflow ran the case in subprocesses with hard timeouts on `windows-latest`
+(MSVC, Visual Studio 18 2026 generator, `/O2 /Ob2`) and `ubuntu-24.04` (GCC 13, `-O3`),
+Python 3.12, built as `ci.yml` builds it (runs 45908947259 and 45913710837; macOS arm64
+local for a third column). Times are the `simulate()` call only.
+
+| case (exact engine, `t_end` 0.02 unless noted) | Linux | Windows | macOS |
+|---|---|---|---|
+| 1 / 2 / 4 bridges, rule on | 0.13 / 0.40 / 1.7 s | 0.48 / 1.3 / 5.2 s | 0.11 / 0.40 / 1.9 s |
+| 10 bridges, rule OFF | 28.8 s | 79.7 s | 33.4 s |
+| 7 bridges, rule on: samples / capped intervals | 9.8 s: 14 113 / 0 | 24.2 s: 14 112 / 0 | 147.5 s: 660 934 / 158 |
+| 10 bridges, rule on, `t_end` 5 ms: samples | 4.5 s: 417 | 15.6 s: 1 212 | 4.6 s: 1 323 |
+| 10 bridges, rule on, output budget 1e5 | 109 s, budget out at 15.266068 ms | 163 s, budget out at 15.266065 ms | |
+| **10 bridges, rule on (the test's case)**: samples / capped / unbounded | **193 s**: 216 675 / 49 / 648 | **2185 s**: 1 877 398 / 454 / 499 | |
+| 10 bridges, rule on, Python gate | 104 s: 216 675 / 49 | > 1800 s (killed at 15.69 ms) | 23.8 s: 16 264 / 0 |
+
+Every rule-free quantity is the same on all three platforms: 20 908 accepted steps, 111 events,
+190 modes, 112 projections, the bus at 200.010575446 V; the predicate and LCP counters agree to
+a few in 2.5e6. Only the output rule's own decisions differ.
+
+Reading:
+
+1. Not a hang. The Windows run terminates (2185 s), below the run's 2e6-sample budget
+   (`OUTPUT_BUDGET`), which bounds it in any case.
+2. The engine itself is 2.75x slower on Windows (rule-free 79.7 s against 28.8 s, the same
+   counters). A rule sample costs about the same on both (0.83 ms against 0.80 ms, from the 1e5
+   budget runs: (run − rule-free) / 1e5). On Linux these two factors would take the case to
+   about 300 s, not 2185 s.
+3. The cause is the rule's sample count. Up to 15.27 ms both platforms take the same 100 000
+   samples (their budgets run out 3e-9 s apart). After that, Windows' chord bound hits the
+   4096-sample cap per interval 454 times, Linux's 49 times: 8.7x the samples. The count is
+   chaotic, not a Windows defect. macOS hits the cap 158 times on 7 bridges, where Linux and
+   Windows hit it 0 times, and 0 times on the 10-bridge Python-gate run, where Linux hits it
+   49 times. The floored-row maximum (`output_floor_max`) differs by 10x to 25x between
+   platforms on the same run (7 bridges: 0.0078 macOS, 0.19 Linux, 0.059 Windows), so the
+   rounding-floor and unbounded decisions on this 1e8-spread system follow the C runtime's last
+   bits, and the cap turns a small difference into thousands of samples.
+
+State: OPEN, skip kept with these numbers. The fix belongs to the output rule, not to Windows:
+a capped interval should stop cutting earlier, or the per-interval cap and the run budget
+should be far smaller than 4096 and 2e6 for a chord bound that keeps hitting them. Then this
+case's sample count is bounded on every platform, and the skip can come off. Not measured:
+which column or row drives the capped intervals after 15.27 ms; why the Windows engine is
+2.75x slower (no profile was taken).
