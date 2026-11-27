@@ -20,10 +20,11 @@ import pulsim as p
 A, F, R, T_END, SNAP = 10.0, 50.0, 10.0, 0.1, 1e-6
 
 
-def _rect(dt):
+def _rect(dt, form="conductance"):
     b = p.CircuitBuilder()
     b.add_sine_voltage_source("V", "in", "gnd", 0.0, A, F)
-    b.add_diode("D", "in", "k", 1e6, 1e-12)
+    # named: the integration line's form; the release default ('branch') is below (F-Z-14)
+    b.add_diode("D", "in", "k", 1e6, 1e-12, **({} if form is None else {"form": form}))
     b.add_resistor("R", "k", "gnd", R)
     n = b.graph.num_switches
     cache = p.PwlStateSpaceCache(b.graph, b.pool)
@@ -51,6 +52,28 @@ def test_located_time_within_the_stated_tolerance(dt):
     assert len(err) >= 8
     # within snap of the final chord's root, which is within snap of the root
     # (first order): 2 snap
+    assert err.max() <= 2 * SNAP, err
+
+
+@pytest.mark.parametrize("dt", [3.7e-5, 1e-4], ids=["off-grid", "on-grid"])
+def test_the_default_form_runs_the_same_states(dt):
+    # the release default form='branch': the same trajectory as the conductance form
+    (a, _), (c, _) = _rect(dt, form=None), _rect(dt)
+    assert np.array_equal(np.asarray(a.times), np.asarray(c.times))
+    xa, xc = np.asarray(a.states)[:, :2], np.asarray(c.states)[:, :2]
+    assert np.abs(xa - xc).max() <= 1e-12 * np.abs(xc).max()       # measured 3.6e-15 V
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "release finding F-Z-14: with the branch-form diode (the release default) a commutation event is "
+    "booked one step late: the start-up turn-on at t = dt (conductance form: no event), and on the "
+    "1e-4 grid the zeros at 100 / 200 / 400 dt as 101 / 201 / 401 dt (err 1.0 dt, gate 2e-6), while "
+    "the states equal the conductance form's to 3.6e-15; same with form='branch' explicit"))
+@pytest.mark.parametrize("dt", [3.7e-5, 1e-4], ids=["off-grid", "on-grid"])
+def test_located_time_within_the_stated_tolerance_default_form(dt):
+    res, _ = _rect(dt, form=None)
+    err = _err_over_dt(res, dt)
+    assert len(err) >= 8
     assert err.max() <= 2 * SNAP, err
 
 

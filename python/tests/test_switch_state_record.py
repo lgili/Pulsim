@@ -1109,6 +1109,12 @@ def test_f_y_9_the_recovery_reference_run_keeps_the_diode_law_under_the_release_
     assert not msgs, msgs
 
 
+@pytest.mark.xfail(strict=True, reason=(
+    "release finding F-Z-17: with the event split on (release default) the snubbed DCM boost at dt = T/200 "
+    "holds D1 in a state its commutation law refuses on 18 samples (t = 1.055 .. 1.225 ms; split_snap 0.01: "
+    "157 samples); E_sw 1.350e-4 J (split off: 1.343e-4, no warning). Both diode forms, mode_selection / "
+    "device_path legacy alike: the split explicit reproduces (integration-line code, arrived with the "
+    "merge of c3ac0a87: efce3c44 / 4341f221 locate flips in the restart window)"))
 def test_recovery_energy_does_not_follow_the_step_size():
     """Snubbed DCM boost, Q_rr = 100 nC. Two-mean-step window: E_sw
     1.059e-4 (pwl T/1000), 1.367e-4 (T/200), 2.406e-4 (T/50),

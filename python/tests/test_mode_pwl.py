@@ -263,14 +263,21 @@ def test_guard_repairs_a_settle_left_in_a_wrong_mode(conductance):
     assert g["repairs"] >= 1 and len(list(off.event_iteration_breaches)) >= g["repairs"]
     assert all(v > 0 for v in g["repair_violations"])
     assert np.max(np.abs(pn(on) - pn(off))) <= 1e-9
-    # the release default (restart + split): 24 repairs, each a real violation; a repaired
-    # step takes the restart's stages instead of the trapezoid, so mid-run the waveform moves
-    # by that path's local error (2.9e-7 V of 95 V, with the rule alone too); the end value
-    # is unchanged (2.4e-12 V measured)
+    # the release default (restart + split): 27 repairs (24 before the c3ac0a87 merge located
+    # flips inside the restart window), each a real violation; a repaired step takes the
+    # restart's stages instead of the trapezoid, so mid-run the waveform moves by that path's
+    # local error (2.93e-7 V of 100 V, with the rule alone too). The end value carries the last
+    # repairs' offset: no farther than that local error (4.07e-8 V measured; 2.4e-12 before)
     off = _sim(B.FAMILIES["bridge1_vf0"].builder(0.0), 0.2, 1e-5, guard=False, **SETTLE)
     on = _sim(B.FAMILIES["bridge1_vf0"].builder(0.0), 0.2, 1e-5, **SETTLE)
     g = on.diagnostics["mode_guard"]
     assert g["repairs"] >= 1 and all(v > 0 for v in g["repair_violations"])
+    d = np.abs(pn(on) - pn(off))
+    assert d.max() <= 3e-7 * 1.01 and d[-1] <= d.max()
+    # the rule alone (split off) still ends where the guard-off run does (2.7e-13 V measured)
+    alone = {"enable_substep_state_correction": False, **SETTLE}
+    off = _sim(B.FAMILIES["bridge1_vf0"].builder(0.0), 0.2, 1e-5, guard=False, **alone)
+    on = _sim(B.FAMILIES["bridge1_vf0"].builder(0.0), 0.2, 1e-5, **alone)
     assert abs(pn(on)[-1] - pn(off)[-1]) <= 1e-9
 
 

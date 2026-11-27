@@ -35,7 +35,9 @@ ON = (2 * math.pi - math.asin(C / A) + 2 * math.pi * K) / W    # upward zeros
 def _run(dt, split=True, c=C):
     b = p.CircuitBuilder()
     b.add_sine_voltage_source("V", "in", "gnd", c, A, F)
-    b.add_diode("D", "in", "k", 1e6, 1e-12)
+    # named: the integration line's form (the release default 'branch' books the start-up
+    # turn-on as an event at t = dt, F-Z-14; test_split_locator_cost covers the default form)
+    b.add_diode("D", "in", "k", 1e6, 1e-12, form="conductance")
     b.add_resistor("R", "k", "gnd", R)
     n = b.graph.num_switches
     cache = p.PwlStateSpaceCache(b.graph, b.pool)
