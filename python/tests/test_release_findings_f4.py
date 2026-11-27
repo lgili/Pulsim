@@ -320,3 +320,52 @@ def test_f_r_1_the_referee_keeps_one_window_not_the_chain(monkeypatch):
     # differ from macOS in the last bits
     assert fr["ratio"] == pytest.approx(0.9955495667041186, rel=1e-9)
     assert peak < 8 * max(sizes), (peak, max(sizes), sum(sizes))
+
+
+def test_f_r_2_a_window_runs_straight_through_an_event_and_its_transient():
+    """F-R-2 (cl_buck_pi 4e4 x): the window plan skipped the sub-ps lines after a DCM turn-off
+    when picking the dt and ended a window ON the event, so the coarse rule-off reference stored
+    the settled switch node (5.02 V) where the rule run resolves its ~20 ps ramp. The fine lines
+    now set the dt of a window that starts LEAD instants before the event (inside the smooth
+    line before it) and runs TAIL x its span past the last fine line; memory stays bounded."""
+    import output_rule_referee as F
+    te = 1e-3
+    fast = te + 2e-12 + 0.27e-12 * np.arange(1, 900)
+    t = np.unique(np.r_[np.linspace(0, te, 11), te + 4e-19, te + 2e-12, fast,
+                        np.linspace(te + 3e-10, 2e-3, 11)[1:]])
+    w = F._windows(t, float(t[-1]), np.array([te]))
+    ends, dts = np.array([e for e, _ in w]), np.array([d for _, d in w])
+    k = int(np.searchsorted(ends, te))            # the window holding the event
+    assert te - 1e-9 < ends[k - 1] < te - 1e-11    # starts in the smooth line before, not on te
+    assert dts[k] <= 0.27e-12 / F.K * (1 + 1e-9)   # the fine lines set its dt
+    assert ends[k] >= fast[-1] + 0.99 * F.TAIL * (fast[-1] - te)   # past the fast transient
+    assert (ends[k] - ends[k - 1]) / dts[k] <= (1 + F.TAIL) * F.WINDOW_POINTS
+    assert dts[k + 1] > 1e3 * dts[k]                # coarse again away from the event
+
+
+def test_f_r_2_the_closed_loop_buck_is_judged_on_every_column_against_a_fine_reference():
+    """F-R-2: cl_buck_pi's referee read 0.50 (11 reference columns against the cell's 13: no
+    stored column read), then 4.4e4 x (a coarse reference holding the DCM switch node settled).
+    Every stored column is now read; the post-event transient is judged against a fine reference
+    run straight through the event, translated onto the cell's event instants (an uninterrupted
+    fine rule-off run reads 0.98 at the worst event). The cell's first 2 ps line after an event is
+    reported apart: an open engine item (~59 x the promise on the switch node, dt 1e-14 confirms)."""
+    import tracemalloc
+
+    import output_rule_referee as F
+
+    unit = "circuits/closed_loop/cl_buck_pi.yaml"
+    warnings.simplefilter("ignore")
+    tracemalloc.start()
+    try:
+        fr = F.check(unit)
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert fr["comparable"], fr
+    assert fr["n_columns"] == 13 and fr["ratio_stored_columns"] is not None
+    assert 0.8 < fr["ratio"] < 1.3, fr["ratio"]                 # measured 1.0209 (not 4.4e4)
+    pf = fr["not_in_ratio"]["post_event_first_line"]
+    assert pf["n"] == 1491 and 30 < pf["ratio"] < 100, pf      # counted and reported, not silent
+    assert fr["not_in_ratio"]["n_lines_at_event"] == 0
+    assert peak < 600e6, peak                                   # one window in memory (~276 MB RSS)

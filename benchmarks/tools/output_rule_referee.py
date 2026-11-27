@@ -7,16 +7,28 @@ its peak; ``floor``: the column's rounding floor when the engine reports one,
 ``diagnostics['output_grid']['output_floor_by_column']``).
 
 How it reads the flow, so that no stored line can go unread:
-* the reference is the SAME route with the rule off, run as a chain of windows that tile the
-  run at stored instants (``resume_from`` the previous window's snapshot); each window's
-  ``dt`` is the shortest stored line in it over ``K`` -- every line holds at least ``K - 1``
-  reference instants, wherever they fall (not only its midpoint, and never only where a
-  dense run happens to have a sample: a dense run that shares the line reads 0 there);
+* the reference is the SAME route with the rule off, run as a chain of windows
+  (``resume_from`` the previous window's snapshot); each window's ``dt`` is the shortest
+  stored line in it over ``K`` -- every line holds at least ``K - 1`` reference instants,
+  wherever they fall (not only its midpoint, and never only where a dense run happens to have
+  a sample: a dense run that shares the line reads 0 there). The sub-ps lines after an event
+  set the dt too: the rule-off engine settles every mode faster than ``dt / 100``
+  (``project_``'s cut), so a coarse window stores the settled value where the rule run
+  resolves the ramp (cl_buck_pi's DCM switch node: 4e4 x read against a settled 5.02 V);
+  ``dt = L / K`` keeps every mode a line of length ``L`` resolves (tau >~ L) 600x above the cut;
+* a seam never sits on an event or inside its transient: a window that refines the dt starts
+  ``LEAD`` of its instants before the seam (inside the smooth line before the event), and the
+  refined window runs on ``TAIL`` x its span past its last fine line (the fast mode's decay)
+  before a coarse window resumes; a seam may fall inside a stored line, which is then read
+  from both windows (the "missing" check is per stored line of the whole run);
 * a line with no reference instant inside, a NaN, other events, a window that cannot resume
   or a column without a floor mapping is a FAILURE of the harness (``comparable`` False, the
   reason given), never a 0 or a pass;
-* every line counts, the first one after an event too (the trace carries both limits of a
-  jump; only reference instants within ``EVENT_TOL`` of an event are skipped, and those
+* every line counts (the trace carries both limits of a jump; only reference instants
+  within ``EVENT_TOL`` of an event are skipped, a line wholly inside that neighbourhood is
+  counted as ``n_lines_at_event``; the cell's first line after an event, its <= 2 ps sample,
+  is read APART: ``post_event_first_line``, counted, its worst reported, not in ``ratio`` --
+  an open engine item, cl_buck_pi reads ~60 x there; instants
   within ``SETTLE`` of the run after one are read apart: the rule settles the parasitic
   cluster at the event, the rule-off reference lets it decay -- ``ratio_incl_settle``);
 * the denominator is the promise itself with the RUN's range, no added slack (the promise's
@@ -45,6 +57,13 @@ import next_defaults_rehearsal as R  # noqa: E402
 import v1_reader  # noqa: E402
 
 EVENT_TOL = 1e-12     # s: reference instants this close to an event are not read; events further apart differ
+# the two runs' events may differ by up to this (a slow sine's diode root, resumed ps before it,
+# lands 1e-11 s off: half_wave_rectifier_sine, voltage_doubler); the reference's flow after each
+# event is translated onto the cell's instant of it, and the largest offset is reported
+EVENT_MATCH = 1e-9
+# a stored line this short (a source corner landed fs short of its instant, ll02 at 12 ms: 2.8e-15 s)
+# is below any reference instant grid: not read, counted (``n_lines_sub_resolution``)
+MIN_LINE = 1e-14
 K = 6                 # each line holds >= K - 1 reference instants
 WINDOW_POINTS = 40_000   # planned instants (a gate poll can add ~10x samples)
 ATOL = 1e-9
@@ -58,6 +77,9 @@ SETTLE = 4e-5
 # cluster's slowest time constant; an event with no record has no window. Past the record's cap
 # (1000) the old run-span window is used and the row says so (``settle_fallback``).
 SETTLE_TAUS = 40.0
+LEAD = 1000      # reference instants of a refining window before its seam (smooth stretch before the event)
+TAIL = 4.0       # a refined window runs on TAIL x its span past its last fine line (the fast mode's decay)
+REFINE = 4.0     # a dt change by more than this factor moves the seam off the stored instant
 
 
 class RefereeError(Exception):
@@ -74,36 +96,72 @@ def _in_windows(tq, windows):
     return (k >= 0) & (tq <= np.maximum.accumulate(w[:, 1])[np.clip(k, 0, None)])
 
 
+def _ulp(t):
+    """Per stored line: a jump's pair (its two limits a few ulps apart), no line."""
+    return np.diff(t) <= np.maximum(64 * np.finfo(float).eps * np.abs(t[:-1]), 1e-300)
+
+
+def _at_event(t0, t1, ev):
+    """Lines [t0, t1] wholly within EVENT_TOL of one event: they can hold no read instant."""
+    out = np.zeros(np.shape(t0), bool)
+    if not ev.size:
+        return out
+    k = np.searchsorted(ev, t0)
+    for o in (-1, 0):
+        e = ev[np.clip(k + o, 0, ev.size - 1)]
+        out |= np.maximum(np.abs(t0 - e), np.abs(t1 - e)) <= EVENT_TOL
+    return out
+
+
 def lines_ratio(t, y, tg, yg, tol, *, events=(), settle=0.0, windows=None):
     """Worst ``|line(tg) - yg| / tol`` over the stored lines of (t, y), read at every
     reference instant ``tg`` strictly inside a line. Raises RefereeError when a line of
     non-zero length holds no reference instant, or on a NaN."""
-    acc = _Lines()
+    acc = _Lines(np.asarray(t, dtype=float))
     acc.add(t, y, tg, yg, tol, events=events, settle=settle, windows=windows)
     return acc.result()
 
 
 class _Lines:
-    """:func:`lines_ratio` added up over pieces of the trace, each piece the stored lines of one
-    reference window with that window's instants (a stored line lies in one window): the worst
-    (first at a tie), the missing lines and the reads of the pieces are those of one call on the
-    whole (F-R-1: the referee no longer keeps every window's reference)."""
+    """:func:`lines_ratio` added up over pieces of the trace ``T`` (the whole run's stored
+    instants), each piece the stored lines a reference window overlaps, with that window's
+    instants: a line cut by a seam is read from both windows, and a line is "missing" only when
+    no piece read it (F-R-1: the referee no longer keeps every window's reference). ``first``
+    (per stored line): the cell's first line after an event, read apart (``first_result``)."""
 
-    def __init__(self):
-        self.e = self.at = self.first = None
-        self.nan, self.n_missing, self.n_read = False, 0, 0
+    def __init__(self, T, first=None):
+        self.T, self.first = T, first
+        n = max(T.size - 1, 0)
+        self.hit, self.at_ev, self.in_settle = (np.zeros(n, bool) for _ in range(3))
+        self.e = self.at = self.fe = self.fat = None
+        self.nan, self.n_read, self.n_first_read = False, 0, 0
 
     def result(self):
         if self.nan:
             raise RefereeError("NaN in the trace or the reference, or no tolerance")
-        if self.n_missing:
-            raise RefereeError(f"{self.n_missing} line(s) without a reference instant, first "
-                               f"[{self.first[0]:.17g}, {self.first[1]:.17g}]")
+        free = _ulp(self.T) | self.at_ev | self.in_settle | (np.diff(self.T) <= MIN_LINE)
+        if self.first is not None:
+            free |= self.first
+        missing = np.flatnonzero(~self.hit & ~free)
+        if missing.size:
+            a = int(missing[0])
+            raise RefereeError(f"{missing.size} line(s) without a reference instant, first "
+                               f"[{self.T[a]:.17g}, {self.T[a + 1]:.17g}]")
         if not self.n_read:   # nothing read is not a pass
             raise RefereeError("no reference instant read on any line")
         return self.e, self.at
 
-    def add(self, t, y, tg, yg, tol, *, events=(), settle=0.0, windows=None):
+    def counts(self):
+        """The lines not in the verdict, by reason (each counted, none silent)."""
+        n_first = int(self.first.sum()) if self.first is not None else 0
+        sub = (np.diff(self.T) <= MIN_LINE) & ~_ulp(self.T)
+        return dict(n_lines_at_event=int((self.at_ev & ~self.hit & ~_ulp(self.T) & ~sub).sum()),
+                    n_lines_sub_resolution=int((sub & ~self.hit).sum()),
+                    n_lines_in_settle_unread=int((self.in_settle & ~self.hit).sum()),
+                    n_post_event_first_lines=n_first, n_post_event_first_read=self.n_first_read,
+                    post_event_first_ratio=self.fe, post_event_first_at=self.fat)
+
+    def add(self, t, y, tg, yg, tol, *, lo=0, events=(), settle=0.0, windows=None):
         t, y, tg, yg = (np.asarray(a, dtype=float) for a in (t, y, tg, yg))
         tol = np.broadcast_to(np.asarray(tol, dtype=float), t.shape)   # per stored sample (a line reads its end's)
         if np.isnan(y).any() or np.isnan(yg).any() or not np.isfinite(tol).all() or (tol <= 0).any():
@@ -111,16 +169,16 @@ class _Lines:
             return
         if t.size < 2:
             return
-        self._add(t, y, tg, yg, tol, events, settle, windows)
+        self._add(t, y, tg, yg, tol, events, settle, windows, lo)
 
-    def _add(self, t, y, tg, yg, tol, events, settle, windows):
+    def _add(self, t, y, tg, yg, tol, events, settle, windows, lo):
         ev = np.asarray(events, dtype=float)
-        keep = np.flatnonzero(np.diff(t) > 0)
+        n = t.size - 1
         j = np.searchsorted(t, tg, side="right") - 1
-        inside = (j >= 0) & (j < t.size - 1)
+        inside = (j >= 0) & (j < n)
         j = np.where(inside, j, 0)
         inside &= tg > t[j]
-        inside &= tg < t[np.minimum(j + 1, t.size - 1)]
+        inside &= tg < t[np.minimum(j + 1, n)]
         if ev.size:
             k = np.searchsorted(ev, tg)
             near = np.zeros(tg.shape, bool)
@@ -135,29 +193,32 @@ class _Lines:
                 d = tg - ev[np.clip(k - 1, 0, ev.size - 1)]
                 near |= (d >= 0) & (d <= settle)
             inside &= ~near
-        hit = np.zeros(t.size, bool)
-        hit[j[inside]] = True
-        # a line too short to hold an instant away from an event (a jump's ulp step) is not a line
-        short = (t[keep + 1] - t[keep]) <= 2 * EVENT_TOL
+        g = lo + j[inside]
+        self.hit[g] = True
+        # a line wholly inside an event's skipped neighbourhood holds no instant to read
+        self.at_ev[lo:lo + n] |= _at_event(t[:-1], t[1:], ev)
         if windows is not None:   # a line that starts inside a settle window may hold no instant outside it
-            short |= _in_windows(t[keep], windows)
+            self.in_settle[lo:lo + n] |= _in_windows(t[:-1], windows)
         elif settle > 0 and ev.size:
-            ka = np.clip(np.searchsorted(ev, t[keep], side="right") - 1, 0, ev.size - 1)
-            short |= (t[keep] >= ev[ka]) & (t[keep] <= ev[ka] + settle)
-        missing = keep[~hit[keep] & ~short]
-        if missing.size:
-            a = int(missing[0])
-            if self.first is None:
-                self.first = (t[a], t[a + 1])
-            self.n_missing += int(missing.size)
+            ka = np.clip(np.searchsorted(ev, t[:-1], side="right") - 1, 0, ev.size - 1)
+            self.in_settle[lo:lo + n] |= (t[:-1] >= ev[ka]) & (t[:-1] <= ev[ka] + settle)
         jj = j[inside]
         lin = y[jj] + (y[jj + 1] - y[jj]) * (tg[inside] - t[jj]) / (t[jj + 1] - t[jj])
         e = np.abs(lin - yg[inside]) / tol[jj + 1]
+        tq = tg[inside]
+        if self.first is not None:
+            f = self.first[g]
+            if f.any():
+                self.n_first_read += int(f.sum())
+                q = int(np.argmax(e[f]))
+                if self.fe is None or e[f][q] > self.fe:
+                    self.fe, self.fat = float(e[f][q]), float(tq[f][q])
+                e, tq = e[~f], tq[~f]
         self.n_read += int(e.size)
         if e.size:
             q = int(np.argmax(e))
             if self.e is None or e[q] > self.e:
-                self.e, self.at = float(e[q]), float(tg[inside][q])
+                self.e, self.at = float(e[q]), float(tq[q])
 
 
 def promise(y, rt, floor):
@@ -172,22 +233,45 @@ def promise(y, rt, floor):
     return np.maximum(rt * rng, max(ATOL, floor))
 
 
-def _windows(t, span_end):
-    """Window ends (stored instants) and each window's dt: dt = shortest line / K, at most
-    WINDOW_POINTS reference instants per window."""
+def _windows(t, span_end, ev=()):
+    """Window ends and each window's dt: dt = shortest line / K (jump pairs and lines wholly
+    inside an event's neighbourhood hold no read instant and set none), at most WINDOW_POINTS
+    reference instants per window before the seams move. A seam where the dt refines by more
+    than REFINE (or at a jump) moves LEAD fine instants earlier, into the smooth line before;
+    one where it coarsens moves TAIL x the refined window's span later (each move at most 0.45
+    of the line it enters): the fast transient is run straight through, never resumed from."""
+    t = np.asarray(t, dtype=float)
+    ev = np.asarray(ev, dtype=float)
     lines = np.diff(t)
+    skip = _ulp(t) | _at_event(t[:-1], t[1:], ev) | (lines <= MIN_LINE)
     w0, dmin, out = t[0], np.inf, []
     for a in range(t.size - 1):
-        L = lines[a]
-        if L <= 2 * EVENT_TOL:
+        if skip[a]:
             continue
+        L = lines[a]
         nd_ = min(dmin, L / K)
         if (t[a + 1] - w0) / nd_ > WINDOW_POINTS and np.isfinite(dmin) and t[a] > w0:
-            out.append((float(t[a]), dmin))
+            out.append([float(t[a]), dmin, a])
             w0, nd_ = t[a], L / K
         dmin = nd_
-    out.append((float(span_end), dmin if np.isfinite(dmin) else (span_end - w0) / K))
-    return out
+    out.append([float(span_end), dmin if np.isfinite(dmin) else (span_end - w0) / K, t.size - 1])
+    starts = [float(t[0])] + [o[0] for o in out[:-1]]
+    ulp = _ulp(t)
+    for i in range(len(out) - 1):
+        b, d_l, a = out[i]
+        d_r = out[i + 1][1]
+        at_jump = (a > 0 and ulp[a - 1]) or (a < ulp.size and ulp[a])
+        if d_r * REFINE < d_l or at_jump:
+            p = a - 1                      # the line ending at the seam, past the jump's pair
+            while p > 0 and ulp[p]:
+                p -= 1
+            out[i][0] = b - min(0.45 * lines[p], LEAD * min(d_l, d_r))
+        elif d_l * REFINE < d_r:
+            q = a                          # the line starting at the seam
+            while q < ulp.size - 1 and ulp[q]:
+                q += 1
+            out[i][0] = b + min(0.45 * lines[q], max(LEAD * d_l, TAIL * (b - starts[i])))
+    return [(o[0], o[1]) for o in out]
 
 
 def _column_floor(res, col, fl):
@@ -267,7 +351,12 @@ def referee(case, res, info, cols, rt, config: str = "auto+next") -> dict:
         rng = max(float(np.ptp(allv)), 1e-3 * float(np.abs(allv).max()))
         tols[c] = max(rt * rng, ATOL, floors[c])
         order += [(c, "r"), (c, "whole"), (c, "so_far")]
-    acc = {k: _Lines() for k in order if isinstance(k, tuple)}
+    # the cell's first line after an event (its <= 2 ps sample past the jump): read apart
+    L_t = np.diff(t)
+    ulp_t = _ulp(t)
+    starts_jump = np.r_[False, ulp_t[:-1]] | _at_event(t[:-1], t[:-1], ev)
+    first = starts_jump & ~ulp_t & (L_t > EVENT_TOL) & (L_t <= 2 * EVENT_TOL)
+    acc = {k: _Lines(t, first) for k in order if isinstance(k, tuple)}
     sofar_tol = {c: promise(ys[c], rt, floors[c]) for c in tols}
     xs = np.asarray(dr.with_right_limits(res).states, dtype=float)
     x_tols = None          # set at the first window, which gives the reference's column count
@@ -275,17 +364,18 @@ def referee(case, res, info, cols, rt, config: str = "auto+next") -> dict:
 
     def read(w):
         """One window's verdict parts; ``w``: (t0, t1, tg, {col: yg}, xg) of the window."""
-        lo = 0 if w[0] is None else int(np.searchsorted(t, w[0], side="left"))
-        hi = int(np.searchsorted(t, w[1], side="right"))
+        # the stored lines the window overlaps (a seam inside a line: that line from both)
+        lo = 0 if w[0] is None else max(int(np.searchsorted(t, w[0], side="right")) - 1, 0)
+        hi = min(int(np.searchsorted(t, w[1], side="left")) + 1, t.size)
         ts, tg_w = t[lo:hi], w[2]
         evx = np.unique(np.r_[ev, jumps_t, jumps_tg])
         for c in tols:
             yc, yg = np.asarray(ys[c], dtype=float)[lo:hi], w[3][c]
-            acc[(c, "r")].add(ts, yc, tg_w, yg, tols[c], events=evx, windows=win)
-            acc[(c, "whole")].add(ts, yc, tg_w, yg, tols[c], events=evx)
-            acc[(c, "so_far")].add(ts, yc, tg_w, yg, sofar_tol[c][lo:hi], events=evx, windows=win)
+            acc[(c, "r")].add(ts, yc, tg_w, yg, tols[c], lo=lo, events=evx, windows=win)
+            acc[(c, "whole")].add(ts, yc, tg_w, yg, tols[c], lo=lo, events=evx)
+            acc[(c, "so_far")].add(ts, yc, tg_w, yg, sofar_tol[c][lo:hi], lo=lo, events=evx, windows=win)
         for j, tol_j in enumerate(x_tols or ()):
-            acc[f"x[{j}]"].add(ts, xs[lo:hi, j], tg_w, w[4][:, j], tol_j, events=evx, windows=win)
+            acc[f"x[{j}]"].add(ts, xs[lo:hi, j], tg_w, w[4][:, j], tol_j, lo=lo, events=evx, windows=win)
 
     # the reference: the same route, rule off, chained windows (one build: a closed loop's
     # controller lives in its Python objects and continues across windows). Streamed (F-R-1):
@@ -293,6 +383,7 @@ def referee(case, res, info, cols, rt, config: str = "auto+next") -> dict:
     # to both), then released; only the event times and jump instants are kept.
     eg_all, jumps_tg, pending, last = [], np.zeros(0), None, None
     snap, n_windows, n_ref, n_seams, t_prev = None, 0, 0, 0, None
+    shift, dte_max, base_ev, n_align_dropped = 0.0, 0.0, -np.inf, 0   # the event alignment (below)
     with warnings.catch_warnings(), nd.builder_form(spec["form"]), nd.plan_defaults(spec.get("plan", False)):
         warnings.simplefilter("ignore")
         # built under the cell's builder form (as run_cell builds the rule run): built outside
@@ -312,7 +403,7 @@ def referee(case, res, info, cols, rt, config: str = "auto+next") -> dict:
         kw = ({k: v for k, v in nd.profile_kwargs(eng).items() if k != "output_rtol"}
               if spec.get("profile") else dict(spec.get("kw") or {}))
         kw.pop("output_rtol", None)
-        for t_w, dt in _windows(t, float(t[-1])):
+        for t_w, dt in _windows(t, float(t[-1]), ev):
             a = dict(args, **kw, dt=float(dt))
             if snap is not None:
                 a.pop("initial_state", None)
@@ -325,8 +416,8 @@ def referee(case, res, info, cols, rt, config: str = "auto+next") -> dict:
             tg = np.asarray(g.times, dtype=float)
             xg = np.asarray(g.states, dtype=float)
             yg = {c: np.asarray(v1_reader.observable(g, c), dtype=float) for c in cols}
-            if g.event_times is not None:
-                eg_all.append(np.asarray(g.event_times, dtype=float))
+            e_w = np.asarray(g.event_times if g.event_times is not None else [], dtype=float)
+            eg_all.append(e_w)
             del g
             n_windows += 1
             # a seam of the window chain (the resumed window's first sample repeats the last
@@ -347,18 +438,45 @@ def referee(case, res, info, cols, rt, config: str = "auto+next") -> dict:
             tg, xg = tg[~seam], xg[~seam]
             yg = {c: v[~seam] for c, v in yg.items()}
             n_ref += int(tg.size)
+            # the reference's flow after each of its events, translated onto the cell's instant of
+            # that event: the two runs locate a diode zero ~1e-13 s apart, and on the switch node's
+            # 0.2 V/ps ramp that offset alone read 400 x (cl_buck_pi, an uninterrupted fine run)
+            # (an instant the translation carries past the cell's next event is not read: the
+            # previous event's offset carried 0.0295 s's pre-event zeros 11 ps onto voltage_doubler's
+            # post-event ramp, 2.3 x)
+            if e_w.size and ev.size:
+                m = np.clip(np.searchsorted(ev, e_w), 1, ev.size) - 1
+                m = np.where(np.abs(ev[np.minimum(m + 1, ev.size - 1)] - e_w) < np.abs(ev[m] - e_w),
+                             np.minimum(m + 1, ev.size - 1), m)
+                d = np.where(np.abs(ev[m] - e_w) <= EVENT_MATCH, ev[m] - e_w, 0.0)
+                dte_max = max(dte_max, float(np.abs(d).max()))
+                ki = np.searchsorted(e_w, tg, side="right") - 1
+                kc = np.clip(ki, 0, None)
+                tg = tg + np.where(ki >= 0, d[kc], shift)
+                base = np.where(ki >= 0, ev[m[kc]], base_ev)
+                shift, base_ev = float(d[-1]), float(ev[m[-1]])
+            else:
+                tg = tg + shift
+                base = np.full(tg.shape, base_ev)
+            if ev.size:
+                nxt = np.searchsorted(ev, base, side="right")
+                keep = (nxt >= ev.size) | (tg < ev[np.minimum(nxt, ev.size - 1)])
+                n_align_dropped += int((~keep).sum())
+                tg, xg = tg[keep], xg[keep]
+                yg = {c: v[keep] for c, v in yg.items()}
             # the jumps of the seam-free reference, its pair across the seam included
             jumps_tg = np.r_[jumps_tg, _jumps(np.r_[pending[2][-1:], tg] if pending is not None else tg)]
             if x_tols is None:
-                # (a dt run of some circuits stores another column set: then only the
-                # observables are read, said so)
-                x_tols = []
-                if xs.shape == (t.size, xg.shape[1]) and (fl is None or len(fl) == xs.shape[1]):
-                    x_tols = [max(rt * max(float(np.ptp(xs[:, j])), 1e-3 * float(np.abs(xs[:, j]).max())), ATOL,
-                                  float(fl[j]) if fl is not None else 0.0) for j in range(xs.shape[1])]
-                    for j in range(len(x_tols)):
-                        acc[f"x[{j}]"] = _Lines()
-                        order.append(f"x[{j}]")
+                # every stored column, or no verdict: a reference with another column set read
+                # nothing of the stored columns and passed on the observables (cl_buck_pi, 11/13)
+                if xs.shape != (t.size, xg.shape[1]) or (fl is not None and len(fl) != xs.shape[1]):
+                    raise RefereeError(f"reference stores {xg.shape[1]} columns, the cell {xs.shape} "
+                                       f"(floors {None if fl is None else len(fl)}): stored columns unread")
+                x_tols = [max(rt * max(float(np.ptp(xs[:, j])), 1e-3 * float(np.abs(xs[:, j]).max())), ATOL,
+                              float(fl[j]) if fl is not None else 0.0) for j in range(xs.shape[1])]
+                for j in range(len(x_tols)):
+                    acc[f"x[{j}]"] = _Lines(t, first)
+                    order.append(f"x[{j}]")
             if pending is not None:
                 read(pending)
             pending = (t_prev, t_w, tg, yg, xg)
@@ -368,7 +486,7 @@ def referee(case, res, info, cols, rt, config: str = "auto+next") -> dict:
             read(pending)
         pending = None
     eg = np.unique(np.concatenate(eg_all)) if eg_all else np.zeros(0)
-    if eg.size != ev.size or (ev.size and float(np.abs(eg - ev).max()) > EVENT_TOL):
+    if eg.size != ev.size or (ev.size and float(np.abs(eg - ev).max()) > EVENT_MATCH):
         n = min(eg.size, ev.size)
         return dict(comparable=False, why=f"reference events differ: {ev.size} vs {eg.size}, "
                     f"max |dt_e| {float(np.abs(eg[:n] - ev[:n]).max()) if n else float('nan'):.3g}")
@@ -397,9 +515,23 @@ def referee(case, res, info, cols, rt, config: str = "auto+next") -> dict:
         worst_x = max(worst_x, r)
         if r > worst:
             worst, where = r, (f"x[{j}]", at)
+    # the lines out of the verdict, by reason, over every column read; the post-event first
+    # line is an open ENGINE item (cl_buck_pi x[3]: ~60 x the promise), reported, not hidden
+    keys = [k for k in order if not isinstance(k, Exception) and (not isinstance(k, tuple) or k[1] == "r")]
+    cs = [(k if isinstance(k, str) else k[0], acc[k].counts()) for k in keys]
+    pf = max(((c, d) for c, d in cs if d["post_event_first_ratio"] is not None),
+             key=lambda z: z[1]["post_event_first_ratio"], default=(None, None))
+    unchecked = dict(n_lines_at_event=max(d["n_lines_at_event"] for _, d in cs),
+                     n_lines_sub_resolution=max(d["n_lines_sub_resolution"] for _, d in cs),
+                     n_lines_in_settle_unread=max(d["n_lines_in_settle_unread"] for _, d in cs),
+                     post_event_first_line=dict(
+                         n=int(first.sum()), ratio=None if pf[1] is None else pf[1]["post_event_first_ratio"],
+                         at=None if pf[1] is None else (pf[0], pf[1]["post_event_first_at"]),
+                         n_read=sum(d["n_post_event_first_read"] for _, d in cs)))
     return dict(comparable=True, ratio=worst, at=where, ratio_incl_settle=worst_whole, settle_s=settle,
                 settle_windows=int(win.shape[0]), settle_fallback=fallback, ratio_stored_columns=worst_x, n_columns=n_x, n_lines=int(np.sum(np.diff(t) > 0)),
-                n_ref=n_ref, n_windows=n_windows, n_seams=n_seams, rtol=rt, per=per,
+                n_ref=n_ref, n_windows=n_windows, n_seams=n_seams, rtol=rt, per=per, not_in_ratio=unchecked,
+                max_event_offset=dte_max, n_ref_dropped_by_alignment=n_align_dropped,
                 n_output_floored=og.get("n_output_floored"), output_floor_max=og.get("output_floor_max"),
                 wall_ref_s=round(time.perf_counter() - t0, 2))
 
