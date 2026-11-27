@@ -4465,6 +4465,43 @@ inline SimulationResult run_transient_trbdf2(
                         if (!is_singular_error(e) || dt_tb <= dt_land) throw;
                         flipped = decide_diodes(x, mask_step, dt_tb);
                     }
+                    // The step was cut at cross_idx's located zero. When the
+                    // round-off bound held every flip here with cross_idx
+                    // past its zero (post-crossing side) by any amount, the
+                    // landing decides as the next step would at this same t:
+                    // probes h_probe_floor, then dt_floor long (the chatter-
+                    // safe path's). The bound held a DCM buck's turn-off ON
+                    // at -1.4e-24 A (an interpolated landing is past the root
+                    // by 1e-6 of the bracket); the next step re-found it on
+                    // its forbidden side and flipped it by probes at the same
+                    // t, a path sensitivities refuse — which of the two ran
+                    // was decided by round-off (libm). Forcing cross_idx's
+                    // bit alone left a bridge partner ON at zero current.
+                    bool land_probed = false;   // the probes refactor mask_step's entry
+                    if (!flipped && !nl_effective) {
+                        const auto& ce_l = diodes.entries()[cross_idx];
+                        if (models::SwitchedDiode::decide(
+                                ce_l.is_on, ce_l.law_voltage(x, ce_l.is_on), ce_l.params())
+                            != ce_l.is_on) {
+                            land_probed = true;
+                            for (const Real h_first : {h_probe_floor, dt_floor}) {
+                                (void)events::settle(opts.max_event_iterations, [&](Size it2) {
+                                    gates_decided = mask_at(t);
+                                    require_probe(
+                                        probe_solve(gates_decided, t,
+                                                    it2 == 0 ? h_first : h_probe_floor,
+                                                    x_trial),
+                                        "a diode event landing,", t);
+                                    const bool f2 = decide_probe(x_trial, gates_decided, t);
+                                    x_sig = x_trial;
+                                    return f2 ? events::Round::Flipped : events::Round::Settled;
+                                });
+                                if (diodes.snapshot_on_bits() != bits_land) break;
+                            }
+                            flipped = diodes.snapshot_on_bits() != bits_land;
+                            if (!flipped) x_sig = x;
+                        }
+                    }
                     // Zero-time cascade at t (fixed point over the
                     // remaining diodes, tiny-dt trap pins state).
                     if (flipped) {
@@ -4506,9 +4543,12 @@ inline SimulationResult run_transient_trbdf2(
                             sens.refuse_step(t, "a diode event of a Newton solve");
                         }
                         // the landing's own factor, or any of its mode (an
-                        // interpolated landing solved nothing)
+                        // interpolated landing solved nothing; a probed one's
+                        // entry was refactored at a probe's dt). ẋ⁻ is the
+                        // bordered solve's, independent of the factor's dt
+                        // when a = 2/that dt (G·y = ḃ, C/2·y = q̇⁻).
                         Real sens_fac_dt = dt_land;
-                        const auto* sens_fac = interp_land
+                        const auto* sens_fac = (interp_land || land_probed)
                             ? cache.any_resident_factor(mask_step, sens_fac_dt)
                             : &cache.resident_factor(mask_step, dt_land);
                         if (sens_fac == nullptr) {

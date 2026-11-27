@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### TR-BDF2: a turn-off landing commits its diode
+
+- **A diode turn-off landed within round-off of its zero now switches at the
+  landing** (`trbdf2`), by the same probes the next step would have run at that
+  instant. Sensitivity runs of a DCM buck were refused at rtol 1e-10 on Linux /
+  Windows and 1e-9 on macOS ("a diode crossing within the conditioning floor
+  of its start"); they now return the true number. Runs without sensitivities
+  are bit-identical on most circuits. An LLC at rtol 1e-10 moves at the
+  tolerance level (a diode that turned off one 2.2e-15 s step after the
+  landing now turns off at it).
+
 ### TR-BDF2: edge probes and the floating-point fixed point
 
 - **An edge probe that passes only as a floating-point fixed point is retaken

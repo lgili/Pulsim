@@ -166,11 +166,7 @@ def _buck(L=100e-6, R=50.0, C=47e-6, Vin=24.0):
     # restart line, so the run returns its number)
     ("pwl", dict(dt=ref.T / 1000, enable_substep_state_correction=True,
                  discontinuity_restart=True)),
-    ("trbdf2", dict(rtol=1e-10, atol=1e-13)),
-    pytest.param("trbdf2", dict(rtol=1e-9, atol=1e-12), marks=pytest.mark.xfail(
-        strict=True, raises=p.UnsupportedError,
-        reason="OPEN (DECISIONS 16): at rtol 1e-9 a turn-off falls within the "
-               "conditioning floor of a step start (flipped at t), refused by name"))])
+    ("trbdf2", dict(rtol=1e-10, atol=1e-13))])
 def test_dcm_buck_transient_against_the_table(engine, kw):
     """6.3: ∂v_C/∂L, ∂R, ∂D at 40 T within 1e-5 of the exact path's table."""
     b = _buck()
@@ -181,6 +177,24 @@ def test_dcm_buck_transient_against_the_table(engine, kw):
     for nm, key in (("L.L", "L"), ("RL.R", "R"), ("S.duty", "D")):
         s = r.sens("vout", nm)[-1]
         assert s == pytest.approx(ref.DCM_TRANSIENT[key], rel=1e-5), (nm, s)
+
+
+@pytest.mark.parametrize("rtol", [1e-9, 1e-11])
+def test_dcm_buck_trbdf2_turnoffs_commit_at_their_landing(rtol):
+    """A turn-off landing whose current is round-off past zero commits there:
+    whether it did, or the next step flipped it by probes at the same t (a
+    refusal), was decided by libm (rtol 1e-9 refused on macOS, 1e-10 on
+    Linux / Windows). Biased, that flip read L 1.3e-4 off at 1e-9; the
+    landing reads the method's own error (2.9e-5 at 1e-9, 1.1e-6 at 1e-11)."""
+    b = _buck()
+    sf = p.make_pwm_switch_fn(1 / ref.T, 0.3, b.switch_index_of("S"),
+                              b.graph.num_switches)
+    r = _run(b, 40 * ref.T, "trbdf2", switch_fn=sf, rtol=rtol, atol=rtol * 1e-3,
+             sensitivities=["L.L", "RL.R", "S.duty"])
+    rel = 5e-5 if rtol > 1e-10 else 5e-6
+    for nm, key in (("L.L", "L"), ("RL.R", "R"), ("S.duty", "D")):
+        s = r.sens("vout", nm)[-1]
+        assert s == pytest.approx(ref.DCM_TRANSIENT[key], rel=rel), (nm, s)
 
 
 # ------------------------------------------------------------- refusals
