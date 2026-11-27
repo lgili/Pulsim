@@ -43,12 +43,15 @@ def _gate(b, name, on_before):
     return fn
 
 
-def _limits(r):
-    """(t, left, right) of each right-limit row of ``with_event_limits``."""
+def _limits(r, start=False):
+    """(view, t, k) of the right-limit rows of ``with_event_limits``: row k is
+    the left at an edge, k + 1 its right limit. The start's row (x(0+) of a
+    re-initialised inconsistent start, F-Z-10) is not an edge's: left out
+    unless ``start``."""
     v = p.with_event_limits(r)
     t = np.asarray(v.times)
     k = np.flatnonzero(t[1:] == np.nextafter(t[:-1], np.inf))
-    return v, t, k
+    return v, t, (k if start else k[t[k] != t[0]])
 
 
 @pytest.mark.parametrize("split", [False, True])
@@ -251,7 +254,7 @@ def test_a_gate_edge_on_a_resume_seam_records_its_right_limit():
     first = _quiet(p.simulate, build(), t_end=t_e, dt=DT, switch_fn=gate, **RULE)
     rest = _quiet(p.simulate, build(), t_end=6e-6, dt=DT, switch_fn=gate,
                   resume_from=first.final_snapshot, **RULE)
-    vr, tr, kr = _limits(rest)
+    vr, tr, kr = _limits(rest, start=True)   # the seam's edge is at the resumed run's t[0]
     assert tr[kr] == pytest.approx([t_e], rel=1e-12)
     for col in ("a", "c"):
         assert np.asarray(vr.v(col))[kr[0] + 1] == pytest.approx(
@@ -679,7 +682,7 @@ def test_a_diode_riding_its_boundary_at_the_row_keeps_the_row(co):
         m.set(k, t < T_E)
         return m
     r = _quiet(p.simulate, b, t_end=3e-6, dt=DT, switch_fn=fn, **RULE)
-    v, t, kk = _limits(r)
+    v, t, kk = _limits(r, start=True)
     (j,) = [j for j in kk if t[j] == 0.0]
     assert abs(float(np.asarray(v.v("sw"))[j + 1])) <= 1e-12
     assert abs(float(np.asarray(v.i("D"))[j + 1])) <= 1e-6
@@ -946,3 +949,51 @@ def test_a_due_right_limit_is_stored_or_counted():
     missing = {float(rec.t) for rec in r.reinit_records} - rows
     assert missing                                   # measured: 19 turn-offs
     assert r.n_right_limit_fallbacks >= len(missing), (len(missing), r.n_right_limit_fallbacks)
+
+
+def _rl_from_source():
+    # 10 V -> R 2 ohm -> node a -> L 1 mH -> gnd
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "vin", "gnd", 10.0)
+    b.add_resistor("R", "vin", "a", 2.0)
+    b.add_inductor("L", "a", "gnd", 1e-3)
+    return b
+
+
+def test_an_inconsistent_start_publishes_its_right_limit_row():
+    """F-Z-10: from the zero state with the source on, row 0 is the user's state
+    (all zeros, not a solution) and x(0+) is a right-limit row: i_L = 0 is
+    continuous, so v_in = v_a = 10 V (no current through R)."""
+    r = _quiet(p.simulate, _rl_from_source(), t_end=5e-6, dt=DT, **RULE)
+    v, t, kk = _limits(r, start=True)
+    assert [float(t[j]) for j in kk] == [0.0]
+    assert np.asarray(v.v("a"))[0] == 0.0 and np.asarray(v.v("vin"))[0] == 0.0
+    assert np.asarray(v.v("vin"))[1] == pytest.approx(10.0, rel=1e-9)
+    assert np.asarray(v.v("a"))[1] == pytest.approx(10.0, rel=1e-9)
+    assert abs(float(np.asarray(v.i("L"))[1])) <= 1e-9 * 5.0   # the pin's 1e-9 of scale
+    # plain rows are unchanged by the record
+    assert np.asarray(r.times)[0] == 0.0 and np.asarray(r.times)[1] == DT
+
+
+def test_a_consistent_start_publishes_no_start_row():
+    """The same cell from its DC operating point (i_L = 5 A, v_a = 0): nothing
+    is re-initialised beyond the noise band, no row at t = 0."""
+    r = _quiet(p.simulate, _rl_from_source(), t_end=5e-6, dt=DT,
+               start_from_dc_op=True, **RULE)
+    idx = r.right_limit_index
+    assert idx is None or len(idx) == 0
+
+
+def test_the_loss_summary_books_the_start_jump_once():
+    """F-Z-10: the diode rig from zeros (10 A forced at t = 0): the summary missed
+    h/2·p(0+) (0.23994 J); with the start row it is the kernel's 12 W · t_end."""
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent))
+    from test_device_losses_kernel import _diode_rig
+    b = _diode_rig(r_th=1.0, c_th=0.01)
+    b.set_device_losses("D1", junction="tj")
+    r = _quiet(p.simulate, b, 0.02, dt=1e-5, engine="pwl", discontinuity_restart=True)
+    (row,) = [q for q in p.device_loss_summary(b, r) if q["name"] == "D1"]
+    E = r.device_energy("D1")["E_cond_electrical"]
+    assert row["E_total"] == pytest.approx(E, rel=1e-12)
+    assert E == pytest.approx(12.0 * 0.02, rel=1e-12)

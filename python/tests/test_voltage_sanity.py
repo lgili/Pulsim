@@ -153,7 +153,8 @@ def test_a_restart_rule_cut_is_named_not_called_a_node_voltage():
     # the row itself is unchanged: the model's right limit (i continuous)
     v = p.with_event_limits(res)
     t = np.asarray(v.times)
-    (j,) = np.flatnonzero(t[1:] == np.nextafter(t[:-1], np.inf))   # the cut's row
+    (j,) = [q for q in np.flatnonzero(t[1:] == np.nextafter(t[:-1], np.inf))
+            if t[q] > 0]   # the cut's row (not the start's, F-Z-10)
     il = np.asarray(v.i("L"))
     assert il[j + 1] == pytest.approx(il[j], rel=1e-9)
     assert abs(np.asarray(v.v("sw"))[j + 1]) > 1e9

@@ -6,6 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Restart rule: an inconsistent start publishes its right limit at t = 0
+
+- **A run that starts from a state that is not a solution of the network at
+  t = 0 now carries a right-limit row there** (`pwl`, `discontinuity_restart`,
+  F-Z-10; user-visible under the rule). Row 0 stays the user's initial state
+  (e.g. zeros with a source on); when the start's re-initialisation moves the
+  state beyond the noise band (1e-8·(1 + |x0| + |x0+|), the jump test's), x(0+)
+  is published in `right_limit_index` / `right_limit_states` like any edge's,
+  so `with_right_limits`, `with_event_limits` and `device_loss_summary` see it.
+  The loss summary missed h/2·p(0+) without it (0.23994 J for the kernel's
+  exact 0.24 J on a diode forced at 10 A from t = 0). A consistent start
+  (`start_from_dc_op`, zeros with every source at zero) and a resume seam
+  publish no start row; plain rows and rule-off runs are unchanged.
+
 ### Restart rule: a cut is named as the cut; the snapshot pickle keeps the anchor
 
 - **A switch cutting an inductor current under the restart rule is reported as

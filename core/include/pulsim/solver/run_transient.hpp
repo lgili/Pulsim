@@ -3049,7 +3049,12 @@ inline SimulationResult run_transient(
                                      Vector& out, topology::SwitchStateMask& m_out)
                                      PULSIM_STEP_DRIVER -> int {
             const bool at_loc = t_from == rl_loc.t;
-            if (!(ev || ip_jump || at_loc)) return 0;
+            // F-Z-10: the run's start (not a resume seam) is re-initialised:
+            // row 0 is the user's state, x(0+) is published only when the
+            // re-initialisation moved it beyond the noise band (below)
+            const bool at_start = !(ev || ip_jump || at_loc) && t_from == opts.t_start &&
+                                  resume_snap == nullptr && !result.states.empty();
+            if (!(ev || ip_jump || at_loc || at_start)) return 0;
             rl_loc.t = std::numeric_limits<Real>::quiet_NaN();   // consumed (no stale time)
             m_out = stamped_mask;
             bool count = false;
@@ -3462,8 +3467,21 @@ inline SimulationResult run_transient(
             aux_events.reset();
             restart_factorizations = rf_s;
             if (ok && !out.allFinite()) unheld = true;   // no state: counted
-            if ((ok && count) || unheld) ++result.n_right_limit_fallbacks;
+            // a start row is due only when it differs from row 0, unknown
+            // when its solve failed: not counted as a fallback
+            if (((ok && count) || unheld) && !at_start) ++result.n_right_limit_fallbacks;
             if (unheld) ok = 0;
+            if (ok && at_start) {
+                // the noise band of the jump test (consistent_start's
+                // 1e-8·(1 + |a0| + |a1|)): above the pin's 1e-9 of scale
+                const Vector& x0 = result.states.front();
+                bool moved = false;
+                for (Index i = 0; i < out.size() && !moved; ++i) {
+                    moved = std::abs(out[i] - x0[i]) >
+                            Real{1e-8} * (Real{1} + std::abs(out[i]) + std::abs(x0[i]));
+                }
+                if (!moved) ok = 0;
+            }
             history.restore(rl_hcur);
             if (!lin) {
                 hs.restore(rl_hs);
