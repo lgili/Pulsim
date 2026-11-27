@@ -53,6 +53,7 @@
 #include "pulsim/solver/result.hpp"
 #include "pulsim/topology/graph.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <format>
 #include <string>
@@ -66,6 +67,11 @@ struct ImplausibleVoltage {
     Real peak = Real{0};          ///< largest |v| the run reached there
     Real source_scale = Real{0};  ///< largest |V| any source can make
     Real t_peak = Real{0};
+    /// F-Z-8: the peak is a restart-rule cut's right-limit row (i·R_off across
+    /// the cutting device for its unresolved L/R_off mode), not a node voltage
+    /// of the waveform: the record that cut it (empty: an ordinary finding).
+    std::string cut_device, cut_state;
+    Real cut_current = Real{0}, cut_energy = Real{0};
 };
 
 /// The largest voltage magnitude any INDEPENDENT source in the
@@ -197,16 +203,44 @@ struct ImplausibleVoltage {
     if (result.has_event_limits && result.event_limit_width > 0) {
         const Size w = result.event_limit_width;
         const Index n = std::min<Index>(n_nodes, static_cast<Index>(w));
+        // F-Z-8: a row at a cut-set record's instant is the conductance-form
+        // model's right limit before the collapse the record reports (i·R_off
+        // for ~L/R_off): judged apart and, when it alone trips, reported as
+        // the cut (device, current, energy), never as a node voltage
+        ImplausibleVoltage cut;
+        const ReinitRecord* cut_rec = nullptr;
+        auto cut_at = [&](Real te) -> const ReinitRecord* {
+            for (const auto& q : result.reinit_records) {
+                if (q.kind == "cut_set" && q.t == te) return &q;
+            }
+            return nullptr;
+        };
+        auto touches = [&](const ReinitRecord& q, Index node) {
+            for (Index b = 0; b < graph.num_branches(); ++b) {
+                if ((graph.branch(b).from == node || graph.branch(b).to == node) &&
+                    std::find(q.devices.begin(), q.devices.end(),
+                              graph.branch_name(b)) != q.devices.end()) {
+                    return true;
+                }
+            }
+            return false;
+        };
         auto scan = [&](const std::vector<Real>& rows, auto&& time_of) {
             for (Size j = 0; (j + 1) * w <= rows.size(); ++j) {
                 const Real* r = rows.data() + j * w;
                 if (std::isnan(r[0])) continue;
+                const Real te = time_of(j);
+                const ReinitRecord* q = cut_at(te);
                 for (Index i = 0; i < n; ++i) {
+                    // only the cutting devices' own terminals are the cut's
+                    const bool at_cut = q != nullptr && touches(*q, i);
+                    ImplausibleVoltage& o = at_cut ? cut : out;
                     const Real a = std::abs(r[i]);
-                    if (!(a <= bound) && !(a <= out.peak)) {
-                        out.node = i;
-                        out.peak = a;
-                        out.t_peak = time_of(j);
+                    if (!(a <= bound) && !(a <= o.peak)) {
+                        o.node = i;
+                        o.peak = a;
+                        o.t_peak = te;
+                        if (at_cut) cut_rec = q;
                     }
                 }
             }
@@ -219,6 +253,16 @@ struct ImplausibleVoltage {
         scan(result.inner_event_right, [&](Size j) {
             return j < result.inner_event_times.size() ? result.inner_event_times[j] : Real{0};
         });
+        if (out.node == kInvalidIndex && cut_rec != nullptr) {
+            out = cut;
+            out.cut_device = cut_rec->devices.empty() ? cut_rec->cause : cut_rec->devices.front();
+            out.cut_state = cut_rec->states.empty() ? std::string{} : cut_rec->states.front();
+            out.cut_energy = cut_rec->dW;
+            // λ = L·i and dW = ½·L·i² of the dominant state: i = 2·dW/λ
+            // (one collapsing state only: dW of several is not one L·i²/2)
+            out.cut_current = cut_rec->lambda != Real{0} && cut_rec->states.size() == 1
+                ? std::abs(Real{2} * cut_rec->dW / cut_rec->lambda) : Real{0};
+        }
     }
     if (out.node != kInvalidIndex) {
         out.source_scale = scale;
@@ -255,6 +299,24 @@ struct ImplausibleVoltage {
             "not at all with the gate off: an inductive current through "
             "them needs a freewheel path (add_diode(..., V_f=...) across "
             "the device or the load).", gated);
+    }
+    if (!v.cut_device.empty()) {
+        return std::format(
+            "'{}' cut the {} of '{}' at t = {:.6g} s in an "
+            "instant: the restart rule booked its energy {:.4g} J once, as an "
+            "impulse record (result.reinit_records, kind 'cut_set'). The right "
+            "limit stored there is the model's own before that collapse: the "
+            "current held across the switch's off-conductance, {:.3e} V at {} "
+            "for the unresolved L/R_off mode (the circuit's sources reach "
+            "{:.4g} V) — an artefact of the ideal cut, not a sample of the "
+            "waveform. A real circuit gives the current a path (a freewheel "
+            "diode, a snubber, the switch's capacitance or avalanche): add "
+            "whichever your design has.",
+            v.cut_device,
+            v.cut_current > Real{0} ? std::format("{:.4g} A current", v.cut_current)
+                                    : std::string("current"),
+            v.cut_state, v.t_peak, v.cut_energy,
+            v.peak, pwl::row_label(graph, pool, v.node), v.source_scale);
     }
     return gated.empty() ? std::format(
         "{} reached {:.3e} V at t = {:.6g} s, but the largest "

@@ -122,7 +122,7 @@ def test_a_conductance_form_cut_keeps_the_models_right_limit_and_warns():
     """The impulse rule records the collapse of the 1 ps mode L·g_off; the
     right limit is the model's own at t_e+ (i_L continuous, v_sw = i_L/g_off,
     as the exact engine's: test_release_findings_a F-5-10) and the voltage
-    guard reads it on the fixed engine too."""
+    guard reads it on the fixed engine too, as the cut it is (F-Z-8)."""
     b = p.CircuitBuilder()
     b.add_voltage_source("Vin", "in", "gnd", 48.0)
     b.add_inductor("L", "in", "sw", 1e-3)
@@ -132,7 +132,7 @@ def test_a_conductance_form_cut_keeps_the_models_right_limit_and_warns():
         m = p.SwitchStateMask(1)
         m.set(0, t < T_E)
         return m
-    with pytest.warns(UserWarning, match="largest voltage"):
+    with pytest.warns(UserWarning, match="'S' cut the .* current of 'L'"):   # F-Z-8
         r = p.simulate(b, t_end=6e-6, dt=DT, switch_fn=sf, **RULE)
     assert len(r.reinit_records) == 1
     v, t, k = _limits(r)

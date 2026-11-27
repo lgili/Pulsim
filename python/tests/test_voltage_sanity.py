@@ -116,3 +116,45 @@ def test_a_generous_factor_can_be_asked_for():
         res = p.simulate(b, t_end=1e-3, dt=1e-8, switch_fn=_sw)
     assert k.find_implausible_voltage(b.graph, b.pool, res,
                                        factor=1e9).node == -1
+
+
+def test_a_restart_rule_cut_is_named_not_called_a_node_voltage():
+    """F-Z-8: under the restart rule an inductor current cut by an ideal
+    switch is an impulse record, and the right-limit row at the cut holds the
+    conductance-form model's own limit (i·R_off for the L/R_off mode, 4.8e10 V
+    here). The warning names the cut — switch, inductor, current, the energy
+    ½·L·i² booked once — instead of a 'largest voltage' node finding. Closed
+    form: Vin — R — L — S(R_on) charging, i(t_e) = V/(R+R_on)·(1 − e^(−t_e/τ))."""
+    V, R, L, R_on, t_e = 48.0, 5.0, 1e-3, 1e-3, 1e-3
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", V)
+    b.add_resistor("R", "vin", "a", R)
+    b.add_inductor("L", "a", "sw", L)
+    b.add_switch("S", "sw", "gnd", 1.0 / R_on, 1e-12)
+
+    def sf(t):
+        m = p.SwitchStateMask(1)
+        m.set(0, t < t_e)
+        return m
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        res = p.simulate(b, t_end=2e-3, dt=1e-6, switch_fn=sf, engine="pwl",
+                         discontinuity_restart=True)
+    i_e = V / (R + R_on) * (1.0 - np.exp(-t_e * (R + R_on) / L))
+    (rec,) = res.reinit_records
+    # trapezoid at h/τ = 5e-3: (h/τ)²/12 = 2e-6
+    assert rec.dW == pytest.approx(0.5 * L * i_e ** 2, rel=1e-5)
+    msgs = [str(w.message) for w in caught]
+    assert not [m for m in msgs if "largest voltage any source" in m]
+    (hit,) = [m for m in msgs if "cut the" in m]
+    assert "'S'" in hit and "'L'" in hit and f"{i_e:.4g} A" in hit
+    assert f"{rec.dW:.4g} J" in hit
+    # the row itself is unchanged: the model's right limit (i continuous)
+    v = p.with_event_limits(res)
+    t = np.asarray(v.times)
+    (j,) = np.flatnonzero(t[1:] == np.nextafter(t[:-1], np.inf))   # the cut's row
+    il = np.asarray(v.i("L"))
+    assert il[j + 1] == pytest.approx(il[j], rel=1e-9)
+    assert abs(np.asarray(v.v("sw"))[j + 1]) > 1e9
+    assert res._implausible_voltage.node >= 0
