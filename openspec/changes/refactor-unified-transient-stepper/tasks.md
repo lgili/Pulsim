@@ -60,15 +60,15 @@ at equal times or time-weighted measures, never sample means.
   - Skeleton done (`solver/step/stepper.hpp`, DECISIONS 10), proven on a toy body only
   - Slice 3b (DECISIONS 15): the TR-BDF2 loop cut in place into eight phase lambdas that the legacy loop and the twin `step::run<TrBdf2>(BodyClock, phase_body(...))` both call (internal `PULSIM_TRBDF2_STEPPER_TWIN=1`, not an engine name); the skeleton grew a deciding-body branch (one ATTEMPT per call; `Verdict::Reject` restarts at poll with no rollback; `End`). Identity: see DECISIONS 15. Cost gate met after DECISIONS 16 (both drivers forced inline; default +0.10–0.35 % over the base, twin ≤ 1.0007× default). Open: `trbdf2-next` name / route; the decision (reject, forced accept, chatter guard) still in the body, not in the controller; a skeleton-owned rollback
 - [ ] 6.2 Equality proof: `trbdf2-next` step-identical to `trbdf2` on every harness circuit and every suite circuit that runs on `trbdf2`; runner job added
-  - Open: proved locally (twin identity 327/327 + 50/50, DECISIONS 15/18; since 3d `benchmarks/tools/trbdf2_identity.py` against a stored baseline); no runner job
+  - Open: proved locally (twin identity 327/327 + 50/50, DECISIONS 15/18; since 3d `benchmarks/tools/trbdf2_identity.py` against a stored baseline, 380/380 at every group of this change); no runner job, by DECISIONS 26 (byte hashes are per toolchain; CI keeps the counter gate and the goldens)
 - [ ] 6.3 Zero-alloc test for the variable-step stepper (accepted, rejected and Newton-retried steps)
-  - WIP: hidden case `[wip]` in `core/tests/perf/test_zero_alloc.cpp` (gated IGBT chopper on TR-BDF2): accepted + rejected steps O(1), 158 -> 166 operator news for 10,050 -> 41,425 accepted / 283 -> 1,239 rejected; the Newton-retried path not yet reached (a short `max_newton_iterations` aborts at h_min or does not retry); un-hide when it is
+  - Un-hidden (DECISIONS 27): an inductor-fed Shockley diode on TR-BDF2. Accepted + rejected steps O(1) (117 -> 125 news for 3,158 -> 11,626 accepted / 331 -> 1,256 rejected); Newton-retried steps NOT zero, 10–16 news per retry (a failed Newton throws a formatted `std::runtime_error`), held by a per-retry bound. Open until the failure report stops allocating (groups 14–15)
 - [x] 6.4 Switch `engine='trbdf2'` and `engine='auto'` without `dt` to the stepper; keep `engine='trbdf2-legacy'`
   - Slice 3c (DECISIONS 17): the skeleton driver is the default of `run_transient_trbdf2` (so of every route that reaches it); the old loop is kept only behind the internal `PULSIM_TRBDF2_STEPPER_LEGACY=1`, NOT as a public `trbdf2-legacy` name (orchestrator's brief: no public option). Default byte-identical to the previous default; identity tool at full counts
 - [ ] 6.5 Oracle: matrix equal for `trbdf2` and `trbdf2-legacy`; counter gate equal; ns/step rows 5–9 not above 0.2
-  - Open: no `trbdf2-legacy` name to run the matrix against; cost measured as instructions per step (DECISIONS 16/18/20), not ns/step
-- [ ] 6.6 Docs: `docs/solvers.md`, CHANGELOG (the legacy name and its removal date)
-  - Open: docs not written
+  - Open by DECISIONS 26: no `trbdf2-legacy` name to run the matrix against (the stored-baseline identity stands in, 380/380); cost measured as instructions per step (DECISIONS 16/18/20), not ns/step
+- [x] 6.6 Docs: `docs/solvers.md`, CHANGELOG (the legacy name and its removal date)
+  - `docs/solvers.md` "For developers: where the stepper lives"; CHANGELOG: no public legacy name existed (DECISIONS 17), so no removal date
 
 ## 7. The fixed-step stepper, feature by feature
 - [x] 7.1 `Stepper<Trapezoidal, Fixed>` as `pwl-next` for plain runs (linear, switches, PWL diodes, Newton devices, `should_continue`, `b_extra_fn`, `initial_state`, `resume_from`)
@@ -127,7 +127,9 @@ at equal times or time-weighted measures, never sample means.
   - C++ side done (`SolverSnapshot::controller`, written and read by the TR-BDF2 engine; DECISIONS 8); the pickle bump waits for the device-interface pickle v4
 - [ ] 12.2 Tests: a split variable-step run is bit-identical to the continuous one; a snapshot without controller state resumes to tolerance; a fixed-step snapshot resumes on the LTE controller and the reverse
   - Open: a split variable-step run is NOT bit-identical on the buck (0/44, DECISIONS 12: gate-learning and hold state are loop locals)
-- [ ] 12.3 Docs: snapshot page
+  - Added (DECISIONS 28): RLC split bit-identical (2 splits), a snapshot without controller state resumes to tolerance, pwl -> trbdf2 and trbdf2 -> pwl resume to tolerance (`test_trbdf2_resume_controller.py`); the buck part needs a snapshot-format change, deferred to groups 14–15
+- [x] 12.3 Docs: snapshot page
+  - `docs/result-reference.md` "Snapshots: `final_snapshot` and `resume_from`"
 
 ## 13. Delete the legacy drivers (one release after 8.3)
 - [x] 13.1 Delete `pwl-legacy`, `trbdf2-legacy`, the hidden names, the bodies of `run_transient` and `run_transient_trbdf2`
