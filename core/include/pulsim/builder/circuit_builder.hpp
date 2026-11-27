@@ -30,6 +30,7 @@
 #include "pulsim/models/igbt_level1.hpp"
 #include "pulsim/models/mosfet_level1.hpp"
 #include "pulsim/models/power_mosfet.hpp"
+#include "pulsim/models/power_mosfet_device.hpp"
 #include "pulsim/models/vcvs.hpp"
 #include "pulsim/models/controlled_sources.hpp"
 #include "pulsim/models/pulse_voltage_source.hpp"
@@ -2633,6 +2634,18 @@ public:
         if (p.R_d > Real{0}) add_resistor(sub(n + ".rd"), drain, dn, rec.R_d_eff);
         if (p.R_g > Real{0}) add_resistor(sub(n + ".rg"), gate, gn, p.R_g);
         if (p.L_s > Real{0}) add_inductor(sub(n + ".ls"), sn, source, p.L_s);
+        if (p.fq_device) {
+            // add-power-mosfet-datasheet-device 5.2 (opt-in): the channel,
+            // C_gd, C_ds and the body diode are ONE f/q device on d', s', g'
+            auto [model, prm] = models::power_mosfet_device::make_model(
+                models::power_mosfet_device::core_of(rec));
+            add_external_device(sub(n), {dn, sn, gn}, std::move(model), std::move(prm),
+                                /*check=*/false, /*debug_jacobian=*/false, /*record=*/true);
+            const Index device = branch_id_of(n);
+            if (p.C_gs > Real{0}) add_capacitor(sub(n + ".cgs"), gn, sn, p.C_gs);
+            power_mosfets_.emplace(device, std::move(rec));
+            return *this;
+        }
         add_mosfet_level1(sub(n), dn, sn, gn, rec.K_eff, rec.V_T_eff,
                           p.lambda, p.kappa, /*with_body_diode=*/false);
         const Index channel = branch_id_of(n);

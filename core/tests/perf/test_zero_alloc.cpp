@@ -992,3 +992,38 @@ TEST_CASE("fixed engine on the step skeleton: its hooks, no per-step allocation"
         CHECK(d4 <= d2 + 2);   // no per-step allocation
     }
 }
+
+// add-exact-propagator-strategy 10.4: the exact engine's fixed-step kernel
+// (x <- Phi x + Gamma from the (mask, dt) cache) allocates nothing per step.
+#include "pulsim/dsed/builder_adapter.hpp"
+
+TEST_CASE("exact fixed step: zero allocations per step after the first visit",
+          "[v2][perf][zero_alloc][dsed]") {
+    builder::CircuitBuilder b;
+    b.add_voltage_source("V", "in", "gnd", 10.0);
+    b.add_resistor("R", "in", "a", 5.0);
+    b.add_inductor("L", "a", "o", 100e-6);
+    b.add_capacitor("C", "o", "gnd", 10e-6);
+    b.add_resistor("RL", "o", "gnd", 20.0);
+    PwlStateSpaceCache cache{b.graph(), b.pool()};
+    dsed::NativeCircuitBuilderAdapter<> ad{b.graph(), b.pool(), cache};
+    ad.set_mask(SwitchStateMask(0));
+    REQUIRE(ad.has_exact_step());
+    Vector x = Vector::Zero(ad.n_state()), y(x.size());
+    REQUIRE(ad.exact_fixed_step_into(0.0, x, 1e-6, y));   // the first visit builds the pair
+    const std::size_t eig0 = ad.n_eig();
+    Eigen::internal::set_is_malloc_allowed(false);
+    const std::size_t before = g_new_count.load();
+    for (int k = 0; k < 1000; ++k) {
+        (void)ad.exact_fixed_step_into(k * 1e-6, x, 1e-6, y);
+        x.swap(y);
+    }
+    const std::size_t after = g_new_count.load();
+    Eigen::internal::set_is_malloc_allowed(true);
+    if (kCountsMeaningful) {
+        REQUIRE(after - before == 0);
+    }
+    REQUIRE(ad.n_eig() == eig0);
+    REQUIRE(ad.n_fixed_steps() == 1001);
+    REQUIRE(ad.fixed_step_flops() == 1001 * (2 * 2 + 2));
+}

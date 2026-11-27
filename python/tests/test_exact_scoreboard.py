@@ -44,10 +44,10 @@ CELLS = {
         "dsed": ("dsed", {}, 0.0, 1e-4, "limits"),         # 2.2e-6
     },
     "circuits/switching/basic/vcswitch_resistor.yaml": {
-        # finding F-SB-2: the split rule applies the gate edge from the start of its step,
-        # delta = -0.005 h: instants sqrt(jump^2 |delta| / T) / span = 0.0032
-        # (the PR line's 0.0032). Under the release default control_tick='state' the edge is
-        # placed exactly: 2.0e-9
+        # finding F-SB-2 (the split rule applied the gate edge from the start of its step,
+        # delta = -0.005 h: instants 0.0032) is closed twice: on the restart line the edge is
+        # located (integration bound 1e-6), and under the release default control_tick='state'
+        # the edge is placed exactly: 2.0e-9. The release's tighter ceiling is kept
         "pwl+split": ("pwl", SPLIT, 0.0, 1e-7, "instants"),
     },
     "circuits/diodes/diode_half_wave_rl_load.yaml": {

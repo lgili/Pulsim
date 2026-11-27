@@ -182,6 +182,12 @@ def _branch_bridges(n):
         p.CircuitBuilder.add_diode = orig
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason=(
+    "OPEN on Windows (CI 2026-11-26, PR #150 head a5a1f19b, all four Python versions): the "
+    "rule-on run of this case does not finish inside the 900 s test timeout; Linux 166 s, "
+    "macOS 109 s per case on the same commit. Slow or non-terminating is not known yet "
+    "(group-f.md, 'Windows: ten bridges under the rule'). A timeout kills the whole pytest "
+    "session, so this cannot be an xfail."))
 @pytest.mark.parametrize("gate", ["constant", "python"])
 def test_fx1_ten_branch_form_bridges_run_under_the_rule(gate):
     """F-X-1: refused at 19.969 ms (Db8b OFF 0.73 V forward after Db0b chattered 18 times in

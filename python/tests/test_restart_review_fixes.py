@@ -90,11 +90,14 @@ def _rl_opaque(te, dt=1e-6):
 def test_an_opaque_edge_on_the_grid_is_not_unlocated():
     r, w = _rl_opaque(5e-6 * (1 - 1e-12))   # on the grid (within snap)
     assert r.counters["unlocated_gate_steps"] == 0 and not w
+    assert r.counters["n_gate_events_bisected"] == 0
 
 
-def test_an_opaque_edge_inside_a_step_is_unlocated():
+def test_an_opaque_edge_inside_a_step_is_bisected():
+    # F-SB-2: bisected to split_snap*dt and split at, not taken at the grid
     r, w = _rl_opaque(5.37e-6)
-    assert r.counters["unlocated_gate_steps"] == 1 and len(w) == 1
+    assert r.counters["unlocated_gate_steps"] == 0 and not w
+    assert r.counters["n_gate_events_bisected"] == 1
 
 
 # --- L5 ----------------------------------------------------------------------

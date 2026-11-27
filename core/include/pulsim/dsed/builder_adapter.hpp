@@ -109,6 +109,7 @@ public:
         // `valid == false` (defective basis, e.g. driven exactly at
         // a circuit resonance) falls back to the numeric path.
         ExactLTI exact;
+        ExactRoute route;               // 15.2 (D13): the kernel this mode took and why
         Vector exact_b;                 // reduced, augmented-const b
         std::vector<Real> aug_omegas;   // one per oscillator pair
         // the sines' direct share of the recovered vector, R_b·stamp·amp·(cos φ, sin φ):
@@ -433,6 +434,71 @@ public:
         out = aug_out_.head(n);
     }
 
+    /// add-exact-propagator-strategy 10.1 (D8): one full grid step of
+    /// length h as x ← Φ·x + Γ from the (mask, h) cache (the mask is the
+    /// entry, h the key, bitwise). False, nothing written, where the pair
+    /// does not apply: no exact step, a piecewise-linear source (its level
+    /// changes per piece: shortcut, the caller takes the modal step; upgrade
+    /// when a pulse-driven fixed run needs the n² step), or the byte budget
+    /// spent on other pairs.
+    bool exact_fixed_step_into(Real t, const Vector& x, Real h, Vector& out) const {
+        ensure_current_resolved_();
+        ensure_exact_built_(*current_entry_);
+        const LTIEntry& e = *current_entry_;
+        if (!e.exact.valid || e.exact.tier == 4 || !pwl_sources_.empty()) return false;
+        const PhiGamma* pg = nullptr;
+        auto& c = e.exact.pg_cache;
+        for (std::size_t i = 0; i < c.size(); ++i)
+            if (c[i].h == h) { pg = &c[i]; break; }
+        if (pg == nullptr) {
+            const auto N = static_cast<std::size_t>(
+                x.size() + 2 * static_cast<Index>(e.aug_omegas.size()));
+            const std::size_t bytes = (N * N + N) * sizeof(Real);
+            constexpr std::size_t kPerMask = 4;   // h = dt plus a few edge-cut lengths at most
+            // the oldest pair of this mask goes when it holds kPerMask; refuse before evicting
+            const std::size_t freed = c.size() >= kPerMask
+                ? (static_cast<std::size_t>(c.front().Phi.size()) + c.front().Gamma.size()) * sizeof(Real) : 0;
+            if (pg_bytes_ - freed + bytes > pg_budget_) { ++n_pg_refused_; return false; }
+            if (freed > 0) {
+                pg_bytes_ -= freed;
+                c.erase(c.begin());
+            }
+            c.push_back(make_phi_gamma(e.exact, h));
+            pg_bytes_ += bytes;
+            ++n_pg_builds_;
+            pg = &c.back();
+        }
+        const auto n = x.size();
+        const auto k = static_cast<Index>(e.aug_omegas.size());
+        if (k == 0) {
+            phi_gamma_step_into(*pg, x, out);
+        } else {
+            aug_in_.resize(n + 2 * k);
+            aug_out_.resize(n + 2 * k);
+            aug_in_.head(n) = x;
+            for (Index j = 0; j < k; ++j) {
+                const Real w = e.aug_omegas[static_cast<Size>(j)];
+                aug_in_[n + 2 * j]     = std::sin(w * t);
+                aug_in_[n + 2 * j + 1] = std::cos(w * t);
+            }
+            phi_gamma_step_into(*pg, aug_in_, aug_out_);
+            out = aug_out_.head(n);
+        }
+        const auto N = static_cast<std::size_t>(pg->Gamma.size());
+        ++n_fixed_steps_;
+        fixed_flops_ += N * N + N;
+        return true;
+    }
+    /// 10.4 counters: fixed (Φ, Γ) steps, pairs built, multiply-adds of
+    /// those steps, cells the budget sent to the modal step (a count of
+    /// steps, not of pairs); the budget in bytes.
+    [[nodiscard]] std::size_t n_fixed_steps() const noexcept { return n_fixed_steps_; }
+    [[nodiscard]] std::size_t n_phi_gamma_builds() const noexcept { return n_pg_builds_; }
+    [[nodiscard]] std::size_t fixed_step_flops() const noexcept { return fixed_flops_; }
+    [[nodiscard]] std::size_t n_phi_gamma_refused() const noexcept { return n_pg_refused_; }
+    [[nodiscard]] std::size_t phi_gamma_bytes() const noexcept { return pg_bytes_; }
+    void set_phi_gamma_budget(std::size_t bytes) noexcept { pg_budget_ = bytes; }
+
     /// The first corner of a piecewise-linear source strictly after t
     /// (+∞ when there is none): a time event of the scheduler, so no
     /// exact step straddles a change of a source's piece (D14).
@@ -751,6 +817,7 @@ public:
             e.exact_built = false;
             e.exact = ExactLTI{};
         }
+        pg_bytes_ = 0;   // the pairs went with the propagators
     }
 
     /// The run's length: tier 1's propagator_defect is stated over it
@@ -765,6 +832,7 @@ public:
             e.exact_built = false;
             e.exact = ExactLTI{};
         }
+        pg_bytes_ = 0;   // the pairs went with the propagators
     }
 
     /// Consistent reinitialisation onto the current mode's slow
@@ -1050,6 +1118,13 @@ public:
         int refined;
         bool balanced;
         Real pade_defect;
+        // 15.2 (D13): the route; n and nnz of the augmented matrix, the action's
+        // steps and matvecs taken (0 off tier 4)
+        ExactRoute route;
+        Eigen::Index n_aug;
+        Eigen::Index nnz_aug;
+        std::size_t action_steps;
+        std::size_t action_matvecs;
     };
     [[nodiscard]] std::vector<ExactReportRow> exact_report() const {
         std::vector<ExactReportRow> rows;
@@ -1059,7 +1134,10 @@ public:
                                 e.exact.norm_A1 * h_max_,
                                 e.exact.reason, e.exact.defect, e.exact.backward,
                                 e.exact.refined, e.exact.balanced,
-                                e.exact.pade_defect});
+                                e.exact.pade_defect, e.route, e.A.rows() + 1,
+                                e.exact.action ? e.exact.action->A.nonZeros() : Eigen::Index{0},
+                                e.exact.action_steps,
+                                e.exact.action ? e.exact.action->matvecs : std::size_t{0}});
             }
         }
         return rows;
@@ -1224,6 +1302,7 @@ private:
         entry.exact_built = true;
         if (!has_dynamic_sources_) {
             entry.exact_b = entry.b_constant;
+            if (route_by_cost_(entry)) return;   // D13: the action, or the hand-over
             entry.exact = make_exact_lti(entry.A, entry.exact_b,
                                          energy_scale_(entry, 0), h_max_, horizon_);
             ++n_eig_;
@@ -1255,6 +1334,45 @@ private:
         }
         // a user b_extra_fn: b(t) has no closed form — the numeric
         // path owns it.
+    }
+
+    /// add-exact-propagator-strategy 15.2 (D13): the route of a DC-driven mode at its first
+    /// visit, from the steps expected in it (horizon / h_max: shortcut, not re-evaluated per
+    /// visit; upgrade when a mode's visits are counted). True when the dense build is not
+    /// taken: tier 4 (the action, no eigenbasis) or no exact step (reason 'cost'). Modes below
+    /// route_min_n_ states are dense without a look (12.2's crossover; the default circuits).
+    /// shortcut: sine and piecewise-linear sources stay dense (their augmented / affine forms
+    /// are not wired to the action); upgrade with a large sine-driven circuit.
+    bool route_by_cost_(LTIEntry& entry) const {
+        const auto n = entry.A.rows();
+        if (n < route_min_n_) return false;
+        ExpmAction act{augment_affine(entry.A.sparseView(), entry.exact_b)};
+        const Real h = h_max_;
+        const Real N = horizon_ > Real{0} && h > Real{0} ? std::max(Real{1}, horizon_ / h) : Real{1};
+        entry.route = choose_exact_route(static_cast<Real>(n + 1), static_cast<Real>(act.A.nonZeros()),
+                                         act.norm1 * h, N, route_costs_);
+        if (entry.route.kernel == "dense") return false;
+        if (entry.route.kernel == "implicit" && refuse_implicit_) {
+            // no run that stepped exactly before is refused for cost: dense, the reason kept
+            entry.route.kernel = "dense";
+            entry.route.reason = "cost (dense kept: implicit segments not allowed)";
+            return false;
+        }
+        entry.exact = ExactLTI{};
+        entry.exact.norm_A1 = act.norm1;
+        if (entry.route.kernel == "action") {
+            entry.exact.valid = true;
+            entry.exact.tier = 4;
+            entry.exact.action.emplace(std::move(act));
+            // the spectrum only (no eigenvectors, ~10 n^3 against the dense setup's ~1200 n^3):
+            // the scan step, the settle at a diode decision and the fast samples read it
+            if (n > 0) entry.exact.lambda = Eigen::EigenSolver<DenseMatrix>(entry.A, false).eigenvalues();
+            return true;
+        }
+        entry.exact.reason = "cost: the dense setup is not repaid over " + detail::fmt_e(N)
+            + " steps and the action needs " + std::to_string(entry.route.matvecs)
+            + " matvecs per step (m_max " + std::to_string(route_costs_.m_max) + ")";
+        return true;
     }
 
     /// Whether a sine voltage or current source exists (its oscillator
@@ -2078,6 +2196,26 @@ private:
     mutable std::size_t n_eig_ = 0;
     mutable Real build_seconds_ = 0;
     mutable Vector aug_in_, aug_out_;
+    // 10.1: the fixed-step pairs' bytes over every mask, and their budget (64 MiB)
+    mutable std::size_t pg_bytes_ = 0, n_pg_builds_ = 0, n_fixed_steps_ = 0, fixed_flops_ = 0,
+                        n_pg_refused_ = 0;
+    std::size_t pg_budget_ = std::size_t{64} << 20;
+    // 15.2 / 15.4 (D13): the route rule's constants and the size below which a mode is dense
+    ExactRouteCosts route_costs_{};
+    Eigen::Index route_min_n_ = 65;
+public:
+    // the route is decided at a mode's first build: a new rule rebuilds the modes
+    void set_route_costs(const ExactRouteCosts& c) { route_costs_ = c; drop_exact_(); }
+    void set_route_min_n(Eigen::Index n) { route_min_n_ = n; drop_exact_(); }
+private:
+    void drop_exact_() {
+        for (auto& [m, e] : mask_cache_) {
+            e.exact_built = false;
+            e.exact = ExactLTI{};
+        }
+        pg_bytes_ = 0;
+    }
+private:
 };
 
 }  // namespace pulsim::dsed

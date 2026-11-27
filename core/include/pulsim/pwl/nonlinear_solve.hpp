@@ -202,6 +202,9 @@ struct NewtonRoundoffAcceptance {
     /// them is a state the solver is not tracking (BUDGET in DECISIONS).
     Size max_consecutive = Size{130};
     bool accepted = false;
+    /// The accepted iterate passed only at its own magnitudes (the
+    /// floating-point fixed point of DECISIONS 12), not at the start's.
+    bool fixed_point = false;
     Real omega = 0;
     Index row = kInvalidIndex;
     /// Run counters (the caller keeps one object per run).
@@ -249,6 +252,7 @@ inline void solve_with_newton_in_place(
     const bool ro_on = roundoff != nullptr && roundoff->enabled;
     if (roundoff != nullptr) {
         roundoff->accepted = false;
+        roundoff->fixed_point = false;
     }
     // Roundoff acceptance state: whether f(x_k), x_k were recorded this
     // call (in the workspace: no allocation per call) and the last
@@ -768,18 +772,56 @@ inline void solve_with_newton_in_place(
         const bool growing = kw >= 2 && !(m_new <= Real{2} * m_old);
         const Real dx_cap = roundoff->dx_rel_max
             * std::max(Real{1}, w.ro_x0_inf);
-        const Vector& scale = w.ro_scale;
         Real omega = Real{0};
         Index row = kInvalidIndex;
-        for (Index i = 0; i < static_cast<Index>(n); ++i) {
-            const Real fi = std::abs(ro_f[i]);
-            const Real be = scale[i] > Real{0}
-                ? fi / scale[i]
-                : (fi == Real{0} ? Real{0}
-                                 : std::numeric_limits<Real>::infinity());
-            if (be > omega) {
-                omega = be;
-                row = i;
+        auto backward_error = [&](const Vector& scale) {
+            omega = Real{0};
+            row = kInvalidIndex;
+            for (Index i = 0; i < static_cast<Index>(n); ++i) {
+                const Real fi = std::abs(ro_f[i]);
+                const Real be = scale[i] > Real{0}
+                    ? fi / scale[i]
+                    : (fi == Real{0} ? Real{0}
+                                     : std::numeric_limits<Real>::infinity());
+                if (be > omega) {
+                    omega = be;
+                    row = i;
+                }
+            }
+        };
+        backward_error(w.ro_scale);
+        bool own_scale = false;
+        // A FLOATING-POINT FIXED POINT (DECISIONS 12): every component of
+        // the last Newton step is within the absolute tol_dx or within
+        // 4 eps of the iterate's own value, so no update can move x_k any
+        // more. Its rows are then also judged at x_k's own magnitudes (the
+        // larger of the two scales per row). ll13_active_clamp_forward: a
+        // dead time drives 40 A into roff = 1e7, the drain and secondary
+        // reach 3.8e8 V within the solve, ||dx|| sits at 4.66e-9 V (below
+        // one ulp, 6e-8 V) and a 1 kS diode row between two such nodes
+        // leaves 2.4e-5 A of cancellation: 0.1 eps of its magnitudes at
+        // x_k, 1e6 eps of the start state's (before the spike), declined
+        // down to h_min. A diverging iterate never takes a step at its own
+        // rounding (10a stands for it); the stagnation windows and the dx
+        // cap still apply.
+        if (stagnated && ro_dx[0] <= dx_cap && !(omega <= roundoff->omega_max)) {
+            bool fixed_point = true;
+            for (Index i = 0; i < static_cast<Index>(n); ++i) {
+                const Real d = std::abs(dx[i]);
+                if (!(d <= tol_dx
+                      || d <= Real{4} * std::numeric_limits<Real>::epsilon()
+                                  * std::abs(w.ro_x[i]))) {
+                    fixed_point = false;
+                    break;
+                }
+            }
+            if (fixed_point) {
+                const Vector axk = w.ro_x.cwiseAbs();
+                Vector sk = seg.J.cwiseAbs() * axk;
+                sk += seg.b_constant.cwiseAbs() + b_extra.cwiseAbs() + f_nl.cwiseAbs();
+                if (J_nl.nonZeros() > 0) sk += J_nl.cwiseAbs() * axk;
+                backward_error(sk.cwiseMax(w.ro_scale));
+                own_scale = true;
             }
         }
         if (stagnated && ro_dx[0] <= dx_cap
@@ -801,6 +843,7 @@ inline void solve_with_newton_in_place(
             }
             x = w.ro_x;
             roundoff->accepted = true;
+            roundoff->fixed_point = own_scale;
             roundoff->omega = omega;
             roundoff->row = row;
             ++roundoff->consecutive;

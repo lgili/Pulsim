@@ -252,6 +252,7 @@ public:
         bump_generation_();
         segments_.clear();
         event_entries_.clear();
+        aux_event_entries_.clear();
         const Size num_switches = graph_.num_switches();
         for (auto mask :
              topology::enumerate_switch_states(num_switches)) {
@@ -275,6 +276,7 @@ public:
         bump_generation_();
         segments_.clear();
         event_entries_.clear();
+        aux_event_entries_.clear();
     }
 
     /// Currently-built dt. Returns 0 for static-only builds.
@@ -664,6 +666,34 @@ public:
     /// * `h_a`, `h_b` are legacy recovery step sizes, retained for
     ///   API compatibility only — the exact split (v2.0 Phase 1)
     ///   ignores them.
+    /// add-exact-propagator-strategy 7.1: |k| = 1 (the inductance matrix
+    /// not positive definite) is refused by name: the coupled windings
+    /// (k != 0), joined by '+'.
+    [[noreturn]] void throw_coupling_not_pd_() const {
+        // the pairs with |k| = 1 to rounding when there are any (a group of three or more
+        // windings can be singular with every pair below 1: then every coupled winding)
+        std::string names;
+        for (const bool unit_only : {true, false}) {
+            for (const auto& tc : pool_.transformer_couplings()) {
+                const Real M = models::TwoWindingTransformer::mutual_inductance(tc.params);
+                if (M == Real{0}) continue;
+                if (unit_only && std::abs(M) < (Real{1} - Real{1e-9}) * std::sqrt(tc.params.L_p * tc.params.L_s))
+                    continue;
+                for (const Index b : {tc.primary_branch_id, tc.secondary_branch_id}) {
+                    if (!names.empty()) names += "+";
+                    names += std::string(graph_.branch_name(b));
+                }
+            }
+            if (!names.empty()) break;
+        }
+        throw UnsupportedError(
+            "dsed", "extraction", names, "InductorCoupling",
+            "compute_lti_state_space: the coupled-inductor matrix of " + names
+            + " is not positive definite (|k| >= 1 on a transformer / "
+            "coupled-inductor pair): the winding currents are not "
+            "independent states.");
+    }
+
     [[nodiscard]] ContinuousLTI
     compute_lti_state_space(
         const topology::SwitchStateMask& mask,
@@ -962,11 +992,7 @@ public:
                 const Eigen::LLT<DenseMatrix> ellt(En);
                 if (!dinv.allFinite() || ellt.info() != Eigen::Success
                     || ellt.matrixL().toDenseMatrix().diagonal().minCoeff() <= Real{1e-6}) {
-                    throw std::runtime_error(
-                        "compute_lti_state_space: the coupled-inductor "
-                        "matrix is not positive definite (|k| >= 1 on a "
-                        "transformer / coupled-inductor pair): the winding "
-                        "currents are not independent states.");
+                    throw_coupling_not_pd_();
                 }
             }
             // G_aa: rank-revealing. The structural path found it singular
@@ -1676,11 +1702,7 @@ public:
             if (llt.info() != Eigen::Success
                 || llt.matrixL().toDenseMatrix().diagonal().minCoeff()
                        <= Real{1e-6} * std::sqrt(lmax)) {
-                throw std::runtime_error(
-                    "compute_lti_state_space: the coupled-inductor "
-                    "matrix is not positive definite (|k| >= 1 on a "
-                    "transformer / coupled-inductor pair): the winding "
-                    "currents are not independent states.");
+                throw_coupling_not_pd_();
             }
             A.middleRows(n_cap, n_ind) =
                 -llt.solve(DenseMatrix(A.middleRows(n_cap, n_ind)));
@@ -1885,6 +1907,21 @@ public:
         throw std::logic_error(std::format(
             "PwlStateSpaceCache::resident_factor: no factor resident for mask "
             "{} at dt = {}", mask.to_string(), dt));
+    }
+
+    /// An out-of-band event table: the restart rule's right-limit solves
+    /// (F-SB-1, run_transient's event_right_limit) take another dt at every
+    /// event; swapped in around them they leave the run's event factors and
+    /// counters exactly as its own solves make them. Call twice (in, out).
+    void swap_aux_events() const {
+        event_entries_.swap(aux_event_entries_);
+        std::atomic<std::uint64_t>* c[4] = {&event_hits_, &event_refactors_,
+                                            &event_builds_, &event_evictions_};
+        for (int i = 0; i < 4; ++i) {
+            const std::uint64_t v = c[i]->load(std::memory_order_relaxed);
+            c[i]->store(aux_counters_[i], std::memory_order_relaxed);
+            aux_counters_[i] = v;
+        }
     }
 
     /// Any factor of `mask` resident now (the event entry's, else the
@@ -2306,6 +2343,7 @@ public:
         // solve_at rebuilds from the updated pool. (The v1.x aux
         // cache silently kept STALE factors here.)
         event_entries_.clear();
+        aux_event_entries_.clear();
 
         // 1. Push the updates into the pool. Each `update_*` mutator
         //    dispatches on the stored device kind; mismatched kinds
@@ -2829,6 +2867,10 @@ private:
 
     mutable numeric::Dictionary<topology::SwitchStateMask,
                                  EventEntry> event_entries_;
+    // swap_aux_events: the out-of-band table and its counters
+    mutable numeric::Dictionary<topology::SwitchStateMask,
+                                 EventEntry> aux_event_entries_;
+    mutable std::uint64_t aux_counters_[4] = {0, 0, 0, 0};
 
     // Monotonic recency clock shared by the event-entry LRU and
     // the lazy segment LRU. `mutable` — bumped from const solve

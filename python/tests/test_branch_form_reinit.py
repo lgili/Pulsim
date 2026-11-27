@@ -74,10 +74,11 @@ def test_cutset_is_reinitialised_and_recorded():
     assert rec.dW == pytest.approx(49.3291e-3, rel=1e-5)   # prototype's run: 49.3120 mJ
     assert rec.projection_gap == 0.0
     assert rec.sample == k0 + 1                                    # the pulse sample
-    # the pulse sample carries the impulse: about -L*i/(h*(1-gamma)) scale
-    # scaled to this run's i_L(t-): the prototype's first-step sample
-    # 959.018799 V (test_ideal_switch_reference) is linear in i_L(t-)
-    assert va[k0 + 1] == pytest.approx(959.018799 * iL[k0] / o["iL_minus"], rel=1e-6)
+    # the pulse sample is REGULAR (restart line, item C): the impulse is the
+    # record's; after the cut i_L = 0 and v_a = 0 (KCL at a: no current, R to
+    # ground). It carried the SDIRK projection's residue, about
+    # -L*i/(h*(1-gamma)) = 959 V (the prototype's first-step sample).
+    assert abs(va[k0 + 1]) <= 1e-9
 
 
 def test_on_impulse_error_names_the_switch_and_the_inductor():

@@ -365,7 +365,7 @@ from .spice_import import (
     spice_to_builder,
 )
 # add-power-mosfet-datasheet-device: charge laws, double pulse, fitters.
-from ._pulsim import ChargeLaw, ChargeTable  # type: ignore[import-not-found]
+from ._pulsim import ChannelTable, ChargeLaw, ChargeTable  # type: ignore[import-not-found]
 from ._pulsim import FluxMapDQ  # type: ignore[import-not-found]
 # add-in-kernel-event-losses: kernel datasheet tables (LossTable.to_kernel()).
 from ._pulsim import ConductionTable, LossTable3D  # type: ignore[import-not-found]
@@ -812,6 +812,7 @@ __all__ = [
     "parse_spice_netlist",
     "spice_to_builder",
     "ChargeLaw",
+    "ChannelTable",
     "ChargeTable",
     "FluxMapDQ",
     "LossTable3D",
@@ -877,9 +878,11 @@ _RESOLUTION_UNESTIMATED_MAX = 0.5
 def _warn_unlocated_edges(res):
     """Fixed-step loop counters that mean a less accurate step: say so once.
 
-    * ``unlocated_gate_steps`` (review M3 / L4): a gate change from a
-      switch_fn without an edge oracle that happened INSIDE the previous
-      step (an edge exactly on the grid is not counted);
+    * ``unlocated_gate_steps`` (review M3 / L4, F-SB-2): gate changes of a
+      switch_fn without an edge oracle that were not bisected (more than
+      eight in one step). The others are bisected to ``split_snap*dt`` and
+      split at (``n_gate_events_bisected``; a pulse that opens and closes
+      between two grid samples is not seen);
     * ``split_event_overflows`` (L5): steps with more events than the
       split takes; the rest were taken unsplit (first order there);
     * ``n_gate_events_unresolved`` (tasks 3.4/5.5): step events (gate
@@ -895,10 +898,10 @@ def _warn_unlocated_edges(res):
         _planning.emit("unlocated_edges",
             f"simulate(enable_substep_state_correction=True): {n} gate "
             "change(s) came from a switch_fn without next_edge_after(t) "
-            "and could not be located inside the step; each was taken "
-            "at the next grid point (first order there). Give the "
-            "schedule an oracle (make_pwm_switch_fn & co. have one) or "
-            "put the edges on the dt grid. See res.counters.",
+            "and could not be located inside the step (more than eight in "
+            "one step); each was taken at the next grid point (first order "
+            "there). Reduce dt or give the schedule an oracle "
+            "(make_pwm_switch_fn & co. have one). See res.counters.",
             UserWarning, stacklevel=4)
     n = c.get("split_event_overflows", 0)
     if n:
@@ -1250,6 +1253,18 @@ def _result_i(self, name: str, t=None, *, port=None):
                 f"result.i({name!r}, port={port!r}): `port` is 1 or 2 and "
                 f"only for a gyrator (this branch is "
                 f"{kinds.get(b_id)!r}).")
+
+    # ------------- power MOSFET f/q device: the drain-terminal current -------------
+    # add-power-mosfet-datasheet-device 5.3 (fq_device=True only; the default
+    # composite keeps its channel-branch reading). Every C_gd / C_ds is inside
+    # the device, so its drain-pin current (f + dq/dt, recorded every accepted
+    # step) is the whole current at d' (= R_d's current when there is one).
+    # Before the state fast path: a Lauritzen body diode's charge is on this branch.
+    if getattr(self, "_xdev_trace", None) is not None and any(
+            d.get("kind") == "power_mosfet" and int(d.get("branch_id", -1)) == int(b_id)
+            and d.get("params", {}).get("fq_device") for d in builder.components()):
+        col = _np.asarray(_rec_mod.result_device_output(self, name, "i(d)"), dtype=float)
+        return col if t is None else col[t]
 
     # ---- Fast path: state-vector-native kinds (inductor, VS family) ----
     # Try inductor first (most common case), then the source family
@@ -2671,6 +2686,11 @@ def simulate(
         one go to the stiffness detector, which picks DOPRI5 or BDF2.
         ``result.n_exact_steps`` counts the exact steps. ``'bdf2'``
         starts each segment with one backward-Euler step.
+        ``'fixed'`` (needs ``dt``): the exact steps go from grid point to
+        grid point (k·dt), a full cell ``x <- Φ·x + Γ`` from a cache keyed on
+        (mode, dt); a diode event between grid points is located exactly and
+        the cell finished by an exact sub-step (counters in
+        ``result.exact``: ``n_fixed_steps``, ``fixed_step_flops``).
     stiffness_threshold
         DSED override: ``|λ_max|·h`` ratio above which auto-dispatch
         picks BDF2 (default 10.0).

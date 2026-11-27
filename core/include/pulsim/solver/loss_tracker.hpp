@@ -116,10 +116,31 @@ struct StepLines {
     // from x0+ for the lines (an ideal element's jump): not the run's i_prev
     std::vector<Real> c_end;
     bool end_own = false;
+    // F-SB-1: the RIGHT LIMIT of an event as a state value, x(t_e+) (the
+    // result's right_limit_* / inner_events), apart from the quadrature
+    // starts above (x_start, right[]: the lines' business, never a limit).
+    // `rl_*`: run_restart's scratch; `rl_start*`: at the step start, set
+    // only where something happens; `rl_right*`: per inner event; `held`:
+    // the mixed step's held-pieces row (quadrature, not an event).
+    Vector rl_x, rl_start;
+    topology::SwitchStateMask rl_m, rl_m_start;
+    // rl_left / rl_start_left: a continuity point (a located V_f = 0
+    // crossing alone): the row is the left value
+    bool rl_ok = false, rl_start_ok = false, rl_left = false, rl_start_left = false;
+    std::array<Vector, kMax> rl_right;
+    std::array<topology::SwitchStateMask, kMax> rl_m_right;
+    std::array<bool, kMax> rl_right_ok{}, held{};
+    // the event at the row carries a recorded jump: the row is x(t_e+) BEFORE
+    // the collapse the record reports; the regular part (the loss tracker's
+    // edge reading) starts after it, at the lines' start
+    bool rl_start_jump = false;
+    std::array<bool, kMax> rl_right_jump{};
     void clear() noexcept {
         start = false;
         n = 0;
         end_own = false;
+        rl_start_ok = false;
+        rl_start_jump = false;
     }
     [[nodiscard]] bool empty() const noexcept { return !start && n == 0; }
 };
@@ -324,16 +345,33 @@ private:
                 // limit; else the step's ends
                 Real vb = d.v, ib = d.i, vp = v1, ip = i1;
                 const auto bit = static_cast<Size>(d.law.bit);
-                if (L.start && L.m_start.get(bit) == on1) {
+                // ONE definition: the stored rows are the state values x(t_e+)
+                // (rl_*, F-SB-1), not the lines' quadrature starts; a
+                // continuity point's row is the stored left (d.v, d.i). At a
+                // recorded jump the regular part starts after the collapse: the
+                // lines' start (the row there holds the pre-collapse state: a
+                // clamp diode read 1e-8 A for the 0.167 A it picks up — review)
+                if (L.rl_start_ok && !L.rl_start_jump && L.rl_m_start.get(bit) == on1) {
+                    if (!L.rl_start_left) {
+                        vp = v_of_(d, L.rl_start);
+                        ip = i_of_(d, L.rl_start, on1);
+                    } else {
+                        vp = d.v;
+                        ip = d.i;
+                    }
+                } else if (L.start && L.m_start.get(bit) == on1) {
                     vp = v_of_(d, L.x_start);
                     ip = i_of_(d, L.x_start, on1);
                 } else {
                     for (Size j = 0; j < L.n; ++j) {
-                        if (!L.right_ok[j] || L.m_right[j].get(bit) != on1) continue;
+                        const bool rl = !L.held[j] && L.rl_right_ok[j] && !L.rl_right_jump[j];
+                        const auto& mr = rl ? L.rl_m_right[j] : L.m_right[j];
+                        if (!(rl || L.right_ok[j]) || mr.get(bit) != on1) continue;
+                        const Vector& xr = rl ? L.rl_right[j] : L.right[j];
                         vb = v_of_(d, L.left[j]);
                         ib = i_of_(d, L.left[j], L.m_left[j].get(bit));
-                        vp = v_of_(d, L.right[j]);
-                        ip = i_of_(d, L.right[j], on1);
+                        vp = v_of_(d, xr);
+                        ip = i_of_(d, xr, on1);
                         break;
                     }
                 }
@@ -405,6 +443,11 @@ private:
         for (std::size_t di = 0; di < devs_.size(); ++di) {
             auto& d = devs_[di];
             const bool on1 = mask.get(static_cast<Size>(d.law.bit));
+            if (d.rl_pending && t0 >= d.rl_t) {   // an unflipped device's right limit
+                d.v = d.rl_v;
+                d.i = d.rl_i;
+                d.rl_pending = false;
+            }
             if (d.ev_pending && t0 >= d.ev_t) {
                 // the first step after an event: under its right side it
                 // starts from the right limit; otherwise the event is stale
@@ -501,7 +544,25 @@ public:
         for (auto& d : devs_) {
             const auto bit = static_cast<Size>(d.law.bit);
             const bool on_l = m_l.get(bit), on_r = m_r.get(bit);
-            if (on_l == on_r) continue;
+            if (on_l == on_r) {
+                // not flipped, but its readings jump with the circuit's (an
+                // off switch's v when its leg commutes): the next step starts
+                // from the right limit, as the flipped devices' do (release D3:
+                // the left limit at the step's start weight drifted 4e-5 of a
+                // VSI's conduction energy once the edge's probe was no step)
+                // Pending, not written now: at a diode landing the landing step
+                // itself is booked after this call and must end on its left
+                // limit (written at once, it started from the right limit: a
+                // first-order error per landing, 1.4e-4 J on a rectifier's
+                // off switch, review of the gate-edge merge).
+                if (!(d.ev_pending && d.ev_t == t)) {
+                    d.rl_pending = true;
+                    d.rl_t = t;
+                    d.rl_v = v_of_(d, x_r);
+                    d.rl_i = i_of_(d, x_r, on_r);
+                }
+                continue;
+            }
             // the same flip already booked at t (a stale left mask after a
             // landing, re-reported by the settle at a coincident gate edge)
             if (d.ev_pending && d.ev_t == t && d.ev_on == on_r) continue;
@@ -627,8 +688,8 @@ public:
             // a network bind_ could not correct keeps the old rule
             if (d.node < 0 || !corrected_(d.node)) continue;
             const bool on = d.ev_pending ? d.ev_on : d.on;
-            const Real v = d.ev_pending ? d.ev_v : d.v;
-            const Real i = d.ev_pending ? d.ev_i : d.i;
+            const Real v = d.ev_pending ? d.ev_v : d.rl_pending ? d.rl_v : d.v;
+            const Real i = d.ev_pending ? d.ev_i : d.rl_pending ? d.rl_i : d.i;
             Real pw = 0;
             if (d.spec.conduction == thermal::ConductionHeat::Electrical) {
                 pw = v * i;
@@ -824,6 +885,9 @@ private:
         // an event() whose right limit the next accept_step() starts from
         bool ev_pending = false, ev_on = false;
         Real ev_t = 0, ev_v = 0, ev_i = 0, ev_e = 0;
+        // an unflipped device's right-limit reading at an event (no booking)
+        bool rl_pending = false;
+        Real rl_t = 0, rl_v = 0, rl_i = 0;
         // the last booking's readings (an impulse at its instant re-books it)
         struct Booked {
             bool valid = false, on = false, event = false, impulsive = false;
@@ -998,7 +1062,9 @@ public:
             }
         }
         for (const auto& d : devs_) {
-            o.insert(o.end(), {Real(d.on), d.v, d.i, d.x_tj, Real(d.ev_pending),
+            // a pending right limit is the reading the resumed step starts from
+            o.insert(o.end(), {Real(d.on), d.rl_pending ? d.rl_v : d.v,
+                               d.rl_pending ? d.rl_i : d.i, d.x_tj, Real(d.ev_pending),
                                Real(d.ev_on), d.ev_t, d.ev_v, d.ev_i, d.ev_e});
             for (const auto* c : {&d.e_on, &d.e_off, &d.e_el, &d.e_tab, &d.e_imp}) {
                 o.push_back(c->s);

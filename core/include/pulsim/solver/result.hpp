@@ -454,6 +454,11 @@ struct SimulationResult {
     /// Steps split at an event inside them
     /// (SimulationOptions::enable_substep_state_correction). 0 off.
     Size n_split_steps = 0;
+    /// Restart rule: event right limits that are not certified: a row whose
+    /// solve did not converge or whose diode mode does not hold at t_e+ (no
+    /// row is stored), or a located turn-off solved through g_off (the row
+    /// is stored). 0 off.
+    Size n_right_limit_fallbacks = 0;
     /// update-fixed-step-loop-bookkeeping loop counters (`res.counters`):
     /// `switch_fn` evaluations in the step loop, segment lookups the
     /// last-segment memo did not absorb, and rollback snapshots taken.
@@ -489,9 +494,10 @@ struct SimulationResult {
     Size stage2_retries = 0;
     Size stage2_be_kept = 0;
     Size stage2_retry_failures = 0;
-    // Event splitting: steps whose gate changed with no edge oracle to
-    // locate it (taken at the next grid point), and steps whose event
-    // list overflowed (kMaxStepEvents or the per-step search cap).
+    // Event splitting: gate changes of a switch_fn with no edge oracle
+    // that were not bisected (more than kMaxStepEvents in one step), and
+    // steps whose event list overflowed (kMaxStepEvents or the per-step
+    // search cap).
     Size unlocated_gate_steps = 0;
     Size split_event_overflows = 0;
     // Event splitting with an edge oracle (tasks 5.3/5.5): the declared
@@ -503,6 +509,21 @@ struct SimulationResult {
     // counter). 0 without splitting.
     Size n_gate_events = 0;
     Size n_gate_events_unresolved = 0;
+    // Event splitting with an opaque switch_fn (F-SB-2): gate changes
+    // between a step's two samples (t_prev, t) bisected to split_snap*dt
+    // and split at. A pulse that opens and closes between two samples is
+    // not seen. 0 without splitting or with an oracle.
+    Size n_gate_events_bisected = 0;
+    // Event splitting: trial solves the diode-crossing locator took
+    // (events::illinois on trapezoidal re-steps from the step start).
+    Size split_locator_trials = 0;
+    // ... and its give-ups (the chord kept: mixed directions, a signal
+    // that does not bracket, a failed trial, the 40-trial cap)
+    Size split_locator_giveups = 0;
+    // The restart rule: steps cut at a diode turn-off located inside an
+    // SDIRK step's stage 2 (the backward-Euler re-take confirmed it; the
+    // locator's trials and give-ups are counted above).
+    Size n_restart_cuts = 0;
     // add-unified-event-queue group 5: the fixed engine's control ticks
     // (one count per TickPlan source) and the largest lateness of a tick
     // on the grid (step time minus scheduled instant).
@@ -617,13 +638,16 @@ struct SimulationResult {
     /// `right_limit_index[j]` is the sample the j-th right limit belongs to
     /// (increasing), its state row `right_limit_states[j*w .. (j+1)*w)` (w =
     /// `event_limit_width`) and its mask `right_limit_switch_bits[j*nb ..]`
-    /// (one byte 0/1 per switch bit, nb = `event_limit_switches`). The fixed
-    /// engine under the restart rule records, at the start sample of each
-    /// SDIRK restart step, the start of the line whose trapezoid is the
-    /// step's own quadrature (StepLines in loss_tracker.hpp): the right
-    /// limit to second order (first order after a kept backward-Euler stage
-    /// 2), exact for the step's integral of any quantity
-    /// linear in the state. `inner_event_*`: an event INSIDE a fixed step
+    /// (one byte 0/1 per switch bit, nb = `event_limit_switches`). A right
+    /// limit is a STATE VALUE, x(t_e+), recorded only where something
+    /// happens (F-SB-1): on the fixed engine under the restart rule, at a
+    /// restart step that starts at an event (a gate edge, a source edge, a
+    /// located split event) or whose start the impulse rule found jumping —
+    /// each capacitor / inductor state continuous (x0) or moved by an ideal
+    /// element's jump (x0 + J), every other unknown the event's mode solved
+    /// there. Never a restart window's later steps, never t = 0 unless the
+    /// start is a probed jump. The lines' quadrature starts are not here
+    /// (StepLines in loss_tracker.hpp). `inner_event_*`: an event INSIDE a fixed step
     /// (the event split): after sample `inner_event_after[j]`, at
     /// `inner_event_times[j]`, the left limit (the sub-step that ended
     /// there, under its mask) and the right limit as above (a NaN row:

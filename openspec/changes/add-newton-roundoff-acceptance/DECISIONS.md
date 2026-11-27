@@ -176,3 +176,30 @@ conservative option was taken.
    window in 291 of 345 accepts; where not, both were below 7 eps).
    The decline message now prints the windows' minima and maxima (and
    "too few for two windows" under four iterations).
+
+12. **A floating-point fixed point is also judged at its own magnitudes
+   (gate-edge line, 2026-11-20; amends 10a for this case only).**
+   ll13_active_clamp_forward on trbdf2 aborted at h_min on 14f at rtol
+   1e-7 (45 µs) and esdirk43 rtol 1e-6 (34 µs), and on the gate-edge merge
+   at the defaults (21 µs). Each abort has the same signature: a dead time
+   drives ~40 A into roff = 1e7, the drain and secondary reach 3.8e8 V
+   within the solve, ||dx|| is constant at 4.66e-9 V for 32 iterations
+   (below one ulp of the state, 6e-8 V: x_k + dx_k == x_k), and a 1 kS
+   diode row between two such nodes leaves 2.4e-5 A of cancellation. That
+   is 0.1 eps of the row's magnitudes at x_k but 1e6 eps of the START
+   state's, taken before the spike: declined, h shrank to h_min, abort.
+   Which tolerance met such a solve was a lottery of the step sequence
+   (env-switched trace build: without this rule every variant of the
+   merge aborted at some tolerance).
+   Rule: when the windows say stagnated, the dx cap holds, and every
+   component of the last Newton step is within the absolute tol_dx or
+   within 4 eps of the iterate's own value, the row backward error is
+   taken against max(start-state scale, scale at x_k) per row. 10a stands
+   for every other iterate: a diverging iterate never steps at its own
+   rounding. The absolute dx test is unchanged.
+   Measured: ll13 runs at trbdf2 default / rtol 1e-7 / esdirk43 rtol 1e-6
+   with 1.09e-4 / 9.4e-6 / 1.02e-4 of range against pwl + restart at
+   dt 5e-10 at 25 smooth instants (14f's default: 1.09e-4).
+   Not covered: a genuine Newton cycle at h_min (||dx|| 1.6e-4 V at
+   5.6e6 V, 1.4e3 eps, dx above the cap) still aborts; it appeared on
+   ll13 only under trace-build variants that are not shipped.

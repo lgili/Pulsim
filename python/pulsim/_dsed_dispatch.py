@@ -73,7 +73,7 @@ _pkg = sys.modules[__package__]
 # Auto = exact stepper when the mode has one, else the stiffness
 # detector's DOPRI5/BDF2 choice; rk45/bdf2 = force one integrator for
 # ALL modes (rk45 still takes the exact stepper where it exists).
-IntegratorChoice = Literal["auto", "rk45", "bdf2"]
+IntegratorChoice = Literal["auto", "rk45", "bdf2", "fixed"]
 
 _DEFAULTS = _run_option_defaults()
 
@@ -114,7 +114,7 @@ class DSEDOptions:
 # 'exact' is the canonical name of the event-driven exact engine, 'dsed' its
 # legacy alias (add-exact-propagator-strategy D11; simulate() maps one to the other).
 _VALID_ENGINES = ("auto", "pwl", "exact", "dsed", "trbdf2")
-_VALID_INTEGRATORS = ("auto", "rk45", "bdf2")
+_VALID_INTEGRATORS = ("auto", "rk45", "bdf2", "fixed")
 
 # (The dsed-only kwargs that get the leak-warning if user passes
 # them while engine='pwl' are enumerated inline in
@@ -917,6 +917,16 @@ def run_dsed_from_builder(
     # rather than an exception handler. Same stance as
     # run_transient_bdf1's PWL-diode refusal (v2.0 Phase 2).
     # ------------------------------------------------------------------
+    # add-exact-propagator-strategy 10 (D8): integrator='fixed' is the
+    # event-driven integrator on the grid k*dt, a full cell x <- Phi x + Gamma
+    fixed_step = integrator == "fixed"
+    if fixed_step:
+        if dt is None:
+            raise _options_error(
+                "integrator",
+                "simulate(engine='exact', integrator='fixed'): the fixed-step form "
+                "steps the grid k*dt; pass dt.")
+        integrator = "rk45"
     _kern = _kern_mod
     _n_sw, _n_diodes, _controlled = _kern._switch_census(
         builder.graph, builder.pool)
@@ -1280,6 +1290,7 @@ def run_dsed_from_builder(
                     settle_round_cap=SETTLE_ROUND_CAP, diode_law_rel=DIODE_LAW_REL,
                     loop_feed=feed_slot.feed,
                     t_offset=float(opts.t_start or 0.0) if resume_from is None else 0.0,
+                    **({"fixed_step": True} if fixed_step else {}),
                     **shadow_kw,
                     **({"output_rtol": float(output_rtol), "output_budget": int(OUTPUT_BUDGET)}
                        if output_rtol else {}),
@@ -1427,6 +1438,12 @@ def run_dsed_from_builder(
                    and run_bdf2_native is not None
                    and run_auto_native is not None)
 
+    if fixed_step:
+        raise unsupported(
+            "dsed", "integrator", message=
+            "simulate(engine='exact', integrator='fixed'): the native adapter "
+            "rejected this circuit and the fallback path has no fixed-step form. "
+            "Drop integrator='fixed'.")
     if bridge10_ok:
         if opts.integrator == "rk45":
             native_res = run_ped_native(

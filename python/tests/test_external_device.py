@@ -545,9 +545,10 @@ def test_recorders_with_an_external_device_in_the_circuit(libs, engine):
 LAUR = dict(I_S=1e-12, n=1.0, V_T=0.025852, tau=1e-7, T_M=1e-8, G_min=1e-12)
 
 
-def _recovery(libs, external):
+def _recovery(libs, external, form=None):
     """The double-pulse test of test_lauritzen_diode: 20 A freewheeling in
     D1 until S1 turns on at 1 us and commutates it (reverse recovery)."""
+    fk = dict(form=form) if form else {}
     b = p.CircuitBuilder()
     b.add_voltage_source("Vdc", "dc", "gnd", 400.0)
     b.add_inductor("Lload", "dc", "sw", 200e-6, i0=20.0)
@@ -556,7 +557,7 @@ def _recovery(libs, external):
         b.add_external_device("D1", ["sw", "d2"], libs["twins"], "lauritzen_twin", LAUR)
     else:
         b.add_lauritzen_diode("D1", "sw", "d2", **LAUR)
-    b.add_switch("S1", "sw", "gnd", 1e3, 1e-9)
+    b.add_switch("S1", "sw", "gnd", 1e3, 1e-9, **fk)
     b.add_resistor("Rsnub", "sw", "gnd", 1e5)
     n, k = b.graph.num_switches, b.switch_index_of("S1")
 
@@ -610,6 +611,24 @@ def test_the_lauritzen_twin_starts_as_the_builtin_under_the_restart_rule(libs):
     bb, sf = _recovery(libs, False)
     builtin = p.simulate(bb, switch_fn=sf, **kw)
     be, sf = _recovery(libs, True)
+    ext = p.simulate(be, switch_fn=sf, **kw)
+    assert np.array_equal(np.asarray(builtin.times), np.asarray(ext.times))
+    assert _recovery_err(builtin, ext) <= 1e-9
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "OPEN, release finding F-Y-8 (measured here 2026-11-25, release defaults explicit): the "
+    "twin and the built-in differ by 8.86e-9 of scale (gate 1e-9): the consistent start is "
+    "solved once for a stateful kind and once for an internal unknown"))
+def test_f_y_8_the_lauritzen_twin_starts_as_the_builtin_under_the_release_defaults(libs):
+    """Release finding F-Y-8 with the release defaults passed explicitly (restart rule,
+    split, mode_selection='auto', branch-form switch): the external twin is an independent
+    implementation of the built-in's law; the two runs agree to the 1e-9 gate."""
+    from ._release_defaults import RELEASE
+    kw = dict(RELEASE, t_end=1.5e-6, dt=2e-10)
+    bb, sf = _recovery(libs, False, form="branch")
+    builtin = p.simulate(bb, switch_fn=sf, **kw)
+    be, sf = _recovery(libs, True, form="branch")
     ext = p.simulate(be, switch_fn=sf, **kw)
     assert np.array_equal(np.asarray(builtin.times), np.asarray(ext.times))
     assert _recovery_err(builtin, ext) <= 1e-9

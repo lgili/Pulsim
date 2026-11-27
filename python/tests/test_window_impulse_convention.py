@@ -122,11 +122,7 @@ def test_energy_ledger_closes_with_the_record_after_a_restart_jump():
     _ledger(False)
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "F-W-1: on an ideal element's jump the pulse step's END state keeps the "
-    "SDIRK projection's residual current in the algebraic unknowns (the "
-    "source's i: p(V) reads +1.31e-4 J over the step, regular -1e-5 J); the "
-    "lines' stage 1 and capacitor currents are regular, the end row is not"))
+# F-W-1 closed on the restart line (item C): stage 2 of an ideal element's jump starts from x0+
 def test_energy_ledger_closes_with_the_records_on_the_ideal_switch():
     _ledger(True)
 
@@ -149,7 +145,6 @@ def test_dsed_reports_the_same_split():
                                rtol=1e-6, atol=1e-12)
 
 
-@pytest.mark.xfail(strict=True, reason="F-W-1 (see the ideal-switch ledger)")
 def test_dsed_and_pwl_source_power_is_the_regular_part():
     _, rp = _run(True)
     _, rd = _run(True, engine="dsed", probes=["p(R)", "p(S)", "p(V)"])

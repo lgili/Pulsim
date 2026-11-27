@@ -190,3 +190,7 @@ ignore = [
              # for compact state-machine transitions
     "E702",  # ``import a; import b`` — used in plot/scope inline imports
 ]
+
+[tool.ruff.lint.per-file-ignores]
+# generated stub: ChannelTable.I mirrors the binding (I(V_GS, V_DS), the datasheet name)
+"python/pulsim/_pulsim.pyi" = ["E743"]

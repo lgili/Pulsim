@@ -52,6 +52,24 @@ def test_a_displaced_switch_reads_its_displacement_only(right_row):
     assert r["part"] == "instants" and not r["missing"] and not r["spurious"]
 
 
+def test_a_joint_truth_instant_the_engine_flips_in_two_reads_the_inner_sides_at_its_own_instants():
+    """Truth: S+ and D- at 0.5 at once (0 -> 1). Engine: D- alone 0.03 earlier,
+    continuous (0 both sides, the truth there too), then S+ at 0.5. D-'s right
+    value is the state between the engine's two flips: graded against the
+    truth at 0.47 (0), not against the truth's right limit after S+ (1).
+    The outer sides (D- left, S+ right) keep the truth instant's limits."""
+    cand, _ = step_truth(0.5)
+    tev = [(0.5, "S+", 0.0, 1.0), (0.5, "D-", 0.0, 1.0)]
+    y = np.where(GRID <= 0.5, 0.0, 1.0)
+    eng = [(0.47, "D-", 0.0, 0.0, 0.0, 0.0), (0.5, "S+", 0.0, 1.0, 0.0, 1.0)]
+    r = metrics.exact_parts(GRID, y, cand(GRID), span=1.0, h=H, truth_events=tev, engine_events=eng)
+    assert r["limits"] == 0.0 and not r["missing"] and not r["spurious"]
+    # control: a wrong outer side still reads in limits (S+ right 0.9 against the truth's 1)
+    eng[1] = (0.5, "S+", 0.0, 0.9, 0.0, 1.0)
+    r = metrics.exact_parts(GRID, y, cand(GRID), span=1.0, h=H, truth_events=tev, engine_events=eng)
+    assert r["limits"] == pytest.approx(0.1, rel=1e-9)
+
+
 def test_the_old_measure_mispriced_that_switch():
     """Why the definition changed (vcswitch_resistor pwl+split): the old
     measure saw nothing without the right-limit row and charged jump² × h/2

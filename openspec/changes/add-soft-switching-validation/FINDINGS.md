@@ -7,6 +7,16 @@ dead-time state equations; none comes from a Pulsim run.
 
 ## New
 
+### F-S-5 — trbdf2 jumps a capacitor node by 200 V at the PSFB's consistent start (simulator, OPEN)
+`psfb_full_bridge_zvs.yaml` on `engine='trbdf2'` (defaults): V(b) is 400 V at
+t = 0 and 599.8 V at the next sample (3e-16 s), back near 400 V within ~1e-13 s.
+The exact truth and `engine='dsed'` keep 400 V (the start is consistent: all
+four rectifier diodes conduct). A 200 V step on a node with 400 pF of C_oss in
+0.3 fs is not a circuit transient. No KPI is affected (the energy of that
+interval is ~1e-22 J); the reference validation starts at 50 ns. Strict xfail:
+`test_soft_switching_kpi.py::test_trbdf2_keeps_the_psfb_consistent_start`.
+
+
 ### F-S-1 — esdirk43 cannot start a charge-form capacitor whose initial current is not zero
 `engine='trbdf2', integrator='esdirk43'` aborts at t = 0 (Newton fails, h at
 h_min) when a `add_nonlinear_capacitor` carries current at t = 0. Minimal: 0 V

@@ -1,0 +1,15 @@
+# Soft-switching references (OpenSpec add-soft-switching-validation): ZVS fraction and
+# switching-energy KPI columns, reference validation against the exact-truth baselines.
+# default = the plain fixed engine (LLC / PSFB: known trap-9 disagreements), variable = trbdf2.
+# Checked by python/tests/test_soft_switching_kpi.py.
+benchmarks:
+  - path: circuits/switching/buck/buck_hard_switching_reference.yaml
+    scenarios: [default, variable]
+  - path: circuits/switching/isolated/llc_half_bridge_zvs.yaml
+    scenarios: [default, variable]
+  - path: circuits/switching/isolated/psfb_full_bridge_zvs.yaml
+    scenarios: [default, variable]
+scenarios:
+  default: {}
+  variable:
+    simulation: {adaptive_timestep: true}

@@ -103,9 +103,12 @@ def test_f33_flyback_turn_off_does_not_enter_the_body_diode():
 def test_f33_flyback_peak_converges_at_second_order():
     """The restart from the consistent state x0+ is second order through the
     impulsive turn-off: peak primary current against the exact engine's
-    16.381990162 A (measured 5.1e-6, 1.2e-6 A at dt 10, 5 ns)."""
+    16.381990162 A. Measured 5.1e-6, 1.2e-6 A at dt 10, 5 ns before the restart
+    step was cut at the turn-off its stage 2 makes (n_restart_cuts); since: 6.27e-6,
+    1.08e-6, 8.2e-8, 4.6e-8 A at dt 40, 20, 10, 5 ns (a floor of ~5e-8 A, 3e-9
+    relative, below 10 ns: the order is read above it)."""
     peak_exact = 16.381990162
-    e = [abs(_run_flyback(dt=dt, **RESTART).max() - peak_exact) for dt in (1e-8, 5e-9)]
+    e = [abs(_run_flyback(dt=dt, **RESTART).max() - peak_exact) for dt in (4e-8, 2e-8)]
     assert e[0] < 1e-5 and e[0] / e[1] > 3.5, e
 
 
@@ -167,13 +170,21 @@ def _psfb(primary):
     return b
 
 
-def _psfb_vout(primary, **kw):
+def _psfb_vout(primary, on_grid=False, **kw):
     """The output voltage v(vout) - v(rect_neg). The secondary floats: its common mode is
-    set by the diodes' g_off leaks alone (mV, rounding), not a circuit quantity."""
+    set by the diodes' g_off leaks alone (mV, rounding), not a circuit quantity.
+    ``on_grid``: every gate edge moved to the grid point the restart rule without the
+    split takes it at: the gate read at t_k - 0.5001 dt acts over (t_{k-1}, t_k], so an edge
+    takes effect at the nearer grid point (a tie at mid-step: the end)."""
     b = _psfb(primary)
     sw = p.make_phase_shift_full_bridge_fn(
         switching_frequency=100e3, phase_shift=1.0, leg_a_hs_idx=0, leg_a_ls_idx=1,
         leg_b_hs_idx=2, leg_b_ls_idx=3, num_switches=b.graph.num_switches, dead_time=100e-9)
+    if on_grid:
+        dt, sw0 = kw["dt"], sw
+
+        def sw(t):   # an opaque function: the split bisects its changes onto the grid
+            return sw0(dt * np.ceil(t / dt - 1e-9) - 0.5001 * dt)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         res = p.simulate(b, t_end=0.2e-3, switch_fn=sw, **kw)
@@ -203,11 +214,18 @@ def test_f37_saturable_psfb_runs_under_the_restart_rule(selector):
     assert v_lin == pytest.approx(F37_LINEAR_TRUTH, abs=2e-7)
     v_sat = _psfb_vout("saturable", dt=50e-9, **split)
     assert v_sat == pytest.approx(F37_SATURABLE_LIMIT, abs=2e-7)
-    # without the split leg B's edges act at the grid (another circuit, no truth): it runs,
-    # and the saturable - linear difference is the split's to 1e-3 of it
+    # without the split leg B's edges act at the grid (another circuit): its reference is
+    # the split run of that circuit (the switch_fn's edges moved to the grid points the
+    # plain run takes them at; measured 6e-5 apart on the saturable - linear difference,
+    # 3e-6 V on v_out). The old pin (the split's own difference, rel 0.05) held only
+    # while the plain run took an off-grid edge on the ceil side (0.008827 vs 0.008123).
+    # The reference samples the gate where the engine does (t_k - 0.5001 dt): a t_k - dt/100
+    # reference put leg B's edges on the far side (d 0.008974 vs 0.008124).
     plain = dict(RESTART, mode_selection=selector, enable_substep_state_correction=False)
     d = _psfb_vout("saturable", dt=50e-9, **plain) - _psfb_vout("linear", dt=50e-9, **plain)
-    assert d == pytest.approx(F37_SATURABLE_LIMIT - F37_LINEAR_TRUTH, rel=0.05)
+    d_ref = (_psfb_vout("saturable", True, dt=50e-9, **split)
+             - _psfb_vout("linear", True, dt=50e-9, **split))
+    assert d == pytest.approx(d_ref, rel=1e-3)
 
 
 def test_f37_lcp_refuses_the_saturable_psfb_by_name():
@@ -284,13 +302,15 @@ def _pathless_saturable(**kw):
         return p.simulate(b, t_end=1e-5, dt=1e-7, switch_fn=fn, **kw)
 
 
-def test_a_saturable_core_cut_by_its_switch_is_refused_by_name():
-    """The consistent start moves linear C / L histories only; a saturable core's current
-    cut into g_off (5e-2 A -> leakage) is refused, naming the core, not integrated from the
-    reversed pseudo-state."""
-    with pytest.raises(p.UnsupportedError, match="saturable_inductor 'Lsat'") as ei:
-        _pathless_saturable(**RESTART)
-    assert ei.value.device == "Lsat" and ei.value.feature == "impulse"
+def test_a_saturable_core_cut_by_its_switch_is_recorded_in_flux():
+    """A saturable core's current cut into g_off (5e-2 A -> leakage): the jump is carried in
+    flux (restart line, item N; it was refused by name). I_sat = 30 A: linear here, so the
+    record is 1/2 L i^2 with i = 10 V * 5 us / 1 mH (closed form; R_on moves it by 1e-5).
+    The nonlinear cases: test_restart_saturable_flux.py."""
+    r = _pathless_saturable(**RESTART)
+    (rec,) = r.reinit_records
+    assert rec.kind == "cut_set" and list(rec.states) == ["Lsat"]
+    assert rec.dW == pytest.approx(0.5 * 1e-3 * 0.05 ** 2, rel=1e-4)
     # restart-less (release: named, the rule is the default): the rule is not on
     _pathless_saturable(engine="pwl", discontinuity_restart=False)
 
@@ -400,14 +420,17 @@ def _two_rectifiers(which, dt=1e-4):
 def test_split_locates_independent_diodes_on_their_own_signals():
     """Only diodes at one FLOATING island share a summed signal (the floating bridge of
     F-3-1). Two grounded rectifiers crossing in one step keep their own crossings: the
-    first is located where it is alone, and its waveform is the lone run's bit for bit
-    (the summed signal put both at a common time between them)."""
+    first is located where it is alone, and its waveform is the lone run's (the summed
+    signal put both at a common time between them). Not bit for bit: the restart step
+    cut at the second rectifier's turn-off (n_restart_cuts) splits the shared step for
+    both, which moves o1 by its truncation error (1.4e-10 relative, measured)."""
     alone, both = _two_rectifiers("1"), _two_rectifiers("12")
     d1 = [e.t_estimated for e in alone.commutation_events]
     b1 = [e.t_estimated for e in both.commutation_events if e.branch_id == 1]
     assert len(d1) == len(b1) >= 3
     np.testing.assert_allclose(b1, d1, rtol=0, atol=1e-12)
-    np.testing.assert_array_equal(np.asarray(both.v("o1")), np.asarray(alone.v("o1")))
+    np.testing.assert_allclose(np.asarray(both.v("o1")), np.asarray(alone.v("o1")),
+                               rtol=1e-9, atol=0)
 
 
 def _rectifier_and_unrelated_pulse(pulse, dt=1e-4, **kw):

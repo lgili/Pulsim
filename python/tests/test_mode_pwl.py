@@ -16,9 +16,11 @@ from tests.oracles import lcp_pulsim_bridge as B
 
 T = 1e-5
 GON, GOFF = 1e3, 1e-9
+RESTART = {"discontinuity_restart": True}
 SPLIT = {"discontinuity_restart": True, "enable_substep_state_correction": True}
 # "pwl" = the restart-less fixed step, explicit since the release made the restart the default
-CONFIGS = [{"discontinuity_restart": False}, {"discontinuity_restart": True}, SPLIT]
+# (RESTART by identity: the restart-cut branch of the shadow test reads `kw is RESTART`)
+CONFIGS = [{"discontinuity_restart": False}, RESTART, SPLIT]
 # Legacy subject: "the default run" these tests compare with is the settle (and its guard);
 # the release default mode_selection='auto' picks 'lcp' for these circuits.
 SETTLE = {"mode_selection": "legacy"}
@@ -108,7 +110,17 @@ def test_shadow_is_bit_identical_and_poses_an_lcp_at_every_site(kw):
     if kw is SPLIT:
         assert sites["substep"] > 0
     assert ms["errors"] == 0
-    assert ms["disagreements"] == []                 # DCM buck: the settle and the LCP agree
+    if kw is RESTART:
+        # The restart step cut at a located turn-off (n_restart_cuts) starts its rest
+        # ON the crossing, where both modes hold (i_D = 0 = v_D): the LCP may take the
+        # other one. Each such site is degenerate (both consistent, LCP violation at
+        # round-off: 7 of them, <= 3.2e-11, measured); any other disagreement is not.
+        assert r1.counters["n_restart_cuts"] > 0
+        for d in ms["disagreements"]:
+            assert d["settle_consistent"] == d["lcp_consistent"] == 1, d
+            assert d["settle_violation"] == 0.0 and d["lcp_violation"] < 1e-9, d
+    else:
+        assert ms["disagreements"] == []             # DCM buck: the settle and the LCP agree
 
 
 def _perturbed(fam, k):

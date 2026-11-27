@@ -2161,3 +2161,33 @@ def test_hysteretic_permeance_refused_by_the_ac_sweep():
             b.graph, b.pool, p.SwitchStateMask(b.graph.num_switches),
             [1e2, 1e4], b.node_id_of("o"), b.node_id_of("o"))
     assert ei.value.device == "Core"
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "OPEN, release finding F-Y-7 (measured here 2026-11-25, release defaults explicit): pwl's "
+    "start record has sample 1 and devices [] where the truth (and the exact engine) has "
+    "sample 0 and ['V0']"))
+def test_f_y_7_the_start_record_of_a_capacitor_loop_under_the_release_defaults():
+    """Release finding F-Y-7 with the release defaults passed explicitly on pwl: C1 (1.5 uF
+    at 8 V) and C2 (1.5 uF at 0 V) closed by the 0 V source V0 at t = 0 share their charge.
+    Truth (closed form): |lambda| = C1 C2 / (C1 + C2) * 8 V = 6e-6 C, dW = 1/2 * 0.75 uF *
+    (8 V)^2 = 2.4e-5 J, at sample 0, through V0; the exact engine (independent) agrees on
+    the sign, the devices and the sample."""
+    from ._release_defaults import RELEASE
+
+    recs = []
+    for kw in (dict(RELEASE), dict(engine="exact")):
+        b = p.CircuitBuilder()
+        b.add_capacitor("C1", "a", "gnd", 1.5e-6, 8.0)
+        b.add_capacitor("C2", "b", "gnd", 1.5e-6, 0.0)
+        b.add_voltage_source("V0", "a", "b", 0.0)
+        b.add_resistor("R", "a", "gnd", 1e3)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            (rec,) = p.simulate(b, 1e-4, dt=1e-6, **kw).reinit_records
+        recs.append(rec)
+    a, e = recs
+    assert abs(a.lambda_) == pytest.approx(6e-6, rel=1e-9)
+    assert a.dW == pytest.approx(2.4e-5, rel=1e-9)
+    assert (a.sample, a.devices) == (0, ["V0"]) == (e.sample, e.devices)
+    assert np.sign(a.lambda_) == np.sign(e.lambda_)

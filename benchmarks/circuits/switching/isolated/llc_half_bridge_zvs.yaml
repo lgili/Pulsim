@@ -15,6 +15,29 @@ benchmark:
   observables:
     - column: V(mid)
     - column: I(Lr)
+  # Probe convention: docs/SOFT_SWITCHING.md (V_DS positive terminal first, I_D = I(switch)).
+  # The KPI window (100 ns) ends before the switch's own next gate edge (3.7 us later).
+  # Baseline: the exact truth (benchmarks/tools/soft_switching_truth.py baseline, mpmath;
+  # never a Pulsim run) on the 10 ns grid, both limits at every event, with V_DS and I_D of
+  # every switch. 0.7 V = the baseline's linear interpolation between its rows on the
+  # dead-time ramp, max (h^2/8)|v''| = 0.19 V, + the 0.5 V each engine sample is held to
+  # against the exact truth inside each dead-time transition (test_soft_switching_validation.py
+  # *_dead_time_commutation_against_exact_truth); both checked in test_soft_switching_kpi.py. From 50 ns: a 10 ns row
+  # cannot follow a start transient of picoseconds (and trbdf2's first fs on the PSFB, F-S-5).
+  # The plain fixed engine (default scenario) is a known disagreement (trap 9, v2_triage).
+  expectations:
+    metrics:
+      max_error: 0.7
+  validation:
+    type: reference
+    observable: V(mid)
+    baseline: baselines/llc_half_bridge_zvs.csv
+    start_time: 50e-9
+  kpi:
+    - {metric: zvs_fraction, switch_observable: V(g_hi), voltage_observable: "V(vin,mid)", threshold_v: 5.0, lookback_samples: 1, label: S_hi}
+    - {metric: switching_loss, switch_observable: V(g_hi), voltage_observable: "V(vin,mid)", current_observable: I(S_hi), window_s: 100e-9, label: S_hi}
+    - {metric: zvs_fraction, switch_observable: V(g_lo), voltage_observable: "V(mid)", threshold_v: 5.0, lookback_samples: 1, label: S_lo}
+    - {metric: switching_loss, switch_observable: V(g_lo), voltage_observable: "V(mid)", current_observable: I(S_lo), window_s: 100e-9, label: S_lo}
 simulation:
   tstart: 0.0
   tstop: 40e-6

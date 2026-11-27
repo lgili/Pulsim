@@ -279,10 +279,13 @@ def test_composites_through_a_restart(fn, dts):
 
 
 # --- controller ticks with the rule on ---------------------------------------------
-def test_controller_ticks_are_unchanged_and_the_gate_moves_one_step():
-    """With the rule the gate of step (t_{k-1}, t_k] is switch_fn(t_{k-1}):
-    tick instants, counts and jitter are the flag-off ones; the recorded
-    on-grid gate edges move one sample later."""
+def test_controller_ticks_are_unchanged_and_the_gate_stays_on_plain_pwls_side():
+    """With the rule the gate of step (t_{k-1}, t_k] is switch_fn(t_k - 0.5001 dt)
+    (F-SB-2; it was switch_fn(t_{k-1}), one sample later): tick instants,
+    counts and jitter are the flag-off ones; an off-grid PWM edge is recorded
+    at the sample plain pwl records it at when it lies past mid-step (the
+    nearer grid point is then the step end, plain pwl's side). Under the release
+    default the event split follows the rule and lands the duty edge at its instant."""
     def run(**kw):
         b = p.CircuitBuilder()
         b.add_voltage_source("Vin", "in", "gnd", 24.0)
@@ -308,10 +311,14 @@ def test_controller_ticks_are_unchanged_and_the_gate_moves_one_step():
     e0 = np.flatnonzero(np.diff(np.asarray(r0.switch_states)[:, 0].astype(int)))
     e1 = np.flatnonzero(np.diff(np.asarray(r1.switch_states)[:, 0].astype(int)))
     # The default event split (follows the rule) lands the off-grid duty edge
-    # at its own instant (12 -> 12); the on-grid period-start edge, sampled at
-    # the step start, moves one sample later (49 -> 50). Without the split
-    # (enable_substep_state_correction=False) the duty edge moved too: 12 -> 13.
-    assert (e1[0], e1[1]) == (e0[0], e0[1] + 1)
+    # at its own instant (12 -> 12; without the split the gate read 0.5001 dt
+    # before the step end, F-SB-2, puts it on plain pwl's side too). The
+    # on-grid period-start edge at t_j: step (t_{j-1}, t_j] reads the gate at
+    # t_j - 0.5001 dt (before the edge) and (t_j, t_{j+1}] after it, as plain
+    # pwl does; it moved one sample later (49 -> 50) only while the rule read
+    # the gate at the step start.
+    assert e1[0] == e0[0] == 12                # same duty, same side
+    assert e1[1] == e0[1]
 
 
 # --- snapshot consumers ---------------------------------------------------------------
@@ -325,10 +332,15 @@ def _buck_window_at_boundary():
     b.add_resistor("R", "out", "gnd", 10.0)
     n, k = b.graph.num_switches, b.switch_index_of("Q")
 
-    def fn(t):   # on for steps 99..135 of every 100: an edge 1 step before the boundary
+    def fn(t):   # on for indices 0..35 of every 100
+        # index j holds on [(j - 0.7) dt, (j + 0.3) dt): the turn-on edge sits
+        # 0.3 dt into the period's last step. The rule takes an edge at the
+        # nearer grid point (gate read 0.5001 dt before the step end, F-SB-2):
+        # its start, so the period's last step is the edge step and the
+        # boundary sits inside its window (two steps owed)
         m = p.SwitchStateMask(n)
-        j = int(round(t / 1e-7)) % 100
-        m.set(k, j >= 99 or j < 36)
+        j = int(math.floor(t / 1e-7 + 0.7)) % 100
+        m.set(k, j < 36)
         return m
     return b, fn
 

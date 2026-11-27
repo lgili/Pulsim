@@ -761,6 +761,24 @@ void init_module(py::module_& m) {
              "lambda(i + d) - lambda(i), in the increment form the flux row "
              "uses (round-off proportional to |d|).");
 
+    py::class_<models::ChannelTable>(m, "ChannelTable",
+        "Tabulated MOSFET channel I_D(V_GS, V_DS) for add_power_mosfet(channel=): "
+        "a rectilinear grid, V_DS from 0, I_D(V_GS, 0) = 0, non-decreasing in "
+        "both arguments (refused by name otherwise, pulsim.NetlistError); "
+        "bicubic Hermite with monotone per-axis tangents (C1); third quadrant "
+        "by terminal swap i(V_GS, V_DS < 0) = -I(V_GS - V_DS, -V_DS).")
+        .def(py::init<std::vector<Real>, std::vector<Real>, std::vector<std::vector<Real>>>(),
+             py::arg("v_gs"), py::arg("v_ds"), py::arg("I"),
+             "I[i][j] = I_D at (v_gs[i], v_ds[j]) [A].")
+        .def("current", [](const models::ChannelTable& t, Real vgs, Real vds) {
+                 const auto e = t.current(vgs, vds);
+                 return py::make_tuple(e.i, e.di_dvgs, e.di_dvds);
+             }, py::arg("v_gs"), py::arg("v_ds"),
+             "(i, di/dv_gs, di/dv_ds) at one bias point, either sign of v_ds.")
+        .def_property_readonly("v_gs", &models::ChannelTable::v_gs)
+        .def_property_readonly("v_ds", &models::ChannelTable::v_ds)
+        .def_property_readonly("I", &models::ChannelTable::current_grid);
+
     py::class_<models::ChargeTable>(m, "ChargeTable",
         "Monotone charge law Q(v) for a nonlinear capacitor: knots "
         "(v, Q, C), cubic Hermite with C as exact tangents, so C(v) is the "
@@ -2410,6 +2428,7 @@ void init_module(py::module_& m) {
                           pd["rds_tc2"] = pp.rds_tc2; pd["vt_tc"] = pp.vt_tc;
                           pd["K_eff"] = pm->K_eff; pd["V_T_eff"] = pm->V_T_eff;
                           pd["R_d_eff"] = pm->R_d_eff;
+                          if (pp.fq_device) pd["fq_device"] = true;
                           desc["kind"] = "power_mosfet";
                           desc["params"] = pd;
                           desc["pins"] = py::make_tuple(pm->drain, pm->source, pm->gate);
@@ -2472,7 +2491,9 @@ void init_module(py::module_& m) {
                  Real kappa, Real R_d, Real C_gs, const py::object& C_gd,
                  const py::object& C_ds, Real R_g, Real L_s,
                  const py::object& body_diode, Real T_j, Real rds_tc1,
-                 Real rds_tc2, Real vt_tc) -> builder::CircuitBuilder& {
+                 Real rds_tc2, Real vt_tc,
+                 std::optional<models::ChannelTable> channel,
+                 bool fq_device) -> builder::CircuitBuilder& {
                   using PM = models::PowerMosfet;
                   auto cap = [&](const py::object& o, const char* what)
                       -> PM::Capacitance {
@@ -2550,6 +2571,10 @@ void init_module(py::module_& m) {
                           S.BV = get("BV", S.BV);
                       }
                   }
+                  p.fq_device = fq_device;
+                  if (channel) {
+                      p.channel = std::make_shared<const models::ChannelTable>(std::move(*channel));
+                  }
                   return self.add_power_mosfet(name, drain, source, gate, p);
               },
               py::arg("name"), py::arg("drain"), py::arg("source"),
@@ -2562,6 +2587,7 @@ void init_module(py::module_& m) {
               py::arg("body_diode") = py::none(),
               py::arg("T_j") = 25.0, py::arg("rds_tc1") = 0.0,
               py::arg("rds_tc2") = 0.0, py::arg("vt_tc") = 0.0,
+              py::arg("channel") = py::none(), py::arg("fq_device") = false,
               py::return_value_policy::reference,
               "Datasheet power MOSFET as one call: Level-1 channel (K "
               "[A/V^2], V_T [V], third quadrant by terminal swap), drift "
@@ -2571,8 +2597,12 @@ void init_module(py::module_& m) {
               "body_diode None or {'model': 'lauritzen'|'shockley', ...}. "
               "T_j [degC] is run-constant: R_d *= r, K /= r with r = 1 + "
               "rds_tc1*dT + rds_tc2*dT^2, V_T += vt_tc*dT (dT = T_j - 25). "
-              "Sub-elements: name (channel), name.rd/.rg/.ls/.cgs/.cgd/.cds, "
-              "name_body. Runs on pwl (time step must resolve the gate "
+              "Default: a composite, sub-elements name (channel), "
+              "name.rd/.rg/.ls/.cgs/.cgd/.cds, name_body. fq_device=True (opt-in): "
+              "the channel (or channel= a ChannelTable, replacing K, V_T, lambda_, "
+              "kappa), C_gd, C_ds and the body diode are ONE f/q device 'name' "
+              "(sub-elements name.rd/.rg/.ls/.cgs); res.i(name) is then the "
+              "drain-terminal current and device_loss_summary lists it. Runs on pwl (time step must resolve the gate "
               "transient: ~0.2 ns for a 60 ns plateau) and trbdf2. "
               "components() reports one 'power_mosfet' entry.");
 
@@ -3210,7 +3240,7 @@ void init_module(py::module_& m) {
                         &SimulationOptions::enable_substep_state_correction)
         .def_readwrite("split_snap", &SimulationOptions::split_snap,
                         "Split events within split_snap*dt of a step "
-                        "boundary are taken at it (default 0.01).")
+                        "boundary are taken at it (default 1e-6).")
         .def_readwrite("resolution_diagnostics",
                         &SimulationOptions::resolution_diagnostics,
                         "Record SimulationResult.resolution (truncation "
@@ -3634,6 +3664,10 @@ void init_module(py::module_& m) {
                 d["split_event_overflows"] = r.split_event_overflows;
                 d["n_gate_events"] = r.n_gate_events;
                 d["n_gate_events_unresolved"] = r.n_gate_events_unresolved;
+                d["n_gate_events_bisected"] = r.n_gate_events_bisected;
+                d["split_locator_trials"] = r.split_locator_trials;
+                d["split_locator_giveups"] = r.split_locator_giveups;
+                d["n_restart_cuts"] = r.n_restart_cuts;
                 d["mode_structure_checks"] = r.mode_structure_checks;
                 d["ideal_loop_releases"] = r.ideal_loop_releases;
                 return d;
@@ -3848,12 +3882,12 @@ void init_module(py::module_& m) {
                 r.right_limit_states.assign(a.data(), a.data() + a.size());
             },
             "(len(right_limit_index), n_states): the right limit of each "
-            "of those samples (where the next step starts). On the fixed "
-            "engine under the restart rule it is the start of the line "
-            "whose trapezoid is the restart step's own SDIRK quadrature "
-            "(exact for the step's integral of a quantity linear in the "
-            "state; as a value the right limit to second order, to first "
-            "order after a kept backward-Euler stage 2).")
+            "of those samples: the state value one instant after the "
+            "event (each capacitor / inductor state continuous, or moved "
+            "by an ideal element's jump; the other unknowns solved in the "
+            "event's mode). Recorded only at events; on the fixed engine "
+            "under the restart rule never at a restart window's later "
+            "steps nor at t = 0 unless the start is a probed jump.")
         .def_property("right_limit_switch_states",
             [](const SimulationResult& r) -> py::object {
                 if (!r.has_event_limits) return py::none();
@@ -4008,6 +4042,13 @@ void init_module(py::module_& m) {
                        "crossing inside them "
                        "(enable_substep_state_correction). 0 with the "
                        "split off.")
+        .def_readonly("n_right_limit_fallbacks",
+                       &SimulationResult::n_right_limit_fallbacks,
+                       "Restart rule: event right limits that are not "
+                       "certified: a row whose solve did not converge or "
+                       "whose diode mode does not hold at t_e+ (no row is "
+                       "stored), or a located turn-off solved through g_off "
+                       "(the row is stored). 0 with the rule off.")
         .def_readonly("event_iteration_breaches",
                        &SimulationResult::event_iteration_breaches)
         .def_readonly("newton_roundoff_accepts",
