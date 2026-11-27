@@ -301,14 +301,21 @@ F = [
      "the same order), so the generic 'reached 6.628e+09 V' warning fires at every dt, the impulse naming never runs. Same "
      "with enable_substep_state_correction=False. Fix: skip (or attribute to the record) the right-limit rows at a "
      "reinit_record's sample in the stored-row scan"),
-    ("F-Z-9", "C", "W", "mode_selection='auto' moves the exact engine's PSFB turn-on v_DS by 2e-9 .. 3e-9 V [owner: mode selection / exact route]",
+    ("F-Z-9", "C", "W", "the exact engine's LCP mode selection on branch-form diodes leaves one of two parallel rectifier diodes OFF for 55 ns (2.3 A); the PSFB turn-on v_DS moves 2e-9 .. 3e-9 V [owner: mode selection (LCP) / branch form]",
      "test_soft_switching_kpi `_engine_trace('psfb_full_bridge_zvs', 'dsed')` (v1 YAML, engine='dsed'), v_DS of S1 on the "
      "row before each turn-on",
      "the mpmath truth to V_TOL 1e-9 V (-0.0046213011 V at 10 us)",
      "mode_selection='legacy': 7.3e-11 / 1.6e-10 V off",
      "1.99e-9 / 3.12e-9 V off at 10 / 20 us (rel 4e-7 of the value, inside rtol_exact 1e-6 but above the cell's 1e-9 V); "
-     "unchanged with device_path='legacy', discontinuity_restart=False, output_rtol=0: the release's mode selection "
-     "(pass mode_selection='auto' on the integration line to reproduce)"),
+     "unchanged with device_path='legacy', discontinuity_restart=False, control_tick='label', output_rtol=0. Cause (R14, "
+     "each run in a fresh process: _engine_trace is lru_cached on (case, engine), so mutating ENGINES in one process "
+     "re-reads the first run): mode_selection='lcp' (= 'auto' with diodes) x form='branch' (the release's add_switch / "
+     "add_diode default); conductance form or the settle give -7.5e-11 / -1.6e-10 V, and the integration kernel with "
+     "form='branch' + 'lcp' reproduces +1.991e-9 / +3.121e-9 exactly (integration-line engine code, exposed by the "
+     "release defaults). At the rectifier commutation t = 7.9205267e-6 (and 17.92, 27.92 us) D6 and D7 are in "
+     "parallel (D5, D8 ON): the LCP at h_e = 2e-13 puts D6 ON with 1.3e-6 A and D7 OFF at gap 7.8e-7 V (the settle "
+     "and conductance form: both ON, equal split); D7 stays OFF to the next event (7.9755e-6, 2.3e-13 s early), D6 "
+     "4.66 A vs 2.33 A; leak_pins 3 / capped 3 (conductance 0 / 0); the 10 us diode event lands 1.54e-14 s late"),
     ("F-Z-10", "B", "W", "under the restart rule the t = 0 start jump has no right-limit row: stored-sample readers (device_loss_summary) trapezoid the first step from the left limit [owner: restart line, event limits / losses]",
      "test_device_losses_kernel::test_loss_summary_reads_the_start_right_limit (10 A source into a PWL diode V_f 0.7 V, "
      "g_on 20 S, dt 1e-5, t_end 0.02)",
