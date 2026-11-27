@@ -25,7 +25,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   divider node 1e-7–2e-6 V off its KCL (4.6e-11 A on ll09's 100 kΩ node on the
   release line). One step of iterative refinement on the same factor (no new
   factorization, right-limit solves only) makes the residual componentwise
-  round-off; the rows move by that round-off.
+  round-off; the rows move by that round-off. The correction solve is skipped
+  when the residual already meets that bound (|r_i| ≤ 4·n·eps·(|J|·|x|)_i).
 
 ### Restart rule: a cut is named as the cut; the snapshot pickle keeps the anchor
 

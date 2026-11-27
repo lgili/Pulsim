@@ -3189,15 +3189,30 @@ inline SimulationResult run_transient(
             // last ε solve's factor. L/ε (1e7 Ω for 1 mH) beside 1e5 Ω rows: the
             // LU's backward error left 4.6e-11 A in a divider node's KCL; one
             // step makes it componentwise (Skeel). Once per row, linear mode.
+            // The correction solve is skipped when r already meets that bound,
+            // |r_i| <= 4·n·eps·(|J|·|x|)_i (the KCL tests' bound).
             auto refined = [&]() -> const Vector& {
                 const Vector* bc = nullptr;
-                const auto* J = lin ? cache.resident_event_matrix(stamped_mask, Real{2} * e_last, &bc)
+                const sparse::DirectSolver* f = nullptr;
+                const auto* J = lin ? cache.resident_event_matrix(stamped_mask, Real{2} * e_last,
+                                                                  &bc, &f)
                                     : nullptr;
-                if (J) {
+                if (J && f) {
                     rl_rr = -(*bc + b_extra);
-                    rl_rr.noalias() -= *J * x;
-                    cache.resident_factor(stamped_mask, Real{2} * e_last).solve(rl_rr, rl_dx);   // factor-reuse
-                    x += rl_dx;
+                    rl_dx.setZero(x.size());   // (|J|·|x|) until the solve overwrites it
+                    for (Eigen::Index c = 0; c < J->outerSize(); ++c) {
+                        for (sparse::Matrix::InnerIterator it(*J, c); it; ++it) {
+                            const Real a = it.value() * x[it.col()];
+                            rl_rr[it.row()] -= a;
+                            rl_dx[it.row()] += std::abs(a);
+                        }
+                    }
+                    const Real tol = Real{4} * static_cast<Real>(J->rows())
+                                     * std::numeric_limits<Real>::epsilon();
+                    if ((rl_rr.array().abs() > tol * rl_dx.array()).any()) {
+                        f->solve(rl_rr, rl_dx);   // factor-reuse
+                        x += rl_dx;
+                    }
                 }
                 return x;
             };
