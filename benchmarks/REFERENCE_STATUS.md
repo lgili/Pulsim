@@ -55,7 +55,7 @@ fails when its err_rms grows past 2x the frozen `known_err:`.
 | switching/multilevel/flying_capacitor_3level.yaml | 0.02 | 0.0466 | 3.74e-05 | 3.74e-05 |
 | switching/multilevel/mmc_4cell_chain.yaml | 0.02 | 0.0268 | 5.74e-05 | 5.74e-05 |
 | switching/multilevel/t_type_3level_halfbridge.yaml | 0.02 | 0.0782 | 4.24e-05 | 4.24e-05 |
-| three_phase/three_phase_diode_rectifier.yaml | 0.02 | 1.51 | 0.00766 | 0.00766 |
+| three_phase/three_phase_diode_rectifier.yaml | 0.02 | 1.51 | 0.00766 | 0.00921 |
 
 ### Every cell that differs from its frozen `known:` entry (every configuration)
 
@@ -127,7 +127,7 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | switching/buck/ll06_buck_vcswitch.yaml | pwl+split | 0.02 | 0.0434 | V(sw) | 0.0068 | 1.9% | 2e-05 | 99 |
 | switching/buck/ll08_buck_mosfet.yaml | pwl | 0.02 | 0.228 | V(sw) | 0.156 | 3.2% | 3.9e-07 | 2 |
 | switching/buck/ll08_buck_mosfet.yaml | pwl+restart | 0.02 | 0.0659 | V(sw) | 0.0173 | 3.2% | 2.1e-07 | 1.1 |
-| switching/buck/ll08_buck_mosfet.yaml | pwl+split | 0.02 | 0.0652 | V(gate) | 0.00443 | 3.2% | 2e-07 | 1 |
+| switching/buck/ll08_buck_mosfet.yaml | pwl+split | 0.02 | 0.0652 | V(gate) | 0.00461 | 3.2% | 2e-07 | 1 |
 | switching/inverter/ll09_half_bridge_inverter_leg.yaml | pwl | 0.02 | 0.0707 | V(ctrl_hi) | 0.0104 | 2.0% | 2.3e-12 | 9.1e-06 |
 | switching/inverter/ll10_full_bridge_inverter_lc.yaml | pwl | 0.02 | 0.05 | V(ctrl_a_lo) | 0.000195 | 1.0% | 3e-12 | 1.2e-05 |
 | switching/isolated/flyback_converter.yaml | pwl | 0.02 | 0.949 | V(out) | chatter | 19.1% | 2e-05 | 2e+02 |
@@ -259,7 +259,7 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | thermal/long_run_drift_buck.yaml | 0.000603 | 1.12e-05 | 1.12e-05 | 2.58e-06 | 1.07e-05 |
 | three_phase/interleaved_buck_3ph.yaml | 0.00217 | 0.00245 | 1.72e-06 | 6.63e-08 | 1.98e-07 |
 | three_phase/three_phase_balanced_rl_load.yaml | 1.82e-06 | 1.83e-06 | 1.83e-06 | 4.22e-05 | 6.01e-07 |
-| three_phase/three_phase_diode_rectifier.yaml | 1.51 | 0.00766 | 0.00766 | 5.51e-05 | 0.00034 |
+| three_phase/three_phase_diode_rectifier.yaml | 1.51 | 0.00766 | 0.00921 | 5.51e-05 | 0.00034 |
 
 ## Analytic set (27 cases; agree = within the frozen ceiling, 1e-3 when none)
 
