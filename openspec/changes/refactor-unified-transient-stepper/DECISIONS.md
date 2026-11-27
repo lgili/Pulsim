@@ -1038,3 +1038,25 @@ says where the implementation departs from them or what it settled.
     which runs outside the event iteration on its own BE right-hand
     side). Moving those three onto the solve point is not an extraction:
     each has its own counters and right-hand side.
+
+22a. **Group 2, fixed engine: the event iteration's solve point is written
+    out, not a dispatch lambda.** The `solve_point` lambda of DECISIONS 22
+    (over `mode_solve` and `dispatch_solve`, forced inline) was
+    byte-identical but cost +0.80 … +1.11 % instructions per accepted step
+    on every fixed-engine case (gate 0.5 %). Shipped instead, in
+    `run_event_iteration`: one `if (nl_refresh_effective)` whose Newton
+    branch picks the segment (nominal, or the off-nominal companion it
+    assembles) and makes ONE tagged `solve_with_newton_b_extra` call (the
+    two Newton calls merged), and whose linear branch stays the inline
+    three-way choice it was (restart factor count, memoised nominal
+    segment, `solve_at`), tagged `solve-point`; `mode_solve` is no longer
+    forced inline. Same calls with the same arguments in the same order:
+    byte-identical on every suite, and the fixed engine is back to group 1
+    (buck_pwl −0.30 %, vsi_pwl −0.04 %, the restart rows −0.25 / −0.02 %
+    vs base). The fixed engine therefore has seven `solve-point` lines
+    (mode_solve 3, event iteration 1 + 3), not one dispatch; TR-BDF2 keeps
+    `solve_stage` / `dispatch_solve`, within the gate. Compile memory of
+    `python/bindings.cpp`: the 3.76 GB of `rss_before.log` does not
+    reproduce with today's compile command; measured the same way on the
+    same day, base 400011ee 4.20 GB, group 1 4.07 GB, the lambda version
+    4.12 GB, this one 4.18 GB — within ±3 % of base, no regression.

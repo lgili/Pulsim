@@ -14,8 +14,9 @@ from pathlib import Path
 SOLVER = Path(__file__).resolve().parents[2] / "core" / "include" / "pulsim" / "solver"
 CALL = re.compile(r"cache\.solve(_at|_segment)?\(|solve_with_newton_b_extra\(")
 TAG = re.compile(r"//\s*(solve-point|factor-reuse|solve-exempt: .+)$")
-# the solve-point lines of each engine's one dispatch
-EXPECTED_SOLVE_POINT = {"run_transient.hpp": 5, "trbdf2_transient.hpp": 5}
+# the solve-point lines of each engine (fixed: mode_solve 3, event iteration
+# 1 Newton + 3 linear, written out on purpose: DECISIONS 22a)
+EXPECTED_SOLVE_POINT = {"run_transient.hpp": 7, "trbdf2_transient.hpp": 5}
 
 
 def test_every_direct_solve_is_tagged():

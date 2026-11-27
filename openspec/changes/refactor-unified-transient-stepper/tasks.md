@@ -26,13 +26,13 @@ at equal times or time-weighted measures, never sample means.
   - Every compare suite of DECISIONS 21 byte-identical (pwl 399/399, trbdf2 380/380, DSED 36/36 default + shadow, exact outputs); C++ step / mode / dsed tests pass; instructions per step −1.2 … +0.05 % (bridge3 −62 %, active-clamp forward −31 %: the DSED dense passes scanned every branch per call)
 
 ## 2. Extract the single solve point
-- [ ] 2.1 `solver/step/stepper_core.hpp`: `StageSpec`, `StepperCore::solve_stage` (step context, history right-hand side, sources, linear or Newton dispatch)
-  - Partial (DECISIONS 22): `step::solve_stage` / `step::dispatch_solve` in `solver/step/stepper_core.hpp`, byte-identical on every compare suite; OPEN: the fixed engine's `solve_point` costs +0.8 … +1.1 % instructions per step over group 1 (gate 0.5 %), see `.scratch/stepper/HANDOFF.md`
+- [x] 2.1 `solver/step/stepper_core.hpp`: `StageSpec`, `StepperCore::solve_stage` (step context, history right-hand side, sources, linear or Newton dispatch)
+  - Done as a free function (DECISIONS 22): `step::solve_stage` / `step::dispatch_solve` in `solver/step/stepper_core.hpp`; the history right-hand side and the sources stay the engines' (DECISIONS 7); byte-identical on every compare suite, cost within gate (DECISIONS 22a)
 - [ ] 2.2 TR-BDF2: `trap_solve`, `probe_solve`, the stage solves and the settle call `solve_stage`; fixed engine: `run_event_iteration`, the retry sub-steps and the sub-step correction call it
-  - Partial: TR-BDF2 `trap_solve` → `solve_stage`, `solve_dispatch` → `dispatch_solve`; fixed: the event iteration's three solves → one `solve_point` (DECISIONS 22); the stage solves keep setting their context at the stage start
+  - Partial: TR-BDF2 `trap_solve` → `solve_stage`, `solve_dispatch` → `dispatch_solve`; the stage solves keep setting their context at the stage start. Fixed engine: the event iteration's solve is written out (one Newton call, the inline linear branch), not `solve_stage` — a dispatch lambda cost +0.8 … +1.1 % instructions per step (DECISIONS 22a)
 - [x] 2.3 Test: a grep-based check that neither driver calls `cache.solve`, `cache.solve_at` or the Newton solver except through `solve_stage`
   - `python/tests/test_single_solve_point.py`: every direct call is tagged `solve-point` / `factor-reuse` / `solve-exempt` (DECISIONS 22)
-- [ ] 2.4 Oracle: goldens bit-identical; step-identical; `n_solves` identical; `test_trbdf2_stateful_with_diodes.py`, `test_stateful_device_stamps_compose.py`
+- [x] 2.4 Oracle: goldens bit-identical; step-identical; `n_solves` identical; `test_trbdf2_stateful_with_diodes.py`, `test_stateful_device_stamps_compose.py`
 
 ## 3. Extract commit, rollback and seeding
 - [ ] 3.1 `StepperCore::commit`, `snapshot_into`, `restore`, `seed(InitialCondition)`; both drivers call them
