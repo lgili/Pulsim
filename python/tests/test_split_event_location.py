@@ -75,17 +75,20 @@ def test_the_split_places_a_gate_edge_at_its_instant(edge, opaque):
 def test_restart_without_the_split_takes_plain_pwls_side(edge):
     """Without the split an event sits on the grid by definition: the step
     that contains the edge carries the new mask (the grid point BEFORE the
-    edge), as plain pwl does."""
+    edge), as plain pwl does. Both options named (the release default turns
+    both on; its placement is test_the_split_places_a_gate_edge_at_its_instant)."""
     t_prev = np.floor(edge / H) * H
-    _, plain = _gated(edge, H)
-    _, rest = _gated(edge, H, **RESTART)
+    _, plain = _gated(edge, H, discontinuity_restart=False)
+    _, rest = _gated(edge, H, **RESTART, enable_substep_state_correction=False)
     assert rest == pytest.approx(plain, abs=1e-6 * H)
     assert rest[0] == pytest.approx(t_prev, abs=1e-6 * H)
 
 
 def test_restart_takes_an_edge_within_dt_over_100_of_a_grid_point_there():
-    # the gate is read at t_k - 0.5001 dt: an edge 0.995 h in is taken at t_k (the nearer point)
-    _, rest = _gated(EDGES[2], H, **RESTART)
+    # the gate is read at t_k - 0.5001 dt: an edge 0.995 h in is taken at t_k (the nearer point).
+    # The rule alone (split named off); with the split (the default) the edge is located at
+    # its instant: test_the_split_places_a_gate_edge_at_its_instant[0.995 h]
+    _, rest = _gated(EDGES[2], H, **RESTART, enable_substep_state_correction=False)
     assert rest[0] == pytest.approx(20.1e-6, abs=1e-6 * H)
 
 
