@@ -4703,6 +4703,13 @@ inline SimulationResult run_transient(
                 const auto ents = diodes.entries();
                 for (Size j = 0; j < ents.size(); ++j) {
                     if (post[j] == rs_cut.pre[j]) continue;
+                    // only a net flip of the step that piece 2 kept: a cut back to the
+                    // step-start mode (on in stage 1, located off) or a flip piece 2
+                    // reverted would be an unpaired record (cl_boost_pi: 36 offs with
+                    // no on) and a phantom sensitivity jump; the step end decides those
+                    // shortcut: the short pulse inside the step goes unrecorded (as before
+                    // F-Z-11); record both edges if a consumer needs it
+                    if (post[j] == rs_cut.b0[j] || ents[j].is_on != post[j]) continue;
                     split_events.push_back(CommutationEvent{
                         .t_estimated = td, .branch_id = ents[j].branch_id, .new_state = post[j]});
                 }

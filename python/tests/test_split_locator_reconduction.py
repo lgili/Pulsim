@@ -178,3 +178,29 @@ def test_a_diode_turn_off_after_a_located_gate_edge_is_located(dt):
     # stage 1 were not located at 1.3 us
     assert np.max(np.abs(ref - off)) / dt <= 5e-3
     assert res.counters["split_locator_giveups"] == 0
+
+
+def test_cut_records_alternate_per_diode(monkeypatch):
+    # a restart step whose diode is on in stage 1 and cut back off in stage 2
+    # ends in its start mode: no net flip, so no record (it was an unpaired
+    # turn-off, 36 on cl_boost_pi by 30 ms, 6 by 0.9 ms; the step end then
+    # records nothing, as before F-Z-11)
+    from pathlib import Path
+
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2] / "benchmarks" / "tools"))
+    pytest.importorskip("yaml")
+    import v1_reader
+
+    root = Path(__file__).resolve().parents[2]
+    case = v1_reader.load(root / "benchmarks/circuits/closed_loop/cl_boost_pi.yaml")
+    case.t_end = 0.9e-3
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = case.run("pwl", discontinuity_restart=True, enable_substep_state_correction=True)
+    last, bad = {}, []
+    for e in sorted(r.commutation_events, key=lambda e: e.t_estimated):
+        if last.get(e.branch_id) == bool(e.new_state):
+            bad.append((e.branch_id, e.t_estimated))
+        last[e.branch_id] = bool(e.new_state)
+    assert r.counters["n_restart_cuts"] > 0   # the cut path ran (measured 7)
+    assert bad == []
