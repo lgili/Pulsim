@@ -315,6 +315,7 @@ def _output_grid_reference(native_res, ncol, t_start):
     og = {k: int(native_res[k]) for k in ("n_output_capped", "n_output_unbounded")}
     og["n_output_samples"] = int(native_res.get("n_output_samples", 0))
     og["n_output_floored"] = int(native_res.get("n_output_floored", 0))
+    og["n_output_inconsistent"] = int(native_res.get("n_output_inconsistent", 0))   # F-X-8
     fr = np.asarray(native_res.get("output_floor_row", []), dtype=float)
     og["output_floor_max"] = float(fr.max()) if fr.size else 0.0
     og["output_floor_by_column"] = fr[-ncol:] if fr.size >= ncol > 0 else np.zeros(ncol)

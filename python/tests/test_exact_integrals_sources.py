@@ -42,6 +42,10 @@ def _run(b, t_end, recs, **kw):
         # release: the default output rule warns about steps of a defective mode it cannot
         # bound; that is not the recorder's line fallback this test forbids
         warnings.filterwarnings("ignore", message=".*output grid.*", category=RuntimeWarning)
+        # and (F-X-8, merged 668e1428) about rule calls certified by the basis-inconsistency
+        # floor (bridge_3ph: 13 calls): counted in diagnostics, not a line fallback either
+        warnings.filterwarnings("ignore", message=".*output rule call.s. met a fast mode.*",
+                                category=RuntimeWarning)
         return p.simulate(b, t_end, engine="exact", recorders=recs, **{"integrator": "rk45", **kw})
 
 
