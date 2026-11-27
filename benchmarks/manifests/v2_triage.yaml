@@ -165,7 +165,7 @@ circuits:
   # loop). Since the DC loop refusal (2026-11-13) the v1 reader starts it from zero state, as
   # uic does, and it runs. trbdf2 1.3e-3: worst V(ctrl_main), err_max 0.99 = a PWM source
   # edge sampled between the two runs' grids (edge_rms 3.3e-5). pwl: V(clamp_node).
-  circuits/switching/isolated/ll13_active_clamp_forward.yaml: {status: runs, known: {pwl: disagree, pwl+restart: disagree, pwl+split: disagree, trbdf2: disagree}, known_err: {pwl: 4.51, pwl+restart: 0.335, pwl+split: 0.335, trbdf2: 0.00133}, cause: [TC-OPEN]}
+  circuits/switching/isolated/ll13_active_clamp_forward.yaml: {status: runs, known: {pwl: disagree, trbdf2: disagree}, known_err: {pwl: 4.51, trbdf2: 0.00133}, cause: [TC-OPEN]}  # pwl+restart / pwl+split agree (0.00197) since integration batch 7 (the reference runs again: fixed-point-accepted trbdf2 edge probes are retaken, 8866e845)
   circuits/switching/isolated/synchronous_flyback.yaml: {status: runs, known: {pwl: disagree}, known_err: {pwl: 0.207}, cause: [TC-PWL-ORDER]}
   # soft-switching validation (batch 14t, M6): pwl with restart off chatters on the ZVS
   # transition nodes (V(mid) 18.8 %, V(b) 39.2 % of steps); restart / split / trbdf2 / dsed agree.
