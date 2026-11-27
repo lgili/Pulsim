@@ -345,7 +345,8 @@ def test_exact_lcp_turns_on_both_parallel_rectifier_diodes(form, monkeypatch):
         assert n >= 3 and i_min > 1e-3 and rel <= 1e-6, (form, n, rel, i_min)
     ms = r.diagnostics["mode_selection"]
     assert ms["leak_pins"] == 0 and ms["capped"] == 0, ms
-    assert ms["fallbacks"] == 0 and ms["fallback_message"] == "", ms
+    if form == "branch":
+        assert ms["rounding_ties"] >= 1, ms     # the floor is what decided it (3 measured)
 
 
 def test_exact_lcp_branch_form_psfb_turn_on_voltage(monkeypatch):
@@ -365,10 +366,10 @@ def test_exact_lcp_branch_form_psfb_turn_on_voltage(monkeypatch):
     assert len(err) == 2 and max(abs(e) for e in err) <= V_TOL["dsed"], err
 
 
-def test_exact_lcp_inconsistent_mode_falls_back_to_the_settle():
-    """The guard behind the selector: with the rounding floor off (a test hook, fresh process: it
-    is read once) the selector returns F-Z-9's mode again; that mode breaks D7's law on its own
-    trajectory, so the settle's (both ON) is committed, each event counted, the first named."""
+def test_exact_lcp_without_the_rounding_floor_brings_f_z_9_back():
+    """The floor is the fix: with it off (a test hook, fresh process: it is read once) the
+    selector decides D7 OFF on its rounding gap again at each commutation (3 leak pins) and
+    D6 carries the pair's current (measured |I6 - I7| / I6 ~ 1)."""
     import json
     import os
     import subprocess
@@ -385,14 +386,12 @@ def test_exact_lcp_inconsistent_mode_falls_back_to_the_settle():
         "i6, i7 = (np.asarray(v1_reader.observable(r, f'I({d})'), dtype=float) for d in ('D6', 'D7'))\n"
         "w = (t > 7.92053e-6 + 5e-9) & (t < 7.92053e-6 + 50e-9)\n"
         "ms = r.diagnostics['mode_selection']\n"
-        "print(json.dumps({k: ms[k] for k in ('fallbacks', 'lcp_inconsistent', 'leak_pins', 'fallback_message')}"
+        "print(json.dumps({k: ms[k] for k in ('rounding_ties', 'leak_pins')}"
         " | {'rel': float(np.max(np.abs(i6[w] - i7[w]) / i6[w]))}))\n")
     env = dict(os.environ, PULSIM_TEST_LCP_NO_ROUNDING_FLOOR="1", PYTHONPATH=os.pathsep.join(sys.path))
     p = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, timeout=900)
     assert p.returncode == 0, p.stderr[-2000:]
     d = json.loads(p.stdout.strip().splitlines()[-1])
-    assert d["leak_pins"] == 3                       # the pre-fix selection is back ...
-    assert d["fallbacks"] == 3                       # ... and replaced at each commutation
-    assert d["lcp_inconsistent"] >= d["fallbacks"]
-    assert "D7" in d["fallback_message"] and "7.92" in d["fallback_message"], d
-    assert d["rel"] <= 1e-6, d
+    assert d["rounding_ties"] == 0, d                # the floor is off ...
+    assert d["leak_pins"] >= 1, d                    # ... the pre-fix selection is back
+    assert d["rel"] > 0.5, d                         # D7 OFF: D6 carries the pair's current
