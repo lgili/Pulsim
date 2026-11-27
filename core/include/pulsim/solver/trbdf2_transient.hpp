@@ -2111,8 +2111,7 @@ inline SimulationResult run_transient_trbdf2(
         if (lin && (dtp > hp * Real{1.0001} || probe_moved() || m_probe == x_mask) && commit
             && t_plus < opts.t_end - h_min
             && t_plus < queue.next_of(events::Kind::ControlTick) - h_min) {
-            history.update_from_state(x_trial, dtp);
-            hs.commit(x_trial, dtp, pwl::TrBdf2Stage::Trapezoidal);
+            step::commit(history, hs, x_trial, dtp, pwl::TrBdf2Stage::Trapezoidal);
             if (learn_gates) {
                 gate.learn_toggles(diodes.num_gated() > 0 ? switch_fn(t_gates)
                                                           : m_probe, t);

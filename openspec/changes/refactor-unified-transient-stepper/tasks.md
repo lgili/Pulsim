@@ -35,9 +35,9 @@ at equal times or time-weighted measures, never sample means.
 - [x] 2.4 Oracle: goldens bit-identical; step-identical; `n_solves` identical; `test_trbdf2_stateful_with_diodes.py`, `test_stateful_device_stamps_compose.py`
 
 ## 3. Extract commit, rollback and seeding
-- [ ] 3.1 `StepperCore::commit`, `snapshot_into`, `restore`, `seed(InitialCondition)`; both drivers call them
-  - Open: commit / rollback / seeding are still each engine's own phases (the skeleton has no rollback, DECISIONS 15)
-- [ ] 3.2 Oracle: goldens; step-identical; `test_snapshot_resume.py`, `test_snapshot_resume_stateful.py`, `test_initial_conditions_across_engines.py`, `test_first_step_order.py` (its xfails keep their status)
+- [x] 3.1 `StepperCore::commit`, `snapshot_into`, `restore`, `seed(InitialCondition)`; both drivers call them
+  - Free functions `step::commit` / `snapshot_into` / `restore` / `seed` in `solver/step/stepper_core.hpp` (DECISIONS 23); every adjacent history + stateful-histories pair of both drivers calls them; the non-adjacent ones (initial-state seeds, TR-BDF2 stage commits, single-history rollbacks) stay, with the reasons in DECISIONS 23
+- [x] 3.2 Oracle: goldens; step-identical; `test_snapshot_resume.py`, `test_snapshot_resume_stateful.py`, `test_initial_conditions_across_engines.py`, `test_first_step_order.py` (its xfails keep their status)
 
 ## 4. Integrators as stage tables
 - [ ] 4.1 `solver/step/integrators.hpp`: `Trapezoidal`, `BackwardEuler`, `TrBdf2` (`stage`, `lte` moved from `trbdf2_transient.hpp:1286-1375`)

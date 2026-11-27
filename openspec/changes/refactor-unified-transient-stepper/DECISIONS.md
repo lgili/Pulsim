@@ -1060,3 +1060,24 @@ says where the implementation departs from them or what it settled.
     reproduce with today's compile command; measured the same way on the
     same day, base 400011ee 4.20 GB, group 1 4.07 GB, the lambda version
     4.12 GB, this one 4.18 GB — within ±3 % of base, no regression.
+
+23. **Group 3: commit, rollback and seeding are four free function
+    templates, not a `StepperCore` object.** `step::commit(history,
+    devices, x, h, formula)`, `step::snapshot_into(history, devices, h, d)`,
+    `step::restore(history, devices, h, d)` and `step::seed(history,
+    devices, x)` (`solver/step/stepper_core.hpp`) are each exactly the
+    adjacent pair of calls the drivers made, linear companions first, with
+    explicit arguments (no object holding references, no captured state;
+    the group-2 lambda showed what a closure costs in the step loop,
+    DECISIONS 22a). Replaced: every ADJACENT pair — fixed engine 4 commits
+    (`commit_backward_euler`, `commit_trap`, the sub-step commit, the step
+    commit), 4 snapshots, 13 restores, the DC-point seed; TR-BDF2 the
+    probe-landing commit. Left as they are, on purpose: pairs whose two
+    halves are not one moment — the `initial_state` seeds (the stateful
+    histories are built between the two), single-history snapshots and
+    restores (the restart line, the LTE filter, the record replays, the
+    stage snapshots), the restart line's `hs.restore` under its own
+    condition, and the TR-BDF2 stage commits (`commit_trbdf2` /
+    landing-specific history updates with `hs.commit` lines further on).
+    Byte-identical on every suite; cost within gate (vsi_pwl +0.32 %,
+    the rest ≤ +0.28 % vs base).

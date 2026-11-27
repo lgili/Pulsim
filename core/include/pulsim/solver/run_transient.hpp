@@ -816,11 +816,11 @@ inline SimulationResult run_transient(
         }();
         if (structure.active()) (void)check_mode(dc.mask, false, opts.t_start);
         x = std::move(dc.x);
-        history.seed_from_dc_op(x);
-        // every stateful kind on its DC curve: PMSM λ, i, θ at the held
-        // point (D19), external charges, Lauritzen q_M, IGBT tail Q,
-        // nonlinear-capacitor q, saturable flux (empty kinds: no-op)
-        hs.seed_from_dc_op(x);
+        // the linear companions, then every stateful kind on its DC curve:
+        // PMSM λ, i, θ at the held point (D19), external charges, Lauritzen
+        // q_M, IGBT tail Q, nonlinear-capacitor q, saturable flux (empty
+        // kinds: no-op)
+        step::seed(history, hs, x);
         seed_held_machine_capacitors(graph, pool, dc.mask, opts.t_start, x,
                                      hs.get<pwl::PmsmMnaHistory>(), history);
         initial_mask = dc.mask;
@@ -1919,8 +1919,7 @@ inline SimulationResult run_transient(
             mask_start_known = stamped_known;
         }
         auto commit_backward_euler = [&](Real h_e) {
-            history.update_from_state_backward_euler(x, h_e);
-            hs.commit(x, h_e, pwl::TrBdf2Stage::BackwardEuler);
+            step::commit(history, hs, x, h_e, pwl::TrBdf2Stage::BackwardEuler);
         };
         // add-parameter-sensitivities group 6: the calls into the recurrence
         // (solver/step/sensitivity.hpp) from the event and restart paths; the
@@ -2119,8 +2118,7 @@ inline SimulationResult run_transient(
             const Real dt_loc = (iters_1 > 1 || breach_1) ? std::max(loc, h_s) : loc;
             ip_x1 = x;
             ip_b = b_extra;
-            history.snapshot_into(ip_hist);
-            hs.snapshot_into(ip_hs);
+            step::snapshot_into(history, hs, ip_hist, ip_hs);
             const Size iters_s = iters;
             const bool flipped_s = flipped;
             const bool cycle_s = mask_cycle;
@@ -2178,8 +2176,7 @@ inline SimulationResult run_transient(
             // One more BE stage of γh, from y (the histories at y), the
             // sources shifted by *s (nullptr: frozen); x: its start, its end.
             auto stage_from = [&](const Vector& y, const Vector* s, Real at) {
-                history.restore(ip_hist);
-                hs.restore(ip_hs);
+                step::restore(history, hs, ip_hist, ip_hs);
                 history.extrapolate_previous(y, Real{1});
                 hs.extrapolate_previous(y, Real{1});
                 history.compute_b_extra_backward_euler(h_s, ip_h1);
@@ -2206,8 +2203,7 @@ inline SimulationResult run_transient(
             } else {
                 ip_x2m = ip_x2;
             }
-            history.restore(ip_hist);
-            hs.restore(ip_hs);
+            step::restore(history, hs, ip_hist, ip_hs);
             event_rl_x = Real{2} * ip_x1 - ip_x2m;
             ip_x3m = x;   // the reading's x3 (the series' later stages reuse x)
             // Per state (C or L): the jump x0+ − x0, the rule's bound;
@@ -2356,8 +2352,7 @@ inline SimulationResult run_transient(
                     const auto stamped_1 = stamped_mask;
                     const bool cycle_1 = mask_cycle;
                     diodes.restore_on_bits(rs_bits0);
-                    history.restore(ip_hist);
-                    hs.restore(ip_hs);
+                    step::restore(history, hs, ip_hist, ip_hs);
                     b_extra = ip_b;
                     x = ip_x1;
                     bool m1_ok = true, y3_ok = false;
@@ -2378,8 +2373,7 @@ inline SimulationResult run_transient(
                         if (!y3_ok) x = ip_y2;
                         solved = true;
                     }
-                    history.restore(ip_hist);   // x0's histories: s0 below
-                    hs.restore(ip_hs);
+                    step::restore(history, hs, ip_hist, ip_hs);   // x0's histories: s0 below
                     if (m1_ok) {
                         // per state, over one stage of the start mode: a smooth move
                         // (no jump of that mode by the rule's d-test, |Δ1 − Δ2| ≤ |Δ2|/γ
@@ -2424,8 +2418,7 @@ inline SimulationResult run_transient(
                         }
                     }
                     diodes.restore_on_bits(ip_bits1);
-                    history.restore(ip_hist);
-                    hs.restore(ip_hs);
+                    step::restore(history, hs, ip_hist, ip_hs);
                     stamped_mask = stamped_1;
                     mask_cycle = cycle_1;
                     if (m1_ok) {
@@ -2689,8 +2682,7 @@ inline SimulationResult run_transient(
                     for (Size i = 0; i < ip_f0.size(); ++i) ip_js[i] = static_cast<Size>(ip_f0[i]);
                     (void)series(false);
                 }
-                history.restore(ip_hist);
-                hs.restore(ip_hs);
+                step::restore(history, hs, ip_hist, ip_hs);
             }
             Real e_jump = 0;
             Size dom = 0;
@@ -3618,8 +3610,7 @@ inline SimulationResult run_transient(
                 // one trapezoidal trial from the step start under the start bits
                 auto trial = [&](Real t_loc) {
                     x = x_prev;
-                    history.restore(history_snap);
-                    hs.restore(hs_snap);
+                    step::restore(history, hs, history_snap, hs_snap);
                     diodes.restore_on_bits(diodes_snap);
                     try {
                         accumulate_b_extra(t_loc, t_loc - a);
@@ -3888,8 +3879,7 @@ inline SimulationResult run_transient(
             // enable_substep_state_correction is true.
             if (may_roll_back) {
                 ++result.rollback_snapshots;
-                history.snapshot_into(history_snap);
-                hs.snapshot_into(hs_snap);
+                step::snapshot_into(history, hs, history_snap, hs_snap);
                 if (has_diodes) {
                     diodes.snapshot_on_bits_into(diodes_snap);
                 } else {
@@ -3928,8 +3918,7 @@ inline SimulationResult run_transient(
                 if (rs_bits[q] != rs_bits2[q] && !rs_bits[q]) return nan;   // a turn-on
             }
             auto trial = [&](Real tau) {
-                history.restore(rs_hist);
-                hs.restore(rs_hs);
+                step::restore(history, hs, rs_hist, rs_hs);
                 diodes.restore_on_bits(rs_bits);
                 x = rs_x1;
                 const Real ts = kGamma * tau;
@@ -4124,8 +4113,7 @@ inline SimulationResult run_transient(
                     rs_bits_first = rs_bits;   // (word copy; assign() walks bits)
                     rs_first_valid = true;
                 }
-                history.snapshot_into(rs_hist);
-                hs.snapshot_into(rs_hs);   // keeps the capacity
+                step::snapshot_into(history, hs, rs_hist, rs_hs);   // keeps the capacity
             }
             const bool cycle_1 = mask_cycle;
             constexpr Real c = (Real{1} - kGamma) / kGamma;
@@ -4184,8 +4172,7 @@ inline SimulationResult run_transient(
                 const auto stamped_2 = stamped_mask;
                 rs_solved2 = last_solved_bits;
                 auto histories_at_x0 = [&] {
-                    history.restore(rs_hist);
-                    hs.restore(rs_hs);
+                    step::restore(history, hs, rs_hist, rs_hs);
                 };
                 x = rs_x1;
                 diodes.restore_on_bits(rs_bits);
@@ -4435,8 +4422,7 @@ inline SimulationResult run_transient(
             }
             StepLines& lines = *L;
             rs_cut.x0 = x;
-            history.snapshot_into(rs_cut.h0);
-            hs.snapshot_into(rs_cut.hs0);
+            step::snapshot_into(history, hs, rs_cut.h0, rs_cut.hs0);
             diodes.snapshot_on_bits_into(rs_cut.b0);
             rs_cut.lsb0 = last_solved_bits;
             const bool cycle0 = mask_cycle, known0 = stamped_known, flipped0 = flipped;
@@ -4467,8 +4453,7 @@ inline SimulationResult run_transient(
             auto restore0 = [&]() {
                 flipped = flipped0;
                 x = rs_cut.x0;
-                history.restore(rs_cut.h0);
-                hs.restore(rs_cut.hs0);
+                step::restore(history, hs, rs_cut.h0, rs_cut.hs0);
                 diodes.restore_on_bits(rs_cut.b0);
                 last_solved_bits = rs_cut.lsb0;
                 mask_cycle = cycle0;
@@ -4895,8 +4880,7 @@ inline SimulationResult run_transient(
                     // the window for the next two grid steps explicitly: their
                     // masks equal the post-event one, so no trigger would.
                     auto commit_trap = [&](Real h) {
-                        history.update_from_state(x, h);
-                        hs.commit(x, h, pwl::TrBdf2Stage::Trapezoidal);
+                        step::commit(history, hs, x, h, pwl::TrBdf2Stage::Trapezoidal);
                     };
                     auto split_step = [&]() {
                         split_events.clear();
@@ -4983,8 +4967,7 @@ inline SimulationResult run_transient(
                                     // b (keep the pre-event solve, flip there) or
                                     // inside (split).
                                     x = x_prev;
-                                    history.restore(history_snap);
-                                    hs.restore(hs_snap);
+                                    step::restore(history, hs, history_snap, hs_snap);
                                     diodes.restore_on_bits(diodes_snap);
                                     mask_cycle = false;
                                     // Post-event bits: the diodes that cross
@@ -5109,8 +5092,7 @@ inline SimulationResult run_transient(
                         // that is a discontinuity too. Back to the step
                         // start, and re-take it as a restart step.
                         x = x_prev;
-                        history.restore(history_snap);
-                        hs.restore(hs_snap);
+                        step::restore(history, hs, history_snap, hs_snap);
                         if (has_diodes) {
                             diodes.restore_on_bits(diodes_snap);
                         }
@@ -5166,8 +5148,7 @@ inline SimulationResult run_transient(
                     // and the cache, whose contents are a function of
                     // the circuit rather than of the run.
                     x = x_prev;
-                    history.restore(history_snap);
-                    hs.restore(hs_snap);
+                    step::restore(history, hs, history_snap, hs_snap);
                     if (has_diodes) {
                         diodes.restore_on_bits(diodes_snap);
                     }
@@ -5253,9 +5234,7 @@ inline SimulationResult run_transient(
                         if (j + 1 < n_sub && sub_restart) {
                             commit_backward_euler(be_commit_h);
                         } else if (j + 1 < n_sub) {
-                            history.update_from_state(x, sub_dt);
-                            hs.commit(x, sub_dt,
-                                      pwl::TrBdf2Stage::Trapezoidal);
+                            step::commit(history, hs, x, sub_dt, pwl::TrBdf2Stage::Trapezoidal);
                         } else {
                             committed_dt = sub_dt;
                             committed_be = sub_restart;
@@ -5572,8 +5551,7 @@ inline SimulationResult run_transient(
             if (committed_be) {
                 commit_backward_euler(be_commit_h);
             } else {
-            history.update_from_state(x, committed_dt);
-            hs.commit(x, committed_dt, pwl::TrBdf2Stage::Trapezoidal);
+            step::commit(history, hs, x, committed_dt, pwl::TrBdf2Stage::Trapezoidal);
             }
             if (restart) {
                 ++result.n_restart_steps;
