@@ -299,6 +299,14 @@ F = [
      "the same order), so the generic 'reached 6.628e+09 V' warning fires at every dt, the impulse naming never runs. Same "
      "with enable_substep_state_correction=False. Fix: skip (or attribute to the record) the right-limit rows at a "
      "reinit_record's sample in the stored-row scan"),
+    ("F-Z-9", "C", "W", "mode_selection='auto' moves the exact engine's PSFB turn-on v_DS by 2e-9 .. 3e-9 V [owner: mode selection / exact route]",
+     "test_soft_switching_kpi `_engine_trace('psfb_full_bridge_zvs', 'dsed')` (v1 YAML, engine='dsed'), v_DS of S1 on the "
+     "row before each turn-on",
+     "the mpmath truth to V_TOL 1e-9 V (-0.0046213011 V at 10 us)",
+     "mode_selection='legacy': 7.3e-11 / 1.6e-10 V off",
+     "1.99e-9 / 3.12e-9 V off at 10 / 20 us (rel 4e-7 of the value, inside rtol_exact 1e-6 but above the cell's 1e-9 V); "
+     "unchanged with device_path='legacy', discontinuity_restart=False, output_rtol=0: the release's mode selection "
+     "(pass mode_selection='auto' on the integration line to reproduce)"),
 ]
 
 # Closed by a fix merged into the release branch: id -> where and the measured result.

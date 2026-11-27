@@ -79,9 +79,11 @@ CASES = {
                                       [("SH", "V(gate)", "V(vcc,sw)")], 1e-6, 1.0),
 }
 ENGINES = {"pwl": "runner default", "trbdf2": "runner variable",
-           "pwl_restart": dict(engine="pwl", discontinuity_restart=True), "dsed": dict(engine="dsed")}
+           "pwl_restart": dict(engine="pwl", discontinuity_restart=True), "dsed": dict(engine="dsed"),
+           # the plain fixed engine (trap 9) is no longer the runner default: its own cell
+           "pwl_plain": dict(engine="pwl", discontinuity_restart=False)}
 V_TOL = {"dsed": 1e-9, "trbdf2": 1e-4, "pwl_restart": 1e-3}
-E_TOL = {"dsed": 3e-5, "trbdf2": 1e-3, "pwl_restart": 1e-2, "pwl": 1e-2}
+E_TOL = {"dsed": 3e-5, "trbdf2": 1e-3, "pwl_restart": 1e-2, "pwl": 1e-2, "pwl_plain": 1e-2}
 TRAP9 = ("known: trap 9 -- the plain fixed engine books each commutation one step early and rings on "
          "the switch node; measured: {}")
 KNOWN_PWL = {   # (ZVS / turn-on voltage, switching energy): the first assertion each fails
@@ -169,11 +171,29 @@ def _measured(runner, case, engine):
     return t, tr, k
 
 
+# The runner default under the release (restart rule + event split). Its CSV carries the grid rows
+# only, no record collapse row, so the trapezoid holds each turn-on's pre-collapse row over the next
+# step (the engine itself, read with collapse rows as _engine_trace reads it: LLC S_hi -0.4 %, PSFB S3
+# -9.7 %, S1 -0.0 %: the restart cell's numbers). Measured on the runner's rows:
+_CSV = "known: the runner's CSV has no collapse rows (with_right_limits(collapse=True)); measured: {}"
+KNOWN_DEFAULT = {
+    "llc_half_bridge_zvs": (None, _CSV.format("S_hi energy 7.444e-11 J vs the truth's trapezoid 7.025e-11 J (+6.0 %)")),
+    "psfb_full_bridge_zvs": (None, _CSV.format("S3 energy 5.672e-11 J vs the truth's trapezoid 3.396e-11 J (+67 %)")),
+}
+
+
+KNOWN_DSED = {"psfb_full_bridge_zvs": (
+    "release finding F-Z-9: mode_selection='auto' (release default) on the exact engine: v_DS at S1's "
+    "10 / 20 us turn-on 1.99e-9 / 3.12e-9 V off the truth (V_TOL 1e-9); mode_selection='legacy' 7.3e-11 / 1.6e-10 V")}
+
+
 def _cells(which):
     for case in CASES:
         for eng in ENGINES:
-            why = (KNOWN_PWL[case][which] if eng == "pwl"
-                   else KNOWN_RESTART.get(case) if eng == "pwl_restart" and which == 1 else None)
+            why = (KNOWN_PWL[case][which] if eng == "pwl_plain"
+                   else KNOWN_DEFAULT.get(case, (None, None))[which] if eng == "pwl"
+                   else KNOWN_RESTART.get(case) if eng == "pwl_restart" and which == 1
+                   else KNOWN_DSED.get(case) if eng == "dsed" and which == 0 else None)
             marks = [pytest.mark.xfail(strict=True, reason=why)] if why else []
             yield pytest.param(case, eng, marks=marks, id=f"{case}-{eng}")
 
@@ -222,7 +242,8 @@ def test_zvs_kpi_and_turn_on_voltage(runner, case, engine):
         on = [k for k in on if t[k] < tr["t_end"] - dt]
         assert len(on) == sum(1 for x in tr["t_on"] if x < tr["t_end"] - dt), (sw, len(on))
         for k, te, want in zip(on, tr["t_on"], tr["v_ds_at_turn_on"]):
-            assert abs(t[k] - te) <= dt, (sw, t[k], te)             # the same edge
+            # the same edge (an edge on a grid point is first read on the next row: t[k] - te = dt + 1.6e-21 s)
+            assert abs(t[k] - te) <= dt * (1 + 1e-9), (sw, t[k], te)
             assert abs(v[k - 1] - want) <= V_TOL.get(engine, 1e-3), (sw, te, v[k - 1], want)
 
 
@@ -271,8 +292,9 @@ def test_runner_writes_the_kpi_columns_and_the_benches_pass(runner):
         assert interp + 0.5 <= bound < interp + 0.55, (case, interp, bound)
     for case in ("llc_half_bridge_zvs", "psfb_full_bridge_zvs"):
         assert status[(case, "variable")][0] == "passed", status
-        # trap 9 on the plain fixed engine: a known disagreement (v2_triage), > 200 V seen
-        assert status[(case, "default")][0] == "failed", status
+        # the runner default is the restart rule + split under the release (trap 9 was the plain
+        # engine's, > 200 V seen): it passes (LLC max_error 0.0806 V measured)
+        assert status[(case, "default")][0] == "passed", status
 
 
 @pytest.mark.xfail(strict=True, reason="F-S-5: trbdf2 starts V(b) of the PSFB at 599.8 V (3e-16 s), 200 V off "
