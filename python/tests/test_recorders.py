@@ -294,9 +294,19 @@ def test_in_loop_feeding_equals_the_stored_array_pass(eng, case):
                 np.testing.assert_allclose(sa[f], sb[f], rtol=rtol,
                                            atol=atol, err_msg=f"{q} {f}")
     if eng == "pwl" or case not in ("rect", "buck"):
-        np.testing.assert_array_equal(a.times, b.times)
+        ta, tb = np.asarray(a.times), np.asarray(b.times)
+        keep = np.ones(tb.size, bool)
+        if eng == "trbdf2":
+            # a turn-off committed at its landing stores its settled post-event
+            # probe (t_ev + the probe's dt, at most the ladder's span·1e-6) as
+            # an extra sample the in-loop record does not carry (the bridge)
+            keep = np.isin(tb, ta)
+            ev = np.array([e.t_estimated for e in res.commutation_events])
+            for t in tb[~keep]:
+                assert ev.size and np.min(np.abs(t - ev)) <= 1e-6 * te, t
+        np.testing.assert_array_equal(ta, tb[keep])
         for q in probes:
-            np.testing.assert_allclose(a[q], b[q], rtol=1e-9, atol=1e-12)
+            np.testing.assert_allclose(a[q], np.asarray(b[q])[keep], rtol=1e-9, atol=1e-12)
 
 
 def test_store_every_gives_the_full_runs_statistics():

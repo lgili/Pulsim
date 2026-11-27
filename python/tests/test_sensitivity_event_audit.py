@@ -75,7 +75,6 @@ STAIRCASE = "staircase"
 NEWTON = "Newton device"
 STATEFUL = "its own state history"
 LANDING = "interpolated or ESDIRK diode landing"
-FLOOR = "conditioning floor"
 
 
 def _expected(kind, dev, eng):
@@ -91,8 +90,6 @@ def _expected(kind, dev, eng):
         return LANDING
     if dev == "newton":
         return NEWTON
-    if kind == "diode_on_off_sine" and eng == "trbdf2":
-        return FLOOR      # the turn-off is flipped at t, not landed
     return None
 
 
@@ -252,6 +249,19 @@ def test_every_cell_is_a_true_number_or_a_refusal_by_name(kind, dev, eng):
         return
     truth = _truth(kind, dev, t_last, name)
     assert s == pytest.approx(truth, rel=1e-5), (s, truth)
+
+
+@pytest.mark.parametrize("rtol", [1e-9, 1e-11])
+def test_trbdf2_sine_rectifier_turnoffs_commit_at_their_landing(rtol, monkeypatch):
+    """The sine cell's turn-off landings commit their diode at every rtol: an
+    interpolated landing sits 1e-6 of its bracket past the zero, inside the
+    round-off bound, and was refused at all three (macOS) when that bound held
+    it. Carried as an event one step later it read 7.4e-4 / 1.65e-4 off (O(h))."""
+    monkeypatch.setitem(ENGINES, "trbdf2", ("trbdf2", dict(rtol=rtol, atol=rtol * 1e-3)))
+    r = _run("diode_on_off_sine", "linear", "trbdf2")
+    s = float(r.sens("c", "RL.R")[-1])
+    truth = _truth("diode_on_off_sine", "linear", float(r.sensitivity.times[-1]), "RL.R")
+    assert s == pytest.approx(truth, rel=1e-6), (s, truth)
 
 
 # The event AT t_end (DECISIONS 16, the reviewer's finding): an event within

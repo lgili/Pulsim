@@ -9,6 +9,8 @@
 // before the table existed, so a driver that takes its stage from the
 // table is bit-identical to one that did not.
 
+#include <cmath>
+
 #include "pulsim/pwl/device_refresh.hpp"   // StepCtx
 #include "pulsim/pwl/history_state.hpp"    // trbdf2_gamma()
 #include "pulsim/pwl/trbdf2_stage.hpp"     // TrBdf2Stage
@@ -118,6 +120,23 @@ struct Sdirk22 {
     }
     [[nodiscard]] static Real weight(int s, int j) noexcept {
         return (s == 1 && j == 0) ? (Real{1} - gamma()) / gamma() : Real{0};
+    }
+    /// The γ of the TR-BDF2 driver's SDIRK(2,2) restart step: γ_TR-BDF2 / 2,
+    /// written 1 − 1/√2 as the driver always wrote it (the literal of
+    /// gamma() may round differently, DECISIONS 4, so the driver keeps this one).
+    [[nodiscard]] static Real restart_gamma() noexcept {
+        return Real{1} - Real{1} / std::sqrt(Real{2});
+    }
+    /// The restart step's embedded first-order estimate of one state entry,
+    /// h(1 − γs)(k1 − k2) with k_s the stage derivatives (design D3).
+    /// Moved from run_transient_trbdf2; the same expression, so the same bits.
+    [[nodiscard]] static Real lte(Real h, Real gs, Real k1, Real k2) noexcept {
+        return h * (Real{1} - gs) * (k1 - k2);
+    }
+    /// The same estimate on a charge / flux row, in increments: the stage-2
+    /// increment of ψ5 minus ((1 − γs)/γs) times the step-end increment.
+    [[nodiscard]] static Real lte_q(Real d_psi5, Real d_1, Real gs) noexcept {
+        return d_psi5 - (Real{1} - gs) / gs * d_1;
     }
 };
 

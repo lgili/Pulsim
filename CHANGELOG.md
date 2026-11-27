@@ -51,6 +51,26 @@ above.
   does (|lambda| / dt). The kernel design evaluator hands a period with a
   cut-set record to the Python path.
 
+### TR-BDF2: a turn-off landing commits its diode
+
+- **A diode turn-off landed within round-off of its zero now switches at the
+  landing** (`trbdf2`), by the same probes the next step would have run at that
+  instant. Sensitivity runs of a DCM buck were refused at rtol 1e-10 on Linux /
+  Windows and 1e-9 on macOS ("a diode crossing within the conditioning floor
+  of its start"); they now return the true number. Runs without sensitivities
+  are bit-identical on most circuits. An LLC at rtol 1e-10 moves at the
+  tolerance level (a diode that turned off one 2.2e-15 s step after the
+  landing now turns off at it).
+
+### Fixed step: the event split's re-initialisation record (F-Z-1)
+
+- **With the event split (`enable_substep_state_correction=True`) a cut-set /
+  capacitor-loop record is taken at the located edge** — its time and the
+  state there (i_L(t_e-)), not the step start's t_prev and x_prev. The state
+  was already cut at the edge; only the record (and the loss tracker's
+  impulse it books) read the step start: an edge at 99.999 h was recorded at
+  99 h with i_L(99 h). Without the split nothing changes.
+
 ### TR-BDF2: edge probes and the floating-point fixed point
 
 - **An edge probe that passes only as a floating-point fixed point is retaken
@@ -59,6 +79,21 @@ above.
   atol 1e-12 (the benchmark reference) committed a 2.3 fs probe at 3.5e8 V
   after the 1.5 us turn-off and then aborted at h_min; it runs again. ll13's
   own trajectories at other tolerances move (fewer roundoff accepts).
+
+### Transient engines on one step driver (refactor-unified-transient-stepper)
+
+- **No result changes.** The `pwl` and `trbdf2` engines now share the step
+  driver and its pieces in `core/include/pulsim/solver/step/` (see
+  "For developers: where the stepper lives" in `docs/solvers.md`). Results and
+  counters are byte-identical to before, checked against stored baselines.
+- **No legacy engine name.** The old TR-BDF2 loop was never exposed as a
+  public `trbdf2-legacy` engine. It was kept behind an internal switch for
+  one slice and then deleted, so there is nothing to migrate and no removal
+  date.
+- **Zero-allocation test for TR-BDF2.** Accepted and rejected steps do not
+  allocate. A step that retries after a failed Newton solve allocates about
+  10 to 16 times, for the failure's error message. A test holds that bound;
+  the allocation itself is not fixed yet.
 
 ### Exact engine, phase 3 slice (add-exact-propagator-strategy groups 7, 10)
 

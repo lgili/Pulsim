@@ -113,8 +113,8 @@ public:
     /// After a committed step solved under `stamped` from `x_prev` (at
     /// `t_prev`) to `x`: record each dependent structure the step entered
     /// impulsively (the explicit projection), or raise on 'error'.
-    /// shortcut: x- is the state at the step start (with the fixed engine's
-    /// event split, not the split instant); the record's t is t_prev.
+    /// `x_prev` / `t_prev`: the state and time the mode was entered from (the
+    /// fixed engine's event split passes the split instant's left limit).
     void record(BranchStructureChecker& structure,
                 const topology::SwitchStateMask& stamped, const Vector& x_prev,
                 const Vector& x, Real t_prev, long sample, bool on_impulse_error,

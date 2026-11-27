@@ -777,3 +777,37 @@ hunk: `edge_past_end` in the no-final-sliver arm, next to the line rule).
   both sides, measured before the `located` fix, which is inside a
   sens-only lambda): buck_pwl +0.10 %, vsi_pwl +0.04 %, buck_trbdf2
   +0.01 %, bridge_trbdf2 +0.02 %.
+
+### TR-BDF2 turn-off landings commit their diode (2026-11-26, PR #150 CI)
+
+- The rtol-1e-9 (macOS) / 1e-10 (Linux, Windows) refusal "a diode crossing
+  within the conditioning floor of its start" was not a sensitivity defect:
+  the step before was an interpolated turn-off landing (1e-6 of its bracket
+  past the zero, by construction), and the landing's round-off bound held
+  the diode ON at -1.4e-24 A (DCM buck) / -8.9e-16 A (sine cell). The next
+  step re-found it on its forbidden side and flipped it by probes at the
+  same t. Which path ran was decided by libm.
+- Fix (`trbdf2_transient.hpp`, landing): when the bound held every flip at a
+  landing and the located diode is on its post-crossing side by any amount,
+  the landing runs the chatter-safe path's own decision at that t (probe
+  settle at h_probe_floor, then dt_floor), so the flip happens at the
+  landing, by the decision the next step would have made, and the regular
+  landed-event path (and its saltation) follows. Rejected first version:
+  forcing only the located diode's bit left a bridge's series partner ON at
+  zero current for 0.3 ms and added a late event (diode_bridge_rectifier
+  n_diode_events 26 > frozen 19).
+- The probes refactor the pre-event mode's event entry at their dt, so the
+  saltation takes any resident factor of that mode with a = 2/its dt (as the
+  interpolated landing does): ẋ⁻ is the bordered solve's, G·y = ḃ with
+  C/2·y = q̇⁻, independent of the factor's dt. No extra factorization.
+- Sensitivities now: sine cell vs Radau rel -2.1e-7 / 6.5e-9 / -1.4e-8 at
+  rtol 1e-9 / 1e-10 / 1e-11 (the carried-at-t attempt: 7.4e-4 / 3.6e-4 /
+  1.65e-4); DCM buck L -2.9e-5 / -5.4e-6 / -1.1e-6 (the method's error).
+  The 1e-9 strict xfail and the audit's FLOOR cell are numbers now.
+- Runs without sensitivities (21 trbdf2 runs, Eigen-3.4 build of a9d6a83a,
+  shown bit-identical to its Eigen-5 build on the 7 sensitivity runs): 20
+  bit-identical (both diode-bridge runs included, 19 = 19 events), most
+  with fewer solves (-1 .. -15). One differs: llc_half_bridge_zvs at rtol
+  1e-10 (D_lo turned off one 2.2e-15 s step after the landing, under the ON
+  mask, without a commutation record; now at the landing; final state
+  4.2e-7 off, n_steps +4 of 52 556, n_solves -7).

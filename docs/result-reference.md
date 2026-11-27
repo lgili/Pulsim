@@ -58,6 +58,34 @@ Engine-specific diagnostics: `newton` (`NewtonCounters`), `counters`
 `step_loop_python_callbacks`, `final_snapshot` (for
 `simulate(resume_from=...)`), `states_bytes` / `total_bytes`.
 
+## Snapshots: `final_snapshot` and `resume_from`
+
+`result.final_snapshot` is the solver's state at the run's last time.
+Passing it as `simulate(..., resume_from=snap)` continues from there, and
+it can be pickled. Besides the circuit state it can carry the step
+controller's memory, which `snap.controller_state` shows as
+`(kind, values)` or `None`:
+
+| kind | written by | what a resume does with it |
+|---|---|---|
+| 2, LTE | `engine='trbdf2'` | the next step is the step the stopped run would have taken |
+| 3, exact | `engine='exact'` | `engine='dsed'` resumes from it; the other engines refuse it |
+| `None` | `engine='pwl'`, or a snapshot without the block | `trbdf2` restarts its controller; `pwl` steps on its `dt` |
+
+What to expect from a split run (tests in
+`python/tests/test_trbdf2_resume_controller.py`):
+
+- **Bit-identical** on `trbdf2` when the controller block is the run's
+  whole loop state, for example an RLC with no switches or diodes, split
+  at one of the continuous run's step times.
+- **Not bit-identical** on a switched circuit. The edge-learning and
+  hold state of the TR-BDF2 loop is not in the snapshot, so the next gate
+  edge can land in a different 14th digit. The resumed run still agrees
+  to tolerance.
+- **Across engines.** A `pwl` snapshot resumes on `trbdf2` and the
+  reverse, to the engines' tolerance.
+- A run with a control graph refuses to resume between two of its ticks.
+
 ## Recorders: `recorded` and `recorder_feed`
 
 With `simulate(recorders=[pulsim.Recorder(...)])`:

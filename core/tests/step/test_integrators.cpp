@@ -53,3 +53,12 @@ TEST_CASE("Trapezoidal: one stage, factor = interval = h", "[step]") {
     STATIC_CHECK(step::TrBdf2::n_stages == 2);
     STATIC_CHECK(step::BackwardEuler::order == 1);
 }
+
+TEST_CASE("SDIRK restart gamma is TR-BDF2's gamma / 2 (to an ulp)", "[step]") {
+    const double gs = step::Sdirk22::restart_gamma();
+    CHECK(std::abs(gs - 0.5 * step::TrBdf2::gamma()) <= 2e-16);
+    CHECK(std::abs(gs - step::Sdirk22::gamma()) <= 2e-16);
+    // the estimate vanishes when both stage derivatives agree
+    CHECK(step::Sdirk22::lte(1e-6, gs, 3.0, 3.0) == 0.0);
+    CHECK(step::Sdirk22::lte_q(0.0, 0.0, gs) == 0.0);
+}

@@ -146,6 +146,7 @@ if(PULSIM_BUILD_TESTS)
     add_executable(pulsim_core_step_tests
         tests/step/test_integrators.cpp
         tests/step/test_controllers.cpp
+        tests/step/test_policies.cpp
         tests/step/test_stepper.cpp
         tests/step/test_esdirk43.cpp  # add-high-order-stiff-integrator
         tests/step/test_sensitivity.cpp  # add-parameter-sensitivities group 5
