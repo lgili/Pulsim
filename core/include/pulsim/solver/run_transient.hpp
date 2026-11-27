@@ -1035,7 +1035,9 @@ inline SimulationResult run_transient(
     // F-Z-14: the same for a branch-form diode's flip — whether the step
     // starts at a gate edge (its gate bits changed; the diode bits ignored)
     topology::SwitchStateMask ideal_prev_stamp = stamped_mask;
+    bool ideal_prev_known = false;   // an unknown start stamp is no edge
     auto gate_edge_since = [&](const topology::SwitchStateMask& prev) {
+        if (!ideal_prev_known) return false;
         const auto d = diodes.current_diode_mask();
         return !(combine_masks(stamped_mask, d, diode_owned) ==
                  combine_masks(prev, d, diode_owned));
@@ -5075,7 +5077,10 @@ inline SimulationResult run_transient(
             // a gated device's record compares with the last OUTER step's
             // stamp: restart stages and split sub-steps re-stamp in between
             if (diodes.num_gated() > 0) gated_prev_stamp = stamped_mask;
-            if (has_ideal_diode) ideal_prev_stamp = stamped_mask;
+            if (has_ideal_diode) {
+                ideal_prev_stamp = stamped_mask;
+                ideal_prev_known = stamped_known;
+            }
 
             // ---- discontinuity restart (add-discontinuity-restart-rule)
             // Triggers: an unknown previous stamp, a mask that differs
@@ -6376,7 +6381,10 @@ inline SimulationResult run_transient(
             // (adversarial-review finding P0-R1).
             last_solved_bits.clear();
             if (diodes.num_gated() > 0) gated_prev_stamp = stamped_mask;
-            if (has_ideal_diode) ideal_prev_stamp = stamped_mask;
+            if (has_ideal_diode) {
+                ideal_prev_stamp = stamped_mask;
+                ideal_prev_known = stamped_known;
+            }
             const bool mode_site_s = mode_ports.has_value() && !nl_refresh_effective;
             auto solve_s = [&](const topology::SwitchStateMask& m, Vector& out) {
                 cache.solve_segment(nominal_segment(m), b_extra_user, out);   // solve-exempt: static path (DECISIONS 22)
