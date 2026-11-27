@@ -1888,6 +1888,13 @@ inline SimulationResult run_transient(
         Real rs_trig_loc = 0;
         // the trigger is an event (F-SB-1): not an unknown start's stamp
         bool rs_trig_ev = false;
+        // F-Z-3: the split's last event piece [rs_piece_a, t] probes only the
+        // modes faster than γ·(t − rs_piece_a); the grid step at anchor_t
+        // probes the rest as a time event at its start (δt_loc = 0)
+        Real rs_piece_a = 0;
+        Real anchor_t = split && resume_snap != nullptr && resume_snap->restart_anchor_at_end
+                            ? opts.t_start
+                            : std::numeric_limits<Real>::quiet_NaN();
         // ... and only diode bits changed there (no gate edge, no source
         // jump): a crossing landed on that grid point stays a continuity
         // point (event_right_limit)
@@ -3737,8 +3744,24 @@ inline SimulationResult run_transient(
                 // ... and so may its declared b_extra_fn jumps (review L6).
                 bj_from = std::numeric_limits<Real>::infinity();
                 bj_next = -std::numeric_limits<Real>::infinity();
+                gate_memo_n = 0;
             }
-            gate_memo_n = 0;
+            if (!split) {
+                gate_memo_n = 0;
+            } else {   // F-Z-2: the last step's end is this step's start (one read, not two)
+                Size keep = 0;
+                for (Size q = 0; q < gate_memo_n; ++q) {
+                    if (gate_memo_t[q] == t_prev) {
+                        if (q != 0) {
+                            gate_memo_t[0] = t_prev;
+                            gate_memo_m[0] = gate_memo_m[q];
+                        }
+                        keep = 1;
+                        break;
+                    }
+                }
+                gate_memo_n = keep;
+            }
             // ---- add-fixed-step-event-splitting: the step's events ----
             // Gate edges from the schedule's oracle and built-in source
             // jumps inside [t_prev + snap, t - snap), in time order. One
@@ -4263,6 +4286,7 @@ inline SimulationResult run_transient(
         // start, a scheduled or located split event): its right limit is
         // recorded (F-SB-1); a window step's only after a probed jump.
         auto restart_lined_once = [&](auto& run_event_iteration, Real a, Real h, Real loc, bool ev) {
+            rs_piece_a = a;
             const bool inner = a != t_prev_step;
             StepLines& lines = *L;   // restart steps exist under the rule only
             if (lines.owner != t_step) {   // the step's first: no per-step reset
@@ -4924,6 +4948,7 @@ inline SimulationResult run_transient(
                                 restart_lined(run_event_iteration, a, h,
                                             i > 0 ? ev_s[i - 1] - ev_t[i - 1]
                                             : rs_trig_t == t_prev ? rs_trig_loc
+                                            : anchor_t == t_prev  ? Real{0}
                                                                   : kGamma * h,
                                             i > 0 || (rs_trig_t == t_prev && rs_trig_ev));
                             } else {
@@ -5099,6 +5124,22 @@ inline SimulationResult run_transient(
                             ++result.n_split_steps;
                             // The event's step and the next two (the rule's window).
                             restart_left = std::max(restart_left, kRestartSteps - 1);
+                        }
+                        // F-Z-3: a last piece that starts at an event inside the
+                        // step (s = t − rs_piece_a < dt) projected only the modes
+                        // faster than γs (a 1 ps mode after a 1e-14 s piece rang
+                        // ±2.25 A on). The next grid step is a restart whose probe
+                        // reads what is left as a jump at its start (δt_loc = 0:
+                        // the motion since the event is already in x; no jump
+                        // found: the plain restart, bit for bit).
+                        anchor_t = std::numeric_limits<Real>::quiet_NaN();
+                        // Only below γ·dt (the restart's own stage 1): a longer piece's
+                        // stage 1 already spans γ²·dt, and the probe would record the
+                        // rest of a resolved collapse as a jump at t (a 50 ns junction
+                        // capacitor after a 0.5·dt piece: a second right-limit row).
+                        if (committed_be && rs_piece_a > t_prev && t - rs_piece_a < kGamma * opts.dt) {
+                            anchor_t = t;
+                            restart_left = std::max(restart_left, Size{1});
                         }
                         flipped = breach || ev_overflow;
                     };
@@ -5926,6 +5967,7 @@ inline SimulationResult run_transient(
                           result.times.size() - rd.lte.size(), Real{0});
         }
         result.final_snapshot.restart_steps_left = restart_left;
+        result.final_snapshot.restart_anchor_at_end = anchor_t == t_reached;
         result.n_restart_factorizations = restart_factorizations;
     } else {
         // ----------- STATIC PATH ----------------------------------------

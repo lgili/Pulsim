@@ -351,6 +351,11 @@ public:
     /// the step of a discontinuity and the next two as SDIRK(2,2)
     /// steps, so a run stopped inside that window resumes it. 0 = none.
     Size restart_steps_left = 0;
+    /// The run ended on a split step whose last piece started at an event
+    /// (F-Z-3): the resumed first step probes as a time event at its start.
+    /// shortcut: not pickled (a pickled resume probes as a window step);
+    /// add it to the pickle tuple if a chunked run must match across processes
+    bool restart_anchor_at_end = false;
     /// The step-size controller's state at `t`
     /// (refactor-unified-transient-stepper task 12): the variable-step
     /// engine's step memory. Empty (`Kind::None`) from the fixed engine,
