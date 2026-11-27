@@ -20,7 +20,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `diagnostics['output_grid']['n_output_inconsistent']` with a RuntimeWarning
   (`output_inconsistent`). Seven bridges: 12 795 samples, no capped interval;
   ten: 16 264; last-bit perturbations of `t_end` / amplitudes stay within
-  12 795–17 879. Rule off: unchanged (byte-identical). The win32 skip of
+  12 795–20 726. Rule off: unchanged (byte-identical). The win32 skip of
   `test_fx1_ten_branch_form_bridges_run_under_the_rule` is removed.
 
 ### Exact engine, phase 3 slice (add-exact-propagator-strategy groups 7, 10)

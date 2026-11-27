@@ -1705,10 +1705,10 @@ in the curvature set: replaced.)
 | 6 / 8 bridges | 12 237 / 0, 15 213 / 0 | 12 236 / 0, 15 213 / 0 |
 | 10 bridges (the test's case) | 16 264 / 0 / 22.8 (Linux 216 675 / 49, Windows 1 877 398 / 454) | 16 264 / 0 / 270 / 23.3 |
 | 10, `t_end`·(1 ± 1e-15) | | 16 264 / 0 / 23.2, 16 264 / 0 / 23.2 |
-| 10, amplitude·(1 ± 1e-15) | | 16 328 / 0 / 22.1, 17 879 / 0 / 23.0 |
+| 10, amplitude·(1 ± 1e-15) | | 16 328 / 0 / 22.6, 20 726 / 0 / 25.1 |
 | 9 / 11 bridges | | 17 515 / 0 / 17.3, 19 486 / 0 / 29.6 |
 
-Every perturbation lands within 12 795–17 879 samples, 0 capped. Rule off: byte-identical on
+Every perturbation lands within 12 795–20 726 samples, 0 capped (final code, `.scratch/orule/stageA2.log`). Rule off: byte-identical on
 7 and 10 bridges and on the 100 property units (`.scratch/f4/prop_units_all.txt`, exact engine,
 times + states hashed). Rule on, the 100 units: 99 byte-identical; active_clamp_forward
 differs (same 62 418 samples, 7 inconsistent calls): its chords against a dense rule-on run
@@ -1717,5 +1717,5 @@ itself cannot read this unit: "reference events differ: 674 vs 675", before and 
 bridges' uncapped runs lose 0–14 samples where the ν-floor applied (14 118 → 14 104).
 
 State: CLOSED on macOS evidence; the win32 skip is removed and the 10-bridge test asserts
-`n_output_capped == 0` (CI on the branch below). Not measured: why the Windows engine is 2.75×
+`n_output_capped == 0`. Verification on 104ff594 (macOS): exact files 144 passed; referee 100 units, 93 comparable, worst 0.99991, none above 1, same as session 10; ctest 1105/1105; pytest 7538 passed (the ten-bridge case 56.7 s per gate); `-m reference` 414 passed; ruff, stubs and openspec clean. Windows: CI run 45934328900, not read yet. Not measured: why the Windows engine is 2.75×
 slower rule-free.
