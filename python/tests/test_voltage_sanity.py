@@ -148,8 +148,8 @@ def test_a_restart_rule_cut_is_named_not_called_a_node_voltage():
     msgs = [str(w.message) for w in caught]
     assert not [m for m in msgs if "largest voltage any source" in m]
     (hit,) = [m for m in msgs if "cut the" in m]
-    assert "'S'" in hit and "'L'" in hit and f"{i_e:.4g} A" in hit
-    assert f"{rec.dW:.4g} J" in hit
+    assert "'S'" in hit and f"the {i_e:.4g} A current of 'L'" in hit
+    assert f"½·L·i² = {rec.dW:.4g} J" in hit   # one state: dW is its own
     # the row itself is unchanged: the model's right limit (i continuous)
     v = p.with_event_limits(res)
     t = np.asarray(v.times)
@@ -159,3 +159,25 @@ def test_a_restart_rule_cut_is_named_not_called_a_node_voltage():
     assert il[j + 1] == pytest.approx(il[j], rel=1e-9)
     assert abs(np.asarray(v.v("sw"))[j + 1]) > 1e9
     assert res._implausible_voltage.node >= 0
+
+
+def test_a_cut_set_names_the_inductive_state_not_a_capacitor_it_also_moved(monkeypatch):
+    """F-Z-8 follow-up on half_bridge_transformer_dc: the cut-set record's states
+    list every state the jump moved in entry order (Cdiv1, Cdiv2, T1.p, T1.s);
+    the warning said "'S_h' cut the current of 'Cdiv1'" — a capacitor named as a
+    cut current. It names the record's own kind (an inductive winding) now."""
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[2]
+    monkeypatch.syspath_prepend(str(root / "benchmarks" / "tools"))
+    pytest.importorskip("yaml")
+    import v1_reader
+    case = v1_reader.load(root / "benchmarks/circuits/magnetics/half_bridge_transformer_dc.yaml")
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        r = case.run("pwl", discontinuity_restart=True)
+    hits = [str(w.message) for w in caught if "cut the" in str(w.message)]
+    assert hits
+    assert "of 'Cdiv" not in hits[0] and "current of 'T1." in hits[0]
+    rec = next(q for q in r.reinit_records if f"t = {q.t:.6g} s" in hits[0])
+    assert rec.kind == "cut_set" and rec.states[0] == "Cdiv1"   # the listing that misled
+    assert f"{rec.dW:.4g} J" in hits[0] and "½·L·i²" not in hits[0]   # several states

@@ -70,8 +70,14 @@ struct ImplausibleVoltage {
     /// F-Z-8: the peak is a restart-rule cut's right-limit row (i·R_off across
     /// the cutting device for its unresolved L/R_off mode), not a node voltage
     /// of the waveform: the record that cut it (empty: an ordinary finding).
-    std::string cut_device, cut_state;
-    Real cut_current = Real{0}, cut_energy = Real{0};
+    /// cut_state is the record's first state of its own kind (an inductor for
+    /// 'cut_set', a capacitor for 'capacitor_loop'), cut_state_kind 'L' / 'C',
+    /// or empty / 0 when no listed state is of that kind (the message then
+    /// names neither a current nor a voltage). cut_size = 2·dW/|λ| of a
+    /// single collapsing state: the cut current (L) or the voltage jump (C).
+    std::string cut_device, cut_state, cut_kind;
+    char cut_state_kind = 0;
+    Real cut_size = Real{0}, cut_energy = Real{0};
 };
 
 /// The largest voltage magnitude any INDEPENDENT source in the
@@ -211,7 +217,7 @@ struct ImplausibleVoltage {
         const ReinitRecord* cut_rec = nullptr;
         auto cut_at = [&](Real te) -> const ReinitRecord* {
             for (const auto& q : result.reinit_records) {
-                if (q.kind == "cut_set" && q.t == te) return &q;
+                if (q.t == te) return &q;   // a cut set or a capacitor loop
             }
             return nullptr;
         };
@@ -256,11 +262,30 @@ struct ImplausibleVoltage {
         if (out.node == kInvalidIndex && cut_rec != nullptr) {
             out = cut;
             out.cut_device = cut_rec->devices.empty() ? cut_rec->cause : cut_rec->devices.front();
-            out.cut_state = cut_rec->states.empty() ? std::string{} : cut_rec->states.front();
+            out.cut_kind = cut_rec->kind;
             out.cut_energy = cut_rec->dW;
-            // λ = L·i and dW = ½·L·i² of the dominant state: i = 2·dW/λ
-            // (one collapsing state only: dW of several is not one L·i²/2)
-            out.cut_current = cut_rec->lambda != Real{0} && cut_rec->states.size() == 1
+            // the states list every state the jump moved, in entry order (a
+            // divider capacitor before the winding whose current was cut):
+            // name the first of the record's own kind, never another kind's
+            using SK = pwl::DevicePool::StoredKind;
+            const char want = cut_rec->kind == "cut_set" ? 'L'
+                              : cut_rec->kind == "capacitor_loop" ? 'C' : 0;
+            bool linear = false;
+            for (const auto& s : cut_rec->states) {
+                for (Index b = 0; want != 0 && out.cut_state.empty() && b < graph.num_branches(); ++b) {
+                    if (graph.branch_name(b) != s || !pool.is_registered(b)) continue;
+                    const SK k = pool.kind_of(b);
+                    if ((want == 'L' && (k == SK::Inductor || k == SK::SaturableInductor)) ||
+                        (want == 'C' && (k == SK::Capacitor || k == SK::NonlinearCapacitor))) {
+                        out.cut_state = s;
+                        out.cut_state_kind = want;
+                        linear = k == SK::Inductor || k == SK::Capacitor;
+                    }
+                }
+            }
+            // λ = L·i (C·ΔV) and dW = ½·L·i² (½·C·ΔV²): i (ΔV) = 2·dW/λ
+            // (one linear collapsing state only: dW of several is not one L·i²/2)
+            out.cut_size = linear && cut_rec->lambda != Real{0} && cut_rec->states.size() == 1
                 ? std::abs(Real{2} * cut_rec->dW / cut_rec->lambda) : Real{0};
         }
     }
@@ -300,10 +325,10 @@ struct ImplausibleVoltage {
             "them needs a freewheel path (add_diode(..., V_f=...) across "
             "the device or the load).", gated);
     }
-    if (!v.cut_device.empty()) {
+    if (!v.cut_device.empty() && v.cut_state_kind == 'L') {
         return std::format(
             "'{}' cut the {} of '{}' at t = {:.6g} s in an "
-            "instant: the restart rule booked its energy {:.4g} J once, as an "
+            "instant: the restart rule booked its energy {}{:.4g} J once, as an "
             "impulse record (result.reinit_records, kind 'cut_set'). The right "
             "limit stored there is the model's own before that collapse: the "
             "current held across the switch's off-conductance, {:.3e} V at {} "
@@ -313,9 +338,35 @@ struct ImplausibleVoltage {
             "diode, a snubber, the switch's capacitance or avalanche): add "
             "whichever your design has.",
             v.cut_device,
-            v.cut_current > Real{0} ? std::format("{:.4g} A current", v.cut_current)
-                                    : std::string("current"),
-            v.cut_state, v.t_peak, v.cut_energy,
+            v.cut_size > Real{0} ? std::format("{:.4g} A current", v.cut_size)
+                                 : std::string("current"),
+            v.cut_state, v.t_peak,
+            v.cut_size > Real{0} ? "½·L·i² = " : "",   // one state: dW is its own
+            v.cut_energy, v.peak, pwl::row_label(graph, pool, v.node), v.source_scale);
+    }
+    if (!v.cut_device.empty() && v.cut_state_kind == 'C') {
+        return std::format(
+            "'{}' closed a capacitor loop on '{}' at t = {:.6g} s: its voltage "
+            "jumped{} by charge sharing in an instant, and the restart rule booked "
+            "the energy {:.4g} J once, as an impulse record "
+            "(result.reinit_records, kind 'capacitor_loop'). The right limit "
+            "stored there, {:.3e} V at {} (the circuit's sources reach {:.4g} V), "
+            "is the ideal switch model's own across that instant, not a sample "
+            "of the waveform. A real circuit limits the sharing current (the "
+            "switch's on-resistance, the loop's inductance): add whichever your "
+            "design has.",
+            v.cut_device, v.cut_state, v.t_peak,
+            v.cut_size > Real{0} ? std::format(" by {:.4g} V", v.cut_size) : std::string{},
+            v.cut_energy, v.peak, pwl::row_label(graph, pool, v.node), v.source_scale);
+    }
+    if (!v.cut_device.empty()) {   // the collapsed state's kind is not told
+        return std::format(
+            "'{}' switched at t = {:.6g} s and the restart rule booked {:.4g} J "
+            "once, as an impulse record (result.reinit_records, kind '{}'). The "
+            "right limit stored there, {:.3e} V at {} (the circuit's sources "
+            "reach {:.4g} V), is the ideal switch model's own across that "
+            "instant, not a sample of the waveform.",
+            v.cut_device, v.t_peak, v.cut_energy, v.cut_kind,
             v.peak, pwl::row_label(graph, pool, v.node), v.source_scale);
     }
     return gated.empty() ? std::format(

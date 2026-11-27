@@ -41,6 +41,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and the energy ½·L·i² the record booked once (`simulate()` and the kernel
   `Simulation` object read the same check). The stored rows, the readers and
   the loss records are unchanged; a run with the rule off is byte-identical.
+  The named state is the record's own kind: an inductor for a cut set (the
+  record's states list every state the jump moved, and a divider capacitor
+  listed first was named as "the current of 'Cdiv1'" on
+  `half_bridge_transformer_dc`), a capacitor for a capacitor loop (worded as
+  a voltage jump by charge sharing, with its energy); when no listed state is
+  of that kind the message names neither a current nor a voltage.
 - **`SolverSnapshot` pickles `restart_anchor_at_end` and `invalid_reason`**
   (field 20, written only when either is set, so every other pickle is byte for
   byte as before; an older pickle loads them as `False` / `""`). A resume from a
