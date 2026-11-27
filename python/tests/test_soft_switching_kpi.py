@@ -55,6 +55,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+import pulsim
 import pulsim._result_views as rv
 
 mp = pytest.importorskip("mpmath")
@@ -183,8 +184,10 @@ KNOWN_DEFAULT = {
 
 
 KNOWN_DSED = {"psfb_full_bridge_zvs": (
-    "release finding F-Z-9: mode_selection='auto' (release default) on the exact engine: v_DS at S1's "
-    "10 / 20 us turn-on 1.99e-9 / 3.12e-9 V off the truth (V_TOL 1e-9); mode_selection='legacy' 7.3e-11 / 1.6e-10 V")}
+    "release finding F-Z-9: the exact engine's LCP mode selection ('auto' -> 'lcp') on branch-form diodes (the "
+    "release's form default) leaves D7 of the parallel D6/D7 pair OFF at the 7.92 us rectifier commutation; v_DS at "
+    "S1's 10 / 20 us turn-on 1.99e-9 / 3.12e-9 V off the truth (V_TOL 1e-9); the settle or form='conductance' "
+    "7.3e-11 / 1.6e-10 V")}
 
 
 def _cells(which):
@@ -328,3 +331,27 @@ def test_collapse_rows_follow_each_record_step():
     assert v.times[6] == np.nextafter(3.0, np.inf) and v.states[6].tolist() == st[4].tolist()
     assert v.switch_states[3].tolist() == sw[2].tolist()
     assert len(with_right_limits(r).times) == 6   # without collapse: one row per right limit
+
+
+
+@pytest.mark.parametrize("form", [
+    "conductance",
+    pytest.param("branch", marks=pytest.mark.xfail(strict=True, reason=(
+        "release finding F-Z-9: on branch-form diodes the LCP puts D6 ON with 1.3e-6 A and D7 OFF at a "
+        "7.8e-7 V gap at the 7.92 us rectifier commutation; D7 stays OFF to 7.9755 us (D6 4.66 A, truth 2.33 A)"))),
+])
+def test_exact_lcp_turns_on_both_parallel_rectifier_diodes(form, monkeypatch):
+    """F-Z-9's cause, at the mode: at the PSFB rectifier commutation
+    (7.9205 us, D5 and D8 ON) D6 and D7 are in parallel (0 -> r through
+    equal R_on) and share the current equally; the LCP must turn both ON
+    on either device form (the settle does)."""
+    for m in ("add_diode", "add_switch"):   # the reader takes the library's default form
+        f = getattr(pulsim.CircuitBuilder, m)
+        monkeypatch.setattr(pulsim.CircuitBuilder, m,
+                            lambda self, *a, _f=f, **k: _f(self, *a, **{"form": form, **k}))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = v1_reader.load(CASES["psfb_full_bridge_zvs"][0]).run("dsed", mode_selection="lcp")
+    k = int(np.searchsorted(np.asarray(r.times), 7.95e-6))
+    i6, i7 = (float(np.asarray(v1_reader.observable(r, f"I({d})"))[k]) for d in ("D6", "D7"))
+    assert i6 > 0.5 and abs(i6 - i7) <= 1e-6 * i6, (form, i6, i7)
