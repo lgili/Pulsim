@@ -222,8 +222,13 @@ def test_fx8_seven_bridges_a_non_decaying_fast_mode_does_not_cut_to_its_time_con
     og = on.diagnostics["output_grid"]
     assert og["n_output_capped"] == 0
     assert og["n_output_samples"] < 30_000
+    # The count is platform-dependent (last bits), so check the counter, warning and floor agree.
+    said = [w for w in caught if "did not decay" in str(w.message)]
     if og["n_output_inconsistent"]:
-        assert any("did not decay" in str(w.message) for w in caught)
+        assert len(said) == 1
+        assert og["output_floor_max"] > 0 and np.max(og["output_floor_by_column"]) > 0
+    else:
+        assert not said
 
 
 def _ladder(n):
