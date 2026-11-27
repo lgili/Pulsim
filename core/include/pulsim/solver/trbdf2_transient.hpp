@@ -2312,7 +2312,7 @@ inline SimulationResult run_transient_trbdf2(
     // set to the stage's base: the same factor, no new history method.
     // The stateful kinds' q rows take the same BE stages (ed_sdirk_base /
     // ed_hs_commit, shared with esdirk43): every circuit can restart.
-    const Real gs = Real{1} - Real{1} / std::sqrt(Real{2});
+    const Real gs = step::Sdirk22::restart_gamma();
     // ---- the SDIRK restart after a diode turn-off on a linear circuit ----
     // A diode with g_off > 0 that turns off leaves the inductor it carried
     // on a g_off path: an L*g_off mode (tau ~ 2e-13 s on the DCM buck) the
@@ -3426,7 +3426,7 @@ inline SimulationResult run_transient_trbdf2(
                     }
                     const Real sc = opts.atol + opts.rtol
                         * std::max(std::abs(y_old), std::abs(y_new));
-                    est_v[i] = h * (Real{1} - gs) * (k1 - k2);
+                    est_v[i] = step::Sdirk22::lte(h, gs, k1, k2);
                     est_sc[i] = sc;
                     // The re-initialisation step: a dependent state jumps
                     // (flux / charge conserved by the BE stages at any h),
@@ -3554,7 +3554,7 @@ inline SimulationResult run_transient_trbdf2(
                     if (q_atol[r] < Real{0}) continue;   // an external row with no q entry
                     Real ee, q0, q1;
                     if (sdirk) {
-                        ee = ed_sdpsi5[r] - (Real{1} - gs) / gs * q_d1[r];
+                        ee = step::Sdirk22::lte_q(ed_sdpsi5[r], q_d1[r], gs);
                         q0 = ed_sq0[r];
                         q1 = ed_spsi5[r] + q_d1[r];
                     } else if constexpr (kE) {

@@ -40,8 +40,8 @@ at equal times or time-weighted measures, never sample means.
 - [x] 3.2 Oracle: goldens; step-identical; `test_snapshot_resume.py`, `test_snapshot_resume_stateful.py`, `test_initial_conditions_across_engines.py`, `test_first_step_order.py` (its xfails keep their status)
 
 ## 4. Integrators as stage tables
-- [ ] 4.1 `solver/step/integrators.hpp`: `Trapezoidal`, `BackwardEuler`, `TrBdf2` (`stage`, `lte` moved from `trbdf2_transient.hpp:1286-1375`)
-  - Done: the stage tables; `TrBdf2::lte` (the per-component estimate, called by the driver); `err_exponent`; `Sdirk22`; `hermite` dense output. Open: the driver's embedded SDIRK estimate (its γs = γ/2, DECISIONS 4) and the W⁻¹ filter
+- [x] 4.1 `solver/step/integrators.hpp`: `Trapezoidal`, `BackwardEuler`, `TrBdf2` (`stage`, `lte` moved from `trbdf2_transient.hpp:1286-1375`)
+  - Done: the stage tables; `TrBdf2::lte` (the per-component estimate, called by the driver); `err_exponent`; `Sdirk22`; `hermite` dense output; the driver's embedded SDIRK restart estimate as `Sdirk22::restart_gamma` / `lte` / `lte_q` (`integrators.hpp:124-140`, called at `trbdf2_transient.hpp:2315,3429,3557`). The W⁻¹ filter stays a driver solve (DECISIONS 24)
 - [x] 4.2 Both drivers obtain their `StageSpec`s from the tables (fixed: `step::Trapezoidal::stage` / `BackwardEuler::on_factor` for every solve's step context; TR-BDF2: `step::TrBdf2::stage`)
 - [x] 4.3 Unit tests: both TR-BDF2 stages return the same `factor_dt`; `BackwardEuler::stage(h/2)` returns `factor_dt == h`; every stage's `h_elapsed` sums to `h` (as `t_off`: the last stage ends at `h`, DECISIONS 3; `core/tests/step/test_integrators.cpp`)
 - [x] 4.4 Oracle: goldens; step-identical; counter gate equal

@@ -1081,3 +1081,19 @@ says where the implementation departs from them or what it settled.
     landing-specific history updates with `hs.commit` lines further on).
     Byte-identical on every suite; cost within gate (vsi_pwl +0.32 %,
     the rest ≤ +0.28 % vs base).
+
+24. **Group 4: the TR-BDF2 restart estimate is on the `Sdirk22` table;
+    the W⁻¹ filter stays a driver solve.** The open part of task 4.1 was
+    the driver's embedded SDIRK estimate and the Hosea–Shampine filter.
+    The estimate is a stage-table property, so it moved:
+    `Sdirk22::restart_gamma()` (the driver's own `1 − 1/√2`, kept apart
+    from `Sdirk22::gamma()`'s literal as DECISIONS 4 requires),
+    `Sdirk22::lte(h, γs, k1, k2)` (the state entries) and
+    `Sdirk22::lte_q(Δψ5, Δ1, γs)` (the charge / flux rows), each the
+    expression it replaced; γs is passed, not recomputed, so the driver
+    evaluates it once as before. The filter is not a table value: it is
+    two solves on the step's factor over a history copy with its state
+    slots overwritten (already tagged `factor-reuse`, DECISIONS 22); it
+    stays in `run_transient_trbdf2` with the other solves, and a policy
+    that wants it (task 15.2's restart) calls it there. Task 4.1 is
+    complete with that reading.
