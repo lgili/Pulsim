@@ -48,7 +48,8 @@ def _sw(t, T=1e-4):
 STORED = dict(discontinuity_restart=False)
 
 
-@pytest.mark.parametrize("kw", [STORED, {}], ids=["stored", "impulse"])
+@pytest.mark.parametrize("kw", [STORED, pytest.param({}, marks=pytest.mark.xfail(strict=True, reason=(
+    "release finding F-Z-8: the right-limit row of a cut-set edge holds the pre-collapse state (i_L continuous through R_off: node sw 2.4e12 V), so the stored-row check fires before the record's named impulse check")))], ids=["stored", "impulse"])
 def test_the_megavolt_is_named(kw):
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
@@ -79,6 +80,8 @@ def test_the_megavolt_is_named(kw):
     assert res._implausible_voltage.node >= 0
 
 
+@pytest.mark.xfail(strict=True, reason=(
+    "release finding F-Z-8: the right-limit row of a cut-set edge holds the pre-collapse state (i_L continuous through R_off: 2.4e12 V on sw, one extra warning), so the stored-row check fires before the record's named impulse check"))
 def test_an_impulse_below_the_factor_says_nothing():
     """The impulse is judged as the stored spike was (|lambda| / dt against
     factor x the source scale): 2.4e5 V is 5000 x 48 V; a factor above that

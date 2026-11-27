@@ -245,6 +245,60 @@ F = [
      "carry the step-end gate_at entry across the reset (-1000 reads per 1000 steps, bit-identical); locate a diode crossing "
      "on the step's Hermite interpolant before any trial solve, or stop Illinois on a signal tolerance instead of 1e-6 dt; "
      "reuse the last trial's factor for the split's sub-step at t_new (it solves trial(t_new) again)"),
+    ("F-Z-3", "A", "W", "an edge split just before a grid point spends the restart's L-stable stages on the short sub-step; the next full step rings a stiff mode [owner: restart line, the split]",
+     "test_fixed_step_discontinuity_order `_caploop(1e-9)` (100 V, 10 ohm, switch 1e3 S / 1e-9 S across 1 nF, tau_on = 1 ps, "
+     "opaque switch_fn closing at (k + 0.5 - 1e-9) TB, TB = 10 us = an edge 1e-5 dt before a grid point); also raw "
+     "run_transient with discontinuity_restart + enable_substep_state_correction set explicitly (integration-line code)",
+     "i_S = 100 / (10 + 1e-3) = 9.999 A over the on phase",
+     "rule alone (split off): max dev 1.8e-15 A; split_snap 1e-2 (the pre-a9d6 value): 1.8e-15 A",
+     "max dev 1.022 A: after the 1e-14 s sub-step v_C is still 99.05 V, the next 1 ns step (1000 tau) is trapezoidal: i -463.8, "
+     "then 12.27 / 7.74 A alternating, decaying 0.996 per step through the whole on phase; 0.362 A for an edge 1e-3 dt "
+     "before the grid point, 0 at 0.1 / 0.5 / 0.9 dt. Fix: count the restart's L-stable stages in grid time (carry them into "
+     "the next full step when the post-edge sub-step is short), or snap a post-edge remainder below a band (1e-2 dt is clean)"),
+    ("F-Z-4", "B", "W", "a right-limit row's node voltages break KCL with the row's own inductor current (2.3e-6 V on a 100 kOhm divider node) [owner: restart line, event limits]",
+     "test_restart_right_limit ll09_half_bridge_inverter_leg.yaml on pwl with discontinuity_restart=True (vcswitch legs "
+     "0.05 / 1e8 ohm, Rmid 100k / 100k, Rload 12 + Lload 1 mH, dt 0.25 us), p.with_event_limits rows",
+     "V(mid) = 50 + 5e4 i(Lload) on every row (mid sees only the divider and Lload): right row = left row",
+     "test green before the a9d6a83a merge (R7)",
+     "right rows 99.98794556 V against 99.98794785 V (2.30e-6 V; other edges 1.57e-6 / 1.05e-7 / 1.45e-8 V) with i(Lload) "
+     "continuous to 5.9e-15 of scale: an equivalent 4.6e-11 A KCL residual at mid. Unchanged with "
+     "enable_substep_state_correction=False, device_path='legacy', mode_selection='legacy' (not a release default; "
+     "integration-line code). The plain sample rows satisfy the KCL exactly"),
+    ("F-Z-5", "D", "W", "trbdf2's sine-rectifier turn-off landing leaves its R sensitivity 1.55e-6 off at rtol 1e-9 [owner: trbdf2 line, WIP bb2e22f4]",
+     "test_sensitivity_event_audit::test_trbdf2_sine_rectifier_turnoffs_commit_at_their_landing[1e-09] "
+     "(diode_on_off_sine, linear, trbdf2 rtol 1e-9 / atol 1e-12, dc/dRL.R at t_end)",
+     "closed form 0.01610926909 to rel 1e-6",
+     "rtol 1e-11: 0.01610926917 (rel 4.6e-9)",
+     "0.01610929404 (rel 1.55e-6); identical with mode_selection='legacy', device_path='legacy', discontinuity_restart=False: "
+     "not a release default. Arrived with the incoming commit bb2e22f4 'WIP(trbdf2): ... (NOT FIXED)' (merged 1337e3f0)"),
+    ("F-Z-6", "D", "R", "ll13 on trbdf2 at rtol 1e-8 aborts at h_min at t ~ 0 [owner: trbdf2 line]",
+     "test_release_findings_fs5::test_roundoff_heavy_reference_circuit_runs_on_trbdf2[ll13-kw4] (ll13 YAML, "
+     "case.run('trbdf2', rtol=1e-8, atol=1e-12); rtol=1e-8 alone or atol=1e-12 alone fail the same)",
+     "runs; within 1e-3 of range of the pwl reference (as the default / rtol 1e-7 / esdirk43 cells)",
+     "passed before the a9d6a83a merge (R7)",
+     "SimulationAborted: Newton failed at t = 0.000000 with h at h_min, ||dx||_inf 7.0e-16 at clamp_node, residual 4.8e-6 "
+     "at the KCL of vin; identical with discontinuity_restart=False, device_path / mode_selection 'legacy', "
+     "control_tick 'label': integration-line code"),
+    ("F-Z-7", "D", "R", "case A on esdirk43 aborts at one run length under device_path='interface' [owner: device path / trbdf2 line]",
+     "test_release_findings_fs5 `_run('esdirk43', t_end=4.595132420726449e-06)` (case A half-bridge, engine trbdf2 "
+     "integrator esdirk43)",
+     "runs at every one of the 40 seeded lengths in [0.2, 6] us",
+     "device_path='legacy': runs",
+     "SimulationAborted: Newton failed near t = 2 us at h_min, ||dx||_inf 5.6e-7 at i(Vdc); also with mode_selection "
+     "'legacy' and discontinuity_restart=False: the release's device_path flip (on the integration line pass "
+     "device_path='interface' to reproduce)"),
+    ("F-Z-8", "B", "W", "a cut-set edge's stored right-limit row holds the pre-collapse state, so both voltage checks report i*R_off as a stored megavolt instead of naming the cut [owner: restart line, event limits / voltage_sanity]",
+     "test_vsi_freewheel_diodes `_bridge(False)` + `_chop` on pwl (diode-less VSI leg, 300 V, R 5 ohm, L 2 mH, dt 2e-6 or 2e-7), "
+     "simulate() or p.Simulation(...).run(); also test_voltage_sanity's 48 V / 1 mH / R_off 1e12 switch",
+     "the cut is an impulse record (lambda = L i = 0.0265 V*s); the warning names the cut ('S' cut the current of 'L', "
+     "peak |lambda|/dt) and none below the factor",
+     "before fc52d7ba ('a due right limit is stored', merged a9d6a83a) no right-limit row was stored there",
+     "the right row has i(Lload) = 13.256 A (continuous) and v(ua) = -6.628e9 V = i * R_off (tau = L/R_off = 4 ps; the "
+     "next sample 1.5e-6 V / 3e-7 A): a true right limit of the conductance-form network, but find_implausible_voltage "
+     "scans right_limit_states before find_implausible_impulse_voltage runs (simulation.hpp check_voltage_; Python twin "
+     "the same order), so the generic 'reached 6.628e+09 V' warning fires at every dt, the impulse naming never runs. Same "
+     "with enable_substep_state_correction=False. Fix: skip (or attribute to the record) the right-limit rows at a "
+     "reinit_record's sample in the stored-row scan"),
 ]
 
 # Closed by a fix merged into the release branch: id -> where and the measured result.

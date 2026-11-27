@@ -143,6 +143,10 @@ def test_a_conductance_form_cut_keeps_the_models_right_limit_and_warns():
     assert vsw[j + 1] == pytest.approx(il[j] / 1e-9, rel=1e-6)
 
 
+@pytest.mark.xfail(strict=True, reason=(
+    "release finding F-Z-4: the right-limit rows' V(mid) breaks KCL with their own i(Lload): 99.98794556 V "
+    "against 50 + 5e4 i_L = 99.98794785 V (2.30e-6 V, 2.3e-8 of scale, gate 1e-12; i_L itself continuous to "
+    "5.9e-15); the same with the split off, device_path / mode_selection legacy"))
 def test_ll09_right_limits_hold_the_continuous_states(monkeypatch):
     """ll09 (half-bridge leg): the investigation's right row read V(mid)
     48.98 V at 0.924 ms where the truth is 99.99 V on both sides. Its one state

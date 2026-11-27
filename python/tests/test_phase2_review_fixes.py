@@ -100,6 +100,8 @@ def test_the_voltage_check_survives_warnings_as_errors():
             p.simulate(b, t_end=1e-3, dt=1e-8, switch_fn=sw)
 
 
+@pytest.mark.xfail(strict=True, reason=(
+    "release finding F-Z-8: the right-limit row of a cut-set edge holds the pre-collapse state (i_L continuous through R_off: 48 V boost, R_off 1e12: 2.4e12 V > 1e9 x 48 V), so the stored-row check fires before the record's named impulse check"))
 def test_the_voltage_factor_is_reachable():
     """The bound is a judgement, so it has to be tunable from the
     entry point users actually call — not only from the binding."""

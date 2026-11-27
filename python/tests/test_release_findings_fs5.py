@@ -186,11 +186,15 @@ def test_a_charge_law_capacitor_charged_from_0_v_by_a_ramp_runs(engine, m):
 
 
 # ------------------------------------- run length as a property (F-S-5 session 2) --
-def test_case_a_runs_at_every_run_length(engine):
+def test_case_a_runs_at_every_run_length(engine, request):
     """The default h_min is span·1e-11, so the companion floor eps·Q/(γh)
     at a ps edge depends on t_end: Newton cycled there (period 6, 7, 10) and
     the two-step stagnation test declined it on 9 of 30 lengths. 40 lengths
     from a fixed seed in [0.2, 6] us; the full 200 are in the notes."""
+    if engine == "esdirk43":
+        request.applymarker(pytest.mark.xfail(strict=True, reason=(
+            "release finding F-Z-7: t_end 4.5951324e-6 aborts (Newton at h_min near t = 2 us, ||dx|| 5.6e-7 at "
+            "i(Vdc)) under device_path='interface' (release default); device_path='legacy' runs")))
     lengths = np.random.default_rng(20261120).uniform(0.2e-6, 6e-6, 40)
     bad = []
     for te in lengths:
@@ -266,7 +270,9 @@ _HEAVY = {
 @pytest.mark.parametrize(("name", "kw"), [
     ("ll08", {}), ("ll13", {}), ("ll13", {"rtol": 1e-7}),
     ("ll13", {"rtol": 1e-6, "integrator": "esdirk43"}),
-    ("ll13", {"rtol": 1e-8, "atol": 1e-12})])
+    pytest.param("ll13", {"rtol": 1e-8, "atol": 1e-12}, marks=pytest.mark.xfail(strict=True, reason=(
+        "release finding F-Z-6: Newton fails at h_min at t ~ 0 (||dx|| 7.0e-16 at clamp_node, residual 4.8e-6 "
+        "at the KCL of vin); rtol 1e-8 alone fails too; the same with every release default set legacy")))])
 def test_roundoff_heavy_reference_circuit_runs_on_trbdf2(name, kw):
     rel, dt_ref, period, offs, inductors, nodes = _HEAVY[name]
     bench = Path(__file__).resolve().parents[2] / "benchmarks"

@@ -251,7 +251,11 @@ def test_every_cell_is_a_true_number_or_a_refusal_by_name(kind, dev, eng):
     assert s == pytest.approx(truth, rel=1e-5), (s, truth)
 
 
-@pytest.mark.parametrize("rtol", [1e-9, 1e-11])
+@pytest.mark.parametrize("rtol", [
+    pytest.param(1e-9, marks=pytest.mark.xfail(strict=True, reason=(
+        "release finding F-Z-5: dc/dR 0.01610929404 against 0.01610926909 (rel 1.55e-6 > 1e-6); the same "
+        "with mode_selection / device_path legacy and the restart off: the incoming WIP bb2e22f4 (NOT FIXED)"))),
+    1e-11])
 def test_trbdf2_sine_rectifier_turnoffs_commit_at_their_landing(rtol, monkeypatch):
     """The sine cell's turn-off landings commit their diode at every rtol: an
     interpolated landing sits 1e-6 of its bracket past the zero, inside the
