@@ -51,14 +51,25 @@ The numbers are in the `Known limitations` part of the 2.1.0 entry of the
   rows, `min` / `max` and their times) and on the event rows. The
   integral-type readings (`integral`, `avg`, `rms`) are two different
   quadratures: the in-loop record is the method's own SDIRK quadrature,
-  which keeps `∫i_C dt = C·Δv` and the energy ledgers exact; the
-  stored-array pass is the trapezoid of the state values. They are equal
-  off restart steps and differ on a restart step by at most the bound
-  derived in the recorders section of [API reference](api-reference.md).
-  On the measured DCM buck the stored trapezoid was the closer of the two
-  to the truth: the window integral of i(L) is +2.9e-5 relative to the
-  closed form from the stored arrays, −1.98e-4 in the loop (on a smooth
-  gate-switched RL cell the two agree to 1e-9) (`python/tests/test_release_findings_b2.py`).
+  which keeps `∫i_C dt = C·Δv` and the energy ledgers closed to round-off;
+  the stored-array pass is the trapezoid of the state values. They are
+  equal off restart steps and differ on a restart step by the leading-order
+  estimate (smooth piece) or the bound (mixed-mode step) derived in the
+  recorders section of [API reference](api-reference.md). A window that
+  ends inside a mixed-mode restart step is first order in that end
+  (the charge `∫i_C` against `C·Δv` of the read states: 2.6e-5 relative at
+  1 µs on a PWM buck, half that at 0.5 µs; 1.7e-3 before the fix).
+  On the measured DCM buck (restart rule, no split, dt = 1 µs) the stored
+  trapezoid was the closer of the two to the truth (the exact engine at
+  dt = 25 ns): the window integral of i(L) is +2.9e-5 relative from the
+  stored arrays, −1.97e-4 in the loop (on a smooth gate-switched RL cell
+  the two agree to 1e-9). The gap is a cancellation, not a better
+  quadrature: it comes from the steps whose mode changes without a
+  located event (a diode turn-off inside the step), where the two
+  quadratures are equally far from the truth with opposite signs (sum
+  −1.14e-4 in the loop, +1.10e-4 stored, over 160 such steps); the stored
+  sign happens to cancel the other steps' −7.8e-5. The feeds' agreement is
+  asserted in `python/tests/test_release_findings_b2.py`.
 * **Event splitting** (with the restart rule): a retried step is re-taken
   without its interior events; an even number of edges of an opaque
   `switch_fn` inside one step is not seen. A diode turn-on that falls one
