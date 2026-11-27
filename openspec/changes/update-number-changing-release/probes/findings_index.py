@@ -336,6 +336,44 @@ F = [
      "in-loop feed reads 1034 rows, the stored view 1001 + 24 event rows (1248 with right limits); unchanged with "
      "device_path / mode_selection legacy. Same with the options explicit: integration-line code. Which side is right is "
      "not settled (closed-form check owed)"),
+    ("F-Z-13", "B", "W", "under the restart rule the in-loop recorder's t = 0 event row (x(0+) of an inconsistent start) carries a capacitor current that is not the right limit's [owner: restart line / recorders]",
+     "test_recorder_device_readings::test_kcl_holds_at_every_recorded_sample[buck-pwl] / [rectifier-pwl] (event_right rows; "
+     ".scratch/triage6/evright.py)",
+     "every event row's right side obeys KCL (to 1e-9 of scale)",
+     "discontinuity_restart=False: no t = 0 event row, every event row closes to 5.5e-12 A",
+     "t = 0 row only: rectifier i(Cf) 1.109 A against i(D1) - i(RL) = 0.0046 A (KCL at dp off 1.1 A), buck i(C) 4.19e-4 A "
+     "against 0; later event rows close to 4e-16 A. Same with rule + split + device_path / mode_selection legacy explicit: "
+     "integration-line code (F-Z-10's start row meets F-Z-12's event-row feed, both merged c3ac0a87)"),
+    ("F-Z-14", "B", "W", "with the branch-form diode (release default) a commutation event is booked one step late: the start-up turn-on at t = dt, a zero on a grid point at the next grid point [owner: restart line, the split / branch form]",
+     "test_split_locator_cost::test_located_time_within_the_stated_tolerance_default_form[off-grid] / [on-grid] (sine "
+     "rectifier, run_transient, rule + split, snap 1e-6; .scratch/triage6/recond.py)",
+     "every event within 2 split_snap*dt of its zero; no event for a start the first step already conducts in",
+     "form='conductance': no start event, every error <= 1e-6 dt",
+     "branch: start-up turn-on at t = dt (err 1.0 dt); on the 1e-4 grid the zeros at 100 / 200 / 400 dt booked at 101 / 201 "
+     "/ 401 dt; the states equal the conductance form's to 3.6e-15 V (event bookkeeping only). Same with form='branch' "
+     "explicit: integration-line code under the release builder default"),
+    ("F-Z-15", "B", "W", "a restart-rule cut is named (F-Z-8) but judged at its right-limit row's i*R_off, not |lambda|/dt: voltage_sanity_factor cannot silence it [owner: restart line, event limits / voltage_sanity]",
+     "test_voltage_sanity::test_the_megavolt_is_named[impulse], test_an_impulse_below_the_factor_says_nothing; "
+     "test_vsi_freewheel_diodes::test_the_kernel_object_reads_the_cut_set_records_too",
+     "the cut is judged as the stored spike was: |lambda|/dt (2.4e5 V = 5000 x 48 V) against factor x the source scale",
+     "discontinuity_restart=False: the stored kV row, silenced by the factor",
+     "_implausible_voltage.peak 2.3999e12 V (the row's i*R_off) at factor 100 and at 6000; the kernel twin reports both "
+     "dt (2e-6: L*i/dt 1.3e4 V < 3e4) and names no 'reached ... V' peak. Same with the rule explicit: integration-line "
+     "design (1abf156f keeps the row and names the cut)"),
+    ("F-Z-16", "B", "W", "with the event split on, a diode turn-on located inside a turn-off's restart window books a capacitor_loop record on a nonlinear capacitor where the kink is no record [owner: restart line, the split]",
+     "test_release_findings_a::test_a_nonlinear_capacitor_shorted_by_its_switch_is_carried_in_charge (_switched_junction(9e-6))",
+     "no record at the 5 us turn-off (a kink)",
+     "enable_substep_state_correction=False: no record (the test passed before the c3ac0a87 merge)",
+     "one capacitor_loop record at 5.0066676 us on Cj (devices S, D1, Cj), lambda 2.46e-13 C (Cj holds ~2.4e-8 C), dW "
+     "1.5e-16 J; same with device_path / mode_selection legacy and the split explicit: integration-line code "
+     "(efce3c44 / 4341f221)"),
+    ("F-Z-17", "B", "W", "with the event split on, the snubbed DCM boost at dt = T/200 holds D1 in a state its commutation law refuses on 18 samples [owner: restart line, the split]",
+     "test_switch_state_record::test_recovery_energy_does_not_follow_the_step_size (_snubbed_dcm_boost, pwl dt T/200, "
+     "Q_rr 100 nC; .scratch/triage6/rr.py)",
+     "no sample breaks the diode law (the summary warns of none)",
+     "enable_substep_state_correction=False: no warning, E_sw 1.343e-4 J (the test passed before the c3ac0a87 merge)",
+     "18 samples (t = 1.055 .. 1.225 ms), E_sw 1.350e-4 J; split_snap 0.01: 157 samples; both diode forms, mode_selection "
+     "/ device_path legacy alike: integration-line code (efce3c44 / 4341f221)"),
     # R: the discovery rehearsal on cbdce080 (.scratch/rehearsal/DISCOVERY_cbdce080.md; reproducers in
     # .scratch/rehearsal/repro/, run under repro/guard.py, an RSS-capped child)
     ("F-R-1", "R", "R", "the rehearsal's output-rule referee keeps every window of its rule-off reference: 3.6 .. 8.1 GB on 11 circuits [owner: benchmarks/tools/output_rule_referee.py]",
@@ -383,6 +421,23 @@ F = [
 # Closed by a fix merged into the release branch: id -> where and the measured result.
 # A closed finding leaves the open tables and is listed under "Closed".
 FIXED = {
+    "F-Z-4": "integration line 5eb1b119 + 2547d14d + 59ce9645 (one refinement step on the published right-limit row; merged "
+             "R13): ll09 on this branch, release defaults, right rows' KCL at mid 4.6e-11 A -> 4.3e-19 A, |dV(mid)| 2.30e-6 V -> "
+             "3.1e-13 V, i(Lload) 6.1e-15 rel; the same with the split off, device_path / mode_selection / control_tick legacy, "
+             "split_snap 0.01 (no release default triggers it any more); `test_ll09_right_limits_hold_the_continuous_states` mark "
+             "removed",
+    "F-Z-8": "integration line 3e61b05d + 1abf156f + 87a4f6bb (merged R13): the voltage check names the cut ('S' cut the 2.4 A "
+             "current of 'L' ..., the energy booked once, reinit_records) and no 'largest voltage' finding fires under the rule; "
+             "`test_the_voltage_factor_is_reachable` mark removed (asserts the named cut too). The factor / peak part is F-Z-15",
+    "F-Z-10": "integration line 3adc2dfe (x(0+) of an inconsistent start published as a right-limit row; merged R13): "
+              "device_loss_summary 0.23994 J -> 0.24 J = the kernel's record; `test_loss_summary_reads_the_start_right_limit` "
+              "mark removed",
+    "F-Z-12": "integration line cc3446e0 + 0231fa75 (merged R13): a restart step fed twice, integrals by the quadrature, samples "
+              "by states; release pwl (rule on) is judged by the incoming `_rule_feeds_agree` (sample outputs and event rows "
+              "bit-identical, integrals within the stated piece bound, 1e-6); `[pwl-buck]` mark removed",
+    "F-4-4": "integration line cc3446e0 (recorder integrals by the restart rule's quadrature; merged R13): buck pwl window "
+             "charge rel 4.6e-6 / 2.6e-5 (bound 2e-4; energy balance 1.9e-5 of supplied, was 3.6 %); "
+             "`test_capacitor_charge_over_mid_step_windows[buck-pwl]` mark removed",
     "F-R-1": "R12 (release branch): the referee streams its rule-off windows (reads a window once the next is known, "
              "keeps only the running worst / missing / read counts, event and jump instants). Verdict dicts identical on "
              "17 prop units (rc_step .. cl_buck_pi, 2..987 windows); peak RSS lc_low_pass_sine auto+next 342 MB (was "
