@@ -53,7 +53,10 @@ def test_cutset_without_the_rule_is_refused_by_name():
 
 
 def test_cutset_is_reinitialised_and_recorded():
-    r, h = _cutset(**RULE)
+    # rule alone (split named off): the gate edge at 99.999 h is taken at the nearer grid
+    # point, 100 h; record there, pulse sample 101. With the split (the release default)
+    # the record is at the located edge: test_cutset_is_recorded_at_the_located_edge
+    r, h = _cutset(**RULE, enable_substep_state_correction=False)
     t = np.asarray(r.times)
     iL, va = np.asarray(r.i("L")), np.asarray(r.v("a"))
     k0 = int(np.argmin(abs(t - 100 * h)))          # the sample at the opening
@@ -79,6 +82,29 @@ def test_cutset_is_reinitialised_and_recorded():
     # ground). It carried the SDIRK projection's residue, about
     # -L*i/(h*(1-gamma)) = 959 V (the prototype's first-step sample).
     assert abs(va[k0 + 1]) <= 1e-9
+
+
+def test_cutset_is_recorded_at_the_located_edge():
+    """The release default (rule + split): the oracle-less edge at 99.999 h is bisected
+    (1000 split_snap from the boundary: not snapped) and the record is taken there
+    (F-Z-1, e09405a1): t = 99.999 h, i_L(t_e-) = |lambda|/L against the closed form
+    10(1 - e^-t/tau) to the run's trapezoid error (rel 2e-5, ~7e-6 at h = tau/20), the
+    first sample after the cut (100 h, sample 100) and every later one at i_L = 0. Before
+    F-Z-1 the record read t = 99 h and i_L(99 h)."""
+    r, h = _cutset(**RULE)
+    t, iL, va = np.asarray(r.times), np.asarray(r.i("L")), np.asarray(r.v("a"))
+    assert r.counters["n_gate_events_bisected"] == 1
+    (rec,) = r.reinit_records
+    assert rec.kind == "cut_set" and list(rec.devices) == ["S"] and list(rec.states) == ["L"]
+    assert rec.t == pytest.approx(99.999 * h, abs=1e-6 * h)
+    i_minus = abs(rec.lambda_) / 1e-3
+    assert i_minus == pytest.approx(10 * (1 - math.exp(-rec.t / TAU)), rel=2e-5)
+    assert rec.dW == pytest.approx(0.5 * 1e-3 * i_minus ** 2, rel=1e-9)
+    assert rec.dW == pytest.approx(49.3291e-3, rel=1e-5)   # measured 49.32913 mJ
+    k0 = int(np.argmin(abs(t - 100 * h)))
+    assert rec.sample == k0 == 100
+    assert np.all(iL[k0:] == 0.0) and iL[k0 - 1] > 9.9
+    assert np.max(np.abs(va[k0:])) <= 1e-9
 
 
 def test_on_impulse_error_names_the_switch_and_the_inductor():

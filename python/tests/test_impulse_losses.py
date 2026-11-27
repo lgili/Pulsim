@@ -37,7 +37,7 @@ def _caploop(engine, h=1e-7, steps=50):
     return b, r
 
 
-def _cutset(engine, N=20):
+def _cutset(engine, N=20, **extra):
     tau = 1e-3
     b = p.CircuitBuilder()
     b.add_voltage_source("V", "vin", "gnd", 10.0)
@@ -50,7 +50,7 @@ def _cutset(engine, N=20):
         m = p.SwitchStateMask(1)
         m.set(k, t < 5e-3 - 1e-9)
         return m
-    kw = dict(dt=tau / N, discontinuity_restart=True) if engine == "pwl" else {}
+    kw = dict(dt=tau / N, discontinuity_restart=True, **extra) if engine == "pwl" else {}
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         r = p.simulate(b, t_end=8e-3, engine=engine, switch_fn=fn, **kw)
@@ -117,12 +117,19 @@ def test_capacitor_loop_jump_and_conduction_partition_the_pulse_step_at_any_dt(h
     assert s["S"]["E_total"] == pytest.approx(10 * 1e-9 * 64 * h, rel=1e-6)
 
 
-def test_the_pulse_step_conducts_its_end_power_only():
+@pytest.mark.parametrize("split", [False, True])
+def test_the_pulse_step_conducts_its_end_power_only(split):
     # the cut-set: R's conduction over the whole run equals the sum of the
-    # windows around the pulse step plus that step's end power times h (the
-    # current is zero after the jump: nothing), not a line from the
-    # pre-jump 9.93 A (R*i^2*h/2 = 2.5e-3 J at tau/20 counted on top of dW)
-    b, r = _cutset("pwl")
+    # windows around the pulse step plus that step's own conduction.
+    # Rule alone (split off, the edge on the grid): the step's end power times h
+    # (the current is zero after the jump: nothing), not a line from the
+    # pre-jump 9.93 A (R*i^2*h/2 = 2.5e-3 J at tau/20 counted on top of dW).
+    # With the split (the release default) the edge (5 ms - 1 ns = 99.99998 h)
+    # is located inside the step: the step conducts the pre-edge piece (a, t_e)
+    # as the trapezoid of its ends i(a), i(t_e-) = |lambda|/L, then nothing
+    # (4.931e-3 J; measured 2.0e-8 of it apart: t_e is the located instant, read
+    # back from the record)
+    b, r = _cutset("pwl", enable_substep_state_correction=split)
     t, i = np.asarray(r.times), np.asarray(r.i("R"))
     (rec,) = r.reinit_records
     k = rec.sample if rec.sample > 0 else int(np.searchsorted(t, rec.t, side="right"))
@@ -130,8 +137,14 @@ def test_the_pulse_step_conducts_its_end_power_only():
 
     def E(lo=None, hi=None):
         return {e["name"]: e for e in device_loss_summary(b, r, t_from=lo, t_to=hi)}["R"]["E_total"]
-    step = 1.0 * i[k] ** 2 * (c - a)
-    assert E() == pytest.approx(E(t[0], a) + E(c, t[-1]) + step, rel=1e-12)
+    if not split:
+        step = 1.0 * i[k] ** 2 * (c - a)
+        assert E() == pytest.approx(E(t[0], a) + E(c, t[-1]) + step, rel=1e-12)
+    else:
+        assert a < rec.t < c and i[k] == 0.0
+        i_e = abs(rec.lambda_) / 1e-3
+        step = 1.0 * 0.5 * (i[k - 1] ** 2 + i_e ** 2) * (rec.t - a)
+        assert E() - E(t[0], a) - E(c, t[-1]) == pytest.approx(step, rel=1e-7)
 
 
 def _balance(b, r):
@@ -148,7 +161,22 @@ def _balance(b, r):
     src1, diss1 = part(t[0], a)
     src2, diss2 = part(c, t[-1])
     E_imp = impulse_losses(b, r)["S"]["E_impulse_total"]
-    assert E_imp == pytest.approx(0.5 * 1e-3 * r.i("L")[k - 1] ** 2, rel=1e-9)
+    # the energy the cut removes: 1/2 L i_L(t_e-)^2 at the edge. With the split (the
+    # release default) t_e is the located 99.99998 h and i_L(t_e-) = |lambda|/L, the
+    # run's own (closed form 10(1 - e^-t/tau) to its trapezoid error, ~7e-6 at tau/20);
+    # since F-Z-1 (e09405a1) the record is taken there, not from i_L(t_{k-1}) (9.92924 A
+    # at N = 20: 3.4e-5 J short). Rule alone the edge is on the grid: t_e = t_{k-1}.
+    i_e = abs(rec.lambda_) / 1e-3
+    if a < rec.t:
+        assert i_e == pytest.approx(10 * (1 - np.exp(-rec.t / 1e-3)), rel=2e-5)
+    else:
+        assert i_e == pytest.approx(r.i("L")[k - 1], rel=1e-12)
+    assert E_imp == pytest.approx(0.5 * 1e-3 * i_e ** 2, rel=1e-9)
+    if a < rec.t:
+        # the located edge's pre-edge piece (a, t_e) conducts: its source energy (the
+        # trapezoid of its ends, i_S(t_e-) = i_e) and its dissipation belong to the balance
+        src1 += 10.0 * 0.5 * (i[k - 1] + i_e) * (rec.t - a)
+        diss1 += part(a, c)[1]
     # i_L = 0 at the start and at the end: no stored-energy change overall
     return (src1 + src2 - diss1 - diss2 - E_imp) / (src1 + src2)
 
@@ -253,13 +281,28 @@ def test_a_decimated_pulse_interval_moves_no_row():
     # (the edge at 10.5h, a mid-step tie: the restart rule takes it at the
     # nearer grid point, the step end 11h (F-SB-2), so the pulse step is
     # (11h, 12h]; at 11.5h it would be (12h, 13h], ending on no stored sample)
+    # rule alone (split named off): the subject is an on-grid pulse step. With the
+    # split (the default) the edge is located at 10.5h, the record is at that inner
+    # instant on no stored sample (sample -1) and no row moves either:
+    # test_a_located_pulse_moves_no_decimated_row
     from pulsim._result_views import _reinit_step_starts
-    _, r = _caploop_closing(1e-6, k_close=10, store_every=4)
+    _, r = _caploop_closing(1e-6, k_close=10, store_every=4,
+                            enable_substep_state_correction=False)
     assert r.reinit_records
     t = np.asarray(r.times)
     # the case under test: a stored pulse sample whose interval spans earlier steps
     assert any(0 < rec.sample < t.size and t[rec.sample - 1] < rec.t - 0.5e-6
                for rec in r.reinit_records)
+    x = np.asarray(r.states)
+    st, _ = _reinit_step_starts(r, x, None)
+    assert st is x
+
+
+def test_a_located_pulse_moves_no_decimated_row():
+    from pulsim._result_views import _reinit_step_starts
+    _, r = _caploop_closing(1e-6, k_close=10, store_every=4)
+    (rec,) = r.reinit_records
+    assert rec.t == pytest.approx(10.5e-6, rel=1e-6) and rec.sample == -1
     x = np.asarray(r.states)
     st, _ = _reinit_step_starts(r, x, None)
     assert st is x
