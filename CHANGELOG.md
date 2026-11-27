@@ -6,6 +6,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Restart rule: a cut is named as the cut; the snapshot pickle keeps the anchor
+
+- **A switch cutting an inductor current under the restart rule is reported as
+  the cut, not as an implausible node voltage** (`pwl`, `discontinuity_restart`,
+  F-Z-8). The right-limit row at the cut is the conductance-form model's own
+  limit (i·R_off across the switch for its unresolved L/R_off mode: 6.6e9 V on
+  the diode-less VSI leg), and the voltage check scanned it first, so the
+  generic "largest voltage any source" warning fired and the cut was never
+  named. A row at a `cut_set` record's instant is now judged apart: when it
+  alone trips the bound the warning names the switch, the inductor, the current
+  and the energy ½·L·i² the record booked once (`simulate()` and the kernel
+  `Simulation` object read the same check). The stored rows, the readers and
+  the loss records are unchanged; a run with the rule off is byte-identical.
+- **`SolverSnapshot` pickles `restart_anchor_at_end` and `invalid_reason`**
+  (field 20, written only when either is set, so every other pickle is byte for
+  byte as before; an older pickle loads them as `False` / `""`). A resume from a
+  pickled copy taken on a split-sliver step is now bit-identical to the
+  in-process one (its first sample was ~470 A off), and a pickled invalid
+  snapshot keeps the reason its resume refuses by.
+
 ### Fixed engine: the restart after a split sliver probes at the next grid step
 
 - **A gate edge a tiny fraction of dt before a grid point no longer leaves a
@@ -20,10 +40,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   linear circuit (with Newton devices the probe also runs the edge-mode
   decision). Split-off runs are byte-identical. The anchor is carried by
   `SolverSnapshot.restart_anchor_at_end` across an in-process resume and the
-  periodic-steady-state period map; it is not pickled: a resume from a
-  pickled copy taken on such a step probes it as a plain window step, and its
-  first sample is wrong (the hard-switched capacitor test: switch current
-  ~470 A off at the first resumed step; every later row bit-identical). The split also
+  periodic-steady-state period map and in its pickle. The split also
   reuses the previous step's end gate read as the step's start (one
   `switch_fn` call per step fewer, results identical).
 
