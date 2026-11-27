@@ -158,7 +158,9 @@ def test_in_loop_and_stored_array_feeds_agree():
     np.testing.assert_array_equal(loop.times, arr.times)
     jumps = loop.event_resolution != "within_dt"
     assert np.all(jumps), "a lined step's commutation is its jump rows, no bracket"
-    assert 0 < arr.event_t.size < loop.event_t.size
+    # F-Z-12: the loop's lines run through the stored right limits; it adds
+    # zero-width rows only where a capacitor reading's line starts
+    assert 0 < arr.event_t.size <= loop.event_t.size
     assert np.all(np.isin(arr.event_t, loop.event_t[jumps]))
     for q in probes:
         scale = max(np.max(np.abs(loop[q])), 1e-300)

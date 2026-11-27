@@ -245,6 +245,9 @@ _CASES = {
              [(0.2e-3 + 3.3e-9, 0.9e-3 - 1.7e-9)], 1e-5, 0.0),
 }
 _LOOP_RUNS = {"pwl": dict(engine="pwl", dt=1e-6),
+              # F-Z-12: the restart rule's rows (right limits, split pieces)
+              "pwl-rule": dict(engine="pwl", dt=1e-6, discontinuity_restart=True,
+                               enable_substep_state_correction=True),
               "trbdf2": dict(engine="trbdf2", rtol=1e-7, atol=1e-10)}
 
 
@@ -291,7 +294,7 @@ def test_in_loop_feeding_equals_the_stored_array_pass(eng, case):
                     atol = rtol * span
                 np.testing.assert_allclose(sa[f], sb[f], rtol=rtol,
                                            atol=atol, err_msg=f"{q} {f}")
-    if eng == "pwl" or case not in ("rect", "buck"):
+    if eng != "trbdf2" or case not in ("rect", "buck"):
         ta, tb = np.asarray(a.times), np.asarray(b.times)
         keep = np.ones(tb.size, bool)
         if eng == "trbdf2":
@@ -455,3 +458,94 @@ def test_stream_after_a_dropped_event_report_keeps_the_loop_rows(eng, monkeypatc
     np.testing.assert_allclose(x_s[:, 0], r["v(dp,dn)"], rtol=1e-12, atol=1e-12)
     again = st.get_new_samples()
     assert again is None or again[0].size == 0
+
+
+# ---- F-Z-12: the restart rule's rows, against a closed form ---------------
+
+_RL = dict(V=10.0, GS=1e3, GOFF=1e-9, RP=10.0, R=1.0, L=1e-4, F=100e3, D=0.37)
+
+
+def _rl_gated():
+    """V -> ideal gated switch -> node a (Rp to ground: the off path) ->
+    R -> L -> ground. Linear in each mode; D = 0.37 puts every turn-off
+    inside a 1 us step (the fixed engine splits it)."""
+    c = _RL
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "vin", "gnd", c["V"])
+    b.add_switch("S", "vin", "a", g_on=c["GS"], g_off=c["GOFF"])
+    b.add_resistor("Rp", "a", "gnd", c["RP"])
+    b.add_resistor("R", "a", "m", c["R"])
+    b.add_inductor("L", "m", "gnd", c["L"])
+    return b, p.make_pwm_switch_fn(c["F"], c["D"], b.switch_index_of("S"),
+                                   b.graph.num_switches)
+
+
+def _rl_modes():
+    """(on, off): the mode's (i_inf, tau) of L di/dt = Vth - Req i."""
+    c = _RL
+    out = []
+    for g in (c["GS"], c["GOFF"]):
+        gt = g + 1.0 / c["RP"]
+        req = c["R"] + 1.0 / gt
+        out.append((g * c["V"] / gt / req, c["L"] / req))
+    return out
+
+
+def _rl_period_integrals(t_end, per):
+    """Closed form: the exact integral of i_L over each period from i(0)=0."""
+    T, D = 1.0 / _RL["F"], _RL["D"]
+    (inf_on, tau_on), (inf_off, tau_off) = _rl_modes()
+    n = int(round(t_end / per))
+    cuts = sorted({k * T + d for k in range(int(round(t_end / T)) + 1)
+                   for d in (0.0, D * T)} | {k * per for k in range(n + 1)})
+    cuts = [x for x in cuts if x <= t_end * (1 + 1e-12)]
+    i0, acc, out = 0.0, 0.0, []
+    for a, b in zip(cuts[:-1], cuts[1:]):
+        on = (a - np.floor(a / T + 1e-9) * T) < D * T * (1 - 1e-9)
+        inf, tau = (inf_on, tau_on) if on else (inf_off, tau_off)
+        e = np.exp(-(b - a) / tau)
+        acc += inf * (b - a) + (i0 - inf) * tau * (1.0 - e)
+        i0 = inf + (i0 - inf) * e
+        if abs(b / per - round(b / per)) < 1e-9:
+            out.append(acc)
+            acc = 0.0
+    return np.asarray(out)
+
+
+def test_restart_rule_feeds_agree_with_a_closed_form():
+    """F-Z-12: under the restart rule the in-loop feed and the stored-array
+    pass integrate one function (the stored rows: samples, both limits at
+    each event, the split's pieces), to round-off of the sums; both are
+    within the trapezoid's own error of the closed-form period integrals
+    of i_L, and that error falls with dt (measured ratios 3.13, 3.20 per
+    halving: the in-step turn-offs' restart pieces keep it short of 4)."""
+    from pulsim._recorders import record_result
+    t_end, per = 2e-4, 1e-5
+    exact = _rl_period_integrals(t_end, per)
+    (inf_on, tau_on), (_, tau_off) = _rl_modes()
+    # |i''| = |i'| / tau <= (|i_inf - i| / tau^2) over both modes, i in [0, inf_on]
+    d2 = inf_on / min(tau_on, tau_off) ** 2
+    errs = []
+    for dt in (1e-6, 5e-7, 2.5e-7):
+        b, fn = _rl_gated()
+        rec = p.Recorder("r", ["i(L)", "v(a)"], period=per)
+        res = p.simulate(b, t_end=t_end, engine="pwl", dt=dt, switch_fn=fn,
+                         recorders=[rec], discontinuity_restart=True,
+                         enable_substep_state_correction=True)
+        assert res.recorder_feed["mode"] == "in-loop"
+        assert len(res.inner_events["times"]) > 0       # the split is exercised
+        a, s = res.recorded["r"], record_result(res, [rec])["r"]
+        for q in ("i(L)", "v(a)"):
+            ia, ib = a.periods[q]["integral"], s.periods[q]["integral"]
+            # round-off of a sum of n rows' trapezoids: n * eps * span * max|y|
+            n_rows = res.times.size + len(res.inner_events["times"])
+            bound = n_rows * np.finfo(float).eps * per * np.max(np.abs(a[q]))
+            assert np.max(np.abs(ia - ib)) <= bound, q
+        ia = a.periods["i(L)"]["integral"]
+        assert ia.size == exact.size
+        # the quadrature's dt^2/12 * T * |i''| plus the samples' own
+        # trapezoidal error of the same form (a linear first-order mode)
+        err = np.max(np.abs(ia - exact))
+        assert err <= 2 * dt ** 2 / 12 * per * d2, (dt, err)
+        errs.append(err)
+    assert errs[0] / errs[1] > 2.8 and errs[1] / errs[2] > 2.8, errs

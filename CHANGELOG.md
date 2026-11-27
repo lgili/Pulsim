@@ -6,6 +6,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Recorders: the in-loop feed reads the restart rule's stored rows (F-Z-12, WIP)
+
+- Under `discontinuity_restart=True` the fixed engine's in-loop recorder fed its lines from the quadrature starts and the held-pieces rows; the stored-array pass reads the stored right limits. The lines now run through the stored rows (right limits, split pieces, no held row): state readings of both feeds are bit-identical (PWM buck: i(L) window integral 2.3e-4 rel apart before, now 0; window max no longer a fictitious extrapolated value). Rule off and trbdf2: byte-identical. WIP: the capacitor-charge identity (`∫i_C = C·Δv`) of the in-loop feed is still off by up to 1.2e-4 on restart steps (test_release_findings_b2/b).
+
 ### Fixed engine: the restart after a split sliver probes at the next grid step
 
 - **A gate edge a tiny fraction of dt before a grid point no longer leaves a

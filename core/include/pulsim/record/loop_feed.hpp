@@ -197,6 +197,8 @@ public:
             }
             d.entry = -1;
         }
+        has_cap_ = false;
+        for (const auto& r : readings_) has_cap_ = has_cap_ || r.dev.law == L::Capacitor;
         graph_ = &graph;
         pool_ = &pool;
         if (view_of_ != nullptr) set_lines_(*view_of_);   // attached before the circuit
@@ -379,6 +381,7 @@ private:
     Vector x_last_, x_seed_, x_row_;
     std::vector<Real> seed_;
     bool seeded_ = false, restored_ = false;
+    bool has_cap_ = false;   ///< a capacitor reading: a line's start current is its own row
     const topology::Graph* graph_ = nullptr;
     const pwl::DevicePool* pool_ = nullptr;
     events::StepHooks* view_of_ = nullptr;
@@ -775,9 +778,13 @@ private:
             for (auto& r : recs_) r.sample(t_pending_, pending_left_);
             settled_event(pending_);
             mask_last_ = mask_pending_;
-        } else if (!event_at_last_ && (!(ms == mask_last_) || !same(xs, x_last_))) {
+        } else if (!event_at_last_ && (!(ms == mask_last_) || !same(xs, x_last_) ||
+                                       (has_cap_ && view.line && view.cap_start != nullptr))) {
             // the engine restarted from another state than it committed
-            // (a restart step's line: its start right limit)
+            // (a restart step's line: its start right limit). F-Z-12: a line
+            // from a continuous state still starts a capacitor's current at
+            // the stage currents' combination (C·Δv); the states' row there
+            // has both limits equal (zero width)
             eval(t0, xs, ms, row_, false, view.cap_start);
             for (auto& r : recs_) r.event(row_, Recorder::Resolution::Settled);
             ++n_jumps_;
