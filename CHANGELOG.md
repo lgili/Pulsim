@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Exact engine output rule
+
+- **The rule's cost no longer follows the last bit (F-X-8).** Under
+  `output_rtol`, a fast mode whose content does not decay as its own closed
+  form says (the eigenbasis's error, 0.4 ps modes of paralleled branch-form
+  bridges) was re-read as a fresh transient at every call and cut each
+  interval to ~1 ps until the 4096-sample cap: seven bridges took 660 934
+  samples on macOS and 14 113 on Linux; ten took 1 877 398 on Windows
+  (2185 s). That part is now measured between two instants of one flow and
+  added to the row's tolerance, counted in
+  `diagnostics['output_grid']['n_output_inconsistent']` with a RuntimeWarning
+  (`output_inconsistent`). Seven bridges: 12 795 samples, no capped interval;
+  ten: 16 264; last-bit perturbations of `t_end` / amplitudes stay within
+  12 795–17 879. Rule off: unchanged (byte-identical). The win32 skip of
+  `test_fx1_ten_branch_form_bridges_run_under_the_rule` is removed.
+
 ### Exact engine, phase 3 slice (add-exact-propagator-strategy groups 7, 10)
 
 - **Coupled inductors with |k| = 1 are refused by name.** The exact engine's
