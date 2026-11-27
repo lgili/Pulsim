@@ -307,7 +307,7 @@ public:
     bool passive = true;
     static constexpr Eigen::Index kMaxEnumerated = 12;
     /// Gaps inside the posed network's rounding stay ties (F-Z-9). False only to
-    /// exercise the engine's fallback on the pre-fix decision (tests).
+    /// reproduce the pre-fix decision (a test hook).
     bool rounding_floor = true;
 
     /// The port LCP in the previous mode's coordinates: z_j = w_j for a
