@@ -47,6 +47,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   in-process one (its first sample was ~470 A off), and a pickled invalid
   snapshot keeps the reason its resume refuses by.
 
+### Fixed engine: `simulate(split_snap=...)`
+
+- **Added** `simulate(split_snap=...)` (and `SolverOptions.split_snap`,
+  `RunOptions.split_snap`): the event split's snap band as a fraction of dt
+  (`pwl`). Its default moved from 0.01 to 1e-6 on this line (an edge is no
+  longer moved by up to dt/100); `split_snap=0.01` restores 2.1.0's value.
+  `None` (the default) changes nothing. A value outside [1e-12, 0.25] or NaN,
+  or one passed with event splitting off, is an `OptionsError`; `trbdf2` and
+  the exact engine refuse it by name (`UnsupportedError`), as they refuse
+  `enable_substep_state_correction`, and it routes `engine='auto'` to `pwl`.
+
 ### Fixed engine: the restart after a split sliver probes at the next grid step
 
 - **A gate edge a tiny fraction of dt before a grid point no longer leaves a

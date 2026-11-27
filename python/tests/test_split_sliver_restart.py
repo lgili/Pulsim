@@ -4,8 +4,8 @@ dt = 1 ns) gated a fraction of dt before a grid point: the step is cut at the
 edge and the event's restart probe spans only gamma * (the piece), so the mode
 was neither damped nor projected and rang +-2.25 A on under trapezoid (max
 deviation 1.022 A at 1e-5 dt, 0.362 A at 1e-3 dt). The next grid step's restart
-now probes it with the event before its start. Options explicit: split_snap
-is reachable only through run_transient."""
+now probes it with the event before its start. Options explicit, on
+run_transient (simulate(split_snap=...) is the same option)."""
 
 from __future__ import annotations
 

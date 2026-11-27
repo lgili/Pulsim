@@ -73,7 +73,7 @@ _NOT_HONOURED[TRBDF2_ROUTE] = tuple(
     tuple(n for n in rows if n in (
         "start_from_dc_op", "strict_event_iterations", "max_dt_halvings",
         "store_every", "enable_substep_state_correction",
-        "discontinuity_restart", "resolution_diagnostics",
+        "discontinuity_restart", "split_snap", "resolution_diagnostics",
         "inductor_freeze_di_max", "inductor_abs_clamp", "progress",
         "live_stream", "mmc_arms", "on_cache"))
     for rows in _NOT_HONOURED["trbdf2"])
