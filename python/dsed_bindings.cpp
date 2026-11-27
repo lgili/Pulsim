@@ -1734,6 +1734,7 @@ void init_module(py::module_& m) {
                 d["n_output_unbounded"] = sim.n_output_unbounded();
                 d["output_budget_t"] = sim.output_budget_t();
                 d["n_output_floored"] = sim.n_output_floored();
+                d["n_output_inconsistent"] = sim.n_output_inconsistent();
                 const auto& fr = sim.output_floor_row();
                 d["output_floor_row"] = std::vector<double>(fr.data(), fr.data() + fr.size());
                 d["n_projections"] = sim.n_projections();

@@ -510,6 +510,9 @@ def _result_from_native(native_res, t_start: float):
         # the chords that needed it, the largest floor, and per stored column its largest
         # floor (the recovered vector is the tail of the bounded rows; 0: never floored)
         og["n_output_floored"] = int(native_res.get("n_output_floored", 0))
+        # of them, the calls certified only by the basis-inconsistency floor: a fast mode's
+        # content that did not decay as its own closed form says (F-X-8; counted, reported)
+        og["n_output_inconsistent"] = int(native_res.get("n_output_inconsistent", 0))
         fr = np.asarray(native_res.get("output_floor_row", []), dtype=float)
         og["output_floor_max"] = float(fr.max()) if fr.size else 0.0
         ncol = res.states.shape[1] if getattr(res, "has_full_states", False) else 0
@@ -536,6 +539,15 @@ def _result_from_native(native_res, t_start: float):
                 f"ran out at t = {og['output_budget_t']:.6g} s; from there the samples are the "
                 "default grid and linear interpolation between them is NOT within output_rtol "
                 "(diagnostics['output_grid']['output_budget_t']). Raise output_rtol, or pass dt.",
+                RuntimeWarning, stacklevel=4)
+        if og["n_output_inconsistent"]:
+            _emit("output_inconsistent",
+                f"simulate(engine='exact', output_rtol=...): {og['n_output_inconsistent']} output "
+                "rule call(s) met a fast mode whose content did not decay as its own closed form "
+                "says (the eigenbasis's or the propagator's error, not a transient); the step was "
+                "bounded without that part, and the bound with it is those rows' floor there "
+                "(diagnostics['output_grid']['output_floor_by_column']): linear interpolation is "
+                "within max(output_rtol, that floor).",
                 RuntimeWarning, stacklevel=4)
         if og["n_output_capped"] or og["n_output_unbounded"]:
             _emit("output_cap",
