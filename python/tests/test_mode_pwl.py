@@ -16,7 +16,7 @@ from tests.oracles import lcp_pulsim_bridge as B
 
 T = 1e-5
 GON, GOFF = 1e3, 1e-9
-RESTART = {"discontinuity_restart": True}
+RESTART = {"discontinuity_restart": True, "enable_substep_state_correction": False}   # the rule alone (the split follows it by default since the release)
 SPLIT = {"discontinuity_restart": True, "enable_substep_state_correction": True}
 # "pwl" = the restart-less fixed step, explicit since the release made the restart the default
 # (RESTART by identity: the restart-cut branch of the shadow test reads `kw is RESTART`)

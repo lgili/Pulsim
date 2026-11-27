@@ -10,7 +10,7 @@ import collections.abc
 import numpy
 import numpy.typing
 import typing
-__all__: list[str] = ['BranchKind', 'BuilderScope', 'CacheMetrics', 'ChargeLaw', 'ChargeTable', 'Circuit', 'CircuitBuilder', 'CommutationEvent', 'ConductionTable', 'ControlGraphBuildError', 'ConvergenceError', 'CxxBlockChain', 'CxxBlockChainState', 'CxxChainBExtra', 'CxxChainPwmGate', 'CxxChainSignalGate', 'CxxChainTick', 'CxxClarkeTransform', 'CxxFirstOrderLowPass', 'CxxGain', 'CxxInputRef', 'CxxIntegrator', 'CxxInverseParkTransform', 'CxxLimiter', 'CxxPIController', 'CxxPIDController', 'CxxPLL', 'CxxParkTransform', 'CxxPwmGenerator', 'CxxSpaceVectorModulator', 'CxxSubtract', 'DCOperatingPoint', 'DCSolveReport', 'DCStrategy', 'DeviceInfo', 'DeviceLossRecord', 'DevicePath', 'DevicePool', 'DiodeModeInconsistentError', 'DtRetry', 'DutyRegister', 'EventIterationBreach', 'FluxMapDQ', 'Graph', 'GridKind', 'IdealDiodeParams', 'ImplausibleVoltage', 'InductorGuardAction', 'InternalError', 'LiveRingHandle', 'LoadedCircuit', 'LossEvent', 'LossTable3D', 'MnaSweepKernelResult', 'NativeMultiMaskPwm', 'NativePwm2Switch', 'NetlistError', 'NewtonCounters', 'NewtonRoundoffBudgetExceeded', 'OptionsError', 'Parameter', 'ParametricRefactorMode', 'ParametricRefactorResult', 'PreflightFinding', 'PreflightIssue', 'PreflightOptions', 'PreflightReport', 'PulsimError', 'PwlStateSpaceCache', 'ReinitRecord', 'ResolutionRecord', 'RingingRecord', 'RunOptions', 'RunStats', 'Simulation', 'SimulationAborted', 'SimulationOptions', 'SimulationResult', 'SingularError', 'SolverSnapshot', 'StoredKind', 'SwitchSchedule', 'SwitchStateMask', 'ThevArm', 'ThevArmParams', 'ThreePhaseLegIndices', 'UnsupportedError', 'block_laws_source', 'compose_chain_observers', 'compute_dc_op', 'compute_dc_op_with_strategy', 'compute_dc_operating_point', 'describe_implausible_voltage', 'device_field_table', 'dopri5_solve', 'dsed_period_map', 'dsed_periodic_orbit', 'engine_capabilities', 'find_implausible_voltage', 'full_bridge', 'half_bridge', 'ja_evaluate', 'ja_replay', 'load_yaml_file', 'load_yaml_string', 'make_carrier_pwm_fn', 'make_chain_switch_fn', 'make_combined_switch_fn', 'make_constant_switch_fn', 'make_dead_time_pwm_pair_fn', 'make_edge_list_fn', 'make_phase_control_fn', 'make_phase_shift_full_bridge_fn', 'make_pwm_switch_fn', 'make_spwm_pair_fn', 'make_three_phase_spwm_fn', 'radau_iia3_solve', 'run_auto_native', 'run_auto_native_builder', 'run_bdf2_native', 'run_bdf2_native_builder', 'run_mna_sweep_kernel', 'run_option_defaults', 'run_option_table', 'run_ped_native', 'run_ped_native_builder', 'run_transient', 'run_transient_bdf1', 'run_transient_trbdf2', 'run_transient_with_chain', 'shockley_saturation_current_at', 'shockley_voltage_for_current', 'static_device_readings', 'thermal_voltage']
+__all__: list[str] = ['BranchKind', 'BuilderScope', 'CacheMetrics', 'ChannelTable', 'ChargeLaw', 'ChargeTable', 'Circuit', 'CircuitBuilder', 'CommutationEvent', 'ConductionTable', 'ControlGraphBuildError', 'ConvergenceError', 'CxxBlockChain', 'CxxBlockChainState', 'CxxChainBExtra', 'CxxChainPwmGate', 'CxxChainSignalGate', 'CxxChainTick', 'CxxClarkeTransform', 'CxxFirstOrderLowPass', 'CxxGain', 'CxxInputRef', 'CxxIntegrator', 'CxxInverseParkTransform', 'CxxLimiter', 'CxxPIController', 'CxxPIDController', 'CxxPLL', 'CxxParkTransform', 'CxxPwmGenerator', 'CxxSpaceVectorModulator', 'CxxSubtract', 'DCOperatingPoint', 'DCSolveReport', 'DCStrategy', 'DeviceInfo', 'DeviceLossRecord', 'DevicePath', 'DevicePool', 'DiodeModeInconsistentError', 'DtRetry', 'DutyRegister', 'EventIterationBreach', 'FluxMapDQ', 'Graph', 'GridKind', 'IdealDiodeParams', 'ImplausibleVoltage', 'InductorGuardAction', 'InternalError', 'LiveRingHandle', 'LoadedCircuit', 'LossEvent', 'LossTable3D', 'MnaSweepKernelResult', 'NativeMultiMaskPwm', 'NativePwm2Switch', 'NetlistError', 'NewtonCounters', 'NewtonRoundoffBudgetExceeded', 'OptionsError', 'Parameter', 'ParametricRefactorMode', 'ParametricRefactorResult', 'PreflightFinding', 'PreflightIssue', 'PreflightOptions', 'PreflightReport', 'PulsimError', 'PwlStateSpaceCache', 'ReinitRecord', 'ResolutionRecord', 'RingingRecord', 'RunOptions', 'RunStats', 'Simulation', 'SimulationAborted', 'SimulationOptions', 'SimulationResult', 'SingularError', 'SolverSnapshot', 'StoredKind', 'SwitchSchedule', 'SwitchStateMask', 'ThevArm', 'ThevArmParams', 'ThreePhaseLegIndices', 'UnsupportedError', 'block_laws_source', 'compose_chain_observers', 'compute_dc_op', 'compute_dc_op_with_strategy', 'compute_dc_operating_point', 'describe_implausible_voltage', 'device_field_table', 'dopri5_solve', 'dsed_period_map', 'dsed_periodic_orbit', 'engine_capabilities', 'find_implausible_voltage', 'full_bridge', 'half_bridge', 'ja_evaluate', 'ja_replay', 'load_yaml_file', 'load_yaml_string', 'make_carrier_pwm_fn', 'make_chain_switch_fn', 'make_combined_switch_fn', 'make_constant_switch_fn', 'make_dead_time_pwm_pair_fn', 'make_edge_list_fn', 'make_phase_control_fn', 'make_phase_shift_full_bridge_fn', 'make_pwm_switch_fn', 'make_spwm_pair_fn', 'make_three_phase_spwm_fn', 'radau_iia3_solve', 'run_auto_native', 'run_auto_native_builder', 'run_bdf2_native', 'run_bdf2_native_builder', 'run_mna_sweep_kernel', 'run_option_defaults', 'run_option_table', 'run_ped_native', 'run_ped_native_builder', 'run_transient', 'run_transient_bdf1', 'run_transient_trbdf2', 'run_transient_with_chain', 'shockley_saturation_current_at', 'shockley_voltage_for_current', 'static_device_readings', 'thermal_voltage']
 class Graph:
     """
     Pulsim topology graph. Build via CircuitBuilder; access via builder.graph.
@@ -411,6 +411,11 @@ class SimulationResult:
     def n_restart_steps(self) -> int:
         """
         Steps taken as SDIRK(2,2) restart steps (discontinuity_restart). 0 with the rule off.
+        """
+    @property
+    def n_right_limit_fallbacks(self) -> int:
+        """
+        Restart rule: event right limits that are not certified: a row whose solve did not converge or whose diode mode does not hold at t_e+ (no row is stored), or a located turn-off solved through g_off (the row is stored). 0 with the rule off.
         """
     @property
     def n_rk45_steps(self):
@@ -1484,6 +1489,27 @@ class FluxMapDQ:
     @property
     def source(self) -> str:
         ...
+class ChannelTable:
+    """
+    Tabulated MOSFET channel I_D(V_GS, V_DS) for add_power_mosfet(channel=): a rectilinear grid, V_DS from 0, I_D(V_GS, 0) = 0, non-decreasing in both arguments (refused by name otherwise, pulsim.NetlistError); bicubic Hermite with monotone per-axis tangents (C1); third quadrant by terminal swap i(V_GS, V_DS < 0) = -I(V_GS - V_DS, -V_DS).
+    """
+    def __init__(self, v_gs: collections.abc.Sequence[float], v_ds: collections.abc.Sequence[float], I: collections.abc.Sequence[collections.abc.Sequence[float]]) -> None:
+        """
+        I[i][j] = I_D at (v_gs[i], v_ds[j]) [A].
+        """
+    def current(self, v_gs: float, v_ds: float) -> tuple[float, float, float]:
+        """
+        (i, di/dv_gs, di/dv_ds) at one bias point, either sign of v_ds.
+        """
+    @property
+    def I(self) -> list[list[float]]:
+        ...
+    @property
+    def v_ds(self) -> list[float]:
+        ...
+    @property
+    def v_gs(self) -> list[float]:
+        ...
 class ChargeTable:
     """
     Monotone charge law Q(v) for a nonlinear capacitor: knots (v, Q, C), cubic Hermite with C as exact tangents, so C(v) is the exact derivative of Q(v). Not odd; linear tails at the end-knot slopes; one knot must sit at v = 0 with Q = 0. Fritsch-Carlson monotonicity is checked and a violating tangent clamped.
@@ -1762,9 +1788,9 @@ class CircuitBuilder:
         """
         Add an MNA-NATIVE PMSM (audit C.3): three stator branches `<name>_a/_b/_c` (phase -> neutral) stamped per Newton iteration with the FULL theta-dependent inductance matrix L(theta) = T^-1 diag(L_d, L_q, L_0) T and the PM flux, so an IPM's d/q dynamics are exact and there is no one-step lag; mechanics are NODES (`omega_node` carries a capacitor J and a resistor 1/B, `theta_node` a 1 F capacitor fed by omega), so they get the same trapezoidal companion in the same solve. T_em comes from the co-energy of the same L(theta) — the reluctance torque appears because L(theta) is in the matrix. A speed-dependent load is just another element on `omega_node`. Read speed with res.v(omega_node), angle with res.v(theta_node), phase currents with res.i('<name>_a'). Compare with the observer-based `add_pmsm` + `make_pmsm_observer`, which uses one average L (tau_d +100 %, tau_q -33 % on a 1/3 mH IPM) and a first-order lag (-0.37 % of speed at dt=5e-5). `harmonics=[(h, psi_h, phi_h), ...]` replaces the PM flux psi_pm*cos(theta_e) by sum psi_h*cos(h*theta_e + phi_h) (phases b, c at theta_e -/+ 120 deg): a non-sinusoidal back-EMF with the torque from the same series; see `CircuitBuilder.add_bldc_mna`. The `<name>.i_d/i_q` traces stay on the theta_e axis, so they are off the PM-fundamental axis by phi_1 when phi_1 != 0. `flux_map=FluxMapDQ` replaces the constant L_d, L_q, psi_pm by a saturating, cross-coupled co-energy map (L_d, L_q, psi_pm must then equal the map's values at i = 0; see `CircuitBuilder.add_pmsm_flux_map`, which passes them).
         """
-    def add_power_mosfet(self, name: str, drain: str, source: str, gate: str, *, K: float, V_T: float, lambda_: float = 0.0, kappa: float = 15.0, R_d: float = 0.0, C_gs: float, C_gd: typing.Any, C_ds: typing.Any, R_g: float = 0.0, L_s: float = 0.0, body_diode: typing.Any = None, T_j: float = 25.0, rds_tc1: float = 0.0, rds_tc2: float = 0.0, vt_tc: float = 0.0) -> CircuitBuilder:
+    def add_power_mosfet(self, name: str, drain: str, source: str, gate: str, *, K: float, V_T: float, lambda_: float = 0.0, kappa: float = 15.0, R_d: float = 0.0, C_gs: float, C_gd: typing.Any, C_ds: typing.Any, R_g: float = 0.0, L_s: float = 0.0, body_diode: typing.Any = None, T_j: float = 25.0, rds_tc1: float = 0.0, rds_tc2: float = 0.0, vt_tc: float = 0.0, channel: ChannelTable | None = None, fq_device: bool = False) -> CircuitBuilder:
         """
-        Datasheet power MOSFET as one call: Level-1 channel (K [A/V^2], V_T [V], third quadrant by terminal swap), drift resistance R_d [ohm], C_gs [F], C_gd and C_ds (float = linear farads, 0 = absent; or a ChargeTable / ChargeLaw), internal gate resistance R_g [ohm], common source inductance L_s [H], body_diode None or {'model': 'lauritzen'|'shockley', ...}. T_j [degC] is run-constant: R_d *= r, K /= r with r = 1 + rds_tc1*dT + rds_tc2*dT^2, V_T += vt_tc*dT (dT = T_j - 25). Sub-elements: name (channel), name.rd/.rg/.ls/.cgs/.cgd/.cds, name_body. Runs on pwl (time step must resolve the gate transient: ~0.2 ns for a 60 ns plateau) and trbdf2. components() reports one 'power_mosfet' entry.
+        Datasheet power MOSFET as one call: Level-1 channel (K [A/V^2], V_T [V], third quadrant by terminal swap), drift resistance R_d [ohm], C_gs [F], C_gd and C_ds (float = linear farads, 0 = absent; or a ChargeTable / ChargeLaw), internal gate resistance R_g [ohm], common source inductance L_s [H], body_diode None or {'model': 'lauritzen'|'shockley', ...}. T_j [degC] is run-constant: R_d *= r, K /= r with r = 1 + rds_tc1*dT + rds_tc2*dT^2, V_T += vt_tc*dT (dT = T_j - 25). Default: a composite, sub-elements name (channel), name.rd/.rg/.ls/.cgs/.cgd/.cds, name_body. fq_device=True (opt-in): the channel (or channel= a ChannelTable, replacing K, V_T, lambda_, kappa), C_gd, C_ds and the body diode are ONE f/q device 'name' (sub-elements name.rd/.rg/.ls/.cgs); res.i(name) is then the drain-terminal current and device_loss_summary lists it. Runs on pwl (time step must resolve the gate transient: ~0.2 ns for a 60 ns plateau) and trbdf2. components() reports one 'power_mosfet' entry.
         """
     def add_pulse_current_source(self, name: str, n_pos: str, n_neg: str, i_initial: float, i_pulsed: float, t_start: float, pulse_width: float, period: float = 0.0, rise_time: float = 0.0, fall_time: float = 0.0) -> CircuitBuilder:
         """
@@ -2530,7 +2556,7 @@ class SimulationOptions:
     @property
     def split_snap(self) -> float:
         """
-        Split events within split_snap*dt of a step boundary are taken at it (default 0.01).
+        Split events within split_snap*dt of a step boundary are taken at it (default 1e-6).
         """
     @split_snap.setter
     def split_snap(self, arg0: float) -> None:
@@ -4753,7 +4779,7 @@ def run_ped_native(system: typing.Any, switch_fn: typing.Any, x0: typing.Annotat
     """
     Native PEDSimulator (DOPRI5 + adaptive PI + event scan) running the C++ scheduler inner loop. `system` and `switch_fn` are still invoked via Python callbacks per step (GIL overhead), but the scheduler control flow runs natively. Returns a dict with times, states, n_accept, n_reject, n_events, cpu_time_seconds, event_log.
     """
-def run_ped_native_builder(adapter: _NativeCircuitBuilderAdapter, switch_fn: typing.Any, x0: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"], t_end: float, rtol: float = 1e-06, atol: float = 1e-09, dt_init: float = 1e-09, dt_max: float = 1e-05, store_every: int = 1, enable_event_projection: bool = True, event_log: bool = True, mode_shadow_h_e: float = 0.0, mode_lcp_h_e: float = 0.0, mode_guard_h_e: float = 0.0, mode_guard_refuse: bool = False, settle_round_cap: int = 64, diode_law_rel: float = 0.001, tick_periods: collections.abc.Sequence[float] = [], tick_offsets: collections.abc.Sequence[float] = [], tick_fns: collections.abc.Sequence[typing.Any] = [], tick_monitors: collections.abc.Sequence[bool] = [], output_rtol: float = 0.0, output_cap: int = 4096, resume: SolverSnapshot | None = None, tick_origins: collections.abc.Sequence[float] = [], tick_next_k: collections.abc.Sequence[int] = [], loop_feed: typing.Any = None, t_offset: float = 0.0, output_budget: int = 2000000) -> dict[typing.Any, typing.Any]:
+def run_ped_native_builder(adapter: _NativeCircuitBuilderAdapter, switch_fn: typing.Any, x0: typing.Annotated[numpy.typing.ArrayLike, numpy.float64, "[m, 1]"], t_end: float, rtol: float = 1e-06, atol: float = 1e-09, dt_init: float = 1e-09, dt_max: float = 1e-05, store_every: int = 1, enable_event_projection: bool = True, event_log: bool = True, mode_shadow_h_e: float = 0.0, mode_lcp_h_e: float = 0.0, mode_guard_h_e: float = 0.0, mode_guard_refuse: bool = False, settle_round_cap: int = 64, diode_law_rel: float = 0.001, tick_periods: collections.abc.Sequence[float] = [], tick_offsets: collections.abc.Sequence[float] = [], tick_fns: collections.abc.Sequence[typing.Any] = [], tick_monitors: collections.abc.Sequence[bool] = [], output_rtol: float = 0.0, output_cap: int = 4096, resume: SolverSnapshot | None = None, tick_origins: collections.abc.Sequence[float] = [], tick_next_k: collections.abc.Sequence[int] = [], loop_feed: typing.Any = None, t_offset: float = 0.0, output_budget: int = 2000000, fixed_step: bool = False) -> dict[typing.Any, typing.Any]:
     """
     Bridge.11 — native PEDSimulator (DOPRI5) over a NativeCircuitBuilderAdapter. RHS / b_vector / A_matrix all execute in C++ without GIL roundtrips; the only Python callback is `switch_fn` at gate edges (rare). v2.0 Phase 3: PWL diodes are commutated by auto-derived event predicates on the reconstructed branch voltage, and every event projects the state onto the new mode's slow manifold (consistent reinitialization; pass enable_event_projection=False for the raw pre-projection behaviour).
     """

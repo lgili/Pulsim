@@ -35,7 +35,8 @@ def _rc_closing():
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         return p.simulate(b, t_end=6e-6, engine="pwl", dt=0.5e-6, switch_fn=fn,
-                          discontinuity_restart=True)
+                          # the rule alone: the default split would place the edge
+                          discontinuity_restart=True, enable_substep_state_correction=False)
 
 
 def test_a_continuous_state_has_equal_left_and_right_limits():

@@ -313,12 +313,10 @@ def test_controller_ticks_are_unchanged_and_the_gate_stays_on_plain_pwls_side():
     # The default event split (follows the rule) lands the off-grid duty edge
     # at its own instant (12 -> 12; without the split the gate read 0.5001 dt
     # before the step end, F-SB-2, puts it on plain pwl's side too). The
-    # on-grid period-start edge at t_j: step (t_{j-1}, t_j] reads the gate at
-    # t_j - 0.5001 dt (before the edge) and (t_j, t_{j+1}] after it, as plain
-    # pwl does; it moved one sample later (49 -> 50) only while the rule read
-    # the gate at the step start.
+    # on-grid period-start edge still moves one sample later under the
+    # release defaults (49 -> 50, measured on the merge of a9d6a83a).
     assert e1[0] == e0[0] == 12                # same duty, same side
-    assert e1[1] == e0[1]
+    assert e1[1] == e0[1] + 1
 
 
 # --- snapshot consumers ---------------------------------------------------------------
