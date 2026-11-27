@@ -62,6 +62,58 @@ def test_a_switched_capacitor_loop_still_records_its_jump():
     assert on[0].dW == pytest.approx(off[0].dW, rel=1e-6)
 
 
+def test_the_unprobed_turn_on_residual_decays_without_ringing():
+    """Without the probe the first sample after the cut holds the fast mode's
+    residual (8.9e-5 A in Vin, measured; 2.5e-8 A with the probe). Piece 2 runs
+    the L-stable SDIRK restart, so it is damped, not an un-projected mode that
+    rings on: the next sample is down by > 1e3 and from the third on every one of
+    50 is within 1e-9 A of the settled current (measured: <= 5.2e-11 A)."""
+    import numpy as np
+
+    r = _switched_junction(9.9e-6, **SPLIT)
+    (ev,) = r.commutation_events
+    t, iv = np.asarray(r.times), np.asarray(r.i("Vin"))
+    k = int(np.searchsorted(t, ev.t_estimated, side="right"))
+    dev = iv[k:k + 50] - np.median(iv[k + 30:k + 80])
+    assert abs(dev[1]) < 1e-3 * abs(dev[0])
+    assert np.max(np.abs(dev[2:])) <= 1e-9
+
+
+def _diode_joined_capacitors(v_th, v1):
+    """C1 (1 uF, charged by 1 mA from v1) joined to C2 (2 uF, at 0 V) by a
+    V_f = 0 diode that turns on at v_D = V_th: the turn-on closes a capacitor loop
+    across a loop voltage V_th (zero when V_th = 0: then a continuity point)."""
+    b = p.CircuitBuilder()
+    b.add_current_source("I", "a", "gnd", 1e-3)
+    b.add_capacitor("C1", "a", "gnd", 1e-6, v1)
+    b.add_diode("D", "a", "b", 1e3, 1e-9, v_th, 0.0)
+    b.add_capacitor("C2", "b", "gnd", 2e-6, 0.0)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return p.simulate(b, t_end=3e-3, dt=1e-6, **SPLIT)
+
+
+def test_a_located_turn_on_across_a_loop_voltage_records_the_charge_sharing():
+    """The skip is for V_f = V_th = 0 crossings only: a located turn-on at
+    V_th = 1 V shares charge dQ = C1*C2/(C1+C2)*V_th = 6.667e-7 C and books
+    dW = dQ*V_th/2 once. rel 1e-5: the 1e-9 S OFF leak carries <= 1e-12 C over
+    1 ms at <= 1 V (rel 1.5e-6 of dQ, and it delays the crossing by ~1 ns, rel
+    1.3e-6 of 1 ms); the located time's own error is split_snap*dt. Measured:
+    rel 7e-7 on dQ and dW, 1.25e-9 s late."""
+    r = _diode_joined_capacitors(1.0, 0.0)
+    (ev,) = r.commutation_events
+    assert ev.new_state and ev.t_estimated == pytest.approx(1e-3, rel=1e-5)
+    (rec,) = r.reinit_records
+    assert rec.kind == "capacitor_loop" and sorted(rec.states) == ["C1", "C2"]
+    dq = 1e-6 * 2e-6 / 3e-6 * 1.0
+    assert abs(rec.lambda_) == pytest.approx(dq, rel=1e-5)
+    assert rec.dW == pytest.approx(0.5 * dq * 1.0, rel=1e-5)
+    # the V_th = 0 crossing of the same loop is continuous: nothing to record
+    r0 = _diode_joined_capacitors(0.0, -1.0)
+    assert [e.new_state for e in r0.commutation_events] == [True]
+    assert list(r0.reinit_records) == []
+
+
 def _snubbed_dcm_boost(form=None):
     """F-Z-17's cell (test_switch_state_record's): the DCM boost with an RC snubber and
     10 nH in series with D1 (V_th 0.7 V); Q1 at 100 kHz, 50 %."""
