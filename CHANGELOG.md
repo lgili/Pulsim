@@ -15,7 +15,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   interval to ~1 ps until the 4096-sample cap: seven bridges took 660 934
   samples on macOS and 14 113 on Linux; ten took 1 877 398 on Windows
   (2185 s). That part is now measured between two instants of one flow and
-  added to the row's tolerance, counted in
+  taken out of the bound of a step it cuts; where that lengthens the step the
+  bound with it is the row's floor there (`output_floor_by_column`), counted in
   `diagnostics['output_grid']['n_output_inconsistent']` with a RuntimeWarning
   (`output_inconsistent`). Seven bridges: 12 795 samples, no capped interval;
   ten: 16 264; last-bit perturbations of `t_end` / amplitudes stay within

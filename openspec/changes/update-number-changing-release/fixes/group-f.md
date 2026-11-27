@@ -1683,21 +1683,24 @@ which is the noise itself (2.9e-6 there); a floor from u·|V⁻¹||x| is 1e6 too
 Fix (exact_lti.hpp `exact_chord_step`, the scheduler resets it): within one LTI flow
 z̈_k(t) = z̈_k(t_p)·e^{λ_k(t − t_p)} exactly. At each counted rule call the previous distinct
 instant of the same flow (same mode, same interval: reset at every event, time event, state
-kick and on the deferral's re-checks) gives, per mode with |ρ| = |e^{λΔ}| ≤ 1/2,
-ν_k = min(|z̈_k|, |z̈_k − ρ z̈_k(t_p)| / |1 − ρ|) (a constant ν leaves exactly this residue), and
-Σ_k |P_jk|·(2/|λ_k|²)·ν_k is added to row j's tolerance. ν_k ≤ |z̈_k|, so this never certifies
-more than dropping those modes' own amplitude terms; a mode that decays as it should has
-ν ≈ 0. Counted: `n_output_inconsistent` (calls the floor was needed for), the floor goes into
-`output_floor_row` / `output_floor_by_column`, and a RuntimeWarning `output_inconsistent` once
-per run. A measured floor, not a futility stop: the ν-floor costs nothing where the basis is
-consistent, and the first call of each interval (no history) is unchanged.
+kick; not on the deferral's re-checks) gives, per mode with |ρ| = |e^{λΔ}| ≤ 1/2, the constant
+part c_k = (z̈_k − ρ z̈_k(t_p)) / (1 − ρ) (a constant part leaves exactly this residue). The step
+is solved first with the measured z̈ (unchanged); only a step it cuts is solved again with
+g_k = z̈_k − c_k, and when that step is longer, the measured bound AT that step is the row's
+floor (`output_floor_row` / `output_floor_by_column`), counted in `n_output_inconsistent`, with
+a RuntimeWarning `output_inconsistent` once per run. So every stored line is within
+max(rtol·range, reported floor) of the bound's own model. A measured floor, not a futility
+stop: a mode that decays as it should has c ≈ 0, and a step the measured bound does not cut,
+or whose length g does not change, is bit-identical. (A first version added Σ|P_jk| s_k ν_k
+to the tolerance; the reviewer showed it could excuse other modes' curvature when mode k is
+in the curvature set: replaced.)
 
 | case (macOS arm64, rule on, `t_end` 0.02) | before: samples / capped / s | after: samples / capped / inconsistent / s |
 |---|---|---|
 | 7 bridges | 660 934 / 158 / 147.5 | 12 795 / 0 / 206 / 9.1 |
 | 7, `t_end`·(1 + 1e-15) | 660 934 / 158 / 154.9 | 12 795 / 0 / 206 / 9.1 |
 | 7, `t_end`·(1 − 1e-15) | 660 934 / 158 / 155.4 | 12 795 / 0 / 206 / 9.2 |
-| 7, amplitude·(1 + 1e-15) | 14 118 / 0 / 9.1 | 14 104 / 0 / 370 / 9.5 |
+| 7, amplitude·(1 + 1e-15) | 14 118 / 0 / 9.1 | 14 104 / 0 / 370 / 9.6 |
 | 7, amplitude·(1 − 1e-15) | 13 356 / 0 / 9.3 | 13 355 / 0 / 29 / 9.4 |
 | 6 / 8 bridges | 12 237 / 0, 15 213 / 0 | 12 236 / 0, 15 213 / 0 |
 | 10 bridges (the test's case) | 16 264 / 0 / 22.8 (Linux 216 675 / 49, Windows 1 877 398 / 454) | 16 264 / 0 / 270 / 23.3 |

@@ -140,14 +140,14 @@ struct ChordWork {
     DenseMatrix S, B, C, D, A0, A1;         // n × (n+1) sums per split (exact_chord_step)
     // The basis-inconsistency floor (F-X-8): z̈ at the last two distinct instants of one
     // LTI flow (the caller sets `track` on the flow's calls and resets at every event, time
-    // event or state kick), and per bounded row the floor it gave (0: none)
-    bool track = false, inconsistent = false;   // inconsistent: the last step needed it
+    // event or state kick); inconsistent: the measured z̈'s bound exceeded a row's tolerance
+    bool track = false, inconsistent = false;
     Real t = Real{0};                           // the instant of the call (set by the caller)
     const void* cur_e = nullptr;
     const void* prev_e = nullptr;
     Real cur_t = Real{0}, prev_t = Real{0};
-    Eigen::VectorXcd cur_zdd, prev_zdd;
-    Vector nz, te0;
+    Eigen::VectorXcd cur_zdd, prev_zdd, gdd;   // gdd: z̈ with the constant parts taken out
+    Vector fu0;
     void reset_flow() noexcept { cur_e = prev_e = nullptr; }
 };
 
@@ -961,14 +961,15 @@ inline constexpr Real kSettleTau = Real{40};
         for (Eigen::Index k = 0; k < n; ++k) w.zdd[k] += std::complex<Real>{w.cr[k], w.ci[k]};
     }
     // F-X-8: within one LTI flow a decaying mode's z̈_k(t) = z̈_k(t_p)·e^{λ_k(t − t_p)}
-    // exactly. What of it did not decay by the previous distinct instant of the flow is
-    // the basis's (or the propagator's) inconsistency, not a transient: a 0.4 ps mode of
-    // seven bridges read a constant |z| = 3.6e-14 for 250 ps (predicted e^-625), 2.6e10 V/unit
-    // on a recovered row, and cut every chord to 1 ps until the cap. Per mode with
-    // |ρ| ≤ 1/2 (it should have decayed by half) that part, ν_k = |z̈ − ρ z̈_p| / |1 − ρ|
-    // (a constant ν has exactly this residue), is ≤ |z̈_k|, its chord at most s_k ν_k; per row
-    // Σ_k |P_jk| s_k ν_k is added to the tolerance (counted by the caller, never silent).
-    w.nz.resize(0);
+    // exactly. What of it did not decay by the previous distinct instant of the flow is the
+    // basis's (or the propagator's) inconsistency, not a transient: a 0.4 ps mode of seven
+    // bridges read a constant |z| = 3.6e-14 for 250 ps (its closed form: e^-625), 2.6e10 V
+    // per unit on a recovered row, and cut every chord to 1 ps until the cap. A constant part
+    // c_k leaves the residue z̈ − ρ z̈_p = c_k (1 − ρ), so per mode with |ρ| ≤ 1/2 (it should
+    // have decayed by half) the bound reads the decaying part g_k = z̈_k − c_k instead of z̈_k.
+    // Only a step the measured z̈ cuts is solved again so; when that step is longer, the
+    // measured bound at it is the row's floor (w.fu) and the call is counted (w.inconsistent).
+    bool sub = false;
     if (w.track) {
         if (w.cur_e != &e || !(w.t >= w.cur_t)) {
             w.cur_e = nullptr;
@@ -980,55 +981,58 @@ inline constexpr Real kSettleTau = Real{40};
         }
         w.cur_e = &e;
         w.cur_t = w.t;
-        w.cur_zdd = w.zdd;
+        w.cur_zdd = w.zdd;   // the measured z̈ (the next call's prediction starts from it)
         if (w.prev_e == &e && w.prev_t < w.t && w.prev_zdd.size() == n) {
             const Real dt = w.t - w.prev_t;
             for (Eigen::Index k = 0; k < n; ++k) {
                 const std::complex<Real> rho = std::exp(e.lambda[k] * dt);
                 if (!(std::abs(rho) <= Real{0.5})) continue;
-                const Real nu = std::min(std::abs(w.zdd[k]),
-                                         std::abs(w.zdd[k] - rho * w.prev_zdd[k]) / std::abs(Real{1} - rho));
-                if (!(nu > Real{0})) continue;
-                if (w.nz.size() == 0) w.nz.setZero(r);
-                w.nz += e.chord_vabs.col(k) * (nu * Real{2} / std::norm(e.lambda[k]));
+                const std::complex<Real> c = (w.zdd[k] - rho * w.prev_zdd[k]) / (Real{1} - rho);
+                if (c == std::complex<Real>{0}) continue;
+                if (!sub) w.gdd = w.zdd;
+                w.gdd[k] -= c;
+                sub = true;
             }
         }
     }
-    // a growing mode's g_k = e^{Re λ_k δ} depends on the probe: its terms are added in fits
-    w.grow.clear();
-    for (Eigen::Index k = 0; k < n; ++k) {
-        const bool grows = e.lambda[k].real() > Real{0};
-        if (grows) w.grow.push_back(k);
-        w.a[k] = grows ? Real{0} : std::abs(w.zdd[k]);
-    }
-    // column i = the split F = chord_order[0, i): S / B / C / A0 as in the bound above
-    w.S.resize(r, n + 1);
-    w.B.resize(r, n + 1);
-    w.C.resize(r, n + 1);
-    w.A0.resize(r, n + 1);
-    w.D.resize(r, n + 1);
-    w.A1.resize(r, n + 1);
-    w.S.col(0).setZero();
-    w.B.col(n).setZero();
-    w.C.col(n).setZero();
-    w.D.col(n).setZero();
-    w.A0.col(n).setZero();
-    w.A1.col(n).setZero();
-    for (Eigen::Index q = n - 1; q >= 0; --q) {
-        const Eigen::Index k = e.chord_order[static_cast<std::size_t>(q)];
-        const std::complex<Real> zl = w.zdd[k] * e.lambda[k];
-        w.B.col(q) = w.B.col(q + 1) + e.chord_vabs.col(k) * w.a[k];
-        w.C.col(q) = w.C.col(q + 1) + e.chord_vabs.col(k) * (w.a[k] * std::abs(e.lambda[k]));
-        w.D.col(q) = w.D.col(q + 1) + e.chord_vabs.col(k) * (w.a[k] * std::norm(e.lambda[k]));
-        w.A0.col(q) = w.A0.col(q + 1) + Pre.col(k) * w.zdd[k].real() - Pim.col(k) * w.zdd[k].imag();
-        w.A1.col(q) = w.A1.col(q + 1) + Pre.col(k) * zl.real() - Pim.col(k) * zl.imag();
-    }
     Eigen::Index n_sat = 0;   // modes with a finite s_k (only they can join F)
     while (n_sat < n && e.chord_s[n_sat] < kInf) ++n_sat;
-    for (Eigen::Index q = 0; q < n_sat; ++q) {
-        const Eigen::Index k = e.chord_order[static_cast<std::size_t>(q)];
-        w.S.col(q + 1) = w.S.col(q) + e.chord_vabs.col(k) * (w.a[k] * e.chord_s[q]);
-    }
+    auto sums = [&] {   // the per-step sums from w.zdd
+        // a growing mode's g_k = e^{Re λ_k δ} depends on the probe: its terms are added in fits
+        w.grow.clear();
+        for (Eigen::Index k = 0; k < n; ++k) {
+            const bool grows = e.lambda[k].real() > Real{0};
+            if (grows) w.grow.push_back(k);
+            w.a[k] = grows ? Real{0} : std::abs(w.zdd[k]);
+        }
+        // column i = the split F = chord_order[0, i): S / B / C / A0 as in the bound above
+        w.S.resize(r, n + 1);
+        w.B.resize(r, n + 1);
+        w.C.resize(r, n + 1);
+        w.A0.resize(r, n + 1);
+        w.D.resize(r, n + 1);
+        w.A1.resize(r, n + 1);
+        w.S.col(0).setZero();
+        w.B.col(n).setZero();
+        w.C.col(n).setZero();
+        w.D.col(n).setZero();
+        w.A0.col(n).setZero();
+        w.A1.col(n).setZero();
+        for (Eigen::Index q = n - 1; q >= 0; --q) {
+            const Eigen::Index k = e.chord_order[static_cast<std::size_t>(q)];
+            const std::complex<Real> zl = w.zdd[k] * e.lambda[k];
+            w.B.col(q) = w.B.col(q + 1) + e.chord_vabs.col(k) * w.a[k];
+            w.C.col(q) = w.C.col(q + 1) + e.chord_vabs.col(k) * (w.a[k] * std::abs(e.lambda[k]));
+            w.D.col(q) = w.D.col(q + 1) + e.chord_vabs.col(k) * (w.a[k] * std::norm(e.lambda[k]));
+            w.A0.col(q) = w.A0.col(q + 1) + Pre.col(k) * w.zdd[k].real() - Pim.col(k) * w.zdd[k].imag();
+            w.A1.col(q) = w.A1.col(q + 1) + Pre.col(k) * zl.real() - Pim.col(k) * zl.imag();
+        }
+        for (Eigen::Index q = 0; q < n_sat; ++q) {
+            const Eigen::Index k = e.chord_order[static_cast<std::size_t>(q)];
+            w.S.col(q + 1) = w.S.col(q) + e.chord_vabs.col(k) * (w.a[k] * e.chord_s[q]);
+        }
+    };
+    sums();
     // the bound on |e_j| at step d, per component, into w.eb (false: not finite)
     auto bound = [&](Real d) {
         const Real q = d * d / Real{8};
@@ -1077,39 +1081,53 @@ inline constexpr Real kSettleTau = Real{40};
     w.te = tol.cwiseMax(w.fu);
     if (rows_p && r > n) w.tyf = w.fu.tail(r - n);
     else w.tyf.resize(0);
-    w.inconsistent = false;
-    if (w.nz.size() == r) {   // the floor the counters see: max(tol, rounding) + the ν-floor
-        w.te0 = w.te;
-        w.te += w.nz;
-        w.fu = w.te;
-    }
     const Eigen::Map<const Vector> tol_e(w.te.data(), r);
     // whether step d satisfies the bound for every component
     auto fits = [&](Real d) { return bound(d) && (w.eb.array() <= tol_e.array()).all(); };
     // w.fu: each row's floor where the bound at the step taken needed it, else 0
     auto floored = [&] {
-        if (w.nz.size() == r)
-            w.inconsistent = (w.eb.array() > w.te0.array()).any();
         w.fu = (w.eb.array() > tol.array()).select(w.fu, Real{0});
     };
-    if (fits(h)) {
+    auto solve = [&]() -> Real {
+        if (fits(h)) {
+            floored();
+            return h;
+        }
+        // bisect in log d; lo always fits, so the result is a bound whatever the split does
+        Real lo = h * Real{1e-12}, hi = h;
+        if (!fits(lo)) {   // not even 1e-12·h fits: no bound (counted as unbounded)
+            bounded = false;
+            w.fu.setZero();
+            return h;
+        }
+        for (int it = 0; it < 60 && hi > lo * Real{1.01}; ++it) {
+            const Real mid = std::sqrt(lo * hi);
+            (fits(mid) ? lo : hi) = mid;
+        }
+        bound(lo);
         floored();
-        return h;
-    }
-    // bisect in log d; lo always fits, so the result is a bound whatever the split does
-    Real lo = h * Real{1e-12}, hi = h;
-    if (!fits(lo)) {   // not even 1e-12·h fits: no bound (counted as unbounded)
-        bounded = false;
-        w.fu.setZero();
-        return h;
-    }
-    for (int it = 0; it < 60 && hi > lo * Real{1.01}; ++it) {
-        const Real mid = std::sqrt(lo * hi);
-        (fits(mid) ? lo : hi) = mid;
-    }
-    bound(lo);
+        return lo;
+    };
+    w.fu0 = w.fu;
+    const Real d = solve();
+    if (!(sub && bounded && d < h)) return d;
+    // F-X-8: the same with the decaying parts g (a step it allows beyond d is counted)
+    w.zdd.swap(w.gdd);
+    sums();
+    w.fu = w.fu0;
+    Real dg = solve();
+    if (!bounded) bounded = true, dg = d;   // g has no bound: keep the measured step
+    w.zdd.swap(w.gdd);   // back to the measured z̈
+    sums();
+    const Real dt = dg > d ? dg : d;
+    if (!bound(dt)) w.eb = w.te;   // a growing term without a finite bound: report the tolerance
+    w.fu = w.fu0;
     floored();
-    return lo;
+    if (dg > d && (w.eb.array() > tol_e.array()).any()) {
+        w.inconsistent = true;   // the measured bound at the step taken is that row's floor
+        w.fu = (w.eb.array() > tol_e.array()).select(w.eb, w.fu);
+    }
+    return dt;
 }
 
 /// A step's error per unit of state, as the propagator states it: tier 1

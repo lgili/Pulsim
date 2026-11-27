@@ -238,9 +238,9 @@ whose bound only fits through its floor is certified constant up to
 rounding at that floor and counted in `res.diagnostics['output_grid']`
 (`n_output_floored`, `output_floor_max`, `output_floor_by_column`). A
 fast mode whose content does not decay between two instants of one flow
-as its own closed form says (the eigenbasis's error, not a transient) adds
-that part's chord to the column's floor instead of cutting the step to its
-time constant: counted in `n_output_inconsistent`, with one RuntimeWarning
+as its own closed form says (the eigenbasis's error, not a transient) is
+taken out of the bound of a step it cuts; where that lengthens the step the
+bound with it is the column's floor there: counted in `n_output_inconsistent`, with one RuntimeWarning
 (`output_inconsistent`). A source corner (a pulse or PWM edge) is always a stored sample. The sample
 stored at an event is its left limit (the right limit is
 `res.right_limit_states`, `pulsim.with_event_limits`); after an event

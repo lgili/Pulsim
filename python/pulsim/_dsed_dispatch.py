@@ -544,9 +544,10 @@ def _result_from_native(native_res, t_start: float):
             _emit("output_inconsistent",
                 f"simulate(engine='exact', output_rtol=...): {og['n_output_inconsistent']} output "
                 "rule call(s) met a fast mode whose content did not decay as its own closed form "
-                "says (the eigenbasis's or the propagator's error, not a transient); its chord "
-                "error was added to those rows' tolerance instead of cutting the step toward its "
-                "time constant (diagnostics['output_grid']['output_floor_by_column']).",
+                "says (the eigenbasis's or the propagator's error, not a transient); the step was "
+                "bounded without that part, and the bound with it is those rows' floor there "
+                "(diagnostics['output_grid']['output_floor_by_column']): linear interpolation is "
+                "within max(output_rtol, that floor).",
                 RuntimeWarning, stacklevel=4)
         if og["n_output_capped"] or og["n_output_unbounded"]:
             _emit("output_cap",
