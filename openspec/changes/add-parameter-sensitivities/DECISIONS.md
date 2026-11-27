@@ -777,3 +777,32 @@ hunk: `edge_past_end` in the no-final-sliver arm, next to the line rule).
   both sides, measured before the `located` fix, which is inside a
   sens-only lambda): buck_pwl +0.10 %, vsi_pwl +0.04 %, buck_trbdf2
   +0.01 %, bridge_trbdf2 +0.02 %.
+
+### TR-BDF2 turn-off landings commit their diode (2026-11-26, PR #150 CI)
+
+- The rtol-1e-9 (macOS) / 1e-10 (Linux, Windows) refusal "a diode crossing
+  within the conditioning floor of its start" was not a sensitivity defect:
+  the step before was an interpolated turn-off landing (1e-6 of its bracket
+  past the zero, by construction), and the landing's round-off bound held
+  the diode ON at -1.4e-24 A (DCM buck) / -8.9e-16 A (sine cell). The next
+  step re-found it on its forbidden side and flipped it by probes at the
+  same t. Which path ran was decided by libm.
+- Fix (`trbdf2_transient.hpp`, landing): when the bound held every flip at a
+  landing, the located diode, on its post-crossing side by any amount,
+  commits there; the regular landed-event path (and its saltation) follows.
+  Not when another diode flipped (a bridge pair crosses together).
+- Sensitivities now: sine cell vs Radau rel -2.1e-7 / 6.5e-9 / -1.4e-8 at
+  rtol 1e-9 / 1e-10 / 1e-11 (the carried-at-t attempt: 7.4e-4 / 3.6e-4 /
+  1.65e-4); DCM buck L -2.9e-5 / -5.4e-6 / -1.1e-6 (the method's error).
+  The 1e-9 strict xfail and the audit's FLOOR cell are numbers now.
+- Runs without sensitivities (21 trbdf2 runs, Eigen-3.4 build of a9d6a83a,
+  shown bit-identical to its Eigen-5 build on the 7 sensitivity runs): 18
+  bit-identical, most with fewer solves. Three differ:
+  llc_half_bridge_zvs at rtol 1e-10 (D_lo turned off one 2.2e-15 s step
+  later, under the ON mask, without a commutation record; now at the
+  landing; final state 4.2e-7 off, n_steps +4 of 52 556, n_solves -43);
+  diode_bridge_rectifier at defaults / rtol 1e-10 (the located D4 turns off
+  at the landing, its series partner D1, then at zero current inside the
+  bound, stays ON up to 0.3 ms instead of both flipping at the probe pass;
+  V(out) the same to 7e-14 at t_end, only the source's floating common mode
+  ac_p / ac_n held by g_off differs; n_solves +11 / -5).
