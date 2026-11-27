@@ -758,6 +758,48 @@
   
   
     <li class="md-nav__item">
+      <a href="../tutorials/11-electrothermal-plecs-buck/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 11 — Electrothermal PLECS buck
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ideal-switch/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Ideal Switch & Diode Complementarity
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../sensitivities/" class="md-nav__link">
         
   
@@ -973,6 +1015,27 @@
   
   <span class="md-ellipsis">
     Result Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../errors/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Error Reference
   </span>
   
 
@@ -2396,12 +2459,47 @@ The numbers are in the <code>Known limitations</code> part of the 2.1.0 entry of
 <ul>
 <li><strong>Restart rule</strong> (<code>discontinuity_restart=True</code>): the ideal-switch
   flyback on the fixed engine gets worse under step refinement; an edge
-  off the <code>dt</code> grid stays first order without event splitting.</li>
+  off the <code>dt</code> grid stays first order without event splitting.
+  <strong>2.1.0 (the released version) can also return a wrong steady state
+  with the rule on:</strong> a diode that turns off inside the restart step's
+  second stage is not located, and the stage starts from an extrapolated
+  capacitor voltage. Measured on a boost with a 1 nH residual inductance:
+  51.34 V with the rule on, against 42.11 V (an independent ODE solve;
+  <code>trbdf2</code> reads 42.111 V, the fixed engine with the rule off 41.86 V).
+  This line fixes it: the turn-off is located and the restart step is cut
+  there (counted in <code>result.counters["n_restart_cuts"]</code>; the same boost
+  reads 42.75 V; re-measured on this line with the 0.5001 h gate sample:
+  42.750 V 0.1 us after the edge, 42.114 V at 0.4 us against 41.48 V). On 2.1.0 the rule is off by default; with it on, compare
+  against <code>trbdf2</code> before trusting it on a converter whose diode commutates
+  right after a gate edge.
+  Without event splitting, a sample of an algebraic signal that is
+  discontinuous at a rounded edge is the pre-edge value: <code>scr_halfwave_r</code>
+  on <code>pwl</code> with the rule reads 0.0271 against its analytic truth (1.47e-16
+  with the rule off).</li>
+<li><strong>Restart rule, switching energy</strong>: the PSFB reference's S3 switching
+  energy reads about −10 % of the exact truth (the C_oss collapse row;
+  strict xfail in <code>python/tests/test_soft_switching_kpi.py</code>,
+  <a href="../SOFT_SWITCHING/">Soft switching</a>).</li>
+<li><strong>Restart rule, recorders</strong> (finding F-Z-12): the in-loop recorder feed
+  and the stored-array pass integrate different functions across an edge.
+  The in-loop window integral of i(L) is −1.98e-4 relative to the truth,
+  the stored arrays' +2.9e-5. Cause: the stored right limits are the true
+  x(t⁺) while the in-loop feed keeps the quadrature line starts and held
+  rows. A fix is in progress; the gaps are strict xfails in
+  <code>python/tests/test_release_findings_b2.py</code>.</li>
 <li><strong>Event splitting</strong> (with the restart rule): a retried step is re-taken
   without its interior events; an even number of edges of an opaque
-  <code>switch_fn</code> inside one step is not seen.</li>
+  <code>switch_fn</code> inside one step is not seen. A diode turn-on that falls one
+  or two steps after a located turn-off is taken at a grid point, up to
+  0.936·dt late (<code>python/tests/test_split_locator_reconduction.py</code>, strict
+  xfail). Locating an event costs trial solves, each a factorisation: 4–6
+  trials per located event.</li>
 <li><strong>Exact engine output rule</strong> (<code>engine='exact', output_rtol=...</code>): a
-  thermal summary read from stored samples depends on the output grid.</li>
+  thermal summary read from stored samples depends on the output grid.
+  The first line after an event (within 2 ps of it) can exceed the rule:
+  59× the bound on a DCM switch node, 1491 such lines on <code>cl_buck_pi</code>.
+  Closed-loop units sit at the promise (ratio ~1.0, <code>cl_buck_pi</code> 1.02),
+  not clearly under it.</li>
 <li><strong>Sensitivities</strong> are refused by name at a recorded cut-set jump (a
   DCM buck on <code>pwl</code> with splitting that returned a number before).</li>
 <li><strong>Exact engine</strong>: twelve paralleled bridges are refused by name; the
@@ -2410,9 +2508,12 @@ The numbers are in the <code>Known limitations</code> part of the 2.1.0 entry of
 </ul>
 <h2 id="on-default-options-nonlinear-output-capacitance-on-the-variable-step-engine">On default options: nonlinear output capacitance on the variable-step engine<a class="headerlink" href="#on-default-options-nonlinear-output-capacitance-on-the-variable-step-engine" title="Permanent link">&para;</a></h2>
 <p>A MOSFET with a nonlinear output capacitance on <code>engine='trbdf2'</code> (and on
-<code>auto</code> without <code>dt</code>, which lands there): the conduction energy after a gate
-edge reads +3.91 % against its closed form (a Coss buck). Workaround: pass
-<code>dt</code> (fixed step), or check the energy with a step-size study.</p>
+<code>auto</code> without <code>dt</code>, which lands there): in 2.1.0 the conduction energy after
+a gate edge read +3.91 % against its closed form (a Coss buck). Since
+[Unreleased] it reads +0.057 % at the defaults (+0.14 % with
+<code>integrator='esdirk43'</code>, +0.007 % at rtol 1e-8): the step after the edge
+starts from the consistent post-edge point. For a tighter number, lower
+<code>rtol</code> or pass <code>dt</code> (fixed step).</p>
 <h2 id="engine-capability-matrix">Engine capability matrix<a class="headerlink" href="#engine-capability-matrix" title="Permanent link">&para;</a></h2>
 <p>Which engine simulates which device kind. This table is the kernel's
 (<code>pulsim.engine_capabilities()</code>); <code>test_engine_conformance.py</code> checks
@@ -2933,6 +3034,13 @@ engine accepts a keyword and ignores it. The defaults are
 <td>False</td>
 </tr>
 <tr>
+<td><code>split_snap</code></td>
+<td>yes</td>
+<td>refused</td>
+<td>refused</td>
+<td>1e-6 (2.1.0: 0.01)</td>
+</tr>
+<tr>
 <td><code>resolution_diagnostics</code></td>
 <td>yes</td>
 <td>refused</td>
@@ -3108,7 +3216,12 @@ engine accepts a keyword and ignores it. The defaults are
 NonlinearCapacitor row. <code>add_power_mosfet</code> is a composite of the
 MosfetLevel1, Capacitor, NonlinearCapacitor, Resistor, Inductor and
 Shockley / Lauritzen diode rows: it runs on <code>pwl</code> and <code>trbdf2</code> and is
-refused on <code>dsed</code>, <code>bdf1</code> and the kernel AC sweep, naming the channel.</p>
+refused on <code>dsed</code>, <code>bdf1</code> and the kernel AC sweep, naming the channel.
+With <code>fq_device=True</code> (opt-in) it is ONE f/q device (channel, C_gd,
+C_ds, body diode: the ExternalDevice row) plus the Resistor, Inductor
+and Capacitor rows of R_d, R_g, L_s, C_gs: it runs on <code>pwl</code>, <code>trbdf2</code>,
+the DC operating point and the kernel AC sweep, and is refused on <code>dsed</code>
+and <code>bdf1</code>, naming the device.</p>
 <p>The branch form of a switch or diode (<code>add_ideal_switch</code>,
 <code>add_diode(form='branch')</code>, YAML <code>form: branch</code>; opt-in) has its own
 column; "no" raises <code>UnsupportedError(feature='branch_form')</code>. A mode
@@ -3273,6 +3386,11 @@ event where the signal jumps.</p>
 <td><strong>TR-BDF2 does not converge on a converter with no capacitance at its switch / rectifier nodes and a leakage inductance in series with a winding.</strong> Each OFF device in series with an inductance leaves a femtosecond mode, and the node between the leakage inductance and the winding carries only inductors, so its voltage is solved to round-off at the smallest steps. It shows as many forced-accept warnings and a result that does not settle as <code>rtol</code> tightens. Every forced accept is blamed on a current of the primary's inductor cut-set (<code>L_leak</code>, <code>T1.p</code>, <code>T1.s</code>), at a gate edge (h = 2e-14 s) or inside the 100 ns dead time that follows it (h = 2e-10 s, the body diodes' zero-current commutation), with the estimate 20 to 3000 times its tolerance: the femtosecond mode makes that current change within any step, so the error estimate is right and cannot be fixed there. Record: DECISIONS #21 of <code>update-trbdf2-post-event-restart</code>, DECISIONS 11 of <code>update-trbdf2-error-control</code>.</td>
 <td><code>examples/phase_shift_full_bridge.yaml</code>, V_out averaged over 1.8-2.0 ms (2026-11-19): 23.975, 23.991 and 23.964 V at <code>rtol</code> 1e-5, 1e-6 and 1e-8, with 2.3 k to 6.6 k forced accepts; <code>integrator='esdirk43'</code> gives 23.964, 23.966 and 23.961 V. <code>engine='exact'</code> gives 24.0661693 V.</td>
 <td>Model the devices' output / junction capacitance and the winding capacitance (with both, the run settles as <code>rtol</code> tightens), or use <code>engine='exact'</code>, which handles the capacitance-free circuit.</td>
+</tr>
+<tr>
+<td><strong>TR-BDF2 allocates on a step whose Newton solve is retried.</strong> Accepted and rejected steps do not allocate; the retry builds the failure's error message (DECISIONS 27 of <code>refactor-unified-transient-stepper</code>).</td>
+<td>About 10 to 16 allocations per retried step, held by a test as a bound.</td>
+<td>None needed for results; it costs time only on runs with many Newton retries.</td>
 </tr>
 <tr>
 <td>The sliding-mode warning says <code>engine='auto'</code> even when <code>engine='trbdf2'</code> was requested.</td>
@@ -3507,7 +3625,7 @@ event where the signal jumps.</p>
 </thead>
 <tbody>
 <tr>
-<td><strong><code>res.i()</code> and <code>device_loss_summary</code> do not cover the Lauritzen diode, the nonlinear capacitor, an IGBT with a tail or <code>add_power_mosfet</code>.</strong> Their current needs a stored charge the states do not give the law. The static Newton kinds (Shockley, smooth diode, level-1 MOSFET, level-1 IGBT without a tail) and the saturable inductor are covered: against a 1 mΩ sense resistor within 2e-12 of the peak current and 4e-13 in energy on <code>pwl</code> and <code>trbdf2</code>.</td>
+<td><strong><code>res.i()</code> and <code>device_loss_summary</code> do not cover the Lauritzen diode, the nonlinear capacitor or an IGBT with a tail.</strong> Their current needs a stored charge the states do not give the law. The static Newton kinds (Shockley, smooth diode, level-1 MOSFET, level-1 IGBT without a tail) and the saturable inductor are covered: against a 1 mΩ sense resistor within 2e-12 of the peak current and 4e-13 in energy on <code>pwl</code> and <code>trbdf2</code>.</td>
 <td><code>res.i("X")</code> raises <code>NotImplementedError</code> naming the recipe.</td>
 <td>Put a 1 mΩ resistor in series and read <code>res.i</code> of the resistor (guide trap 1).</td>
 </tr>
@@ -3539,9 +3657,14 @@ event where the signal jumps.</p>
 </thead>
 <tbody>
 <tr>
-<td><strong><code>add_power_mosfet</code> is a composite of Newton devices: no <code>res.i</code> of the device and no loss row.</strong> The generic readings cover the bare <code>mosfet_level1</code>, not this composite.</td>
+<td><strong><code>add_power_mosfet</code> (default composite): no <code>res.i</code> of the device and no loss row.</strong></td>
 <td><code>res.i("Q1")</code> raises like <code>mosfet_level1</code>; <code>device_loss_summary</code> omits it.</td>
-<td><code>p.double_pulse_test</code> (sense resistor), or a 1 mΩ resistor in series.</td>
+<td><code>fq_device=True</code>, <code>p.double_pulse_test</code> (sense resistor), or a 1 mΩ resistor in series.</td>
+</tr>
+<tr>
+<td><strong><code>add_power_mosfet(fq_device=True)</code>'s loss row is <code>v_DS · i_D</code> of the external drain / source pins.</strong> The gate-drive energy is not in it, and at a switch event elsewhere in the circuit the device current's right limit is taken as its sample (the device itself is continuous).</td>
+<td><code>res.i("Q1")</code> is the drain-terminal current: within 1e-9 of a 1 mΩ sense resistor on <code>pwl</code>; on <code>trbdf2</code> 4.35e-9 of the peak (strict xfail in <code>python/tests/test_power_mosfet.py</code>).</td>
+<td>For gate loss, read <code>res.i("Q1.rg")</code>.</td>
 </tr>
 <tr>
 <td><strong>The level-1 MOSFET has a negative slope near threshold.</strong> The triode polynomial at small or negative overdrive makes dI/dV_DS &lt; 0 at V_DS = 0 for V_OV in (≈ −0.72/κ, 0), and just past saturation onset (down to −0.040 S for K = 1.43, κ = 15); there <code>i·v</code> reaches −0.29 mW. The zero-voltage leak <code>α(1−β)·K·V_OV²</code> is gone since 2026-11-19: zero current at V_DS = 0, C¹ across it (add-unified-device-interface DECISIONS #44).</td>
@@ -3549,7 +3672,7 @@ event where the signal jumps.</p>
 <td>Drive the gate well past threshold (κ·V_OV ≫ 1), or raise <code>kappa</code>.</td>
 </tr>
 <tr>
-<td><strong><code>add_power_mosfet</code> non-goals:</strong> p-channel, live T_j inside the law (T_j is run-constant), drain inductance and package networks, avalanche, SiC/GaN effects, a table channel (constant-K Level-1 only), AC analysis.</td>
+<td><strong><code>add_power_mosfet</code> non-goals:</strong> p-channel, live T_j inside the law (T_j is run-constant), drain inductance and package networks, avalanche, SiC/GaN effects; a table channel (<code>channel=p.ChannelTable(...)</code>) is taken at the T_j it was measured at (temperature coefficients refused with it).</td>
 <td>-</td>
 <td>-</td>
 </tr>

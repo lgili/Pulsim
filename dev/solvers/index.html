@@ -758,6 +758,48 @@
   
   
     <li class="md-nav__item">
+      <a href="../tutorials/11-electrothermal-plecs-buck/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 11 — Electrothermal PLECS buck
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ideal-switch/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Ideal Switch & Diode Complementarity
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../sensitivities/" class="md-nav__link">
         
   
@@ -1071,6 +1113,21 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Variable-step transient engine (engine='trbdf2')">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#for-developers-where-the-stepper-lives" class="md-nav__link">
+    <span class="md-ellipsis">
+      For developers: where the stepper lives
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1095,6 +1152,15 @@
   <a href="#see-also" class="md-nav__link">
     <span class="md-ellipsis">
       See also
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-exact-engines-output-rule-output_rtol" class="md-nav__link">
+    <span class="md-ellipsis">
+      The exact engine's output rule (output_rtol)
     </span>
   </a>
   
@@ -1142,6 +1208,27 @@
   
   <span class="md-ellipsis">
     Result Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../errors/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Error Reference
   </span>
   
 
@@ -2229,6 +2316,21 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Variable-step transient engine (engine='trbdf2')">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#for-developers-where-the-stepper-lives" class="md-nav__link">
+    <span class="md-ellipsis">
+      For developers: where the stepper lives
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2253,6 +2355,15 @@
   <a href="#see-also" class="md-nav__link">
     <span class="md-ellipsis">
       See also
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-exact-engines-output-rule-output_rtol" class="md-nav__link">
+    <span class="md-ellipsis">
+      The exact engine's output rule (output_rtol)
     </span>
   </a>
   
@@ -2347,6 +2458,11 @@
   event, then the SDIRK window from it. Edges off the grid become
   second order (buck D = 0.4567, <code>v_C</code> at T/50: 8.08e-2 V snapped,
   1.07e-6 V split); <code>res.n_split_steps</code> counts the split steps.
+  <code>split_snap</code> (a fraction of dt, default 1e-6; 2.1.0's was 0.01) is the
+  split's snap band: an event that close to a grid point is taken at it
+  instead of cutting a sliver, and events that close merge. Pass
+  <code>split_snap=0.01</code> for 2.1.0's behaviour; it must lie in [1e-12, 0.25] and
+  needs the split on (<code>OptionsError</code> otherwise).
   A jump the restart finds (or an ideal element's) is reported by
   <code>res.reinit_records</code>; an in-loop recorder's lines start from the
   post-jump state, so a window integral is the regular part, as on
@@ -2505,6 +2621,70 @@ after a gate edge:</p>
 <p><code>res._trbdf2_stats</code> reports <code>n_derivative_refreshes</code>,
 <code>n_refresh_probes</code> and <code>h_post_event_min</code> (smallest accepted first
 step after a refreshed edge).</p>
+<h3 id="for-developers-where-the-stepper-lives">For developers: where the stepper lives<a class="headerlink" href="#for-developers-where-the-stepper-lives" title="Permanent link">&para;</a></h3>
+<p>Both transient engines (<code>pwl</code>, fixed step, in <code>solver/run_transient.hpp</code>;
+<code>trbdf2</code>, variable step, in <code>solver/trbdf2_transient.hpp</code>) run on one
+step driver. The shared pieces are in <code>core/include/pulsim/solver/step/</code>:</p>
+<table>
+<thead>
+<tr>
+<th>header</th>
+<th>what it holds</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>stepper.hpp</code></td>
+<td><code>step::run&lt;I&gt;(clock, body)</code>: the loop over the engine's phases (poll, attempt, accept or reject, commit, end)</td>
+</tr>
+<tr>
+<td><code>controllers.hpp</code></td>
+<td><code>FixedClock</code>, <code>LteController</code> (step proposal, <code>reject_factor</code>) and <code>ControllerState</code>, the controller's part of a snapshot</td>
+</tr>
+<tr>
+<td><code>integrators.hpp</code></td>
+<td>stage tables: <code>Trapezoidal</code>, <code>BackwardEuler</code>, <code>TrBdf2</code>, <code>Sdirk22</code> (incl. the restart estimate <code>restart_gamma</code> / <code>lte</code> / <code>lte_q</code>)</td>
+</tr>
+<tr>
+<td><code>esdirk43.hpp</code></td>
+<td>the <code>Esdirk43</code> table</td>
+</tr>
+<tr>
+<td><code>policies.hpp</code></td>
+<td><code>HalvingLadder</code> (fixed-step sub-step retry), <code>GuardPolicy</code> (inductor freeze, then clamp), <code>RestartPolicy</code> (the fixed engine's SDIRK restart steps)</td>
+</tr>
+<tr>
+<td><code>stepper_core.hpp</code></td>
+<td><code>commit</code>, <code>snapshot_into</code>, <code>restore</code>, <code>seed</code>: accept, rollback and seeding over the history and the devices</td>
+</tr>
+<tr>
+<td><code>source_accumulator.hpp</code></td>
+<td>the source vector of a step</td>
+</tr>
+<tr>
+<td><code>sensitivity.hpp</code></td>
+<td>forward sensitivities along the stages</td>
+</tr>
+</tbody>
+</table>
+<p>What each engine still owns, and why (the decisions are in
+<code>openspec/changes/refactor-unified-transient-stepper/DECISIONS.md</code>):</p>
+<ul>
+<li><strong>Its solve point</strong> (DECISIONS 22). The fixed engine writes its one
+  Newton call per segment out in the event iteration, because a closure
+  on its step path cost more than the 0.5 % budget; TR-BDF2 keeps
+  <code>solve_stage</code> / <code>dispatch_solve</code>.</li>
+<li><strong>The step decisions</strong> (DECISIONS 15, 25): reject, forced accept, the
+  chatter guard, the event iteration (<code>run_event_iteration</code>) and the
+  TR-BDF2 probe / landing phases stay in the engine's body. As free
+  functions they would take the engine's whole state; they move when the
+  event-driven loop owns that state (task groups 14 and 15).</li>
+<li><strong>The W⁻¹ restart filter</strong> (DECISIONS 24): two solves on the step's
+  factor, so it stays with the other solves in <code>run_transient_trbdf2</code>.</li>
+</ul>
+<p>Changes here are behaviour-preserving by contract: results, counters
+included, are checked byte for byte against stored baselines
+(<code>benchmarks/tools/pwl_identity.py</code>, <code>benchmarks/tools/trbdf2_identity.py</code>).</p>
 <h2 id="tuning-guide">Tuning guide<a class="headerlink" href="#tuning-guide" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -2594,6 +2774,48 @@ step after a refreshed edge).</p>
 <li><code>openspec/changes/add-adaptive-runge-kutta-solvers/</code> — proposal +
   design + delta spec.</li>
 </ul>
+<h2 id="the-exact-engines-output-rule-output_rtol">The exact engine's output rule (<code>output_rtol</code>)<a class="headerlink" href="#the-exact-engines-output-rule-output_rtol" title="Permanent link">&para;</a></h2>
+<p>With <code>engine='exact'</code>, no <code>dt</code>, <code>store_every</code> or recorders, <code>output_rtol</code>
+chooses the stored samples: every event instant (both limits of a jump),
+and between events only the samples a tolerance needs. The promise: the
+straight line between two consecutive stored samples is within
+<code>max(output_rtol * range, atol, floor)</code> of the exact solution at every
+instant of the line, for every stored column (states, node voltages,
+branch currents). <code>range</code> is the column's range over the run so far
+(through the end of the exact step holding the line, at least 1e-3 of
+its peak); <code>atol</code> is the run's absolute tolerance (default 1e-9). No
+column is promised below its own rounding floor (<code>floor</code>, 16·eps times
+the sum of the magnitudes of the terms it is evaluated from): a column
+whose bound only fits through its floor is certified constant up to
+rounding at that floor and counted in <code>res.diagnostics['output_grid']</code>
+(<code>n_output_floored</code>, <code>output_floor_max</code>, <code>output_floor_by_column</code>). A
+fast mode whose content does not decay between two instants of one flow
+as its own closed form says (the eigenbasis's error, not a transient) is
+taken out of the bound of a step it cuts; where that lengthens the step the
+bound with it is the column's floor there: counted in <code>n_output_inconsistent</code>, with one RuntimeWarning
+(<code>output_inconsistent</code>). A source corner (a pulse or PWM edge) is always a stored sample. The sample
+stored at an event is its left limit (the right limit is
+<code>res.right_limit_states</code>, <code>pulsim.with_event_limits</code>); after an event
+that changed the mode or a source's piece the solution 2 ps later is a
+stored sample as well, so plain interpolation of <code>res.times</code> draws a
+jump of a node voltage as a jump (over those 2 ps, the one line the
+promise does not cover) and not as a ramp to the next sample. The
+"exact solution" of the promise is the flow WITH the parasitic cluster
+projected at each event: modes whose time constant is below 1e-6 of the
+run's resolved time scale are settled at the event instant (the rule-off
+run lets them decay; a diode turn-off's ~1 ns mode read 0.31 V apart for
+a few ns). Every projection is recorded in <code>diagnostics['output_grid']</code>:
+<code>n_projections</code>, <code>projection_max_by_column</code> (per stored column the largest
+amplitude a projection moved it by) and <code>projections</code> (the first 1000:
+instant <code>t</code>, largest <code>amplitude</code>, its <code>column</code>, the cluster's slowest time
+constant <code>tau</code>). Recorders on such a run read a window's min / max inside
+each exact step from its closed form where one exists (a constant plus one
+damped sinusoid or at most two real exponentials); elsewhere the step ends
+are kept and counted (<code>res.recorder_feed['closed_form']['n_extrema_ends']</code>). Where the
+4096-sample cap per interval, a mode without a diagonalising basis, or
+the run's 2e6-sample budget suspends the promise, the diagnostics say
+so and the run warns. <code>benchmarks/tools/output_rule_referee.py</code> checks
+the promise on the benchmark set.</p>
 
 
 

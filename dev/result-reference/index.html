@@ -16,7 +16,7 @@
         <link rel="prev" href="../api-reference/">
       
       
-        <link rel="next" href="../device-reference/">
+        <link rel="next" href="../errors/">
       
       
       <link rel="icon" href="../assets/images/pulsim-logo.svg">
@@ -758,6 +758,48 @@
   
   
     <li class="md-nav__item">
+      <a href="../tutorials/11-electrothermal-plecs-buck/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 11 — Electrothermal PLECS buck
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ideal-switch/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Ideal Switch & Diode Complementarity
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../sensitivities/" class="md-nav__link">
         
   
@@ -1041,6 +1083,15 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#snapshots-final_snapshot-and-resume_from" class="md-nav__link">
+    <span class="md-ellipsis">
+      Snapshots: final_snapshot and resume_from
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#recorders-recorded-and-recorder_feed" class="md-nav__link">
     <span class="md-ellipsis">
       Recorders: recorded and recorder_feed
@@ -1053,6 +1104,27 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../errors/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Error Reference
+  </span>
+  
+
+      </a>
     </li>
   
 
@@ -2064,6 +2136,15 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#snapshots-final_snapshot-and-resume_from" class="md-nav__link">
+    <span class="md-ellipsis">
+      Snapshots: final_snapshot and resume_from
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#recorders-recorded-and-recorder_feed" class="md-nav__link">
     <span class="md-ellipsis">
       Recorders: recorded and recorder_feed
@@ -2206,6 +2287,52 @@ engine does not report one — <code>engine</code>, <code>n_steps</code>, <code>
 <code>control_tick_counts</code>, <code>control_tick_jitter_max</code>,
 <code>step_loop_python_callbacks</code>, <code>final_snapshot</code> (for
 <code>simulate(resume_from=...)</code>), <code>states_bytes</code> / <code>total_bytes</code>.</p>
+<h2 id="snapshots-final_snapshot-and-resume_from">Snapshots: <code>final_snapshot</code> and <code>resume_from</code><a class="headerlink" href="#snapshots-final_snapshot-and-resume_from" title="Permanent link">&para;</a></h2>
+<p><code>result.final_snapshot</code> is the solver's state at the run's last time.
+Passing it as <code>simulate(..., resume_from=snap)</code> continues from there, and
+it can be pickled. Besides the circuit state it can carry the step
+controller's memory, which <code>snap.controller_state</code> shows as
+<code>(kind, values)</code> or <code>None</code>:</p>
+<table>
+<thead>
+<tr>
+<th>kind</th>
+<th>written by</th>
+<th>what a resume does with it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>2, LTE</td>
+<td><code>engine='trbdf2'</code></td>
+<td>the next step is the step the stopped run would have taken</td>
+</tr>
+<tr>
+<td>3, exact</td>
+<td><code>engine='exact'</code></td>
+<td><code>engine='dsed'</code> resumes from it; the other engines refuse it</td>
+</tr>
+<tr>
+<td><code>None</code></td>
+<td><code>engine='pwl'</code>, or a snapshot without the block</td>
+<td><code>trbdf2</code> restarts its controller; <code>pwl</code> steps on its <code>dt</code></td>
+</tr>
+</tbody>
+</table>
+<p>What to expect from a split run (tests in
+<code>python/tests/test_trbdf2_resume_controller.py</code>):</p>
+<ul>
+<li><strong>Bit-identical</strong> on <code>trbdf2</code> when the controller block is the run's
+  whole loop state, for example an RLC with no switches or diodes, split
+  at one of the continuous run's step times.</li>
+<li><strong>Not bit-identical</strong> on a switched circuit. The edge-learning and
+  hold state of the TR-BDF2 loop is not in the snapshot, so the next gate
+  edge can land in a different 14th digit. The resumed run still agrees
+  to tolerance.</li>
+<li><strong>Across engines.</strong> A <code>pwl</code> snapshot resumes on <code>trbdf2</code> and the
+  reverse, to the engines' tolerance.</li>
+<li>A run with a control graph refuses to resume between two of its ticks.</li>
+</ul>
 <h2 id="recorders-recorded-and-recorder_feed">Recorders: <code>recorded</code> and <code>recorder_feed</code><a class="headerlink" href="#recorders-recorded-and-recorder_feed" title="Permanent link">&para;</a></h2>
 <p>With <code>simulate(recorders=[pulsim.Recorder(...)])</code>:</p>
 <ul>
@@ -2289,13 +2416,13 @@ its stream, if any, is re-attached).</p>
         
         
           
-          <a href="../device-reference/" class="md-footer__link md-footer__link--next" aria-label="Next: Device Reference">
+          <a href="../errors/" class="md-footer__link md-footer__link--next" aria-label="Next: Error Reference">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                Device Reference
+                Error Reference
               </div>
             </div>
             <div class="md-footer__button md-icon">

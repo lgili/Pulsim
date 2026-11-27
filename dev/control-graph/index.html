@@ -749,6 +749,48 @@
   
   
     <li class="md-nav__item">
+      <a href="../tutorials/11-electrothermal-plecs-buck/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 11 — Electrothermal PLECS buck
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ideal-switch/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Ideal Switch & Diode Complementarity
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../sensitivities/" class="md-nav__link">
         
   
@@ -964,6 +1006,27 @@
   
   <span class="md-ellipsis">
     Result Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../errors/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Error Reference
   </span>
   
 
@@ -2375,10 +2438,11 @@ chain with ordinary <code>Rate</code>s (state time, G6) samples <code>x(kT)</cod
 On <code>trbdf2</code> both modes tick on the exact instants.</p>
 <p><code>simulate(control_tick="state")</code> (off by default) runs these graphs in
 state time for that run: tick k samples <code>x(kT)</code> and holds from <code>kT</code>. It
-also narrows the event split's snap from <code>0.01*dt</code> to <code>1e-6*dt</code>
-(<code>SimulationOptions.split_snap</code>), so with
+also set the event split's snap (<code>SimulationOptions.split_snap</code>) to
+<code>1e-6*dt</code> (DECISIONS G30); that is now the default for every run
+(F-SB-2), so with
 <code>discontinuity_restart=True, enable_substep_state_correction=True</code> a
-PWM edge is no longer moved by up to <code>dt/100</code> (DECISIONS G30).</p>
+PWM edge is no longer moved by up to <code>dt/100</code> in either mode.</p>
 <p>Closed form, P loop on the RC of the table above (<code>K_p = 2</code>, set-point
 1 V, <code>T = 100 µs</code>), label time at step <code>h</code>: <code>w_0 = 0</code>,
 <code>w_{k+1} = a_k w_k + (1 - a_k)·2(1 - w_k)</code>, <code>a_0 = e^{-(T-h)/τ}</code>,

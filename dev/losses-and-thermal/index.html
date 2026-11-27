@@ -749,6 +749,48 @@
   
   
     <li class="md-nav__item">
+      <a href="../tutorials/11-electrothermal-plecs-buck/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 11 — Electrothermal PLECS buck
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ideal-switch/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Ideal Switch & Diode Complementarity
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../sensitivities/" class="md-nav__link">
         
   
@@ -964,6 +1006,27 @@
   
   <span class="md-ellipsis">
     Result Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../errors/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Error Reference
   </span>
   
 
@@ -2729,9 +2792,14 @@ and I_rr as time-weighted integrals, starting from the off-state bias
 (an all-zero start turns the device on through C_gd before the gate
 command). Use <code>engine="trbdf2"</code>; on <code>pwl</code>
 the step must resolve the gate transient (0.2 ns for a 60 ns plateau).
-The datasheet fitters are in <code>pulsim.datasheet</code>. Losses of the
-composite are not in <code>device_loss_summary</code> yet (unified device
-interface).</p>
+The datasheet fitters are in <code>pulsim.datasheet</code>. The default composite
+is not in <code>device_loss_summary</code>. With <code>fq_device=True</code> (opt-in) the
+channel, C_gd, C_ds and the body diode are one f/q device: <code>res.i("Q1")</code> is its
+drain-terminal current and <code>device_loss_summary</code> lists it (<code>kind =
+"power_mosfet"</code>, <code>v_DS · i_D</code> of the external pins, gate drive
+excluded). A measured output characteristic replaces the Level-1 law
+with <code>channel=p.ChannelTable(v_gs, v_ds, I)</code> (needs <code>fq_device=True</code>) (monotone, <code>I(V_GS, 0) =
+0</code>, third quadrant by terminal swap).</p>
 <h2 id="whats-not-covered">What's <em>not</em> covered<a class="headerlink" href="#whats-not-covered" title="Permanent link">&para;</a></h2>
 <p>The kernel runs at fixed <code>dt</code>. We don't resolve sub-<code>dt</code> switching
 waveform shapes — the PSIM annotations capture the right <em>energy</em> per

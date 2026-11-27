@@ -758,6 +758,48 @@
   
   
     <li class="md-nav__item">
+      <a href="../tutorials/11-electrothermal-plecs-buck/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 11 — Electrothermal PLECS buck
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ideal-switch/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Ideal Switch & Diode Complementarity
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../sensitivities/" class="md-nav__link">
         
   
@@ -1274,6 +1316,27 @@
   
   <span class="md-ellipsis">
     Result Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../errors/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Error Reference
   </span>
   
 
@@ -3488,6 +3551,33 @@ evaluations plus one verification period to <code>v_C = 8.99624708729 V</code>
   <code>run_periodic_shooting</code> / <code>run_harmonic_balance</code> are deprecated
   delegates of it.</p>
 </li>
+<li><strong>Gate state.</strong> An open-loop <code>switch_fn</code> may hold state it only
+  reads (a PWM object with <code>duty</code> and <code>f_sw</code> attributes, a closure over
+  a float). Before the solve the gate is evaluated at 257 points over
+  <code>[0, T]</code> and along its <code>next_edge_after</code> edges, and everything it can
+  reach (its attributes and slots, function attributes, closure cells,
+  defaults, the globals and module attributes its code names, its
+  class's attributes; numbers and arrays by value, lists, dicts and
+  objects by identity and contents) is compared before and after. A
+  change is refused with <code>UnsupportedError(feature=
+  "hidden_controller_state")</code> naming the first path that changed, e.g.
+  <code>'switch_fn.n_calls' changed</code>; so is a reachable value with no visible
+  state and no <code>__eq__</code> (a <code>random.Random</code>, a NumPy <code>Generator</code>, an
+  iterator), named <code>uncomparable state at ...</code>, and a gate the probe
+  cannot call. Not measured: state that only moves outside the first
+  period (a gate that changes itself at <code>t &gt; T</code>), the internals of
+  pulsim, NumPy, SciPy, the standard library and installed packages
+  (their functions and classes are taken as stateless; the user's
+  instances of their Python classes are measured); state that returns to
+  its start value after the probe's calls; a value compared through its
+  own <code>__eq__</code> (one without visible state) changes only as <code>__eq__</code>
+  sees. pulsim's native schedules (<code>SwitchSchedule</code>, <code>NativePwm2Switch</code>,
+  <code>NativeMultiMaskPwm</code>) are taken as stateless; any other native object
+  the gate reaches (a <code>CxxPIController</code>, a chain) is refused as
+  uncomparable. The probe calls the gate, so a refused gate is left with
+  its state moved. A controller that should
+  move belongs in a compiled control graph (<code>closed_loops=</code>,
+  <code>control=</code>), whose state is part of <code>x0</code>.</li>
 <li><strong>Multipliers.</strong> <code>stable = max|μ| &lt; 1</code>. An orbit with a multiplier
   outside the unit circle is returned with <code>stable=False</code>, and
   <code>r.unstable_multipliers</code> names each one: −1 side <code>flip

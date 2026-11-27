@@ -758,6 +758,48 @@
   
   
     <li class="md-nav__item">
+      <a href="../tutorials/11-electrothermal-plecs-buck/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Tutorial 11 — Electrothermal PLECS buck
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ideal-switch/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Ideal Switch & Diode Complementarity
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../sensitivities/" class="md-nav__link">
         
   
@@ -846,6 +888,24 @@
   <a href="#what-the-samples-cannot-show" class="md-nav__link">
     <span class="md-ellipsis">
       What the samples cannot show
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-truth-and-the-bounds" class="md-nav__link">
+    <span class="md-ellipsis">
+      The truth and the bounds
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#known-disagreements-strict-xfails" class="md-nav__link">
+    <span class="md-ellipsis">
+      Known disagreements (strict xfails)
     </span>
   </a>
   
@@ -1049,6 +1109,27 @@
   
   <span class="md-ellipsis">
     Result Reference
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../errors/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Error Reference
   </span>
   
 
@@ -2064,6 +2145,24 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#the-truth-and-the-bounds" class="md-nav__link">
+    <span class="md-ellipsis">
+      The truth and the bounds
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#known-disagreements-strict-xfails" class="md-nav__link">
+    <span class="md-ellipsis">
+      Known disagreements (strict xfails)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#reference-circuits" class="md-nav__link">
     <span class="md-ellipsis">
       Reference circuits
@@ -2189,8 +2288,11 @@ gate; its ZCS test uses its conduction flag.</p>
 <li><strong>ZCS fraction</strong>: the same with <code>|I_D|</code> against <code>threshold_a</code> (default 0.1 A).</li>
 <li><strong>Switching loss per event</strong>: <code>∫ V_DS · I_D dt</code> over <code>window_s</code> after each
   transition (trapezoid over the samples, window end interpolated), summed and
-  divided by the span. The window must contain the transition and end before
-  the next one; it includes that window's conduction.</li>
+  divided by the trace's span. The window starts at the first sample that shows
+  the new switch state and must end before the next transition; it includes that
+  window's conduction. The benchmark runner skips the first stored sample (an
+  algebraic node's first sample is not solved: a switch ON from t = 0 would count
+  a turn-on with a made-up V_DS).</li>
 </ul>
 <p>In a benchmark YAML the three KPIs take <code>switch_observable</code>,
 <code>voltage_observable</code> / <code>current_observable</code>, <code>threshold_v</code> / <code>threshold_a</code>,
@@ -2214,6 +2316,98 @@ gate; its ZCS test uses its conduction flag.</p>
   on the LLC and phase-shifted full-bridge references is wrong by whole events
   (recorded as known disagreements in <code>benchmarks/manifests/v2_triage.yaml</code>).</li>
 </ul>
+<h2 id="the-truth-and-the-bounds">The truth and the bounds<a class="headerlink" href="#the-truth-and-the-bounds" title="Permanent link">&para;</a></h2>
+<p><code>benchmarks/tools/soft_switching_truth.py</code> (on <code>exact_truth.py</code>, mpmath, never
+imports pulsim) gives, per switch, the left limit of <code>V_DS</code> at every turn-on, the
+ZVS fraction and the switching energy of the windows above, exact. The KPI is a
+trapezoid over a trace's samples, so it carries the quadrature error of that grid
+even with exact states: on <code>trbdf2</code> the PSFB's S3 column reads 3.66e-11 J against
+the exact 3.18e-11 J (+15 %, about two samples in its 50 ns window), all of it
+quadrature. The tool measures that part on the same grid, and the test holds the
+column to it. The window starts at the first sample of the new state: on a trace
+without event rows, a hard transition between the last old-state sample and that
+sample is not integrated (none of the three references has one: their C_oss edges
+are soft and the buck has no device capacitance). The baselines
+<code>benchmarks/baselines/{llc_half_bridge_zvs,psfb_full_bridge_zvs,buck_hard_switching_reference}.csv.gz</code>
+are the same truth on the netlist grid with both limits at every event
+(<code>soft_switching_truth.py baseline</code>). Checks and their bounds:
+<code>python/tests/test_soft_switching_kpi.py</code> (runner columns, <code>pwl</code> with the
+restart rule, <code>trbdf2</code>, <code>dsed</code>), run as a bench by
+<code>benchmark_runner.py --benchmarks benchmarks/manifests/soft_switching.yaml</code>.</p>
+<table>
+<thead>
+<tr>
+<th>benchmark</th>
+<th>switch</th>
+<th>ZVS (truth)</th>
+<th>exact switching energy</th>
+<th>avg over the run</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>LLC</td>
+<td>S_hi / S_lo</td>
+<td>1.0 (|V_DS| &lt; 1.2 mV)</td>
+<td>7.022e-11 / 7.280e-11 J</td>
+<td>1.76 / 1.82 µW</td>
+</tr>
+<tr>
+<td>PSFB</td>
+<td>S1 / S2 / S3 / S4</td>
+<td>1.0 (&lt; 5 mV)</td>
+<td>5.702e-10 / 8.527e-10 / 3.178e-11 / 3.306e-11 J</td>
+<td>(30 µs run)</td>
+</tr>
+<tr>
+<td>buck (hard)</td>
+<td>SH</td>
+<td>0 (24.01–24.09 V, then 1.42–6.01 V in DCM)</td>
+<td>7.406e-6 J</td>
+<td>14.81 mW</td>
+</tr>
+</tbody>
+</table>
+<p>The buck has no device capacitance: its "switching" energy is the conduction in
+the 1 µs windows, not an <code>E_oss</code>.</p>
+<h2 id="known-disagreements-strict-xfails">Known disagreements (strict xfails)<a class="headerlink" href="#known-disagreements-strict-xfails" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>engine</th>
+<th>benchmark</th>
+<th>measured</th>
+<th>truth</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>plain <code>pwl</code> (trap 9)</td>
+<td>LLC</td>
+<td>V_DS at S_lo's 4 µs turn-on 0.918 V; S_hi energy 9.250e-11 J (+32 %)</td>
+<td>−0.0011 V; 7.022e-11 J</td>
+</tr>
+<tr>
+<td>plain <code>pwl</code> (trap 9)</td>
+<td>PSFB</td>
+<td>ZVS of S3 and S4 2/3 (8.53 V at 8 µs); S1 energy 1.046e-9 J (+84 %)</td>
+<td>1.0; 5.702e-10 J</td>
+</tr>
+<tr>
+<td>plain <code>pwl</code> (trap 9)</td>
+<td>buck</td>
+<td>ZVS 0.04 (1 of 25 turn-ons read soft)</td>
+<td>0 of 24</td>
+</tr>
+<tr>
+<td><code>trbdf2</code> (F-S-5)</td>
+<td>PSFB</td>
+<td>V(b) 599.8 V at 3e-16 s after a consistent start</td>
+<td>400 V</td>
+</tr>
+</tbody>
+</table>
+<p>Use the restart rule (<code>discontinuity_restart=True</code>), <code>trbdf2</code> or <code>dsed</code> for these KPIs.</p>
 <h2 id="reference-circuits">Reference circuits<a class="headerlink" href="#reference-circuits" title="Permanent link">&para;</a></h2>
 <p><code>benchmarks/circuits/switching/isolated/llc_half_bridge_zvs.yaml</code> and
 <code>psfb_full_bridge_zvs.yaml</code> (both soft),
