@@ -229,6 +229,22 @@ F = [
      "record at the located edge 99.999 h, lambda = L i_L(t_e-), sample 100",
      "record at 100 h, sample 101 (enable_substep_state_correction=False)",
      "record t = 99.000 h with i_L(99 h); the state itself was cut at the edge (n_gate_events_bisected = 1)"),
+    # ---- R9 (2026-11-27 night, triage slice 3)
+    ("F-Z-2", "A", "C", "the event split's locators cost one factorisation per Illinois trial (to split_snap*dt = 1e-6 dt) and an opaque schedule two reads per step [owner: restart line, the split]",
+     "benchmarks/tools/counters.py buck_dcm / three_phase_diode_rectifier / diode_bridge_rectifier on pwl (release default, "
+     "or run_transient with discontinuity_restart + enable_substep_state_correction set explicitly: same counts, so it is "
+     "integration-line code); test_fixed_step_loop_bookkeeping `_run` (100 kHz buck, opaque switch_fn, dt 1e-7)",
+     "frozen event_refactors 75 / 249 / 56 (11-20 freeze, before the F-SB-2/F-SB-4 locator b0523a49 reached the tree); "
+     "one schedule read per step + one per gate edge (1020 per 1000 steps)",
+     "split off (rule alone): 192 / 418 / 0 refactors (raw run_transient)",
+     "209 / 910 / 217 = frozen + split_locator_trials (138 / 658 / 161; diode bridge exactly 217 - 161 = 56): each trial is "
+     "a trapezoidal solve at dt = t_loc - t_prev, a new factor. Diode bridge (40 commutations) refactors 217 / 160 / 122 / 73 "
+     "at split_snap 1e-6 / 1e-4 / 1e-2 / 0.25 (buck_dcm 209 / 155 / 124 / 77, 3-phase 935 / 677 / 527 / 357). Reads 2412 "
+     "per 1000 steps = 1000 + 1000 (gate_at's memo is cleared every step, run_transient.hpp ~3741, so the step end t is read "
+     "again as the next t_prev) + 20.6 per edge (bisection to 1e-6 dt: log2(1e6) = 19.9); 2064 at split_snap 0.25. To avoid: "
+     "carry the step-end gate_at entry across the reset (-1000 reads per 1000 steps, bit-identical); locate a diode crossing "
+     "on the step's Hermite interpolant before any trial solve, or stop Illinois on a signal tolerance instead of 1e-6 dt; "
+     "reuse the last trial's factor for the split's sub-step at t_new (it solves trial(t_new) again)"),
 ]
 
 # Closed by a fix merged into the release branch: id -> where and the measured result.

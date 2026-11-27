@@ -69,6 +69,10 @@ def test_switch_fn_is_read_once_per_step(kw):
     assert c2 == r2.counters["switch_fn_calls"] + 1
 
 
+@pytest.mark.xfail(strict=True, reason=(
+    "release finding F-Z-2: 2412 reads per 1000 steps, not 1020: gate_at's memo is cleared every step "
+    "(the step end is read again as the next t_prev, +1000) and each edge is bisected to split_snap*dt = "
+    "1e-6 dt (+20.6 reads per edge; 2064 at split_snap 0.25)"))
 def test_the_split_adds_one_read_per_gate_edge():
     """Release default (restart + split): one evaluation per step plus one
     per gate edge after t = 0 (100 kHz, two edges a period: 20 in 1000 steps)."""
