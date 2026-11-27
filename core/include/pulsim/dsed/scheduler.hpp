@@ -526,6 +526,8 @@ public:
         output_lo_.resize(0);
         output_ylo_.resize(0);
         output_count_ = output_events_ = n_output_capped_ = n_output_unbounded_ = n_output_floored_ = 0;
+        n_output_inconsistent_ = 0;
+        output_work_.reset_flow();
         output_floor_row_.resize(0);
         output_pend_ = output_jump_ = false;
         n_projections_ = 0;
@@ -796,6 +798,7 @@ public:
                     hook_accepted_(t_step0, t, step_fired ? x_pre_event : x, step_mask);
                     // a kick (heat on the thermal states) is a jump the LTI chord does not see
                     const bool kicked = state_kick_ && state_kick_(x, step_fired ? &x_pre_event : nullptr);
+                    if (kicked) output_work_.reset_flow();   // a jump the flow's z̈ does not see
                     ++step_idx;
                     // F-X-4: under the output rule an end the chord from the last stored
                     // sample covers is not stored (stored later only if a chord needs it)
@@ -1130,6 +1133,10 @@ public:
     /// augmented state, then the recovered vector) the largest floor so used (0: none).
     [[nodiscard]] std::size_t n_output_floored() const noexcept { return n_output_floored_; }
     [[nodiscard]] const Vector& output_floor_row() const noexcept { return output_floor_row_; }
+    /// The rule calls certified only through the basis-inconsistency floor (F-X-8: a fast
+    /// mode's content that did not decay as its own closed form says between two instants of
+    /// one flow; its chord is added to that row's tolerance, and to output_floor_row).
+    [[nodiscard]] std::size_t n_output_inconsistent() const noexcept { return n_output_inconsistent_; }
 
     // Test hooks: the step cap (default 10M) and the settle's round cap
     // (default 64). A small cap reaches the give-up deterministically on
@@ -3616,6 +3623,7 @@ private:
     std::size_t output_cap_ = 0, output_count_ = 0, output_events_ = 0;
     Real output_target_ = Real{0};   // the interval's next time event
     std::size_t n_output_capped_ = 0, n_output_unbounded_ = 0, n_output_floored_ = 0;
+    std::size_t n_output_inconsistent_ = 0;
     Vector output_floor_row_;   // per bounded row (state, then recovered): the largest floor used
     std::size_t output_budget_ = 0, output_total_ = 0;   // cut steps allowed / taken in the run
     Real output_budget_t_ = std::numeric_limits<Real>::quiet_NaN();
@@ -3634,6 +3642,7 @@ private:
                 output_events_ = n_events;
                 output_target_ = t_target;
                 output_count_ = 0;
+                output_work_.reset_flow();   // the inconsistency floor compares within one flow
             }
             if (output_count_ >= output_cap_) return h;
             if (output_total_ >= output_budget_) {   // the run's budget is spent: the dt_max grid
@@ -3687,6 +3696,7 @@ private:
             };
             set_tol();
             bool bounded = true;
+            output_work_.track = count;   // the deferral's re-check is not on the flow's clock
             Real d = system_.exact_output_step(t, x, output_tol_, output_rtol_, h, bounded, output_work_);
             if (d < h) {
                 // the scale of the interval ahead too (a state starting from rest
@@ -3703,6 +3713,7 @@ private:
                 return h;
             }
             output_certified_ = true;
+            if (count && output_work_.inconsistent) ++n_output_inconsistent_;
             // rows certified only through their rounding floor (never silent: counted)
             if (const Vector& fu = output_work_.fu; (fu.array() > Real{0}).any()) {
                 if (output_floor_row_.size() != fu.size()) output_floor_row_.setZero(fu.size());

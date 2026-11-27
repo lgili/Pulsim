@@ -138,6 +138,17 @@ struct ChordWork {
     std::vector<Eigen::Index> grow;         // modes with Re λ > 0
     Eigen::VectorXcd zdd;
     DenseMatrix S, B, C, D, A0, A1;         // n × (n+1) sums per split (exact_chord_step)
+    // The basis-inconsistency floor (F-X-8): z̈ at the last two distinct instants of one
+    // LTI flow (the caller sets `track` on the flow's calls and resets at every event, time
+    // event or state kick), and per bounded row the floor it gave (0: none)
+    bool track = false, inconsistent = false;   // inconsistent: the last step needed it
+    Real t = Real{0};                           // the instant of the call (set by the caller)
+    const void* cur_e = nullptr;
+    const void* prev_e = nullptr;
+    Real cur_t = Real{0}, prev_t = Real{0};
+    Eigen::VectorXcd cur_zdd, prev_zdd;
+    Vector nz, te0;
+    void reset_flow() noexcept { cur_e = prev_e = nullptr; }
 };
 
 /// eˢ − 1 for complex s without cancellation at any |s|.
@@ -906,6 +917,7 @@ inline constexpr Real kSettleTau = Real{40};
                                            const Vector& tol, Real h, bool& bounded,
                                            ChordWork& w) {
     bounded = e.valid && e.tier == 1;
+    w.inconsistent = false;
     if (!bounded || !(h > Real{0})) return h;
     const auto n = x.size();
     // the bounded rows: the state, or the caller's output map (chord_P, rows = tol's)
@@ -947,6 +959,40 @@ inline constexpr Real kSettleTau = Real{40};
         w.cr.noalias() = e.Vinv_re * *c1;
         w.ci.noalias() = e.Vinv_im * *c1;
         for (Eigen::Index k = 0; k < n; ++k) w.zdd[k] += std::complex<Real>{w.cr[k], w.ci[k]};
+    }
+    // F-X-8: within one LTI flow a decaying mode's z̈_k(t) = z̈_k(t_p)·e^{λ_k(t − t_p)}
+    // exactly. What of it did not decay by the previous distinct instant of the flow is
+    // the basis's (or the propagator's) inconsistency, not a transient: a 0.4 ps mode of
+    // seven bridges read a constant |z| = 3.6e-14 for 250 ps (predicted e^-625), 2.6e10 V/unit
+    // on a recovered row, and cut every chord to 1 ps until the cap. Per mode with
+    // |ρ| ≤ 1/2 (it should have decayed by half) that part, ν_k = |z̈ − ρ z̈_p| / |1 − ρ|
+    // (a constant ν has exactly this residue), is ≤ |z̈_k|, its chord at most s_k ν_k; per row
+    // Σ_k |P_jk| s_k ν_k is added to the tolerance (counted by the caller, never silent).
+    w.nz.resize(0);
+    if (w.track) {
+        if (w.cur_e != &e || !(w.t >= w.cur_t)) {
+            w.cur_e = nullptr;
+            w.prev_e = nullptr;
+        } else if (w.t > w.cur_t) {
+            w.prev_e = w.cur_e;
+            w.prev_t = w.cur_t;
+            w.prev_zdd.swap(w.cur_zdd);
+        }
+        w.cur_e = &e;
+        w.cur_t = w.t;
+        w.cur_zdd = w.zdd;
+        if (w.prev_e == &e && w.prev_t < w.t && w.prev_zdd.size() == n) {
+            const Real dt = w.t - w.prev_t;
+            for (Eigen::Index k = 0; k < n; ++k) {
+                const std::complex<Real> rho = std::exp(e.lambda[k] * dt);
+                if (!(std::abs(rho) <= Real{0.5})) continue;
+                const Real nu = std::min(std::abs(w.zdd[k]),
+                                         std::abs(w.zdd[k] - rho * w.prev_zdd[k]) / std::abs(Real{1} - rho));
+                if (!(nu > Real{0})) continue;
+                if (w.nz.size() == 0) w.nz.setZero(r);
+                w.nz += e.chord_vabs.col(k) * (nu * Real{2} / std::norm(e.lambda[k]));
+            }
+        }
     }
     // a growing mode's g_k = e^{Re λ_k δ} depends on the probe: its terms are added in fits
     w.grow.clear();
@@ -1031,11 +1077,19 @@ inline constexpr Real kSettleTau = Real{40};
     w.te = tol.cwiseMax(w.fu);
     if (rows_p && r > n) w.tyf = w.fu.tail(r - n);
     else w.tyf.resize(0);
+    w.inconsistent = false;
+    if (w.nz.size() == r) {   // the floor the counters see: max(tol, rounding) + the ν-floor
+        w.te0 = w.te;
+        w.te += w.nz;
+        w.fu = w.te;
+    }
     const Eigen::Map<const Vector> tol_e(w.te.data(), r);
     // whether step d satisfies the bound for every component
     auto fits = [&](Real d) { return bound(d) && (w.eb.array() <= tol_e.array()).all(); };
     // w.fu: each row's floor where the bound at the step taken needed it, else 0
     auto floored = [&] {
+        if (w.nz.size() == r)
+            w.inconsistent = (w.eb.array() > w.te0.array()).any();
         w.fu = (w.eb.array() > tol.array()).select(w.fu, Real{0});
     };
     if (fits(h)) {

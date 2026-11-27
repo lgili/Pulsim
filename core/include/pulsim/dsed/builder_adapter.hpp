@@ -739,6 +739,7 @@ public:
         const LTIEntry& e = *current_entry_;
         const auto n = x.size();
         const auto k = static_cast<Index>(e.aug_omegas.size());
+        w.t = t;   // the basis-inconsistency floor's flow instant (exact_chord_step)
         w.xa.resize(n + 2 * k);
         w.ta.resize(n + 2 * k);
         w.xa.head(n) = x;
