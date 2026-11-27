@@ -1892,7 +1892,9 @@ inline SimulationResult run_transient(
         // modes faster than γ·(t − rs_piece_a); the grid step at anchor_t
         // probes the rest as a time event at its start (δt_loc = 0)
         Real rs_piece_a = 0;
-        Real anchor_t = std::numeric_limits<Real>::quiet_NaN();
+        Real anchor_t = split && resume_snap != nullptr && resume_snap->restart_anchor_at_end
+                            ? opts.t_start
+                            : std::numeric_limits<Real>::quiet_NaN();
         // ... and only diode bits changed there (no gate edge, no source
         // jump): a crossing landed on that grid point stays a continuity
         // point (event_right_limit)
@@ -3744,7 +3746,9 @@ inline SimulationResult run_transient(
                 bj_next = -std::numeric_limits<Real>::infinity();
                 gate_memo_n = 0;
             }
-            {   // F-Z-2: the last step's end is this step's start (one read, not two)
+            if (!split) {
+                gate_memo_n = 0;
+            } else {   // F-Z-2: the last step's end is this step's start (one read, not two)
                 Size keep = 0;
                 for (Size q = 0; q < gate_memo_n; ++q) {
                     if (gate_memo_t[q] == t_prev) {
@@ -5129,7 +5133,11 @@ inline SimulationResult run_transient(
                         // the motion since the event is already in x; no jump
                         // found: the plain restart, bit for bit).
                         anchor_t = std::numeric_limits<Real>::quiet_NaN();
-                        if (committed_be && rs_piece_a > t_prev) {
+                        // Only below γ·dt (the restart's own stage 1): a longer piece's
+                        // stage 1 already spans γ²·dt, and the probe would record the
+                        // rest of a resolved collapse as a jump at t (a 50 ns junction
+                        // capacitor after a 0.5·dt piece: a second right-limit row).
+                        if (committed_be && rs_piece_a > t_prev && t - rs_piece_a < kGamma * opts.dt) {
                             anchor_t = t;
                             restart_left = std::max(restart_left, Size{1});
                         }
@@ -5959,6 +5967,7 @@ inline SimulationResult run_transient(
                           result.times.size() - rd.lte.size(), Real{0});
         }
         result.final_snapshot.restart_steps_left = restart_left;
+        result.final_snapshot.restart_anchor_at_end = anchor_t == t_reached;
         result.n_restart_factorizations = restart_factorizations;
     } else {
         // ----------- STATIC PATH ----------------------------------------

@@ -13,10 +13,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   The split cut the step at the edge, so the event's restart probe spanned only
   γ·(the sliver after it): a 1 ps mode of a hard-switched capacitor, gated
   1e-5·dt (1e-3·dt) before the grid point, rang ±2.25 A under trapezoid (max
-  deviation 1.022 A / 0.362 A; the rule alone 1.8e-15 A). The grid step after a
-  split's last event piece is now a restart whose impulse probe reads what is
-  left as a jump at its start; where the probe finds none it is the plain
-  restart, bit for bit. Split-off runs are byte-identical. The split also
+  deviation 1.022 A / 0.362 A; the rule alone 1.8e-15 A). When a split's last
+  event piece is shorter than γ·dt (the restart's own stage 1), the next grid
+  step is a restart whose impulse probe reads what is left as a jump at its
+  start; where the probe finds none it is the plain restart, bit for bit. Split-off runs are byte-identical. The split also
   reuses the previous step's end gate read as the step's start (one
   `switch_fn` call per step fewer, results identical).
 
