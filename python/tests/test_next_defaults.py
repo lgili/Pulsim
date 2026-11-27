@@ -77,6 +77,19 @@ def test_legacy_patches_and_restores():
     assert nd.legacy_route(1e-6) == "pwl" and nd.legacy_route(None) == "trbdf2"
 
 
+def test_legacy_split_columns_take_2_1_0_split_snap(monkeypatch):
+    seen = []
+    monkeypatch.setattr(pulsim, "simulate", lambda *a, **k: seen.append(k))
+    with nd.legacy():
+        pulsim.simulate(None, 1e-3, 1e-6, engine="pwl", discontinuity_restart=True,
+                        enable_substep_state_correction=True)
+        pulsim.simulate(None, 1e-3, 1e-6, engine="pwl")                 # split off: no snap
+        pulsim.simulate(None, 1e-3, 1e-6, engine="pwl", enable_substep_state_correction=True,
+                        split_snap=1e-3)                                # an explicit snap wins
+    assert seen[0]["split_snap"] == nd.LEGACY_SPLIT_SNAP == 0.01
+    assert "split_snap" not in seen[1] and seen[2]["split_snap"] == 1e-3
+
+
 def test_builder_form_patches_and_restores():
     before = pulsim.CircuitBuilder.add_switch
     with nd.builder_form():

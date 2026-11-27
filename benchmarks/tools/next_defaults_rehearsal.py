@@ -104,7 +104,7 @@ CONFIGS = configs()
 def signature(name) -> str:
     """What a cached cell was measured with: its configuration and the profile."""
     import hashlib
-    legacy = ([nd.LEGACY, nd.LEGACY_BUILDER, nd.LEGACY_YAML, nd.LEGACY_PLAN, "F-R-2"]
+    legacy = ([nd.LEGACY, nd.LEGACY_BUILDER, nd.LEGACY_YAML, nd.LEGACY_PLAN, nd.LEGACY_SPLIT_SNAP, "F-R-2"]
               if name.endswith(rs.LEGACY) else [])   # the legacy profile is part of the cell (F-R-2)
     blob = json.dumps([CONFIGS[name], [(e, k, repr(x.value)) for e, k, x in nd.table()], *legacy],
                       sort_keys=True, default=repr)

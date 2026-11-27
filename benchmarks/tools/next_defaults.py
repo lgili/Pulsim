@@ -160,6 +160,9 @@ LEGACY = {
 }
 LEGACY_BUILDER = {"form": "conductance"}        # add_switch / add_diode (YAML: `form: conductance`)
 LEGACY_YAML = {"switch_form": "conductance"}    # load_yaml_file / load_yaml_string: a netlist's default
+# 2.1.0's event-split snap band (now simulate(split_snap=...), default 1e-6): a legacy pwl
+# call that turns the split on gets it; with the split off simulate() refuses the keyword.
+LEGACY_SPLIT_SNAP = 0.01
 # No keyword: the uniform rules change only refusal order and messages.
 LEGACY_PLAN = {"UNIFORM_ENGINE_RULES": False}
 
@@ -198,6 +201,9 @@ def legacy():
         solver = kw.get("solver")
         add = {k: v for k, v in legacy_kwargs(eng).items()
                if k not in kw and not (solver is not None and getattr(solver, k, None) is not None)}
+        if (engine_key(eng) == "pwl" and "split_snap" not in kw
+                and {**add, **kw}.get("enable_substep_state_correction")):
+            add["split_snap"] = LEGACY_SPLIT_SNAP
         return orig(*args, **add, **kw)
 
     def add_switch(self, *a, **k):
