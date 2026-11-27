@@ -4917,6 +4917,12 @@ void init_module(py::module_& m) {
             "discontinuity_restart: SDIRK restart steps still owed when "
             "the run ended (the rule takes a discontinuity's step and the "
             "next two); a resumed run takes them first. 0 = none.")
+        .def_readwrite("restart_anchor_at_end",
+            &SolverSnapshot::restart_anchor_at_end,
+            "discontinuity_restart + event split (F-Z-3): the run ended on "
+            "a split step whose last piece was a sliver after an event; a "
+            "resumed run probes its first step as a jump at its start. "
+            "Not pickled (a pickled copy resumes without it).")
         .def_property("_control_state",
             [](const SolverSnapshot& s) -> py::object {
                 if (!s.control_state) return py::none();

@@ -16,7 +16,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   deviation 1.022 A / 0.362 A; the rule alone 1.8e-15 A). When a split's last
   event piece is shorter than γ·dt (the restart's own stage 1), the next grid
   step is a restart whose impulse probe reads what is left as a jump at its
-  start; where the probe finds none it is the plain restart, bit for bit. Split-off runs are byte-identical. The split also
+  start; where the probe finds none it is the plain restart, bit for bit on a
+  linear circuit (with Newton devices the probe also runs the edge-mode
+  decision). Split-off runs are byte-identical. The anchor is carried by
+  `SolverSnapshot.restart_anchor_at_end` across an in-process resume and the
+  periodic-steady-state period map; it is not pickled: a resume from a
+  pickled copy taken on such a step probes it as a plain window step, and its
+  first sample is wrong (the hard-switched capacitor test: switch current
+  ~470 A off at the first resumed step; every later row bit-identical). The split also
   reuses the previous step's end gate read as the step's start (one
   `switch_fn` call per step fewer, results identical).
 

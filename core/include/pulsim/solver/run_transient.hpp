@@ -5131,7 +5131,9 @@ inline SimulationResult run_transient(
                         // ±2.25 A on). The next grid step is a restart whose probe
                         // reads what is left as a jump at its start (δt_loc = 0:
                         // the motion since the event is already in x; no jump
-                        // found: the plain restart, bit for bit).
+                        // found: the plain restart, bit for bit on a linear
+                        // circuit -- with Newton devices δt_loc < h_s also runs
+                        // decide_edge_mode, which a window step skips).
                         anchor_t = std::numeric_limits<Real>::quiet_NaN();
                         // Only below γ·dt (the restart's own stage 1): a longer piece's
                         // stage 1 already spans γ²·dt, and the probe would record the

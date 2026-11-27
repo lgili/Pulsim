@@ -1040,6 +1040,14 @@ class SolverSnapshot:
     def recorder_state(self, arg0: collections.abc.Sequence[float]) -> None:
         ...
     @property
+    def restart_anchor_at_end(self) -> bool:
+        """
+        discontinuity_restart + event split (F-Z-3): the run ended on a split step whose last piece was a sliver after an event; a resumed run probes its first step as a jump at its start. Not pickled (a pickled copy resumes without it).
+        """
+    @restart_anchor_at_end.setter
+    def restart_anchor_at_end(self, arg0: bool) -> None:
+        ...
+    @property
     def restart_pending(self) -> bool:
         """
         True when restart_steps_left > 0.
