@@ -13,7 +13,8 @@ Severity: **W** wrong answer silently; **R** refusal / abort of something that u
 | C the new mode selection (`mode_selection='auto'`) | 2 | 2 | 1 | 5 |
 | D trbdf2 | 1 | 2 | 0 | 3 |
 | F the exact route / output rule | 2 | 1 | 1 | 4 |
-| all | 17 | 5 | 7 | 29 |
+| R next-defaults rehearsal, discovery run on cbdce080 (not the release record) | 3 | 1 | 1 | 5 |
+| all | 20 | 6 | 8 | 34 |
 
 Bucket-0 items (fixed by the integrator, not findings): `oracles/lcp_pulsim_bridge.py` builds `form='conductance'` (keyword `form=`); `next_defaults.legacy()` reads `dt` from the third positional argument; the branch-form refusal names `V_f` for `add_diode`.
 
@@ -258,6 +259,48 @@ Bucket-0 items (fixed by the integrator, not findings): `oracles/lcp_pulsim_brid
 - old: 0.0107 V (20036 samples: before the merge of the PR line's batch 14s the rule also stored every step end)
 - new: 39.56 V at t = 0.12 ms of a 173 V range with the default rule (2713 samples); 27.9 V with output_rtol=1e-7 (24033 samples). The rule's promise covers the states only; a node voltage recovered algebraically is a chord between two stored samples. The bound on recovered rows is on fix/core-release-f4-chord-bound (not mergeable: three defects found by its verification)
 - parked: `python.tests.test_diode_state_reconstruction::test_boost_dcm_recovery_voltage_is_v_out_minus_v_in[auto]` (xfail); `python.tests.test_exact_route::test_inductor_cut_set_runs_and_agrees_with_pwl` (xfail)
+
+## R — next-defaults rehearsal, discovery run on cbdce080 (not the release record)
+
+### F-R-1 [R] the rehearsal's output-rule referee keeps every window of its rule-off reference: 3.6 .. 8.1 GB on 11 circuits [owner: benchmarks/tools/output_rule_referee.py]
+
+- call: F-R-1_windows.py (lc_low_pass_sine, run_cell('auto+next') then output_rule_referee.referee); the referee chains dsed windows at dt 7.5e-10 .. 3.0e-9 s (131,885 .. 398,134 samples per 30 us window) and appends each to its lists
+- truth: the cell itself: 16,732 samples, 102 MB, 0.054 s
+- old: stale cache (older tip): the same cell finished, rule_ratio 0.4996 (its RSS was not recorded)
+- new: +25 MB per window, killed at 3.0 GB after 14.6 s (batch: 33 auto / auto:route / auto+next cells of 11 circuits killed at 3.6 .. 8.1 GB; re-run with the referee stubbed, all 33 agree, rule_ratio not measured). Likely the batch that froze the machine twice. Fix: decimate / stream the reference instead of keeping every row
+- parked: none parked
+
+### F-R-2 [W] the rehearsal's '@legacy' cells run under the release defaults: on the release tree pwl@legacy == pwl bit for bit (556 / 556 cells) [owner: benchmarks/tools/next_defaults_rehearsal.py]
+
+- call: F-R-2_legacy_columns.py (flyback_converter, run_cell('pwl') vs run_cell('pwl@legacy') vs the same inside reference_status.profile_of('pwl@legacy') = nd.legacy())
+- truth: pwl@legacy = the 2.1.0 defaults: V(out) final 24.5056 V (nd.legacy())
+- old: pre-flip tree: the plain columns were 2.1.0 and the difference was visible
+- new: rehearsal pwl@legacy 14.0838 V = release pwl 14.0838 V (bit-identical); run_cell never enters rs.profile_of(name), and the 'today + one option' columns (b) are release + option. On the release tree the rendered report compares the release with itself (0 cells worse / better than legacy). Fix: wrap run_cell in rs.profile_of(name); read 2.1.0 from the pre-flip NEXT_DEFAULTS_REHEARSAL.md meanwhile (done in the discovery report)
+- parked: none parked
+
+### F-R-3 [W] an exact-engine event jump stored as two rows one ulp apart reads as a 3 % error to any time-interpolating reader (the rehearsal's exact grade: dsed 0.0304) [owner: exact_scoreboard.grade / event rows]
+
+- call: F-R-3_ulp_event_row.py (diode_half_wave_rl_load, case.run('dsed') release vs nd.legacy())
+- truth: release and 2.1.0 dsed rows identical to 4.4e-14 V (times to 1.4e-17 s)
+- old: pre-flip rehearsal: dsed exact 4.9e-6 (pwl 5e-5, trbdf2 1.7e-6 now)
+- new: rows -0.307834 / -0.313848 / -3.1e-6 V at t = 0.0500999172 s and one ulp later; np.interp at a time 6.9e-18 s off reads 0.3138 V (0.0304 of range); the rehearsal grades dsed and auto 0.0304 on this circuit (also diode_rectifier dsed 9.8e-6 vs 1.6e-7, voltage_doubler dsed 1.3e-7 vs 3.6e-10). Suspect: the grade, not the engine; settle by grading the left / right limits as limits
+- parked: none parked
+
+### F-R-4 [W] forward_converter on pwl under the restart rule is 145x farther from the mpmath truth than the pre-flip rehearsal predicted (7.09e-4 vs 4.9e-6) [owner: restart line]
+
+- call: F-R-4_forward_pwl_exact.py (v1 YAML, case.run('pwl'), exact_scoreboard.grade against the 50-digit truth, 2.1.0 + one release option at a time)
+- truth: the mpmath truth (trbdf2 4.6e-6, dsed 9e-8 now)
+- old: 2.1.0 pwl 1.145 (table 0.71); pre-flip rehearsal pwl+next 4.9e-6
+- new: release pwl 7.0936e-4; 2.1.0 + discontinuity_restart alone 7.0921e-4 (the rule is the whole move; mode selection / control tick / device path do not touch it); still 'agree' at the harness tol 0.02 (err_rms 9.7e-6). Also synchronous_flyback pwl 1.49e-6 vs 1.3e-7 predicted (11x). Not explained by an open A finding
+- parked: none parked
+
+### F-R-5 [C] the rehearsal's reference + truth phase of long_run_drift_buck takes 46 min and 3.27 GB [owner: benchmarks/tools (differential_runner.reference / exact_truth)]
+
+- call: F-R-5_long_run_reference.py (thermal/long_run_drift_buck: 0.1 s at dt 1e-6; dr.reference then the exact_truth Solver, timed separately)
+- truth: its 28 cells together: under 3 s
+- old: not measured on an earlier tip
+- new: next_defaults_rehearsal run --circuits thermal/long_run_drift_buck.yaml under /usr/bin/time -l: 2763 s, peak 3,268,132,864 B (all 28 cells agree). Excluded from the batch by the 30 min / 3 GB rule, measured alone
+- parked: none parked
 
 ## Closed (fix merged into the release branch)
 
