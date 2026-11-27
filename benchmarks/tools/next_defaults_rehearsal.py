@@ -104,7 +104,9 @@ CONFIGS = configs()
 def signature(name) -> str:
     """What a cached cell was measured with: its configuration and the profile."""
     import hashlib
-    blob = json.dumps([CONFIGS[name], [(e, k, repr(x.value)) for e, k, x in nd.table()]],
+    legacy = ([nd.LEGACY, nd.LEGACY_BUILDER, nd.LEGACY_YAML, nd.LEGACY_PLAN, "F-R-2"]
+              if name.endswith(rs.LEGACY) else [])   # the legacy profile is part of the cell (F-R-2)
+    blob = json.dumps([CONFIGS[name], [(e, k, repr(x.value)) for e, k, x in nd.table()], *legacy],
                       sort_keys=True, default=repr)
     return hashlib.sha1(blob.encode("utf-8")).hexdigest()[:12]
 # the same run as an (a) cell; the split alone is refused by run_transient (it needs the rule)
@@ -189,7 +191,10 @@ def run_cell(case, name):
     spec = CONFIGS[name]
     info, t0 = {}, time.perf_counter()
     try:
-        with warnings.catch_warnings(), nd.builder_form(spec["form"]), nd.plan_defaults(spec.get("plan", False)):
+        # an '@legacy' cell runs under next_defaults.legacy(): every flipped default at its 2.1.0
+        # value (F-R-2: without it pwl@legacy was pwl bit for bit)
+        with warnings.catch_warnings(), rs.profile_of(name), nd.builder_form(spec["form"]), \
+                nd.plan_defaults(spec.get("plan", False)):
             warnings.simplefilter("ignore")
             if spec.get("route"):
                 b1, sw1, obs = case.build()     # one build: a closed loop's sw and observer share a PI

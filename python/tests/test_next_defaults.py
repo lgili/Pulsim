@@ -128,3 +128,37 @@ def test_judge_basis():
     assert ndr.judge({"outcome": "agree", "exact": 1e-6}, {"outcome": "agree", "exact": 3e-6}) == (
         "worse", "truth")
     assert ndr.judge({"outcome": "agree"}, {"outcome": "disagree"}) == ("worse", "outcome")
+
+
+# F-R-2: the rehearsal's '@legacy' cells ran under the release defaults (pwl@legacy == pwl).
+# benchmarks/goldens/pwl_legacy/ is byte-identical to `git show v2.1.0:benchmarks/goldens/pwl/`.
+@pytest.mark.parametrize("rel", [
+    "circuits/switching/isolated/flyback_converter.yaml",     # final V(out) 24.5056 (2.1.0) vs 14.0838
+    "circuits/switching/boost/boost_classic.yaml",
+    "circuits/diodes/diode_bridge_rectifier.yaml",
+    "circuits/stress/stiff_rlc.yaml",
+    "circuits/motors/motor_pmsm_dq_open_loop.yaml",
+])
+def test_rehearsal_legacy_cell_reproduces_2_1_0_goldens(rel):
+    import goldens as G
+    import v1_reader
+    case = v1_reader.load(ndr.ROOT / rel)
+    gold = __import__("json").loads((G.LEGACY_DIR / f"{Path(rel).stem}.json").read_text(encoding="utf-8"))
+    with nd.legacy():
+        names = case.build()[0].state_var_names()
+    newton = gold["rtol"] > G.RTOL_LINEAR
+    kind, res, *_ = ndr.run_cell(case, "pwl@legacy")
+    assert kind == "ran"
+    assert G.compare(gold, G.snapshot(res, names, newton)) == []
+    kind, res, *_ = ndr.run_cell(case, "pwl")       # the release defaults move these numbers
+    assert kind == "ran"
+    try:
+        moved = G.compare(gold, G.snapshot(res, names, newton)) != []
+    except IndexError:                              # the branch form adds states
+        moved = True
+    assert moved
+
+
+def test_legacy_cells_have_their_own_cache_signature():
+    assert ndr.CONFIGS["pwl@legacy"] == ndr.CONFIGS["pwl"]              # the same spec ...
+    assert ndr.signature("pwl@legacy") != ndr.signature("pwl")          # ... not the same cell

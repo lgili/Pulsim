@@ -383,6 +383,17 @@ F = [
 # Closed by a fix merged into the release branch: id -> where and the measured result.
 # A closed finding leaves the open tables and is listed under "Closed".
 FIXED = {
+    "F-R-1": "R12 (release branch): the referee streams its rule-off windows (reads a window once the next is known, "
+             "keeps only the running worst / missing / read counts, event and jump instants). Verdict dicts identical on "
+             "17 prop units (rc_step .. cl_buck_pi, 2..987 windows); peak RSS lc_low_pass_sine auto+next 342 MB (was "
+             "3.0 GB at 14.6 s, 8.1 GB in the batch), ll09_half_bridge_inverter_leg 183 MB (was 6.4 GB); the 36 auto / "
+             "auto:route / auto+next cells of the 12 killed circuits ran with the real referee, no guard kill, worker peak "
+             "<= 1071 MB; `test_f_r_1_the_referee_keeps_one_window_not_the_chain` (traced peak 104 MB vs 300 MB before)",
+    "F-R-2": "R12 (release branch): run_cell enters reference_status.profile_of(name) = next_defaults.legacy() (the one "
+             "LEGACY table) and an '@legacy' cell has its own cache signature. flyback pwl@legacy final V(out) 24.505618 "
+             "V (2.1.0), pwl 14.083810 V; 25 / 25 golden circuits' pwl@legacy match goldens/pwl_legacy (= v2.1.0 "
+             "goldens/pwl, byte-identical), 19 / 25 plain pwl do not; 21 units: 67 / 105 @legacy cells now differ from "
+             "the plain column (were 0); `test_rehearsal_legacy_cell_reproduces_2_1_0_goldens`",
     "F-Z-3": "integration line 8baa0153 + 6634be3c (merged 668e1428, R10): the restart after a split sliver probes at the "
              "next grid step; `_caploop(1e-9)` max dev 1.022 A -> 1.78e-15 A, P 0.045982 W (closed form 0.0460); "
              "`test_hard_switched_capacitor_at_a_finer_step[default]` mark removed, test_split_sliver_restart passes",
