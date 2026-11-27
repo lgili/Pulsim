@@ -251,16 +251,21 @@ def test_every_cell_is_a_true_number_or_a_refusal_by_name(kind, dev, eng):
     assert s == pytest.approx(truth, rel=1e-5), (s, truth)
 
 
-@pytest.mark.parametrize("rtol", [
-    pytest.param(1e-9, marks=pytest.mark.xfail(strict=True, reason=(
-        "release finding F-Z-5: dc/dR 0.01610929404 against 0.01610926909 (rel 1.55e-6 > 1e-6); the same "
-        "with mode_selection / device_path legacy and the restart off: the incoming WIP bb2e22f4 (NOT FIXED)"))),
-    1e-11])
-def test_trbdf2_sine_rectifier_turnoffs_commit_at_their_landing(rtol, monkeypatch):
+# F-Z-5 corrected: the 1e-9 cell moved with the release default form='branch' of add_diode
+# (no engine difference from the integration line). Measured, dc/dR rel error at rtol 1e-9 /
+# 1e-11: conductance 2.1e-7 / 1.4e-8, branch 1.55e-6 / 4.6e-9 -- it falls with rtol on both
+# forms (the defect this test guards is O(h), 7.4e-4, rtol-independent). The table was taken
+# on the conductance form, so the 1e-9 cell names it; the 1e-11 cell is the default (branch).
+@pytest.mark.parametrize("rtol,form", [(1e-9, "conductance"), (1e-11, None)])
+def test_trbdf2_sine_rectifier_turnoffs_commit_at_their_landing(rtol, form, monkeypatch):
     """The sine cell's turn-off landings commit their diode at every rtol: an
     interpolated landing sits 1e-6 of its bracket past the zero, inside the
     round-off bound, and was refused at all three (macOS) when that bound held
     it. Carried as an event one step later it read 7.4e-4 / 1.65e-4 off (O(h))."""
+    if form:
+        f = p.CircuitBuilder.add_diode
+        monkeypatch.setattr(p.CircuitBuilder, "add_diode",
+                            lambda self, *a, **k: f(self, *a, **{"form": form, **k}))
     monkeypatch.setitem(ENGINES, "trbdf2", ("trbdf2", dict(rtol=rtol, atol=rtol * 1e-3)))
     r = _run("diode_on_off_sine", "linear", "trbdf2")
     s = float(r.sens("c", "RL.R")[-1])

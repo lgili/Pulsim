@@ -254,10 +254,9 @@ def test_hard_switched_capacitor_current_does_not_ring():
 
 
 @pytest.mark.parametrize("kw", [
-    pytest.param(ON, id="default", marks=pytest.mark.xfail(strict=True, reason=(
-        "release finding F-Z-3: the split cuts the edge 1e-5 dt before the grid point; the restart's "
-        "L-stable stages are spent on that 1e-14 s sub-step and the next full step is trapezoidal over "
-        "1000 tau: +-2.25 A ringing, max dev 1.022 A (0.362 A at 1e-3 dt; none at split_snap 1e-2 or 0.1 dt)"))),
+    # F-Z-3 fixed (8baa0153 / 6634be3c): the restart after a split sliver probes at the next
+    # grid step; max dev 1.022 A -> 1.8e-15 A at dt 1e-9 (edge 1e-5 dt before the grid point)
+    pytest.param(ON, id="default"),
     pytest.param(dict(discontinuity_restart=True, enable_substep_state_correction=False), id="rule-alone"),
 ])
 def test_hard_switched_capacitor_at_a_finer_step(kw):
