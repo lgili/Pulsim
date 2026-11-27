@@ -3190,7 +3190,7 @@ inline SimulationResult run_transient(
             // LU's backward error left 4.6e-11 A in a divider node's KCL; one
             // step makes it componentwise (Skeel). Once per row, linear mode.
             // The correction solve is skipped when r already meets that bound,
-            // |r_i| <= 4·n·eps·(|J|·|x|)_i (the KCL tests' bound).
+            // |r_i| <= n·eps·(|J|·|x|)_i (the KCL tests allow 4x that).
             auto refined = [&]() -> const Vector& {
                 const Vector* bc = nullptr;
                 const sparse::DirectSolver* f = nullptr;
@@ -3207,7 +3207,7 @@ inline SimulationResult run_transient(
                             rl_dx[it.row()] += std::abs(a);
                         }
                     }
-                    const Real tol = Real{4} * static_cast<Real>(J->rows())
+                    const Real tol = static_cast<Real>(J->rows())
                                      * std::numeric_limits<Real>::epsilon();
                     if ((rl_rr.array().abs() > tol * rl_dx.array()).any()) {
                         f->solve(rl_rr, rl_dx);   // factor-reuse

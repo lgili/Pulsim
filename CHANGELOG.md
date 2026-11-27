@@ -26,7 +26,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   release line). One step of iterative refinement on the same factor (no new
   factorization, right-limit solves only) makes the residual componentwise
   round-off; the rows move by that round-off. The correction solve is skipped
-  when the residual already meets that bound (|r_i| ≤ 4·n·eps·(|J|·|x|)_i).
+  when the residual already meets that bound (|r_i| ≤ n·eps·(|J|·|x|)_i).
 
 ### Restart rule: a cut is named as the cut; the snapshot pickle keeps the anchor
 
@@ -36,7 +36,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   limit (i·R_off across the switch for its unresolved L/R_off mode: 6.6e9 V on
   the diode-less VSI leg), and the voltage check scanned it first, so the
   generic "largest voltage any source" warning fired and the cut was never
-  named. A row at a `cut_set` record's instant is now judged apart: when it
+  named. A row at an impulse record's instant is now judged apart: when it
   alone trips the bound the warning names the switch, the inductor, the current
   and the energy ½·L·i² the record booked once (`simulate()` and the kernel
   `Simulation` object read the same check). The stored rows, the readers and
@@ -46,7 +46,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   listed first was named as "the current of 'Cdiv1'" on
   `half_bridge_transformer_dc`), a capacitor for a capacitor loop (worded as
   a voltage jump by charge sharing, with its energy); when no listed state is
-  of that kind the message names neither a current nor a voltage.
+  of that kind the message names neither a current nor a voltage. Of several
+  records at one instant, a row is read against the one whose devices touch its
+  node, a cut set first; a capacitor loop's row is reported as a finding to
+  check, not as an artefact.
 - **`SolverSnapshot` pickles `restart_anchor_at_end` and `invalid_reason`**
   (field 20, written only when either is set, so every other pickle is byte for
   byte as before; an older pickle loads them as `False` / `""`). A resume from a

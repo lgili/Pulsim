@@ -74,4 +74,21 @@ TEST_CASE("A capacitor switched onto a source is reported as a capacitor loop",
     REQUIRE(msg.find(std::format("by {:.4g} V", f.cut_size)) != std::string::npos);
     REQUIRE(msg.find(std::format("{:.4g} J", rec->dW)) != std::string::npos);
     REQUIRE(msg.find("current of") == std::string::npos);
+
+    // two records at one instant (review): the row is read against the one
+    // whose devices touch the node, a cut set before a capacitor loop, and a
+    // record of other devices listed first is not taken
+    ReinitRecord other{.t = rec->t, .kind = "capacitor_loop", .devices = {"V"}};
+    ReinitRecord cs{.t = rec->t, .kind = "cut_set", .devices = {"S"}, .states = {"C"},
+                    .lambda = 1.0, .dW = 2.0};
+    r.reinit_records.insert(r.reinit_records.begin(), other);
+    r.reinit_records.push_back(cs);
+    const auto f2 = find_implausible_voltage(g, pool, r);
+    REQUIRE(f2.cut_kind == "cut_set");
+    REQUIRE(f2.cut_state_kind == 0);   // its only state is no inductor: neither wording
+    const std::string m2 = describe(g, pool, f2);
+    INFO(m2);
+    REQUIRE(m2.find("kind 'cut_set'") != std::string::npos);
+    REQUIRE(m2.find("capacitor loop") == std::string::npos);
+    REQUIRE(m2.find("current of") == std::string::npos);
 }

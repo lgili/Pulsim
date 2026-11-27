@@ -209,17 +209,18 @@ struct ImplausibleVoltage {
     if (result.has_event_limits && result.event_limit_width > 0) {
         const Size w = result.event_limit_width;
         const Index n = std::min<Index>(n_nodes, static_cast<Index>(w));
-        // F-Z-8: a row at a cut-set record's instant is the conductance-form
-        // model's right limit before the collapse the record reports (i·R_off
-        // for ~L/R_off): judged apart and, when it alone trips, reported as
-        // the cut (device, current, energy), never as a node voltage
+        // F-Z-8: a row at an impulse record's instant, at that record's own
+        // devices' terminals, is the conductance-form model's right limit
+        // before the collapse the record reports (i·R_off for ~L/R_off):
+        // judged apart and, when it alone trips, reported as that record
+        // (device, state, energy), never as a node voltage
         ImplausibleVoltage cut;
         const ReinitRecord* cut_rec = nullptr;
-        auto cut_at = [&](Real te) -> const ReinitRecord* {
+        auto any_at = [&](Real te) {
             for (const auto& q : result.reinit_records) {
-                if (q.t == te) return &q;   // a cut set or a capacitor loop
+                if (q.t == te) return true;
             }
-            return nullptr;
+            return false;
         };
         auto touches = [&](const ReinitRecord& q, Index node) {
             for (Index b = 0; b < graph.num_branches(); ++b) {
@@ -231,18 +232,32 @@ struct ImplausibleVoltage {
             }
             return false;
         };
+        // several records can share an instant (one per dependent group, and
+        // a fast-mode record): the one whose devices touch the node, a cut
+        // set first (a spike i·R_off is a cut's, not a charge sharing's)
+        auto record_for = [&](Real te, Index node) -> const ReinitRecord* {
+            const ReinitRecord* hit = nullptr;
+            for (const auto& q : result.reinit_records) {
+                if (q.t != te || !touches(q, node)) continue;
+                if (q.kind == "cut_set") return &q;
+                if (hit == nullptr) hit = &q;
+            }
+            return hit;
+        };
         auto scan = [&](const std::vector<Real>& rows, auto&& time_of) {
             for (Size j = 0; (j + 1) * w <= rows.size(); ++j) {
                 const Real* r = rows.data() + j * w;
                 if (std::isnan(r[0])) continue;
                 const Real te = time_of(j);
-                const ReinitRecord* q = cut_at(te);
+                const bool has = any_at(te);
                 for (Index i = 0; i < n; ++i) {
-                    // only the cutting devices' own terminals are the cut's
-                    const bool at_cut = q != nullptr && touches(*q, i);
-                    ImplausibleVoltage& o = at_cut ? cut : out;
                     const Real a = std::abs(r[i]);
-                    if (!(a <= bound) && !(a <= o.peak)) {
+                    if (a <= bound) continue;   // NaN goes on (!(NaN <= bound))
+                    // only the record's own devices' terminals are its
+                    const ReinitRecord* q = has ? record_for(te, i) : nullptr;
+                    const bool at_cut = q != nullptr;
+                    ImplausibleVoltage& o = at_cut ? cut : out;
+                    if (!(a <= o.peak)) {
                         o.node = i;
                         o.peak = a;
                         o.t_peak = te;
@@ -350,11 +365,10 @@ struct ImplausibleVoltage {
             "jumped{} by charge sharing in an instant, and the restart rule booked "
             "the energy {:.4g} J once, as an impulse record "
             "(result.reinit_records, kind 'capacitor_loop'). The right limit "
-            "stored there, {:.3e} V at {} (the circuit's sources reach {:.4g} V), "
-            "is the ideal switch model's own across that instant, not a sample "
-            "of the waveform. A real circuit limits the sharing current (the "
-            "switch's on-resistance, the loop's inductance): add whichever your "
-            "design has.",
+            "stored there reads {:.3e} V at {} (the circuit's sources reach "
+            "{:.4g} V): charge sharing does not explain that, so check the "
+            "circuit at that instant. A real circuit limits the sharing current "
+            "(the switch's on-resistance, the loop's inductance).",
             v.cut_device, v.cut_state, v.t_peak,
             v.cut_size > Real{0} ? std::format(" by {:.4g} V", v.cut_size) : std::string{},
             v.cut_energy, v.peak, pwl::row_label(graph, pool, v.node), v.source_scale);
@@ -363,9 +377,8 @@ struct ImplausibleVoltage {
         return std::format(
             "'{}' switched at t = {:.6g} s and the restart rule booked {:.4g} J "
             "once, as an impulse record (result.reinit_records, kind '{}'). The "
-            "right limit stored there, {:.3e} V at {} (the circuit's sources "
-            "reach {:.4g} V), is the ideal switch model's own across that "
-            "instant, not a sample of the waveform.",
+            "right limit stored there reads {:.3e} V at {} (the circuit's "
+            "sources reach {:.4g} V); check the circuit at that instant.",
             v.cut_device, v.t_peak, v.cut_energy, v.cut_kind,
             v.peak, pwl::row_label(graph, pool, v.node), v.source_scale);
     }
