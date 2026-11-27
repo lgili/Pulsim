@@ -298,13 +298,12 @@ TEST_CASE("the Coss law's residual at an esdirk43 stage is the hand stamp's, "
                             }
                         }
                     }
-                    // commit: the same increment; the hand BE commit divides
-                    // by h where its stamp multiplies by 1/h (one rounding)
+                    // commit: the same operations as the hand commit (BE divides
+                    // by h, trapezoid/BDF2 the formula's increment form), to the bit
                     auto hl = hist, hi = hist;
                     hl.commit(x, h, st);
                     pwl::iface::commit(hi, x, h, st);
-                    const Real il = hl.entries()[0].i_prev;
-                    CHECK(close(hi.entries()[0].i_prev, il, il, 2));
+                    CHECK(hi.entries()[0].i_prev == hl.entries()[0].i_prev);
                     CHECK(hi.entries()[0].q_prev == hl.entries()[0].q_prev);
                 }
             }

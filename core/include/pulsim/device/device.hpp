@@ -425,7 +425,8 @@ PULSIM_DEVICE_INLINE inline Real stamp_fq_local(const aux_t<D>& aux, const typen
 }
 
 /// Commit after an accepted step: q_n ← q(x) and q̇_n ← the derivative the
-/// step produced. On a PIN row that is the formula's a·q(x) + r (the row
+/// step produced. On a PIN row that is the formula's rate in increment
+/// form (formula_rate; (q(x) − q_n)/h on backward Euler, as the hand commit) (the row
 /// is a shared KCL, so f alone is not the derivative; physical, so a
 /// variable h stays legal). On an INTERNAL row the device owns the whole
 /// equation f + q̇ = 0, so q̇_n ← −f(x) exactly, not the formula value,
