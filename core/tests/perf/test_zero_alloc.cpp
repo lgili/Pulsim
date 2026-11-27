@@ -55,6 +55,7 @@
 #include "pulsim/record/loop_feed.hpp"
 #include "pulsim/record/recorder.hpp"
 #include "pulsim/solver/run_transient.hpp"
+#include "pulsim/solver/trbdf2_transient.hpp"
 #include "pulsim/topology/graph.hpp"
 
 using namespace pulsim;
@@ -934,6 +935,72 @@ TEST_CASE("stored-charge kinds (Lauritzen, IGBT tail): allocation count is "
             CHECK(delta4 <= delta + 6);
             CHECK(delta < 128);
         }
+    }
+}
+
+TEST_CASE("variable-step stepper (TR-BDF2): allocation count is O(1) over "
+          "accepted, rejected and Newton-retried steps",
+          "[.][wip][v2][perf][zero_alloc][stepper]") {
+    // WIP (hidden): accepted + rejected measured O(1) (158 -> 166 operator
+    // news for 10,050 -> 41,425 accepted steps); no Newton budget 4..12 yet
+    // found that both finishes this run and retries (3 aborts at h_min).
+    // refactor-unified-transient-stepper 6.3: the gated IGBT chopper of the
+    // stored-charge case on engine 'trbdf2' (Newton devices, gate edges: the
+    // run accepts, rejects and retries Newton). Its records grow with the
+    // accepted steps (times, states, switch states), so the count may rise by
+    // the amortised growth of those vectors, never by one per step.
+    builder::CircuitBuilder b;
+    b.add_voltage_source("V", "vcc", "gnd", 15.0);
+    b.add_inductor("L", "vcc", "c", 1e-4);
+    b.add_pulse_voltage_source("VG", "g", "gnd", 0.0, 15.0, 0.0, 2.5e-5, 5e-5);
+    b.add_igbt_level1("Q", "c", "gnd", "g", 1.5, 0.05, 5.0, 10.0, 0.01, false,
+                      1e-6, 0.3);
+    b.add_lauritzen_diode("DL", "c", "vcc");
+    b.add_resistor("R", "c", "vcc", 50.0);
+    PwlStateSpaceCache cache{b.graph(), b.pool()};
+    cache.build_lazy(Real{1e-6});
+    const auto switch_fn = [](Real) { return SwitchStateMask(0); };
+    solver::TrBdf2Options o;
+    o.t_start = 0.0;
+    o.t_end = 1e-3;
+    // A short Newton budget makes some stage solves fail, so the run also
+    // takes the shrink-and-retake path (n_newton_retries): the smallest
+    // budget (from 4) that still finishes the run and retries.
+    for (Size it = 4; it <= 12; ++it) {
+        o.max_newton_iterations = it;
+        solver::TrBdf2Stats probe;
+        try {
+            (void)solver::run_transient_trbdf2(cache, b.graph(), b.pool(), o,
+                                               switch_fn, {}, std::nullopt, &probe);
+        } catch (const std::runtime_error&) {
+            continue;
+        }
+        if (probe.n_newton_retries > 0) break;
+    }
+    auto run = [&](Real t_end, solver::TrBdf2Stats& st) {
+        o.t_end = t_end;
+        const std::size_t b0 = g_new_count.load();
+        auto r = solver::run_transient_trbdf2(cache, b.graph(), b.pool(), o,
+                                              switch_fn, {}, std::nullopt, &st);
+        REQUIRE(r.times.size() > 10);
+        return g_new_count.load() - b0;
+    };
+    solver::TrBdf2Stats warm, s1, s4;
+    (void)run(1e-3, warm);
+    const std::size_t d1 = run(1e-3, s1);
+    const std::size_t d4 = run(4e-3, s4);
+    INFO("max_newton_iterations " << o.max_newton_iterations);
+    INFO("operator-new count: " << s1.n_accept << " accepted / " << s1.n_reject
+         << " rejected / " << s1.n_newton_retries << " Newton retries -> " << d1
+         << "; " << s4.n_accept << " / " << s4.n_reject << " / "
+         << s4.n_newton_retries << " -> " << d4);
+    CHECK(s4.n_accept > 3 * s1.n_accept);
+    CHECK(s4.n_reject > s1.n_reject);
+    CHECK(s4.n_newton_retries > s1.n_newton_retries);
+    if (kCountsMeaningful) {
+        CHECK(d4 >= d1);
+        // Measured 158 -> 166 for 4x the steps (amortised record growth).
+        CHECK(d4 <= d1 + 32);
     }
 }
 

@@ -62,7 +62,7 @@ at equal times or time-weighted measures, never sample means.
 - [ ] 6.2 Equality proof: `trbdf2-next` step-identical to `trbdf2` on every harness circuit and every suite circuit that runs on `trbdf2`; runner job added
   - Open: proved locally (twin identity 327/327 + 50/50, DECISIONS 15/18; since 3d `benchmarks/tools/trbdf2_identity.py` against a stored baseline); no runner job
 - [ ] 6.3 Zero-alloc test for the variable-step stepper (accepted, rejected and Newton-retried steps)
-  - Open: no variable-step zero-allocation case yet
+  - WIP: hidden case `[wip]` in `core/tests/perf/test_zero_alloc.cpp` (gated IGBT chopper on TR-BDF2): accepted + rejected steps O(1), 158 -> 166 operator news for 10,050 -> 41,425 accepted / 283 -> 1,239 rejected; the Newton-retried path not yet reached (a short `max_newton_iterations` aborts at h_min or does not retry); un-hide when it is
 - [x] 6.4 Switch `engine='trbdf2'` and `engine='auto'` without `dt` to the stepper; keep `engine='trbdf2-legacy'`
   - Slice 3c (DECISIONS 17): the skeleton driver is the default of `run_transient_trbdf2` (so of every route that reaches it); the old loop is kept only behind the internal `PULSIM_TRBDF2_STEPPER_LEGACY=1`, NOT as a public `trbdf2-legacy` name (orchestrator's brief: no public option). Default byte-identical to the previous default; identity tool at full counts
 - [ ] 6.5 Oracle: matrix equal for `trbdf2` and `trbdf2-legacy`; counter gate equal; ns/step rows 5–9 not above 0.2
