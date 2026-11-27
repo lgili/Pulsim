@@ -315,5 +315,6 @@ def test_f_r_1_the_referee_keeps_one_window_not_the_chain(monkeypatch):
     finally:
         tracemalloc.stop()
     assert fr["comparable"] and fr["n_windows"] == len(sizes) >= 10, fr
-    assert fr["ratio"] == pytest.approx(0.9955495667041186, rel=1e-12)   # the verdict before the fix
+    # 1e-9: on the integration line Linux and Windows CI read this ratio 1.8e-11 away from macOS
+    assert fr["ratio"] == pytest.approx(0.9955495667041186, rel=1e-9)   # the verdict before the fix
     assert peak < 8 * max(sizes), (peak, max(sizes), sum(sizes))
