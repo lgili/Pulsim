@@ -92,3 +92,70 @@ TEST_CASE("A capacitor switched onto a source is reported as a capacitor loop",
     REQUIRE(m2.find("capacitor loop") == std::string::npos);
     REQUIRE(m2.find("current of") == std::string::npos);
 }
+
+// F-Z-15: a cut set's row is judged by |λ|/dt (R_off-free), not i·R_off, so
+// voltage_sanity_factor can silence a known cut; a megavolt elsewhere in the
+// same row (a node no record device touches) is still a node voltage.
+TEST_CASE("A cut is judged by its impulse over the step, not by i*R_off",
+          "[voltage_sanity][restart][F-Z-15]") {
+    constexpr Real V = 48.0, L = 1e-3, t_e = 5e-5, dt = 1e-8;
+    Graph g;
+    const Index vin = g.add_node("vin");
+    const Index sw = g.add_node("sw");
+    const Index x = g.add_node("x");
+    g.add_branch(vin, g.ground(), BranchKind::Source, "V");
+    g.add_branch(vin, sw, BranchKind::PassiveLinear, "L");
+    g.add_branch(sw, g.ground(), BranchKind::Switch, "S");
+    g.add_branch(vin, x, BranchKind::PassiveLinear, "R1");
+    g.add_branch(x, g.ground(), BranchKind::PassiveLinear, "R2");
+    DevicePool pool;
+    pool.add_voltage_source(0, {.V = V});
+    pool.add_inductor(1, {.L = L});
+    pool.add_switch(2, 1e3, 1e-12);
+    pool.add_resistor(3, {.G = 1e-3});
+    pool.add_resistor(4, {.G = 1e-3});
+    PwlStateSpaceCache cache(g, pool);
+    cache.build(dt);
+    SimulationOptions o;
+    o.t_start = 0.0;
+    o.dt = dt;
+    o.t_end = 2 * t_e;
+    o.discontinuity_restart = true;
+    auto r = run_transient(cache, g, pool, o, [&](Real t) {
+        SwitchStateMask m(1);
+        m.set(0, t < t_e);
+        return m;
+    });
+    const ReinitRecord* rec = nullptr;
+    for (const auto& q : r.reinit_records) {
+        if (q.kind == "cut_set") rec = &q;
+    }
+    REQUIRE(rec != nullptr);
+    const Real m = std::abs(rec->lambda) / dt;   // L·i/dt ≈ 2.4e5 V = 5000 × 48 V
+    REQUIRE(m == Catch::Approx(2.4e5).epsilon(1e-3));
+    const auto f = find_implausible_voltage(g, pool, r, 100.0);
+    REQUIRE(f.node == sw);
+    REQUIRE(f.cut_kind == "cut_set");
+    REQUIRE(f.peak == Catch::Approx(m).epsilon(1e-6));
+    REQUIRE(f.cut_row_voltage > 1e11);   // i·R_off, reported only
+    const std::string msg = describe(g, pool, f);
+    INFO(msg);
+    REQUIRE(msg.find(std::format("reached {:.3e} V", f.cut_measure)) != std::string::npos);
+    REQUIRE(msg.find(std::format("{:.3e} V", f.cut_row_voltage)) != std::string::npos);
+    // 6000 × 48 V covers |λ|/dt and not i·R_off: silent
+    REQUIRE(find_implausible_voltage(g, pool, r, 6000.0).node == kInvalidIndex);
+    // a megavolt at x in the cut's own row: no record device touches x
+    const Size w = r.event_limit_width;
+    bool planted = false;
+    for (Size j = 0; j < r.right_limit_index.size(); ++j) {
+        if (r.times[r.right_limit_index[j]] == rec->t) {
+            r.right_limit_states[j * w + static_cast<Size>(x)] = 1e6;
+            planted = true;
+        }
+    }
+    REQUIRE(planted);
+    const auto f2 = find_implausible_voltage(g, pool, r, 6000.0);
+    REQUIRE(f2.node == x);
+    REQUIRE(f2.cut_device.empty());
+    REQUIRE(f2.peak == Catch::Approx(1e6).epsilon(1e-6));
+}

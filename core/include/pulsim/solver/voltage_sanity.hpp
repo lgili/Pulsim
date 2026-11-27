@@ -78,6 +78,12 @@ struct ImplausibleVoltage {
     std::string cut_device, cut_state, cut_kind;
     char cut_state_kind = 0;
     Real cut_size = Real{0}, cut_energy = Real{0};
+    /// F-Z-15: a cut set's row is judged by the cut's own size, its impulse
+    /// over the step |λ|/h (cut_measure, then also `peak`), not by i·R_off,
+    /// which scales with the arbitrary R_off: cut_row_voltage is that row
+    /// value (reported, not judged), cut_step the step h (0: no step known,
+    /// the row value was judged as before).
+    Real cut_measure = Real{0}, cut_row_voltage = Real{0}, cut_step = Real{0};
 };
 
 /// The largest voltage magnitude any INDEPENDENT source in the
@@ -244,7 +250,10 @@ struct ImplausibleVoltage {
             }
             return hit;
         };
-        auto scan = [&](const std::vector<Real>& rows, auto&& time_of) {
+        // the step a record at a row's instant was carried over: the fixed
+        // grid's dt, else (a variable-step run) the next sample's distance
+        const Real grid_dt = result.final_snapshot.grid_dt;
+        auto scan = [&](const std::vector<Real>& rows, auto&& time_of, auto&& step_of) {
             for (Size j = 0; (j + 1) * w <= rows.size(); ++j) {
                 const Real* r = rows.data() + j * w;
                 if (std::isnan(r[0])) continue;
@@ -256,12 +265,22 @@ struct ImplausibleVoltage {
                     // only the record's own devices' terminals are its
                     const ReinitRecord* q = has ? record_for(te, i) : nullptr;
                     const bool at_cut = q != nullptr;
+                    // F-Z-15: a cut set is judged by |λ|/h, the size of the cut
+                    // itself (R_off-free); the row value i·R_off is kept beside it
+                    const Real h = at_cut && q->kind == "cut_set" ? step_of(j) : Real{0};
+                    const Real m = h > Real{0} ? std::abs(q->lambda) / h : a;
+                    if (m <= bound) continue;   // a cut the user's factor covers
                     ImplausibleVoltage& o = at_cut ? cut : out;
-                    if (!(a <= o.peak)) {
+                    if (!(m <= o.peak) || (m == o.peak && at_cut && a > o.cut_row_voltage)) {
                         o.node = i;
-                        o.peak = a;
+                        o.peak = m;
                         o.t_peak = te;
-                        if (at_cut) cut_rec = q;
+                        if (at_cut) {
+                            cut_rec = q;
+                            o.cut_measure = h > Real{0} ? m : Real{0};
+                            o.cut_row_voltage = a;
+                            o.cut_step = h;
+                        }
                     }
                 }
             }
@@ -270,10 +289,15 @@ struct ImplausibleVoltage {
             return j < result.right_limit_index.size() &&
                            result.right_limit_index[j] < result.times.size()
                        ? result.times[result.right_limit_index[j]] : Real{0};
+        }, [&](Size j) {
+            if (grid_dt > Real{0}) return grid_dt;   // NaN: no grid
+            const Size k = j < result.right_limit_index.size() ? result.right_limit_index[j]
+                                                               : result.times.size();
+            return k + 1 < result.times.size() ? result.times[k + 1] - result.times[k] : Real{0};
         });
         scan(result.inner_event_right, [&](Size j) {
             return j < result.inner_event_times.size() ? result.inner_event_times[j] : Real{0};
-        });
+        }, [&](Size) { return grid_dt > Real{0} ? grid_dt : Real{0}; });
         if (out.node == kInvalidIndex && cut_rec != nullptr) {
             out = cut;
             out.cut_device = cut_rec->devices.empty() ? cut_rec->cause : cut_rec->devices.front();
@@ -340,24 +364,44 @@ struct ImplausibleVoltage {
             "them needs a freewheel path (add_diode(..., V_f=...) across "
             "the device or the load).", gated);
     }
+    // F-Z-15: the measure judged at a cut set (|λ|/h), told beside the row value
+    const std::string judged = v.cut_step > Real{0} ? std::format(
+        "Its impulse over the step, |λ|/dt (dt = {:.4g} s), reached {:.3e} V at {} "
+        "— {:.0f} × the {:.4g} V the circuit's sources reach: that size of the "
+        "cut is what voltage_sanity_factor is judged against.",
+        v.cut_step, v.cut_measure, pwl::row_label(graph, pool, v.node),
+        v.cut_measure / v.source_scale, v.source_scale) : std::string{};
+    const Real row_v = v.cut_row_voltage > Real{0} ? v.cut_row_voltage : v.peak;
     if (!v.cut_device.empty() && v.cut_state_kind == 'L') {
-        return std::format(
+        const std::string head = std::format(
             "'{}' cut the {} of '{}' at t = {:.6g} s in an "
             "instant: the restart rule booked its energy {}{:.4g} J once, as an "
-            "impulse record (result.reinit_records, kind 'cut_set'). The right "
-            "limit stored there is the model's own before that collapse: the "
-            "current held across the switch's off-conductance, {:.3e} V at {} "
-            "for the unresolved L/R_off mode (the circuit's sources reach "
-            "{:.4g} V) — an artefact of the ideal cut, not a sample of the "
-            "waveform. A real circuit gives the current a path (a freewheel "
-            "diode, a snubber, the switch's capacitance or avalanche): add "
-            "whichever your design has.",
+            "impulse record (result.reinit_records, kind 'cut_set'). ",
             v.cut_device,
             v.cut_size > Real{0} ? std::format("{:.4g} A current", v.cut_size)
                                  : std::string("current"),
             v.cut_state, v.t_peak,
             v.cut_size > Real{0} ? "½·L·i² = " : "",   // one state: dW is its own
-            v.cut_energy, v.peak, pwl::row_label(graph, pool, v.node), v.source_scale);
+            v.cut_energy);
+        constexpr const char* tail =
+            " A real circuit gives the current a path (a freewheel "
+            "diode, a snubber, the switch's capacitance or avalanche): add "
+            "whichever your design has.";
+        if (!judged.empty()) {
+            return head + judged + std::format(
+                " The right limit stored there, {:.3e} V, is the model's own before "
+                "that collapse: the current held across the switch's off-conductance "
+                "for the unresolved L/R_off mode — it scales with R_off, an artefact "
+                "of the ideal cut and not a sample of the waveform, so it is reported, "
+                "not judged.", row_v) + tail;
+        }
+        return head + std::format(
+            "The right "
+            "limit stored there is the model's own before that collapse: the "
+            "current held across the switch's off-conductance, {:.3e} V at {} "
+            "for the unresolved L/R_off mode (the circuit's sources reach "
+            "{:.4g} V) — an artefact of the ideal cut, not a sample of the "
+            "waveform.", row_v, pwl::row_label(graph, pool, v.node), v.source_scale) + tail;
     }
     if (!v.cut_device.empty() && v.cut_state_kind == 'C') {
         return std::format(
@@ -378,9 +422,10 @@ struct ImplausibleVoltage {
             "'{}' switched at t = {:.6g} s and the restart rule booked {:.4g} J "
             "once, as an impulse record (result.reinit_records, kind '{}'). The "
             "right limit stored there reads {:.3e} V at {} (the circuit's "
-            "sources reach {:.4g} V); check the circuit at that instant.",
+            "sources reach {:.4g} V); check the circuit at that instant.{}",
             v.cut_device, v.t_peak, v.cut_energy, v.cut_kind,
-            v.peak, pwl::row_label(graph, pool, v.node), v.source_scale);
+            row_v, pwl::row_label(graph, pool, v.node), v.source_scale,
+            judged.empty() ? std::string{} : " " + judged);
     }
     return gated.empty() ? std::format(
         "{} reached {:.3e} V at t = {:.6g} s, but the largest "
