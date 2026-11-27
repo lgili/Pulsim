@@ -286,6 +286,7 @@ struct ModeSelection {
     int enumerations = 0;     // non-passive: Lemke ended at a ray, the 2^k modes enumerated (D3)
     int nonunique_modes = 0;  // enumerations that found several modes (fewest flips taken)
     int recoordinated = 0;    // first passes re-posed in OFF coordinates after a failure (F-4-2)
+    int rounding_ties = 0;    // gaps above tol_w inside the posed network's rounding: kept tied (F-Z-9)
     std::vector<char> tied;   // per port: left OFF as a remaining tie (not decided by any pass)
     std::vector<Real> tie_currents;   // |i| of each port tied at h_e (A)
 };
@@ -305,6 +306,9 @@ public:
     /// proves nothing, the modes are enumerated up to kMaxEnumerated ports.
     bool passive = true;
     static constexpr Eigen::Index kMaxEnumerated = 12;
+    /// Gaps inside the posed network's rounding stay ties (F-Z-9). False only to
+    /// exercise the engine's fallback on the pre-fix decision (tests).
+    bool rounding_floor = true;
 
     /// The port LCP in the previous mode's coordinates: z_j = w_j for a
     /// port ON in the previous mode, i_j for one OFF; the complement
@@ -473,6 +477,7 @@ public:
                 status = solve_with_hysteresis_(ports, sc, h, piv, out.released);
                 out.shorted_held += shorted_held_;
                 out.shorted_released += shorted_released_;
+                out.rounding_ties += rounding_ties_;
                 if (pass == 0 || (status != LcpStatus::Solution && status != LcpStatus::Trivial))
                     break;
                 const Real tol_w = tol * sc.vscale;
@@ -510,6 +515,7 @@ public:
                     status = solve_with_hysteresis_(ports, sc, h, piv, out.released);
                     out.shorted_held += shorted_held_;
                     out.shorted_released += shorted_released_;
+                    out.rounding_ties += rounding_ties_;
                     ++out.recoordinated;
                 }
             }
@@ -834,12 +840,30 @@ private:
         }
         const Real tol_w = tol * sc.vscale;
         const Real tol_i = tol * sc.iscale + tol_w * sc.c_max / h;
+        // A gap is only decided when it clears the rounding of the network it was
+        // computed on: the port voltages (u) and the drops (Z·i) are ~1e10 V when a
+        // widened pass is posed with an inductor's 13 A into g_off (the PSFB
+        // rectifier's all-OFF anchor), and its 7.8e-7 V "gap" of one of two
+        // symmetric diodes was that rounding, decided OFF (F-Z-9). Inside it the
+        // port stays a tie for the next pass to decide. On a circuit-scale network
+        // (|u_j| + |Z_j|·|i| below ~1e7 V) the floor is below tol_w and nothing changes.
+        const bool zk = Z_.rows() == k && Z_.cols() == k;
+        const Real fl = Real{16} * static_cast<Real>(k) * std::numeric_limits<Real>::epsilon();
+        const auto tol_w_dec = [&](Eigen::Index j) {   // port j's own row: |u_j| + Σ|Z_jc|·|i_c|
+            if (!rounding_floor) return tol_w;
+            Real net = j < u_.size() ? std::abs(u_[j]) : Real{0};
+            if (zk)
+                for (Eigen::Index c = 0; c < k; ++c) net += std::abs(Z_(j, c)) * std::abs(i_[c]);
+            return std::max(tol_w, fl * net);
+        };
+        rounding_ties_ = 0;
         cls_.assign(ports.size(), 0);
         for (Eigen::Index j = 0; j < k; ++j) {
             const auto ju = static_cast<std::size_t>(j);
             int s;
             if (fixed_[ju]) s = coord_[ju] ? 1 : 0;
-            else if (held_[ju] || wg_[j] > tol_w) s = 0;
+            else if (held_[ju] || wg_[j] > tol_w_dec(j)) s = 0;
+            else if (wg_[j] > tol_w) { s = -1; ++rounding_ties_; }
             else if (i_[j] > tol_i) s = 1;
             else s = -1;
             cls_[ju] = s;
@@ -920,7 +944,7 @@ private:
     std::vector<char> held_, short_, coord_, fixed_, pin_, anchor_;
     const std::vector<char>* prev_ = nullptr;
     std::vector<Eigen::Index> free_, idx_, oth_;
-    int enum_ = 0, nonunique_ = 0, shorted_held_ = 0, shorted_released_ = 0;
+    int enum_ = 0, nonunique_ = 0, shorted_held_ = 0, shorted_released_ = 0, rounding_ties_ = 0;
 };
 
 }  // namespace pulsim::events

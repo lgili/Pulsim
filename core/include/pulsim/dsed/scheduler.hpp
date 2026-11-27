@@ -63,6 +63,7 @@
 #include <string_view>
 #include <type_traits>
 #include <cstdio>
+#include <cstdlib>
 #include <utility>
 #include <vector>
 
@@ -139,6 +140,10 @@ struct ModeShadowReport {
     std::string last_error;
     std::vector<ModeShadowRecord> disagreements;
     bool decides = false;            // mode_selection='lcp': the LCP decided every event
+    std::size_t rounding_ties = 0;   // gaps inside the posed network's rounding kept tied (F-Z-9)
+    std::size_t lcp_inconsistent = 0;   // 'lcp': selected modes the judge found inconsistent
+    std::size_t fallbacks = 0;       // of those, replaced by the settle's consistent mode
+    std::string fallback_message;    // the first replacement, once per run
 };
 
 /// The default-mode guard (slice 2, task 4): after each settle, the
@@ -1911,6 +1916,7 @@ private:
                 ++rep.lcp_events;
                 diode_bits_ = prev_bits;
                 mask = lcp_apply_(t, x, gates_prev, prev_bits, rec, rep);
+                if (lcp_fallback_(t, x, mask, gates_prev, prev_bits, rep)) return;
                 const std::size_t mk = reinit_log_size_();
                 held_x_ = x;
                 project_(t, x);
@@ -2002,6 +2008,9 @@ private:
             sc = system_.port_scale(t, x_held);
         }
         selector_.passive = passivity_.passive();
+        // test hook: the pre-F-Z-9 decision, to exercise the fallback on the PSFB
+        static const bool no_floor = std::getenv("PULSIM_TEST_LCP_NO_ROUNDING_FLOOR") != nullptr;
+        if (no_floor) selector_.rounding_floor = false;
         const auto sel = selector_.select(
             shadow_ports_, prev,
             [&](Real h, const std::vector<char>& anchor, DenseMatrix& Z, Vector& u) {
@@ -2055,9 +2064,80 @@ private:
         rep.released += static_cast<std::size_t>(sel.released);
         rep.enumerations += static_cast<std::size_t>(sel.enumerations);
         rep.nonunique_modes += static_cast<std::size_t>(sel.nonunique_modes);
+        rep.rounding_ties += static_cast<std::size_t>(sel.rounding_ties);
         last_select_ray_ = sel.status == events::LcpStatus::SecondaryRay;
         last_scale_ = sc;
         return sel;
+    }
+
+    /// mode_selection='lcp' (F-Z-9): the selected mode is judged on its own exact
+    /// trajectory from the held state (the shadow's judge). A mode that breaks a
+    /// law there is not committed silently: the settle decides the same event from
+    /// the same state, and its mode is taken when it differs and the judge finds it
+    /// consistent; otherwise the LCP's mode stands. Both are counted, the first
+    /// replacement named once per run. True: the settle's projected state and mask
+    /// are committed in (x, mask).
+    bool lcp_fallback_(Real t, Vector& x, MaskT& mask, const MaskT& gates_prev,
+                       const MaskT& prev_bits, ModeShadowReport& rep)
+        requires HasNodePairVoltage<System> {
+        std::vector<char> lcp_on(diodes_.size()), st(diodes_.size());
+        for (std::size_t j = 0; j < diodes_.size(); ++j)
+            lcp_on[j] = diode_bits_.get(diodes_[j].switch_idx) ? 1 : 0;
+        const events::CircuitScale sc = last_scale_;
+        Real worst = Real{0};
+        int wj = -1, c = -1;
+        try {
+            c = judge_(gates_prev, lcp_on, t, x, sc, worst, &wj);
+        } catch (const std::runtime_error&) {
+            c = -1;   // no verdict: the LCP's mode is committed as before
+        } catch (const UnsupportedError&) {
+            c = -1;
+        }
+        system_.set_mask(mask);
+        if (c != 0) return false;
+        ++rep.lcp_inconsistent;
+        const MaskT bits_lcp = diode_bits_;
+        const auto loop_lcp = rejected_loop_;
+        const std::size_t mk0 = reinit_log_size_(), mark0 = reinit_mark_;
+        const int rounds0 = settle_rounds_;
+        Vector x2 = x;
+        MaskT m2 = gates_prev;
+        diode_bits_ = prev_bits;
+        reinit_mark_ = mk0;
+        settle_rounds_ = 0;
+        int c2 = -1;
+        try {
+            system_.set_mask(gates_prev);
+            settle_and_project_(t, x2, m2);
+            for (std::size_t j = 0; j < diodes_.size(); ++j)
+                st[j] = diode_bits_.get(diodes_[j].switch_idx) ? 1 : 0;
+            Real w2 = Real{0};
+            if (st != lcp_on) c2 = judge_(gates_prev, st, t, x, sc, w2);
+        } catch (const std::runtime_error&) {
+            c2 = -1;   // the settle has no mode here (a cap, a singular mode): the LCP's stands
+        } catch (const UnsupportedError&) {
+            c2 = -1;   // a settle round reached a loop of ideal elements
+        }
+        reinit_mark_ = mark0;
+        settle_rounds_ = rounds0;
+        if (c2 == 1) {
+            x = x2;
+            mask = m2;
+            system_.set_mask(mask);
+            ++rep.fallbacks;
+            if (rep.fallback_message.empty())
+                rep.fallback_message =
+                    "dsed at t = " + sci_(t) + " s: the complementarity selection's mode breaks the law of "
+                    + (wj >= 0 ? diodes_[static_cast<std::size_t>(wj)].label : std::string{"a diode"})
+                    + " on its own trajectory (by " + sci_(worst) + " V); the settle's mode, consistent "
+                    "there, was used (every such event is counted in 'fallbacks')";
+            return true;
+        }
+        truncate_reinit_log_(mk0);
+        diode_bits_ = bits_lcp;
+        rejected_loop_ = loop_lcp;
+        system_.set_mask(mask);
+        return false;
     }
 
     /// The LCP decides: diode bits and the system mask from the selected
