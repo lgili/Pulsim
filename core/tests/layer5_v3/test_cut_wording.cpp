@@ -14,7 +14,9 @@
 #include "pulsim/solver/voltage_sanity.hpp"
 #include "pulsim/topology/graph.hpp"
 
+#include <cmath>
 #include <format>
+#include <limits>
 #include <string>
 
 using namespace pulsim;
@@ -158,4 +160,17 @@ TEST_CASE("A cut is judged by its impulse over the step, not by i*R_off",
     REQUIRE(f2.node == x);
     REQUIRE(f2.cut_device.empty());
     REQUIRE(f2.peak == Catch::Approx(1e6).epsilon(1e-6));
+    // a non-finite value on the cut's own terminal is a failed solve, not the
+    // cut's i·R_off: it is judged as the row, whatever the factor (review)
+    for (Size j = 0; j < r.right_limit_index.size(); ++j) {
+        if (r.times[r.right_limit_index[j]] == rec->t) {
+            r.right_limit_states[j * w + static_cast<Size>(x)] = 0.0;
+            r.right_limit_states[j * w + static_cast<Size>(sw)] =
+                std::numeric_limits<Real>::infinity();
+        }
+    }
+    const auto f3 = find_implausible_voltage(g, pool, r, 6000.0);
+    REQUIRE(f3.node == sw);
+    REQUIRE(f3.cut_step == 0.0);
+    REQUIRE(std::isinf(f3.peak));
 }

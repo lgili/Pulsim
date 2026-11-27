@@ -228,6 +228,10 @@ struct ImplausibleVoltage {
             }
             return false;
         };
+        // shortcut: every terminal of a record's devices is the record's at its
+        // instant, so a finite spike on such a terminal that is not the cut's own
+        // i·R_off is judged by the cut's |λ|/dt too (F-Z-15); tell them apart by
+        // |i|/g_off if a circuit ever needs it
         auto touches = [&](const ReinitRecord& q, Index node) {
             for (Index b = 0; b < graph.num_branches(); ++b) {
                 if ((graph.branch(b).from == node || graph.branch(b).to == node) &&
@@ -267,7 +271,11 @@ struct ImplausibleVoltage {
                     const bool at_cut = q != nullptr;
                     // F-Z-15: a cut set is judged by |λ|/h, the size of the cut
                     // itself (R_off-free); the row value i·R_off is kept beside it
-                    const Real h = at_cut && q->kind == "cut_set" ? step_of(j) : Real{0};
+                    // (a NaN / Inf row is a failed solve, not a cut's i·R_off: the
+                    // row is judged; h is the nominal dt, as the finding defines it:
+                    // a retried or split step's shorter piece is not used)
+                    const Real h = at_cut && q->kind == "cut_set" && std::isfinite(a)
+                        ? step_of(j) : Real{0};
                     const Real m = h > Real{0} ? std::abs(q->lambda) / h : a;
                     if (m <= bound) continue;   // a cut the user's factor covers
                     ImplausibleVoltage& o = at_cut ? cut : out;
