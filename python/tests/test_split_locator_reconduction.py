@@ -7,13 +7,13 @@ period is a turn-off at the downward zero and a turn-on at the upward one
 through run_transient). A dip that starts and ends inside one step is not
 seen by any step-end check (the step is ON at both ends) and is not counted.
 
-Measured (macOS, 2026-11-27; identical on 87a4f6bb before F-Z-2, so not the
-stop rule): every turn-off is located within 1e-6 dt at every dt; the
-turn-on is located when the dip spans >= 3 steps (dt = 9.25 us: 10 / 10
-within 1e-6 dt) and is NOT located when it falls in the next step or the one
-after the located turn-off's (dip = 0.78 / 1.55 steps): dt = 37 us 8 / 8 and dt = 18.5 us 10 / 10 turn-ons sit on
-a grid point, max error 0.936 dt / 0.873 dt (n_split_steps = the number of
-turn-offs: the turn-on step is not split)."""
+Measured (macOS, 2026-11-27): every turn-off is located within 1e-6 dt at
+every dt. Before F-Z-11 the turn-on was located only when the dip spans >= 3
+steps (dt = 9.25 us); one that fell in the restart window the located
+turn-off opened (dip = 0.78 / 1.55 steps) sat on a grid point: dt = 37 us
+8 / 8 and dt = 18.5 us 10 / 10, max error 0.936 dt / 0.873 dt. F-Z-11 locates
+every flip of a window step (a cut inside the restart step): max 8.1e-7 dt /
+5.9e-7 dt."""
 
 from __future__ import annotations
 
@@ -32,9 +32,9 @@ OFF = (math.pi + math.asin(C / A) + 2 * math.pi * K) / W       # downward zeros
 ON = (2 * math.pi - math.asin(C / A) + 2 * math.pi * K) / W    # upward zeros
 
 
-def _run(dt, split=True):
+def _run(dt, split=True, c=C):
     b = p.CircuitBuilder()
-    b.add_sine_voltage_source("V", "in", "gnd", C, A, F)
+    b.add_sine_voltage_source("V", "in", "gnd", c, A, F)
     b.add_diode("D", "in", "k", 1e6, 1e-12)
     b.add_resistor("R", "k", "gnd", R)
     n = b.graph.num_switches
@@ -94,12 +94,87 @@ def test_a_turn_on_three_steps_later_is_located_against_a_fine_rule_alone_run():
         assert np.max(np.abs(ref - mine)) <= dt_f + 2 * SNAP * dt
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "a turn-on in the next 1-2 steps after a located turn-off is taken at a grid point, "
-    "not located: dt=37us 8/8 max 0.936 dt, dt=18.5us 10/10 max 0.873 dt "
-    "(pre-existing on 87a4f6bb, not the F-Z-2 stop rule)"))
-@pytest.mark.parametrize("dt", [3.7e-5, 1.85e-5])
+@pytest.mark.parametrize("dt", [3.7e-5, 1.85e-5, 9.25e-6])
 def test_a_turn_on_soon_after_a_located_turn_off_is_located(dt):
+    # F-Z-11: the turn-on falls in the restart window the turn-off's cut opened
+    # (a window step, SDIRK): located inside it too (before: on a grid point)
     res = _run(dt)
-    # the count is asserted (passing) above: only the location is expected to fail
-    assert _err_over_dt(_times(res, True), ON, dt).max() <= 2 * SNAP
+    te = _times(res, True)
+    assert len(te) == _visible(dt) >= 8
+    assert _err_over_dt(te, ON, dt).max() <= 2 * SNAP
+    assert res.counters["split_locator_giveups"] == 0
+
+
+# --- the mirror: a bump, -9 + 10 sin: a turn-off soon after a located turn-on --
+ON2 = (math.asin(C / A) + 2 * math.pi * K) / W
+OFF2 = (math.pi - math.asin(C / A) + 2 * math.pi * K) / W
+
+
+@pytest.mark.parametrize("dt", [3.7e-5, 1.85e-5, 9.25e-6])
+def test_a_turn_off_soon_after_a_located_turn_on_is_located(dt):
+    res = _run(dt, c=-C)
+    on, off = _times(res, True), _times(res, False)
+    vis = int(sum(1 for a, b in zip(ON2, OFF2)
+                  if b < T_END and math.floor(a / dt) != math.floor(b / dt)))
+    assert len(off) == vis >= 8
+    # shortcut (F-Z-11): a flip inside the run's first step is not located (a
+    # zero start's round-off flips a diode there); at 37 us the first turn-on,
+    # 35.6 us, is in it: taken at the step end, so it is left out here
+    on = on[on >= dt]
+    assert len(on) == sum(1 for a, b in zip(ON2, OFF2)
+                          if a >= dt and b < T_END and math.floor(a / dt) != math.floor(b / dt))
+    assert _err_over_dt(on, ON2, dt).max() <= 2 * SNAP
+    assert _err_over_dt(off, OFF2, dt).max() <= 2 * SNAP
+    assert res.counters["split_locator_giveups"] == 0
+
+
+# --- a gate edge, then the freewheel diode's turn-off within two steps ---------
+# Switch from 10 V into L = 10 uH, R = 1 ohm and a 5 V back-EMF; the diode
+# freewheels when the switch opens (3 us into each 10 us period) and the
+# current reaches zero ~2.3 us later: the turn-off falls in the first
+# (dt = 2 us) or second (dt = 1.3 us) window step after the edge's split.
+TB, T_ON, GON, GOFF = 1e-5, 3e-6, 1e3, 1e-9
+
+
+def _freewheel(dt, split=True, n_per=6):
+    b = p.CircuitBuilder()
+    b.add_voltage_source("Vin", "vin", "gnd", 10.0)
+    b.add_switch("S", "vin", "sw", GON, GOFF)
+    b.add_diode("D", "gnd", "sw", GON, GOFF)
+    b.add_inductor("L", "sw", "a", 1e-5)
+    b.add_resistor("R", "a", "o", 1.0)
+    b.add_voltage_source("Vo", "o", "gnd", 5.0)
+    n, k = b.graph.num_switches, b.switch_index_of("S")
+
+    def sw(t):
+        m = p.SwitchStateMask(n)
+        m.set(k, bool(t - TB * math.floor(t / TB) < T_ON))
+        return m
+
+    cache = p.PwlStateSpaceCache(b.graph, b.pool)
+    cache.build_lazy(dt)
+    o = p.SimulationOptions(t_start=0.0, t_end=n_per * TB, dt=dt)
+    o.discontinuity_restart = True
+    o.enable_substep_state_correction = split
+    o.split_snap = SNAP
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return p.run_transient(cache, b.graph, b.pool, o, sw)
+
+
+@pytest.mark.parametrize("dt", [2e-6, 1.3e-6])
+def test_a_diode_turn_off_after_a_located_gate_edge_is_located(dt):
+    res = _freewheel(dt)
+    off = _times(res, False)
+    assert len(off) == 6
+    # the rule alone at dt/1000 takes each edge and the zero at fine grid
+    # points: within ~2 dt_f of the true instants
+    dt_f = dt / 1000
+    ref = _times(_freewheel(dt_f, split=False), False)
+    assert len(ref) == len(off)
+    # the located zero is the dt-solution's: its O(dt^2) integration error
+    # measured 4.8e-4 dt (2 us) / 1.5e-3 dt (1.3 us); before F-Z-11 the records
+    # sat at the step end (0.65 / 0.85 dt), and two zeros in a window step's
+    # stage 1 were not located at 1.3 us
+    assert np.max(np.abs(ref - off)) / dt <= 5e-3
+    assert res.counters["split_locator_giveups"] == 0

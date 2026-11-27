@@ -55,11 +55,13 @@ The numbers are in the `Known limitations` part of the 2.1.0 entry of the
   `python/tests/test_release_findings_b2.py`.
 * **Event splitting** (with the restart rule): a retried step is re-taken
   without its interior events; an even number of edges of an opaque
-  `switch_fn` inside one step is not seen. A diode turn-on that falls one
-  or two steps after a located turn-off is taken at a grid point, up to
-  0.936·dt late (`python/tests/test_split_locator_reconduction.py`, strict
-  xfail). Locating an event costs trial solves, each a factorisation: 4–6
-  trials per located event.
+  `switch_fn` inside one step is not seen. A diode flip in the restart
+  window after an event is located (turn-on and turn-off), except: a flip
+  in the first stage of a sub-step that starts at an event (taken at the
+  event), a second flip in the rest of an already cut restart step, and a
+  flip inside the run's first step (taken at the step end, up to 1·dt late;
+  `python/tests/test_split_locator_reconduction.py`). Locating an event
+  costs trial solves, each a factorisation: 4–7 trials per located event.
 * **Exact engine output rule** (`engine='exact', output_rtol=...`): a
   thermal summary read from stored samples depends on the output grid.
   The first line after an event (within 2 ps of it) can exceed the rule:

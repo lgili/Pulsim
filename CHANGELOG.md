@@ -6,6 +6,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Event splitting: a diode flip in the restart window is located
+
+- **With `enable_substep_state_correction`, a diode turn-on (or turn-off)
+  in the one or two restart steps after a located event is now cut at its
+  crossing** instead of being taken at a grid point (a 9 + 10·sin rectifier
+  at dt = 37 µs: 8 of 8 turn-ons up to 0.936·dt late before, within
+  1e-6·dt after). The cut's flips are recorded at the located instant.
+  Split off: unchanged bit for bit.
+
 ### Restart rule: an inconsistent start publishes its right limit at t = 0
 
 - **A run that starts from a state that is not a solution of the network at

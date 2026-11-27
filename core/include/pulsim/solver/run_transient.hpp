@@ -878,6 +878,11 @@ inline SimulationResult run_transient(
     // Restart stage-1 state, kept for the stage-2 fallback (see
     // run_restart): x1, its diode bits and the histories at x0.
     Vector rs_x1, rs_x2;
+    // F-Z-11: the uncut restart (sub)step, kept while its other flips are located
+    Vector rk_x, rk_b;
+    std::vector<Real> rk_h;
+    pwl::StatefulHistories::Snapshot rk_hs;
+    std::vector<bool> rk_bits, rk_lsb;
     Vector edge_xl;   // the edge's mode decision: a linearized solve (decide_edge_mode)
     std::vector<bool> edge_bits;   // the diode bits after its stage
     std::vector<bool> rs_bits, rs_bits2, rs_bits_be, rs_solved2;
@@ -948,9 +953,10 @@ inline SimulationResult run_transient(
     // t (NaN: none), the post-event bits, and restart_lined's entry state.
     struct RsCut {
         bool arm = false, vf0 = false;   // vf0: only V_f = 0, ungated diodes flip
+        bool off = false;                // a turn-off among the cut's flips
         bool piece1 = false;             // run_restart is the cut's first piece
         Real t = std::numeric_limits<Real>::quiet_NaN();
-        std::vector<bool> bits, b0, lsb0;
+        std::vector<bool> bits, b0, lsb0, pre;   // pre: the bits before the cut's flips
         Vector x0, x_end;
         std::vector<Real> h0;
         pwl::StatefulHistories::Snapshot hs0;
@@ -4014,17 +4020,29 @@ inline SimulationResult run_transient(
         // change, a failed trial, an instant within snap of an end).
         // Leaves x / histories / bits as the last trial: the caller puts
         // them back. Out of line, once per run.
-        auto restart_cut_at = [&](auto& rei, Real t_from, Real h) PULSIM_STEP_DRIVER -> Real {
+        // F-Z-11 (the split on): any crossing, turn-on (on the voltage) or
+        // turn-off (on the current), from the pre-side bits `pre` to the
+        // decided `post`; from_start: a flip of stage 1 itself, bracketed by
+        // the (sub)step's start state (rs_cut.x0) instead of stage 1's.
+        // also: a second decided mode (stage 2's bits, from_start) whose flips
+        // are bracketed with stage 1's
+        auto restart_cut_at = [&](auto& rei, Real t_from, Real h, bool from_start = false,
+                                  const std::vector<bool>* also = nullptr)
+                                  PULSIM_STEP_DRIVER -> Real {
             constexpr Real nan = std::numeric_limits<Real>::quiet_NaN();
             constexpr Real c = (Real{1} - kGamma) / kGamma;
             const auto ents = diodes.entries();
-            const Real t1 = t_from + kGamma * h, t2 = t_from + h;
-            for (Size q = 0; q < ents.size(); ++q) {
+            const Real t2 = t_from + h;
+            const Real t1 = from_start ? t_from : t_from + kGamma * h;
+            const std::vector<bool>& pre = from_start ? rs_bits0 : rs_bits;
+            const std::vector<bool>& post = from_start ? rs_bits : rs_bits2;
+            const Vector& x_a = from_start ? rs_cut.x0 : rs_x1;
+            for (Size q = 0; !split && q < ents.size(); ++q) {
                 if (rs_bits[q] != rs_bits2[q] && !rs_bits[q]) return nan;   // a turn-on
             }
             auto trial = [&](Real tau) {
                 step::restore(history, hs, rs_hist, rs_hs);
-                diodes.restore_on_bits(rs_bits);
+                diodes.restore_on_bits(pre);
                 x = rs_x1;
                 const Real ts = kGamma * tau;
                 try {
@@ -4043,17 +4061,22 @@ inline SimulationResult run_transient(
             };
             if (!trial(h)) return nan;
             rs_cut.x_end = x;
+            // > 0 while diode j stays in its pre-side state (an OFF diode's
+            // crossing signal is negative while it stays off)
             auto sig = [&](Size j, const Vector& xv) {
-                return models::SwitchedDiode::crossing_signal(
-                    true, ents[j].law_voltage(xv, true), ents[j].params());
+                const bool on = pre[j];
+                const Real s = models::SwitchedDiode::crossing_signal(
+                    on, ents[j].law_voltage(xv, on), ents[j].params());
+                return on ? s : -s;
             };
             // the earliest chord, and the diodes that cross with it (a bridge's
             // pair) share one signal: ON stays on while s > 0
             cross_scratch.assign(ents.size(), t2 + h);
             Real t_c = t2;
             for (Size j = 0; j < ents.size(); ++j) {
-                if (!(rs_bits[j] && !rs_bits2[j])) continue;
-                const Real s1 = sig(j, rs_x1), s2 = sig(j, rs_cut.x_end);
+                const bool moved = pre[j] != post[j] || (also && pre[j] != (*also)[j]);
+                if (!(moved && (split || pre[j]))) continue;
+                const Real s1 = sig(j, x_a), s2 = sig(j, rs_cut.x_end);
                 if (!(s1 > Real{0} && s2 < Real{0})) continue;
                 cross_scratch[j] = interp_commutation_time(t1, t2, s1, s2);
                 t_c = std::min(t_c, cross_scratch[j]);
@@ -4066,7 +4089,7 @@ inline SimulationResult run_transient(
                 }
                 return s;
             };
-            const Real s_a = signal(rs_x1), s_b = signal(rs_cut.x_end);
+            const Real s_a = signal(x_a), s_b = signal(rs_cut.x_end);
             events::Bracket br{t1, s_a, t2, s_b, s_a, s_b, 0};
             auto narrow = [&](const events::Bracket& q) { return q.tb - q.ta <= snap; };
             Real t_cur = t1, t_was = t2;
@@ -4107,13 +4130,18 @@ inline SimulationResult run_transient(
                 : std::clamp(br.ta - br.sa_raw * (br.tb - br.ta) / (br.sb_raw - br.sa_raw),
                              br.ta, br.tb);
             if (!(t_new - t_from >= snap && t2 - t_new >= snap)) return nan;
-            rs_cut.bits = rs_bits;
+            rs_cut.pre = pre;
+            rs_cut.bits = pre;
             rs_cut.vf0 = true;
+            rs_cut.off = false;
             for (Size j = 0; j < ents.size(); ++j) {
                 if (!(cross_scratch[j] - t_c < snap)) continue;
-                rs_cut.bits[j] = false;
+                rs_cut.bits[j] = !pre[j];
+                rs_cut.off = rs_cut.off || pre[j];
+                // a turn-on at V_th > 0 jumps by (g_on − g_off)·V_th (split_step's rule)
                 rs_cut.vf0 = rs_cut.vf0 && ents[j].V_f == Real{0} &&
-                             ents[j].gate == models::SwitchedDiode::Gate::None;
+                             ents[j].gate == models::SwitchedDiode::Gate::None &&
+                             (pre[j] || ents[j].V_th == Real{0});
             }
             return t_new;
         };
@@ -4229,6 +4257,12 @@ inline SimulationResult run_transient(
                 }
                 step::snapshot_into(history, hs, rs_hist, rs_hs);   // keeps the capacity
             }
+            // F-Z-11: stage 1 changed the mode of a (sub)step that starts at no
+            // event (a window step, the step after a sliver): a crossing inside
+            // [t_from, t_from + h], located from the start state (the split's)
+            const bool s1_flip = split && rs_cut.arm && has_diodes && iters_1 > 1 &&
+                                 edge_flips == 0 && !ev && !(rs_trig_t == t_from) &&
+                                 t_from != opts.t_start && !(rs_bits == rs_bits0);
             const bool cycle_1 = mask_cycle;
             constexpr Real c = (Real{1} - kGamma) / kGamma;
             history.extrapolate_previous(x, c);
@@ -4249,6 +4283,7 @@ inline SimulationResult run_transient(
             // secondary at every switch-off (exact error 0.11, not
             // converging with dt).
             bool on_to_off = false;
+            bool kept_be_2 = false;   // F-Z-11: the re-take kept stage 1's mode
             if (has_diodes && iters_2 > 1) {
                 diodes.snapshot_on_bits_into(rs_bits2);
                 for (Size q = 0; q < rs_bits.size(); ++q) {
@@ -4259,7 +4294,8 @@ inline SimulationResult run_transient(
                     on_to_off = on_to_off || (rs_bits[q] != rs_bits2[q]);
                 }
             }
-            if (on_to_off && rs_cut.piece1) {
+            if ((on_to_off || (split && iters_2 > 1 && !(rs_bits2 == rs_bits))) &&
+                rs_cut.piece1) {
                 // the first piece of a cut step ends AT the located turn-off:
                 // its stage 2 stays in stage 1's mode (the locator's trial;
                 // the flip is the next piece's start)
@@ -4313,9 +4349,10 @@ inline SimulationResult run_transient(
                 // (restart_lined) cuts the step there; the state below
                 // is put back as before either way
                 if (!keep_be && be_ok && rs_cut.arm && !impulsive && !ip_jump && !ln_pre &&
-                    !sx.on) {
+                    !sx.on && !s1_flip) {
                     rs_cut.t = restart_cut_at(run_event_iteration, t_from, h);
                 }
+                kept_be_2 = keep_be;
                 if (keep_be) {
                     ++result.stage2_be_kept;
                     if (L) L->be_kept = true;
@@ -4349,6 +4386,46 @@ inline SimulationResult run_transient(
                 }
             } else if (sx.on) [[unlikely]] {
                 sx.stage(1, step::psi_sdirk_stage2(dt_eq, c), t_from + h, dt_eq);
+            }
+            // F-Z-11 (the split): every other flip of the (sub)step is located
+            // too: stage 1's (above), or a stage-2 change that is not the
+            // turn-off the re-take confirms (a turn-on). No cut: the uncut
+            // (sub)step is put back as solved.
+            const bool s2_flip = split && rs_cut.arm && has_diodes && !s1_flip && !on_to_off &&
+                                 iters_2 > 1 && t_from != opts.t_start &&
+                                 !(rs_bits2 == rs_bits);
+            // shortcut: not in the run's first (sub)step, where a zero start's
+            // round-off flips a diode in stage 2 and back (the buck at t = 0:
+            // 3e-8 V); upgrade if a real crossing there matters
+            if ((s1_flip || s2_flip) && std::isnan(rs_cut.t) && !impulsive && !ip_jump &&
+                !ln_pre && !sx.on) {
+                rk_x = x;
+                rk_b = b_extra;
+                step::snapshot_into(history, hs, rk_h, rk_hs);
+                diodes.snapshot_on_bits_into(rk_bits);
+                rk_lsb = last_solved_bits;
+                const auto stamped_k = stamped_mask;
+                const Size iters_k = iters;
+                const bool flipped_k = flipped, cycle_k = mask_cycle;
+                const bool s2_moved = iters_2 > 1 && !(rs_bits2 == rs_bits) && !kept_be_2;
+                rs_cut.t = restart_cut_at(run_event_iteration, t_from, h, s1_flip,
+                                          s1_flip && s2_moved ? &rs_bits2 : nullptr);
+                if (s1_flip && std::isnan(rs_cut.t) && s2_moved) {
+                    // none from the start: stage 2's own change, as without stage 1's
+                    rs_cut.t = restart_cut_at(run_event_iteration, t_from, h);
+                }
+                {   // the uncut (sub)step as solved, cut or not (restart_lined reads
+                    // its settle state before it re-takes the pieces)
+                    x = rk_x;
+                    b_extra = rk_b;
+                    step::restore(history, hs, rk_h, rk_hs);
+                    diodes.restore_on_bits(rk_bits);
+                    last_solved_bits = rk_lsb;
+                    stamped_mask = stamped_k;
+                    iters = iters_k;
+                    flipped = flipped_k;
+                    mask_cycle = cycle_k;
+                }
             }
             // A diode flip inside the step is a discontinuity of its
             // own: the window covers this step and the next two.
@@ -4614,7 +4691,7 @@ inline SimulationResult run_transient(
             // the event's right limit: a located turn-off (split_step's rl_loc)
             rl_loc.t = td;
             rl_loc.at_b = false;
-            rl_loc.off = true;
+            rl_loc.off = rs_cut.off;
             rl_loc.vf0 = vf0;
             rl_loc.pure = vf0;
             rl_loc.bits = post;
@@ -4622,6 +4699,14 @@ inline SimulationResult run_transient(
             flipped = flipped || flipped_1;
             const bool uncut = (mask_cycle || flipped) && !unsettled_uncut;
             if (!uncut) ++result.n_restart_cuts;   // counted once the cut is kept (a throw keeps none)
+            if (!uncut && split) {   // the located flips, at the cut (split_step's records)
+                const auto ents = diodes.entries();
+                for (Size j = 0; j < ents.size(); ++j) {
+                    if (post[j] == rs_cut.pre[j]) continue;
+                    split_events.push_back(CommutationEvent{
+                        .t_estimated = td, .branch_id = ents[j].branch_id, .new_state = post[j]});
+                }
+            }
             if (uncut) {
                 // a piece left the diode mode unsettled where the whole step
                 // settled (the three-phase rectifier's mask cycle at 2.55 ms):
