@@ -14,6 +14,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   at dt = 37 µs: 8 of 8 turn-ons up to 0.936·dt late before, within
   1e-6·dt after). The cut's flips are recorded at the located instant.
   Split off: unchanged bit for bit.
+- Split-on reference grades: three cells improve (`buck_dcm` ×0.588,
+  `diode_rectifier` ×0.987, `forward_converter` ×0.997), four move up by
+  0.1–0.6 % and still agree (`active_clamp_forward` ×1.006, `cl_boost_pi`
+  ×1.005, `boost_pfc_open_loop` and `two_phase_interleaved_boost` ×1.001).
+  The moved events are closer to a dt/100 run: on `active_clamp_forward`
+  the turn-on after each main-switch turn-off goes from 0.31·dt late (a grid
+  point) to 0.004·dt, and the mean event error drops from 0.19·dt to
+  0.13·dt; on `cl_boost_pi` 440 of 441 moved turn-offs are as close or
+  closer, and 37 turn-offs that were missing are now located. The
+  grade still rises because the late grid turn-on used to cancel the
+  ringing turn-offs' own integration lag, which this change does not
+  touch: over a steady period the conduction interval error goes from
+  −0.02·dt to +0.07·dt. The cell's error is the method's second-order
+  integration error (3.74e-3, 9.56e-4, 2.41e-4 at dt, dt/2, dt/4), and the
+  shift stays at +0.3 to +0.6 % at every dt. On `cl_boost_pi` the
+  waveform against a dt/100 run is unchanged (×1.0000). The PI is sampled
+  at the step, so that run and the trbdf2 reference differ by 3.0e-4,
+  four times the cell's grade.
 
 ### Restart rule: an inconsistent start publishes its right limit at t = 0
 
