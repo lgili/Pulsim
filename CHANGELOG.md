@@ -11,6 +11,33 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - With `discontinuity_restart=True` a restart step is fed to an in-loop recorder twice: its integral-type fields (`integral`, `avg`, `rms`) take the step's SDIRK stage quadrature as before (so `∫i_C dt = C·Δv` and the energy ledgers close to round-off), and its sample-type outputs (kept rows, `min` / `max` and their times, requested times, event rows) take states of the trajectory only — step ends and the limits at events. Before, the quadrature line starts and held other-mode stage rows leaked into the samples: a PWM buck's window max read 21.5298249 V, a value no state had (now 21.5294326), and every restart step's line start was reported as a jump row (123 event rows against 41 real events).
 - The stored-array pass sees states only and integrates their trapezoid. The two feeds now agree bit for bit on every sample-type output and event row; integral-type fields are identical off restart steps and differ on a restart piece of length h by `|γ − 1/4|·h³·|y″| + O(h⁴)` on a smooth stretch (γ = 1 − 1/√2), at most `h·(2(1−γ) − 1/2)·2·max|y|` on a mixed-mode step. See the recorders section of `docs/api-reference.md`. Rule off, trbdf2 and exact: byte-identical outputs.
 
+### Event splitting: a diode flip in the restart window is located
+
+- **With `enable_substep_state_correction`, a diode turn-on (or turn-off)
+  in the one or two restart steps after a located event is now cut at its
+  crossing** instead of being taken at a grid point (a 9 + 10·sin rectifier
+  at dt = 37 µs: 8 of 8 turn-ons up to 0.936·dt late before, within
+  1e-6·dt after). The cut's flips are recorded at the located instant.
+  Split off: unchanged bit for bit.
+- Split-on reference grades: three cells improve (`buck_dcm` ×0.588,
+  `diode_rectifier` ×0.987, `forward_converter` ×0.997), four move up by
+  0.1–0.6 % and still agree (`active_clamp_forward` ×1.006, `cl_boost_pi`
+  ×1.005, `boost_pfc_open_loop` and `two_phase_interleaved_boost` ×1.001).
+  The moved events are closer to a dt/100 run: on `active_clamp_forward`
+  the turn-on after each main-switch turn-off goes from 0.31·dt late (a grid
+  point) to 0.004·dt, and the mean event error drops from 0.19·dt to
+  0.13·dt; on `cl_boost_pi` 440 of 441 moved turn-offs are as close or
+  closer, and 37 turn-offs that were missing are now located. The
+  grade still rises because the late grid turn-on used to cancel the
+  ringing turn-offs' own integration lag, which this change does not
+  touch: over a steady period the conduction interval error goes from
+  −0.02·dt to +0.07·dt. The cell's error is the method's second-order
+  integration error (3.74e-3, 9.56e-4, 2.41e-4 at dt, dt/2, dt/4), and the
+  shift stays at +0.3 to +0.6 % at every dt. On `cl_boost_pi` the
+  waveform against a dt/100 run is unchanged (×1.0000). The PI is sampled
+  at the step, so that run and the trbdf2 reference differ by 3.0e-4,
+  four times the cell's grade.
+
 ### Restart rule: an inconsistent start publishes its right limit at t = 0
 
 - **A run that starts from a state that is not a solution of the network at
