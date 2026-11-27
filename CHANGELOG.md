@@ -27,7 +27,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the turn-on after each main-switch turn-off goes from 0.31·dt late (a grid
   point) to 0.004·dt, and the mean event error drops from 0.19·dt to
   0.13·dt; on `cl_boost_pi` 440 of 441 moved turn-offs are as close or
-  closer, and 37 turn-offs that were missing are now located. The
+  closer. The
   grade still rises because the late grid turn-on used to cancel the
   ringing turn-offs' own integration lag, which this change does not
   touch: over a steady period the conduction interval error goes from
@@ -37,6 +37,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   waveform against a dt/100 run is unchanged (×1.0000). The PI is sampled
   at the step, so that run and the trbdf2 reference differ by 3.0e-4,
   four times the cell's grade.
+- A cut flip is recorded only when it is the step's net flip (kept by the
+  rest of the step). A restart step whose diode turned on in stage 1 and
+  was cut back off in stage 2 ends in its start mode; the cut had recorded
+  a turn-off with no turn-on before it (`cl_boost_pi`: 37 such records by
+  30 ms) and handed it to the sensitivity pass as a state event. Such a
+  step now records nothing, as before; states are unchanged.
 
 ### Restart rule: an inconsistent start publishes its right limit at t = 0
 

@@ -26,7 +26,7 @@ fails when its err_rms grows past 2x the frozen `known_err:`.
 
 | circuit | tol | pwl | pwl+restart | pwl+split |
 |---|---:|---:|---:|---:|
-| closed_loop/cl_boost_pi.yaml | 0.02 | 0.0582 | 0.0511 | 7.2e-05 |
+| closed_loop/cl_boost_pi.yaml | 0.02 | 0.0582 | 0.0511 | 7.24e-05 |
 | closed_loop/ll14_buck_closed_loop.yaml | 0.02 | 0.249 | 0.144 | 0.126 |
 | closed_loop/ll15_boost_closed_loop.yaml | 0.02 | 0.22 | 0.0484 | 0.0279 |
 | closed_loop/ll16_flyback_closed_loop.yaml | 0.02 | 0.112 | 0.113 | 0.0942 |
@@ -44,7 +44,7 @@ fails when its err_rms grows past 2x the frozen `known_err:`.
 | switching/inverter/ll09_half_bridge_inverter_leg.yaml | 0.02 | 0.0707 | 0.0102 | 0.0102 |
 | switching/inverter/ll10_full_bridge_inverter_lc.yaml | 0.02 | 0.05 | 0.000127 | 0.000127 |
 | switching/isolated/flyback_converter.yaml | 0.02 | 0.949 | 8.98e-06 | 8.98e-06 |
-| switching/isolated/forward_converter.yaml | 0.02 | 0.707 | 9.75e-06 | 9.74e-06 |
+| switching/isolated/forward_converter.yaml | 0.02 | 0.707 | 9.75e-06 | 9.71e-06 |
 | switching/isolated/full_bridge_dc.yaml | 0.02 | 0.0828 | 2.67e-05 | 2.67e-05 |
 | switching/isolated/ll11_llc_resonant_converter.yaml | 0.02 | error | error | error |
 | switching/isolated/ll13_active_clamp_forward.yaml | 0.02 | 4.51 | 0.00197 | 0.00197 |
@@ -127,7 +127,7 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | switching/buck/ll06_buck_vcswitch.yaml | pwl+split | 0.02 | 0.0434 | V(sw) | 0.0068 | 1.9% | 2e-05 | 99 |
 | switching/buck/ll08_buck_mosfet.yaml | pwl | 0.02 | 0.228 | V(sw) | 0.156 | 3.2% | 3.9e-07 | 2 |
 | switching/buck/ll08_buck_mosfet.yaml | pwl+restart | 0.02 | 0.0659 | V(sw) | 0.0173 | 3.2% | 2.1e-07 | 1.1 |
-| switching/buck/ll08_buck_mosfet.yaml | pwl+split | 0.02 | 0.0652 | V(gate) | 0.00445 | 3.2% | 2e-07 | 1 |
+| switching/buck/ll08_buck_mosfet.yaml | pwl+split | 0.02 | 0.0652 | V(gate) | 0.00443 | 3.2% | 2e-07 | 1 |
 | switching/inverter/ll09_half_bridge_inverter_leg.yaml | pwl | 0.02 | 0.0707 | V(ctrl_hi) | 0.0104 | 2.0% | 2.3e-12 | 9.1e-06 |
 | switching/inverter/ll10_full_bridge_inverter_lc.yaml | pwl | 0.02 | 0.05 | V(ctrl_a_lo) | 0.000195 | 1.0% | 3e-12 | 1.2e-05 |
 | switching/isolated/flyback_converter.yaml | pwl | 0.02 | 0.949 | V(out) | chatter | 19.1% | 2e-05 | 2e+02 |
@@ -148,7 +148,7 @@ cell disagrees by edge timing; edge err above it: the states differ.
 
 | circuit | pwl | pwl+restart | pwl+split | trbdf2 | dsed |
 |---|---:|---:|---:|---:|---:|
-| closed_loop/cl_boost_pi.yaml | 0.0582 | 0.0511 | 7.2e-05 | 1.32e-06 | 1.29e-06 |
+| closed_loop/cl_boost_pi.yaml | 0.0582 | 0.0511 | 7.24e-05 | 1.32e-06 | 1.29e-06 |
 | closed_loop/cl_buck_aggressive_pi.yaml | 0.00662 | 0.00619 | 0.00404 | 3.72e-05 | 3.24e-05 |
 | closed_loop/cl_buck_pi.yaml | 0.0121 | 0.0044 | 0.00049 | 1.88e-05 | 1.77e-05 |
 | closed_loop/ll14_buck_closed_loop.yaml | 0.249 | 0.144 | 0.126 | 0.000543 | refused |
@@ -158,7 +158,7 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | diodes/diode_bridge_rectifier.yaml | 0.000216 | 0.000177 | 0.000172 | 3.22e-05 | 6.58e-06 |
 | diodes/diode_clamp_overvoltage.yaml | 0.00565 | 0.00565 | 0.00565 | 0 | 6.01e-12 |
 | diodes/diode_half_wave_rl_load.yaml | 0.0186 | 0.000586 | 0.000586 | 1.58e-05 | 6.92e-06 |
-| diodes/diode_rectifier.yaml | 0.0139 | 0.00157 | 0.00135 | 0.000183 | 1.26e-05 |
+| diodes/diode_rectifier.yaml | 0.0139 | 0.00157 | 0.00133 | 0.000183 | 1.26e-05 |
 | diodes/half_wave_rectifier_sine.yaml | 0.000393 | 6.24e-05 | 4.11e-05 | 2.36e-05 | 4.6e-06 |
 | diodes/voltage_doubler.yaml | 0.000222 | 3e-05 | 3.02e-05 | 5.06e-06 | 6.01e-07 |
 | linear/bridge_resistive_pure.yaml | 0 | 0 | 0 | 0 | 1.33e-13 |
@@ -215,8 +215,8 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | switching/boost/ll12_pfc_boost_continuous.yaml | 0.083 | 0.0753 | 0.0753 | 0.000115 | refused |
 | switching/boost/synchronous_boost.yaml | 6.31e-05 | 2.88e-07 | 2.88e-07 | 8.33e-08 | 3.02e-07 |
 | switching/boost/textbook_erickson_boost_ccm.yaml | 0.000313 | 4.09e-07 | 3.94e-07 | 9.53e-06 | 6.92e-07 |
-| switching/boost/two_phase_interleaved_boost.yaml | 0.00019 | 4.69e-07 | 4.32e-07 | 5.56e-06 | 6.59e-07 |
-| switching/buck/buck_dcm.yaml | 0.00183 | 9.92e-07 | 9.91e-07 | 7.7e-06 | 6e-07 |
+| switching/boost/two_phase_interleaved_boost.yaml | 0.00019 | 4.69e-07 | 4.33e-07 | 5.56e-06 | 6.59e-07 |
+| switching/buck/buck_dcm.yaml | 0.00183 | 9.92e-07 | 5.83e-07 | 7.7e-06 | 6e-07 |
 | switching/buck/buck_hard_switching_reference.yaml | 0.00102 | 7.6e-07 | 7.6e-07 | 2.27e-06 | 8.29e-07 |
 | switching/buck/buck_mosfet_nonlinear.yaml | 0.00841 | 3.87e-05 | 4.07e-07 | 5.08e-07 | refused |
 | switching/buck/buck_switching.yaml | 0.00168 | 9.7e-07 | 9.53e-07 | 1.36e-06 | 1.03e-06 |
@@ -240,10 +240,10 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | switching/inverter/lcc_resonant_inverter.yaml | 0.00565 | 0.000232 | 0.000232 | 8.37e-05 | 8.81e-05 |
 | switching/inverter/ll09_half_bridge_inverter_leg.yaml | 0.0707 | 0.0102 | 0.0102 | 4.26e-05 | 0.000167 |
 | switching/inverter/ll10_full_bridge_inverter_lc.yaml | 0.05 | 0.000127 | 0.000127 | 9.15e-05 | 0.000127 |
-| switching/isolated/active_clamp_forward.yaml | 0.00425 | 0.00378 | 0.00374 | 0.000117 | 1.25e-06 |
+| switching/isolated/active_clamp_forward.yaml | 0.00425 | 0.00378 | 0.00376 | 0.000117 | 1.25e-06 |
 | switching/isolated/dual_active_bridge.yaml | 0.000265 | 2.4e-06 | 2.4e-06 | 3.49e-05 | 1.86e-06 |
 | switching/isolated/flyback_converter.yaml | 0.949 | 8.98e-06 | 8.98e-06 | 4.29e-05 | 1.13e-06 |
-| switching/isolated/forward_converter.yaml | 0.707 | 9.75e-06 | 9.74e-06 | 2.17e-05 | 1.12e-06 |
+| switching/isolated/forward_converter.yaml | 0.707 | 9.75e-06 | 9.71e-06 | 2.17e-05 | 1.12e-06 |
 | switching/isolated/full_bridge_dc.yaml | 0.0828 | 2.67e-05 | 2.67e-05 | 0.000141 | 2.67e-05 |
 | switching/isolated/ll11_llc_resonant_converter.yaml | error | error | error | error | refused |
 | switching/isolated/ll13_active_clamp_forward.yaml | 4.51 | 0.00197 | 0.00197 | 0.00108 | refused |
