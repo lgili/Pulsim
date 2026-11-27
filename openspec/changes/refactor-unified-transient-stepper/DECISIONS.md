@@ -1097,3 +1097,27 @@ says where the implementation departs from them or what it settled.
     stays in `run_transient_trbdf2` with the other solves, and a policy
     that wants it (task 15.2's restart) calls it there. Task 4.1 is
     complete with that reading.
+
+25. **Group 5: the policies that are a decision became types; the two
+    that are a loop over the engine's state did not.**
+    `solver/step/policies.hpp`: `HalvingLadder` (`cap` = min(requested,
+    20), `n_sub` = 2^h, `sub_dt` = dt / 2^h), `GuardPolicy::apply` (the
+    freeze then the clamp, returning the current and the two flags the
+    record counts) and `RestartPolicy` (the fixed engine's three SDIRK
+    steps and its γ literal; `None` is `restart_rule` off, a run-time
+    option, so no type). Each is the expression it replaced; the driver
+    keeps the loops that apply them (rollback, sub-steps, the
+    `dt_retries` / `inductor_guard_actions` records). `ShrinkAndRepeat`
+    is `LteController::reject_factor` (controllers.hpp, task 5.1): no
+    second name. Left open: `IterateAtStepEnd` (the event iteration:
+    solves, mode settle, split events and lines interleaved, already the
+    `run_event_iteration` lambda) and `Localize` (the TR-BDF2 probe /
+    landing phases). As free functions they need the engine's whole
+    state as arguments, and the group-2 lambda showed the fixed engine
+    cannot afford a closure on its step path (DECISIONS 22a); they move
+    with the decisions in groups 14–15. Oracle for 5.3: a new dump
+    (`poldump_plugin.py` over the 11 test files that produce the three
+    records: 606 results, 4 with `dt_retries`, 4 with
+    `inductor_guard_actions`, 29 with `event_iteration_breaches`) compared
+    byte for byte against `485337aa`, which is itself byte-identical to
+    the 400011ee baseline on every other suite.

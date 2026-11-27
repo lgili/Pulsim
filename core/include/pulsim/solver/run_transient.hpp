@@ -63,6 +63,7 @@
 #include "pulsim/solver/result.hpp"
 #include "pulsim/solver/step/controllers.hpp"
 #include "pulsim/solver/step/integrators.hpp"
+#include "pulsim/solver/step/policies.hpp"
 #include "pulsim/solver/step/stepper.hpp"
 #include "pulsim/solver/step/stepper_core.hpp"
 #include "pulsim/solver/step/sensitivity.hpp"
@@ -1779,8 +1780,8 @@ inline SimulationResult run_transient(
         // step and the next two (kRestartSteps). A run that does not
         // start consistent owes them from its first step; a resume
         // carries its own count.
-        constexpr Size kRestartSteps = 3;
-        constexpr Real kGamma = Real{1} - Real{0.70710678118654752440};
+        constexpr Size kRestartSteps = step::RestartPolicy::kSteps;
+        constexpr Real kGamma = step::RestartPolicy::kGamma;
         Size restart_left =
             !restart_rule ? Size{0}
             : resume_snap != nullptr ? resume_snap->restart_steps_left
@@ -5138,9 +5139,8 @@ inline SimulationResult run_transient(
                 // option is read/write from Python and unchecked by
                 // SimulationOptions::valid(), so clamp at the point
                 // of use.
-                constexpr Size kMaxHalvings = Size{20};
                 const Size halving_cap =
-                    std::min(opts.max_dt_halvings, kMaxHalvings);
+                    step::HalvingLadder::cap(opts.max_dt_halvings);
                 for (Size h = 1; h <= halving_cap; ++h) {
                     // Back to the state at t_prev. Note what is NOT
                     // restored: `sat_history`, which this step has
@@ -5172,9 +5172,8 @@ inline SimulationResult run_transient(
                     ideal_pending.clear();
                     event_rl_t = std::numeric_limits<Real>::quiet_NaN();
 
-                    const Size n_sub = Size{1} << h;
-                    const Real sub_dt =
-                        opts.dt / static_cast<Real>(n_sub);
+                    const Size n_sub = step::HalvingLadder::n_sub(h);
+                    const Real sub_dt = step::HalvingLadder::sub_dt(opts.dt, h);
                     bool all_ok = true;
                     for (Size j = 0; j < n_sub; ++j) {
                         const Real t_sub =
@@ -5269,10 +5268,9 @@ inline SimulationResult run_transient(
                         "otherwise; more likely the circuit needs a "
                         "snubber, a softer device model, or a look at "
                         "the device the message above names.{}",
-                        t, Size{1} << halving_cap,
-                        opts.dt / static_cast<Real>(
-                            Size{1} << halving_cap),
-                        Size{1} << halving_cap, why,
+                        t, step::HalvingLadder::n_sub(halving_cap),
+                        step::HalvingLadder::sub_dt(opts.dt, halving_cap),
+                        step::HalvingLadder::n_sub(halving_cap), why,
                         newton_failed
                             ? "\nIf PWL diodes (add_diode) share the "
                               "circuit with a Newton device (saturable "
@@ -5475,31 +5473,17 @@ inline SimulationResult run_transient(
                     // start-of-step state across both sub-steps.
                     const Real i_prev_step =
                         x_prev[e.inductor_branch_var_id];
-                    Real i_new = x[e.inductor_branch_var_id];
-                    const Real i_solved = i_new;
-                    bool froze = false;
-                    bool clamped = false;
-                    // Step-to-step jump guard: snap back to the pre-step
-                    // current when the solver emits an unphysical kilo-amp
-                    // delta (rectifier in DCM, etc.).
-                    if (opts.inductor_freeze_di_max > Real{0}) {
-                        const Real di  = i_new - i_prev_step;
-                        const Real adi = di < Real{0} ? -di : di;
-                        if (adi > opts.inductor_freeze_di_max) {
-                            i_new = i_prev_step;
-                            froze = true;
-                        }
-                    }
-                    // Absolute clamp: catches the *slow drift* form
-                    // of the same failure where the per-step delta
-                    // stays below the freeze threshold but i_L walks
-                    // monotonically past physical bounds over many
-                    // line cycles.
-                    if (opts.inductor_abs_clamp > Real{0}) {
-                        const Real lim = opts.inductor_abs_clamp;
-                        if (i_new >  lim) { i_new =  lim; clamped = true; }
-                        if (i_new < -lim) { i_new = -lim; clamped = true; }
-                    }
+                    const Real i_solved = x[e.inductor_branch_var_id];
+                    // Step-to-step jump guard (snap back to the pre-step
+                    // current on an unphysical kilo-amp delta: rectifier in
+                    // DCM), then the absolute clamp (the slow-drift form of
+                    // the same failure): step::GuardPolicy.
+                    const auto guard = step::GuardPolicy::apply(
+                        i_prev_step, i_solved, opts.inductor_freeze_di_max,
+                        opts.inductor_abs_clamp);
+                    const Real i_new = guard.i;
+                    const bool froze = guard.froze;
+                    const bool clamped = guard.clamped;
                     // v2.0 Phase 2: a guard that fires REPLACES the
                     // solver's answer with a number the user
                     // configured. Say so. Silently reporting the

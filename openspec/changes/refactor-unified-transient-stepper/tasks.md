@@ -50,8 +50,9 @@ at equal times or time-weighted measures, never sample means.
 ## 5. Controllers and policies as types
 - [x] 5.1 `solver/step/controllers.hpp`: `Fixed` (integer counter), `Lte` (moved from `trbdf2_transient.hpp:1710-1810` with the step memory), `ControllerState` (`FixedClock` is the fixed engine's grid; `LteController` the TR-BDF2 step memory and factor laws; both drivers use them)
 - [ ] 5.2 `solver/step/policies.hpp`: `IterateAtStepEnd`, `Localize`, `HalvingLadder`, `ShrinkAndRepeat`, `GuardPolicy`, `RestartPolicy` (`None` plus whatever Phase 2 has landed), each extracted in place and called by its driver
-  - Open: the policies are still inside the engines' phases (task groups 14–15 move the decisions)
-- [ ] 5.3 Oracle: goldens; step-identical; `dt_retries`, `event_iteration_breaches`, `inductor_guard_actions` records identical
+  - Done (DECISIONS 25): `HalvingLadder`, `GuardPolicy`, `RestartPolicy` in `solver/step/policies.hpp`, called by the fixed engine (`run_transient.hpp`: restart constants, the halving loop and its message, the guard walk); `ShrinkAndRepeat` is `LteController::reject_factor` (`controllers.hpp`). Open: `IterateAtStepEnd`, `Localize` (loops over the engine's state; groups 14–15)
+- [x] 5.3 Oracle: goldens; step-identical; `dt_retries`, `event_iteration_breaches`, `inductor_guard_actions` records identical
+  - Group 5 (DECISIONS 25): goldens 22/22, steps 29/29, pwl 399/399, trbdf2 380/380 identical; the three records byte-identical over 606 results of 11 test files (`poldump_plugin.py`; 4 / 4 / 29 results carry `dt_retries` / `inductor_guard_actions` / `event_iteration_breaches`)
 
 ## 6. The variable-step stepper
 - [x] 6.1 `solver/step/stepper.hpp`: `Stepper<I, C>`; instantiate `Stepper<TrBdf2, Lte>`; hidden engine name `trbdf2-next`
