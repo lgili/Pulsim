@@ -40,6 +40,7 @@ import bisect as _bisect
 import re
 
 import numpy as _np
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Callable, Literal, Optional, cast
 
@@ -447,6 +448,49 @@ def _exact_result(
     return res
 
 
+class _EventProjections(Mapping):
+    """``diagnostics['event_projections']``: every projection of the parasitic cluster
+    at an event, rule on or off (never silent; F-SB-3 / F-R-3). Keys: ``n_projections``;
+    ``capped`` (more projections than the 1000 records kept); ``projection_max_by_column``
+    (per stored column the largest amplitude it moved; zeros rule off, where the default
+    path recovers nothing); ``projections`` (instant ``t``, largest ``amplitude`` -- rule
+    off max |Δx| over the state --, its stored ``column`` or None, the cluster's slowest
+    ``tau``). Built on first read: a run that never reads it pays nothing."""
+
+    def __init__(self, native_res, t_start: float, ncol: int):
+        self._raw = (native_res.get("projection_records"), native_res.get("projection_max_row"),
+                     int(native_res.get("n_projections", 0)), t_start, ncol)
+        self._d: Optional[dict] = None
+
+    def _built(self) -> dict:
+        if self._d is None:
+            recs, pm, n, t0, ncol = self._raw
+            recs = _np.asarray(recs if recs is not None else _np.zeros((0, 4)), dtype=float).reshape(-1, 4)
+            pm = _np.asarray(pm if pm is not None else [], dtype=float)
+            off = pm.size - ncol   # the stored columns are the tail of the recovered vector
+            self._d = dict(
+                n_projections=n, capped=n > len(recs),
+                projection_max_by_column=(pm[-ncol:] if pm.size >= ncol > 0 else _np.zeros(ncol)),
+                projections=[
+                    {"t": float(t) + t0, "amplitude": float(a), "tau": float(tau),
+                     # a row that is not a stored column (or none, rule off): None
+                     "column": int(r) - off if 0 < ncol <= pm.size and r >= off else None}
+                    for t, a, r, tau in recs])
+        return self._d
+
+    def __getitem__(self, key):
+        return self._built()[key]
+
+    def __iter__(self):
+        return iter(self._built())
+
+    def __len__(self) -> int:
+        return len(self._built())
+
+    def __repr__(self) -> str:
+        return repr(self._built())
+
+
 def _result_from_native(native_res, t_start: float):
     """The result of a Bridge.11 run (``run_*_native_builder``). ``t_start``:
     the engine ran on its own clock from 0; every time it reports is
@@ -503,20 +547,8 @@ def _result_from_native(native_res, t_start: float):
         if key in native_res:
             res.diagnostics[key] = native_res[key]
     if "projection_records" in native_res:
-        # every projection of the parasitic cluster at an event, rule on or off (never
-        # silent; F-SB-3 / F-R-3): the count, per stored column the largest amplitude it
-        # moved, and the records (instant, largest amplitude, its column, the cluster's
-        # slowest time constant; capped)
         ncol = res.states.shape[1] if getattr(res, "has_full_states", False) else 0
-        pm = np.asarray(native_res.get("projection_max_row", []), dtype=float)
-        proj = dict(
-            n_projections=int(native_res.get("n_projections", 0)),
-            projection_max_by_column=(pm[-ncol:] if pm.size >= ncol > 0 else np.zeros(ncol)),
-            projections=[
-                {"t": t + t_start, "amplitude": a, "tau": tau,
-                 # a row of the recovered vector that is not a stored column: None
-                 "column": (int(r) - (pm.size - ncol)) if 0 < ncol and int(r) >= pm.size - ncol else None}
-                for t, a, r, tau in native_res.get("projection_records", [])])
+        proj = _EventProjections(native_res, float(t_start), ncol)
         res.diagnostics["event_projections"] = proj
     else:
         proj = {}
@@ -536,7 +568,7 @@ def _result_from_native(native_res, t_start: float):
         ncol = res.states.shape[1] if getattr(res, "has_full_states", False) else 0
         og["output_floor_by_column"] = (fr[-ncol:] if fr.size >= ncol > 0
                                         else np.zeros(ncol))
-        og.update(proj)
+        og.update(proj)   # built here: the rule's own report
         tb = native_res["output_budget_t"]
         og["output_budget_t"] = None if tb != tb else tb + t_start   # NaN: not spent
         res.diagnostics["output_grid"] = og

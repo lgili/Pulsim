@@ -46,9 +46,14 @@ def test_every_event_projection_is_recorded(rule):
     assert np.all(np.diff(t) > 0)                       # the contract: strictly increasing
     ep = res.diagnostics["event_projections"]
     assert ep["n_projections"] >= 3                     # D1's three turn-offs at least
-    big = [p for p in ep["projections"] if p["amplitude"] > 0.3]
-    assert len(big) >= 3                                # 0.31385 V each (V(out) -> settled)
+    assert not ep["capped"] and len(ep["projections"]) == ep["n_projections"]
+    # under the rule the amplitude is over the recovered vector: 0.31385 V each (V(out) ->
+    # settled); rule off it is max |dx| over the state (no recovery on the default path:
+    # it would evaluate the sources and a user's b_extra_fn), with no column
+    big = [p for p in ep["projections"] if p["amplitude"] > (0.3 if rule else 0.0)]
+    assert len(big) >= 3
     for p_ in big:
+        assert (p_["column"] is None) == (not rule)
         assert p_["tau"] > 0 and p_["tau"] < 1e-8      # the g_off cluster, 1 ns
         # at a stored event row (the left limit), and that row has a right limit
         k = int(np.argmin(np.abs(t - p_["t"])))
