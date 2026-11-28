@@ -2612,13 +2612,22 @@ inline SimulationResult run_transient_trbdf2(
             }
             if (!consistent) {
                 // the adopt/commit paths (and the sensitivity stage) read the
-                // first probe's factor, which the second solve evicted: re-solve
+                // first probe's factor, which the second solve evicted: re-solve.
+                // A re-solve that fails or lands at another length (the 2 dtp
+                // probe may have raised the learned floor) leaves a factor that
+                // is not x1's: no probe to take, the init slots stay.
                 x_trial = x;
+                bool ok_re = false;
                 try {
-                    probe_solve(*start_probe_m, t, dt1, x_trial);
+                    ok_re = probe_solve(*start_probe_m, t, dt1, x_trial)
+                            && last_probe_dt == dt1;
                 } catch (const pwl::NewtonRoundoffBudgetExceeded&) {
                     throw;
                 } catch (const std::runtime_error&) {
+                    ok_re = false;
+                }
+                if (!ok_re) {
+                    start_probe_ok = false;
                     return false;
                 }
             }
