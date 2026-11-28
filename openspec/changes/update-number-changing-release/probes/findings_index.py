@@ -333,7 +333,9 @@ F = [
      "rule alone 6.43e-9 rel (max 1.38e-7 V, first > 1e-10 V at t = 0.2494 ms) with both runs' 225 events at the same "
      "instants (2.4e-18 s) and the same 703 restart steps; split 2.05e-8 (events 3.4e-13 s apart). Same with the options "
      "explicit: integration-line code. Suspect: the restart's L-stable stages start the magnetic nodes (algebraic) from a "
-     "different consistent value than the inductor branch"),
+     "different consistent value than the inductor branch. R15 (after the e2d82ed5 merge): the release default (rule + split) is now 3.517e-12 rel (199 events, 2.8e-17 s "
+     "apart; `[pwl-default]` mark removed, cause of the move not isolated: one of F-Z-14 / F-Z-16 / F-Z-17); the rule alone "
+     "(enable_substep_state_correction=False, a non-default) is still 6.433e-9 rel, rule off 3.673e-12"),
     ("F-Z-12", "B", "W", "under the restart rule the in-loop recorder of a PWM buck disagrees with the stored-array pass [owner: restart line / recorders]",
      "test_recorders::test_in_loop_feeding_equals_the_stored_array_pass[pwl-buck] (MOSFET buck 100 kHz, dt 1e-6, 1 ms, "
      "window 0.2 .. 0.9 ms, period 1e-5)",
@@ -428,6 +430,38 @@ F = [
 # Closed by a fix merged into the release branch: id -> where and the measured result.
 # A closed finding leaves the open tables and is listed under "Closed".
 FIXED = {
+    "F-Z-7": "integration line e2d82ed5 (C_oss interface stamp in the increment form a*(q - q_n); merged R15 7ce6ea8c): case A "
+             "esdirk43 at t_end 4.5951324e-6 runs under the release default device_path='interface' (and with mode_selection / "
+             "device_path legacy, restart off); all 40 seeded lengths run on both integrators; the incoming "
+             "`test_case_a_device_paths_are_the_same_run` holds the two paths bit-identical; `[esdirk43]` mark removed",
+    "F-Z-9": "integration line e2d82ed5 (LCP rounding ties; merged R15): under the real release default (no option: 'auto' -> "
+             "'lcp', form='branch') rounding_ties 3, leak_pins 0, capped 0; D6 / D7 both ON at the three commutations "
+             "(|I6 - I7| / I6 5.3e-11); v_DS at the 10 / 20 us turn-on -7.329e-11 / -1.615e-10 V (bar 1e-9), the same for "
+             "'auto' / 'lcp' / 'legacy', each in a fresh process; KNOWN_DSED emptied, "
+             "`test_exact_lcp_rectifier_pair_shares_at_7_95_us[branch]` mark removed",
+    "F-Z-13": "integration line e2d82ed5 (right-limit rows read the right-limit solve's companion currents; merged R15): "
+              "rectifier start row i(D1) = -i(Vac) = 0.004601 A, KCL residual 6e-19 A (was 1.1 A), buck start row closes "
+              "to 0; `test_kcl_holds_at_every_recorded_sample[buck-pwl|rectifier-pwl]` marks removed",
+    "F-Z-14": "integration line e2d82ed5 (branch-form flip booked on the conductance form's chord; merged R15): the default-form "
+              "locator test passes on and off grid; the DCM buck under the release default: natural turn-offs within 2.6e-11 dt "
+              "of the conductance form, gate-edge turn-offs 2.1e-4 dt; gate-edge diode turn-ons differ by exactly 1 dt "
+              "(branch at the edge 3.0 us, the conductance form one step later 3.1 us: the legacy form is late, the default "
+              "is right); an ideal branch diode (R_on = 0): natural turn-offs 0.077 dt with the split (1 dt without it). "
+              "Goldens: 8 n_commutations lowered by the dropped start-up turn-on (values, steps, digests unchanged); "
+              "`test_located_time_within_the_stated_tolerance_default_form` mark removed",
+    "F-Z-15": "integration line e2d82ed5 (a cut row judged by |lambda|/dt; merged R15): 48 V / 1 mH opening: peak 2.39994e5 V "
+              "(was 2.4e12) at the default factor, silent at 6000 and 1e9; the release's impulse-energy warning reports the "
+              "same cut at every factor (10 cuts, 0.0288 J vs 0.00288 J stored), so a modest cut is silent in the voltage "
+              "check and reported by the impulse check (the intended split); a large cut (5000x) raises both, naming the "
+              "same device and records (overlap, not a contradiction); marks removed in test_voltage_sanity (2) and "
+              "test_vsi_freewheel_diodes (2)",
+    "F-Z-16": "integration line e2d82ed5 (no impulse probe at a located V_f = 0 diode crossing; merged R15): no record at the "
+              "5 us turn-off of the switched junction; `test_a_nonlinear_capacitor_shorted_by_its_switch_is_carried_in_charge` "
+              "mark removed",
+    "F-Z-17": "integration line e2d82ed5 (restart_cut_at re-brackets from the step start; merged R15): snubbed DCM boost T/200, "
+              "release default: 0 diode-law samples (was 18), E_sw 1.350e-4 J (split off 1.343e-4), the same on both forms and "
+              "with mode_selection / device_path legacy; split_snap 0.01: 139 samples within split_snap*dt; "
+              "`test_recovery_energy_does_not_follow_the_step_size` mark removed",
     "F-Z-4": "integration line 5eb1b119 + 2547d14d + 59ce9645 (one refinement step on the published right-limit row; merged "
              "R13): ll09 on this branch, release defaults, right rows' KCL at mid 4.6e-11 A -> 4.3e-19 A, |dV(mid)| 2.30e-6 V -> "
              "3.1e-13 V, i(Lload) 6.1e-15 rel; the same with the split off, device_path / mode_selection / control_tick legacy, "
