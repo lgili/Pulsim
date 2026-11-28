@@ -2338,12 +2338,18 @@ inline SimulationResult run_transient(
             const Real tol_i = g_leak * (Real{1} + v_max);
             // the floor of one linear state: a current's tol_i, a capacitor's
             // tol_i/g beside a gyrator (gyr_floor), else none
-            auto floor_of = [&](const pwl::HistoryEntry& e) {
-                if (!is_cap(e)) return tol_i;
+            // (a nonlinear capacitor's: v_floor(e) times C(v1))
+            // shortcut: every capacitor on a gyrator's port-2 island gets it, also
+            // an electrical one beside a gyrator used as an impedance inverter;
+            // narrow to flux nodes if the solver ever learns node domains
+            auto v_floor = [&](const auto& e) {
                 const auto at = [&](Index n) {
                     return n >= 0 ? gyr_floor[static_cast<Size>(n)] : Real{0};
                 };
                 return tol_i * std::max(at(e.from), at(e.to));
+            };
+            auto floor_of = [&](const pwl::HistoryEntry& e) {
+                return is_cap(e) ? v_floor(e) : tol_i;
             };
             // One reading of one state (s0 = x0, s1..s3 the stages): the jump
             // d = (s1 − s0) − (s2 − s1) against the rate after the event and
@@ -2412,8 +2418,9 @@ inline SimulationResult run_transient(
                 for (Size k = 0; k < nn; ++k) {
                     const auto& e = ncs[k];
                     const Real v1 = ncv(e, ip_x1);
-                    const Real tol = models::NonlinearCapacitor::capacitance(e.params, v1) * Real{1e-8} *
-                                         (Real{1} + std::abs(e.v_prev) + std::abs(v1)) +
+                    const Real tol = models::NonlinearCapacitor::capacitance(e.params, v1) *
+                                         (Real{1e-8} * (Real{1} + std::abs(e.v_prev) + std::abs(v1)) +
+                                          v_floor(e)) +
                                      allow(e.i_prev, ne + k);
                     const bool jk = law_jumps(e.q_prev, ncq(e, ip_x1),
                                               [&](const Vector& y) { return ncq(e, y); }, tol);
@@ -2510,7 +2517,8 @@ inline SimulationResult run_transient(
                             const Real v1 = ncv(e, ip_y1);
                             ip_m1[ne + k] = m1(e.q_prev, ncq(e, ip_y1), ncq(e, ip_y2), ncq(e, x),
                                                models::NonlinearCapacitor::capacitance(e.params, v1) *
-                                                   Real{1e-8} * (Real{1} + std::abs(e.v_prev) + std::abs(v1)));
+                                                   (Real{1e-8} * (Real{1} + std::abs(e.v_prev) + std::abs(v1)) +
+                                                    v_floor(e)));
                         }
                         for (Size k = 0; k < nsat; ++k) {
                             const auto& e = sats[k];
@@ -2715,7 +2723,8 @@ inline SimulationResult run_transient(
                         const Real v1 = ncv(e, ip_x1);
                         const Real c1 = models::NonlinearCapacitor::capacitance(e.params, v1);
                         w = Real{1} / std::sqrt(c1);
-                        noise = c1 * Real{1e-8} * (Real{1} + std::abs(ip_s0v[k - ne]) + std::abs(v1));
+                        noise = c1 * (Real{1e-8} * (Real{1} + std::abs(ip_s0v[k - ne]) + std::abs(v1)) +
+                                      v_floor(e));
                     } else {   // a flux: energy weight 1/√L(i1)
                         const auto& e = sats[k - ne - nn];
                         const Real l1 = std::abs(pwl::SaturableInductorHistory::flux_and_inductance(
