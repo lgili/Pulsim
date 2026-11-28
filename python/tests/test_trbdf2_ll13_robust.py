@@ -61,8 +61,10 @@ def test_run_length_does_not_change_the_common_span():
         assert d.max() < 1e-3
 
 
-@pytest.mark.xfail(strict=True, reason="root cause 2: the 1.5 us turn-off edge probe "
-                   "stalls and the step falls to h_min (F-Z-6 part 2, open)")
+# Not strict: the stall is decided at round-off. It aborts on macOS arm64 and runs
+# through on Linux x86-64 (CI of 9f80b681: XPASS on ubuntu 3.10 and 3.13).
+@pytest.mark.xfail(strict=False, reason="root cause 2: the 1.5 us turn-off edge probe "
+                   "stalls and the step falls to h_min on some platforms (F-Z-6 part 2, open)")
 def test_three_microsecond_run_survives_the_first_turn_off():
     _run(3e-6, 1e-8)
 
