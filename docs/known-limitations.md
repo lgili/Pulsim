@@ -38,6 +38,10 @@ The numbers are in the `Known limitations` part of the 2.1.0 entry of the
   42.750 V 0.1 us after the edge, 42.114 V at 0.4 us against 41.48 V). On 2.1.0 the rule is off by default; with it on, compare
   against `trbdf2` before trusting it on a converter whose diode commutates
   right after a gate edge.
+  Without event splitting, a diode that turns off inside a restart step's
+  first stage is not located either: the step keeps a first-order kick
+  (`half_bridge_transformer_dc`, dt = 100 ns: up to 3.3e-6 V on V(out) per
+  such turn-off; with `enable_substep_state_correction=True` it is located).
   Without event splitting, a sample of an algebraic signal that is
   discontinuous at a rounded edge is the pre-edge value: `scr_halfwave_r`
   on `pwl` with the rule reads 0.0271 against its analytic truth (1.47e-16
