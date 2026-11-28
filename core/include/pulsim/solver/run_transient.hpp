@@ -974,6 +974,10 @@ inline SimulationResult run_transient(
         bool arm = false, vf0 = false;   // vf0: only V_f = 0, ungated diodes flip
         bool off = false;                // a turn-off among the cut's flips
         bool piece1 = false;             // run_restart is the cut's first piece
+        bool kink = false;               // the cut ends a ramp (consistent_start), not a diode's
+        Size kink_k = 0;                 // that ramp's history entry
+        Real kink_r = 0;                 // and its starting rate ẋ(0+)
+        Real kink_s = 0;                 // and the value it comes to rest at
         Real t = std::numeric_limits<Real>::quiet_NaN();
         std::vector<bool> bits, b0, lsb0, pre;   // pre: the bits before the cut's flips
         Vector x0, x_end;
@@ -2556,6 +2560,89 @@ inline SimulationResult run_transient(
                             }
                         }
                     }
+                }
+            }
+            // A RAMP, not a jump (the split's, armed by restart_lined): a state
+            // that leaves the event at a finite rate r = ẋ(0+) and comes to rest
+            // at θ inside the probe (a Newton freewheel diode's current reaching
+            // zero 84 ns after a gate edge, γh = 73 ns) gives Δ1 = rγh,
+            // Δ2 = r(θ − γh), Δ3 = 0 and the test above fires for θ < 1.185γh: the
+            // current would be discarded as an impulse (½·i·θ of charge lost), and
+            // integrated across instead SDIRK's x0* reverses it (V(sw) −33 V).
+            // It is cut at θ (restart_lined: piece A on the slope, piece B from
+            // rest). r is read by one backward-Euler stage of ε = 1e-3·γh from x0
+            // (the start's own slope; a fast mode of τ gives r = A/(τ + ε)), and
+            // θ = |s3 − s0|/|r| with s3 at rest (|Δ3| ≤ 1e-2·|s3 − s0|).
+            // Threshold θ ≥ γ²h + ε, from the test itself: one mode of τ, ρ =
+            // τ/(τ + γh), Δk = Aρ^(k−1)(1 − ρ), fires iff ρ < γ/(1 + γ) ⇔ τ < γ²h,
+            // and then θ = (τ + ε)(1 − ρ³) < γ²h + ε: every fast mode the test
+            // flags stays an impulse (a switch cut, τ = L/R_off = 5 ps, reads
+            // θ ≈ ε). A ramp shorter than γ²h is, to the probe, such a mode: it
+            // stays an impulse too, its error the rule's own for a mode of τ < γ²h,
+            // the state's integral displaced by ≤ ½|Δs|·γ²h (ll15's start-up
+            // edges: ≤ 0.64 nC each). Linear entries only, every flagged one a
+            // ramp; a saturable core or nonlinear capacitor flagged keeps the
+            // impulse. shortcut: a slope that does not end at rest (|Δ3| large)
+            // stays an impulse; upgrade with a two-slope θ if one matters.
+            if (split && jumped && solved && rs_cut.arm && std::isnan(rs_cut.t)) {
+                bool all = true;
+                for (Size k = 0; k < nn; ++k) all = all && ip_nc[3 * k + 2] == Real{0};
+                for (Size k = 0; k < nsat; ++k) all = all && ip_sl[3 * k + 2] == Real{0};
+                for (Size k = 0; k < ne; ++k) all = all && ip_d[2 * k + 1] != Real{2};
+                Real th = std::numeric_limits<Real>::infinity(), tr = 0, ts = 0;
+                Size tk = ne;
+                if (all) {
+                    const Real eps = Real{1e-3} * h_s;
+                    const Vector x_k = x, b_k = b_extra;
+                    const Size it_k = iters;
+                    const bool fl_k = flipped, cy_k = mask_cycle;
+                    const auto st_k = stamped_mask;
+                    step::restore(history, hs, ip_hist, ip_hs);
+                    x = ip_x1;
+                    accumulate_b_extra(t_from + eps, Real{2} * eps, true);
+                    try {
+                        run_event_iteration(t_from + eps, Real{2} * eps, true, true);
+                    } catch (const pwl::NewtonRoundoffBudgetExceeded&) {
+                        throw;
+                    } catch (const std::runtime_error&) {
+                        all = false;
+                    }
+                    for (Size k = 0; all && k < ne; ++k) {
+                        if (ip_d[2 * k + 1] == Real{0}) continue;
+                        const auto& e = ents[k];
+                        const Real s0 = is_cap(e) ? e.v_prev : e.i_prev;
+                        const Real r = (state(e, x) - s0) / eps;
+                        const Real tot = state(e, ip_x3f) - s0;
+                        const Real tk_ = r != Real{0} ? tot / r : Real{-1};
+                        all = tk_ >= kGamma * h_s + eps && tk_ < Real{2} * h_s &&
+                              std::abs(state(e, ip_x3f) - state(e, ip_x2)) <= Real{1e-2} * std::abs(tot);
+                        if (all && tk_ < th) {
+                            th = tk_;
+                            tr = r;
+                            tk = k;
+                            ts = state(e, ip_x3f);
+                        }
+                    }
+                    step::restore(history, hs, ip_hist, ip_hs);
+                    x = x_k;
+                    b_extra = b_k;
+                    iters = it_k;
+                    flipped = fl_k;
+                    mask_cycle = cy_k;
+                    stamped_mask = st_k;
+                }
+                if (all && tk < ne) {
+                    // the uncut pass goes on as before (an impulse); restart_lined
+                    // discards it and cuts at t_from + θ
+                    rs_cut.t = t_from + th;
+                    rs_cut.kink = true;
+                    rs_cut.kink_k = tk;
+                    rs_cut.kink_r = tr;
+                    rs_cut.kink_s = ts;
+                    rs_cut.pre = rs_bits0;
+                    rs_cut.bits = rs_bits0;   // no diode flips at a ramp's end
+                    rs_cut.off = false;
+                    rs_cut.vf0 = false;
                 }
             }
             // jumped: a recorded jump (flag 1); moving: any state carried
@@ -4821,7 +4908,9 @@ inline SimulationResult run_transient(
         // SDIRK's stage 2, as before); upgrade if two independent turn-offs
         // inside one step matter
         auto restart_lined = [&](auto& run_event_iteration, Real a, Real h, Real loc, bool ev) {
-            rs_cut.arm = has_diodes && !sx.on;
+            // the split also cuts at a ramp's end (consistent_start), diodes or not
+            rs_cut.arm = (has_diodes || split) && !sx.on;
+            rs_cut.kink = false;
             rs_cut.t = std::numeric_limits<Real>::quiet_NaN();
             if (!rs_cut.arm) {
                 restart_lined_once(run_event_iteration, a, h, loc, ev);
@@ -4904,7 +4993,20 @@ inline SimulationResult run_transient(
             rl_loc.vf0 = vf0;
             rl_loc.pure = vf0;
             rl_loc.bits = post;
-            restart_lined_once(run_event_iteration, td, (a + h) - td, snap, true);
+            // a ramp's end: θ's error (the log-law drop slows the last of a
+            // diode's current: ll15 leaves ~1e-3 of it) is piece B's location
+            // error, |s_A − s_rest|/|r|, held below what its probe resolves (γ²·h_B, the
+            // threshold above): else piece B's probe judges the rest (as before)
+            Real loc_b = snap;
+            if (rs_cut.kink) {
+                const auto& e = history.entries()[rs_cut.kink_k];
+                const Real s_a = e.kind == pwl::DevicePool::StoredKind::Capacitor
+                    ? stamping::read_node_voltage(x, e.from) - stamping::read_node_voltage(x, e.to)
+                    : x[e.inductor_branch_var_id];
+                const Real dl = std::abs((s_a - rs_cut.kink_s) / rs_cut.kink_r);
+                if (dl < kGamma * kGamma * ((a + h) - td)) loc_b = std::max(snap, dl);
+            }
+            restart_lined_once(run_event_iteration, td, (a + h) - td, loc_b, true);
             flipped = flipped || flipped_1;
             const bool uncut = (mask_cycle || flipped) && !unsettled_uncut;
             if (!uncut) ++result.n_restart_cuts;   // counted once the cut is kept (a throw keeps none)
