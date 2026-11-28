@@ -13,6 +13,8 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <limits>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -431,5 +433,125 @@ TEST_CASE("Roundoff acceptance: a floating-point fixed point is judged at its "
         REQUIRE_FALSE(ro.fixed_point);
         REQUIRE(ro.total == 0);
         REQUIRE(ro.consecutive == 0);
+    }
+}
+
+namespace {
+// V1 = 1 GV at n0, 1 S n0-n1, 1 S n1-ground, V2 = 0.5 GV at n1: V2's current
+// is the n1 KCL row's cancellation of 5e8 A terms, ~0 A. A device on that
+// row walks V2's current in steps of u = 2^-24 A (one ulp of the 5e8 terms
+// that set it) at a residual of 12 u (1.6 eps of the row's terms), from the
+// moment the first step lands (off at the cold start, so the start state's
+// scale has nothing on the row). ll13's Vin branch at the 1.5 us turn-off:
+// 13 A moving 3.7e-9 A, two million of its own ulps.
+struct PropagatedPath {
+    Path p;
+    Real u;
+    Real r = 12;   // residual, in u
+    Real operator()(const Vector& x, sparse::Matrix& J_nl, Vector& f_nl,
+                    const Graph&, const DevicePool&) const {
+        J_nl.setZero();
+        f_nl.setZero();
+        if (std::abs(x[0]) < 1) return 0.0;
+        const long n = std::lround(-x[3] / u);
+        for (std::size_t k = 0; k < p.at.size(); ++k) {
+            if (p.at[k] == n) {
+                const Real s = static_cast<Real>(p.steps[k]);
+                f_nl[1] = ((s > 0 ? r : -r) + static_cast<Real>(n)) * u;
+                J_nl.coeffRef(1, 3) = r / std::abs(s) - 1.0;
+                break;
+            }
+        }
+        return 0.0;
+    }
+};
+struct TwoSourceCircuit {
+    Graph g;
+    DevicePool pool;
+    std::unique_ptr<PwlStateSpaceCache> cache;
+    TwoSourceCircuit() {
+        g.add_node("n0");
+        g.add_node("n1");
+        g.add_branch(0, g.ground(), BranchKind::Source);
+        g.add_branch(0, 1, BranchKind::PassiveLinear);
+        g.add_branch(1, g.ground(), BranchKind::PassiveLinear);
+        g.add_branch(1, g.ground(), BranchKind::Source);
+        pool.add_voltage_source(0, {.V = 1e9});
+        pool.add_resistor(1, {.G = 1.0});
+        pool.add_resistor(2, {.G = 1.0});
+        pool.add_voltage_source(3, {.V = 5e8});
+        cache = std::make_unique<PwlStateSpaceCache>(g, pool);
+        cache->build();
+    }
+};
+}  // namespace
+
+TEST_CASE("Roundoff acceptance: a fixed point at the rounding propagated to a "
+          "component is accepted, a larger step is not",
+          "[v2][newton][roundoff]") {
+    TwoSourceCircuit c;
+    const auto& seg = c.cache->lookup(SwitchStateMask(0));
+    REQUIRE(seg.state_size == 4);
+    const Real u = std::ldexp(1.0, -24);
+    const Real eps = std::numeric_limits<Real>::epsilon();
+    {
+        const PropagatedPath dev{Path({2, -1, -1}), u};
+        NewtonRoundoffAcceptance ro;
+        ro.enabled = true;
+        ro.judge_own_scale = true;
+        const Vector x = solve_with_newton_b_extra(
+            seg, dev, c.g, c.pool, Vector::Zero(4), Vector::Zero(4), 40, 1e-9,
+            1e-9, false, false, nullptr, &ro);
+        REQUIRE(ro.accepted);
+        REQUIRE(ro.fixed_point);
+        // the step it stalled at is above the absolute tolerance and far
+        // above V2's current's own ulps: only the propagated bound takes it
+        REQUIRE(u > 1e-9);
+        REQUIRE(u > 1e6 * eps * std::abs(x[3]));
+        REQUIRE(std::abs(x[1] - 5e8) <= 1e-6 * 5e8);
+        // the accepted iterate solves the unmodified equations to the
+        // round-off of each row's own terms
+        sparse::Matrix J_nl(4, 4);
+        Vector f_nl = Vector::Zero(4);
+        (void)dev(x, J_nl, f_nl, c.g, c.pool);
+        const Vector res = seg.J * x + seg.b_constant + f_nl;
+        const Vector sk = Vector(seg.J.cwiseAbs() * x.cwiseAbs())
+                          + seg.b_constant.cwiseAbs() + f_nl.cwiseAbs();
+        for (Index i = 0; i < 4; ++i) {
+            INFO(i);
+            REQUIRE(std::abs(res[i]) <= ro.omega_max * sk[i]);
+        }
+    }
+    {
+        // Not converged: the same cycle scaled by 2^14 (steps of 1e-3 A, the
+        // residual 2^14 x 12 u = 1.2e-2 A, 2.6e4 eps of the row's terms) on
+        // an equally well-conditioned row (slope 5): stagnated and inside
+        // the dx cap (|x_0| = 1e4), 1e3 x the propagated bound. Declined (by
+        // the backward-error test: with dx = -J^-1 f the propagated bound
+        // cannot be the only test to fail on a real Newton step).
+        const PropagatedPath dev{Path({1L << 15, -(1L << 14), -(1L << 14)}), u,
+                                 12.0 * (1L << 14)};
+        NewtonRoundoffAcceptance ro;
+        ro.enabled = true;
+        ro.judge_own_scale = true;
+        Vector x0 = Vector::Zero(4);
+        x0[2] = 1e4;
+        try {
+            (void)solve_with_newton_b_extra(seg, dev, c.g, c.pool, x0,
+                                            Vector::Zero(4), 40, 1e-9, 1e-9,
+                                            false, false, nullptr, &ro);
+            FAIL("a step far above the propagated rounding was accepted: fp="
+                 << ro.fixed_point << " omega/eps=" << ro.omega / eps
+                 << " row=" << ro.row);
+        } catch (const NewtonRoundoffBudgetExceeded&) {
+            FAIL("a decline must not be the budget error");
+        } catch (const std::runtime_error& e) {
+            INFO(e.what());
+            REQUIRE(std::string(e.what()).find("Roundoff acceptance declined")
+                    != std::string::npos);
+            REQUIRE(std::string(e.what()).find("stagnated") != std::string::npos);
+            REQUIRE(std::string(e.what()).find("within 1e-6") != std::string::npos);
+        }
+        REQUIRE_FALSE(ro.accepted);
     }
 }

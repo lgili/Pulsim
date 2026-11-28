@@ -210,6 +210,42 @@ per device as in D5.
 `n_alloc_steady` (heap allocations after warm-up, from the existing
 operator-new counting harness).
 
+### Task 1.2: where a dsed step's bytes and time go (measured 2026-11-28)
+
+Harness `.scratch/modal/split.cpp` (not committed): the C++ `PEDSimulator` on the
+adapter, heap calls and bytes counted by interposing `malloc` / `calloc` /
+`realloc` / `posix_memalign` (Eigen and `operator new` both land there), time by
+`steady_clock` and `/usr/bin/sample`. Each part is also run alone, as many calls
+as the run made. Python wall: `simulate(engine='dsed')`, min of 15, sync buck of
+`perf/p9_dsed.py` (2000 periods, 4000 steps, 3999 events, n = 2); DCM buck: the
+same with a diode for Q2, R = 50 Ω, D = 0.3 (5979 steps, 28 304 predicate
+evaluations). Apple M-series, `-O3 -ffp-contract=off`.
+
+| Part (per step) | heap calls | bytes | ns (base) | ns (tip) |
+|---|---|---|---|---|
+| sync buck, whole C++ `simulate()` | 2.07 | 674 | 220 | 198 |
+| `exact_advance_state_into` alone | 0 | 0 | 66 | 25 |
+| of which per-mode `exp` / `expm1` / `sincos` / complex divide (sample) | — | — | ≈ 60 % | 0 on a repeated h |
+| `ped_push_sample` alone | 1.01 | 295 | 26 | 26 |
+| `pre_event_states` push (every event) | ≈ 1 | ≈ 16 + growth | — | — |
+| `~PEDResult` (one free per sample vector; sample) | — | — | 20 % of the C++ run | — |
+| DCM buck, whole C++ `simulate()` | 2.41 | 1004 | 869 | 827 |
+| `locate_event_exact_` (scan + Illinois; sample) | 0 | 0 | 41 % of the run | — |
+| predicate evaluation (`node_pair_voltage`, n = 2) | 0 | 0 | 3.4 (7 % of the run) | 3.4 |
+| binding conversion (`ped_result_to_dict`, right limits, `recover_full`; sample) | — | — | ≈ 30 % of the Python wall | — |
+| Python `segments_from_exact` (a tuple per segment) | — | — | ≈ 0.7 ms of 3.5 ms | ≈ 0.02 ms |
+| sync buck, Python `simulate()` wall | — | — | 3.54 ms (885 ns/step) | 2.39 ms (598 ns/step) |
+
+Reading: the per-step heap traffic is the sample store (the `Vector` copy of
+`states` and of `pre_event_states`, plus amortised growth); the stepping kernel
+allocates nothing. The C++ loop is ≈ 19 % of the Python wall; the rest is the
+binding conversion and Python post-processing. Decisions taken from it:
+(a) the tier-1 step caches `e^{λh}` and `h·φ₁(λh)·w` of the last `h` (bitwise; the
+same doubles, results bit-identical) — the transcendental part was the step's
+cost, not the `V⁻¹x` / `Vz` products a kept `z` would save; (b) the segment
+count is one `np.unique`; (c) 3.1, 3.2 and 3.3 are not done, with their numbers
+in tasks.md.
+
 ## Applicability rules
 
 The strategy is **selected by `auto`** when all hold:

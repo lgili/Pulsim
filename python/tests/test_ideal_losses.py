@@ -93,11 +93,12 @@ def test_static_path_records_the_ideal_diode_flips():
                    switch_fn=lambda t: p.SwitchStateMask(b.graph.num_switches))
     bid = next(c["branch_id"] for c in b.components() if c.get("name") == "D")
     ev = [e for e in r.commutation_events if e.branch_id == bid]
-    # The first step turns it ON (the start stamp is OFF); sin(2π·1e3·t + 0.3) then crosses
-    # zero at 0.45225 + 0.5·k ms. Stamped at the end of the step that flipped (shortcut).
-    assert [e.new_state for e in ev] == [True, False, True, False, True, False, True]
-    assert ev[0].t_estimated == pytest.approx(1e-6, abs=1e-15)
-    for k, e in enumerate(ev[1:]):
+    # The first step turns it ON from the start's OFF stamp at v = 2.96 V: conducting from
+    # t = 0+, no event (F-Z-14, as the conductance form). sin(2π·1e3·t + 0.3) then crosses
+    # zero at 0.45225 + 0.5·k ms; an ideal diode reads no chord while ON: stamped at the
+    # end of the step that flipped (shortcut).
+    assert [e.new_state for e in ev] == [False, True, False, True, False, True]
+    for k, e in enumerate(ev):
         lag = e.t_estimated - (0.45225e-3 + 0.5e-3 * k)
         assert 0.0 < lag <= 1e-6 + 1e-12
 

@@ -245,6 +245,9 @@ _CASES = {
              [(0.2e-3 + 3.3e-9, 0.9e-3 - 1.7e-9)], 1e-5, 0.0),
 }
 _LOOP_RUNS = {"pwl": dict(engine="pwl", dt=1e-6),
+              # F-Z-12: the restart rule's rows (right limits, split pieces)
+              "pwl-rule": dict(engine="pwl", dt=1e-6, discontinuity_restart=True,
+                               enable_substep_state_correction=True),
               "trbdf2": dict(engine="trbdf2", rtol=1e-7, atol=1e-10)}
 
 
@@ -272,6 +275,9 @@ def test_in_loop_feeding_equals_the_stored_array_pass(eng, case):
     # trbdf2 stores its settled post-event probe as a sample: the line from
     # the left limit to it (stored) vs from the settled state (in-loop)
     rtol = 1e-6 if eng == "trbdf2" and case in ("rect", "buck") else 1e-9
+    if eng == "pwl-rule":
+        _rule_feeds_agree(res, a, b, probes, 1e-6)
+        return
     for q in probes:
         for st in (lambda r: r.windows[q], lambda r: r.periods[q]):
             sa, sb = st(a), st(b)
@@ -291,7 +297,7 @@ def test_in_loop_feeding_equals_the_stored_array_pass(eng, case):
                     atol = rtol * span
                 np.testing.assert_allclose(sa[f], sb[f], rtol=rtol,
                                            atol=atol, err_msg=f"{q} {f}")
-    if eng == "pwl" or case not in ("rect", "buck"):
+    if eng != "trbdf2" or case not in ("rect", "buck"):
         ta, tb = np.asarray(a.times), np.asarray(b.times)
         keep = np.ones(tb.size, bool)
         if eng == "trbdf2":
@@ -305,6 +311,39 @@ def test_in_loop_feeding_equals_the_stored_array_pass(eng, case):
         np.testing.assert_array_equal(ta, tb[keep])
         for q in probes:
             np.testing.assert_allclose(a[q], np.asarray(b[q])[keep], rtol=1e-9, atol=1e-12)
+
+
+_GAMMA = 1.0 - 1.0 / np.sqrt(2.0)   # the SDIRK restart step's stage 1: BE over gamma*h
+
+
+def _rule_feeds_agree(res, a, b, probes, dt):
+    """F-Z-12, the restart rule's promise between the feeds. Sample-type
+    outputs are states in both: bit for bit. Integral-type: equal but on
+    restart steps, where the loop takes the step's SDIRK quadrature and the
+    stored pass the states' trapezoid; per step of length h at most
+    h*(2(1 - gamma) - 1/2)*2*max|y| (stage values within the record's
+    range), summed over the run's restart steps."""
+    ta, tb = np.asarray(a.times), np.asarray(b.times)
+    np.testing.assert_array_equal(ta, tb)
+    np.testing.assert_array_equal(a.event_t, b.event_t)
+    c = res.n_restart_steps * dt * (2.0 * (1.0 - _GAMMA) - 0.5) * 2.0
+    for q in probes:
+        np.testing.assert_array_equal(a[q], b[q], err_msg=q)
+        np.testing.assert_array_equal(a.event_left[q], b.event_left[q], err_msg=q)
+        np.testing.assert_array_equal(a.event_right[q], b.event_right[q], err_msg=q)
+        big = float(np.max(np.abs(b[q])))
+        for kind in ("windows", "periods"):
+            sa, sb = getattr(a, kind)[q], getattr(b, kind)[q]
+            for f in ("min", "t_min", "max", "t_max", "t0", "t1"):
+                np.testing.assert_array_equal(sa[f], sb[f], err_msg=(q, kind, f))
+            if res.n_restart_steps == 0:
+                for f in ("integral", "avg", "rms"):
+                    np.testing.assert_array_equal(sa[f], sb[f], err_msg=(q, kind, f))
+                continue
+            span = sb["t1"] - sb["t0"]
+            assert np.all(np.abs(sa["integral"] - sb["integral"]) <= c * big), (q, kind)
+            assert np.all(np.abs(sa["avg"] - sb["avg"]) <= c * big / span), (q, kind)
+            assert np.all(np.abs(sa["rms"] ** 2 - sb["rms"] ** 2) * span <= c * big * big), (q, kind)
 
 
 def test_store_every_gives_the_full_runs_statistics():
@@ -455,3 +494,100 @@ def test_stream_after_a_dropped_event_report_keeps_the_loop_rows(eng, monkeypatc
     np.testing.assert_allclose(x_s[:, 0], r["v(dp,dn)"], rtol=1e-12, atol=1e-12)
     again = st.get_new_samples()
     assert again is None or again[0].size == 0
+
+
+# ---- F-Z-12: the restart rule's rows, against a closed form ---------------
+
+_RL = dict(V=10.0, GS=1e3, GOFF=1e-9, RP=10.0, R=1.0, L=1e-4, F=100e3, D=0.37)
+
+
+def _rl_gated():
+    """V -> ideal gated switch -> node a (Rp to ground: the off path) ->
+    R -> L -> ground. Linear in each mode; D = 0.37 puts every turn-off
+    inside a 1 us step (the fixed engine splits it)."""
+    c = _RL
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "vin", "gnd", c["V"])
+    b.add_switch("S", "vin", "a", g_on=c["GS"], g_off=c["GOFF"])
+    b.add_resistor("Rp", "a", "gnd", c["RP"])
+    b.add_resistor("R", "a", "m", c["R"])
+    b.add_inductor("L", "m", "gnd", c["L"])
+    return b, p.make_pwm_switch_fn(c["F"], c["D"], b.switch_index_of("S"),
+                                   b.graph.num_switches)
+
+
+def _rl_modes():
+    """(on, off): the mode's (i_inf, tau) of L di/dt = Vth - Req i."""
+    c = _RL
+    out = []
+    for g in (c["GS"], c["GOFF"]):
+        gt = g + 1.0 / c["RP"]
+        req = c["R"] + 1.0 / gt
+        out.append((g * c["V"] / gt / req, c["L"] / req))
+    return out
+
+
+def _rl_period_integrals(t_end, per):
+    """Closed form: the exact integral of i_L over each period from i(0)=0."""
+    T, D = 1.0 / _RL["F"], _RL["D"]
+    (inf_on, tau_on), (inf_off, tau_off) = _rl_modes()
+    n = int(round(t_end / per))
+    cuts = sorted({k * T + d for k in range(int(round(t_end / T)) + 1)
+                   for d in (0.0, D * T)} | {k * per for k in range(n + 1)})
+    cuts = [x for x in cuts if x <= t_end * (1 + 1e-12)]
+    i0, acc, out = 0.0, 0.0, []
+    for a, b in zip(cuts[:-1], cuts[1:]):
+        on = (a - np.floor(a / T + 1e-9) * T) < D * T * (1 - 1e-9)
+        inf, tau = (inf_on, tau_on) if on else (inf_off, tau_off)
+        e = np.exp(-(b - a) / tau)
+        acc += inf * (b - a) + (i0 - inf) * tau * (1.0 - e)
+        i0 = inf + (i0 - inf) * e
+        if abs(b / per - round(b / per)) < 1e-9:
+            out.append(acc)
+            acc = 0.0
+    return np.asarray(out)
+
+
+def test_restart_rule_feeds_agree_with_a_closed_form():
+    """F-Z-12 on a cell with smooth restart pieces only (gate-switched RL,
+    no diode). The feeds' sample-type outputs are equal bit for bit. On a
+    restart piece of length h the loop's SDIRK quadrature h[(1-g)Y1 + gY2]
+    and the stored trapezoid h(y0 + Y2)/2 differ by (g - 1/4) h^3 y'' +
+    O(h^4) (g = 1 - 1/sqrt 2; Y1 = y(a + g h) + O(h^2) from stage 1's
+    backward Euler): summed over the run's restart steps the gap stays
+    under |g - 1/4| dt^3 max|i''| each (measured slack 45-54x) and falls
+    as dt^3. The loop's period integrals converge to the closed form as
+    dt^2 (measured ratios 3.49, 3.66, 3.89 per halving)."""
+    from pulsim._recorders import record_result
+    t_end, per = 2e-4, 1e-5
+    exact = _rl_period_integrals(t_end, per)
+    (inf_on, tau_on), (_, tau_off) = _rl_modes()
+    # |i''| = |i'| / tau <= (|i_inf - i| / tau^2) over both modes, i in [0, inf_on]
+    d2 = inf_on / min(tau_on, tau_off) ** 2
+    errs, gaps = [], []
+    for dt in (1e-6, 5e-7, 2.5e-7, 1.25e-7):
+        b, fn = _rl_gated()
+        rec = p.Recorder("r", ["i(L)", "v(a)"], period=per)
+        res = p.simulate(b, t_end=t_end, engine="pwl", dt=dt, switch_fn=fn,
+                         recorders=[rec], discontinuity_restart=True,
+                         enable_substep_state_correction=True)
+        assert res.recorder_feed["mode"] == "in-loop"
+        assert len(res.inner_events["times"]) > 0       # the split is exercised
+        a, s = res.recorded["r"], record_result(res, [rec])["r"]
+        np.testing.assert_array_equal(a.event_t, s.event_t)
+        for q in ("i(L)", "v(a)"):
+            np.testing.assert_array_equal(a[q], s[q])
+            np.testing.assert_array_equal(a.event_right[q], s.event_right[q])
+            np.testing.assert_array_equal(a.periods[q]["max"], s.periods[q]["max"])
+        ia, ib = a.periods["i(L)"]["integral"], s.periods["i(L)"]["integral"]
+        gap = float(np.sum(np.abs(ia - ib)))
+        assert gap <= res.n_restart_steps * abs(_GAMMA - 0.25) * dt ** 3 * d2, (dt, gap)
+        gaps.append(gap)
+        assert ia.size == exact.size
+        # the states' own dt^2/12 * T * |i''| plus the quadrature's, of the same form
+        err = float(np.max(np.abs(ia - exact)))
+        assert err <= 2 * dt ** 2 / 12 * per * d2, (dt, err)
+        errs.append(err)
+    r = np.array(errs[:-1]) / np.array(errs[1:])
+    assert r[0] > 3.3 and np.all(r[1:] > 3.5), errs
+    assert np.all(np.array(gaps[:-1]) / np.array(gaps[1:]) > 5.0), gaps

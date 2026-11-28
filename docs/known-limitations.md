@@ -38,6 +38,10 @@ The numbers are in the `Known limitations` part of the 2.1.0 entry of the
   42.750 V 0.1 us after the edge, 42.114 V at 0.4 us against 41.48 V). On 2.1.0 the rule is off by default; with it on, compare
   against `trbdf2` before trusting it on a converter whose diode commutates
   right after a gate edge.
+  Without event splitting, a diode that turns off inside a restart step's
+  first stage is not located either: the step keeps a first-order kick
+  (`half_bridge_transformer_dc`, dt = 100 ns: up to 3.3e-6 V on V(out) per
+  such turn-off; with `enable_substep_state_correction=True` it is located).
   Without event splitting, a sample of an algebraic signal that is
   discontinuous at a rounded edge is the pre-edge value: `scr_halfwave_r`
   on `pwl` with the rule reads 0.0271 against its analytic truth (1.47e-16
@@ -46,20 +50,59 @@ The numbers are in the `Known limitations` part of the 2.1.0 entry of the
   energy reads about −10 % of the exact truth (the C_oss collapse row;
   strict xfail in `python/tests/test_soft_switching_kpi.py`,
   [Soft switching](SOFT_SWITCHING.md)).
-* **Restart rule, recorders** (finding F-Z-12): the in-loop recorder feed
-  and the stored-array pass integrate different functions across an edge.
-  The in-loop window integral of i(L) is −1.98e-4 relative to the truth,
-  the stored arrays' +2.9e-5. Cause: the stored right limits are the true
-  x(t⁺) while the in-loop feed keeps the quadrature line starts and held
-  rows. A fix is in progress; the gaps are strict xfails in
-  `python/tests/test_release_findings_b2.py`.
+* **Restart rule, recorders** (finding F-Z-12): the in-loop feed and the
+  stored-array pass agree bit for bit on every sample-type output (kept
+  rows, `min` / `max` and their times) and on the event rows. The
+  integral-type readings (`integral`, `avg`, `rms`) are two different
+  quadratures: the in-loop record is the method's own SDIRK quadrature,
+  which keeps `∫i_C dt = C·Δv` and the energy ledgers closed to round-off;
+  the stored-array pass is the trapezoid of the state values. They are
+  equal off restart steps and differ on a restart step by the leading-order
+  estimate (smooth piece) or the bound (mixed-mode step) derived in the
+  recorders section of [API reference](api-reference.md). A window that
+  ends inside a mixed-mode restart step is first order in that end
+  (the charge `∫i_C` against `C·Δv` of the read states: 2.6e-5 relative at
+  1 µs on a PWM buck, half that at 0.5 µs; 1.7e-3 before the fix).
+  On the measured DCM buck (restart rule, no split, dt = 1 µs) the stored
+  trapezoid was the closer of the two to the truth (the exact engine at
+  dt = 25 ns): the window integral of i(L) is +2.9e-5 relative from the
+  stored arrays, −1.97e-4 in the loop (on a smooth gate-switched RL cell
+  the two agree to 1e-9). The gap is a cancellation, not a better
+  quadrature: it comes from the steps whose mode changes without a
+  located event (a diode turn-off inside the step), where the two
+  quadratures are equally far from the truth with opposite signs (sum
+  −1.14e-4 in the loop, +1.10e-4 stored, over 160 such steps); the stored
+  sign happens to cancel the other steps' −7.8e-5. The feeds' agreement is
+  asserted in `python/tests/test_release_findings_b2.py`.
 * **Event splitting** (with the restart rule): a retried step is re-taken
   without its interior events; an even number of edges of an opaque
-  `switch_fn` inside one step is not seen. A diode turn-on that falls one
-  or two steps after a located turn-off is taken at a grid point, up to
-  0.936·dt late (`python/tests/test_split_locator_reconduction.py`, strict
-  xfail). Locating an event costs trial solves, each a factorisation: 4–6
-  trials per located event.
+  `switch_fn` inside one step is not seen. A diode flip in the restart
+  window after an event is located (turn-on and turn-off), except: a flip
+  in the first stage of a sub-step that starts at an event (taken at the
+  event), a second flip in the rest of an already cut restart step, and a
+  flip inside the run's first step (taken at the step end, up to 1·dt late;
+  `python/tests/test_split_locator_reconduction.py`). The rule alone dates
+  a diode flip inside a step at the step end (no locator): on
+  `forward_converter` the D_fw hand-over after the switch turn-on costs the
+  exact grade 1.5e-4 / 3.3e-5 / 3.5e-5 at dt = 100 / 50 / 25 ns (first
+  order, phase dependent); with the split 1.0e-6 / 3.2e-7 / 2.7e-7 (the
+  waveform's own level). (F-R-4, fixed: the D_rect re-conduction 6.1 ns
+  after the turn-off was held off for a step because the edge's projection
+  fitted one of the two winding modes; it now conducts from the edge.)
+  Locating an event costs trial solves, each a factorisation: 4–7 trials per located event.
+  A current that ramps to zero inside a restart piece after a switch
+  turn-off (an exponential freewheel diode: there is no diode state to
+  locate) was read by the restart probe as a jump when it ended within
+  1.185·γh of the event: the step recorded a `cut_set` and dropped the
+  current as an impulse (`ll15_boost_closed_loop` at dt = 0.5 us: 60 mA
+  conducting 84 ns, V(vout) 4.3e-3 V low). With the split the piece is now
+  cut where the ramp ends (fixed: ll15 V(vout) offset 2.2e-4 V, the charge
+  over the edge step 0.52 -> 2.51 nC). Still open: a ramp shorter than
+  γ²h ≈ 0.086·h stays an impulse (the probe cannot tell it from a fast
+  mode; ll15's start-up edges, 413 records); one ending between 1.185·γh
+  and the step end is integrated across by SDIRK (+17 % charge at 0.72·h,
+  `python/tests/test_restart_ramp_end_cut.py`); the rule alone keeps the
+  impulse.
 * **Exact engine output rule** (`engine='exact', output_rtol=...`): a
   thermal summary read from stored samples depends on the output grid.
   The first line after an event (within 2 ps of it) can exceed the rule:
@@ -276,6 +319,7 @@ event where the signal jumps.
 
 | Limitation | Measured | Workaround |
 |---|---|---|
+| **`trbdf2` on the active-clamp forward converter (`ll13_active_clamp_forward`): every MOSFET turn-off edge costs hundreds of steps below 1e-11 s.** The post-edge mode has a parasitic mode of tau ~ 2e-13 s; the committed edge probe is a trapezoidal step of dtp >> tau, which leaves that mode ringing (amplification ~ -0.99), and the step controller then resolves it, at nodes of up to 3.5e8 V. | Up to 389 steps below 1e-11 s per turn-off at rtol 1e-8 (1806 at rtol 1e-10). The three aborts at those nodes ("Newton failed ... at h_min" at rtol 1e-6 / 1.6 us, 1e-8 / 3 us and 1e-10 / 100 us) are fixed: Newton's round-off acceptance now takes an iterate whose step is at the rounding propagated to each unknown. All 18 measured runs (rtol 1e-6 / 1e-8 / 1e-10, 1.6 to 100 us) complete on macOS arm64. A backward-Euler edge probe was measured and not adopted (one more abort). | For fewer steps, use `engine='pwl'` with an explicit `dt`. |
 | **`dsed` can settle a zero-band diode into the wrong mode; two guards stop it being returned.** The complementarity guard (default) judges each settled mode and repairs the wrong ones with the LCP; the stored-sample guard raises `DiodeModeInconsistentError` for what the kernel guard misses. | Boost 12 V, 100 µH, 47 µF, 100 kHz, D = 0.5, V_th = 0 at 20 / 50 / 500 Ω: repaired (7 / 16 / 23 events), ends on trbdf2 rtol 1e-10. LC tank into a series diode with V_th = 0 (a double crossing inside one step): the kernel guard returns v = -5.18 V at 10 µs (trbdf2 9.50 V); the stored-sample guard raises. | `V_th = 1e-3` for the double crossing, or `pwl` / `trbdf2`. |
 | **The exact engine with the default mode selection loses a flyback's magnetising energy at every turn-off.** At the gate-off the secondary diode's current is a state at 0, so the settle reads its voltage as 0 and keeps it OFF; the forward bias exists only inside the 1e-14 s `R_off` transient in which the coupling would carry the current over, and the guard's judge (horizons past that transient) confirms the mode. A default-path defect; `mode_selection='auto'` (the next defaults) does not have it. Pinned as a strict xfail: `test_release_findings_c.py::test_the_flyback_secondary_conducts_on_the_exact_engine[legacy]`; notes: `openspec/changes/update-number-changing-release/fixes/group-c.md` (F-3-3 side observation). | `_flyback(False, 1.0)` of `test_saturable_transformer.py` (100 kHz, D = 0.5, `engine='dsed'`, 1 ms): v_out over 0.8-1 ms is 0.000 V (also at `rtol=1e-9`); the primary current drops from 2.06 A to 1e-7 A at each gate-off. `mode_selection='auto'` gives 16.357 V; truth 16.365 V (the fixed engine with the restart rule at dt 10 / 5 / 2.5 ns, and the exact engine under `'auto'`). | `mode_selection='auto'` or `'lcp'` on the exact engine, or `engine='pwl'` with `dt` and `discontinuity_restart=True`. |
 | **Fixed-step controller ticks land on the `dt` grid.** Source j ticks at `t_start + k*T_j` on both engines; `trbdf2` lands each instant, `pwl` delivers it at the first grid point at or after it. | `T = 2.5*dt` over 100 µs at `dt` = 1 µs: 40 ticks, each late by less than `dt` (`result.control_tick_jitter_max`), with a warning; `T < dt` raises. | `dt = T/n`, or omit `dt` (`trbdf2`). |
@@ -289,6 +333,7 @@ event where the signal jumps.
 | The sliding-mode warning says `engine='auto'` even when `engine='trbdf2'` was requested. | Seen on the `V_th = 0` bridge above. | None needed: the warning describes the TR-BDF2 run. |
 | **`trbdf2` and `auto` can crash the Python process.** | The saturable-primary PSFB of the mask-chatter row, with no `dt`. With `t_end = 0.2 ms` it raises `SimulationAborted` at t = 0 (`h_min`). With `t_end = 2 ms` the process dies with a segmentation fault (exit code 139). | Pass `dt`. Run variable-step jobs you cannot vet in a subprocess. |
 | **A rectifier whose DC side floats cannot start on `engine='auto'`.** Guide trap 8. | 100 V bridge with the DC rails not connected to ground. It aborts with `factorize failed (numerically singular) ... (dt=6e-14) ... node dcn`. A 1 MΩ or 1 GΩ resistor from `dcn` to ground does not help. | Ground one DC rail (92.83 V on TR-BDF2), or pass `dt` (92.54 V at `dt=1e-5`). |
+| **TR-BDF2 can step over the first pulse of a Python `switch_fn`.** Before a gate bit has closed a pulse the engine samples it at 4 equal points of each step plus one walking point, at most `h_max/4` apart, and more coarsely while another bit toggles with wider pulses. Once it has closed a pulse, no later pulse at least half as wide as the bit's narrower recent width (quiet: the run's narrowest pulse) is stepped over (`simulate` docstring, `switch_fn`). Pinned by `test_trbdf2_post_event_restart.py`. | Tick buck, 100 ns pulses every 30 µs, then every 10 µs, 1 ms run (h_max = 1 µs): the four regular samples are 250 ns apart and phase-locked to the 10 µs period, so only the walking sample can hit a pulse before one is seen. Both device forms stepped over the 30 µs pulse; the branch form stepped over the 60 µs one too, and saw every pulse from 90 µs on. | Pass `dt` of at most 4x the first pulse's width (one gate bit), start that pulse on a source breakpoint or a controller tick, or declare the edges (`p.NativePwm2Switch`, `next_edge_after`). |
 | **DSED polls a Python `switch_fn`, so it misses gate intervals shorter than the polling period.** The poll runs every `dt_max/10` (1 µs on a 2 ms run). The warning calls this "correct but slower". | 48 V synchronous buck, 100 kHz, D = 0.4, 200 ns dead time, 50 Ω. With no `dt`, the body diodes are never ON in the record over 1-2 ms (31 % of the samples on `pwl`). V_out over that window is 19.73 V against 20.35 V on `pwl` (-3.1 %). With `dt=1e-7` DSED gives 20.350 V. | Pass a `dt` of at most half the shortest gate interval, or use `engine='pwl'`. |
 | `simulate(engine='dsed')` with no `switch_fn` warns that it will poll "this plain Python switch_fn". | RC plus diode, no `switch_fn`: the run is correct but prints that warning. | Ignore it. |
 | `start_from_dc_op=True` works only on the fixed engine. | Without `dt` it raises `ValueError: ... start_from_dc_op is a fixed-step entry point`. | Pass `dt`. |

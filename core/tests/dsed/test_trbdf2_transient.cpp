@@ -626,7 +626,11 @@ TEST_CASE("TR-BDF2: derivative slots are refreshed after a gate edge",
                 const Real expect = V - (R + r_on) * i_prev;
                 if (refresh) {
                     REQUIRE(v_prev == Approx(expect).epsilon(1e-8));
-                    REQUIRE(st.n_derivative_refreshes == 1);
+                    // 2: the edge, and the zero start (no initial_state):
+                    // i(0) = 0 through the OFF switch's 1 GOhm leaves
+                    // v_L(0+) = V - i (R + 1e9) = V = 10 V, not the init
+                    // slot's 0 V, so the start takes the probe's slot.
+                    REQUIRE(st.n_derivative_refreshes == 2);
                 } else {
                     REQUIRE(std::abs(v_prev) < 1e-6);
                     REQUIRE(st.n_derivative_refreshes == 0);

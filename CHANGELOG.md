@@ -6,6 +6,147 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Event splitting: a current that ramps to zero inside a restart piece is cut there, not dropped
+
+- With `discontinuity_restart=True, enable_substep_state_correction=True`, after a switch turn-off the current of an exponential (Newton) freewheel diode falls at a steady rate and reaches zero inside the piece. When it ended within 1.185·γh of the event the restart probe read that ramp as a jump: a `cut_set` record and the whole current dropped as an impulse, its charge ½·i·θ never delivered (`ll15_boost_closed_loop` at dt = 0.5 us: 60 mA conducting 84 ns, 879 records in 5 ms, V(vout) 4.3e-3 V low at 4510 us). The probe now tells a ramp from a fast mode by one extra backward-Euler stage of 1e-3·γh (the start's own slope): a state that moved |s3 − s0| = r·θ with θ ≥ γ²h comes from a slope ending at θ, since every single mode the jump test flags (τ < γ²h) gives θ < γ²h. The step is cut at θ (piece A on the slope, piece B from rest, one cut per piece, counted in `n_restart_cuts`). ll15: records 879 -> 413, charge over the edge step 0.52 -> 2.51 nC, V(vout) offset at 4510 us -4.27e-3 -> -2.19e-4 V, rms against a dt/100 run 2.16e-3 -> 5.50e-4; ll14: the edge kick at 341.5 us -1.10e-5 -> +1.6e-8 V. ll14's rms rises 1.84e-3 -> 1.88e-3: its dropped charge had cancelled an independent positive drift (500-2500 us), every changed edge kick is ~1000× smaller. A ramp shorter than γ²h still records the impulse (what the probe resolves); the rule alone and the rule off are unchanged.
+
+### trbdf2 / esdirk43: Newton round-off acceptance at very high node voltages
+
+At the active-clamp forward converter's turn-off edges (`ll13_active_clamp_forward`), nodes reach 3.5e8 V
+inside a 2e-13 s mode. Some short steps there ended Newton at the 50-iteration budget with the residual at
+round-off (under 0.5 eps of each row's own terms), and the round-off acceptance still declined them. Its
+fixed-point test wanted every unknown's last step within 4 eps of its own value, but some unknowns are set by
+rows of much larger terms. The Vin branch current is 13 A and is set by 1e8 V terms, so it moved 3.7e-9 A,
+two million of its own ulps. A node of a nearly singular short step moved 48 eps. The step fell to h_min,
+and three run lengths aborted (rtol 1e-6 / 1.6 us, 1e-8 / 3 us, 1e-10 / 100 us). The test now also takes a
+step at the rounding PROPAGATED to that unknown: omega_max |J^-1| (|J||x| + |b|), estimated from below with
+two solves on the iterate's own factor. It runs only on a stagnated solve that exhausted its budget, and only
+with judge_own_scale (trbdf2 / esdirk43). The absolute dx tolerance, the residual backward-error test, the
+stagnation windows and the dx cap are unchanged. Default `pwl` step solves are byte-identical; the fixed
+engine's event right-limit solve (which already judged at its own scale) gets the same rule (pwl+restart /
+pwl+split identity: ll13 fewer right-limit fallbacks, ll08 inner-event right states). All 18 measured ll13
+runs complete; the 3 us expected failure is removed. ll13 trbdf2 grade 0.00109 -> 0.00123 (ceiling 0.00133).
+
+### TR-BDF2: a quiet gate bit keeps its samples while another bit toggles; the opaque `switch_fn` guarantee is stated (F-Z-18)
+
+`test_a_gate_that_gets_faster_loses_no_pulse` failed with branch-form devices (77 of 78 pulses). This was not an engine defect:
+the lost 60 µs pulse was the gate's second pulse, and the first had been stepped over too, so the engine had learned nothing.
+At h_max = 1 µs the four regular samples are 250 ns apart and phase-locked to the 10 µs period. Only the walking sample
+could hit a 100 ns pulse, and its phase follows the start-up steps. The test now lands the first pulse on a source
+breakpoint, runs on both device forms, and checks every edge against the bisection bound (h_min). A second test puts
+220 ns pulses after 300 µs of 800 ns quiet steps.
+
+The review of that guarantee found a real defect with two gate bits. A quiet bit caps the step at twice the narrowest
+pulse of the run, but the number of samples per step followed only the bits that were toggling. Under a 50 % PWM on
+another bit, that was one sample per step, and 2 of 8 later 60 ns pulses went unseen (100 ns narrowest). A step capped by a
+quiet bit now keeps at least 4 samples. Single-bit gates are unchanged. The `simulate` docstring (`switch_fn`) and
+known-limitations state the guarantee. Before a bit has closed a pulse, nothing is guaranteed. After that, no pulse at least
+half as wide as the bit's recent narrower width is stepped over (while the bit is quiet: the run's narrowest pulse).
+
+### Restart rule: a located rectifier turn-off is no longer thrown away by round-off at the crossing
+
+- Under `discontinuity_restart=True` a diode turn-off inside a step is located and the step cut there; the first piece ends at the crossing (v_D = 0), so its stage 2 may iterate on that round-off. A flip-and-back there was left as solved, read as an unsettled piece, and the uncut step stood: on `half_bridge_transformer_dc` (dt = 100 ns) the secondary kept 15-35 % of its off-state settling at such steps (+3.3e-6 V on V(out) each, first order in dt). Which steps hit it depended on 1e-9 V differences in the previous switch edge's projection, so the change to the projection's fit order above fixed one edge and broke another. The first piece's stage 2 is now re-solved in stage 1's mode when every diode it moved is one the locator found crossing at the cut (a real flip of another diode inside the piece is taken as in any other step and counted in `result.counters["restart_piece1_flips_kept"]`): those positive kicks are gone (sum of |V(out)| step errors at diode turn-offs 4.20e-5 V -> 2.27e-5 V; what remains are turn-offs inside stage 1, which the rule alone does not locate). On `sepic`, `two_phase_interleaved_boost` and `cascaded_boost_buck` (rule alone) the rms against a dt/100 run rises although no switching kick grew: the removed positive kicks had cancelled the remaining stage-1 ones.
+
+### Restart rule: the edge's projection takes every fast mode of a two-winding cut (F-R-4)
+
+- Under `discontinuity_restart=True` the impulse probe's vector series stopped growing its fit at the jump test's leakage floor g_leak·(1 + v_max), whose v_max is stage 1's impulse voltage (6.5 kV, 19.5 mA on `forward_converter`'s switch-off), so of the two fast modes of a transformer whose windings both see only g_off (leakage ρ = 3.7e-4, magnetizing ρ = 0.013) only one was projected: 5 % of the magnetizing mode stayed in x0+, D_rect re-decided there stayed off and its re-conduction (6.1 ns after the edge in the truth) was dated a step late — exact grade 7.1e-4 / 3.3e-4 / 1.5e-4 at dt = 100 / 50 / 25 ns, first order. The fit now grows while the next second difference is above the stages' relative rounding (the floors still decide acceptance; the same Ritz criterion ρ ≤ γ/(1 + γ) decides what is fast). D_rect now conducts from the edge and the re-initialisation books ½·JᵀLJ with x0+ = (g_off·V_in, 0) to rel 1e-8. `forward_converter` with the split: 1.0e-6 / 3.2e-7 / 2.7e-7 (the waveform's level); with the rule alone 1.5e-4 / 3.3e-5 / 3.5e-5, now set by the D_fw hand-over the rule alone does not locate. Flyback: the secondary current 100 ns after the switch-off equals the exact truth to 1e-11 A (was 1.05e-5 A off) and the stage-2 BE re-take no longer fires there. Only rule-on cells move (19 of 585; rule off byte-identical); no reference class changes.
+
+### Restart rule: a gapped core and its equivalent inductor take the same restart step (F-Z-11)
+
+- Under `discontinuity_restart=True` the impulse probe tested an inductor current against the OFF-leakage floor g_leak·(1 + v_max) but a capacitor state against none, so a permeance's MMF (the same physical state as a winding's current, scaled by N) read a leakage-level flux as a jump: at each DCM body-diode turn-off of a buck the magnetic formulation recorded a `capacitor_loop` re-initialisation (λ ≈ 5e-14 Wb) and its impulsive branch moved the output capacitor by its O(h²) second difference, while the inductor formulation did not. A capacitor on the port-2 island of a gyrator (a winding's magnetic network) now gets that floor mapped through the gyrator, g_leak·(1 + v_max)/g (a saturable or table permeance, in charge: that floor times C(v)). The gapped-core buck and its inductor now agree to 3.6e-12 rel under the rule alone (was 6.45e-9; 1.9e-8 / 1.0e-9 at dt 2e-7 / 5e-8), with no re-initialisation records in either. Circuits without a gyrator: byte-identical; rule off: byte-identical.
+- The saturable-permeance path of that floor is now tested: the same buck with a saturable core (`test_saturable_core_in_a_switching_buck_takes_the_gyrator_floor`) records no re-initialisation under the rule alone or with the split, below the knee (B_sat 3500 T; it equals the linear core to 6.96e-10 rel, the law's curvature, rule on or off) and saturating (0.35 T); before the fix the rule alone recorded 20 per 1 ms in both.
+
+### Fixed engine, split: a failed right-limit solve at a located crossing publishes a consistent state and mask
+
+- With `enable_substep_state_correction=True`, when the right-limit solve at a located V_f = 0 diode crossing failed, the row kept the left state but could carry a diode mask the solve had already re-decided. The row now pairs the left state with the mask decided before the solve (the pair the rule without the split publishes there). Split off: unreachable.
+
+### Exact engine: faster steps on a repeated step length (results unchanged)
+
+A step of the exact engine reuses each mode's `e^{λh}` and `h·φ₁(λh)·w` when its length equals the previous step's, and the route record counts its segments with one `np.unique`. Stored arrays are bit-identical. The 2000-period synchronous buck runs in 2.4 ms instead of 3.5 ms; the measurement behind it (where the step's bytes and time go) is in the exact-propagator design notes.
+
+### TR-BDF2: a run started from an inconsistent state now starts from a consistent one, and its numbers move (F-Z-6, part 1)
+
+- `ll13_active_clamp_forward` at `trbdf2` rtol 1e-8 aborted at t = 0 for some run lengths (3 us: "Newton failed ... at h_min"). From a zero start the linear entries of a circuit without a stateful kind kept the init's derivative slots (v_L = 0 where the leakage inductor carries 48 V at t = 0+); the first step's estimate was O(h) at every h, the step sank to h_min = span * 1e-11, and that floor decided the run. Now, on a fresh run from the zero start (no `initial_state`) without a stateful kind (with or without sensitivities; a resume keeps its snapshot's slots, a given `initial_state` is a DC operating point with zero slots by contract and keeps them, so periodic-steady-state period runs are unchanged, and so is a start whose slots are already consistent or a run with `refresh_after_event` off), a probe at t_start under the start mode is compared with the slots, and when any slot is off by more than its tolerance over the first step the start takes the probe as a gate edge does: its slots only when the probe stayed at the floor and the states did not move over it, otherwise the probe is committed as a trapezoidal step of its own (ll13: its states move over a 1e-18 s probe). The probe leaves no probe state behind (learned probe floor, round-off counters) and a probe that fails, round-off budget included, keeps the init slots. It costs one probe solve per fresh run, none per step.
+- Default `trbdf2` results move for every circuit started from an inconsistent state (a source onto a zero start): the start's rejection cascade is gone (an RC step response: 66 -> 57 steps at the same error, 5.22e-4 V; a PWM half bridge: 1031 -> 1025 samples). On the reference set (trbdf2 column, 139 cells) 91 cells move, none changes class, the new/old error ratio has median 1.000 (quartiles 0.994 / 1.003, extremes 0.06 .. 1.25). The grade's reference is the same engine at rtol 1e-8, which moves too: rc_step (1.13x) is byte-identical at its default tolerance and its reference's error against the closed form is unchanged (4.2597e-7 of 5 V both), the grade moved with the reference's sample placement; ll13_active_clamp_forward (0.00108 -> 0.00135) is 3 % more accurate before its first turn-off edge (1.062e-3 vs 1.095e-3 against two rtol 1e-10 runs that agree there to 1.6e-7), and after the turn-off edges two rtol 1e-10 runs of the old and new code disagree by 1.3e-3 (part 2); t_type_3level (1.03x) differs by 1.8e-6 against rtol 1e-10 runs that disagree with each other by 1.6e-5. ll13 at rtol 1e-8: no t = 0 abort at any run length; runs of 5, 20 and 50 us agree on [0, 3 us] to 1.2e-6 rms of each state's peak. Aborts left at its turn-off edges (part 2, open): rtol 1e-6 @ 1.6 us, 1e-8 @ 3 us, 1e-10 @ 100 us (2.1.0 / the base: 1e-8 @ 1.6 us, and t = 0 at 1e-8 @ 3 us, 1e-10 @ 3 us and 100 us).
+- A consistent start whose sources move is no longer judged inconsistent: the probe's slot at t + dtp carries the source's own motion over dtp (rc_step's 5e9 V/s ramp from 0 V), so when a slot is off by more than its tolerance a second probe at 2 dtp extrapolates each slot's jump to dtp -> 0, and only a jump that survives the extrapolation (v_L = 0 against 10 V across an inductor at t = 0+) takes the probe. rc_step at rtol 1e-8 is byte-identical to the base again (it was committing its probe); circuits started from a truly inconsistent state are unchanged by this. Costs two more probe solves (the 2 dtp probe and a re-solve of the first, whose factor the sensitivity stage reads) on a fresh run whose first check fails. A re-solve that fails, or lands at another probe length, takes no probe (the start keeps its init slots) rather than commit a probe whose factor is not resident.
+- In-loop recorders: a settled event report before the run's first step hook (a diode landing at the end of the first step, which a consistent start makes possible) was dropped and the whole record fell back to the stored-arrays pass; it is now placed by that step.
+
+### Fixed engine, split: event rows at located diode crossings obey KCL and the diode law
+
+- With `discontinuity_restart=True, enable_substep_state_correction=True`, a located crossing where only V_f = 0 diodes flip was published as a continuity point: the right limit was the left state read under the new mode's law. A turn-on read `g_on·v_D(left)` (the location's residual voltage): on a bridge rectifier `i(D1)` = 2.06 mA at t = 21.79 ms (KCL at `s` / `dp` off by 2.06 mA) and `i(D3)` = 17.1 mA at t = 30.004 ms (KCL at `s` / `dn` off by 17.1 mA). The right limit is now solved in the decided mode like every other event's, for the recorder rows, the stored right-limit states and the loss booking; every row now satisfies KCL to the solver's floor and each diode reads its ON or OFF law (`test_recorder_device_readings.py::test_every_row_obeys_kcl_and_the_diode_law`, rectifier and `diode_half_wave_rl_load`). A turn-off's right limit follows the OFF law: `v_out` moves by the residual current through `1/g_off` (2.8e-5 V on the half-wave RL load). The rule alone (split off) and the default engine are unchanged.
+
+### Exact engine, `output_rtol`: the first sample after an event is placed by the rule
+
+- The sample stored just past an event (F-X-7) sat a fixed 2 ps out; on a node with a fast resolved post-event mode the chord from the right limit to it left the trajectory by up to 59 × the promise (`cl_buck_pi`'s switch node; `buck_dcm` 5.4 ×). It is now the rule's own chord step from the right limit, at most 2 ps and at least `64·eps·max(1, |t|)`, counted in the interval's cap and the run's budget. Referee: first line after an event 59.4 → 1.5e-5 (`cl_buck_pi`), 2.79 → 0.91 (`cl_boost_pi`), 5.42 → 1.7e-5 (`buck_dcm`); a closing switch on an RC (τ = 50 ps) 19.7 × → 0.99 × against the closed form. Samples: ≈ 2 more per event on `cl_buck_pi` (+3030 over 1491 events), 0.04 on `cl_boost_pi`, 0.4 on `buck_dcm`; open-loop cells unchanged. Without `output_rtol` nothing changes.
+
+### Exact engine: every event projection is recorded, rule on or off (F-R-3, F-SB-3)
+
+- At a diode turn-off the exact engine projects out the modes faster than its parasitic window (`diode_half_wave_rl_load`: the 1 ns `L·g_off` mode; V(out)'s right limit is the settled −3.1e-6 V where the unprojected flow starts at −0.31385 V). Without the output rule nothing recorded that, so the scoreboard's rule (1) could not see it and graded the right limit as wrong: 0.0304 of the range. Every run now carries `diagnostics['event_projections']` (`n_projections`, `projection_max_by_column`, `projections`: instant, amplitude, column, `tau`; the keys `diagnostics['output_grid']` already had under the rule), and the scoreboard's rule (1) reads them. `res.times` does NOT change: one row per stored sample, the left limit at an event, right limits in `right_limit_*` (`pulsim.with_event_limits` inserts them one ulp later, opt-in). Times, states, switch states and right limits are unchanged to the bit.
+- Without the output rule the record is read from the state alone (no recovery: no extra source or `b_extra_fn` evaluation, no allocation per event): `amplitude` is the largest state move, `column` None, `projection_max_by_column` zero; the records are built on first read of `diagnostics['event_projections']`, and `capped` says when more than the 1000 kept were projected. Default-option exact runs cost within 0.5 % of a step of the base.
+
+### Voltage check: a restart-rule cut is judged by its impulse over the step, so `voltage_sanity_factor` can silence it (F-Z-15)
+
+- Under `discontinuity_restart=True` the right-limit row at an inductor-current cut holds the switch model's i·R_off (2.4e12 V for 2.4 A into 1e-12 S), which depends on the arbitrary R_off and exceeded any sensible factor. A row at a `cut_set` record's instant, on the cutting devices' terminals, is now judged by the cut's own size |λ|/dt (2.4e-3 V·s / 1e-8 s = 2.4e5 V = 5000 × 48 V): it still warns at the default factor 100 and is silent at 6000. The message reports both numbers and says which was judged; `ImplausibleVoltage.peak` is the judged value and the object now exposes `cut_device`, `cut_state`, `cut_kind`, `cut_size`, `cut_energy`, `cut_measure`, `cut_row_voltage`, `cut_step`. A cut that is physically modest (|λ|/dt under 100× the sources, e.g. the diode-less VSI at dt = 2e-6: 1.3e4 V against 3e4 V) no longer raises the voltage warning at the default factor (the release tests expect exactly this); its records stay in `result.reinit_records`, and on this line no other warning reports its destroyed energy (the release line's impulse-energy warning does). Rows not at a cut, other nodes in a cut's row, capacitor-loop records: judged as before, and so is a non-finite row (a failed solve, not a cut). `simulate()` on `pwl` / `trbdf2` and `Simulation` share the one check; `engine='exact'` judges its right-limit rows apart, with no records, and still reads them as node voltages. The step is the nominal dt (a retried or split step's shorter piece is not used). Results are unchanged; on the identity set the warning object is gone on five `pwl+restart` / `pwl+split` cells (half_bridge_transformer_dc, flyback, forward, ll13 active-clamp forward, synchronous flyback), whose cuts are under 100× their sources by this measure.
+
+### Recorders: a right-limit row reads a capacitor's current of the post-jump network (F-Z-13)
+
+- Under `discontinuity_restart=True` an in-loop recorder's right-limit rows (the x(0⁺) row of an inconsistent start, an event's right side) read a capacitor's current from the restart step's stage quadrature: a bridge rectifier's start row read i(Cf) = 1.109 A where 0.0046 A is right (KCL at the node off by 1.1 A), a buck's i(C) = 4.19e-4 A where 0 is right. Such a row now reads the companion current of the right limit's own solve, so KCL closes there to the solve's round-off (3.3e-12 A / 7.7e-11 A on those cells); a capacitor switched onto 10 V through 1 kΩ from 2 V reads (V − v_C)/R = 8 mA. Integral-type fields (∫i_C = C·Δv) still take the quadrature and are unchanged; rule off: byte-identical. Still open with the split on: a diode's reading on one located turn-on row of that rectifier (2 mA, KCL at the node off by it).
+
+### Fixed engine: a branch-form diode's commutation is booked where the conductance form books it (F-Z-14)
+
+- `engine='pwl'` booked a `form='branch'` diode's flip at the step end: a start-up turn-on at t = dt (the conductance form books none), and on a 1e-4 s grid a sine rectifier's zeros at 100 / 200 / 400·dt as 101 / 201 / 401·dt, though the two forms' states agree to 3.6e-15 V. A flip at no gate edge is now booked on the conductance form's chord of v_d − V_on, and a turn-on from a start already at or above V_on books nothing; a flip at a gate edge keeps its instant (the edge under the restart rule, the step end without it). On that rectifier the two forms' event lists are now identical (to 6.9e-15 s with the split); in a DCM buck the natural turn-offs moved one step earlier, onto the conductance form's times. States are unchanged; conductance-form runs are byte-identical. An ideal branch diode (R_on = 0) reads no chord while ON and its natural turn-off stays at the step end.
+
+### Exact engine, `mode_selection='lcp'`: parallel branch-form diodes turn on together (F-Z-9)
+
+- At the PSFB rectifier commutation (7.92 µs, D5 and D8 ON) the selector's widened pass was posed with every tie OFF; the output inductor's 13 A into `g_off` put the port voltages at ~7e9 V, and a 7.8e-7 V gap of D7 (that network's rounding) was taken as a decision: D7 OFF for 55 ns, I(D6) 4.66 A where 2.33 A is true, and the 10 / 20 µs turn-on v_DS +2e-9 V off the truth. A gap now decides OFF only above the posed network's rounding (`16·k·eps·(|u| + |Z|·|i|)`, below the tolerance on any circuit-scale network); inside it the port stays a tie for the next pass. Branch form + `'lcp'`: both diodes ON (I(D6) = I(D7)), `leak_pins` / `capped` 3 → 0, v_DS −7.3e-11 / −1.6e-10 V. `diagnostics['mode_selection']['rounding_ties']` counts the gaps kept tied. The floor applies wherever the selector runs (`'lcp'` / `'auto'` on `dsed`, `pwl`, `trbdf2`); runs where it never acts (`rounding_ties` 0) are unchanged to the bit, and default runs (settle, conductance form) are unchanged.
+
+### Device interface: the nonlinear capacitor stamps as its hand stamp, to the bit (F-Z-7)
+
+- With `device_path='interface'` the `NonlinearCapacitor` (C_oss) law's residual was assembled as `a·q + r` (`q/h − q_n/h`), rounding relative to `a·Q` instead of the step's increment: an `eps·Q/h` Newton floor that reached ~1e-6 A on a sub-femtosecond `esdirk43` stage (the release line's case A aborted at h_min at `t_end` 4.5951e-6 s). The q-only rows now take the hand stamp's increment form `a·(q − q_n)` (and `(c1·q + c2·q_γ + c3·q_n)/h` in the BDF2 stage), the junction tangent the model's `C0/(1+u)^m`, the BDF2 conductance `c1·C/h` and the backward-Euler commit `(q − q_n)/h`. Case A now runs to the same bits on both device paths (41 of 41 seeded run lengths, `trbdf2` and `esdirk43`; before: 0 of 41). Runs on the default `device_path='legacy'` are unchanged.
+
+### Event split: what a located diode crossing books (F-Z-16, F-Z-17)
+
+- F-Z-16: with the split on, a diode crossing the split locates where only `V_f = 0` diodes flip is a continuity point (both laws meet at `v = i = 0`); the restart's impulse probe no longer runs there. It had read the new mode's own fast transient as a jump: a 1 mΩ diode clamping a 0.2 nF junction booked a `capacitor_loop` record of 2.46e-13 C (`i_L·R_on·C`, 10× the probe's `split_snap·dt` allowance). A switched-capacitor loop (a gate edge closing on a charged capacitor) records as before. Split off: byte-identical.
+- F-Z-17: a crossing the restart cut locates just past stage 1 is bracketed on the SDIRK trial's own value at `t1`, not stage 1's backward-Euler state. The bracket had kept stage 1's sign (D1 at 0.65 V while the trial read 0.70–0.75 V), so the cut landed at `t1`, and its left limit (an inner-event row) held D1 OFF above V_th: 18 rows on the snubbed DCM boost at T/200, by up to 0.0497 V, which `device_loss_summary` warned about. Now there are none. At `split_snap=0.01` the remaining rows (139, down from 157) sit within the locator's stated `split_snap·dt` tolerance. Split off: byte-identical.
+
+### Recorders: under the restart rule, integrals by the method, samples by the states (F-Z-12)
+
+- With `discontinuity_restart=True` a restart step is fed to an in-loop recorder twice: its integral-type fields (`integral`, `avg`, `rms`) take the step's SDIRK stage quadrature as before (so `∫i_C dt = C·Δv` and the energy ledgers close to round-off), and its sample-type outputs (kept rows, `min` / `max` and their times, requested times, event rows) take states of the trajectory only — step ends and the limits at events. Before, the quadrature line starts and held other-mode stage rows leaked into the samples: a PWM buck's window max read 21.5298249 V, a value no state had (now 21.5294326), and every restart step's line start was reported as a jump row (123 event rows against 41 real events).
+- The stored-array pass sees states only and integrates their trapezoid. The two feeds now agree bit for bit on every sample-type output and event row; integral-type fields are identical off restart steps and differ on a restart piece of length h by `|γ − 1/4|·h³·|y″| + O(h⁴)` on a smooth stretch (γ = 1 − 1/√2), at most `h·(2(1−γ) − 1/2)·2·max|y|` on a mixed-mode step. See the recorders section of `docs/api-reference.md`. Rule off, trbdf2 and exact: byte-identical outputs.
+
+### Event splitting: a diode flip in the restart window is located
+
+- **With `enable_substep_state_correction`, a diode turn-on (or turn-off)
+  in the one or two restart steps after a located event is now cut at its
+  crossing** instead of being taken at a grid point (a 9 + 10·sin rectifier
+  at dt = 37 µs: 8 of 8 turn-ons up to 0.936·dt late before, within
+  1e-6·dt after). The cut's flips are recorded at the located instant.
+  Split off: unchanged bit for bit.
+- Split-on reference grades: three cells improve (`buck_dcm` ×0.588,
+  `diode_rectifier` ×0.987, `forward_converter` ×0.997), four move up by
+  0.1–0.6 % and still agree (`active_clamp_forward` ×1.006, `cl_boost_pi`
+  ×1.005, `boost_pfc_open_loop` and `two_phase_interleaved_boost` ×1.001).
+  The moved events are closer to a dt/100 run: on `active_clamp_forward`
+  the turn-on after each main-switch turn-off goes from 0.31·dt late (a grid
+  point) to 0.004·dt, and the mean event error drops from 0.19·dt to
+  0.13·dt; on `cl_boost_pi` 440 of 441 moved turn-offs are as close or
+  closer. The
+  grade still rises because the late grid turn-on used to cancel the
+  ringing turn-offs' own integration lag, which this change does not
+  touch: over a steady period the conduction interval error goes from
+  −0.02·dt to +0.07·dt. The cell's error is the method's second-order
+  integration error (3.74e-3, 9.56e-4, 2.41e-4 at dt, dt/2, dt/4), and the
+  shift stays at +0.3 to +0.6 % at every dt. On `cl_boost_pi` the
+  waveform against a dt/100 run is unchanged (×1.0000). The PI is sampled
+  at the step, so that run and the trbdf2 reference differ by 3.0e-4,
+  four times the cell's grade.
+- A cut flip is recorded only when it is the step's net flip (kept by the
+  rest of the step). A restart step whose diode turned on in stage 1 and
+  was cut back off in stage 2 ends in its start mode; the cut had recorded
+  a turn-off with no turn-on before it (`cl_boost_pi`: 37 such records by
+  30 ms) and handed it to the sensitivity pass as a state event. Such a
+  step now records nothing, as before; states are unchanged.
+
 ### Restart rule: an inconsistent start publishes its right limit at t = 0
 
 - **A run that starts from a state that is not a solution of the network at

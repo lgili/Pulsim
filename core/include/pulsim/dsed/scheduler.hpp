@@ -63,6 +63,7 @@
 #include <string_view>
 #include <type_traits>
 #include <cstdio>
+#include <cstdlib>
 #include <utility>
 #include <vector>
 
@@ -139,6 +140,7 @@ struct ModeShadowReport {
     std::string last_error;
     std::vector<ModeShadowRecord> disagreements;
     bool decides = false;            // mode_selection='lcp': the LCP decided every event
+    std::size_t rounding_ties = 0;   // gaps inside the posed network's rounding kept tied (F-Z-9)
 };
 
 /// The default-mode guard (slice 2, task 4): after each settle, the
@@ -701,17 +703,22 @@ public:
                     // F-X-7: the sample stored at an event is its LEFT limit, so a recovered
                     // row that jumps there (a bridge's bus, 132.6 -> 173.1 V) was drawn as a
                     // ramp to the next stored sample, 4 us away. Under the rule the flow just
-                    // past the event (2 ps: the shortest step near_time tells apart) is a
-                    // sample too; a step too short to hold it keeps its end.
+                    // past the event is a sample too, placed by the rule's own chord from the
+                    // right limit and at most 2 ps out (the shortest step near_time tells
+                    // apart: a later one draws the jump as a ramp again; a fixed 2 ps left a
+                    // 1 ns mode 59x off the chord); a step too short to hold 2 ps keeps its end.
                     bool out_keep_end = false;
                     Real out_from = std::numeric_limits<Real>::quiet_NaN();   // the rule's chords start past it
                     if (output_rtol_ > Real{0} && output_jump_) {
                         output_jump_ = false;
-                        const Real te = t + Real{2} * std::max(Real{1e-12},
+                        const Real h_sep = Real{2} * std::max(Real{1e-12},
                             Real{8} * std::numeric_limits<Real>::epsilon() * std::abs(t));
                         const Real t1 = evt ? evt->t_event : t + h_ex;
-                        out_keep_end = !(te < t1) || near_time(te, t1);
+                        out_keep_end = !(t + h_sep < t1) || near_time(t + h_sep, t1);
                         if (!out_keep_end) {
+                            // counted in the interval's cap and the run's budget; floored at
+                            // output_step_'s 64 eps max(1,|t|)
+                            const Real te = t + output_step_(t, x, h_sep, result.n_events, t_target);
                             advance_(t, x, te - t, output_x_);
                             const MaskT m = system_.current_mask();
                             ped_push_sample(result, te, output_x_, m, m, nullptr);
@@ -1775,7 +1782,7 @@ private:
     }
 
     void project_(Real t, Vector& x) {
-        if (output_rtol_ > Real{0}) proj_xin_ = x;   // note_projection_: a chain or a restart
+        proj_xin_ = x;   // note_projection_: a chain or a restart
         // dependent states first, whatever the event projection says: an
         // inconsistent state is not a state of the mode (DECISIONS,
         // dependent states)
@@ -1797,15 +1804,23 @@ private:
                 if constexpr (requires(Vector& y) { system_.recover_full_into(t, x, y);
                                                      system_.recover_from_state();
                                                      system_.fast_cluster_tau(thr); }) {
-                    if (output_rtol_ > Real{0}) {   // every projection under the rule (any step)
+                    // every projection is recorded, rule on or off (F-SB-3 / F-R-3: the
+                    // collapsed transient is a reported jump, never silent). Rule off only
+                    // one that moved x, and from x alone: no recovery (it evaluates the
+                    // sources and a user's b_extra_fn), no allocation (the default path)
+                    proj_xpre_ = x;
+                    system_.project_slow(t, x, thr);
+                    if (output_rtol_ > Real{0}) {
                         proj_y0_.resize(system_.recover_from_state().rows());
-                        system_.recover_full_into(t, x, proj_y0_);
-                        system_.project_slow(t, x, thr);
+                        system_.recover_full_into(t, proj_xpre_, proj_y0_);
                         proj_y1_.resize(proj_y0_.size());
                         system_.recover_full_into(t, x, proj_y1_);
                         note_projection_(t, x, thr);
-                        return;
+                    } else if (x != proj_xpre_ || (proj_pending_ && t == proj_t_)) {
+                        // (a still round at the pending instant: a restart clears the record)
+                        note_projection_state_(t, x, thr);
                     }
+                    return;
                 }
                 system_.project_slow(t, x, thr);
             } else {
@@ -1843,7 +1858,7 @@ private:
         // admissible mode is refused by the loop's name: that loop is the cause
         rejected_loop_.reset();
         last_select_ray_ = false;
-        commit_projection_();   // the previous event's projection record (rule on only)
+        commit_projection_();   // the previous event's projection record
         try {
             decide_modes_impl_(t, x, mask, gates_prev, prev_bits, rec, result);
         } catch (const UnsupportedError& e) {
@@ -2002,6 +2017,9 @@ private:
             sc = system_.port_scale(t, x_held);
         }
         selector_.passive = passivity_.passive();
+        // test hook: the pre-F-Z-9 decision (a test shows the PSFB defect comes back without the floor)
+        static const bool no_floor = std::getenv("PULSIM_TEST_LCP_NO_ROUNDING_FLOOR") != nullptr;
+        if (no_floor) selector_.rounding_floor = false;
         const auto sel = selector_.select(
             shadow_ports_, prev,
             [&](Real h, const std::vector<char>& anchor, DenseMatrix& Z, Vector& u) {
@@ -2055,6 +2073,7 @@ private:
         rep.released += static_cast<std::size_t>(sel.released);
         rep.enumerations += static_cast<std::size_t>(sel.enumerations);
         rep.nonunique_modes += static_cast<std::size_t>(sel.nonunique_modes);
+        rep.rounding_ties += static_cast<std::size_t>(sel.rounding_ties);
         last_select_ray_ = sel.status == events::LcpStatus::SecondaryRay;
         last_scale_ = sc;
         return sel;
@@ -3732,15 +3751,18 @@ private:
         return h;
     }
 public:
-    /// One projected event under the output rule: the instant, the largest projected
-    /// amplitude over the recovered vector (|y before − y after| in the settled mode), the
-    /// row it is on, and the projected cluster's slowest time constant.
+    /// One projected event (rule on or off): the instant, the largest projected
+    /// amplitude, the row it is on, and the projected cluster's slowest time constant.
+    /// Under the rule the amplitude is over the recovered vector (|y before − y after| in
+    /// the settled mode); rule off it is max |x before − x after| over the state and the
+    /// row is kNoProjectionRow (no recovery on the default path).
+    static constexpr std::size_t kNoProjectionRow = std::numeric_limits<std::size_t>::max();
     struct ProjectionRecord {
         Real t = 0, amplitude = 0, tau = 0;
         std::size_t row = 0;
     };
     static constexpr std::size_t kProjectionRecordCap = 1000;
-    /// Projected events (rule on only; the pending one at the last instant included).
+    /// Projected events (the pending one at the last instant included).
     [[nodiscard]] std::size_t n_projections() const noexcept {
         return n_projections_ + (proj_pending_ ? 1 : 0);
     }
@@ -3759,12 +3781,15 @@ public:
 
 private:
     std::size_t n_projections_ = 0;
-    Vector projection_max_, proj_amp_, proj_y0_, proj_y1_, proj_xin_, proj_xout_;
+    Vector projection_max_, proj_amp_, proj_y0_, proj_y1_, proj_xin_, proj_xout_, proj_xpre_;
     std::vector<ProjectionRecord> projections_;
     bool proj_pending_ = false;
     Real proj_t_ = std::numeric_limits<Real>::quiet_NaN(), proj_tau_ = 0;
 
+    Real proj_a_ = 0;   // rule off: the pending record's moved amplitude, max |Δx| over the state
+
     [[nodiscard]] ProjectionRecord pending_record_() const {
+        if (output_rtol_ <= Real{0}) return {proj_t_, proj_a_, proj_tau_, kNoProjectionRow};
         Eigen::Index row = 0;
         const Real a = proj_amp_.size() ? proj_amp_.maxCoeff(&row) : Real{0};
         return {proj_t_, a, proj_tau_, static_cast<std::size_t>(row)};
@@ -3773,11 +3798,36 @@ private:
         if (!proj_pending_) return;
         proj_pending_ = false;
         ++n_projections_;
-        projection_max_ = projection_max_.size() == proj_amp_.size()
-                              ? Vector(projection_max_.cwiseMax(proj_amp_)) : proj_amp_;
+        if (output_rtol_ > Real{0})
+            projection_max_ = projection_max_.size() == proj_amp_.size()
+                                  ? Vector(projection_max_.cwiseMax(proj_amp_)) : proj_amp_;
+        if (projections_.capacity() < kProjectionRecordCap) projections_.reserve(kProjectionRecordCap);
         if (projections_.size() < kProjectionRecordCap) projections_.push_back(pending_record_());
     }
-    /// project_ under the rule, after project_slow (proj_y0_ → proj_y1_). Every settle
+    /// A new round at the pending record's instant chains when it projects the previous
+    /// round's result; any other round commits the pending record first.
+    bool begin_projection_round_(Real t, const Vector& x) {
+        const bool same = proj_pending_ && t == proj_t_;
+        const bool chain = same && proj_xin_.size() == proj_xout_.size() && proj_xin_ == proj_xout_;
+        if (!same) commit_projection_();
+        proj_xout_ = x;
+        return chain;
+    }
+    /// note_projection_ with the rule off: the amplitude from the state project_ already
+    /// holds (proj_xpre_ → x), no recovered vector, no per-row maximum, no allocation.
+    void note_projection_state_(Real t, const Vector& x, Real thr) {
+        const Real a = (x - proj_xpre_).cwiseAbs().maxCoeff();
+        if (begin_projection_round_(t, x)) {
+            proj_a_ += a;
+        } else {
+            proj_a_ = a;
+            proj_tau_ = 0;
+        }
+        proj_tau_ = std::max(proj_tau_, system_.fast_cluster_tau(thr));
+        proj_t_ = t;
+        proj_pending_ = proj_a_ > Real{0};
+    }
+    /// project_, after project_slow (proj_y0_ → proj_y1_). Every settle
     /// round of one event projects: a round that projects the previous round's result
     /// adds its amplitude (an upper bound over the chain); a round restarted from the held
     /// state replaces the event's record (its earlier rounds are not physics). Each event's
@@ -3785,10 +3835,7 @@ private:
     /// instant keep two.
     void note_projection_(Real t, const Vector& x, Real thr) {
         const Vector d = (proj_y1_ - proj_y0_).cwiseAbs();
-        const bool chain = proj_pending_ && t == proj_t_ && proj_xin_.size() == proj_xout_.size()
-                           && proj_xin_ == proj_xout_;
-        if (!(proj_pending_ && t == proj_t_)) commit_projection_();
-        proj_xout_ = x;
+        const bool chain = begin_projection_round_(t, x);
         if (chain && proj_amp_.size() == d.size()) {
             proj_amp_ += d;
         } else {

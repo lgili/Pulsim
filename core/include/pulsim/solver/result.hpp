@@ -528,6 +528,9 @@ struct SimulationResult {
     // SDIRK step's stage 2 (the backward-Euler re-take confirmed it; the
     // locator's trials and give-ups are counted above).
     Size n_restart_cuts = 0;
+    // A cut's first piece whose stage 2 moved a diode the locator did not
+    // find crossing at the cut: a real flip, not forced back to stage 1's mode.
+    Size restart_piece1_flips_kept = 0;
     // add-unified-event-queue group 5: the fixed engine's control ticks
     // (one count per TickPlan source) and the largest lateness of a tick
     // on the grid (step time minus scheduled instant).

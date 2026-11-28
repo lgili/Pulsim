@@ -882,6 +882,7 @@ inline py::dict mode_shadow_dict(const pulsim::dsed::ModeShadowReport& r,
     d["port_model_problems"] = port_problems;
     d["errors"] = r.errors;
     d["last_error"] = r.last_error;
+    d["rounding_ties"] = r.rounding_ties;
     return d;
 }
 
@@ -1737,13 +1738,28 @@ void init_module(py::module_& m) {
                 d["n_output_inconsistent"] = sim.n_output_inconsistent();
                 const auto& fr = sim.output_floor_row();
                 d["output_floor_row"] = std::vector<double>(fr.data(), fr.data() + fr.size());
+            }
+            {   // every event projection, rule on or off (F-SB-3 / F-R-3): one (n, 4)
+                // array [t, amplitude, row (-1: none, rule off), tau]; Python builds the
+                // records only when they are read. The per-row maximum exists under the rule
                 d["n_projections"] = sim.n_projections();
-                const auto pm = sim.projection_max();
-                d["projection_max_row"] = std::vector<double>(pm.data(), pm.data() + pm.size());
-                py::list recs;
-                for (const auto& r : sim.projection_records())
-                    recs.append(py::make_tuple(r.t, r.amplitude, r.row, r.tau));
-                d["projection_records"] = recs;
+                if (output_rtol > Real{0}) {
+                    const auto pm = sim.projection_max();
+                    d["projection_max_row"] = std::vector<double>(pm.data(), pm.data() + pm.size());
+                }
+                const auto recs = sim.projection_records();
+                py::array_t<double> a({static_cast<py::ssize_t>(recs.size()), py::ssize_t{4}});
+                auto m = a.mutable_unchecked<2>();
+                for (std::size_t k = 0; k < recs.size(); ++k) {
+                    const auto& r = recs[k];
+                    const auto i = static_cast<py::ssize_t>(k);
+                    m(i, 0) = r.t;
+                    m(i, 1) = r.amplitude;
+                    m(i, 2) = r.row == std::remove_cvref_t<decltype(sim)>::kNoProjectionRow
+                                  ? -1.0 : static_cast<double>(r.row);
+                    m(i, 3) = r.tau;
+                }
+                d["projection_records"] = a;
             }
             d["exact"] = exact_report_dict(adapter, res.n_predicate_evals);
             if (mode_shadow_h_e > Real{0}) {
