@@ -2610,6 +2610,18 @@ inline SimulationResult run_transient_trbdf2(
                 }
                 consistent = jumps_ok(d0);
             }
+            if (!consistent) {
+                // the adopt/commit paths (and the sensitivity stage) read the
+                // first probe's factor, which the second solve evicted: re-solve
+                x_trial = x;
+                try {
+                    probe_solve(*start_probe_m, t, dt1, x_trial);
+                } catch (const pwl::NewtonRoundoffBudgetExceeded&) {
+                    throw;
+                } catch (const std::runtime_error&) {
+                    return false;
+                }
+            }
             x_trial = x1;   // the adopt/commit paths take the first probe
             last_probe_dt = dt1;
             hist_rec = rec1;
