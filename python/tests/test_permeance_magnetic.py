@@ -657,14 +657,17 @@ def test_saturable_permeance_from_a_table_follows_its_law():
     assert build(table).magnetic_element("Core")["area"] is None
 
 
-def _buck(magnetic):
+def _buck(magnetic, b_sat=None):
     b = p.CircuitBuilder()
     b.add_voltage_source("Vin", "vin", "gnd", 24.0)
     b.add_mosfet("Q1", "vin", "sw")
     b.add_diode("D1", "gnd", "sw", 1e3, 1e-9)
     if magnetic:
         b.add_winding("W", "sw", "vout", "m1", "gnd", N_G)
-        b.add_permeance("Pc", "m1", "m2", P_CORE)
+        if b_sat is None:
+            b.add_permeance("Pc", "m1", "m2", P_CORE)
+        else:   # the same core's saturable law (P_CORE below the knee)
+            b.add_saturable_permeance("Pc", "m1", "m2", A_G, L_G, mu_r=MUR, B_sat=b_sat)
         b.add_air_gap("G", "m2", "gnd", A_G, GAP)
     else:
         b.add_inductor("L", "sw", "vout", L_GAPPED)
@@ -676,6 +679,14 @@ def _buck(magnetic):
 @pytest.mark.filterwarnings("ignore:simulate\\(engine='trbdf2'\\)")
 @pytest.mark.parametrize("engine,kw,tol", [
     ("pwl", dict(dt=1e-7), 1e-9),
+    # F-Z-11: under the restart rule the DCM body-diode turn-off left a
+    # leakage-level flux (1.5e-8 A x N) that the permeances' jump test read
+    # as a jump (no absolute floor on a capacitor state) and the inductor's
+    # did not (its floor g_leak (1 + v_max)): the impulsive branch moved the
+    # output capacitor by its O(h^2) second difference, 6.4e-9 rel
+    pytest.param("pwl", dict(dt=1e-7, discontinuity_restart=True), 1e-9, id="pwl-restart"),
+    pytest.param("pwl", dict(dt=1e-7, discontinuity_restart=True,
+                             enable_substep_state_correction=True), 1e-9, id="pwl-split"),
     ("trbdf2", dict(rtol=1e-8, atol=1e-10), 1e-4),
 ])
 def test_gapped_core_in_a_switching_buck_equals_its_inductor(engine, kw, tol):
@@ -690,6 +701,32 @@ def test_gapped_core_in_a_switching_buck_equals_its_inductor(engine, kw, tol):
     tt = np.linspace(1e-4, 1e-3, 500)
     a, c = (np.interp(tt, r.times, r.v("vout")) for r in runs)
     assert rel(a, c) < tol
+    if kw.get("discontinuity_restart"):
+        # one decision for one physical state: neither run re-initialises
+        assert [len(r.reinit_records) for r in runs] == [0, 0]
+        assert runs[0].n_restart_steps == runs[1].n_restart_steps
+
+
+@pytest.mark.parametrize("kw", [
+    pytest.param(dict(discontinuity_restart=True), id="restart"),
+    pytest.param(dict(discontinuity_restart=True, enable_substep_state_correction=True), id="split"),
+])
+def test_saturable_core_in_a_switching_buck_takes_the_gyrator_floor(kw):
+    # F-Z-11 review (9bdb2e8a): the saturable permeance's state reads the
+    # gyrator floor too. Before (e2d82ed5) the rule alone re-initialised the
+    # saturable core 20 times per 1 ms, linear (B_sat 3500 T) or saturating
+    # (0.35 T). Below the knee it is the linear core: measured 6.96e-10 rel,
+    # with the rule on or off alike (the law's curvature at B/B_sat ~ 1e-5).
+    def run(b):
+        pwm = p.make_pwm_switch_fn(100e3, 0.5, b.switch_index_of("Q1"), b.graph.num_switches)
+        return p.simulate(b, t_end=1e-3, engine="pwl", dt=1e-7, switch_fn=pwm, **kw)
+    sat, lin = run(_buck(True, b_sat=3500.0)), run(_buck(True))
+    tt = np.linspace(1e-4, 1e-3, 500)
+    assert rel(np.interp(tt, sat.times, sat.v("vout")), np.interp(tt, lin.times, lin.v("vout"))) < 1e-9
+    assert len(sat.reinit_records) == 0
+    assert sat.n_restart_steps == lin.n_restart_steps
+    # saturating (the knee crossed every period): still no re-initialisation
+    assert len(run(_buck(True, b_sat=BSAT)).reinit_records) == 0
 
 
 @pytest.mark.parametrize("case", ["three_limb", "ee"])
