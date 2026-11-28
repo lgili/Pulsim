@@ -106,7 +106,8 @@ MEASURE_TEXT = [
     "on that side at the truth's instant (at the engine's own instant when there is no match). An "
     "engine without right limits (trbdf2) is graded on its left values only.",
     "- **rule (1), a projected transient**: at a matched event where the engine REPORTS a projection "
-    "(a `reinit_records` entry at its instant) and records a right value the truth does not have at its "
+    "(a `reinit_records` entry at its instant, or the exact engine's record of the parasitic cluster it "
+    "projected out there, `diagnostics['event_projections']`) and records a right value the truth does not have at its "
     "instant, the truth is followed to 32 W (W = the engine's declared parasitic window: dt/100 for the "
     "exact engine, whose event projection removes every mode faster than that; h/32 for pwl), on offsets "
     "32 W 2^-k cut at irrational fractions, and not past the next truth event. If it settles there and "
@@ -116,8 +117,9 @@ MEASURE_TEXT = [
     "against the settled truth kept in `limits`; the cell counts it (`n_projected`, `p<n>` after `by` in "
     "the full table). Without the record, or when the truth settles elsewhere or later, the limit stands. "
     "A fixed-engine impulse record whose jump the truth makes too is not this (the truth's own right "
-    "limit is already the value: nothing collapsed). No engine writes such a record at the events the "
-    "rule was made for yet (finding F-SB-3).", "",
+    "limit is already the value: nothing collapsed). No engine wrote such a record at the events the "
+    "rule was made for until the exact engine recorded its event projections on every run (findings "
+    "F-SB-3, F-R-3).", "",
     "Cell = the largest part of the worst column (`by` names it); a non-finite value anywhere scores inf. "
     "Classes (< 1e-3 / 1e-6 / 1e-9) are read from it. Events at the run's first or last instant are not "
     "graded. Source breaks without a device flip are not events here: the engine is given their instant, "
@@ -235,7 +237,7 @@ def switch_names(sol):
     return names
 
 
-def event_record(sol, res, cols, t_end, names):
+def event_record(sol, res, cols, t_end, names, parasitic=0.0):
     """The truth's device events and the engine's, with this column's
     one-sided values, for ``metrics.exact_parts``.
 
@@ -248,7 +250,8 @@ def event_record(sol, res, cols, t_end, names):
     state), the left value that row, the right value the later row when it
     is a right limit (one ulp later), else not recorded; the 7th element is
     True when the engine reports a projection there (a ``reinit_records``
-    entry within 4 ulp of the instant: rule (1)). Every other right
+    entry, or an exact-engine ``diagnostics['event_projections']`` record, within
+    4 ulp of the instant: rule (1)). Every other right
     limit is a ``right_rows`` entry. Returns per column the keyword
     arguments of ``exact_parts`` besides the rows."""
     import v1_reader
@@ -263,7 +266,16 @@ def event_record(sol, res, cols, t_end, names):
     sv = None if sv is None else np.asarray(sv, dtype=bool)
     available = sv is not None and sv.ndim == 2 and sv.shape[0] == tv.size and sv.shape[1] > 0
     is_right = np.r_[False, tv[1:] == np.nextafter(tv[:-1], np.inf)]
-    proj_t = np.array(sorted(float(r.t) for r in (getattr(res, "reinit_records", None) or ())))
+    # a reported projection: a re-initialisation record, or the exact engine's record of
+    # the parasitic cluster it projected out at an event (diagnostics['event_projections'])
+    # (only a removed cluster, 0 < tau <= the declared window: a rounding move is not one)
+    dg = (getattr(res, "diagnostics", None) or {}).get("event_projections") or {}
+    if dg.get("n_projections", 0) > len(dg.get("projections", ())):
+        raise RuntimeError(f"{len(dg['projections'])} of {dg['n_projections']} projection records "
+                           "(the engine's cap): rule (1) cannot be armed for the rest")
+    proj_t = np.array(sorted([float(r.t) for r in (getattr(res, "reinit_records", None) or ())]
+                             + [float(p["t"]) for p in dg.get("projections", ())
+                                if p["amplitude"] > 0 and 0 < p["tau"] <= (parasitic or np.inf)]))
 
     def reported(te):
         return bool(proj_t.size) and bool(np.any(np.abs(proj_t - te) <= 4 * np.spacing(abs(te))))
@@ -324,7 +336,8 @@ def grade(sol, tr, cols, sp, dt, tol, self_score=True, names=None, parasitic=0.0
     keep = t <= t_end + DELTA * dt                  # rows past the run's end (a float t_end) are not graded
     t = t[keep]
     cand = sol.at_float(cols, t, 0.0)
-    ev = event_record(sol, res, cols, t_end, switch_names(sol) if names is None else names)
+    ev = event_record(sol, res, cols, t_end, switch_names(sol) if names is None else names,
+                      parasitic)
     per, dep, worst_pt = {}, None, 0.0
     for c in cols:
         y = np.asarray(v1_reader.observable(res, c), dtype=float)[keep]
