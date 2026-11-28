@@ -18,8 +18,10 @@ and three run lengths aborted (rtol 1e-6 / 1.6 us, 1e-8 / 3 us, 1e-10 / 100 us).
 step at the rounding PROPAGATED to that unknown: omega_max |J^-1| (|J||x| + |b|), estimated from below with
 two solves on the iterate's own factor. It runs only on a stagnated solve that exhausted its budget, and only
 with judge_own_scale (trbdf2 / esdirk43). The absolute dx tolerance, the residual backward-error test, the
-stagnation windows and the dx cap are unchanged, and `pwl` is byte-identical. All 18 measured ll13 runs
-complete. The 3 us expected failure is removed.
+stagnation windows and the dx cap are unchanged. Default `pwl` step solves are byte-identical; the fixed
+engine's event right-limit solve (which already judged at its own scale) gets the same rule (pwl+restart /
+pwl+split identity: ll13 fewer right-limit fallbacks, ll08 inner-event right states). All 18 measured ll13
+runs complete; the 3 us expected failure is removed. ll13 trbdf2 grade 0.00109 -> 0.00123 (ceiling 0.00133).
 
 ### Exact engine: faster steps on a repeated step length (results unchanged)
 

@@ -835,9 +835,11 @@ inline void solve_with_newton_in_place(
             // each row's own terms makes in it: omega_max |J^-1| sk. That
             // bound is estimated from J(x_k)'s factor as max |J^-1 (±sk)|
             // (all-positive and alternating signs; an estimate from BELOW,
-            // so the test is never looser than the true bound). A diverging
-            // or still-contracting step is far above it. Two solves, only
-            // here, on a budget-exhausted stagnated solve.
+            // so the test is never looser than the true bound). With
+            // dx = -J^-1 f this is nearly implied by the backward-error test
+            // below, which still decides; the guards against a drifting
+            // iterate stay the stagnation windows and the dx cap. Two
+            // solves, only here, on a budget-exhausted stagnated solve.
             if (!fixed_point && last_step_plain && w.solver
                 && w.solver->is_factorized()) {
                 Vector& y1 = w.f_trial;

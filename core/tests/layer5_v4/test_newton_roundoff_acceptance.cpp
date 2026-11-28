@@ -526,7 +526,9 @@ TEST_CASE("Roundoff acceptance: a fixed point at the rounding propagated to a "
         // Not converged: the same cycle scaled by 2^14 (steps of 1e-3 A, the
         // residual 2^14 x 12 u = 1.2e-2 A, 2.6e4 eps of the row's terms) on
         // an equally well-conditioned row (slope 5): stagnated and inside
-        // the dx cap (|x_0| = 1e4), 1e3 x the propagated bound. Declined.
+        // the dx cap (|x_0| = 1e4), 1e3 x the propagated bound. Declined (by
+        // the backward-error test: with dx = -J^-1 f the propagated bound
+        // cannot be the only test to fail on a real Newton step).
         const PropagatedPath dev{Path({1L << 15, -(1L << 14), -(1L << 14)}), u,
                                  12.0 * (1L << 14)};
         NewtonRoundoffAcceptance ro;
