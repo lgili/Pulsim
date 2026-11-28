@@ -882,6 +882,7 @@ inline py::dict mode_shadow_dict(const pulsim::dsed::ModeShadowReport& r,
     d["port_model_problems"] = port_problems;
     d["errors"] = r.errors;
     d["last_error"] = r.last_error;
+    d["rounding_ties"] = r.rounding_ties;
     return d;
 }
 

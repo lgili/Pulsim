@@ -63,6 +63,7 @@
 #include <string_view>
 #include <type_traits>
 #include <cstdio>
+#include <cstdlib>
 #include <utility>
 #include <vector>
 
@@ -139,6 +140,7 @@ struct ModeShadowReport {
     std::string last_error;
     std::vector<ModeShadowRecord> disagreements;
     bool decides = false;            // mode_selection='lcp': the LCP decided every event
+    std::size_t rounding_ties = 0;   // gaps inside the posed network's rounding kept tied (F-Z-9)
 };
 
 /// The default-mode guard (slice 2, task 4): after each settle, the
@@ -2002,6 +2004,9 @@ private:
             sc = system_.port_scale(t, x_held);
         }
         selector_.passive = passivity_.passive();
+        // test hook: the pre-F-Z-9 decision (a test shows the PSFB defect comes back without the floor)
+        static const bool no_floor = std::getenv("PULSIM_TEST_LCP_NO_ROUNDING_FLOOR") != nullptr;
+        if (no_floor) selector_.rounding_floor = false;
         const auto sel = selector_.select(
             shadow_ports_, prev,
             [&](Real h, const std::vector<char>& anchor, DenseMatrix& Z, Vector& u) {
@@ -2055,6 +2060,7 @@ private:
         rep.released += static_cast<std::size_t>(sel.released);
         rep.enumerations += static_cast<std::size_t>(sel.enumerations);
         rep.nonunique_modes += static_cast<std::size_t>(sel.nonunique_modes);
+        rep.rounding_ties += static_cast<std::size_t>(sel.rounding_ties);
         last_select_ray_ = sel.status == events::LcpStatus::SecondaryRay;
         last_scale_ = sc;
         return sel;
