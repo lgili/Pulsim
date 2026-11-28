@@ -11,6 +11,8 @@
 
 #include "pulsim/dsed/exact_lti.hpp"
 
+#include <cstring>
+
 #include <cmath>
 
 using namespace pulsim;
@@ -926,4 +928,27 @@ TEST_CASE("Exact: the fixed-step pair cache evicts the oldest length and stays e
     REQUIRE(ad.n_phi_gamma_refused() == 1);
     REQUIRE(ad.phi_gamma_bytes() == 4 * pair);
     REQUIRE(ad.exact_fixed_step_into(t, x, 1e-4, y));       // still cached (no eviction on refusal)
+}
+
+TEST_CASE("Exact: the per-h modal coefficients cached by the step are the ones it would compute",
+          "[v2][dsed][exact_lti]") {
+    // series RLC (complex pair) driven by b: a step on a repeated h reuses e^{λh} and
+    // h·φ₁(λh)·w; every step must equal, bit for bit, the step of a fresh propagator
+    DenseMatrix A(2, 2);
+    A << -0.5, -1.0, 1.0, -1e-3;
+    Vector b(2);
+    b << 3.0, 0.25;
+    const auto cached = make_exact_lti(A, b);
+    REQUIRE(cached.valid);
+    REQUIRE(cached.tier == 1);
+    Vector x(2), y(2), ref(2);
+    x << 1.0, -2.0;
+    for (const Real h : {0.1, 0.1, 0.37, 0.1, 0.37, 0.37, 0.0, 0.1}) {
+        const auto fresh = make_exact_lti(A, b);
+        exact_advance_into(fresh, x, h, ref);
+        exact_advance_into(cached, x, h, y);
+        INFO("h = " << h);
+        REQUIRE(std::memcmp(y.data(), ref.data(), sizeof(Real) * 2) == 0);
+        x = y;
+    }
 }

@@ -35,9 +35,9 @@ def segments_from_exact(exact: dict, switch_states: Any) -> list[dict]:
     if S is not None and S.ndim == 2 and len(S):
         # a row holds the mask of the interval ending at it; a segment is a maximal run of rows
         starts = np.flatnonzero(np.r_[True, np.any(S[1:] != S[:-1], axis=1)])
-        for i in starts:
-            key = tuple(bool(v) for v in S[i])
-            runs[key] = runs.get(key, 0) + 1
+        # one count per distinct mask (a per-row tuple cost ~0.2 us a sample: 4000 events)
+        rows_u, counts = np.unique(S[starts], axis=0, return_counts=True)
+        runs = {tuple(bool(v) for v in u): int(c) for u, c in zip(rows_u, counts)}
     for m in exact.get("masks", []):
         tier, detail = int(m["tier"]), str(m.get("reason", ""))
         ok = tier in (1, 2)

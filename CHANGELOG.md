@@ -6,6 +6,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Exact engine: faster steps on a repeated step length (results unchanged)
+
+A step of the exact engine reuses each mode's `e^{λh}` and `h·φ₁(λh)·w` when its length equals the previous step's, and the route record counts its segments with one `np.unique`. Stored arrays are bit-identical. The 2000-period synchronous buck runs in 2.4 ms instead of 3.5 ms; the measurement behind it (where the step's bytes and time go) is in the exact-propagator design notes.
+
 ### Fixed engine, split: event rows at located diode crossings obey KCL and the diode law
 
 - With `discontinuity_restart=True, enable_substep_state_correction=True`, a located crossing where only V_f = 0 diodes flip was published as a continuity point: the right limit was the left state read under the new mode's law. A turn-on read `g_on·v_D(left)` (the location's residual voltage): on a bridge rectifier `i(D1)` = 2.06 mA at t = 21.79 ms (KCL at `s` / `dp` off by 2.06 mA) and `i(D3)` = 17.1 mA at t = 30.004 ms (KCL at `s` / `dn` off by 17.1 mA). The right limit is now solved in the decided mode like every other event's, for the recorder rows, the stored right-limit states and the loss booking; every row now satisfies KCL to the solver's floor and each diode reads its ON or OFF law (`test_recorder_device_readings.py::test_every_row_obeys_kcl_and_the_diode_law`, rectifier and `diode_half_wave_rl_load`). A turn-off's right limit follows the OFF law: `v_out` moves by the residual current through `1/g_off` (2.8e-5 V on the half-wave RL load). The rule alone (split off) and the default engine are unchanged.
