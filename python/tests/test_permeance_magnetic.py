@@ -676,6 +676,14 @@ def _buck(magnetic):
 @pytest.mark.filterwarnings("ignore:simulate\\(engine='trbdf2'\\)")
 @pytest.mark.parametrize("engine,kw,tol", [
     ("pwl", dict(dt=1e-7), 1e-9),
+    # F-Z-11: under the restart rule the DCM body-diode turn-off left a
+    # leakage-level flux (1.5e-8 A x N) that the permeances' jump test read
+    # as a jump (no absolute floor on a capacitor state) and the inductor's
+    # did not (its floor g_leak (1 + v_max)): the impulsive branch moved the
+    # output capacitor by its O(h^2) second difference, 6.4e-9 rel
+    pytest.param("pwl", dict(dt=1e-7, discontinuity_restart=True), 1e-9, id="pwl-restart"),
+    pytest.param("pwl", dict(dt=1e-7, discontinuity_restart=True,
+                             enable_substep_state_correction=True), 1e-9, id="pwl-split"),
     ("trbdf2", dict(rtol=1e-8, atol=1e-10), 1e-4),
 ])
 def test_gapped_core_in_a_switching_buck_equals_its_inductor(engine, kw, tol):
@@ -690,6 +698,10 @@ def test_gapped_core_in_a_switching_buck_equals_its_inductor(engine, kw, tol):
     tt = np.linspace(1e-4, 1e-3, 500)
     a, c = (np.interp(tt, r.times, r.v("vout")) for r in runs)
     assert rel(a, c) < tol
+    if kw.get("discontinuity_restart"):
+        # one decision for one physical state: neither run re-initialises
+        assert [len(r.reinit_records) for r in runs] == [0, 0]
+        assert runs[0].n_restart_steps == runs[1].n_restart_steps
 
 
 @pytest.mark.parametrize("case", ["three_limb", "ee"])

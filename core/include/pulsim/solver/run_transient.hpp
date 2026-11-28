@@ -998,6 +998,34 @@ inline SimulationResult run_transient(
         for (const auto& d : diodes.entries()) g += d.g_off;
         return g;
     }();
+    // F-Z-11: that resolution on the far side of a gyrator (a winding's
+    // magnetic network): a port-1 current floor i is a port-2 MMF floor i/g,
+    // per node of port 2's island (ground excluded). Without it a permeance
+    // read a leakage-level flux as a jump its equivalent inductor did not.
+    const std::vector<Real> gyr_floor = [&] {
+        std::vector<Real> f(static_cast<Size>(graph.num_nodes()), Real{0});
+        std::vector<Index> todo;
+        for (Index bi = 0; bi < graph.num_branches(); ++bi) {
+            if (!pool.is_registered(bi) ||
+                pool.kind_of(bi) != pwl::DevicePool::StoredKind::Gyrator) continue;
+            const Real g = std::abs(pool.gyrator_params(bi).g);
+            if (!(g > Real{0})) continue;
+            const Real s = Real{1} / g;
+            const auto& br = graph.branch(bi);
+            todo.assign({br.from, br.to});
+            while (!todo.empty()) {
+                const Index n = todo.back();
+                todo.pop_back();
+                if (n < 0 || n >= graph.num_nodes() || f[static_cast<Size>(n)] >= s) continue;
+                f[static_cast<Size>(n)] = s;
+                for (const Index b : graph.branches_of(n)) {
+                    todo.push_back(graph.branch(b).from);
+                    todo.push_back(graph.branch(b).to);
+                }
+            }
+        }
+        return f;
+    }();
     Real event_rl_t = std::numeric_limits<Real>::quiet_NaN();
     std::vector<CommutationEvent> step_events;      // per-step event scratch
     std::vector<bool> post_event_bits;              // event-split scratch
@@ -2308,6 +2336,15 @@ inline SimulationResult run_transient(
                 v_max = std::max({v_max, std::abs(ip_x1[n]), std::abs(x[n])});
             }
             const Real tol_i = g_leak * (Real{1} + v_max);
+            // the floor of one linear state: a current's tol_i, a capacitor's
+            // tol_i/g beside a gyrator (gyr_floor), else none
+            auto floor_of = [&](const pwl::HistoryEntry& e) {
+                if (!is_cap(e)) return tol_i;
+                const auto at = [&](Index n) {
+                    return n >= 0 ? gyr_floor[static_cast<Size>(n)] : Real{0};
+                };
+                return tol_i * std::max(at(e.from), at(e.to));
+            };
             // One reading of one state (s0 = x0, s1..s3 the stages): the jump
             // d = (s1 − s0) − (s2 − s1) against the rate after the event and
             // the next difference d' = (s2 − s1) − (s3 − s2) (see above).
@@ -2361,7 +2398,7 @@ inline SimulationResult run_transient(
                     const Real s0 = is_cap(e) ? e.v_prev : e.i_prev;
                     const Real s1 = state(e, ip_x1);
                     const Real tol = Real{1e-8} * (Real{1} + std::abs(s0) + std::abs(s1)) +
-                                     (is_cap(e) ? Real{0} : tol_i) + allow(ip_r[k], k);
+                                     floor_of(e) + allow(ip_r[k], k);
                     const bool jk = jumps(s0, s1, state(e, ip_x2m), state(e, ip_x3m), tol) &&
                                     jumps(s0, s1, state(e, ip_x2), state(e, ip_x3f), tol);
                     ip_d[2 * k + 1] = jk ? Real{1} : Real{0};
@@ -2466,7 +2503,7 @@ inline SimulationResult run_transient(
                             const Real a1 = state(e, ip_y1);
                             ip_m1[k] = m1(s0, a1, state(e, ip_y2), state(e, x),
                                           Real{1e-8} * (Real{1} + std::abs(s0) + std::abs(a1)) +
-                                              (is_cap(e) ? Real{0} : tol_i));
+                                              floor_of(e));
                         }
                         for (Size k = 0; k < nn; ++k) {
                             const auto& e = ncs[k];
@@ -2672,7 +2709,7 @@ inline SimulationResult run_transient(
                         const auto& e = ents[k];
                         w = std::sqrt(e.C_or_L);
                         noise = Real{1e-8} * (Real{1} + std::abs(sval(k, 0)) + std::abs(sval(k, 1))) +
-                                (is_cap(e) ? Real{0} : tol_i);
+                                floor_of(e);
                     } else if (k < ne + nn) {
                         const auto& e = ncs[k - ne];
                         const Real v1 = ncv(e, ip_x1);
@@ -2872,7 +2909,7 @@ inline SimulationResult run_transient(
                             k2 += s * state(e, ip_x2m); k3 += s * state(e, ip_x3m);
                             kf2 += s * state(e, ip_x2); kf3 += s * state(e, ip_x3f);
                             sc += Real{1e-8} * (Real{1} + std::abs(a0) + std::abs(a1)) +
-                                  (is_cap(e) ? Real{0} : tol_i) + allow(ip_r[k], k);
+                                  floor_of(e) + allow(ip_r[k], k);
                         }
                     }
                     share = share || (jumps(k0, k1, k2, k3, sc) && jumps(k0, k1, kf2, kf3, sc));
