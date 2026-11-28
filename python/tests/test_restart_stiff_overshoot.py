@@ -144,3 +144,43 @@ def test_half_bridge_turn_off_cut_keeps_its_located_crossing(monkeypatch):
         k = int(np.searchsorted(t, te + 1e-12)) - 1   # the step end's last sample
         assert t[k] == pytest.approx(te, abs=1e-12)
         assert abs(i_s[k] - ref) < 0.02 * ref, (te, i_s[k])
+    assert r.counters["restart_piece1_flips_kept"] == 0   # every iteration: the crossing's round-off
+
+
+def _two_diodes(offset):
+    """D1 freewheels a 6.9 mA inductor current that ramps to zero 0.8 dt after the gate
+    edge at 5 us (the located cut); D2, an independent loop on a 2.5 MHz sine, conducts
+    while V2 > 0. With offset 0.3 V the sine dips below zero at piece 1's end but not at
+    the uncut step's stage times: a real flip of D2 inside piece 1 (scanned, rule alone)."""
+    import pulsim as p
+
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "in", "gnd", 10.0)
+    b.add_switch("S", "in", "a", 1e3, 1e-9)
+    b.add_diode("D1", "gnd", "a", 1e3, 1e-9)
+    b.add_inductor("L", "a", "m", 1e-3)
+    b.add_voltage_source("Vo", "m", "gnd", 8.62)   # ramp down (10-8.62)/8.62 x 5 us = 0.8 us
+    b.add_sine_voltage_source("V2", "s", "gnd", offset, 1.0, 2.5e6, 0.79)
+    b.add_resistor("R2", "s", "k", 10.0)
+    b.add_diode("D2", "k", "gnd", 1e3, 1e-9)
+    n, k = b.graph.num_switches, b.switch_index_of("S")
+
+    def fn(t):
+        m = p.SwitchStateMask(n)
+        m.set(k, t < 5e-6)
+        return m
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return p.simulate(b, t_end=8e-6, dt=1e-6, engine="pwl", switch_fn=fn, **RULE)
+
+
+def test_a_second_diode_flipping_inside_the_first_piece_is_not_forced():
+    """Piece 1's stage 2 is forced back to stage 1's mode only when every diode it moved
+    is one the locator found crossing at the cut. D2's flip inside piece 1 is real: it
+    is taken as in any other stage 2 (counted), and D1's located cut still stands. The
+    control (offset 2 V: D2 never flips) forces nothing."""
+    r = _two_diodes(0.3)
+    assert r.counters["n_restart_cuts"] == 1
+    assert r.counters["restart_piece1_flips_kept"] == 1
+    c = _two_diodes(2.0).counters
+    assert c["n_restart_cuts"] == 1 and c["restart_piece1_flips_kept"] == 0

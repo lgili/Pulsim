@@ -4464,7 +4464,22 @@ inline SimulationResult run_transient(
                     on_to_off = on_to_off || (rs_bits[q] != rs_bits2[q]);
                 }
             }
+            // Piece 1's stage-2 iteration is that crossing's round-off only if every
+            // bit it moved is one the locator found crossing at the cut. Two solves
+            // (stage 1's mode, then last_solved_bits) and the end bits are every mask
+            // it visited; more solves (an unseen intermediate mask) or another bit
+            // moved: a real flip inside the piece, taken as in any other stage 2
+            // (the overshoot re-take below decides it).
+            bool piece1_roundoff = false;
             if (rs_cut.piece1 && has_diodes && iters_2 > 1) {
+                piece1_roundoff = iters_2 == 2 && last_solved_bits.size() == rs_bits.size();
+                for (Size q = 0; piece1_roundoff && q < rs_bits.size(); ++q) {
+                    const bool moved = rs_bits[q] != rs_bits2[q] || rs_bits[q] != last_solved_bits[q];
+                    piece1_roundoff = !moved || rs_cut.bits[q] != rs_cut.pre[q];
+                }
+                if (!piece1_roundoff) ++result.restart_piece1_flips_kept;
+            }
+            if (piece1_roundoff) {
                 // the first piece of a cut step ends AT the located turn-off:
                 // its stage 2 stays in stage 1's mode (the locator's trial;
                 // the flip is the next piece's start). Any iteration there is
