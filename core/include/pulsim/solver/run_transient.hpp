@@ -3654,10 +3654,12 @@ inline SimulationResult run_transient(
             restart_factorizations = rf_s;
             if (ok && !out.allFinite()) unheld = true;   // no state: counted
             // review: a continuity point whose solve fails keeps the left value
-            // (the shortcut's row), neither dropped nor counted
+            // (the shortcut's row), neither dropped nor counted; with the left
+            // mask too: hold_mode may already have re-decided m_out
             if (pure_loc && unheld) {
                 unheld = false;
                 ok = 2;
+                m_out = stamped_s;
             }
             // a start row is due only when it differs from row 0, unknown
             // when its solve failed: not counted as a fallback
