@@ -4857,7 +4857,8 @@ inline SimulationResult run_transient(
             const bool unsettled_uncut = mask_cycle || flipped;
             // the counters keep the uncut pass's work (the pieces add theirs)
             const Size s2r = result.stage2_retries, s2k = result.stage2_be_kept,
-                       s2f = result.stage2_retry_failures;
+                       s2f = result.stage2_retry_failures,
+                       p1k = result.restart_piece1_flips_kept;
             auto restore0 = [&]() {
                 flipped = flipped0;
                 x = rs_cut.x0;
@@ -4929,6 +4930,7 @@ inline SimulationResult run_transient(
                 result.stage2_retries = s2r;   // the same pass again: counted once
                 result.stage2_be_kept = s2k;
                 result.stage2_retry_failures = s2f;
+                result.restart_piece1_flips_kept = p1k;   // a discarded cut's piece counts nothing
             }
         };
 
