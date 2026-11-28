@@ -205,6 +205,25 @@ def test_case_a_runs_at_every_run_length(engine, request):
     assert bad == []
 
 
+# ------------------------------------- F-Z-7: the two device paths on case A --
+@pytest.mark.parametrize("te", [4.595132420726449e-06, 2.2e-6, 1.0690440e-06])
+def test_case_a_device_paths_are_the_same_run(engine, te):
+    """F-Z-7: device_path='interface' stamped the Coss law's residual as
+    a·q + r (q/h − q_n/h), rounding relative to a·Q: an eps·Q/h floor that
+    reached 1e-6 A on a sub-fs esdirk43 stage (the release aborted at h_min
+    at 4.5951e-6 s). It now takes the hand stamp's increment form a·(q − q_n)
+    and its tangent and commit operations: the same run to the bit (bound
+    0; 41 of 41 seeded lengths on both integrators, the notes)."""
+    runs = {}
+    for path in ("legacy", "interface"):
+        _, _, r = _run.__wrapped__(engine, t_end=te, device_path=path)
+        runs[path] = (np.asarray(r.times), np.asarray(r.v("sw")), np.asarray(r.v("vdc")),
+                      r.stats.n_newton_iterations)
+    (tl, vl, bl, nl), (ti, vi, bi, ni) = runs["legacy"], runs["interface"]
+    assert np.array_equal(tl, ti) and np.array_equal(vl, vi) and np.array_equal(bl, bi)
+    assert nl == ni
+
+
 # ------------- saturable cut-set opened by a switch (reviewer's case, session 2) --
 def _cut_set():
     b = p.CircuitBuilder()

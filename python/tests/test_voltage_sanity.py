@@ -212,10 +212,84 @@ def test_a_cut_set_names_the_inductive_state_not_a_capacitor_it_also_moved(monke
     case = v1_reader.load(root / "benchmarks/circuits/magnetics/half_bridge_transformer_dc.yaml")
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        r = case.run("pwl", discontinuity_restart=True)
+        # F-Z-15: judged by |λ|/dt, the largest cut is 2.1e-4 V·s / 1e-7 s = 2.1e3 V
+        # (44 x 48 V, silent at 100); the sampled 72 V step-up stays under 5 x 48 V
+        r = case.run("pwl", discontinuity_restart=True, voltage_sanity_factor=5.0)
     hits = [str(w.message) for w in caught if "cut the" in str(w.message)]
     assert hits
     assert "of 'Cdiv" not in hits[0] and "current of 'T1." in hits[0]
     rec = next(q for q in r.reinit_records if f"t = {q.t:.6g} s" in hits[0])
     assert rec.kind == "cut_set" and rec.states[0] == "Cdiv1"   # the listing that misled
     assert f"{rec.dW:.4g} J" in hits[0] and "½·L·i²" not in hits[0]   # several states
+
+
+# F-Z-15: under the restart rule the cut's right-limit row holds i*R_off
+# (2.4e12 V here, 1/g_off times the 2.4 A), which no factor can sensibly cover;
+# the cut is judged by its own size, the impulse over the step |lambda| / dt
+# (2.4e-3 V*s / 1e-8 s = 2.4e5 V = 5000 x 48 V).
+RULE = dict(t_end=1e-3, dt=1e-8, switch_fn=_sw, engine="pwl", discontinuity_restart=True)
+
+
+def _cut_run(factor):
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        res = p.simulate(opening_inductor(), voltage_sanity_factor=factor, **RULE)
+    return res, [str(w.message) for w in caught]
+
+
+def test_a_cut_is_judged_by_its_impulse_and_reports_both_numbers():
+    res, msgs = _cut_run(100.0)
+    cuts = [r for r in res.reinit_records if r.kind == "cut_set"]
+    assert len(cuts) == 10
+    lam = max(abs(r.lambda_) for r in cuts)
+    assert lam == pytest.approx(2.4e-3, rel=1e-3)        # L*i, i = 48 V * 50 us / 1 mH
+    v = res._implausible_voltage
+    assert v.peak == pytest.approx(lam / 1e-8, rel=1e-6)  # the judged size: |lambda| / dt
+    assert v.cut_measure == v.peak and v.cut_step == pytest.approx(1e-8, rel=1e-6)
+    assert v.cut_row_voltage > 1e11                       # i*R_off = 2.4 A * 1e12 ohm, not judged
+    assert (v.cut_device, v.cut_state, v.cut_kind) == ("S", "L", "cut_set")
+    assert v.cut_size == pytest.approx(2.4, rel=1e-3)
+    assert v.cut_energy == pytest.approx(cuts[0].dW, rel=1e-6)
+    assert v.source_scale == pytest.approx(48.0, rel=1e-6)
+    (hit,) = [m for m in msgs if "cut the" in m]
+    assert not [m for m in msgs if "largest voltage any source" in m]
+    assert f"reached {v.peak:.3e} V" in hit and f"{v.cut_row_voltage:.3e} V" in hit
+    assert "voltage_sanity_factor is judged against" in hit and "not judged" in hit
+
+
+def test_a_known_cut_is_silenced_by_the_factor():
+    """6000 x 48 V = 2.88e5 V covers |lambda| / dt (2.4e5 V), not i*R_off."""
+    res, msgs = _cut_run(6000.0)
+    assert len(res.reinit_records) == 10
+    assert getattr(res, "_implausible_voltage", None) is None
+    assert not [m for m in msgs if "cut the" in m or "largest voltage any source" in m]
+
+
+def test_a_megavolt_that_is_no_cut_still_warns_at_that_factor():
+    """Rule off: the stored 2.9e6 V sample is a node voltage, not a cut row."""
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        res = p.simulate(opening_inductor(), t_end=1e-3, dt=1e-8, switch_fn=_sw,
+                         engine="pwl", discontinuity_restart=False,
+                         voltage_sanity_factor=6000.0)
+    assert res._implausible_voltage.peak > 6000.0 * 48.0
+    assert res._implausible_voltage.cut_device == ""
+    assert [w for w in caught if "largest voltage any source" in str(w.message)]
+
+
+@pytest.mark.parametrize("factor,warns", [(100.0, True), (6000.0, False)])
+def test_the_kernel_object_judges_the_cut_alike(factor, warns):
+    import re
+    o = p.RunOptions(t_end=1e-3, dt=1e-8, engine="pwl")
+    o.discontinuity_restart = True
+    o.voltage_sanity_factor = factor
+    sim = p.Simulation(opening_inductor().build(), o)
+    sim.set_switch_fn(_sw)
+    res = sim.run()
+    lam = max(abs(r.lambda_) for r in res.reinit_records if r.kind == "cut_set")
+    d = [x for x in sim.diagnostics if x["code"] == "implausible_voltage"]
+    assert bool(d) is warns, sim.diagnostics
+    if warns:
+        assert "cut the" in d[0]["message"]
+        peak = float(re.search(r"reached (\S+) V", d[0]["message"]).group(1))
+        assert peak == pytest.approx(lam / 1e-8, rel=1e-3)   # printed to 4 digits

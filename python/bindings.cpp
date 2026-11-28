@@ -3354,7 +3354,20 @@ void init_module(py::module_& m) {
         .def_readonly("peak", &solver::ImplausibleVoltage::peak)
         .def_readonly("source_scale",
                        &solver::ImplausibleVoltage::source_scale)
-        .def_readonly("t_peak", &solver::ImplausibleVoltage::t_peak);
+        .def_readonly("t_peak", &solver::ImplausibleVoltage::t_peak)
+        // F-Z-8 / F-Z-15: the restart-rule record a cut row was read against
+        // (cut_device empty: an ordinary node finding)
+        .def_readonly("cut_device", &solver::ImplausibleVoltage::cut_device)
+        .def_readonly("cut_state", &solver::ImplausibleVoltage::cut_state)
+        .def_readonly("cut_kind", &solver::ImplausibleVoltage::cut_kind)
+        .def_readonly("cut_size", &solver::ImplausibleVoltage::cut_size,
+            "the cut current (A, an inductor) or voltage jump (V, a capacitor); 0: not one state")
+        .def_readonly("cut_energy", &solver::ImplausibleVoltage::cut_energy)
+        .def_readonly("cut_measure", &solver::ImplausibleVoltage::cut_measure,
+            "|lambda| / dt of a cut set, the value judged (then also `peak`); 0: the row was judged")
+        .def_readonly("cut_row_voltage", &solver::ImplausibleVoltage::cut_row_voltage,
+            "the stored right-limit row value (i*R_off at a cut set), reported, not judged")
+        .def_readonly("cut_step", &solver::ImplausibleVoltage::cut_step);
 
     m.def("find_implausible_voltage",
         [](const topology::Graph& graph, const pwl::DevicePool& pool,

@@ -333,6 +333,94 @@ def test_collapse_rows_follow_each_record_step():
     assert len(with_right_limits(r).times) == 6   # without collapse: one row per right limit
 
 
+# ---- F-Z-9: the LCP on branch-form rectifier diodes ------------------------------------------
+# At the PSFB rectifier commutations (7.92 / 17.92 / 27.92 us, D5 and D8 ON) D6 and D7 turn on
+# together and share the current equally (equal R_on, symmetric bridge). The selector's widened
+# pass was posed with every tie OFF: the output inductor's 13 A into g_off put the port voltages
+# at ~7e9 V, and the 7.8e-7 V gap it computed for D7 (rounding of that network) was read as a
+# decision: D7 OFF for 55 ns, I(D6) 4.66 A where 2.33 A is true.
+
+def _psfb_exact_lcp(form, monkeypatch):
+    import pulsim
+    for m in ("add_diode", "add_switch"):   # the reader takes the library's default form
+        f = getattr(pulsim.CircuitBuilder, m)
+        monkeypatch.setattr(pulsim.CircuitBuilder, m,
+                            lambda self, *a, _f=f, **k: _f(self, *a, **{"form": form, **k}))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return v1_reader.load(CASES["psfb_full_bridge_zvs"][0]).run("dsed", mode_selection="lcp")
+
+
+def _rectifier_pair_split(r):
+    """Per commutation: (samples, worst |I(D6) - I(D7)| / I(D6)) from 5 to 50 ns after it."""
+    t = np.asarray(r.times, dtype=float)
+    i6, i7 = (np.asarray(v1_reader.observable(r, f"I({d})"), dtype=float) for d in ("D6", "D7"))
+    out = []
+    for t0 in (7.92053e-6, 17.92049e-6, 27.92046e-6):
+        w = (t > t0 + 5e-9) & (t < t0 + 50e-9)
+        out.append((int(w.sum()), float(np.max(np.abs(i6[w] - i7[w]) / i6[w])) if w.any() else np.inf,
+                    float(np.min(i6[w])) if w.any() else 0.0))
+    return out
+
+
+@pytest.mark.parametrize("form", ["conductance", "branch"])
+def test_exact_lcp_turns_on_both_parallel_rectifier_diodes(form, monkeypatch):
+    r = _psfb_exact_lcp(form, monkeypatch)
+    for n, rel, i_min in _rectifier_pair_split(r):
+        assert n >= 3 and i_min > 1e-3 and rel <= 1e-6, (form, n, rel, i_min)
+    ms = r.diagnostics["mode_selection"]
+    assert ms["leak_pins"] == 0 and ms["capped"] == 0, ms
+    if form == "branch":
+        assert ms["rounding_ties"] >= 1, ms     # the floor is what decided it (3 measured)
+
+
+def test_exact_lcp_branch_form_psfb_turn_on_voltage(monkeypatch):
+    """The turn-on KPI that exposed F-Z-9 (+1.991e-9 / +3.121e-9 V against the 1e-9 V bar): on
+    branch-form devices with 'lcp' it is the conductance form's again."""
+    import pulsim
+    for m in ("add_diode", "add_switch"):
+        f = getattr(pulsim.CircuitBuilder, m)
+        monkeypatch.setattr(pulsim.CircuitBuilder, m,
+                            lambda self, *a, _f=f, **k: _f(self, *a, **{"form": "branch", **k}))
+    monkeypatch.setitem(ENGINES, "dsed_branch_lcp", dict(engine="dsed", mode_selection="lcp"))
+    t, tr = _engine_trace("psfb_full_bridge_zvs", "dsed_branch_lcp")
+    g, v, _ = tr["S1"]
+    truth = _truth("psfb_full_bridge_zvs", "S1")["v_ds_at_turn_on"]
+    on = [k for k in range(1, len(t)) if g[k] and not g[k - 1]]
+    err = [v[k - 1] - w for k, w in zip(on, truth)]
+    assert len(err) == 2 and max(abs(e) for e in err) <= V_TOL["dsed"], err
+
+
+def test_exact_lcp_without_the_rounding_floor_brings_f_z_9_back():
+    """The floor is the fix: with it off (a test hook, fresh process: it is read once) the
+    selector decides D7 OFF on its rounding gap again at each commutation (3 leak pins) and
+    D6 carries the pair's current (measured |I6 - I7| / I6 ~ 1)."""
+    import json
+    import os
+    import subprocess
+    code = (
+        "import json, sys, warnings\n"
+        f"sys.path[:0] = {[str(ROOT / 'tools'), str(ROOT)]!r}\n"
+        "import numpy as np, pulsim, v1_reader\n"
+        "for m in ('add_diode', 'add_switch'):\n"
+        "    f = getattr(pulsim.CircuitBuilder, m)\n"
+        "    setattr(pulsim.CircuitBuilder, m, lambda self, *a, _f=f, **k: _f(self, *a, **{'form': 'branch', **k}))\n"
+        "warnings.simplefilter('ignore')\n"
+        f"r = v1_reader.load({str(CASES['psfb_full_bridge_zvs'][0])!r}).run('dsed', mode_selection='lcp')\n"
+        "t = np.asarray(r.times)\n"
+        "i6, i7 = (np.asarray(v1_reader.observable(r, f'I({d})'), dtype=float) for d in ('D6', 'D7'))\n"
+        "w = (t > 7.92053e-6 + 5e-9) & (t < 7.92053e-6 + 50e-9)\n"
+        "ms = r.diagnostics['mode_selection']\n"
+        "print(json.dumps({k: ms[k] for k in ('rounding_ties', 'leak_pins')}"
+        " | {'rel': float(np.max(np.abs(i6[w] - i7[w]) / i6[w]))}))\n")
+    env = dict(os.environ, PULSIM_TEST_LCP_NO_ROUNDING_FLOOR="1", PYTHONPATH=os.pathsep.join(sys.path))
+    p = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, timeout=900)
+    assert p.returncode == 0, p.stderr[-2000:]
+    d = json.loads(p.stdout.strip().splitlines()[-1])
+    assert d["rounding_ties"] == 0, d                # the floor is off ...
+    assert d["leak_pins"] >= 1, d                    # ... the pre-fix selection is back
+    assert d["rel"] > 0.5, d                         # D7 OFF: D6 carries the pair's current
+
 
 @pytest.mark.parametrize("form", [
     "conductance",
@@ -340,18 +428,12 @@ def test_collapse_rows_follow_each_record_step():
         "release finding F-Z-9: on branch-form diodes the LCP puts D6 ON with 1.3e-6 A and D7 OFF at a "
         "7.8e-7 V gap at the 7.92 us rectifier commutation; D7 stays OFF to 7.9755 us (D6 4.66 A, truth 2.33 A)"))),
 ])
-def test_exact_lcp_turns_on_both_parallel_rectifier_diodes(form, monkeypatch):
-    """F-Z-9's cause, at the mode: at the PSFB rectifier commutation
-    (7.9205 us, D5 and D8 ON) D6 and D7 are in parallel (0 -> r through
-    equal R_on) and share the current equally; the LCP must turn both ON
-    on either device form (the settle does)."""
-    for m in ("add_diode", "add_switch"):   # the reader takes the library's default form
-        f = getattr(pulsim.CircuitBuilder, m)
-        monkeypatch.setattr(pulsim.CircuitBuilder, m,
-                            lambda self, *a, _f=f, **k: _f(self, *a, **{"form": form, **k}))
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        r = v1_reader.load(CASES["psfb_full_bridge_zvs"][0]).run("dsed", mode_selection="lcp")
+def test_exact_lcp_rectifier_pair_shares_at_7_95_us(form, monkeypatch):
+    """F-Z-9's cause, at the mode (this branch's pin): at the PSFB rectifier
+    commutation (7.9205 us, D5 and D8 ON) D6 and D7 are in parallel (0 -> r
+    through equal R_on) and share the current equally; the LCP must turn both
+    ON on either device form (the settle does)."""
+    r = _psfb_exact_lcp(form, monkeypatch)
     k = int(np.searchsorted(np.asarray(r.times), 7.95e-6))
     i6, i7 = (float(np.asarray(v1_reader.observable(r, f"I({d})"))[k]) for d in ("D6", "D7"))
     assert i6 > 0.5 and abs(i6 - i7) <= 1e-6 * i6, (form, i6, i7)

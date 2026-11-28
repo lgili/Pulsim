@@ -156,7 +156,9 @@ PULSIM_IFACE_INLINE inline Real stamp_entry(const NonlinearCapacitorHistory::Ent
     const std::array<Index, 2> at{e.from, e.to};
     std::array<Real, 2> F{};
     std::array<std::array<Real, 2>, 2> J{};
-    device::stamp_fq<CossLaw>(CossLaw::aux_from(e.params), CossLaw::from(e.params),
+    auto aux = CossLaw::aux_from(e.params);
+    aux.hand_tangent = true;   // J = the hand stamp's C(v)·a, to the bit
+    device::stamp_fq<CossLaw>(aux, CossLaw::from(e.params),
                               gather<2>(x, at, 2), c, {e.q_prev, -e.q_prev},
                               {e.i_prev, -e.i_prev}, {qg, -qg}, F, J);
     scatter<CossLaw>(at, F, J, J_nl, f_nl);

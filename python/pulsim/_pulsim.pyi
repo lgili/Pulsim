@@ -2678,6 +2678,36 @@ class ImplausibleVoltage:
     A node whose voltage left the range the circuit's own sources can account for. `node == -1` means the trace is plausible.
     """
     @property
+    def cut_device(self) -> str:
+        ...
+    @property
+    def cut_energy(self) -> float:
+        ...
+    @property
+    def cut_kind(self) -> str:
+        ...
+    @property
+    def cut_measure(self) -> float:
+        """
+        |lambda| / dt of a cut set, the value judged (then also `peak`); 0: the row was judged
+        """
+    @property
+    def cut_row_voltage(self) -> float:
+        """
+        the stored right-limit row value (i*R_off at a cut set), reported, not judged
+        """
+    @property
+    def cut_size(self) -> float:
+        """
+        the cut current (A, an inductor) or voltage jump (V, a capacitor); 0: not one state
+        """
+    @property
+    def cut_state(self) -> str:
+        ...
+    @property
+    def cut_step(self) -> float:
+        ...
+    @property
     def node(self) -> int:
         ...
     @property
