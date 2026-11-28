@@ -65,3 +65,43 @@ def test_run_length_does_not_change_the_common_span():
                    "stalls and the step falls to h_min (F-Z-6 part 2, open)")
 def test_three_microsecond_run_survives_the_first_turn_off():
     _run(3e-6, 1e-8)
+
+
+def _rl():
+    import pulsim as p
+    b = p.CircuitBuilder()
+    b.add_voltage_source("V", "in", "gnd", 10.0)
+    b.add_resistor("R", "in", "n", 10.0)
+    b.add_inductor("L", "n", "gnd", 1e-3)
+    return p, b
+
+
+def _sim(p, b, **kw):
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return p.simulate(b, engine="trbdf2", dt=1e-6, **kw)
+
+
+def test_start_slots_resume_like_the_uninterrupted_run():
+    # zero start: v_L(0+) = 10 V against the init slot's 0 V, so the start takes
+    # the probe's slots; a short run, its snapshot and a resume reach the
+    # uninterrupted run's end state, and the resume takes no second start probe
+    p, b = _rl()
+    full = _sim(p, b, t_end=1e-3)
+    head = _sim(p, b, t_end=2e-6)
+    assert head._trbdf2_stats["n_derivative_refreshes"] == 1
+    tail = _sim(p, b, t_end=1e-3, resume_from=head.final_snapshot)
+    assert tail._trbdf2_stats["n_derivative_refreshes"] == 0
+    a, c = np.asarray(full.states[-1]), np.asarray(tail.states[-1])
+    assert np.allclose(c, a, rtol=1e-6, atol=1e-9)
+    # the exact end current (V/R)(1 - e^{-t R/L}) = 1 - e^{-10}, at the run's tolerance
+    k = b.state_var_names().index("I(L)")
+    assert c[k] == pytest.approx(1.0 - np.exp(-10.0), rel=1e-5)
+
+
+def test_a_given_initial_state_takes_no_start_probe():
+    # initial_state is seeded as a DC operating point (zero slots by contract):
+    # PSS period runs start there and must keep the map they had
+    p, b = _rl()
+    r = _sim(p, b, t_end=1e-4, initial_state=np.zeros(len(b.state_var_names())))
+    assert r._trbdf2_stats["n_derivative_refreshes"] == 0

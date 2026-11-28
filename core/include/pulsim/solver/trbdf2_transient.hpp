@@ -2586,6 +2586,14 @@ inline SimulationResult run_transient_trbdf2(
     if (hs.any() && resume_from == nullptr && !start_consistent(true)) {
         sdirk_left = std::max(sdirk_left, Size{1});
     } else if (!hs.any() && resume_from == nullptr
+               // Only the zero start: a given initial_state is seeded as a DC
+               // operating point (zero slots by that contract), and a PSS
+               // period run starts from one: the probe's capacitor slot
+               // carries 2C ulp(v) / h_probe of round-off (mA on a 12 V,
+               // 47 uF buck orbit), the period map's noise grew 2.6x (v_C)
+               // to 6x (i_L) and the shooting stalled at 3.6e-8 above rtol.
+               && !initial_state.has_value()
+               && opts.refresh_after_event   // as at a gate edge
                // a tick at t_start may change the gates the probe was solved under
                && queue.next_of(events::Kind::ControlTick) > t + h_min) {
         // The probe is optional here: it leaves no probe state behind (a
@@ -2679,6 +2687,12 @@ inline SimulationResult run_transient_trbdf2(
             }
             history.restore(hist_rec);   // the probe's slots, the states are x's
             if (lt) lt->slots_rewritten();
+            // as the gate edge's slots-only path: the first step under this
+            // mode takes them, and a snapshot before the first commit says
+            // post_edge_derivatives (a resume must not land an edge again)
+            edge_slots_t = t;
+            edge_slots_m = *start_probe_m;
+            slots_only_t = t + dtp;
             ++st.n_derivative_refreshes;
         }
     }
