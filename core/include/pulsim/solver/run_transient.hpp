@@ -2298,7 +2298,6 @@ inline SimulationResult run_transient(
             step::restore(history, hs, ip_hist, ip_hs);
             event_rl_x = Real{2} * ip_x1 - ip_x2m;
             ip_x3m = x;   // the reading's x3 (the series' later stages reuse x)
-            const auto mode_3 = stamped_mask;   // the series' stages: this mode's linear map
             // Per state (C or L): the jump x0+ − x0, the rule's bound;
             // energy ½ΔᵀMΔ with the transformers' mutuals.
             auto state = [&](const pwl::HistoryEntry& e, const Vector& v) {
@@ -2698,13 +2697,6 @@ inline SimulationResult run_transient(
                     stage_from(ip_xk, moved ? &ip_sk : nullptr, moved ? tk : t1);
                     if (!solved) {
                         solved = true;
-                        stages_ok = false;
-                        break;
-                    }
-                    // a stage in another mode is not T·D_k (the Krylov relation
-                    // the fit needs): the series stops before it (m_ok or the
-                    // fallbacks), never spans a mode change
-                    if (!(stamped_mask == mode_3)) {
                         stages_ok = false;
                         break;
                     }
