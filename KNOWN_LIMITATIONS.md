@@ -719,6 +719,10 @@ comments and `benchmarks/REFERENCE_STATUS.md`.
   the restart nor the split makes it second order (same section). The
   reader's `K = kp` (half v1's law; restore-reference-benchmark-harness
   DECISIONS 14 R1) is a second, open defect on these circuits.
+- **TC-SPLIT-RIGHT-LIMIT** — release finding F-Z-19 (open, integration-line code): with the
+  event split at `split_snap = 0.01` (the harness's `pwl+split@legacy`), conductance-form
+  diodes, the row one `dt` after a located diode turn-off of `diode_half_wave_rl_load` reads
+  25.571 V (source peak 10 V); the kernel default `split_snap` and the branch form agree.
 - **TC-OPEN** — not isolated: the cell is frozen with its measured error and
   the manifest comment says what is known. `transformer_leakage` (linear, no
   switching: 4.1e-3 on every `pwl` configuration), `ll06_buck_vcswitch`
