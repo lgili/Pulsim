@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### trbdf2 / esdirk43: Newton round-off acceptance at very high node voltages
+
+At the active-clamp forward converter's turn-off edges (`ll13_active_clamp_forward`), nodes reach 3.5e8 V
+inside a 2e-13 s mode. Some short steps there ended Newton at the 50-iteration budget with the residual at
+round-off (under 0.5 eps of each row's own terms), and the round-off acceptance still declined them. Its
+fixed-point test wanted every unknown's last step within 4 eps of its own value, but some unknowns are set by
+rows of much larger terms. The Vin branch current is 13 A and is set by 1e8 V terms, so it moved 3.7e-9 A,
+two million of its own ulps. A node of a nearly singular short step moved 48 eps. The step fell to h_min,
+and three run lengths aborted (rtol 1e-6 / 1.6 us, 1e-8 / 3 us, 1e-10 / 100 us). The test now also takes a
+step at the rounding PROPAGATED to that unknown: omega_max |J^-1| (|J||x| + |b|), estimated from below with
+two solves on the iterate's own factor. It runs only on a stagnated solve that exhausted its budget, and only
+with judge_own_scale (trbdf2 / esdirk43). The absolute dx tolerance, the residual backward-error test, the
+stagnation windows and the dx cap are unchanged, and `pwl` is byte-identical. All 18 measured ll13 runs
+complete. The 3 us expected failure is removed.
+
 ### Exact engine: faster steps on a repeated step length (results unchanged)
 
 A step of the exact engine reuses each mode's `e^{λh}` and `h·φ₁(λh)·w` when its length equals the previous step's, and the route record counts its segments with one `np.unique`. Stored arrays are bit-identical. The 2000-period synchronous buck runs in 2.4 ms instead of 3.5 ms; the measurement behind it (where the step's bytes and time go) is in the exact-propagator design notes.
