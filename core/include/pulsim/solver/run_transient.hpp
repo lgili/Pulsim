@@ -2584,7 +2584,10 @@ inline SimulationResult run_transient(
             // ramp; a saturable core or nonlinear capacitor flagged keeps the
             // impulse. shortcut: a slope that does not end at rest (|Δ3| large)
             // stays an impulse; upgrade with a two-slope θ if one matters.
-            if (split && jumped && solved && rs_cut.arm && std::isnan(rs_cut.t)) {
+            // (a stage 1 that turned a PWL diode keeps the impulse: piece B would
+            // start from the pre-event bits, rs_cut.bits below)
+            if (split && jumped && solved && rs_cut.arm && std::isnan(rs_cut.t) &&
+                (!has_diodes || (diodes.snapshot_on_bits_into(ip_bits1), ip_bits1 == rs_bits0))) {
                 bool all = true;
                 for (Size k = 0; k < nn; ++k) all = all && ip_nc[3 * k + 2] == Real{0};
                 for (Size k = 0; k < nsat; ++k) all = all && ip_sl[3 * k + 2] == Real{0};
