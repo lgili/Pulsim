@@ -285,9 +285,9 @@ _HEAVY = {
 @pytest.mark.parametrize(("name", "kw"), [
     ("ll08", {}), ("ll13", {}), ("ll13", {"rtol": 1e-7}),
     ("ll13", {"rtol": 1e-6, "integrator": "esdirk43"}),
-    pytest.param("ll13", {"rtol": 1e-8, "atol": 1e-12}, marks=pytest.mark.xfail(strict=True, reason=(
-        "release finding F-Z-6: Newton fails at h_min at t ~ 0 (||dx|| 7.0e-16 at clamp_node, residual 4.8e-6 "
-        "at the KCL of vin); rtol 1e-8 alone fails too; the same with every release default set legacy")))])
+    # F-Z-6 (closed, integration 9f80b681: trbdf2 takes a consistent start from the zero start): the
+    # t ~ 0 h_min abort is gone; this reference call runs under the release defaults
+    ("ll13", {"rtol": 1e-8, "atol": 1e-12})])
 def test_roundoff_heavy_reference_circuit_runs_on_trbdf2(name, kw):
     rel, dt_ref, period, offs, inductors, nodes = _HEAVY[name]
     bench = Path(__file__).resolve().parents[2] / "benchmarks"

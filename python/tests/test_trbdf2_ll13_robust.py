@@ -61,10 +61,20 @@ def test_run_length_does_not_change_the_common_span():
         assert d.max() < 1e-3
 
 
-@pytest.mark.xfail(strict=True, reason="root cause 2: the 1.5 us turn-off edge probe "
-                   "stalls and the step falls to h_min (F-Z-6 part 2, open)")
-def test_three_microsecond_run_survives_the_first_turn_off():
-    _run(3e-6, 1e-8)
+# Root cause 2 (F-Z-6 part 2, open on the integration line, docs/known-limitations.md): the
+# 1.5 us turn-off edge probe stalls and the step falls to h_min. Release branch: the release
+# defaults (YAML switch / diode form='branch' among them) run it to 3 us (1845 samples); the
+# pre-release profile (benchmarks/tools/next_defaults.legacy(), = the integration line's
+# defaults) still aborts at the edge ("Newton failed at t = 0.000002 ... h_min", node sec).
+@pytest.mark.parametrize("profile", ["release", pytest.param("legacy", marks=pytest.mark.xfail(
+    strict=True, reason="root cause 2: the 1.5 us turn-off edge probe stalls and the step falls "
+    "to h_min (F-Z-6 part 2, open on the integration line)"))])
+def test_three_microsecond_run_survives_the_first_turn_off(profile):
+    import contextlib  # noqa: PLC0415
+
+    import next_defaults  # noqa: PLC0415
+    with next_defaults.legacy() if profile == "legacy" else contextlib.nullcontext():
+        _run(3e-6, 1e-8)
 
 
 def _rl():

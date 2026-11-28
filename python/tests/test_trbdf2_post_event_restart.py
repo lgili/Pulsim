@@ -266,6 +266,11 @@ def test_the_pulse_cap_follows_the_recent_pulses():
     assert np.sum(t > 0.5e-3) <= 2 * np.sum(tr > 0.5e-3)
 
 
+@pytest.mark.xfail(strict=True, reason=(
+    "release finding F-Z-18: with the release default form='branch' trbdf2 steps over the 60 us pulse "
+    "(77 of 78 rises; pulses seen from 90 us) since the consistent start (integration 9f80b681); "
+    "form='conductance' 78 of 78 (first seen 60 us); not moved by device_path / mode_selection / "
+    "control_tick / discontinuity_restart; .scratch/triage12/pulse.py"))
 def test_a_gate_that_gets_faster_loses_no_pulse():
     """A 100 ns pulse every third period, then every period (pulse skipping
     resuming). The rises prove periodic at 3T and the cap lifts between

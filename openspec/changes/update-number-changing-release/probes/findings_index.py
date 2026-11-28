@@ -383,6 +383,23 @@ F = [
      "enable_substep_state_correction=False: no warning, E_sw 1.343e-4 J (the test passed before the c3ac0a87 merge)",
      "18 samples (t = 1.055 .. 1.225 ms), E_sw 1.350e-4 J; split_snap 0.01: 157 samples; both diode forms, mode_selection "
      "/ device_path legacy alike: integration-line code (efce3c44 / 4341f221)"),
+    # ---- R16 (2026-11-28, triage slice 7: merge of integration 9f80b681)
+    ("F-Z-18", "D", "W", "trbdf2 steps over a gate pulse of an opaque switch_fn on a branch-form buck since the consistent start [owner: trbdf2 line]",
+     "test_trbdf2_post_event_restart::test_a_gate_that_gets_faster_loses_no_pulse (_tick_buck: 10 V buck, add_switch / add_diode "
+     "with the release default form='branch', 100 ns pulses every 3rd 10 us period then every period from 300 us; "
+     "simulate(engine='trbdf2', 1 ms); .scratch/triage12/pulse.py)",
+     "every pulse from the second on is seen (78 rises after 35 us)",
+     "passed on this branch before the 9f80b681 merge (run11); form='conductance' after the merge: 78 of 78, first rise 60 us",
+     "77 of 78: the 60 us pulse (the first the test requires) is stepped over, first rise seen 90 us; the same with "
+     "device_path / mode_selection 'legacy', control_tick 'label', discontinuity_restart=False, undriven='closed'; "
+     "the integration line (conductance default) is unaffected, so the release's form flip exposes it"),
+    ("F-Z-19", "A", "W", "with the split at split_snap 0.01 a located diode turn-off's next row on a conductance-form half-wave RL load is 25.6 V (source peak 10 V) [owner: restart line, the split's right-limit solve]",
+     "diode_half_wave_rl_load v1 YAML, conductance form (next_defaults.legacy()), case.run('pwl', discontinuity_restart=True, "
+     "enable_substep_state_correction=True, split_snap=0.01); REFERENCE_STATUS pwl+split@legacy; .scratch/triage12/hw_split.py",
+     "the trbdf2 rtol 1e-8 reference: -1e-5 V after the 50.1 ms turn-off",
+     "6.16e-5 rms (agree) before the 9f80b681 merge; split_snap 1e-6 (the kernel default) and restart alone: max 0.0164 V",
+     "rows -0.2513 / -0.3141 (event limits, 6.9e-18 s apart) / 25.571 / -0.0062 V at t = 50.1 ms; err_rms 0.049156, err_max 2.48 "
+     "(disagree); the integration-line build (147c2894) gives the same 25.571 V: integration-line code (e4aefaaa / 9247bc7d)"),
     # R: the discovery rehearsal on cbdce080 (.scratch/rehearsal/DISCOVERY_cbdce080.md; reproducers in
     # .scratch/rehearsal/repro/, run under repro/guard.py, an RSS-capped child)
     ("F-R-1", "R", "R", "the rehearsal's output-rule referee keeps every window of its rule-off reference: 3.6 .. 8.1 GB on 11 circuits [owner: benchmarks/tools/output_rule_referee.py]",
@@ -430,6 +447,15 @@ F = [
 # Closed by a fix merged into the release branch: id -> where and the measured result.
 # A closed finding leaves the open tables and is listed under "Closed".
 FIXED = {
+    "F-Z-6": "integration line 9f80b681 (trbdf2 consistent start from the zero start; merged R16): ll13 trbdf2 rtol 1e-8 / atol 1e-12 "
+             "(the benchmark reference call) runs to 50 us (5588 samples); the table rtol None / 1e-6 / 1e-8 x t_end 1.6 / 3 / 10 / 50 us "
+             "and rtol 1e-10 x 1.6 / 3 / 10 us all run under the release defaults (15 of 15); the 1.5 us turn-off edge abort (part 2) "
+             "still reproduces under the pre-release profile at 3 us / 1e-8 (test_trbdf2_ll13_robust [legacy], strict xfail; "
+             "docs/known-limitations.md)",
+    "F-R-3": "integration line 9f80b681 (every exact-engine event projection recorded, rule (1) of the scoreboard prices it; merged R16): "
+             "the scoreboard dsed cell on diode_half_wave_rl_load 0.0304 (limits) -> 4.817e-6 (instants; limits part 3.05e-7; "
+             "3 projections recorded, tau 1.0e-9 s); a reader that np.interp's across the two event rows 6.9e-18 s apart still "
+             "reads 0.3138 V there (a time-interpolating reader, not the grade)",
     "F-Z-7": "integration line e2d82ed5 (C_oss interface stamp in the increment form a*(q - q_n); merged R15 7ce6ea8c): case A "
              "esdirk43 at t_end 4.5951324e-6 runs under the release default device_path='interface' (and with mode_selection / "
              "device_path legacy, restart off); all 40 seeded lengths run on both integrators; the incoming "
