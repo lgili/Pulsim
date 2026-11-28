@@ -184,11 +184,11 @@ def test_diode_event_is_recorded_where_it_happens():
     assert (nxt - ev).max() < 1e-9
 
 
-def _tick_buck():
+def _tick_buck(**form):
     b = p.CircuitBuilder()
     b.add_voltage_source("Vin", "vin", "gnd", 10.0)
-    b.add_switch("S", "vin", "sw", 100.0, 1e-6)
-    b.add_diode("D", "gnd", "sw", 100.0, 1e-6)
+    b.add_switch("S", "vin", "sw", 100.0, 1e-6, **form)
+    b.add_diode("D", "gnd", "sw", 100.0, 1e-6, **form)
     b.add_inductor("L", "sw", "out", 100e-6)
     b.add_capacitor("C", "out", "gnd", 100e-6)
     b.add_resistor("R", "out", "gnd", 10.0)
@@ -266,31 +266,82 @@ def test_the_pulse_cap_follows_the_recent_pulses():
     assert np.sum(t > 0.5e-3) <= 2 * np.sum(tr > 0.5e-3)
 
 
-def test_a_gate_that_gets_faster_loses_no_pulse():
-    """A 100 ns pulse every third period, then every period (pulse skipping
-    resuming). The rises prove periodic at 3T and the cap lifts between
-    them; the new pulses come where none is predicted, and only the gate
-    samples inside the lifted step can see them: they stay half a pulse
-    apart. Every edge, structurally."""
-    Tp, w = 1e-5, 1e-7
-    b = _tick_buck()
+def _opaque_pulses(form, rises, widths, t_end=1e-3):
+    """The tick buck driven by an opaque gate: pulse i is high on
+    [rises[i], rises[i] + widths[i]). The first pulse rises on a source
+    breakpoint, so a step ends there whatever the start-up steps: it is
+    seen. A first pulse narrower than the step's h/4 sampling is otherwise
+    seen only by chance: at h = h_max = 1 us the four regular samples are
+    250 ns apart and phase-locked to the 10 us period, so only the walking
+    sample can hit a 100 ns pulse, one time in ten. Returns
+    (the last pre-edge sample, the first post-edge sample, whether it
+    rose) at every recorded edge, and the run."""
+    b = _tick_buck(**form)
     k = b.switch_index_of("S")
+    b.add_pulse_voltage_source("Vmark", "mark", "gnd", 0.0, 1.0, rises[0], 1.0)
+    b.add_resistor("Rmark", "mark", "gnd", 1e3)
+    ra, wa = np.asarray(rises), np.asarray(widths)
 
     def fn(t):
         m = p.SwitchStateMask(b.graph.num_switches)
-        n = int(t // Tp)
-        m.set(k, bool(n >= 1 and t - n * Tp < w
-                      and (n % 3 == 0 or n * Tp >= 3e-4 - 1e-12)))
+        i = np.searchsorted(ra, t, side="right") - 1
+        m.set(k, bool(i >= 0 and t - ra[i] < wa[i]))
         return m
-    r = p.simulate(b, 1e-3, engine="trbdf2", switch_fn=fn)
-    # From the second pulse on: a pulse before any is seen can be stepped
-    # over by any opaque-gate run (nothing to cap by yet).
-    want = sum(1 for n in range(4, 100) if n % 3 == 0 or n * Tp >= 3e-4 - 1e-12)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message=".*narrower than the spacing")
+        r = p.simulate(b, t_end, engine="trbdf2", switch_fn=fn)
     t = np.asarray(r.times)
     s = np.asarray(r.switch_states)[:, k]
     j = np.flatnonzero(s[1:] != s[:-1])
-    j = j[t[j] > 3.5 * Tp]
-    assert (int(np.sum(s[j + 1])), int(np.sum(~s[j + 1]))) == (want, want)
+    return t[j], t[j + 1], s[j + 1], r
+
+
+def _assert_edges(form, rises, widths, t_end=1e-3):
+    pre, post, up, r = _opaque_pulses(form, rises, widths, t_end)
+    ra = np.asarray(rises)
+    edges = np.sort(np.r_[ra, ra + np.asarray(widths)])
+    assert (int(np.sum(up)), int(np.sum(~up))) == (len(ra), len(ra))
+    assert np.all(up[0::2]) and not np.any(up[1::2])
+    # The stated event tolerance: an edge is bisected until its bracket is
+    # at most h_min (span * 1e-11 here); the step lands on the bracket's
+    # post-edge end, recorded under the pre-edge gate (the left limit), and
+    # the post-edge sample follows within 1 ns. Algorithm bounds, not pins.
+    h_min = 1e-11 * t_end
+    assert np.all(pre >= edges) and np.all(pre - edges <= h_min)
+    assert np.all(post - pre < 1e-9)
+    return r
+
+
+@pytest.mark.parametrize("form", [{"form": "conductance"}, {"form": "branch"}],
+                         ids=["conductance", "branch"])
+def test_a_gate_that_gets_faster_loses_no_pulse(form):
+    """A 100 ns pulse every third period, then every period (pulse skipping
+    resuming). Once the first pulse is seen the step is capped at twice it
+    while the gate is quiet, the rises prove periodic at 3T and the cap
+    lifts between them; the new pulses come where none is predicted, and
+    only the gate samples inside the lifted step can see them: they stay
+    half a pulse apart. Every edge, structurally, on both device forms.
+    (The first pulse used to be left to chance: both forms missed the 30 us
+    pulse, and the branch form's walking sample missed the 60 us one too.)"""
+    Tp, w = 1e-5, 1e-7
+    rises = [n * Tp for n in range(3, 100) if n % 3 == 0 or n * Tp >= 3e-4 - 1e-12]
+    _assert_edges(form, rises, [w] * len(rises))
+
+
+@pytest.mark.parametrize("form", [{"form": "conductance"}, {"form": "branch"}],
+                         ids=["conductance", "branch"])
+def test_a_narrow_pulse_after_a_long_quiet_stretch_is_seen(form):
+    """A 400 ns pulse, 300 us of nothing, then 220 ns pulses. Over the quiet
+    stretch the step is capped at twice the narrowest pulse seen (800 ns)
+    and sampled at a quarter of it, so a pulse at least half as wide as the
+    narrowest seen cannot fit between two samples: the 220 ns pulses are
+    narrower than the steps before them and than h_max / 4, and comparing
+    the gate at the two ends of a step would miss each one."""
+    rises = [3e-5, 3.3e-4 + 1.234e-7, 6.3e-4 + 3.21e-8, 6.4e-4 + 5e-9]
+    r = _assert_edges(form, rises, [4e-7, 2.2e-7, 2.2e-7, 2.2e-7])
+    t = np.asarray(r.times)
+    q = np.diff(t[(t > 5e-5) & (t < 3.3e-4)])
+    assert q.max() > 2.2e-7           # the quiet steps are wider than the pulse
 
 
 def test_a_learned_probe_floor_leaves_the_turn_offs_unchanged():
@@ -374,3 +425,45 @@ def test_learning_a_periodic_opaque_gate_is_cheap():
     _, up_e, dn_e = loop_run(False)
     assert (up, dn) == (up_e, dn_e)
     assert r._trbdf2_stats["n_accept"] < 10_000    # measured 2,357; 28,049 before
+
+
+@pytest.mark.parametrize("form", [{"form": "conductance"}, {"form": "branch"}],
+                         ids=["conductance", "branch"])
+def test_a_quiet_bit_keeps_its_samples_while_another_bit_toggles(form):
+    """Bit B: a 100 ns pulse (on a source breakpoint), then 60 ns pulses
+    after ever longer quiet gaps; bit A: a 50 % opaque PWM at 10 us. B's
+    quiet cap holds the step at twice the narrowest pulse, but the samples
+    per step followed A's 5 us widths alone: one sample per step, and
+    pulses at least half as wide as the narrowest seen went unseen. Every
+    B edge, structurally."""
+    Tp = 1e-5
+    b = _tick_buck(**form)
+    b.add_switch("S2", "vin", "x", 100.0, 1e-6, **form)
+    b.add_resistor("Rx", "x", "gnd", 100.0)
+    b.add_pulse_voltage_source("Vmark", "mark", "gnd", 0.0, 1.0, 3e-5, 1.0)
+    b.add_resistor("Rmark", "mark", "gnd", 1e3)
+    ka, kb = b.switch_index_of("S"), b.switch_index_of("S2")
+    rises, widths, t0 = [3e-5], [1e-7], 3.01e-5
+    for g in (1e-6, 3e-6, 7e-6, 15e-6, 31e-6, 63e-6, 127e-6, 255e-6):
+        t0 += g + 1.7e-8 * len(rises)        # off any step grid
+        rises.append(t0)
+        widths.append(6e-8)
+        t0 += 6e-8
+    ra, wa = np.asarray(rises), np.asarray(widths)
+
+    def fn(t):
+        m = p.SwitchStateMask(b.graph.num_switches)
+        m.set(ka, bool((t % Tp) < 0.5 * Tp))
+        i = np.searchsorted(ra, t, side="right") - 1
+        m.set(kb, bool(i >= 0 and t - ra[i] < wa[i]))
+        return m
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message=".*narrower than the spacing")
+        r = p.simulate(b, 1e-3, engine="trbdf2", switch_fn=fn)
+    t = np.asarray(r.times)
+    s = np.asarray(r.switch_states)[:, kb]
+    j = np.flatnonzero(s[1:] != s[:-1])
+    edges = np.sort(np.r_[ra, ra + wa])
+    assert (int(np.sum(s[j + 1])), int(np.sum(~s[j + 1]))) == (len(ra), len(ra))
+    pre = t[j]
+    assert np.all(pre >= edges) and np.all(pre - edges <= 1e-11 * 1e-3)

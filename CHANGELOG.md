@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### TR-BDF2: a quiet gate bit keeps its samples while another bit toggles; the opaque `switch_fn` guarantee is stated (F-Z-18)
+
+`test_a_gate_that_gets_faster_loses_no_pulse` failed with branch-form devices (77 of 78 pulses). This was not an engine defect:
+the lost 60 µs pulse was the gate's second pulse, and the first had been stepped over too, so the engine had learned nothing.
+At h_max = 1 µs the four regular samples are 250 ns apart and phase-locked to the 10 µs period. Only the walking sample
+could hit a 100 ns pulse, and its phase follows the start-up steps. The test now lands the first pulse on a source
+breakpoint, runs on both device forms, and checks every edge against the bisection bound (h_min). A second test puts
+220 ns pulses after 300 µs of 800 ns quiet steps.
+
+The review of that guarantee found a real defect with two gate bits. A quiet bit caps the step at twice the narrowest
+pulse of the run, but the number of samples per step followed only the bits that were toggling. Under a 50 % PWM on
+another bit, that was one sample per step, and 2 of 8 later 60 ns pulses went unseen (100 ns narrowest). A step capped by a
+quiet bit now keeps at least 4 samples. Single-bit gates are unchanged. The `simulate` docstring (`switch_fn`) and
+known-limitations state the guarantee. Before a bit has closed a pulse, nothing is guaranteed. After that, no pulse at least
+half as wide as the bit's recent narrower width is stepped over (while the bit is quiet: the run's narrowest pulse).
+
 ### Restart rule: a located rectifier turn-off is no longer thrown away by round-off at the crossing
 
 - Under `discontinuity_restart=True` a diode turn-off inside a step is located and the step cut there; the first piece ends at the crossing (v_D = 0), so its stage 2 may iterate on that round-off. A flip-and-back there was left as solved, read as an unsettled piece, and the uncut step stood: on `half_bridge_transformer_dc` (dt = 100 ns) the secondary kept 15-35 % of its off-state settling at such steps (+3.3e-6 V on V(out) each, first order in dt). Which steps hit it depended on 1e-9 V differences in the previous switch edge's projection, so the change to the projection's fit order above fixed one edge and broke another. The first piece's stage 2 is now re-solved in stage 1's mode when every diode it moved is one the locator found crossing at the cut (a real flip of another diode inside the piece is taken as in any other step and counted in `result.counters["restart_piece1_flips_kept"]`): those positive kicks are gone (sum of |V(out)| step errors at diode turn-offs 4.20e-5 V -> 2.27e-5 V; what remains are turn-offs inside stage 1, which the rule alone does not locate). On `sepic`, `two_phase_interleaved_boost` and `cascaded_boost_buck` (rule alone) the rms against a dt/100 run rises although no switching kick grew: the removed positive kicks had cancelled the remaining stage-1 ones.
