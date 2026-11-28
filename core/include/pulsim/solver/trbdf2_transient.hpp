@@ -2594,6 +2594,7 @@ inline SimulationResult run_transient_trbdf2(
                // to 6x (i_L) and the shooting stalled at 3.6e-8 above rtol.
                && !initial_state.has_value()
                && opts.refresh_after_event   // as at a gate edge
+               && !opts.sdirk_on_linear_circuits   // the edge then restarts by SDIRK, no probe
                // a tick at t_start may change the gates the probe was solved under
                && queue.next_of(events::Kind::ControlTick) > t + h_min) {
         // The probe is optional here: it leaves no probe state behind (a
@@ -2607,6 +2608,8 @@ inline SimulationResult run_transient_trbdf2(
         const Index ro_r = ro_row;
         const std::string err_keep = newton_last_error;
         const pwl::StepCtx ctx_keep = step_ctx;
+        const Size start_retries_keep = n_newton_start_retries;
+        const Vector x_trial_keep = x_trial;   // the next probe's warm start
         bool refresh = false;
         try {
             refresh = !start_consistent(false) && start_probe_ok;
@@ -2650,6 +2653,7 @@ inline SimulationResult run_transient_trbdf2(
         ro_row = ro_r;
         newton_last_error = err_keep;
         step_ctx = ctx_keep;
+        n_newton_start_retries = start_retries_keep;
         if (refresh && commit) {
             const SwitchStateMask& m = *start_probe_m;
             const Vector x0 = x;
@@ -2677,6 +2681,7 @@ inline SimulationResult run_transient_trbdf2(
             x_mask = m;
             x_mask_known = true;
             gates_decided = m;
+            newton_at_start = false;   // x is no longer the start state
             ++st.n_derivative_refreshes;
         } else if (refresh) {
             if (sens.on()) [[unlikely]] {   // the slots move, x and t do not: mirrored
@@ -2693,7 +2698,11 @@ inline SimulationResult run_transient_trbdf2(
             edge_slots_t = t;
             edge_slots_m = *start_probe_m;
             slots_only_t = t + dtp;
+            x_edge = x_trial;   // the first step's Newton warm start, as after an edge
+            x_edge_t = t;
             ++st.n_derivative_refreshes;
+        } else {
+            x_trial = x_trial_keep;
         }
     }
     std::vector<pwl::HistoryEntry> hist_snap, hist_s1, hist_s2, hist_f;
