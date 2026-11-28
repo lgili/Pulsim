@@ -3110,6 +3110,7 @@ inline SimulationResult run_transient(
             rl_loc.t = std::numeric_limits<Real>::quiet_NaN();   // consumed (no stale time)
             m_out = stamped_mask;
             bool count = false;
+            bool pure_loc = false;   // a continuity point solved (split): its fallback is the left
             if (at_loc && has_diodes) {
                 diodes.snapshot_on_bits_into(rl_bits);
                 // pure: V_f = 0 flips only, stage 1 kept exactly the located
@@ -3125,6 +3126,7 @@ inline SimulationResult run_transient(
                 // shortcut: the rule without the split keeps the left value (its
                 // outputs are frozen); it can carry the same g_on·v_D(left) residue
                 if (pure && !split) return 2;
+                pure_loc = pure;
                 // not a continuity point, solved in the decided mode. A
                 // turn-off is counted: the locator's residual current goes
                 // through 1/g_off (a V_f > 0 turn-off, R2, or one beside a
@@ -3563,6 +3565,12 @@ inline SimulationResult run_transient(
             aux_events.reset();
             restart_factorizations = rf_s;
             if (ok && !out.allFinite()) unheld = true;   // no state: counted
+            // review: a continuity point whose solve fails keeps the left value
+            // (the shortcut's row), neither dropped nor counted
+            if (pure_loc && unheld) {
+                unheld = false;
+                ok = 2;
+            }
             // a start row is due only when it differs from row 0, unknown
             // when its solve failed: not counted as a fallback
             if (((ok && count) || unheld) && !at_start) ++result.n_right_limit_fallbacks;
