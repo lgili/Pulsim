@@ -742,7 +742,7 @@ private:
     LcpStatus solve_with_hysteresis_(const std::vector<DiodePort>& ports,
                                      const CircuitScale& sc, Real h,
                                      int& pivots, int& released) {
-        shorted_held_ = shorted_released_ = 0;
+        shorted_held_ = shorted_released_ = rounding_ties_ = 0;   // a failed solve adds none
         const auto k = static_cast<Eigen::Index>(ports.size());
         const Real tol_w0 = tol * sc.vscale;
         held_.assign(ports.size(), 0);
@@ -845,8 +845,8 @@ private:
         // widened pass is posed with an inductor's 13 A into g_off (the PSFB
         // rectifier's all-OFF anchor), and its 7.8e-7 V "gap" of one of two
         // symmetric diodes was that rounding, decided OFF (F-Z-9). Inside it the
-        // port stays a tie for the next pass to decide. On a circuit-scale network
-        // (|u_j| + |Z_j|·|i| below ~1e7 V) the floor is below tol_w and nothing changes.
+        // port stays a tie for the next pass to decide. The floor exceeds tol_w only for
+        // |u_j| + |Z_j|·|i| > tol_w / (16·k·eps) (2.8e7 V at k = 4, 400 V); below it nothing changes.
         const bool zk = Z_.rows() == k && Z_.cols() == k;
         const Real fl = Real{16} * static_cast<Real>(k) * std::numeric_limits<Real>::epsilon();
         const auto tol_w_dec = [&](Eigen::Index j) {   // port j's own row: |u_j| + Σ|Z_jc|·|i_c|
@@ -856,7 +856,6 @@ private:
                 for (Eigen::Index c = 0; c < k; ++c) net += std::abs(Z_(j, c)) * std::abs(i_[c]);
             return std::max(tol_w, fl * net);
         };
-        rounding_ties_ = 0;
         cls_.assign(ports.size(), 0);
         for (Eigen::Index j = 0; j < k; ++j) {
             const auto ju = static_cast<std::size_t>(j);
