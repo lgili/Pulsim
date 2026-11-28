@@ -6,6 +6,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### trbdf2 / esdirk43: Newton round-off acceptance at very high node voltages
+
+At the active-clamp forward converter's turn-off edges (`ll13_active_clamp_forward`), nodes reach 3.5e8 V
+inside a 2e-13 s mode. Some short steps there ended Newton at the 50-iteration budget with the residual at
+round-off (under 0.5 eps of each row's own terms), and the round-off acceptance still declined them. Its
+fixed-point test wanted every unknown's last step within 4 eps of its own value, but some unknowns are set by
+rows of much larger terms. The Vin branch current is 13 A and is set by 1e8 V terms, so it moved 3.7e-9 A,
+two million of its own ulps. A node of a nearly singular short step moved 48 eps. The step fell to h_min,
+and three run lengths aborted (rtol 1e-6 / 1.6 us, 1e-8 / 3 us, 1e-10 / 100 us). The test now also takes a
+step at the rounding PROPAGATED to that unknown: omega_max |J^-1| (|J||x| + |b|), estimated from below with
+two solves on the iterate's own factor. It runs only on a stagnated solve that exhausted its budget, and only
+with judge_own_scale (trbdf2 / esdirk43). The absolute dx tolerance, the residual backward-error test, the
+stagnation windows and the dx cap are unchanged. Default `pwl` step solves are byte-identical; the fixed
+engine's event right-limit solve (which already judged at its own scale) gets the same rule (pwl+restart /
+pwl+split identity: ll13 fewer right-limit fallbacks, ll08 inner-event right states). All 18 measured ll13
+runs complete; the 3 us expected failure is removed. ll13 trbdf2 grade 0.00109 -> 0.00123 (ceiling 0.00133).
+
 ### TR-BDF2: a quiet gate bit keeps its samples while another bit toggles; the opaque `switch_fn` guarantee is stated (F-Z-18)
 
 `test_a_gate_that_gets_faster_loses_no_pulse` failed with branch-form devices (77 of 78 pulses). This was not an engine defect:
