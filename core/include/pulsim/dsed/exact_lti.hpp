@@ -735,7 +735,8 @@ inline void exact_advance_into(const ExactLTI& e, const Vector& x, Real h,
     }
     e.z_re.noalias() = e.Vinv_re * x;
     e.z_im.noalias() = e.Vinv_im * x;
-    if (!(h == e.coef_h)) {
+    // the sign too: e^{λ·(-0)} and e^{λ·(+0)} may differ in a zero's sign
+    if (!(h == e.coef_h && std::signbit(h) == std::signbit(e.coef_h))) {
         e.coef_ex.resize(n);   // no-op after the first call
         e.coef_g.resize(n);
         for (Eigen::Index i = 0; i < n; ++i) {

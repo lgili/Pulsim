@@ -943,7 +943,7 @@ TEST_CASE("Exact: the per-h modal coefficients cached by the step are the ones i
     REQUIRE(cached.tier == 1);
     Vector x(2), y(2), ref(2);
     x << 1.0, -2.0;
-    for (const Real h : {0.1, 0.1, 0.37, 0.1, 0.37, 0.37, 0.0, 0.1}) {
+    for (const Real h : {0.1, 0.1, 0.37, 0.1, 0.37, 0.37, 0.0, -0.0, 0.0, 0.1}) {
         const auto fresh = make_exact_lti(A, b);
         exact_advance_into(fresh, x, h, ref);
         exact_advance_into(cached, x, h, y);
