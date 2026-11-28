@@ -261,6 +261,46 @@ def test_the_run_budget_stops_the_rule_with_one_warning(monkeypatch):
     assert np.diff(t[t > tb])[:-1].min() >= 0.99 * grid
 
 
+def test_the_first_sample_after_an_event_is_placed_by_the_rule():
+    """F-X-7's sample past an event sat a fixed 2 ps out: a switch closing on an RC
+    (tau = C / (1/R + g_on) = 49.75 ps, resolved: above 1e-6 of the 5 us interval)
+    leaves the chord 19.7 x the rule's bound there. It is now the rule's chord from the
+    right limit, at most 2 ps and at least 64 eps max(1, |t|); against the closed form."""
+    F, V, R, C, gon, goff, rtol = 1e5, 100.0, 10.0, 1e-9, 20.0, 1e-9, 1e-5
+    b = pulsim.CircuitBuilder()
+    b.add_voltage_source("V", "in", "gnd", V)
+    b.add_resistor("R", "in", "sw", R)
+    b.add_switch("S", "sw", "gnd", gon, goff)
+    b.add_capacitor("C", "sw", "gnd", C)
+    sw = pulsim.make_pwm_switch_fn(F, 0.5, b.switch_index_of("S"), b.graph.num_switches, 0.5 / F)
+    r = pulsim.simulate(b, 4 / F, engine="exact", switch_fn=sw, output_rtol=rtol)
+    t, v = np.asarray(r.times), np.asarray(r.v("sw"))
+    assert np.all(np.diff(t) > 0)
+    og = r.diagnostics["output_grid"]
+    assert (og["n_output_capped"], og["n_output_unbounded"]) == (0, 0)
+    tol = rtol * (v.max() - v.min())   # the rule's bound: rtol x the row's range (~100 V)
+    for k, te in enumerate(np.arange(1, 8) * 0.5 / F):
+        i = int(np.argmin(np.abs(t - te)))
+        assert t[i] == pytest.approx(te, rel=1e-9)
+        g = gon if k % 2 == 0 else goff
+        tau, vinf = C / (1 / R + g), V / R / (1 / R + g)
+        h1 = t[i + 1] - t[i]
+        assert 64 * np.finfo(float).eps * max(1.0, t[i]) <= h1 <= 2e-12 * (1 + 1e-9)
+        s = np.linspace(t[i], t[i + 1], 201)
+        exact = vinf + (v[i] - vinf) * np.exp(-(s - t[i]) / tau)
+        chord = np.interp(s, t[i:i + 2], v[i:i + 2])
+        assert np.abs(chord - exact).max() <= 1.02 * tol, (k, h1)   # 0.988 measured
+        if g == gon:
+            # control: the fixed 2 ps chord on the same closed form (19.7 x)
+            s2 = np.linspace(t[i], t[i] + 2e-12, 201)
+            e2 = vinf + (v[i] - vinf) * np.exp(-(s2 - t[i]) / tau)
+            c2 = np.interp(s2, s2[[0, -1]], e2[[0, -1]])
+            assert np.abs(c2 - e2).max() > 10 * tol
+            # samples per transient: the rule's chord count over A e^{-s/tau} is
+            # 2 sqrt(A / (8 tol)) = 224 (230 measured): bounded, no collapse
+            assert ((t > t[i]) & (t <= t[i] + 20 * tau)).sum() <= 300
+
+
 def test_the_analytic_gate_reads_the_projected_flow():
     """DECISIONS 8: the rule's promise is against the flow with the parasitic cluster
     projected at events, and each projection is recorded; the rehearsal's analytic

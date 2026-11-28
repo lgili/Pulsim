@@ -6,6 +6,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Exact engine, `output_rtol`: the first sample after an event is placed by the rule
+
+- The sample stored just past an event (F-X-7) sat a fixed 2 ps out; on a node with a fast resolved post-event mode the chord from the right limit to it left the trajectory by up to 59 × the promise (`cl_buck_pi`'s switch node; `buck_dcm` 5.4 ×). It is now the rule's own chord step from the right limit, at most 2 ps and at least `64·eps·max(1, |t|)`, counted in the interval's cap and the run's budget. Referee: first line after an event 59.4 → 1.5e-5 (`cl_buck_pi`), 2.79 → 0.91 (`cl_boost_pi`), 5.42 → 1.7e-5 (`buck_dcm`); a closing switch on an RC (τ = 50 ps) 19.7 × → 0.99 × against the closed form. Samples: ≈ 2 more per event on `cl_buck_pi` (+3030 over 1491 events), 0.04 on `cl_boost_pi`, 0.4 on `buck_dcm`; open-loop cells unchanged. Without `output_rtol` nothing changes.
+
 ### Exact engine: every event projection is recorded, rule on or off (F-R-3, F-SB-3)
 
 - At a diode turn-off the exact engine projects out the modes faster than its parasitic window (`diode_half_wave_rl_load`: the 1 ns `L·g_off` mode; V(out)'s right limit is the settled −3.1e-6 V where the unprojected flow starts at −0.31385 V). Without the output rule nothing recorded that, so the scoreboard's rule (1) could not see it and graded the right limit as wrong: 0.0304 of the range. Every run now carries `diagnostics['event_projections']` (`n_projections`, `projection_max_by_column`, `projections`: instant, amplitude, column, `tau`; the keys `diagnostics['output_grid']` already had under the rule), and the scoreboard's rule (1) reads them. `res.times` does NOT change: one row per stored sample, the left limit at an event, right limits in `right_limit_*` (`pulsim.with_event_limits` inserts them one ulp later, opt-in). Times, states, switch states and right limits are unchanged to the bit.

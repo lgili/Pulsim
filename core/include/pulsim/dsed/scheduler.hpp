@@ -703,17 +703,22 @@ public:
                     // F-X-7: the sample stored at an event is its LEFT limit, so a recovered
                     // row that jumps there (a bridge's bus, 132.6 -> 173.1 V) was drawn as a
                     // ramp to the next stored sample, 4 us away. Under the rule the flow just
-                    // past the event (2 ps: the shortest step near_time tells apart) is a
-                    // sample too; a step too short to hold it keeps its end.
+                    // past the event is a sample too, placed by the rule's own chord from the
+                    // right limit and at most 2 ps out (the shortest step near_time tells
+                    // apart: a later one draws the jump as a ramp again; a fixed 2 ps left a
+                    // 1 ns mode 59x off the chord); a step too short to hold 2 ps keeps its end.
                     bool out_keep_end = false;
                     Real out_from = std::numeric_limits<Real>::quiet_NaN();   // the rule's chords start past it
                     if (output_rtol_ > Real{0} && output_jump_) {
                         output_jump_ = false;
-                        const Real te = t + Real{2} * std::max(Real{1e-12},
+                        const Real h_sep = Real{2} * std::max(Real{1e-12},
                             Real{8} * std::numeric_limits<Real>::epsilon() * std::abs(t));
                         const Real t1 = evt ? evt->t_event : t + h_ex;
-                        out_keep_end = !(te < t1) || near_time(te, t1);
+                        out_keep_end = !(t + h_sep < t1) || near_time(t + h_sep, t1);
                         if (!out_keep_end) {
+                            // counted in the interval's cap and the run's budget; floored at
+                            // output_step_'s 64 eps max(1,|t|)
+                            const Real te = t + output_step_(t, x, h_sep, result.n_events, t_target);
                             advance_(t, x, te - t, output_x_);
                             const MaskT m = system_.current_mask();
                             ped_push_sample(result, te, output_x_, m, m, nullptr);
