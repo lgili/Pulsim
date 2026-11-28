@@ -44,8 +44,11 @@ def test_newton_circuit_runs_from_a_zero_start(form):
     # 12: rows judged at x_k's own magnitudes). The branch form takes the
     # second since that rule: no retry, and its trajectory is byte-identical
     # to 2.1.0's (which retried 4 times).
-    assert (r._trbdf2_stats["n_newton_start_retries"]
-            + r.newton_roundoff_accepts) >= 1
+    # F-Z-6: 48 V onto the zero-charge C is an inconsistent start (i_C = 0 in
+    # the init slot); the start now takes a probe's consistent slots, and the
+    # first solve needs neither (0 retries, 0 round-off accepts).
+    assert (r._trbdf2_stats["n_newton_start_retries"] + r.newton_roundoff_accepts
+            + r._trbdf2_stats["n_derivative_refreshes"]) >= 1
     # the capacitor charges through the switch and the diode: both engines
     # end on the same state (3.2e-5 V apart against pwl
     # at dt = 1e-9, both forms)

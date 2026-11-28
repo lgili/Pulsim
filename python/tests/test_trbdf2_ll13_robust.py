@@ -12,6 +12,7 @@ import pathlib
 import sys
 import warnings
 
+import numpy as np
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -37,5 +38,30 @@ def test_start_does_not_sit_on_the_floor(t_end, rtol):
     assert st["n_forced_accepts"] == 0
     assert st["n_derivative_refreshes"] >= 1   # the start took the probe's slots
     h_min = t_end * 1e-11   # the run's floor (span_ref = 1000 h_max)
-    assert r.times[1] - r.times[0] > 10 * h_min   # it was the floor: forced, or Newton singular
+    # times[1]: the start probe (its states move over it), committed as a step;
+    # the first TR-BDF2 step after it was the floor: forced, or Newton singular
+    assert r.times[2] - r.times[1] > 10 * h_min
 
+
+
+def _on_grid(r, g):
+    t, x = np.asarray(r.times), np.asarray(r.states)
+    return np.array([np.interp(g, t, x[:, j]) for j in range(x.shape[1])]).T
+
+
+def test_run_length_does_not_change_the_common_span():
+    # runs of 5, 20 and 50 us agree on [0, 3 us] (measured: rms 1.2e-6 of each
+    # state's peak, max 4.6e-6, edges included; the reference class is 1e-3)
+    g = np.linspace(0.0, 3e-6, 3001)
+    runs = [_on_grid(_run(te, 1e-8), g) for te in (5e-6, 20e-6, 50e-6)]
+    scale = np.abs(runs[0]).max(axis=0) + 1e-30
+    for x in runs[1:]:
+        d = np.abs(x - runs[0]) / scale
+        assert np.sqrt(np.mean(d ** 2, axis=0)).max() < 1e-4
+        assert d.max() < 1e-3
+
+
+@pytest.mark.xfail(strict=True, reason="root cause 2: the 1.5 us turn-off edge probe "
+                   "stalls and the step falls to h_min (F-Z-6 part 2, open)")
+def test_three_microsecond_run_survives_the_first_turn_off():
+    _run(3e-6, 1e-8)

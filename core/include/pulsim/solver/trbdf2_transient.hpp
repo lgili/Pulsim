@@ -2520,6 +2520,7 @@ inline SimulationResult run_transient_trbdf2(
     // h_min = span * 1e-11. The floor then decided the run: forced-accepted
     // at 5e-16 s (50 us), Newton numerically singular at 3e-17 s (3 us).
     bool start_probe_ok = false;
+    std::optional<SwitchStateMask> start_probe_m;
     auto start_consistent = [&](bool stateful) {
         const Size nq = hs.stage_rows();
         if (stateful && nq == 0) return false;
@@ -2527,8 +2528,8 @@ inline SimulationResult run_transient_trbdf2(
         if (stateful) hs.stage_start(Real{1}, q0.data(), f0.data());
         x_trial = x;
         try {
-            if (!probe_solve(mask_at(opts.t_start + Real{0.5} * h_min), t,
-                             h_probe_floor, x_trial)
+            start_probe_m = mask_at(opts.t_start + Real{0.5} * h_min);
+            if (!probe_solve(*start_probe_m, t, h_probe_floor, x_trial)
                 || !x_trial.allFinite()) {
                 return false;
             }
@@ -2551,6 +2552,17 @@ inline SimulationResult run_transient_trbdf2(
             const bool cap = a.kind == pwl::DevicePool::StoredKind::Capacitor;
             const Real d = cap ? (b.i_prev - a.i_prev) : (b.v_prev - a.v_prev);
             const Real y = cap ? a.v_prev : a.i_prev;
+            if (!stateful) {
+                // a probe that moved y by a few ulps (a DC start) rebuilds the
+                // slot from round-off amplified by 2h/dt ~ 2e7: consistent
+                const Real ya = cap ? entry_v(entries[i], x) : x[entries[i].inductor_branch_var_id];
+                const Real yb = cap ? entry_v(entries[i], x_trial)
+                                    : x_trial[entries[i].inductor_branch_var_id];
+                if (std::abs(yb - ya) <= Real{8} * std::numeric_limits<Real>::epsilon()
+                                             * std::max(std::abs(ya), std::abs(yb))) {
+                    continue;
+                }
+            }
             if (!(std::abs(d) * h / a.C_or_L <= opts.atol + opts.rtol * std::abs(y))) {
                 return false;
             }
@@ -2573,11 +2585,102 @@ inline SimulationResult run_transient_trbdf2(
     };
     if (hs.any() && resume_from == nullptr && !start_consistent(true)) {
         sdirk_left = std::max(sdirk_left, Size{1});
-    } else if (!hs.any() && resume_from == nullptr && !sens.on()   // shortcut: a
-               && !start_consistent(false) && start_probe_ok) {    // sensitivity run keeps the init slots
-        history.restore(hist_rec);   // the probe's slots, the states are x's
-        if (lt) lt->slots_rewritten();
-        ++st.n_derivative_refreshes;
+    } else if (!hs.any() && resume_from == nullptr
+               // a tick at t_start may change the gates the probe was solved under
+               && queue.next_of(events::Kind::ControlTick) > t + h_min) {
+        // The probe is optional here: it leaves no probe state behind (a
+        // learned floor would lengthen every later probe of the run) and a
+        // probe that fails, round-off budget included, keeps the init slots.
+        const Real dtp_keep = last_probe_dt, learned_keep = h_probe_learned;
+        const bool ok_keep = last_probe_ok;
+        const pwl::NewtonRoundoffAcceptance ro_keep = newton_roundoff;
+        const Size ro_n = ro_accepts, retries = n_probe_newton_retries;
+        const Real ro_w = ro_omega_max;
+        const Index ro_r = ro_row;
+        const std::string err_keep = newton_last_error;
+        const pwl::StepCtx ctx_keep = step_ctx;
+        bool refresh = false;
+        try {
+            refresh = !start_consistent(false) && start_probe_ok;
+        } catch (const pwl::NewtonRoundoffBudgetExceeded&) {
+            refresh = false;
+        }
+        // As at a gate edge: a start mode with dependent states is the SDIRK
+        // re-initialisation's (its probe crosses an impulse), no probe's.
+        if (refresh && structure.active()
+            && !reinit.entering(structure, *start_probe_m, false).empty()) {
+            refresh = false;
+        }
+        const Real dtp = last_probe_dt;
+        // As at a gate edge: a probe retaken longer than the floor (its
+        // slots are those of many fast time constants past t_start) or one
+        // whose states moved over it is no right limit: it is committed as
+        // a trapezoidal step of its own (ll13: Newton stalls at the floor
+        // span * 1e-12, the probe is retaken 100x). Otherwise only the slots.
+        bool moved = false;
+        for (Size i = 0; refresh && !moved && i < entries.size(); ++i) {
+            const auto& e = entries[i];
+            const bool cap = e.kind == pwl::DevicePool::StoredKind::Capacitor;
+            const Real ya = cap ? entry_v(e, x) : x[e.inductor_branch_var_id];
+            const Real yb = cap ? entry_v(e, x_trial) : x_trial[e.inductor_branch_var_id];
+            moved = !(std::abs(yb - ya)
+                      <= opts.atol + opts.rtol * std::max(std::abs(ya), std::abs(yb)));
+        }
+        const bool commit = refresh && (moved || dtp > h_probe_floor * Real{1.0001});
+        const Real t_plus = t + dtp;
+        if (commit && !(t_plus < opts.t_end - h_min
+                        && t_plus < queue.next_of(events::Kind::ControlTick) - h_min)) {
+            refresh = false;   // no room for the probe's step: the init slots
+        }
+        last_probe_dt = dtp_keep;
+        h_probe_learned = learned_keep;
+        last_probe_ok = ok_keep;
+        newton_roundoff = ro_keep;
+        ro_accepts = ro_n;
+        n_probe_newton_retries = retries;
+        ro_omega_max = ro_w;
+        ro_row = ro_r;
+        newton_last_error = err_keep;
+        step_ctx = ctx_keep;
+        if (refresh && commit) {
+            const SwitchStateMask& m = *start_probe_m;
+            const Vector x0 = x;
+            const SwitchStateMask m0 = x_mask;
+            step::commit(history, hs, x_trial, dtp, pwl::TrBdf2Stage::Trapezoidal);
+            if (sens.on()) [[unlikely]] {   // the probe is a trapezoidal step
+                sens.begin_step(t, x);
+                sens_stage(0, step::psi_trapezoidal(dtp), m, dtp, x_trial, t_plus);
+                sens.commit(t_plus);
+            }
+            x = x_trial;
+            x_sig = x;
+            const Real t_hook0 = t;
+            t = t_plus;
+            push_time(t, "start-probe");
+            result.states.push_back(x);
+            result.event_iteration_count.push_back(0);
+            result.record_switch_state(m);
+            device_state_once(t, x);
+            if (hooks) hooks->accepted(t_hook0, t, x, m);
+            // the main loop's step sink (in-loop recorders) sees no step before it
+            if (hooks && hooks->has_step()) hooks->step(t_hook0, x0, m0, t, x, m, false);
+            if (lt) lt->accept_step(t_hook0, t, x, m, nullptr, 0.5, 0, 0.5);
+            if (structure.active()) reinit.note(m);
+            x_mask = m;
+            x_mask_known = true;
+            gates_decided = m;
+            ++st.n_derivative_refreshes;
+        } else if (refresh) {
+            if (sens.on()) [[unlikely]] {   // the slots move, x and t do not: mirrored
+                sens.begin_step(t, x);
+                sens_stage(0, step::psi_trapezoidal(dtp), *start_probe_m, dtp,
+                           x_trial, t_plus);
+                sens.adopt_stage_slots();
+            }
+            history.restore(hist_rec);   // the probe's slots, the states are x's
+            if (lt) lt->slots_rewritten();
+            ++st.n_derivative_refreshes;
+        }
     }
     std::vector<pwl::HistoryEntry> hist_snap, hist_s1, hist_s2, hist_f;
     std::vector<Real> est_v, est_sc;

@@ -173,9 +173,12 @@ def test_estimate_is_the_true_local_error():
     needed: rtol meant twice itself. With the factor the step count
     grows (by at most 2**(1/3) = 1.26) and the error shrinks.
     Measured at rtol 1e-5: 58 steps and 8.17e-4 V before, 66 steps
-    and 5.22e-4 V after (+-5 % on the count)."""
+    and 5.22e-4 V after (+-5 % on the count).
+    F-Z-6: the start now takes the consistent slot i_C(0+) = V/R (it kept
+    i_C = 0, and the first steps were rejected from 1e-8 s down to 7e-12 s and
+    grown back): 57 steps at the same 5.22e-4 V (rel 1e-4)."""
     n5, e5 = _rc_decay(1e-5)
-    assert n5 == pytest.approx(66, rel=0.05)
+    assert n5 == pytest.approx(57, rel=0.05)
     assert e5 < 6e-4
 
 
