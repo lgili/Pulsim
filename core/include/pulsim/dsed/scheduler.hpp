@@ -1800,13 +1800,17 @@ private:
                                                      system_.recover_from_state();
                                                      system_.fast_cluster_tau(thr); }) {
                     // every projection is recorded, rule on or off (F-SB-3 / F-R-3: the
-                    // collapsed transient is a reported jump, never silent)
-                    proj_y0_.resize(system_.recover_from_state().rows());
-                    system_.recover_full_into(t, x, proj_y0_);
+                    // collapsed transient is a reported jump, never silent); rule off only
+                    // one that moved x (the recoveries cost 4 % of a step on buck_ccm)
+                    proj_xpre_ = x;
                     system_.project_slow(t, x, thr);
-                    proj_y1_.resize(proj_y0_.size());
-                    system_.recover_full_into(t, x, proj_y1_);
-                    note_projection_(t, x, thr);
+                    if (output_rtol_ > Real{0} || x != proj_xpre_) {
+                        proj_y0_.resize(system_.recover_from_state().rows());
+                        system_.recover_full_into(t, proj_xpre_, proj_y0_);
+                        proj_y1_.resize(proj_y0_.size());
+                        system_.recover_full_into(t, x, proj_y1_);
+                        note_projection_(t, x, thr);
+                    }
                     return;
                 }
                 system_.project_slow(t, x, thr);
@@ -3765,7 +3769,7 @@ public:
 
 private:
     std::size_t n_projections_ = 0;
-    Vector projection_max_, proj_amp_, proj_y0_, proj_y1_, proj_xin_, proj_xout_;
+    Vector projection_max_, proj_amp_, proj_y0_, proj_y1_, proj_xin_, proj_xout_, proj_xpre_;
     std::vector<ProjectionRecord> projections_;
     bool proj_pending_ = false;
     Real proj_t_ = std::numeric_limits<Real>::quiet_NaN(), proj_tau_ = 0;

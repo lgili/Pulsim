@@ -237,7 +237,7 @@ def switch_names(sol):
     return names
 
 
-def event_record(sol, res, cols, t_end, names):
+def event_record(sol, res, cols, t_end, names, parasitic=0.0):
     """The truth's device events and the engine's, with this column's
     one-sided values, for ``metrics.exact_parts``.
 
@@ -268,9 +268,14 @@ def event_record(sol, res, cols, t_end, names):
     is_right = np.r_[False, tv[1:] == np.nextafter(tv[:-1], np.inf)]
     # a reported projection: a re-initialisation record, or the exact engine's record of
     # the parasitic cluster it projected out at an event (diagnostics['event_projections'])
+    # (only a removed cluster, 0 < tau <= the declared window: a rounding move is not one)
     dg = (getattr(res, "diagnostics", None) or {}).get("event_projections") or {}
+    if dg.get("n_projections", 0) > len(dg.get("projections", ())):
+        raise RuntimeError(f"{len(dg['projections'])} of {dg['n_projections']} projection records "
+                           "(the engine's cap): rule (1) cannot be armed for the rest")
     proj_t = np.array(sorted([float(r.t) for r in (getattr(res, "reinit_records", None) or ())]
-                             + [float(p["t"]) for p in dg.get("projections", ()) if p["amplitude"] > 0]))
+                             + [float(p["t"]) for p in dg.get("projections", ())
+                                if p["amplitude"] > 0 and 0 < p["tau"] <= (parasitic or np.inf)]))
 
     def reported(te):
         return bool(proj_t.size) and bool(np.any(np.abs(proj_t - te) <= 4 * np.spacing(abs(te))))
@@ -331,7 +336,8 @@ def grade(sol, tr, cols, sp, dt, tol, self_score=True, names=None, parasitic=0.0
     keep = t <= t_end + DELTA * dt                  # rows past the run's end (a float t_end) are not graded
     t = t[keep]
     cand = sol.at_float(cols, t, 0.0)
-    ev = event_record(sol, res, cols, t_end, switch_names(sol) if names is None else names)
+    ev = event_record(sol, res, cols, t_end, switch_names(sol) if names is None else names,
+                      parasitic)
     per, dep, worst_pt = {}, None, 0.0
     for c in cols:
         y = np.asarray(v1_reader.observable(res, c), dtype=float)[keep]
