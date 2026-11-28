@@ -77,16 +77,15 @@ The numbers are in the `Known limitations` part of the 2.1.0 entry of the
   in the first stage of a sub-step that starts at an event (taken at the
   event), a second flip in the rest of an already cut restart step, and a
   flip inside the run's first step (taken at the step end, up to 1·dt late;
-  `python/tests/test_split_locator_reconduction.py`). A re-conduction that
-  ends a parasitic transient after a gate edge is dated at the next step
-  (up to 1·dt late, first order in dt): `forward_converter`'s D_rect turns
-  on 6.1 ns after the switch turn-off, once the 0.4 ns `g_off` collapse of
-  the primary current has passed. The edge's projection leaves 5 % of that
-  mode, stage 2's re-turn-on is then read as an SDIRK overshoot (the
-  flyback rule), and the step ends with D_rect off. V(out) is within 1e-6
-  of its span at every instant; the event's date costs the exact grade
-  7.1e-4 / 3.3e-4 / 1.5e-4 at dt = 100 / 50 / 25 ns. Locating an event
-  costs trial solves, each a factorisation: 4–7 trials per located event.
+  `python/tests/test_split_locator_reconduction.py`). The rule alone dates
+  a diode flip inside a step at the step end (no locator): on
+  `forward_converter` the D_fw hand-over after the switch turn-on costs the
+  exact grade 1.5e-4 / 3.3e-5 / 3.5e-5 at dt = 100 / 50 / 25 ns (first
+  order, phase dependent); with the split 1.0e-6 / 3.2e-7 / 2.7e-7 (the
+  waveform's own level). (F-R-4, fixed: the D_rect re-conduction 6.1 ns
+  after the turn-off was held off for a step because the edge's projection
+  fitted one of the two winding modes; it now conducts from the edge.)
+  Locating an event costs trial solves, each a factorisation: 4–7 trials per located event.
 * **Exact engine output rule** (`engine='exact', output_rtol=...`): a
   thermal summary read from stored samples depends on the output grid.
   The first line after an event (within 2 ps of it) can exceed the rule:

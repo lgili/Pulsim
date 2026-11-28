@@ -57,11 +57,15 @@ def test_flyback_releases_its_secondary_at_every_switch_off(monkeypatch, kw):
         r = _run(case, div, kw)
         t = np.asarray(r.times)
         k = int(np.argmin(np.abs(t - 8.1e-6)))
-        # measured +1.05e-5 A (dt) / +9.0e-7 A (dt/2); before -0.040 / -0.033 A
-        assert abs(r.i("T1.s")[k] - FLYBACK_IS_8_1US) < 2e-4
+        # measured +1.5602e-6 A at dt and dt/2 (F-R-4); with the one-mode
+        # projection +1.05e-5 / +9.0e-7 A; before the BE re-take -0.040 / -0.033 A
+        assert abs(r.i("T1.s")[k] - FLYBACK_IS_8_1US) < 1e-8
         # measured -3.4e-5 / -1.8e-5 V; before +0.146 / +0.134 V (not converging)
         assert r.v("out")[-1] == pytest.approx(FLYBACK_VOUT_100US, abs=5e-4)
-        assert r.counters["stage2_be_kept"] >= 3   # 5 measured: one per switch-off; before 0
+        # F-R-4: the edge's projection now takes the magnetizing mode too, so
+        # stage 2 has no residual to flip (5 BE re-takes with the one-mode fit);
+        # the re-take itself stays covered by test_restart_review_fixes
+        assert r.counters["stage2_be_kept"] == 0
 
 
 @pytest.mark.parametrize("kw", [RULE, SPLIT], ids=["restart", "split"])
@@ -71,7 +75,43 @@ def test_forward_converter_agrees_with_the_exact_truth_as_dt_halves(monkeypatch,
     for div in (1, 2):
         r = _run(case, div, kw)
         errs.append(abs(r.v("out")[-1] - FORWARD_VOUT_100US))
-        # measured +2.1e-5 / +1.4e-4 A; before +0.160 / +0.149 A
+        # measured +3e-6 / +1e-6 A (F-R-4; +2.1e-5 / +1.4e-4 A with the one-mode
+        # projection); before +0.160 / +0.149 A
         assert r.i("L_o")[-1] == pytest.approx(FORWARD_ILO_100US, abs=2e-3)
-    # measured 7.1e-6 / 9.0e-5 V; before 0.157 / 0.151 V (not converging)
+    # measured 2.2e-7 / 7.6e-7 V rule, 2.3e-6 / 8.5e-7 V split (F-R-4; 7.1e-6 /
+    # 9.0e-5 V with the one-mode projection); before the
+    # BE re-take 0.157 / 0.151 V (not converging)
     assert max(errs) < 1e-3, errs
+
+
+@pytest.mark.parametrize("kw", [RULE, SPLIT], ids=["restart", "split"])
+def test_forward_switch_off_projects_both_winding_modes_and_rectifier_conducts(monkeypatch, kw):
+    """F-R-4: at the switch-off both windings see only g_off, so the fast subspace
+    has two modes (leakage, τ ≈ 10 ps; magnetizing, τ = L(1 + k)·g_off ≈ 0.39 ns).
+    The edge's projection fitted one (its growth test stopped at the leakage floor
+    g_leak·(1 + v_max), 19.5 mA at stage 1's 6.5 kV), left 5 % of the magnetizing
+    mode in x0+ and D_rect was held off for a whole step (first order in dt). On
+    the OFF mode's slow manifold the primary carries g_off·V_in, the secondary ~0
+    and D_rect is forward-biased (the truth re-conducts 6.1 ns after the edge)."""
+    case = _case(monkeypatch, "forward_converter")
+    case.t_end = 8.25e-6
+    r = _run(case, 1, kw)
+    t = np.asarray(r.times)
+    k0 = int(np.searchsorted(t, 8e-6 - 1e-15))   # the edge's left sample
+    i1, i2 = r.i("T1.p")[k0], r.i("T1.s")[k0]
+    recs = [x for x in r.reinit_records if 7.99e-6 < x.t < 8.25e-6]
+    assert len(recs) == 1 and recs[0].t == pytest.approx(8e-6, abs=1e-15)
+    assert recs[0].kind == "cut_set" and sorted(recs[0].states) == ["T1.p", "T1.s"]
+    # dW = ½·JᵀLJ, J = x0+ − x0 with x0+ = (g_off·V_in, 0): measured rel 1.1e-8;
+    # with the one-mode fit about 1 % off
+    lm, mm = 200e-6, 0.95 * 200e-6
+    j1, j2 = 1e-6 * 24.0 - i1, -i2
+    assert recs[0].dW == pytest.approx(0.5 * lm * (j1 * j1 + j2 * j2) + mm * j1 * j2, rel=1e-6)
+    k = int(np.argmin(np.abs(t - 8.1e-6)))
+    # (SW, D_rect, D_fw), the netlist's order: D_rect conducts from the edge's
+    # step on (with the one-mode fit [0, 0, 1] until the next step)
+    assert [bool(b) for b in r.switch_states[k]] == [False, True, True]
+    # the secondary carries no trapped flux: dt/100 gives -6.71e-6 A (measured
+    # -6.87e-6 A here; with the one-mode fit D_rect was off; trapped it was ~16 mA)
+    assert abs(r.i("T1.s")[k] - -6.71e-6) < 1e-6
+    assert r.counters["stage2_be_kept"] == 0

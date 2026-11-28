@@ -929,7 +929,7 @@ inline SimulationResult run_transient(
     std::vector<IdealJump> ideal_pending;
     // the jump's vector series (consistent_start): the reading's x3, the later
     // stages and their sources; the start mode's probe (ip_y1, ip_bits1, ip_m1)
-    Vector ip_x3m, ip_xk, ip_sk, ip_y1, ip_y2, ip_w, ip_c, ip_g;
+    Vector ip_x3m, ip_xk, ip_sk, ip_y1, ip_y2, ip_w, ip_c, ip_g, ip_c_ok;
     std::vector<Vector> ip_xs;   // the series' stages 4, 5, …
     DenseMatrix ip_Dw;
     std::vector<Real> ip_m1, ip_f0, ip_s0, ip_s0v;
@@ -2709,7 +2709,16 @@ inline SimulationResult run_transient(
                 const Size ns = ip_js.size();
                 const auto nsi = static_cast<Index>(ns);
                 ip_w.resize(nsi);
-                Real thr2 = 0;
+                // thr2: the stages' noise with the rule's floors (the fit's
+                // acceptance); thr2r: a linear state's relative part alone (the
+                // fit's growth). F-R-4: the floor tol_i = g_leak·(1 + v_max) reads
+                // v_max off stage 1's impulse voltage (6.5 kV for a forward
+                // converter's cut, tol_i 19.5 mA), so m = 1 passed it and the
+                // magnetizing mode (ρ = 0.013) of a two-winding cut stayed out of
+                // J: 8 mA in the secondary, D_rect held off for a step (first order).
+                // The stages are one mode's linear map (single solves), so the
+                // Krylov fit keeps growing while D_{m+1} is above their rounding.
+                Real thr2 = 0, thr2r = 0;
                 for (Size i = 0; i < ns; ++i) {
                     const Size k = ip_js[i];
                     Real w = 0, noise = 0;
@@ -2734,6 +2743,20 @@ inline SimulationResult run_transient(
                     }
                     ip_w[static_cast<Index>(i)] = w;
                     thr2 += (w * noise) * (w * noise);
+                    // (the relative part: the floor's terms dropped)
+                    Real nr = Real{1e-8} * (Real{1} + std::abs(sval(k, 0)) + std::abs(sval(k, 1)));
+                    if (k >= ne && k < ne + nn) {
+                        const auto& e = ncs[k - ne];
+                        const Real v1 = ncv(e, ip_x1);
+                        nr = models::NonlinearCapacitor::capacitance(e.params, v1) * Real{1e-8} *
+                             (Real{1} + std::abs(ip_s0v[k - ne]) + std::abs(v1));
+                    } else if (k >= ne + nn) {
+                        const auto& e = sats[k - ne - nn];
+                        const Real i1 = ip_x1[e.branch_var_id];
+                        nr = std::abs(pwl::SaturableInductorHistory::flux_and_inductance(e, i1).second) *
+                             Real{1e-8} * (Real{1} + std::abs(e.i_L_old) + std::abs(i1));
+                    }
+                    thr2r += (w * nr) * (w * nr);
                 }
                 auto second = [&](Index j, Vector& out) {   // D_{j+1}, unweighted
                     out.resize(nsi);
@@ -2744,17 +2767,32 @@ inline SimulationResult run_transient(
                     }
                 };
                 const Index mmax = std::min<Index>(nsi, 6);
-                Index m = 1;
+                Index m = 1, m_ok = 0;   // m_ok: the last fit within thr2
                 Real r2 = 0;
                 for (;; ++m) {
-                    if (!stage_to(m + 2)) return false;
+                    if (!stage_to(m + 2)) {
+                        if (m_ok == 0) return false;
+                        m = m_ok;   // a later stage failed: the fit the floors accepted
+                        ip_c = ip_c_ok;
+                        r2 = 0;
+                        break;
+                    }
                     ip_Dw.resize(nsi, m + 1);
                     for (Index j = 0; j <= m; ++j) {
                         second(j, ip_sk);
                         ip_Dw.col(j) = ip_sk.cwiseProduct(ip_w);
                     }
                     r2 = solver::jump_series_fit(ip_Dw, m, ip_c);
-                    if (!(r2 > thr2) || m == mmax) break;
+                    if (!(r2 > thr2r) || m == mmax) break;
+                    if (!(r2 > thr2)) {
+                        m_ok = m;
+                        ip_c_ok = ip_c;
+                    }
+                }
+                if (r2 > thr2 && m_ok > 0) {   // (D_{m+1}'s residual is not monotone in m)
+                    m = m_ok;
+                    ip_c = ip_c_ok;
+                    r2 = 0;
                 }
                 if (r2 > thr2 && nsi > mmax) return false;
                 if (!solver::jump_series_coeffs(ip_c, kGamma / (Real{1} + kGamma), ip_g)) return false;
