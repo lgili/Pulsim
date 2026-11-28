@@ -566,11 +566,10 @@ private:
 
     void on_event(Real t, const Vector& xl, const topology::SwitchStateMask& ml,
                   const Vector& xr, const topology::SwitchStateMask& mr) {
-        if (settled_ && !started_) {
-            ++n_dropped_;
-            return;
-        }
-        if (settled_ && t == t_last_) {  // after the sample at t
+        // Before the first step a settled report is held as pending: an event
+        // at the first step's end (a diode landing on a consistent start) is
+        // placed by that step's hook; one at the run's start is still dropped.
+        if (settled_ && started_ && t == t_last_) {  // after the sample at t
             eval(t, xr, mr, row_, true);
             settled_event(row_);
             mask_last_ = mr;  // the mode the next step runs in

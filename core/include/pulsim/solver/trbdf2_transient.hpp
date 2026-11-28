@@ -2512,15 +2512,24 @@ inline SimulationResult run_transient_trbdf2(
     // its error): a probe at t_start under the start mode gives each q row's
     // derivative there, and when no row's slot is off by more than its
     // tolerance over the first step, that step is the integrator's own.
-    auto start_consistent = [&]() {
+    // Without a stateful kind (stateful = false) only the linear entries are
+    // checked, and an inconsistent start takes the probe's slots, as a gate
+    // edge does (below): ll13 from a zero start read v_L = 0 for the 48 V its
+    // leakage inductor carries at t = 0+, the first step's estimate was
+    // O(h) at every h (8e4 at 3e-14 s, 812 at 3e-16 s) and the step sat on
+    // h_min = span * 1e-11. The floor then decided the run: forced-accepted
+    // at 5e-16 s (50 us), Newton numerically singular at 3e-17 s (3 us).
+    bool start_probe_ok = false;
+    std::optional<SwitchStateMask> start_probe_m;
+    auto start_consistent = [&](bool stateful) {
         const Size nq = hs.stage_rows();
-        if (nq == 0) return false;
+        if (stateful && nq == 0) return false;
         std::vector<Real> q0(nq), f0(nq), f1(nq), sc(nq);
-        hs.stage_start(Real{1}, q0.data(), f0.data());
+        if (stateful) hs.stage_start(Real{1}, q0.data(), f0.data());
         x_trial = x;
         try {
-            if (!probe_solve(mask_at(opts.t_start + Real{0.5} * h_min), t,
-                             h_probe_floor, x_trial)
+            start_probe_m = mask_at(opts.t_start + Real{0.5} * h_min);
+            if (!probe_solve(*start_probe_m, t, h_probe_floor, x_trial)
                 || !x_trial.allFinite()) {
                 return false;
             }
@@ -2529,6 +2538,7 @@ inline SimulationResult run_transient_trbdf2(
         } catch (const std::runtime_error&) {
             return false;
         }
+        start_probe_ok = true;
         // The linear entries too: a source switched onto a zero start (24 V
         // into a gated buck) leaves their slots inconsistent, and a TR-BDF2
         // first step was rejected down to 4e-13 s.
@@ -2536,16 +2546,97 @@ inline SimulationResult run_transient_trbdf2(
         history.refresh_derivatives(x_trial, last_probe_dt);
         history.snapshot_into(hist_rec);
         history.restore(hist_rec0);
-        for (Size i = 0; i < hist_rec.size(); ++i) {
-            const auto& a = hist_rec0[i];
-            const auto& b = hist_rec[i];
-            const bool cap = a.kind == pwl::DevicePool::StoredKind::Capacitor;
-            const Real d = cap ? (b.i_prev - a.i_prev) : (b.v_prev - a.v_prev);
-            const Real y = cap ? a.v_prev : a.i_prev;
-            if (!(std::abs(d) * h / a.C_or_L <= opts.atol + opts.rtol * std::abs(y))) {
-                return false;
+        // the slot jump d_i(dtp) of entry i, or 0 (consistent by round-off)
+        auto slot_jumps = [&](const std::vector<pwl::HistoryEntry>& rec, const Vector& xt) {
+            std::vector<Real> d(rec.size(), Real{0});
+            for (Size i = 0; i < rec.size(); ++i) {
+                const auto& a = hist_rec0[i];
+                const bool cap = a.kind == pwl::DevicePool::StoredKind::Capacitor;
+                if (!stateful) {
+                    // a probe that moved y by a few ulps (a DC start) rebuilds the
+                    // slot from round-off amplified by 2h/dt ~ 2e7: consistent
+                    const Real ya = cap ? entry_v(entries[i], x) : x[entries[i].inductor_branch_var_id];
+                    const Real yb = cap ? entry_v(entries[i], xt)
+                                        : xt[entries[i].inductor_branch_var_id];
+                    if (std::abs(yb - ya) <= Real{8} * std::numeric_limits<Real>::epsilon()
+                                                 * std::max(std::abs(ya), std::abs(yb))) {
+                        continue;
+                    }
+                }
+                d[i] = cap ? (rec[i].i_prev - a.i_prev) : (rec[i].v_prev - a.v_prev);
             }
+            return d;
+        };
+        auto jumps_ok = [&](const std::vector<Real>& d) {
+            for (Size i = 0; i < d.size(); ++i) {
+                const auto& a = hist_rec0[i];
+                const bool cap = a.kind == pwl::DevicePool::StoredKind::Capacitor;
+                const Real y = cap ? a.v_prev : a.i_prev;
+                if (!(std::abs(d[i]) * h / a.C_or_L <= opts.atol + opts.rtol * std::abs(y))) {
+                    return false;
+                }
+            }
+            return true;
+        };
+        const std::vector<Real> d1 = slot_jumps(hist_rec, x_trial);
+        if (!jumps_ok(d1)) {
+            if (stateful) return false;
+            // A consistent start whose sources move (a ramp from 0) still sees the
+            // slot change over the probe, d(dtp) = slot' * dtp + O(dtp^2) (rc_step at
+            // rtol 1e-8: 5e9 V/s ramp). A second probe at 2 dtp extrapolates the
+            // jump to dtp -> 0; an inconsistent slot (v_L = 0 for 48 V) keeps it.
+            const Real dt1 = last_probe_dt;
+            const Vector x1 = x_trial;
+            const std::vector<pwl::HistoryEntry> rec1 = hist_rec;
+            x_trial = x;
+            bool ok2 = false;
+            try {
+                ok2 = probe_solve(*start_probe_m, t, Real{2} * dt1, x_trial) && x_trial.allFinite();
+            } catch (const pwl::NewtonRoundoffBudgetExceeded&) {
+                throw;
+            } catch (const std::runtime_error&) {
+                ok2 = false;
+            }
+            const Real dt2 = last_probe_dt;
+            bool consistent = false;
+            if (ok2 && dt2 > dt1 * Real{1.5}) {
+                history.refresh_derivatives(x_trial, dt2);
+                history.snapshot_into(hist_rec);
+                history.restore(hist_rec0);
+                const std::vector<Real> d2 = slot_jumps(hist_rec, x_trial);
+                std::vector<Real> d0(d1.size());
+                for (Size i = 0; i < d1.size(); ++i) {
+                    d0[i] = (dt2 * d1[i] - dt1 * d2[i]) / (dt2 - dt1);
+                }
+                consistent = jumps_ok(d0);
+            }
+            if (!consistent) {
+                // the adopt/commit paths (and the sensitivity stage) read the
+                // first probe's factor, which the second solve evicted: re-solve.
+                // A re-solve that fails or lands at another length (the 2 dtp
+                // probe may have raised the learned floor) leaves a factor that
+                // is not x1's: no probe to take, the init slots stay.
+                x_trial = x;
+                bool ok_re = false;
+                try {
+                    ok_re = probe_solve(*start_probe_m, t, dt1, x_trial)
+                            && last_probe_dt == dt1;
+                } catch (const pwl::NewtonRoundoffBudgetExceeded&) {
+                    throw;
+                } catch (const std::runtime_error&) {
+                    ok_re = false;
+                }
+                if (!ok_re) {
+                    start_probe_ok = false;
+                    return false;
+                }
+            }
+            x_trial = x1;   // the adopt/commit paths take the first probe
+            last_probe_dt = dt1;
+            hist_rec = rec1;
+            if (!consistent) return false;
         }
+        if (!stateful) return true;
         pwl::StatefulHistories::Snapshot snap;
         hs.snapshot_into(snap);
         hs.refresh_derivatives(x_trial, last_probe_dt);
@@ -2561,8 +2652,127 @@ inline SimulationResult run_transient_trbdf2(
         }
         return true;
     };
-    if (hs.any() && resume_from == nullptr && !start_consistent()) {
+    if (hs.any() && resume_from == nullptr && !start_consistent(true)) {
         sdirk_left = std::max(sdirk_left, Size{1});
+    } else if (!hs.any() && resume_from == nullptr
+               // Only the zero start: a given initial_state is seeded as a DC
+               // operating point (zero slots by that contract), and a PSS
+               // period run starts from one: the probe's capacitor slot
+               // carries 2C ulp(v) / h_probe of round-off (mA on a 12 V,
+               // 47 uF buck orbit), the period map's noise grew 2.6x (v_C)
+               // to 6x (i_L) and the shooting stalled at 3.6e-8 above rtol.
+               && !initial_state.has_value()
+               && opts.refresh_after_event   // as at a gate edge
+               && !opts.sdirk_on_linear_circuits   // the edge then restarts by SDIRK, no probe
+               // a tick at t_start may change the gates the probe was solved under
+               && queue.next_of(events::Kind::ControlTick) > t + h_min) {
+        // The probe is optional here: it leaves no probe state behind (a
+        // learned floor would lengthen every later probe of the run) and a
+        // probe that fails, round-off budget included, keeps the init slots.
+        const Real dtp_keep = last_probe_dt, learned_keep = h_probe_learned;
+        const bool ok_keep = last_probe_ok;
+        const pwl::NewtonRoundoffAcceptance ro_keep = newton_roundoff;
+        const Size ro_n = ro_accepts, retries = n_probe_newton_retries;
+        const Real ro_w = ro_omega_max;
+        const Index ro_r = ro_row;
+        const std::string err_keep = newton_last_error;
+        const pwl::StepCtx ctx_keep = step_ctx;
+        const Size start_retries_keep = n_newton_start_retries;
+        const Vector x_trial_keep = x_trial;   // the next probe's warm start
+        bool refresh = false;
+        try {
+            refresh = !start_consistent(false) && start_probe_ok;
+        } catch (const pwl::NewtonRoundoffBudgetExceeded&) {
+            refresh = false;
+        }
+        // As at a gate edge: a start mode with dependent states is the SDIRK
+        // re-initialisation's (its probe crosses an impulse), no probe's.
+        if (refresh && structure.active()
+            && !reinit.entering(structure, *start_probe_m, false).empty()) {
+            refresh = false;
+        }
+        const Real dtp = last_probe_dt;
+        // As at a gate edge: a probe retaken longer than the floor (its
+        // slots are those of many fast time constants past t_start) or one
+        // whose states moved over it is no right limit: it is committed as
+        // a trapezoidal step of its own (ll13: Newton stalls at the floor
+        // span * 1e-12, the probe is retaken 100x). Otherwise only the slots.
+        bool moved = false;
+        for (Size i = 0; refresh && !moved && i < entries.size(); ++i) {
+            const auto& e = entries[i];
+            const bool cap = e.kind == pwl::DevicePool::StoredKind::Capacitor;
+            const Real ya = cap ? entry_v(e, x) : x[e.inductor_branch_var_id];
+            const Real yb = cap ? entry_v(e, x_trial) : x_trial[e.inductor_branch_var_id];
+            moved = !(std::abs(yb - ya)
+                      <= opts.atol + opts.rtol * std::max(std::abs(ya), std::abs(yb)));
+        }
+        const bool commit = refresh && (moved || dtp > h_probe_floor * Real{1.0001});
+        const Real t_plus = t + dtp;
+        if (commit && !(t_plus < opts.t_end - h_min
+                        && t_plus < queue.next_of(events::Kind::ControlTick) - h_min)) {
+            refresh = false;   // no room for the probe's step: the init slots
+        }
+        last_probe_dt = dtp_keep;
+        h_probe_learned = learned_keep;
+        last_probe_ok = ok_keep;
+        newton_roundoff = ro_keep;
+        ro_accepts = ro_n;
+        n_probe_newton_retries = retries;
+        ro_omega_max = ro_w;
+        ro_row = ro_r;
+        newton_last_error = err_keep;
+        step_ctx = ctx_keep;
+        n_newton_start_retries = start_retries_keep;
+        if (refresh && commit) {
+            const SwitchStateMask& m = *start_probe_m;
+            const Vector x0 = x;
+            const SwitchStateMask m0 = x_mask;
+            step::commit(history, hs, x_trial, dtp, pwl::TrBdf2Stage::Trapezoidal);
+            if (sens.on()) [[unlikely]] {   // the probe is a trapezoidal step
+                sens.begin_step(t, x);
+                sens_stage(0, step::psi_trapezoidal(dtp), m, dtp, x_trial, t_plus);
+                sens.commit(t_plus);
+            }
+            x = x_trial;
+            x_sig = x;
+            const Real t_hook0 = t;
+            t = t_plus;
+            push_time(t, "start-probe");
+            result.states.push_back(x);
+            result.event_iteration_count.push_back(0);
+            result.record_switch_state(m);
+            device_state_once(t, x);
+            if (hooks) hooks->accepted(t_hook0, t, x, m);
+            // the main loop's step sink (in-loop recorders) sees no step before it
+            if (hooks && hooks->has_step()) hooks->step(t_hook0, x0, m0, t, x, m, false);
+            if (lt) lt->accept_step(t_hook0, t, x, m, nullptr, 0.5, 0, 0.5);
+            if (structure.active()) reinit.note(m);
+            x_mask = m;
+            x_mask_known = true;
+            gates_decided = m;
+            newton_at_start = false;   // x is no longer the start state
+            ++st.n_derivative_refreshes;
+        } else if (refresh) {
+            if (sens.on()) [[unlikely]] {   // the slots move, x and t do not: mirrored
+                sens.begin_step(t, x);
+                sens_stage(0, step::psi_trapezoidal(dtp), *start_probe_m, dtp,
+                           x_trial, t_plus);
+                sens.adopt_stage_slots();
+            }
+            history.restore(hist_rec);   // the probe's slots, the states are x's
+            if (lt) lt->slots_rewritten();
+            // as the gate edge's slots-only path: the first step under this
+            // mode takes them, and a snapshot before the first commit says
+            // post_edge_derivatives (a resume must not land an edge again)
+            edge_slots_t = t;
+            edge_slots_m = *start_probe_m;
+            slots_only_t = t + dtp;
+            x_edge = x_trial;   // the first step's Newton warm start, as after an edge
+            x_edge_t = t;
+            ++st.n_derivative_refreshes;
+        } else {
+            x_trial = x_trial_keep;
+        }
     }
     std::vector<pwl::HistoryEntry> hist_snap, hist_s1, hist_s2, hist_f;
     std::vector<Real> est_v, est_sc;
