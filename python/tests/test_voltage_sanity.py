@@ -48,8 +48,7 @@ def _sw(t, T=1e-4):
 STORED = dict(discontinuity_restart=False)
 
 
-@pytest.mark.parametrize("kw", [STORED, pytest.param({}, marks=pytest.mark.xfail(strict=True, reason=(
-    "release finding F-Z-15: a restart-rule cut is named (F-Z-8 fixed) but judged at its right-limit row's i*R_off (2.4e12 V at sw), not at |lambda|/dt (2.4e5 V = 5000 x 48 V): voltage_sanity_factor cannot silence it and the kernel twin's peak is not L*i/dt; same with discontinuity_restart=True explicit")))], ids=["stored", "impulse"])
+@pytest.mark.parametrize("kw", [STORED, {}], ids=["stored", "impulse"])
 def test_the_megavolt_is_named(kw):
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
@@ -82,8 +81,6 @@ def test_the_megavolt_is_named(kw):
     assert res._implausible_voltage.node >= 0
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "release finding F-Z-15: a restart-rule cut is named (F-Z-8 fixed) but judged at its right-limit row's i*R_off (2.4e12 V at sw), not at |lambda|/dt (2.4e5 V = 5000 x 48 V): voltage_sanity_factor cannot silence it and the kernel twin's peak is not L*i/dt; same with discontinuity_restart=True explicit"))
 def test_an_impulse_below_the_factor_says_nothing():
     """The impulse is judged as the stored spike was (|lambda| / dt against
     factor x the source scale): 2.4e5 V is 5000 x 48 V; a factor above that

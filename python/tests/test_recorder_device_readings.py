@@ -80,15 +80,7 @@ def _run(fac, eng, probes, **rec):
 
 @pytest.mark.parametrize("eng", sorted(_RUNS_C))
 @pytest.mark.parametrize("circ", sorted(_CIRCUITS))
-def test_kcl_holds_at_every_recorded_sample(circ, eng, request):
-    if eng == "pwl" and circ in ("buck", "rectifier"):
-        request.applymarker(pytest.mark.xfail(strict=True, reason=(
-            "release finding F-Z-13: under the restart rule the in-loop recorder's t = 0 event row (the "
-            "x(0+) right limit of an inconsistent start, F-Z-10) carries a capacitor current that is not "
-            "the right limit's: rectifier i(Cf) 1.109 A against i(D1) - i(RL) = 0.0046 A (KCL at dp off "
-            "1.1 A), buck i(C) 4.19e-4 A against i(L) - i(R) = 0; every later event row closes to 4e-16 A. "
-            "Same with discontinuity_restart=True, enable_substep_state_correction=True, device_path / "
-            "mode_selection 'legacy' explicit (integration-line code); restart off: no t = 0 row")))
+def test_kcl_holds_at_every_recorded_sample(circ, eng):
     _, _, _, kcl, caps = _CIRCUITS[circ]()
     devs = sorted({t.lstrip("-") for ts in kcl.values() for t in ts})
     vs = sorted({f"v({n})" for n, _ in caps.values()})

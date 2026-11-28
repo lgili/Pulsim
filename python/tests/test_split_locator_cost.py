@@ -64,11 +64,6 @@ def test_the_default_form_runs_the_same_states(dt):
     assert np.abs(xa - xc).max() <= 1e-12 * np.abs(xc).max()       # measured 3.6e-15 V
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "release finding F-Z-14: with the branch-form diode (the release default) a commutation event is "
-    "booked one step late: the start-up turn-on at t = dt (conductance form: no event), and on the "
-    "1e-4 grid the zeros at 100 / 200 / 400 dt as 101 / 201 / 401 dt (err 1.0 dt, gate 2e-6), while "
-    "the states equal the conductance form's to 3.6e-15; same with form='branch' explicit"))
 @pytest.mark.parametrize("dt", [3.7e-5, 1e-4], ids=["off-grid", "on-grid"])
 def test_located_time_within_the_stated_tolerance_default_form(dt):
     res, _ = _rect(dt, form=None)

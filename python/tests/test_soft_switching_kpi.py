@@ -55,7 +55,6 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-import pulsim
 import pulsim._result_views as rv
 
 mp = pytest.importorskip("mpmath")
@@ -183,11 +182,8 @@ KNOWN_DEFAULT = {
 }
 
 
-KNOWN_DSED = {"psfb_full_bridge_zvs": (
-    "release finding F-Z-9: the exact engine's LCP mode selection ('auto' -> 'lcp') on branch-form diodes (the "
-    "release's form default) leaves D7 of the parallel D6/D7 pair OFF at the 7.92 us rectifier commutation; v_DS at "
-    "S1's 10 / 20 us turn-on 1.99e-9 / 3.12e-9 V off the truth (V_TOL 1e-9); the settle or form='conductance' "
-    "7.3e-11 / 1.6e-10 V")}
+# F-Z-9 closed (R15, e2d82ed5 rounding ties): the release default gives -7.329e-11 / -1.615e-10 V
+KNOWN_DSED: dict = {}
 
 
 def _cells(which):
@@ -422,12 +418,7 @@ def test_exact_lcp_without_the_rounding_floor_brings_f_z_9_back():
     assert d["rel"] > 0.5, d                         # D7 OFF: D6 carries the pair's current
 
 
-@pytest.mark.parametrize("form", [
-    "conductance",
-    pytest.param("branch", marks=pytest.mark.xfail(strict=True, reason=(
-        "release finding F-Z-9: on branch-form diodes the LCP puts D6 ON with 1.3e-6 A and D7 OFF at a "
-        "7.8e-7 V gap at the 7.92 us rectifier commutation; D7 stays OFF to 7.9755 us (D6 4.66 A, truth 2.33 A)"))),
-])
+@pytest.mark.parametrize("form", ["conductance", "branch"])
 def test_exact_lcp_rectifier_pair_shares_at_7_95_us(form, monkeypatch):
     """F-Z-9's cause, at the mode (this branch's pin): at the PSFB rectifier
     commutation (7.9205 us, D5 and D8 ON) D6 and D7 are in parallel (0 -> r

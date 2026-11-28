@@ -700,8 +700,8 @@ F_Z_11 = ("release finding F-Z-11: under the restart rule the gapped core and it
     # two formulations' located instants differ by the locator's residual
     # (measured 3.7e-14 s over 199 events, asserted below) and v(out) by
     # 2.59e-9 of its range: the bound is that residual's effect x 3
-    pytest.param("pwl", dict(dt=1e-7), 8e-9, id="pwl-default",
-                 marks=pytest.mark.xfail(strict=True, reason=F_Z_11)),
+    # (R15: 3.5e-12 measured after the e2d82ed5 merge, 199 events 2.8e-17 s apart; was 2.05e-8)
+    pytest.param("pwl", dict(dt=1e-7), 8e-9, id="pwl-default"),
     ("trbdf2", dict(rtol=1e-8, atol=1e-10), 1e-4),
 ])
 def test_gapped_core_in_a_switching_buck_equals_its_inductor(engine, kw, tol):

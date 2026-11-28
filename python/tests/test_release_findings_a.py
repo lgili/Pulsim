@@ -338,12 +338,6 @@ def _switched_junction(t_end, **kw):
         return p.simulate(b, t_end=t_end, dt=2e-8, switch_fn=fn, **kw)
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "release finding F-Z-16: with the event split on (release default) the D1 turn-on located inside the "
-    "turn-off's restart window (5.0066676 us) books a capacitor_loop record on Cj (lambda 2.46e-13 C, dW "
-    "1.5e-16 J; Cj holds ~2.4e-8 C) where the kink is no record; enable_substep_state_correction=False: "
-    "none. Same with the split explicit (integration-line code, arrived with the merge of c3ac0a87: "
-    "efce3c44 / 4341f221 locate flips in the restart window)"))
 def test_a_nonlinear_capacitor_shorted_by_its_switch_is_carried_in_charge():
     """The rule reads a nonlinear capacitor's rate before the event from its law
     (i_prev / C(v_prev)): the turn-off kink at 5 us is no record; the 1 ps discharge at
