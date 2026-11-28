@@ -90,13 +90,19 @@ The numbers are in the `Known limitations` part of the 2.1.0 entry of the
   after the turn-off was held off for a step because the edge's projection
   fitted one of the two winding modes; it now conducts from the edge.)
   Locating an event costs trial solves, each a factorisation: 4–7 trials per located event.
-  A freewheeling diode that conducts for less than the rest of the step
-  after a switch turn-off is not located: the step records a `cut_set`
-  re-initialisation and drops the inductor's whole current as an impulse
-  instead of delivering it to the output (`ll15_boost_closed_loop` at
-  dt = 0.5 us: 60 mA, conducting 84 ns in `trbdf2`; `ll14_buck_closed_loop`:
-  35 mA, 164 ns; a dt/100 run conducts it). The edge's right limit itself
-  is correct (D on, the inductor current kept).
+  A current that ramps to zero inside a restart piece after a switch
+  turn-off (an exponential freewheel diode: there is no diode state to
+  locate) was read by the restart probe as a jump when it ended within
+  1.185·γh of the event: the step recorded a `cut_set` and dropped the
+  current as an impulse (`ll15_boost_closed_loop` at dt = 0.5 us: 60 mA
+  conducting 84 ns, V(vout) 4.3e-3 V low). With the split the piece is now
+  cut where the ramp ends (fixed: ll15 V(vout) offset 2.2e-4 V, the charge
+  over the edge step 0.52 -> 2.51 nC). Still open: a ramp shorter than
+  γ²h ≈ 0.086·h stays an impulse (the probe cannot tell it from a fast
+  mode; ll15's start-up edges, 413 records); one ending between 1.185·γh
+  and the step end is integrated across by SDIRK (+17 % charge at 0.72·h,
+  `python/tests/test_restart_ramp_end_cut.py`); the rule alone keeps the
+  impulse.
 * **Exact engine output rule** (`engine='exact', output_rtol=...`): a
   thermal summary read from stored samples depends on the output grid.
   The first line after an event (within 2 ps of it) can exceed the rule:

@@ -6,6 +6,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Event splitting: a current that ramps to zero inside a restart piece is cut there, not dropped
+
+- With `discontinuity_restart=True, enable_substep_state_correction=True`, after a switch turn-off the current of an exponential (Newton) freewheel diode falls at a steady rate and reaches zero inside the piece. When it ended within 1.185·γh of the event the restart probe read that ramp as a jump: a `cut_set` record and the whole current dropped as an impulse, its charge ½·i·θ never delivered (`ll15_boost_closed_loop` at dt = 0.5 us: 60 mA conducting 84 ns, 879 records in 5 ms, V(vout) 4.3e-3 V low at 4510 us). The probe now tells a ramp from a fast mode by one extra backward-Euler stage of 1e-3·γh (the start's own slope): a state that moved |s3 − s0| = r·θ with θ ≥ γ²h comes from a slope ending at θ, since every single mode the jump test flags (τ < γ²h) gives θ < γ²h. The step is cut at θ (piece A on the slope, piece B from rest, one cut per piece, counted in `n_restart_cuts`). ll15: records 879 -> 413, charge over the edge step 0.52 -> 2.51 nC, V(vout) offset at 4510 us -4.27e-3 -> -2.19e-4 V, rms against a dt/100 run 2.16e-3 -> 5.50e-4; ll14: the edge kick at 341.5 us -1.10e-5 -> +1.6e-8 V. ll14's rms rises 1.84e-3 -> 1.88e-3: its dropped charge had cancelled an independent positive drift (500-2500 us), every changed edge kick is ~1000× smaller. A ramp shorter than γ²h still records the impulse (what the probe resolves); the rule alone and the rule off are unchanged.
+
 ### trbdf2 / esdirk43: Newton round-off acceptance at very high node voltages
 
 At the active-clamp forward converter's turn-off edges (`ll13_active_clamp_forward`), nodes reach 3.5e8 V
