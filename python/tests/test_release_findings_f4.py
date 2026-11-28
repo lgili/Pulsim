@@ -350,8 +350,9 @@ def test_f_r_2_the_closed_loop_buck_is_judged_on_every_column_against_a_fine_ref
     stored column read), then 4.4e4 x (a coarse reference holding the DCM switch node settled).
     Every stored column is now read; the post-event transient is judged against a fine reference
     run straight through the event, translated onto the cell's event instants (an uninterrupted
-    fine rule-off run reads 0.98 at the worst event). The cell's first 2 ps line after an event is
-    reported apart: an open engine item (~59 x the promise on the switch node, dt 1e-14 confirms)."""
+    fine rule-off run reads 0.98 at the worst event). The cell's first line after an event is
+    reported apart: it read ~59 x the promise on the switch node at a fixed 2 ps; the rule now
+    places it (<= 2 ps), so a cut first line is sub-ps and counted in ``n_lines_at_event``."""
     import tracemalloc
 
     import output_rule_referee as F
@@ -366,8 +367,10 @@ def test_f_r_2_the_closed_loop_buck_is_judged_on_every_column_against_a_fine_ref
         tracemalloc.stop()
     assert fr["comparable"], fr
     assert fr["n_columns"] == 13 and fr["ratio_stored_columns"] is not None
-    assert 0.8 < fr["ratio"] < 1.3, fr["ratio"]                 # measured 1.0209 (not 4.4e4)
+    assert 0.8 < fr["ratio"] < 1.3, fr["ratio"]                 # measured 1.0818 (not 4.4e4)
     pf = fr["not_in_ratio"]["post_event_first_line"]
-    assert pf["n"] == 1491 and 30 < pf["ratio"] < 100, pf      # counted and reported, not silent
-    assert fr["not_in_ratio"]["n_lines_at_event"] == 0
+    # 1491 events: the 2 ps lines the rule left uncut are read apart (999 measured, 1.5e-5),
+    # the cut ones are sub-ps lines counted at the event (1804 measured): every event counted
+    assert 0 < pf["n"] < 1491 and pf["ratio"] < 1.3, pf
+    assert fr["not_in_ratio"]["n_lines_at_event"] >= 1491 - pf["n"]
     assert peak < 600e6, peak                                   # one window in memory (~276 MB RSS)

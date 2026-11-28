@@ -27,8 +27,9 @@ How it reads the flow, so that no stored line can go unread:
 * every line counts (the trace carries both limits of a jump; only reference instants
   within ``EVENT_TOL`` of an event are skipped, a line wholly inside that neighbourhood is
   counted as ``n_lines_at_event``; the cell's first line after an event, its <= 2 ps sample,
-  is read APART: ``post_event_first_line``, counted, its worst reported, not in ``ratio`` --
-  an open engine item, cl_buck_pi reads ~60 x there; instants
+  is read APART: ``post_event_first_line``, counted, its worst reported, not in ``ratio``
+  (cl_buck_pi read ~60 x there at the old fixed 2 ps; the rule now places that sample, and a
+  line it cut below EVENT_TOL is counted in ``n_lines_at_event``); instants
   within ``SETTLE`` of the run after one are read apart: the rule settles the parasitic
   cluster at the event, the rule-off reference lets it decay -- ``ratio_incl_settle``);
 * the denominator is the promise itself with the RUN's range, no added slack (the promise's
@@ -102,14 +103,16 @@ def _ulp(t):
 
 
 def _at_event(t0, t1, ev):
-    """Lines [t0, t1] wholly within EVENT_TOL of one event: they can hold no read instant."""
+    """Lines [t0, t1] within EVENT_TOL of one event but for under 1/K of their length (the
+    rule's adaptive first samples: cl_buck_pi's 0.35 ps lines, one 0.05 ps past EVENT_TOL):
+    they can hold no read instant at the window's dt (instants that land there are read)."""
     out = np.zeros(np.shape(t0), bool)
     if not ev.size:
         return out
     k = np.searchsorted(ev, t0)
     for o in (-1, 0):
         e = ev[np.clip(k + o, 0, ev.size - 1)]
-        out |= np.maximum(np.abs(t0 - e), np.abs(t1 - e)) <= EVENT_TOL
+        out |= np.maximum(np.abs(t0 - e), np.abs(t1 - e)) <= EVENT_TOL + np.abs(t1 - t0) / K
     return out
 
 
@@ -262,13 +265,15 @@ def _windows(t, span_end, ev=()):
         d_r = out[i + 1][1]
         at_jump = (a > 0 and ulp[a - 1]) or (a < ulp.size and ulp[a])
         if d_r * REFINE < d_l or at_jump:
-            p = a - 1                      # the line ending at the seam, past the jump's pair
-            while p > 0 and ulp[p]:
+            # the line ending at the seam, past the jump's pair and a sub-ps first line after
+            # the event (else the seam sits inside the transient: buck_dcm read 9.6e4 x)
+            p = a - 1
+            while p > 0 and skip[p]:
                 p -= 1
             out[i][0] = b - min(0.45 * lines[p], LEAD * min(d_l, d_r))
         elif d_l * REFINE < d_r:
             q = a                          # the line starting at the seam
-            while q < ulp.size - 1 and ulp[q]:
+            while q < ulp.size - 1 and skip[q]:
                 q += 1
             out[i][0] = b + min(0.45 * lines[q], max(LEAD * d_l, TAIL * (b - starts[i])))
     return [(o[0], o[1]) for o in out]

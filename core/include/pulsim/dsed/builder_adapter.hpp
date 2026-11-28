@@ -862,8 +862,9 @@ public:
         // the mode's own eigenvalues (once per mode); with sines they are the augmented
         // matrix's, A's plus the oscillators' ±iω (Re 0: never in the cluster). A dense
         // eigensolve only where the exact build has none (its eig failed)
-        Eigen::VectorXcd lam = e.exact.lambda;
-        if (lam.size() < e.A.rows()) lam = Eigen::EigenSolver<DenseMatrix>(e.A, false).eigenvalues();
+        Eigen::VectorXcd dense;   // read in place: no copy per event on the default path
+        if (e.exact.lambda.size() < e.A.rows()) dense = Eigen::EigenSolver<DenseMatrix>(e.A, false).eigenvalues();
+        const Eigen::VectorXcd& lam = dense.size() ? dense : e.exact.lambda;
         Real slow = std::numeric_limits<Real>::infinity();
         for (Eigen::Index i = 0; i < lam.size(); ++i)
             if (lam[i].real() < -fast_threshold) slow = std::min(slow, -lam[i].real());
