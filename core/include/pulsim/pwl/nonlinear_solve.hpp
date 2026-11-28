@@ -316,6 +316,7 @@ inline void solve_with_newton_in_place(
     constexpr Size lm_max_attempts = Size{30};
 
     Real last_dx_norm  = std::numeric_limits<Real>::infinity();
+    bool last_step_plain = false;   // the last dx came from w.solver's factor of J(x_k)
     Real last_res_norm = std::numeric_limits<Real>::infinity();
     // Argmax companions to the two norms above (v2.0 Phase 1) —
     // the MNA row where each is worst, for the failure message.
@@ -466,6 +467,7 @@ inline void solve_with_newton_in_place(
         //        shrink-λ if residual drops, else grow λ and
         //        retry.
         Real alpha = Real{1};
+        last_step_plain = false;
         if (enable_lm) {
             // LM inner loop. Acceptance uses the L2 norm of f
             // (the natural LM objective ||f||₂²) since the
@@ -587,6 +589,7 @@ inline void solve_with_newton_in_place(
             Vector& neg_f = w.neg_f;
             neg_f = -f_combined;
             solver->solve(neg_f, dx);
+            last_step_plain = true;
 
             if (enable_line_search) {
                 sparse::Matrix& J_nl_trial = w.J_nl_trial;
@@ -820,11 +823,48 @@ inline void solve_with_newton_in_place(
                     break;
                 }
             }
+            const Vector axk = w.ro_x.cwiseAbs();
+            Vector sk = seg.J.cwiseAbs() * axk;
+            sk += seg.b_constant.cwiseAbs() + b_extra.cwiseAbs() + f_nl.cwiseAbs();
+            if (J_nl.nonZeros() > 0) sk += J_nl.cwiseAbs() * axk;
+            // A component can also sit at the rounding PROPAGATED to it: a
+            // current fixed by rows of 1e8 V terms (ll13's Vin branch: 13 A
+            // moving 3.7e-9 A, 2e6 of its own ulps) or a node of a nearly
+            // singular 2L/h system (1.08e8 V moving 48 eps at h = 1.8e-17 s)
+            // cannot do better than the change an omega_max perturbation of
+            // each row's own terms makes in it: omega_max |J^-1| sk. That
+            // bound is estimated from J(x_k)'s factor as max |J^-1 (±sk)|
+            // (all-positive and alternating signs; an estimate from BELOW,
+            // so the test is never looser than the true bound). With
+            // dx = -J^-1 f this is nearly implied by the backward-error test
+            // below, which still decides; the guards against a drifting
+            // iterate stay the stagnation windows and the dx cap. Two
+            // solves, only here, on a budget-exhausted stagnated solve.
+            if (!fixed_point && last_step_plain && w.solver
+                && w.solver->is_factorized()) {
+                Vector& y1 = w.f_trial;
+                Vector& y2 = w.x_trial;
+                Vector& r = w.neg_f;
+                r = sk;
+                y1.setZero(static_cast<Index>(n));
+                y2.setZero(static_cast<Index>(n));
+                w.solver->solve(r, y1);
+                for (Index i = 1; i < r.size(); i += 2) r[i] = -r[i];
+                w.solver->solve(r, y2);
+                fixed_point = true;
+                for (Index i = 0; i < static_cast<Index>(n); ++i) {
+                    const Real d = std::abs(dx[i]);
+                    if (!(d <= tol_dx
+                          || d <= Real{4} * std::numeric_limits<Real>::epsilon()
+                                      * std::abs(w.ro_x[i])
+                          || d <= roundoff->omega_max
+                                      * std::max(std::abs(y1[i]), std::abs(y2[i])))) {
+                        fixed_point = false;
+                        break;
+                    }
+                }
+            }
             if (fixed_point) {
-                const Vector axk = w.ro_x.cwiseAbs();
-                Vector sk = seg.J.cwiseAbs() * axk;
-                sk += seg.b_constant.cwiseAbs() + b_extra.cwiseAbs() + f_nl.cwiseAbs();
-                if (J_nl.nonZeros() > 0) sk += J_nl.cwiseAbs() * axk;
                 backward_error(sk.cwiseMax(w.ro_scale));
                 own_scale = true;
             }

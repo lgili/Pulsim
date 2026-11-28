@@ -40,7 +40,7 @@ fails when its err_rms grows past 2x the frozen `known_err:`.
 | switching/boost/ll07_boost_vcswitch.yaml | 0.02 | 0.0983 | 0.0445 | 0.0445 |
 | switching/boost/ll12_pfc_boost_continuous.yaml | 0.02 | 0.083 | 0.0753 | 0.0753 |
 | switching/buck/ll06_buck_vcswitch.yaml | 0.02 | 0.0781 | 0.0792 | 0.0434 |
-| switching/buck/ll08_buck_mosfet.yaml | 0.02 | 0.228 | 0.0659 | 0.0652 |
+| switching/buck/ll08_buck_mosfet.yaml | 0.02 | 0.227 | 0.0656 | 0.0652 |
 | switching/inverter/ll09_half_bridge_inverter_leg.yaml | 0.02 | 0.0707 | 0.0102 | 0.0102 |
 | switching/inverter/ll10_full_bridge_inverter_lc.yaml | 0.02 | 0.05 | 0.000127 | 0.000127 |
 | switching/isolated/flyback_converter.yaml | 0.02 | 0.949 | 9.03e-06 | 9.03e-06 |
@@ -125,16 +125,16 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | switching/buck/ll06_buck_vcswitch.yaml | pwl | 0.02 | 0.0781 | V(ctrl) | 0.021 | 2.8% | 2e-05 | 99 |
 | switching/buck/ll06_buck_vcswitch.yaml | pwl+restart | 0.02 | 0.0792 | V(sw) | 0.0384 | 0.9% | 1.3e-07 | 0.64 |
 | switching/buck/ll06_buck_vcswitch.yaml | pwl+split | 0.02 | 0.0434 | V(sw) | 0.0068 | 1.9% | 2e-05 | 99 |
-| switching/buck/ll08_buck_mosfet.yaml | pwl | 0.02 | 0.228 | V(sw) | 0.156 | 3.2% | 3.9e-07 | 2 |
-| switching/buck/ll08_buck_mosfet.yaml | pwl+restart | 0.02 | 0.0659 | V(sw) | 0.0173 | 3.2% | 2.1e-07 | 1.1 |
-| switching/buck/ll08_buck_mosfet.yaml | pwl+split | 0.02 | 0.0652 | V(gate) | 0.00461 | 3.2% | 2e-07 | 1 |
+| switching/buck/ll08_buck_mosfet.yaml | pwl | 0.02 | 0.227 | V(sw) | 0.155 | 3.2% | 3.9e-07 | 2 |
+| switching/buck/ll08_buck_mosfet.yaml | pwl+restart | 0.02 | 0.0656 | V(sw) | 0.0169 | 3.2% | 2.1e-07 | 1.1 |
+| switching/buck/ll08_buck_mosfet.yaml | pwl+split | 0.02 | 0.0652 | V(gate) | 0.00462 | 3.2% | 2e-07 | 1 |
 | switching/inverter/ll09_half_bridge_inverter_leg.yaml | pwl | 0.02 | 0.0707 | V(ctrl_hi) | 0.0104 | 2.0% | 2.3e-12 | 9.1e-06 |
 | switching/inverter/ll10_full_bridge_inverter_lc.yaml | pwl | 0.02 | 0.05 | V(ctrl_a_lo) | 0.000195 | 1.0% | 3e-12 | 1.2e-05 |
 | switching/isolated/flyback_converter.yaml | pwl | 0.02 | 0.949 | V(out) | chatter | 19.1% | 2e-05 | 2e+02 |
 | switching/isolated/forward_converter.yaml | pwl | 0.02 | 0.707 | V(out) | chatter | 6.2% | 9.9e-06 | 99 |
 | switching/isolated/full_bridge_dc.yaml | pwl | 0.02 | 0.0829 | V(load_p) | 3.54e-06 | 4.0% | 1e-07 | 0.5 |
 | switching/isolated/ll13_active_clamp_forward.yaml | pwl | 0.02 | 4.51 | V(clamp_node) | 0.642 | 5.0% | 5e-11 | 0.001 |
-| switching/isolated/ll13_active_clamp_forward.yaml | trbdf2 | 0.001 | 0.00109 | V(ctrl_clamp) | 3.31e-05 | 0.0% | 5e-11 |  |
+| switching/isolated/ll13_active_clamp_forward.yaml | trbdf2 | 0.001 | 0.00123 | V(ctrl_main) | 3.32e-05 | 0.0% | 5e-11 |  |
 | switching/isolated/llc_half_bridge_zvs.yaml | pwl | 0.02 | 0.021 | V(mid) | chatter | 18.8% | 8.5e-06 | 8.5e+02 |
 | switching/isolated/psfb_full_bridge_zvs.yaml | pwl | 0.02 | 0.0211 | V(b) | chatter | 39.2% | 7e-06 | 7e+02 |
 | switching/isolated/synchronous_flyback.yaml | pwl | 0.02 | 0.207 | V(out) | 0.143 | 1.0% | 1e-12 | 1e-05 |
@@ -224,7 +224,7 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | switching/buck/cascaded_buck_buck.yaml | 0.00126 | 1.16e-06 | 1.16e-06 | 1.42e-05 | 1.46e-06 |
 | switching/buck/high_freq_gan_buck.yaml | 0.00103 | 6.2e-06 | 6.2e-06 | 8.56e-05 | 5.1e-06 |
 | switching/buck/ll06_buck_vcswitch.yaml | 0.0781 | 0.0792 | 0.0434 | 7.94e-05 | 0.000171 |
-| switching/buck/ll08_buck_mosfet.yaml | 0.228 | 0.0659 | 0.0652 | 0.00011 | refused |
+| switching/buck/ll08_buck_mosfet.yaml | 0.227 | 0.0656 | 0.0652 | 0.000102 | refused |
 | switching/buck/sync_buck_500khz.yaml | 0.00167 | 3.77e-06 | 3.77e-06 | 1.71e-05 | 1.98e-06 |
 | switching/buck/synchronous_buck.yaml | 0.00132 | 1.05e-06 | 1.05e-06 | 3.15e-06 | 1.35e-06 |
 | switching/buck/textbook_erickson_buck_ccm.yaml | 0.000771 | 5.02e-07 | 4.21e-07 | 9.86e-06 | 4.3e-07 |
@@ -246,7 +246,7 @@ cell disagrees by edge timing; edge err above it: the states differ.
 | switching/isolated/forward_converter.yaml | 0.707 | 9.61e-06 | 9.62e-06 | 2.17e-05 | 1.12e-06 |
 | switching/isolated/full_bridge_dc.yaml | 0.0829 | 2.72e-05 | 2.72e-05 | 0.000141 | 2.72e-05 |
 | switching/isolated/ll11_llc_resonant_converter.yaml | error | error | error | error | refused |
-| switching/isolated/ll13_active_clamp_forward.yaml | 4.51 | 0.00207 | 0.00207 | 0.00109 | refused |
+| switching/isolated/ll13_active_clamp_forward.yaml | 4.51 | 0.00207 | 0.00207 | 0.00123 | refused |
 | switching/isolated/llc_half_bridge_zvs.yaml | 0.021 | 0.00059 | 0.00059 | 2.9e-05 | 2.98e-05 |
 | switching/isolated/psfb_full_bridge_zvs.yaml | 0.0211 | 0.0017 | 0.0017 | 1.62e-05 | 0.000127 |
 | switching/isolated/synchronous_flyback.yaml | 0.207 | 1.62e-05 | 1.62e-05 | 9.15e-06 | 1.02e-06 |

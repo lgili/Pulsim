@@ -10,6 +10,39 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - With `discontinuity_restart=True, enable_substep_state_correction=True`, after a switch turn-off the current of an exponential (Newton) freewheel diode falls at a steady rate and reaches zero inside the piece. When it ended within 1.185·γh of the event the restart probe read that ramp as a jump: a `cut_set` record and the whole current dropped as an impulse, its charge ½·i·θ never delivered (`ll15_boost_closed_loop` at dt = 0.5 us: 60 mA conducting 84 ns, 879 records in 5 ms, V(vout) 4.3e-3 V low at 4510 us). The probe now tells a ramp from a fast mode by one extra backward-Euler stage of 1e-3·γh (the start's own slope): a state that moved |s3 − s0| = r·θ with θ ≥ γ²h comes from a slope ending at θ, since every single mode the jump test flags (τ < γ²h) gives θ < γ²h. The step is cut at θ (piece A on the slope, piece B from rest, one cut per piece, counted in `n_restart_cuts`). ll15: records 879 -> 413, charge over the edge step 0.52 -> 2.51 nC, V(vout) offset at 4510 us -4.27e-3 -> -2.19e-4 V, rms against a dt/100 run 2.16e-3 -> 5.50e-4; ll14: the edge kick at 341.5 us -1.10e-5 -> +1.6e-8 V. ll14's rms rises 1.84e-3 -> 1.88e-3: its dropped charge had cancelled an independent positive drift (500-2500 us), every changed edge kick is ~1000× smaller. A ramp shorter than γ²h still records the impulse (what the probe resolves); the rule alone and the rule off are unchanged.
 
+### trbdf2 / esdirk43: Newton round-off acceptance at very high node voltages
+
+At the active-clamp forward converter's turn-off edges (`ll13_active_clamp_forward`), nodes reach 3.5e8 V
+inside a 2e-13 s mode. Some short steps there ended Newton at the 50-iteration budget with the residual at
+round-off (under 0.5 eps of each row's own terms), and the round-off acceptance still declined them. Its
+fixed-point test wanted every unknown's last step within 4 eps of its own value, but some unknowns are set by
+rows of much larger terms. The Vin branch current is 13 A and is set by 1e8 V terms, so it moved 3.7e-9 A,
+two million of its own ulps. A node of a nearly singular short step moved 48 eps. The step fell to h_min,
+and three run lengths aborted (rtol 1e-6 / 1.6 us, 1e-8 / 3 us, 1e-10 / 100 us). The test now also takes a
+step at the rounding PROPAGATED to that unknown: omega_max |J^-1| (|J||x| + |b|), estimated from below with
+two solves on the iterate's own factor. It runs only on a stagnated solve that exhausted its budget, and only
+with judge_own_scale (trbdf2 / esdirk43). The absolute dx tolerance, the residual backward-error test, the
+stagnation windows and the dx cap are unchanged. Default `pwl` step solves are byte-identical; the fixed
+engine's event right-limit solve (which already judged at its own scale) gets the same rule (pwl+restart /
+pwl+split identity: ll13 fewer right-limit fallbacks, ll08 inner-event right states). All 18 measured ll13
+runs complete; the 3 us expected failure is removed. ll13 trbdf2 grade 0.00109 -> 0.00123 (ceiling 0.00133).
+
+### TR-BDF2: a quiet gate bit keeps its samples while another bit toggles; the opaque `switch_fn` guarantee is stated (F-Z-18)
+
+`test_a_gate_that_gets_faster_loses_no_pulse` failed with branch-form devices (77 of 78 pulses). This was not an engine defect:
+the lost 60 µs pulse was the gate's second pulse, and the first had been stepped over too, so the engine had learned nothing.
+At h_max = 1 µs the four regular samples are 250 ns apart and phase-locked to the 10 µs period. Only the walking sample
+could hit a 100 ns pulse, and its phase follows the start-up steps. The test now lands the first pulse on a source
+breakpoint, runs on both device forms, and checks every edge against the bisection bound (h_min). A second test puts
+220 ns pulses after 300 µs of 800 ns quiet steps.
+
+The review of that guarantee found a real defect with two gate bits. A quiet bit caps the step at twice the narrowest
+pulse of the run, but the number of samples per step followed only the bits that were toggling. Under a 50 % PWM on
+another bit, that was one sample per step, and 2 of 8 later 60 ns pulses went unseen (100 ns narrowest). A step capped by a
+quiet bit now keeps at least 4 samples. Single-bit gates are unchanged. The `simulate` docstring (`switch_fn`) and
+known-limitations state the guarantee. Before a bit has closed a pulse, nothing is guaranteed. After that, no pulse at least
+half as wide as the bit's recent narrower width is stepped over (while the bit is quiet: the run's narrowest pulse).
+
 ### Restart rule: a located rectifier turn-off is no longer thrown away by round-off at the crossing
 
 - Under `discontinuity_restart=True` a diode turn-off inside a step is located and the step cut there; the first piece ends at the crossing (v_D = 0), so its stage 2 may iterate on that round-off. A flip-and-back there was left as solved, read as an unsettled piece, and the uncut step stood: on `half_bridge_transformer_dc` (dt = 100 ns) the secondary kept 15-35 % of its off-state settling at such steps (+3.3e-6 V on V(out) each, first order in dt). Which steps hit it depended on 1e-9 V differences in the previous switch edge's projection, so the change to the projection's fit order above fixed one edge and broke another. The first piece's stage 2 is now re-solved in stage 1's mode when every diode it moved is one the locator found crossing at the cut (a real flip of another diode inside the piece is taken as in any other step and counted in `result.counters["restart_piece1_flips_kept"]`): those positive kicks are gone (sum of |V(out)| step errors at diode turn-offs 4.20e-5 V -> 2.27e-5 V; what remains are turn-offs inside stage 1, which the rule alone does not locate). On `sepic`, `two_phase_interleaved_boost` and `cascaded_boost_buck` (rule alone) the rms against a dt/100 run rises although no switching kick grew: the removed positive kicks had cancelled the remaining stage-1 ones.
