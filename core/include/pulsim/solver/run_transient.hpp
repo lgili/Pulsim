@@ -199,6 +199,25 @@ inline void seed_held_machine_capacitors(
 }
 
 // -----------------------------------------------------------------------------
+// branch_form_event_time — where a branch-form diode's flip over a step that
+// starts at no gate edge is booked (F-Z-14): the conductance form's chord of
+// s = v_d − V_on (node voltages, valid in both states) when it changes sign, so
+// both forms book one instant; NaN (no event) for an OFF → ON flip from a step
+// start already at or above V_on — the start's assumed bits, conducting from
+// t_prev⁺, where the conductance form books none either; else the step end.
+// shortcut: an ideal ON diode (R_on = 0) reads s ≡ V_f − V_on, no chord: its
+// natural turn-off stays at the step end (at most one step late).
+// -----------------------------------------------------------------------------
+[[nodiscard]] constexpr Real branch_form_event_time(
+    bool on_prev, Real t_prev, Real t_curr, Real s_prev, Real s_curr) noexcept {
+    if (s_prev * s_curr < Real{0}) {
+        return interp_commutation_time(t_prev, t_curr, s_prev, s_curr);
+    }
+    if (!on_prev && s_prev >= Real{0}) return std::numeric_limits<Real>::quiet_NaN();
+    return t_curr;
+}
+
+// -----------------------------------------------------------------------------
 // Callback type aliases.
 //
 // `std::function` is the V0 dispatch mechanism. A V1 follow-up
@@ -1013,6 +1032,20 @@ inline SimulationResult run_transient(
     // add-pwl-igbt-and-thyristor: the stamped mask at the step start,
     // so a gated device's commutation record follows its stamped state.
     topology::SwitchStateMask gated_prev_stamp = stamped_mask;
+    // F-Z-14: the same for a branch-form diode's flip — whether the step
+    // starts at a gate edge (its gate bits changed; the diode bits ignored)
+    topology::SwitchStateMask ideal_prev_stamp = stamped_mask;
+    bool ideal_prev_known = false;   // an unknown start stamp is no edge
+    auto gate_edge_since = [&](const topology::SwitchStateMask& prev) {
+        if (!ideal_prev_known) return false;
+        const auto d = diodes.current_diode_mask();
+        return !(combine_masks(stamped_mask, d, diode_owned) ==
+                 combine_masks(prev, d, diode_owned));
+    };
+    // the conductance form's watched signal v_d − V_on
+    auto branch_form_s = [](const pwl::DiodeEventState::DiodeEntry& e, const Vector& xs) {
+        return e.law_voltage(xs, false) - models::SwitchedDiode::turn_on_voltage(e.params());
+    };
 
     // Event-iteration cap. 0 disables iteration entirely
     // (matching Layer 5 V2 behaviour for regression testing).
@@ -3064,7 +3097,8 @@ inline SimulationResult run_transient(
         // Called with stage 1 solved (x, its b_extra, its bits); everything
         // it touches is put back. Out of line, once per run.
         auto event_right_limit = [&](auto& rei, Real t_from, Real h_s, Real loc, bool ev,
-                                     Vector& out, topology::SwitchStateMask& m_out)
+                                     Vector& out, topology::SwitchStateMask& m_out,
+                                     std::vector<Real>& c_out)
                                      PULSIM_STEP_DRIVER -> int {
             const bool at_loc = t_from == rl_loc.t;
             // F-Z-10: the run's start (not a resume seam) is re-initialised:
@@ -3537,6 +3571,20 @@ inline SimulationResult run_transient(
                             Real{1e-8} * (Real{1} + std::abs(out[i]) + std::abs(x0[i]));
                 }
                 if (!moved) ok = 0;
+            }
+            if (ok == 1) {
+                // F-Z-13: the capacitors' currents at the row, the last ε
+                // solve's backward-Euler companion (its histories still in
+                // place): the post-jump network's KCL at t_e+
+                c_out.assign(ents.size(), Real{0});
+                for (Size k = 0; k < ents.size(); ++k) {
+                    const auto& e = ents[k];
+                    if (e.kind != pwl::DevicePool::StoredKind::Capacitor) continue;
+                    c_out[k] = models::Capacitor::g_eq(Real{2} * e_last,
+                                                       models::Capacitor::Params{e.C_or_L}) *
+                               (stamping::read_node_voltage(out, e.from) -
+                                stamping::read_node_voltage(out, e.to) - e.v_prev);
+                }
             }
             history.restore(rl_hcur);
             if (!lin) {
@@ -4263,7 +4311,7 @@ inline SimulationResult run_transient(
                 // F-SB-1: the right limit, only where something happens
                 // (the caller's event, a probed jump)
                 const int rl = event_right_limit(run_event_iteration, t_from, h_s, loc,
-                                                 ev, L->rl_x, L->rl_m);
+                                                 ev, L->rl_x, L->rl_m, L->rl_c);
                 L->rl_ok = rl != 0;
                 L->rl_left = rl == 2;
             }
@@ -4534,11 +4582,13 @@ inline SimulationResult run_transient(
                 lines.held[j] = false;
                 lines.rl_right_jump[j] = ip_jump;
                 lines.rl_right_ok[j] = lines.rl_ok;
+                lines.rl_left_right[j] = lines.rl_left;
                 if (lines.rl_ok) {
                     if (lines.rl_left) {   // a continuity point: the left
                         lines.rl_right[j] = lines.left[j];
                     } else {
                         std::swap(lines.rl_right[j], lines.rl_x);
+                        std::swap(lines.rl_c_right[j], lines.rl_c);
                     }
                     lines.rl_m_right[j] = lines.rl_m;
                 }
@@ -4548,6 +4598,7 @@ inline SimulationResult run_transient(
                 lines.rl_start_left = lines.rl_left;
                 if (lines.rl_ok) {
                     std::swap(lines.rl_start, lines.rl_x);
+                    std::swap(lines.rl_c_start, lines.rl_c);
                     lines.rl_m_start = lines.rl_m;
                 }
             }
@@ -5060,6 +5111,10 @@ inline SimulationResult run_transient(
             // a gated device's record compares with the last OUTER step's
             // stamp: restart stages and split sub-steps re-stamp in between
             if (diodes.num_gated() > 0) gated_prev_stamp = stamped_mask;
+            if (has_ideal_diode) {
+                ideal_prev_stamp = stamped_mask;
+                ideal_prev_known = stamped_known;
+            }
 
             // ---- discontinuity restart (add-discontinuity-restart-rule)
             // Triggers: an unknown previous stamp, a mask that differs
@@ -5671,16 +5726,28 @@ inline SimulationResult run_transient(
                         continue;
                     }
                     if (has_ideal_diode && pool.is_branch_form(e.branch_id)) {
-                        // shortcut: stamped at the step end, not interpolated;
-                        // the event split locates it when it is on. A flip a
-                        // gate edge forced in the restart's first stage is
-                        // stamped at the edge (t_prev).
-                        if (static_cast<bool>(commut_on_prev[j]) != e.is_on) {
-                            const bool at_edge = edge_restart && rs_first_valid &&
-                                                 rs_bits_first[j] == e.is_on;
-                            step_events.push_back(CommutationEvent{
-                                .t_estimated = at_edge ? t_prev : t,
-                                .branch_id = e.branch_id, .new_state = e.is_on});
+                        // A flip at a gate edge is booked at the edge (t_prev)
+                        // when the restart's first stage made it, else at the
+                        // step end; any other flip as the conductance form
+                        // (branch_form_event_time).
+                        const bool on_prev = static_cast<bool>(commut_on_prev[j]);
+                        if (on_prev != e.is_on) {
+                            Real t_ev = t;
+                            if (gate_edge_since(ideal_prev_stamp)) {
+                                if (edge_restart && rs_first_valid &&
+                                    rs_bits_first[j] == e.is_on) {
+                                    t_ev = t_prev;
+                                }
+                            } else {
+                                t_ev = branch_form_event_time(
+                                    on_prev, t_prev, t, branch_form_s(e, x_prev),
+                                    branch_form_s(e, x));
+                            }
+                            if (!std::isnan(t_ev)) {
+                                step_events.push_back(CommutationEvent{
+                                    .t_estimated = t_ev,
+                                    .branch_id = e.branch_id, .new_state = e.is_on});
+                            }
                         }
                         continue;
                     }
@@ -5989,16 +6056,21 @@ inline SimulationResult run_transient(
             const Vector* xa = s_rl ? &lines.rl_start : &x_prev;
             const topology::SwitchStateMask* ma =
                 lines.rl_start_ok ? &lines.rl_m_start : &mask_start;
-            const Real* ca = lines.start ? cap(lines.c_start) : nullptr;
+            // F-Z-13: a row's capacitor currents are its state's: the right
+            // limit's own (rl_c_*), the left's at a continuity point or with
+            // no right limit, the committed i_prev at x_prev — never the
+            // quadrature's (c_start / c_right: feed_quadrature's)
+            const Real* ca = s_rl ? cap(lines.rl_c_start) : nullptr;
             for (Size j = 0; j < lines.n; ++j) {
                 if (lines.held[j]) continue;
                 hooks->line(ta, *xa, *ma, lines.t[j], lines.left[j], lines.m_left[j], ca,
                             cap(lines.c_left[j]));
                 ta = lines.t[j];
                 const bool r = lines.rl_right_ok[j];
+                const bool own = r && !lines.rl_left_right[j];
                 xa = r ? &lines.rl_right[j] : &lines.left[j];
                 ma = r ? &lines.rl_m_right[j] : &lines.m_left[j];
-                ca = cap(lines.right_ok[j] ? lines.c_right[j] : lines.c_left[j]);
+                ca = cap(own ? lines.rl_c_right[j] : lines.c_left[j]);
             }
             hooks->line(ta, *xa, *ma, t, x, stamped_mask, ca,
                         lines.end_own ? cap(lines.c_end) : nullptr);
@@ -6343,6 +6415,10 @@ inline SimulationResult run_transient(
             // (adversarial-review finding P0-R1).
             last_solved_bits.clear();
             if (diodes.num_gated() > 0) gated_prev_stamp = stamped_mask;
+            if (has_ideal_diode) {
+                ideal_prev_stamp = stamped_mask;
+                ideal_prev_known = stamped_known;
+            }
             const bool mode_site_s = mode_ports.has_value() && !nl_refresh_effective;
             auto solve_s = [&](const topology::SwitchStateMask& m, Vector& out) {
                 cache.solve_segment(nominal_segment(m), b_extra_user, out);   // solve-exempt: static path (DECISIONS 22)
@@ -6476,11 +6552,20 @@ inline SimulationResult run_transient(
                         continue;
                     }
                     if (has_ideal_diode && pool.is_branch_form(e.branch_id)) {
-                        // at s = 0 while ON: the crossing test never fires
-                        if (static_cast<bool>(commut_on_prev[j]) != e.is_on) {
-                            result.commutation_events.push_back(CommutationEvent{
-                                .t_estimated = t, .branch_id = e.branch_id,
-                                .new_state = e.is_on});
+                        // a flip at a gate edge at the step end, any other as
+                        // the conductance form (branch_form_event_time)
+                        const bool on_prev = static_cast<bool>(commut_on_prev[j]);
+                        if (on_prev != e.is_on) {
+                            const Real t_ev = gate_edge_since(ideal_prev_stamp)
+                                ? t
+                                : branch_form_event_time(on_prev, t_prev, t,
+                                                         branch_form_s(e, x_prev),
+                                                         branch_form_s(e, x));
+                            if (!std::isnan(t_ev)) {
+                                result.commutation_events.push_back(CommutationEvent{
+                                    .t_estimated = t_ev, .branch_id = e.branch_id,
+                                    .new_state = e.is_on});
+                            }
                         }
                         continue;
                     }

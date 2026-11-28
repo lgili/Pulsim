@@ -135,6 +135,12 @@ struct StepLines {
     // edge reading) starts after it, at the lines' start
     bool rl_start_jump = false;
     std::array<bool, kMax> rl_right_jump{};
+    // F-Z-13: per history entry, a capacitor's current at each rl_* row: the
+    // companion current of the right limit's own ε solve (the post-jump
+    // network's KCL at t_e+), not the quadrature's c_start / c_right
+    std::vector<Real> rl_c, rl_c_start;
+    std::array<std::vector<Real>, kMax> rl_c_right;
+    std::array<bool, kMax> rl_left_right{};   // rl_right[j] is the left (rl_left)
     void clear() noexcept {
         start = false;
         n = 0;
