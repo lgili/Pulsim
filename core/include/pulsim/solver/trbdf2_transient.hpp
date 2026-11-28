@@ -2512,11 +2512,19 @@ inline SimulationResult run_transient_trbdf2(
     // its error): a probe at t_start under the start mode gives each q row's
     // derivative there, and when no row's slot is off by more than its
     // tolerance over the first step, that step is the integrator's own.
-    auto start_consistent = [&]() {
+    // Without a stateful kind (stateful = false) only the linear entries are
+    // checked, and an inconsistent start takes the probe's slots, as a gate
+    // edge does (below): ll13 from a zero start read v_L = 0 for the 48 V its
+    // leakage inductor carries at t = 0+, the first step's estimate was
+    // O(h) at every h (8e4 at 3e-14 s, 812 at 3e-16 s) and the step sat on
+    // h_min = span * 1e-11. The floor then decided the run: forced-accepted
+    // at 5e-16 s (50 us), Newton numerically singular at 3e-17 s (3 us).
+    bool start_probe_ok = false;
+    auto start_consistent = [&](bool stateful) {
         const Size nq = hs.stage_rows();
-        if (nq == 0) return false;
+        if (stateful && nq == 0) return false;
         std::vector<Real> q0(nq), f0(nq), f1(nq), sc(nq);
-        hs.stage_start(Real{1}, q0.data(), f0.data());
+        if (stateful) hs.stage_start(Real{1}, q0.data(), f0.data());
         x_trial = x;
         try {
             if (!probe_solve(mask_at(opts.t_start + Real{0.5} * h_min), t,
@@ -2529,6 +2537,7 @@ inline SimulationResult run_transient_trbdf2(
         } catch (const std::runtime_error&) {
             return false;
         }
+        start_probe_ok = true;
         // The linear entries too: a source switched onto a zero start (24 V
         // into a gated buck) leaves their slots inconsistent, and a TR-BDF2
         // first step was rejected down to 4e-13 s.
@@ -2546,6 +2555,7 @@ inline SimulationResult run_transient_trbdf2(
                 return false;
             }
         }
+        if (!stateful) return true;
         pwl::StatefulHistories::Snapshot snap;
         hs.snapshot_into(snap);
         hs.refresh_derivatives(x_trial, last_probe_dt);
@@ -2561,8 +2571,13 @@ inline SimulationResult run_transient_trbdf2(
         }
         return true;
     };
-    if (hs.any() && resume_from == nullptr && !start_consistent()) {
+    if (hs.any() && resume_from == nullptr && !start_consistent(true)) {
         sdirk_left = std::max(sdirk_left, Size{1});
+    } else if (!hs.any() && resume_from == nullptr && !sens.on()   // shortcut: a
+               && !start_consistent(false) && start_probe_ok) {    // sensitivity run keeps the init slots
+        history.restore(hist_rec);   // the probe's slots, the states are x's
+        if (lt) lt->slots_rewritten();
+        ++st.n_derivative_refreshes;
     }
     std::vector<pwl::HistoryEntry> hist_snap, hist_s1, hist_s2, hist_f;
     std::vector<Real> est_v, est_sc;
