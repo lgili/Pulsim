@@ -425,3 +425,45 @@ def test_learning_a_periodic_opaque_gate_is_cheap():
     _, up_e, dn_e = loop_run(False)
     assert (up, dn) == (up_e, dn_e)
     assert r._trbdf2_stats["n_accept"] < 10_000    # measured 2,357; 28,049 before
+
+
+@pytest.mark.parametrize("form", [{"form": "conductance"}, {"form": "branch"}],
+                         ids=["conductance", "branch"])
+def test_a_quiet_bit_keeps_its_samples_while_another_bit_toggles(form):
+    """Bit B: a 100 ns pulse (on a source breakpoint), then 60 ns pulses
+    after ever longer quiet gaps; bit A: a 50 % opaque PWM at 10 us. B's
+    quiet cap holds the step at twice the narrowest pulse, but the samples
+    per step followed A's 5 us widths alone: one sample per step, and
+    pulses at least half as wide as the narrowest seen went unseen. Every
+    B edge, structurally."""
+    Tp = 1e-5
+    b = _tick_buck(**form)
+    b.add_switch("S2", "vin", "x", 100.0, 1e-6, **form)
+    b.add_resistor("Rx", "x", "gnd", 100.0)
+    b.add_pulse_voltage_source("Vmark", "mark", "gnd", 0.0, 1.0, 3e-5, 1.0)
+    b.add_resistor("Rmark", "mark", "gnd", 1e3)
+    ka, kb = b.switch_index_of("S"), b.switch_index_of("S2")
+    rises, widths, t0 = [3e-5], [1e-7], 3.01e-5
+    for g in (1e-6, 3e-6, 7e-6, 15e-6, 31e-6, 63e-6, 127e-6, 255e-6):
+        t0 += g + 1.7e-8 * len(rises)        # off any step grid
+        rises.append(t0)
+        widths.append(6e-8)
+        t0 += 6e-8
+    ra, wa = np.asarray(rises), np.asarray(widths)
+
+    def fn(t):
+        m = p.SwitchStateMask(b.graph.num_switches)
+        m.set(ka, bool((t % Tp) < 0.5 * Tp))
+        i = np.searchsorted(ra, t, side="right") - 1
+        m.set(kb, bool(i >= 0 and t - ra[i] < wa[i]))
+        return m
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message=".*narrower than the spacing")
+        r = p.simulate(b, 1e-3, engine="trbdf2", switch_fn=fn)
+    t = np.asarray(r.times)
+    s = np.asarray(r.switch_states)[:, kb]
+    j = np.flatnonzero(s[1:] != s[:-1])
+    edges = np.sort(np.r_[ra, ra + wa])
+    assert (int(np.sum(s[j + 1])), int(np.sum(~s[j + 1]))) == (len(ra), len(ra))
+    pre = t[j]
+    assert np.all(pre >= edges) and np.all(pre - edges <= 1e-11 * 1e-3)

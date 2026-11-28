@@ -190,6 +190,7 @@ public:
     PULSIM_SAMPLED_GATE_INLINE Real pulse_cap(Real at_t) {
         Real lim = std::numeric_limits<Real>::infinity();
         gate_sample_w_ = std::numeric_limits<Real>::infinity();
+        gate_quiet_capped_ = false;
         for (const Size i : gate_bits_) {
             const Real wh = gate_w_last_[2 * i + 1];
             const Real wl = gate_w_last_[2 * i];
@@ -203,6 +204,7 @@ public:
                 // 10 ns pulses, every 1 ns one.
                 if (std::isfinite(gate_pulse_min_)) {
                     lim = std::min(lim, Real{2} * gate_pulse_min_);
+                    gate_quiet_capped_ = true;
                 }
                 continue;
             }
@@ -261,6 +263,10 @@ public:
             n_gs = static_cast<int>(std::clamp(
                 std::ceil(Real{2} * h / gate_sample_w_),
                 Real{1}, Real{4096}));
+            // A quiet bit's cap (2 x the run's narrowest pulse) needs its
+            // 4 samples even when a toggling bit's wider pulse would allow
+            // fewer: with 1, a quiet bit's 1.5 w_min pulse went unseen.
+            if (gate_quiet_capped_) n_gs = std::max(n_gs, kGateSamples);
         }
         if (learn_) {
             const Real spacing =
@@ -388,6 +394,7 @@ private:
     Mask gate_rise_prev_;
     Real gate_period_cap_ = std::numeric_limits<Real>::infinity();
     Real gate_sample_w_ = std::numeric_limits<Real>::infinity();
+    bool gate_quiet_capped_ = false;   // a quiet bit capped this step (pulse_cap)
     std::vector<Real> gate_frac_;
     Size& n_undersampled_;
 };

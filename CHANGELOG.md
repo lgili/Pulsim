@@ -6,16 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### TR-BDF2: what an opaque `switch_fn` is guaranteed, and a gate test that no longer relies on luck (F-Z-18)
+### TR-BDF2: a quiet gate bit keeps its samples while another bit toggles; the opaque `switch_fn` guarantee is stated (F-Z-18)
 
-`test_a_gate_that_gets_faster_loses_no_pulse` failed with branch-form devices (77 of 78 pulses). No engine change: the lost
-60 µs pulse was the gate's second pulse and the first was stepped over too, so nothing had been learned. At h_max = 1 µs the
-four regular samples are 250 ns apart and phase-locked to the 10 µs period; only the walking sample could hit a 100 ns pulse,
-and which pulse it hit depended on the start-up steps. The test now lands the first pulse on a source breakpoint, runs on both
-device forms, and checks every edge against the bisection bound (h_min); a second test puts 220 ns pulses after a 300 µs quiet
-stretch of 800 ns steps. The `simulate` docstring (`switch_fn`) and known-limitations now state the guarantee: before a gate
-bit has closed a pulse, samples are up to h_max/4 apart and a narrower first pulse can be missed unreported. After that, no
-pulse at least half as wide as the bit's recent narrower width (quiet: the run's narrowest pulse) is stepped over.
+`test_a_gate_that_gets_faster_loses_no_pulse` failed with branch-form devices (77 of 78 pulses). This was not an engine defect:
+the lost 60 µs pulse was the gate's second pulse, and the first had been stepped over too, so the engine had learned nothing.
+At h_max = 1 µs the four regular samples are 250 ns apart and phase-locked to the 10 µs period. Only the walking sample
+could hit a 100 ns pulse, and its phase follows the start-up steps. The test now lands the first pulse on a source
+breakpoint, runs on both device forms, and checks every edge against the bisection bound (h_min). A second test puts
+220 ns pulses after 300 µs of 800 ns quiet steps.
+
+The review of that guarantee found a real defect with two gate bits. A quiet bit caps the step at twice the narrowest
+pulse of the run, but the number of samples per step followed only the bits that were toggling. Under a 50 % PWM on
+another bit, that was one sample per step, and 2 of 8 later 60 ns pulses went unseen (100 ns narrowest). A step capped by a
+quiet bit now keeps at least 4 samples. Single-bit gates are unchanged. The `simulate` docstring (`switch_fn`) and
+known-limitations state the guarantee. Before a bit has closed a pulse, nothing is guaranteed. After that, no pulse at least
+half as wide as the bit's recent narrower width is stepped over (while the bit is quiet: the run's narrowest pulse).
 
 ### Exact engine: faster steps on a repeated step length (results unchanged)
 
