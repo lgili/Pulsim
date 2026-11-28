@@ -123,8 +123,13 @@ def test_the_voltage_factor_is_reachable():
                     voltage_sanity_factor=1e9)
     assert [w for w in caught
             if "largest voltage" in str(w.message)] == []
-    # F-Z-8 (fixed 3e61b05d / 1abf156f): under the restart rule the cut is named, not read as a stored megavolt
-    assert any("cut the" in str(w.message) and "'L'" in str(w.message) for w in caught)
+    # F-Z-15 (integration e2d82ed5): under the restart rule the cut is judged by
+    # |lambda|/dt = 2.4e-3 V*s / 1e-8 s = 2.4e5 V = 5000 x 48 V < 1e9 x 48 V, so
+    # the factor silences the voltage check too; the release's impulse-energy
+    # warning still reports the cut (10 cuts, 0.0288 J against 0.00288 J stored)
+    assert not any("cut the" in str(w.message) and "'L'" in str(w.message)
+                   and "instantaneous current cut" not in str(w.message) for w in caught)
+    assert sum("instantaneous current cut(s) of 'L'" in str(w.message) for w in caught) == 1
 
 
 # --- D: a dependent source defeats the bound -----------------------

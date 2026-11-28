@@ -244,15 +244,17 @@ def test_diode_turn_off_is_located_within_005_dt():
     # The release default is the split.
     assert offs() == split
     # The rule alone: every estimate is a grid index. The branch-form diode
-    # (default) reports the grid point that ends the crossing step: within
-    # one dt after the located crossing.
+    # (default) books its flip on the conductance form's chord since F-Z-14
+    # (integration e2d82ed5; it booked the step END before): the crossing
+    # step's START, 0.98 dt early, the same grid index as the conductance form.
     off = offs(**RULE)
     assert all(abs(k - round(k)) < 1e-3 for k, _ in off), off
-    assert all(0.0 < k - ks < 1.0 for (k, _), (ks, _) in zip(off, split)), (off, split)
-    # legacy subject: the conductance form reported the step's START, 0.98 dt early
-    off = offs(form="conductance", **RULE)
-    assert all(abs(k - round(k)) < 1e-3 for k, _ in off), off
     assert all(0.95 <= d <= 1.0 for _, d in off), off
+    # legacy subject: the conductance form reported the step's START, 0.98 dt early
+    off_c = offs(form="conductance", **RULE)
+    assert all(abs(k - round(k)) < 1e-3 for k, _ in off_c), off_c
+    assert all(0.95 <= d <= 1.0 for _, d in off_c), off_c
+    assert [round(k) for k, _ in off] == [round(k) for k, _ in off_c], (off, off_c)
     # legacy subject: the pre-release default engine (restart-less, conductance
     # form): a grid index too, 0.32-0.33 dt early.
     off = offs(form="conductance", **OLD_DEFAULT)
