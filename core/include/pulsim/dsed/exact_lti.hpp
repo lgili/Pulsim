@@ -101,6 +101,10 @@ struct ExactLTI {
 
     // Workspaces: a step allocates nothing.
     mutable Vector z_re, z_im, zn_re, zn_im, y, c1_re, c1_im;
+    // tier 1: e^{λh} and h·φ₁(λh)·w of the last h (bitwise): the same doubles a
+    // recomputation gives, without the n complex exp / expm1 / divide per step
+    mutable Real coef_h = std::numeric_limits<Real>::quiet_NaN();
+    mutable Eigen::VectorXcd coef_ex, coef_g;
     // tier 4 (add-exact-propagator-strategy 15.2, D13): e^{[[A, b], [0, 0]] h}·[x; 1] by the
     // truncated Taylor action on the sparse augmented matrix; its workspaces
     std::optional<ExpmAction> action;
@@ -609,6 +613,8 @@ inline constexpr Real kPadeTheta13 = 5.371920351148152;
             out.z_im.resize(n);
             out.zn_re.resize(n);
             out.zn_im.resize(n);
+            out.coef_ex.resize(n);
+            out.coef_g.resize(n);
             return out;
         }
         out.reason = kExactRoundoff * out.kappa > kExactTierBound
@@ -729,12 +735,21 @@ inline void exact_advance_into(const ExactLTI& e, const Vector& x, Real h,
     }
     e.z_re.noalias() = e.Vinv_re * x;
     e.z_im.noalias() = e.Vinv_im * x;
+    // the sign too: e^{λ·(-0)} and e^{λ·(+0)} may differ in a zero's sign
+    if (!(h == e.coef_h && std::signbit(h) == std::signbit(e.coef_h))) {
+        e.coef_ex.resize(n);   // no-op after the first call
+        e.coef_g.resize(n);
+        for (Eigen::Index i = 0; i < n; ++i) {
+            const std::complex<Real> s = e.lambda[i] * h;
+            // exp(s) of a strongly decayed mode underflows to 0: exact.
+            e.coef_ex[i] = std::exp(s);
+            e.coef_g[i] = h * phi1(s) * e.w[i];
+        }
+        e.coef_h = h;
+    }
     for (Eigen::Index i = 0; i < n; ++i) {
-        const std::complex<Real> s = e.lambda[i] * h;
-        // exp(s) of a strongly decayed mode underflows to 0: exact.
         const std::complex<Real> zi =
-            std::exp(s) * std::complex<Real>{e.z_re[i], e.z_im[i]}
-            + h * phi1(s) * e.w[i];
+            e.coef_ex[i] * std::complex<Real>{e.z_re[i], e.z_im[i]} + e.coef_g[i];
         e.zn_re[i] = zi.real();
         e.zn_im[i] = zi.imag();
     }
