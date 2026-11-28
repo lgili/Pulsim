@@ -115,3 +115,32 @@ def test_forward_switch_off_projects_both_winding_modes_and_rectifier_conducts(m
     # -6.87e-6 A here; with the one-mode fit D_rect was off; trapped it was ~16 mA)
     assert abs(r.i("T1.s")[k] - -6.71e-6) < 1e-6
     assert r.counters["stage2_be_kept"] == 0
+
+
+# half_bridge_transformer_dc (rule alone, dt 100 ns): I(T1.s) at the end of the steps
+# in which a rectifier diode turns off; reference: pwl + restart at dt/100
+HALF_BRIDGE_IS_EDGES = ((492.4e-6, 3.4911e-5), (631.3e-6, 3.6752e-5))
+
+
+def test_half_bridge_turn_off_cut_keeps_its_located_crossing(monkeypatch):
+    """A rectifier turn-off inside a restart step is located and the step cut there;
+    the first piece ends AT the crossing (v_D = 0), so its stage 2 may iterate on
+    that round-off: a flip, or a flip and back. The cycle was left as solved, read
+    as an unsettled piece, and the uncut step stood: the secondary kept 15 % / 35 %
+    of its off-state settling at these two edges (+3.3e-6 V on V(out) each, first
+    order in dt), which edge depended on a 1e-9 V difference in the previous
+    switch edge's projection. Kept, the step's error is its first-order part:
+    +1.2e-7 / +1.9e-7 A (0.3 % / 0.5 %); the bound 2 % lies between."""
+    monkeypatch.syspath_prepend(str(ROOT / "benchmarks" / "tools"))
+    pytest.importorskip("yaml")
+    import v1_reader
+
+    case = v1_reader.load(ROOT / "benchmarks" / "circuits" / "magnetics" / "half_bridge_transformer_dc.yaml")
+    case.t_end = 0.64e-3
+    r = _run(case, 1, RULE)
+    t = np.asarray(r.times)
+    i_s = np.asarray(r.i("T1.s"))
+    for te, ref in HALF_BRIDGE_IS_EDGES:
+        k = int(np.searchsorted(t, te + 1e-12)) - 1   # the step end's last sample
+        assert t[k] == pytest.approx(te, abs=1e-12)
+        assert abs(i_s[k] - ref) < 0.02 * ref, (te, i_s[k])

@@ -2298,6 +2298,7 @@ inline SimulationResult run_transient(
             step::restore(history, hs, ip_hist, ip_hs);
             event_rl_x = Real{2} * ip_x1 - ip_x2m;
             ip_x3m = x;   // the reading's x3 (the series' later stages reuse x)
+            const auto mode_3 = stamped_mask;   // the series' stages: this mode's linear map
             // Per state (C or L): the jump x0+ − x0, the rule's bound;
             // energy ½ΔᵀMΔ with the transformers' mutuals.
             auto state = [&](const pwl::HistoryEntry& e, const Vector& v) {
@@ -2700,6 +2701,13 @@ inline SimulationResult run_transient(
                         stages_ok = false;
                         break;
                     }
+                    // a stage in another mode is not T·D_k (the Krylov relation
+                    // the fit needs): the series stops before it (m_ok or the
+                    // fallbacks), never spans a mode change
+                    if (!(stamped_mask == mode_3)) {
+                        stages_ok = false;
+                        break;
+                    }
                     ip_xs.push_back(x);
                 }
                 return stages_ok;
@@ -2718,6 +2726,10 @@ inline SimulationResult run_transient(
                 // J: 8 mA in the secondary, D_rect held off for a step (first order).
                 // The stages are one mode's linear map (single solves), so the
                 // Krylov fit keeps growing while D_{m+1} is above their rounding.
+                // It stops once the span is invariant: the slow content adds one
+                // Ritz value ρ ≈ 1 (held at factor 1) and the residual drops to
+                // rounding (forward cut: ρ 3.4e-4, 0.013, 0.99997, m = 3; the
+                // half bridge's: 1.3e-3, 1.0000, m = 2).
                 Real thr2 = 0, thr2r = 0;
                 for (Size i = 0; i < ns; ++i) {
                     const Size k = ip_js[i];
@@ -4460,11 +4472,15 @@ inline SimulationResult run_transient(
                     on_to_off = on_to_off || (rs_bits[q] != rs_bits2[q]);
                 }
             }
-            if ((on_to_off || (split && iters_2 > 1 && !(rs_bits2 == rs_bits))) &&
-                rs_cut.piece1) {
+            if (rs_cut.piece1 && has_diodes && iters_2 > 1) {
                 // the first piece of a cut step ends AT the located turn-off:
                 // its stage 2 stays in stage 1's mode (the locator's trial;
-                // the flip is the next piece's start)
+                // the flip is the next piece's start). Any iteration there is
+                // that crossing's round-off (v_D = 0 at the piece's end): a
+                // flip, or a flip and back (a cycle) — the latter, left as
+                // solved, read as an unsettled piece and threw the located cut
+                // away (half_bridge_transformer_dc: the uncut step left 15-35 %
+                // of the secondary's off-state settling, +3.3e-6 V per kick)
                 x = rs_x1;
                 diodes.restore_on_bits(rs_bits);
                 mask_cycle = cycle_1;   // the discarded flipping pass's cycle is not this solve's
