@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### TR-BDF2: what an opaque `switch_fn` is guaranteed, and a gate test that no longer relies on luck (F-Z-18)
+
+`test_a_gate_that_gets_faster_loses_no_pulse` failed with branch-form devices (77 of 78 pulses). No engine change: the lost
+60 µs pulse was the gate's second pulse and the first was stepped over too, so nothing had been learned. At h_max = 1 µs the
+four regular samples are 250 ns apart and phase-locked to the 10 µs period; only the walking sample could hit a 100 ns pulse,
+and which pulse it hit depended on the start-up steps. The test now lands the first pulse on a source breakpoint, runs on both
+device forms, and checks every edge against the bisection bound (h_min); a second test puts 220 ns pulses after a 300 µs quiet
+stretch of 800 ns steps. The `simulate` docstring (`switch_fn`) and known-limitations now state the guarantee: before a gate
+bit has closed a pulse, samples are up to h_max/4 apart and a narrower first pulse can be missed unreported. After that, no
+pulse at least half as wide as the bit's recent narrower width (quiet: the run's narrowest pulse) is stepped over.
+
 ### Exact engine: faster steps on a repeated step length (results unchanged)
 
 A step of the exact engine reuses each mode's `e^{λh}` and `h·φ₁(λh)·w` when its length equals the previous step's, and the route record counts its segments with one `np.unique`. Stored arrays are bit-identical. The 2000-period synchronous buck runs in 2.4 ms instead of 3.5 ms; the measurement behind it (where the step's bytes and time go) is in the exact-propagator design notes.

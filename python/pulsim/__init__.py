@@ -2639,6 +2639,24 @@ def simulate(
     switch_fn
         Callable ``t -> SwitchStateMask`` controlling the
         switch state at each sample.  Defaults to all-closed.
+        On ``engine='trbdf2'`` a callable that does not declare its
+        edges (no ``next_edge_after``) is seen only where it is called:
+        at each step's start, at 4 equal points of the step plus one
+        walking point, and in the bisection (to ``h_min``) of an edge a
+        sample finds. Per gate bit: before the bit has closed a pulse
+        the samples are at most ``h_max/4`` apart, so a first pulse
+        narrower than that can be stepped over unreported (pass ``dt``
+        of at most 4x its width, start it on a source breakpoint or a
+        controller tick, or declare the edges). Once it has closed a
+        pulse, no later pulse at least half as wide as ``w`` is stepped
+        over: while the bit keeps toggling (within twice its last
+        period) the samples are ``w/2`` apart, ``w`` the narrower of
+        its last high and low widths (at most 4096 samples per step:
+        a step longer than ``2048 w`` is sampled ``h/4096`` apart);
+        while it is quiet the step is capped at twice the narrowest
+        pulse of the run. A floor the step cannot go below (``h_min``,
+        a mode's conditioning floor) wins over the cap, and a pulse
+        shorter than ``max(16 h_min, 1e-9 x span)`` is not learned.
     b_extra_fn
         PWL-only: Callable ``t -> list[float]`` adding to the constant
         residual F = J·x + b at each step.  An entry ``e`` on a voltage
@@ -3970,9 +3988,10 @@ def _plan_run(
         #      MNA kernel. L-stable, LTE-controlled — no dt to
         #      guess; `dt` (optional) is the step CEILING h_max,
         #      which is also the gate-edge sampling resolution
-        #      (switch_fn is sampled every h/4, so a one-shot gate
+        #      (switch_fn is sampled every h/4, so a first gate
         #      pulse narrower than h_max/4 can be missed SILENTLY;
-        #      a periodic one caps h at twice its pulse once seen). ----
+        #      once a pulse is seen, later ones at least half as wide
+        #      are not: see the switch_fn parameter). ----
         # Every unsupported combination was already caught by
         # _trbdf2_blockers above (which is also what routes
         # engine='auto' away from here).
