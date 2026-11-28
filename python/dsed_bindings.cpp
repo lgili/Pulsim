@@ -1738,6 +1738,8 @@ void init_module(py::module_& m) {
                 d["n_output_inconsistent"] = sim.n_output_inconsistent();
                 const auto& fr = sim.output_floor_row();
                 d["output_floor_row"] = std::vector<double>(fr.data(), fr.data() + fr.size());
+            }
+            {   // every event projection, rule on or off (F-SB-3 / F-R-3)
                 d["n_projections"] = sim.n_projections();
                 const auto pm = sim.projection_max();
                 d["projection_max_row"] = std::vector<double>(pm.data(), pm.data() + pm.size());

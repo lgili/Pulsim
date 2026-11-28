@@ -502,6 +502,24 @@ def _result_from_native(native_res, t_start: float):
     for key in ("mode_shadow", "mode_selection", "mode_guard"):
         if key in native_res:
             res.diagnostics[key] = native_res[key]
+    if "projection_records" in native_res:
+        # every projection of the parasitic cluster at an event, rule on or off (never
+        # silent; F-SB-3 / F-R-3): the count, per stored column the largest amplitude it
+        # moved, and the records (instant, largest amplitude, its column, the cluster's
+        # slowest time constant; capped)
+        ncol = res.states.shape[1] if getattr(res, "has_full_states", False) else 0
+        pm = np.asarray(native_res.get("projection_max_row", []), dtype=float)
+        proj = dict(
+            n_projections=int(native_res.get("n_projections", 0)),
+            projection_max_by_column=(pm[-ncol:] if pm.size >= ncol > 0 else np.zeros(ncol)),
+            projections=[
+                {"t": t + t_start, "amplitude": a, "tau": tau,
+                 # a row of the recovered vector that is not a stored column: None
+                 "column": (int(r) - (pm.size - ncol)) if 0 < ncol and int(r) >= pm.size - ncol else None}
+                for t, a, r, tau in native_res.get("projection_records", [])])
+        res.diagnostics["event_projections"] = proj
+    else:
+        proj = {}
     if "n_output_capped" in native_res:   # the output-grid rule (output_rtol)
         og = {k: int(native_res[k]) for k in ("n_output_capped", "n_output_unbounded")}
         # the rule's samples: read from a step's start, not steps (n_exact_steps)
@@ -518,18 +536,7 @@ def _result_from_native(native_res, t_start: float):
         ncol = res.states.shape[1] if getattr(res, "has_full_states", False) else 0
         og["output_floor_by_column"] = (fr[-ncol:] if fr.size >= ncol > 0
                                         else np.zeros(ncol))
-        # every projection of the parasitic cluster at an event (never silent): the count,
-        # per stored column the largest amplitude it moved, and the records (instant,
-        # largest amplitude, its column, the cluster's slowest time constant; capped)
-        og["n_projections"] = int(native_res.get("n_projections", 0))
-        pm = np.asarray(native_res.get("projection_max_row", []), dtype=float)
-        og["projection_max_by_column"] = (pm[-ncol:] if pm.size >= ncol > 0
-                                          else np.zeros(ncol))
-        og["projections"] = [
-            {"t": t + t_start, "amplitude": a, "tau": tau,
-             # a row of the recovered vector that is not a stored column: None
-             "column": (int(r) - (pm.size - ncol)) if 0 < ncol and int(r) >= pm.size - ncol else None}
-            for t, a, r, tau in native_res.get("projection_records", [])]
+        og.update(proj)
         tb = native_res["output_budget_t"]
         og["output_budget_t"] = None if tb != tb else tb + t_start   # NaN: not spent
         res.diagnostics["output_grid"] = og

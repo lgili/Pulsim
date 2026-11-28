@@ -1777,7 +1777,7 @@ private:
     }
 
     void project_(Real t, Vector& x) {
-        if (output_rtol_ > Real{0}) proj_xin_ = x;   // note_projection_: a chain or a restart
+        proj_xin_ = x;   // note_projection_: a chain or a restart
         // dependent states first, whatever the event projection says: an
         // inconsistent state is not a state of the mode (DECISIONS,
         // dependent states)
@@ -1799,15 +1799,15 @@ private:
                 if constexpr (requires(Vector& y) { system_.recover_full_into(t, x, y);
                                                      system_.recover_from_state();
                                                      system_.fast_cluster_tau(thr); }) {
-                    if (output_rtol_ > Real{0}) {   // every projection under the rule (any step)
-                        proj_y0_.resize(system_.recover_from_state().rows());
-                        system_.recover_full_into(t, x, proj_y0_);
-                        system_.project_slow(t, x, thr);
-                        proj_y1_.resize(proj_y0_.size());
-                        system_.recover_full_into(t, x, proj_y1_);
-                        note_projection_(t, x, thr);
-                        return;
-                    }
+                    // every projection is recorded, rule on or off (F-SB-3 / F-R-3: the
+                    // collapsed transient is a reported jump, never silent)
+                    proj_y0_.resize(system_.recover_from_state().rows());
+                    system_.recover_full_into(t, x, proj_y0_);
+                    system_.project_slow(t, x, thr);
+                    proj_y1_.resize(proj_y0_.size());
+                    system_.recover_full_into(t, x, proj_y1_);
+                    note_projection_(t, x, thr);
+                    return;
                 }
                 system_.project_slow(t, x, thr);
             } else {
@@ -1845,7 +1845,7 @@ private:
         // admissible mode is refused by the loop's name: that loop is the cause
         rejected_loop_.reset();
         last_select_ray_ = false;
-        commit_projection_();   // the previous event's projection record (rule on only)
+        commit_projection_();   // the previous event's projection record
         try {
             decide_modes_impl_(t, x, mask, gates_prev, prev_bits, rec, result);
         } catch (const UnsupportedError& e) {
@@ -3738,7 +3738,7 @@ private:
         return h;
     }
 public:
-    /// One projected event under the output rule: the instant, the largest projected
+    /// One projected event (rule on or off): the instant, the largest projected
     /// amplitude over the recovered vector (|y before − y after| in the settled mode), the
     /// row it is on, and the projected cluster's slowest time constant.
     struct ProjectionRecord {
@@ -3746,7 +3746,7 @@ public:
         std::size_t row = 0;
     };
     static constexpr std::size_t kProjectionRecordCap = 1000;
-    /// Projected events (rule on only; the pending one at the last instant included).
+    /// Projected events (the pending one at the last instant included).
     [[nodiscard]] std::size_t n_projections() const noexcept {
         return n_projections_ + (proj_pending_ ? 1 : 0);
     }
@@ -3783,7 +3783,7 @@ private:
                               ? Vector(projection_max_.cwiseMax(proj_amp_)) : proj_amp_;
         if (projections_.size() < kProjectionRecordCap) projections_.push_back(pending_record_());
     }
-    /// project_ under the rule, after project_slow (proj_y0_ → proj_y1_). Every settle
+    /// project_, after project_slow (proj_y0_ → proj_y1_). Every settle
     /// round of one event projects: a round that projects the previous round's result
     /// adds its amplitude (an upper bound over the chain); a round restarted from the held
     /// state replaces the event's record (its earlier rounds are not physics). Each event's

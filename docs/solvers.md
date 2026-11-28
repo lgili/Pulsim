@@ -293,7 +293,9 @@ promise does not cover) and not as a ramp to the next sample. The
 projected at each event: modes whose time constant is below 1e-6 of the
 run's resolved time scale are settled at the event instant (the rule-off
 run lets them decay; a diode turn-off's ~1 ns mode read 0.31 V apart for
-a few ns). Every projection is recorded in `diagnostics['output_grid']`:
+a few ns). Every projection is recorded in `diagnostics['output_grid']`
+(and, rule on or off, in `diagnostics['event_projections']`, the same
+keys; without the rule the cut is `dt_max / 100`):
 `n_projections`, `projection_max_by_column` (per stored column the largest
 amplitude a projection moved it by) and `projections` (the first 1000:
 instant `t`, largest `amplitude`, its `column`, the cluster's slowest time
