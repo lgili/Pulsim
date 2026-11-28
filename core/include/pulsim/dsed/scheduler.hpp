@@ -1816,7 +1816,8 @@ private:
                         proj_y1_.resize(proj_y0_.size());
                         system_.recover_full_into(t, x, proj_y1_);
                         note_projection_(t, x, thr);
-                    } else if (x != proj_xpre_) {
+                    } else if (x != proj_xpre_ || (proj_pending_ && t == proj_t_)) {
+                        // (a still round at the pending instant: a restart clears the record)
                         note_projection_state_(t, x, thr);
                     }
                     return;
