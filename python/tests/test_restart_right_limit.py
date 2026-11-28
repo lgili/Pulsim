@@ -182,8 +182,10 @@ def _half_wave_rl():
 @pytest.mark.parametrize("dt", [20e-6, 30e-6])   # the crossing lands on b / inside the step
 def test_a_located_turn_off_is_continuous_at_its_right_limit(dt):
     """At a LOCATED crossing where only V_f = 0 diodes flip and nothing else
-    happens, the ON and OFF laws meet (i = 0, v_D = 0): nothing jumps, the
-    right limit is the left (no solve, no mode forced). The located current
+    happens, the ON and OFF laws meet (i = 0, v_D = 0): nothing jumps. With
+    the split the right limit is still solved in the new mode (the left read
+    under the new law broke KCL by the residual); the rule alone keeps the
+    left value. The located current
     is zero only to the locator's tolerance (here ~26 uA); read through the
     OFF mode's 1/g_off it was a 25.6 V spike (the scoreboard cell 9.6e-4 ->
     5.5e-2)."""
@@ -196,9 +198,16 @@ def test_a_located_turn_off_is_continuous_at_its_right_limit(dt):
     vo, il = np.asarray(v.v("out")), np.asarray(v.i("L1"))
     v_in = 10.0 * np.sin(2 * np.pi * 50.0 * t[j])
     span = 20.0
-    assert abs(vo[j + 1] - vo[j]) <= 1e-6 * span
-    assert abs(vo[j + 1] - v_in) <= 1e-6 * span
     assert il[j + 1] == pytest.approx(il[j], rel=1e-9, abs=1e-15)   # the state, x0
+    # re-pinned (split-open-events): the right limit is solved in the OFF mode
+    # (the left value read under the OFF law broke KCL by the located residual
+    # i_L). It is the pinned eps solve's: the source is read eps/2 later
+    # (v_in moves by 1.8e-5 / 2.8e-5 V), v_out follows the OFF law
+    # v_out = v_in - i_L / g_off; no jump beyond the source's and the residual's
+    vi = np.asarray(v.v("in"))
+    assert vo[j + 1] == pytest.approx(vi[j + 1] - il[j + 1] / 1e-6, abs=1e-9 * span)
+    assert abs(vo[j + 1] - vo[j]) <= abs(vi[j + 1] - vi[j]) + abs(il[j]) / 1e-6 + 1e-9 * span
+    assert abs(vi[j + 1] - v_in) <= 2e-3 * dt * 2 * np.pi * 50.0 * 10.0   # eps = 1e-3 * gamma * dt
     assert r.n_right_limit_fallbacks == 0
 
 

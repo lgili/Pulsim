@@ -3198,20 +3198,28 @@ inline SimulationResult run_transient(
             rl_loc.t = std::numeric_limits<Real>::quiet_NaN();   // consumed (no stale time)
             m_out = stamped_mask;
             bool count = false;
+            bool pure_loc = false;   // a continuity point solved (split): its fallback is the left
             if (at_loc && has_diodes) {
                 diodes.snapshot_on_bits_into(rl_bits);
                 // pure: V_f = 0 flips only, stage 1 kept exactly the located
                 // bits (no other diode moved), no trigger at a crossing on b
                 // (at b the next step's trigger must be the flip alone)
-                if (rl_loc.pure && !(rl_loc.at_b && rs_trig_t == t_from && !rs_trig_dio) &&
-                    rl_bits == rl_loc.bits) {
-                    return 2;
-                }
+                // A continuity point is still solved in the decided mode: the
+                // left value read under the new law is off by g_on·v_D(left)
+                // (the location's residual: 2.06 mA on the rectifier, KCL
+                // broken at the row), the solve reads both laws and KCL
+                const bool pure = rl_loc.pure &&
+                    !(rl_loc.at_b && rs_trig_t == t_from && !rs_trig_dio) &&
+                    rl_bits == rl_loc.bits;
+                // shortcut: the rule without the split keeps the left value (its
+                // outputs are frozen); it can carry the same g_on·v_D(left) residue
+                if (pure && !split) return 2;
+                pure_loc = pure;
                 // not a continuity point, solved in the decided mode. A
                 // turn-off is counted: the locator's residual current goes
                 // through 1/g_off (a V_f > 0 turn-off, R2, or one beside a
                 // gate edge, R1); a turn-on at V_th > 0 is read as solved
-                count = rl_loc.off;
+                count = rl_loc.off && !pure;
             }
             rl_x1 = x;
             rl_b0 = b_extra;
@@ -3645,6 +3653,12 @@ inline SimulationResult run_transient(
             aux_events.reset();
             restart_factorizations = rf_s;
             if (ok && !out.allFinite()) unheld = true;   // no state: counted
+            // review: a continuity point whose solve fails keeps the left value
+            // (the shortcut's row), neither dropped nor counted
+            if (pure_loc && unheld) {
+                unheld = false;
+                ok = 2;
+            }
             // a start row is due only when it differs from row 0, unknown
             // when its solve failed: not counted as a fallback
             if (((ok && count) || unheld) && !at_start) ++result.n_right_limit_fallbacks;
