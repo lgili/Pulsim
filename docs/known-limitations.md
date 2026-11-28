@@ -38,6 +38,10 @@ The numbers are in the `Known limitations` part of the 2.1.0 entry of the
   42.750 V 0.1 us after the edge, 42.114 V at 0.4 us against 41.48 V). On 2.1.0 the rule is off by default; with it on, compare
   against `trbdf2` before trusting it on a converter whose diode commutates
   right after a gate edge.
+  Without event splitting, a diode that turns off inside a restart step's
+  first stage is not located either: the step keeps a first-order kick
+  (`half_bridge_transformer_dc`, dt = 100 ns: up to 3.3e-6 V on V(out) per
+  such turn-off; with `enable_substep_state_correction=True` it is located).
   Without event splitting, a sample of an algebraic signal that is
   discontinuous at a rounded edge is the pre-edge value: `scr_halfwave_r`
   on `pwl` with the rule reads 0.0271 against its analytic truth (1.47e-16
@@ -77,8 +81,22 @@ The numbers are in the `Known limitations` part of the 2.1.0 entry of the
   in the first stage of a sub-step that starts at an event (taken at the
   event), a second flip in the rest of an already cut restart step, and a
   flip inside the run's first step (taken at the step end, up to 1·dt late;
-  `python/tests/test_split_locator_reconduction.py`). Locating an event
-  costs trial solves, each a factorisation: 4–7 trials per located event.
+  `python/tests/test_split_locator_reconduction.py`). The rule alone dates
+  a diode flip inside a step at the step end (no locator): on
+  `forward_converter` the D_fw hand-over after the switch turn-on costs the
+  exact grade 1.5e-4 / 3.3e-5 / 3.5e-5 at dt = 100 / 50 / 25 ns (first
+  order, phase dependent); with the split 1.0e-6 / 3.2e-7 / 2.7e-7 (the
+  waveform's own level). (F-R-4, fixed: the D_rect re-conduction 6.1 ns
+  after the turn-off was held off for a step because the edge's projection
+  fitted one of the two winding modes; it now conducts from the edge.)
+  Locating an event costs trial solves, each a factorisation: 4–7 trials per located event.
+  A freewheeling diode that conducts for less than the rest of the step
+  after a switch turn-off is not located: the step records a `cut_set`
+  re-initialisation and drops the inductor's whole current as an impulse
+  instead of delivering it to the output (`ll15_boost_closed_loop` at
+  dt = 0.5 us: 60 mA, conducting 84 ns in `trbdf2`; `ll14_buck_closed_loop`:
+  35 mA, 164 ns; a dt/100 run conducts it). The edge's right limit itself
+  is correct (D on, the inductor current kept).
 * **Exact engine output rule** (`engine='exact', output_rtol=...`): a
   thermal summary read from stored samples depends on the output grid.
   The first line after an event (within 2 ps of it) can exceed the rule:

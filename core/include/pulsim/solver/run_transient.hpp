@@ -929,7 +929,7 @@ inline SimulationResult run_transient(
     std::vector<IdealJump> ideal_pending;
     // the jump's vector series (consistent_start): the reading's x3, the later
     // stages and their sources; the start mode's probe (ip_y1, ip_bits1, ip_m1)
-    Vector ip_x3m, ip_xk, ip_sk, ip_y1, ip_y2, ip_w, ip_c, ip_g;
+    Vector ip_x3m, ip_xk, ip_sk, ip_y1, ip_y2, ip_w, ip_c, ip_g, ip_c_ok;
     std::vector<Vector> ip_xs;   // the series' stages 4, 5, …
     DenseMatrix ip_Dw;
     std::vector<Real> ip_m1, ip_f0, ip_s0, ip_s0v;
@@ -997,6 +997,34 @@ inline SimulationResult run_transient(
         }
         for (const auto& d : diodes.entries()) g += d.g_off;
         return g;
+    }();
+    // F-Z-11: that resolution on the far side of a gyrator (a winding's
+    // magnetic network): a port-1 current floor i is a port-2 MMF floor i/g,
+    // per node of port 2's island (ground excluded). Without it a permeance
+    // read a leakage-level flux as a jump its equivalent inductor did not.
+    const std::vector<Real> gyr_floor = [&] {
+        std::vector<Real> f(static_cast<Size>(graph.num_nodes()), Real{0});
+        std::vector<Index> todo;
+        for (Index bi = 0; bi < graph.num_branches(); ++bi) {
+            if (!pool.is_registered(bi) ||
+                pool.kind_of(bi) != pwl::DevicePool::StoredKind::Gyrator) continue;
+            const Real g = std::abs(pool.gyrator_params(bi).g);
+            if (!(g > Real{0})) continue;
+            const Real s = Real{1} / g;
+            const auto& br = graph.branch(bi);
+            todo.assign({br.from, br.to});
+            while (!todo.empty()) {
+                const Index n = todo.back();
+                todo.pop_back();
+                if (n < 0 || n >= graph.num_nodes() || f[static_cast<Size>(n)] >= s) continue;
+                f[static_cast<Size>(n)] = s;
+                for (const Index b : graph.branches_of(n)) {
+                    todo.push_back(graph.branch(b).from);
+                    todo.push_back(graph.branch(b).to);
+                }
+            }
+        }
+        return f;
     }();
     Real event_rl_t = std::numeric_limits<Real>::quiet_NaN();
     std::vector<CommutationEvent> step_events;      // per-step event scratch
@@ -2308,6 +2336,21 @@ inline SimulationResult run_transient(
                 v_max = std::max({v_max, std::abs(ip_x1[n]), std::abs(x[n])});
             }
             const Real tol_i = g_leak * (Real{1} + v_max);
+            // the floor of one linear state: a current's tol_i, a capacitor's
+            // tol_i/g beside a gyrator (gyr_floor), else none
+            // (a nonlinear capacitor's: v_floor(e) times C(v1))
+            // shortcut: every capacitor on a gyrator's port-2 island gets it, also
+            // an electrical one beside a gyrator used as an impedance inverter;
+            // narrow to flux nodes if the solver ever learns node domains
+            auto v_floor = [&](const auto& e) {
+                const auto at = [&](Index n) {
+                    return n >= 0 ? gyr_floor[static_cast<Size>(n)] : Real{0};
+                };
+                return tol_i * std::max(at(e.from), at(e.to));
+            };
+            auto floor_of = [&](const pwl::HistoryEntry& e) {
+                return is_cap(e) ? v_floor(e) : tol_i;
+            };
             // One reading of one state (s0 = x0, s1..s3 the stages): the jump
             // d = (s1 − s0) − (s2 − s1) against the rate after the event and
             // the next difference d' = (s2 − s1) − (s3 − s2) (see above).
@@ -2361,7 +2404,7 @@ inline SimulationResult run_transient(
                     const Real s0 = is_cap(e) ? e.v_prev : e.i_prev;
                     const Real s1 = state(e, ip_x1);
                     const Real tol = Real{1e-8} * (Real{1} + std::abs(s0) + std::abs(s1)) +
-                                     (is_cap(e) ? Real{0} : tol_i) + allow(ip_r[k], k);
+                                     floor_of(e) + allow(ip_r[k], k);
                     const bool jk = jumps(s0, s1, state(e, ip_x2m), state(e, ip_x3m), tol) &&
                                     jumps(s0, s1, state(e, ip_x2), state(e, ip_x3f), tol);
                     ip_d[2 * k + 1] = jk ? Real{1} : Real{0};
@@ -2375,8 +2418,9 @@ inline SimulationResult run_transient(
                 for (Size k = 0; k < nn; ++k) {
                     const auto& e = ncs[k];
                     const Real v1 = ncv(e, ip_x1);
-                    const Real tol = models::NonlinearCapacitor::capacitance(e.params, v1) * Real{1e-8} *
-                                         (Real{1} + std::abs(e.v_prev) + std::abs(v1)) +
+                    const Real tol = models::NonlinearCapacitor::capacitance(e.params, v1) *
+                                         (Real{1e-8} * (Real{1} + std::abs(e.v_prev) + std::abs(v1)) +
+                                          v_floor(e)) +
                                      allow(e.i_prev, ne + k);
                     const bool jk = law_jumps(e.q_prev, ncq(e, ip_x1),
                                               [&](const Vector& y) { return ncq(e, y); }, tol);
@@ -2466,14 +2510,15 @@ inline SimulationResult run_transient(
                             const Real a1 = state(e, ip_y1);
                             ip_m1[k] = m1(s0, a1, state(e, ip_y2), state(e, x),
                                           Real{1e-8} * (Real{1} + std::abs(s0) + std::abs(a1)) +
-                                              (is_cap(e) ? Real{0} : tol_i));
+                                              floor_of(e));
                         }
                         for (Size k = 0; k < nn; ++k) {
                             const auto& e = ncs[k];
                             const Real v1 = ncv(e, ip_y1);
                             ip_m1[ne + k] = m1(e.q_prev, ncq(e, ip_y1), ncq(e, ip_y2), ncq(e, x),
                                                models::NonlinearCapacitor::capacitance(e.params, v1) *
-                                                   Real{1e-8} * (Real{1} + std::abs(e.v_prev) + std::abs(v1)));
+                                                   (Real{1e-8} * (Real{1} + std::abs(e.v_prev) + std::abs(v1)) +
+                                                    v_floor(e)));
                         }
                         for (Size k = 0; k < nsat; ++k) {
                             const auto& e = sats[k];
@@ -2664,7 +2709,20 @@ inline SimulationResult run_transient(
                 const Size ns = ip_js.size();
                 const auto nsi = static_cast<Index>(ns);
                 ip_w.resize(nsi);
-                Real thr2 = 0;
+                // thr2: the stages' noise with the rule's floors (the fit's
+                // acceptance); thr2r: a linear state's relative part alone (the
+                // fit's growth). F-R-4: the floor tol_i = g_leak·(1 + v_max) reads
+                // v_max off stage 1's impulse voltage (6.5 kV for a forward
+                // converter's cut, tol_i 19.5 mA), so m = 1 passed it and the
+                // magnetizing mode (ρ = 0.013) of a two-winding cut stayed out of
+                // J: 8 mA in the secondary, D_rect held off for a step (first order).
+                // The stages are one mode's linear map (single solves), so the
+                // Krylov fit keeps growing while D_{m+1} is above their rounding.
+                // It stops once the span is invariant: the slow content adds one
+                // Ritz value ρ ≈ 1 (held at factor 1) and the residual drops to
+                // rounding (forward cut: ρ 3.4e-4, 0.013, 0.99997, m = 3; the
+                // half bridge's: 1.3e-3, 1.0000, m = 2).
+                Real thr2 = 0, thr2r = 0;
                 for (Size i = 0; i < ns; ++i) {
                     const Size k = ip_js[i];
                     Real w = 0, noise = 0;
@@ -2672,13 +2730,14 @@ inline SimulationResult run_transient(
                         const auto& e = ents[k];
                         w = std::sqrt(e.C_or_L);
                         noise = Real{1e-8} * (Real{1} + std::abs(sval(k, 0)) + std::abs(sval(k, 1))) +
-                                (is_cap(e) ? Real{0} : tol_i);
+                                floor_of(e);
                     } else if (k < ne + nn) {
                         const auto& e = ncs[k - ne];
                         const Real v1 = ncv(e, ip_x1);
                         const Real c1 = models::NonlinearCapacitor::capacitance(e.params, v1);
                         w = Real{1} / std::sqrt(c1);
-                        noise = c1 * Real{1e-8} * (Real{1} + std::abs(ip_s0v[k - ne]) + std::abs(v1));
+                        noise = c1 * (Real{1e-8} * (Real{1} + std::abs(ip_s0v[k - ne]) + std::abs(v1)) +
+                                      v_floor(e));
                     } else {   // a flux: energy weight 1/√L(i1)
                         const auto& e = sats[k - ne - nn];
                         const Real l1 = std::abs(pwl::SaturableInductorHistory::flux_and_inductance(
@@ -2688,6 +2747,20 @@ inline SimulationResult run_transient(
                     }
                     ip_w[static_cast<Index>(i)] = w;
                     thr2 += (w * noise) * (w * noise);
+                    // (the relative part: the floor's terms dropped)
+                    Real nr = Real{1e-8} * (Real{1} + std::abs(sval(k, 0)) + std::abs(sval(k, 1)));
+                    if (k >= ne && k < ne + nn) {
+                        const auto& e = ncs[k - ne];
+                        const Real v1 = ncv(e, ip_x1);
+                        nr = models::NonlinearCapacitor::capacitance(e.params, v1) * Real{1e-8} *
+                             (Real{1} + std::abs(ip_s0v[k - ne]) + std::abs(v1));
+                    } else if (k >= ne + nn) {
+                        const auto& e = sats[k - ne - nn];
+                        const Real i1 = ip_x1[e.branch_var_id];
+                        nr = std::abs(pwl::SaturableInductorHistory::flux_and_inductance(e, i1).second) *
+                             Real{1e-8} * (Real{1} + std::abs(e.i_L_old) + std::abs(i1));
+                    }
+                    thr2r += (w * nr) * (w * nr);
                 }
                 auto second = [&](Index j, Vector& out) {   // D_{j+1}, unweighted
                     out.resize(nsi);
@@ -2698,17 +2771,32 @@ inline SimulationResult run_transient(
                     }
                 };
                 const Index mmax = std::min<Index>(nsi, 6);
-                Index m = 1;
+                Index m = 1, m_ok = 0;   // m_ok: the last fit within thr2
                 Real r2 = 0;
                 for (;; ++m) {
-                    if (!stage_to(m + 2)) return false;
+                    if (!stage_to(m + 2)) {
+                        if (m_ok == 0) return false;
+                        m = m_ok;   // a later stage failed: the fit the floors accepted
+                        ip_c = ip_c_ok;
+                        r2 = 0;
+                        break;
+                    }
                     ip_Dw.resize(nsi, m + 1);
                     for (Index j = 0; j <= m; ++j) {
                         second(j, ip_sk);
                         ip_Dw.col(j) = ip_sk.cwiseProduct(ip_w);
                     }
                     r2 = solver::jump_series_fit(ip_Dw, m, ip_c);
-                    if (!(r2 > thr2) || m == mmax) break;
+                    if (!(r2 > thr2r) || m == mmax) break;
+                    if (!(r2 > thr2)) {
+                        m_ok = m;
+                        ip_c_ok = ip_c;
+                    }
+                }
+                if (r2 > thr2 && m_ok > 0) {   // (D_{m+1}'s residual is not monotone in m)
+                    m = m_ok;
+                    ip_c = ip_c_ok;
+                    r2 = 0;
                 }
                 if (r2 > thr2 && nsi > mmax) return false;
                 if (!solver::jump_series_coeffs(ip_c, kGamma / (Real{1} + kGamma), ip_g)) return false;
@@ -2872,7 +2960,7 @@ inline SimulationResult run_transient(
                             k2 += s * state(e, ip_x2m); k3 += s * state(e, ip_x3m);
                             kf2 += s * state(e, ip_x2); kf3 += s * state(e, ip_x3f);
                             sc += Real{1e-8} * (Real{1} + std::abs(a0) + std::abs(a1)) +
-                                  (is_cap(e) ? Real{0} : tol_i) + allow(ip_r[k], k);
+                                  floor_of(e) + allow(ip_r[k], k);
                         }
                     }
                     share = share || (jumps(k0, k1, k2, k3, sc) && jumps(k0, k1, kf2, kf3, sc));
@@ -3566,10 +3654,12 @@ inline SimulationResult run_transient(
             restart_factorizations = rf_s;
             if (ok && !out.allFinite()) unheld = true;   // no state: counted
             // review: a continuity point whose solve fails keeps the left value
-            // (the shortcut's row), neither dropped nor counted
+            // (the shortcut's row), neither dropped nor counted; with the shortcut's
+            // mask (stamped before the solves): hold_mode may have re-decided m_out
             if (pure_loc && unheld) {
                 unheld = false;
                 ok = 2;
+                m_out = stamped_s;
             }
             // a start row is due only when it differs from row 0, unknown
             // when its solve failed: not counted as a fallback
@@ -4390,11 +4480,30 @@ inline SimulationResult run_transient(
                     on_to_off = on_to_off || (rs_bits[q] != rs_bits2[q]);
                 }
             }
-            if ((on_to_off || (split && iters_2 > 1 && !(rs_bits2 == rs_bits))) &&
-                rs_cut.piece1) {
+            // Piece 1's stage-2 iteration is that crossing's round-off only if every
+            // bit it moved is one the locator found crossing at the cut. Two solves
+            // (stage 1's mode, then last_solved_bits) and the end bits are every mask
+            // it visited; more solves (an unseen intermediate mask) or another bit
+            // moved: a real flip inside the piece, taken as in any other stage 2
+            // (the overshoot re-take below decides it).
+            bool piece1_roundoff = false;
+            if (rs_cut.piece1 && has_diodes && iters_2 > 1) {
+                piece1_roundoff = iters_2 == 2 && last_solved_bits.size() == rs_bits.size();
+                for (Size q = 0; piece1_roundoff && q < rs_bits.size(); ++q) {
+                    const bool moved = rs_bits[q] != rs_bits2[q] || rs_bits[q] != last_solved_bits[q];
+                    piece1_roundoff = !moved || rs_cut.bits[q] != rs_cut.pre[q];
+                }
+                if (!piece1_roundoff) ++result.restart_piece1_flips_kept;
+            }
+            if (piece1_roundoff) {
                 // the first piece of a cut step ends AT the located turn-off:
                 // its stage 2 stays in stage 1's mode (the locator's trial;
-                // the flip is the next piece's start)
+                // the flip is the next piece's start). Any iteration there is
+                // that crossing's round-off (v_D = 0 at the piece's end): a
+                // flip, or a flip and back (a cycle) — the latter, left as
+                // solved, read as an unsettled piece and threw the located cut
+                // away (half_bridge_transformer_dc: the uncut step left 15-35 %
+                // of the secondary's off-state settling, +3.3e-6 V per kick)
                 x = rs_x1;
                 diodes.restore_on_bits(rs_bits);
                 mask_cycle = cycle_1;   // the discarded flipping pass's cycle is not this solve's
@@ -4750,7 +4859,8 @@ inline SimulationResult run_transient(
             const bool unsettled_uncut = mask_cycle || flipped;
             // the counters keep the uncut pass's work (the pieces add theirs)
             const Size s2r = result.stage2_retries, s2k = result.stage2_be_kept,
-                       s2f = result.stage2_retry_failures;
+                       s2f = result.stage2_retry_failures,
+                       p1k = result.restart_piece1_flips_kept;
             auto restore0 = [&]() {
                 flipped = flipped0;
                 x = rs_cut.x0;
@@ -4822,6 +4932,7 @@ inline SimulationResult run_transient(
                 result.stage2_retries = s2r;   // the same pass again: counted once
                 result.stage2_be_kept = s2k;
                 result.stage2_retry_failures = s2f;
+                result.restart_piece1_flips_kept = p1k;   // a discarded cut's piece counts nothing
             }
         };
 
