@@ -38,6 +38,10 @@ The numbers are in the `Known limitations` part of the 2.1.0 entry of the
   42.750 V 0.1 us after the edge, 42.114 V at 0.4 us against 41.48 V). On 2.1.0 the rule is off by default; with it on, compare
   against `trbdf2` before trusting it on a converter whose diode commutates
   right after a gate edge.
+  Without event splitting, a diode that turns off inside a restart step's
+  first stage is not located either: the step keeps a first-order kick
+  (`half_bridge_transformer_dc`, dt = 100 ns: up to 3.3e-6 V on V(out) per
+  such turn-off; with `enable_substep_state_correction=True` it is located).
   Without event splitting, a sample of an algebraic signal that is
   discontinuous at a rounded edge is the pre-edge value: `scr_halfwave_r`
   on `pwl` with the rule reads 0.0271 against its analytic truth (1.47e-16
@@ -77,8 +81,22 @@ The numbers are in the `Known limitations` part of the 2.1.0 entry of the
   in the first stage of a sub-step that starts at an event (taken at the
   event), a second flip in the rest of an already cut restart step, and a
   flip inside the run's first step (taken at the step end, up to 1·dt late;
-  `python/tests/test_split_locator_reconduction.py`). Locating an event
-  costs trial solves, each a factorisation: 4–7 trials per located event.
+  `python/tests/test_split_locator_reconduction.py`). The rule alone dates
+  a diode flip inside a step at the step end (no locator): on
+  `forward_converter` the D_fw hand-over after the switch turn-on costs the
+  exact grade 1.5e-4 / 3.3e-5 / 3.5e-5 at dt = 100 / 50 / 25 ns (first
+  order, phase dependent); with the split 1.0e-6 / 3.2e-7 / 2.7e-7 (the
+  waveform's own level). (F-R-4, fixed: the D_rect re-conduction 6.1 ns
+  after the turn-off was held off for a step because the edge's projection
+  fitted one of the two winding modes; it now conducts from the edge.)
+  Locating an event costs trial solves, each a factorisation: 4–7 trials per located event.
+  A freewheeling diode that conducts for less than the rest of the step
+  after a switch turn-off is not located: the step records a `cut_set`
+  re-initialisation and drops the inductor's whole current as an impulse
+  instead of delivering it to the output (`ll15_boost_closed_loop` at
+  dt = 0.5 us: 60 mA, conducting 84 ns in `trbdf2`; `ll14_buck_closed_loop`:
+  35 mA, 164 ns; a dt/100 run conducts it). The edge's right limit itself
+  is correct (D on, the inductor current kept).
 * **Exact engine output rule** (`engine='exact', output_rtol=...`): a
   thermal summary read from stored samples depends on the output grid.
   The first line after an event (within 2 ps of it) can exceed the rule:
@@ -309,6 +327,7 @@ event where the signal jumps.
 | The sliding-mode warning says `engine='auto'` even when `engine='trbdf2'` was requested. | Seen on the `V_th = 0` bridge above. | None needed: the warning describes the TR-BDF2 run. |
 | **`trbdf2` and `auto` can crash the Python process.** | The saturable-primary PSFB of the mask-chatter row, with no `dt`. With `t_end = 0.2 ms` it raises `SimulationAborted` at t = 0 (`h_min`). With `t_end = 2 ms` the process dies with a segmentation fault (exit code 139). | Pass `dt`. Run variable-step jobs you cannot vet in a subprocess. |
 | **A rectifier whose DC side floats cannot start on `engine='auto'`.** Guide trap 8. | 100 V bridge with the DC rails not connected to ground. It aborts with `factorize failed (numerically singular) ... (dt=6e-14) ... node dcn`. A 1 MΩ or 1 GΩ resistor from `dcn` to ground does not help. | Ground one DC rail (92.83 V on TR-BDF2), or pass `dt` (92.54 V at `dt=1e-5`). |
+| **TR-BDF2 can step over the first pulse of a Python `switch_fn`.** Before a gate bit has closed a pulse the engine samples it at 4 equal points of each step plus one walking point, at most `h_max/4` apart, and more coarsely while another bit toggles with wider pulses. Once it has closed a pulse, no later pulse at least half as wide as the bit's narrower recent width (quiet: the run's narrowest pulse) is stepped over (`simulate` docstring, `switch_fn`). Pinned by `test_trbdf2_post_event_restart.py`. | Tick buck, 100 ns pulses every 30 µs, then every 10 µs, 1 ms run (h_max = 1 µs): the four regular samples are 250 ns apart and phase-locked to the 10 µs period, so only the walking sample can hit a pulse before one is seen. Both device forms stepped over the 30 µs pulse; the branch form stepped over the 60 µs one too, and saw every pulse from 90 µs on. | Pass `dt` of at most 4x the first pulse's width (one gate bit), start that pulse on a source breakpoint or a controller tick, or declare the edges (`p.NativePwm2Switch`, `next_edge_after`). |
 | **DSED polls a Python `switch_fn`, so it misses gate intervals shorter than the polling period.** The poll runs every `dt_max/10` (1 µs on a 2 ms run). The warning calls this "correct but slower". | 48 V synchronous buck, 100 kHz, D = 0.4, 200 ns dead time, 50 Ω. With no `dt`, the body diodes are never ON in the record over 1-2 ms (31 % of the samples on `pwl`). V_out over that window is 19.73 V against 20.35 V on `pwl` (-3.1 %). With `dt=1e-7` DSED gives 20.350 V. | Pass a `dt` of at most half the shortest gate interval, or use `engine='pwl'`. |
 | `simulate(engine='dsed')` with no `switch_fn` warns that it will poll "this plain Python switch_fn". | RC plus diode, no `switch_fn`: the run is correct but prints that warning. | Ignore it. |
 | `start_from_dc_op=True` works only on the fixed engine. | Without `dt` it raises `ValueError: ... start_from_dc_op is a fixed-step entry point`. | Pass `dt`. |

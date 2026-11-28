@@ -23,6 +23,39 @@ engine's event right-limit solve (which already judged at its own scale) gets th
 pwl+split identity: ll13 fewer right-limit fallbacks, ll08 inner-event right states). All 18 measured ll13
 runs complete; the 3 us expected failure is removed. ll13 trbdf2 grade 0.00109 -> 0.00123 (ceiling 0.00133).
 
+### TR-BDF2: a quiet gate bit keeps its samples while another bit toggles; the opaque `switch_fn` guarantee is stated (F-Z-18)
+
+`test_a_gate_that_gets_faster_loses_no_pulse` failed with branch-form devices (77 of 78 pulses). This was not an engine defect:
+the lost 60 µs pulse was the gate's second pulse, and the first had been stepped over too, so the engine had learned nothing.
+At h_max = 1 µs the four regular samples are 250 ns apart and phase-locked to the 10 µs period. Only the walking sample
+could hit a 100 ns pulse, and its phase follows the start-up steps. The test now lands the first pulse on a source
+breakpoint, runs on both device forms, and checks every edge against the bisection bound (h_min). A second test puts
+220 ns pulses after 300 µs of 800 ns quiet steps.
+
+The review of that guarantee found a real defect with two gate bits. A quiet bit caps the step at twice the narrowest
+pulse of the run, but the number of samples per step followed only the bits that were toggling. Under a 50 % PWM on
+another bit, that was one sample per step, and 2 of 8 later 60 ns pulses went unseen (100 ns narrowest). A step capped by a
+quiet bit now keeps at least 4 samples. Single-bit gates are unchanged. The `simulate` docstring (`switch_fn`) and
+known-limitations state the guarantee. Before a bit has closed a pulse, nothing is guaranteed. After that, no pulse at least
+half as wide as the bit's recent narrower width is stepped over (while the bit is quiet: the run's narrowest pulse).
+
+### Restart rule: a located rectifier turn-off is no longer thrown away by round-off at the crossing
+
+- Under `discontinuity_restart=True` a diode turn-off inside a step is located and the step cut there; the first piece ends at the crossing (v_D = 0), so its stage 2 may iterate on that round-off. A flip-and-back there was left as solved, read as an unsettled piece, and the uncut step stood: on `half_bridge_transformer_dc` (dt = 100 ns) the secondary kept 15-35 % of its off-state settling at such steps (+3.3e-6 V on V(out) each, first order in dt). Which steps hit it depended on 1e-9 V differences in the previous switch edge's projection, so the change to the projection's fit order above fixed one edge and broke another. The first piece's stage 2 is now re-solved in stage 1's mode when every diode it moved is one the locator found crossing at the cut (a real flip of another diode inside the piece is taken as in any other step and counted in `result.counters["restart_piece1_flips_kept"]`): those positive kicks are gone (sum of |V(out)| step errors at diode turn-offs 4.20e-5 V -> 2.27e-5 V; what remains are turn-offs inside stage 1, which the rule alone does not locate). On `sepic`, `two_phase_interleaved_boost` and `cascaded_boost_buck` (rule alone) the rms against a dt/100 run rises although no switching kick grew: the removed positive kicks had cancelled the remaining stage-1 ones.
+
+### Restart rule: the edge's projection takes every fast mode of a two-winding cut (F-R-4)
+
+- Under `discontinuity_restart=True` the impulse probe's vector series stopped growing its fit at the jump test's leakage floor g_leak·(1 + v_max), whose v_max is stage 1's impulse voltage (6.5 kV, 19.5 mA on `forward_converter`'s switch-off), so of the two fast modes of a transformer whose windings both see only g_off (leakage ρ = 3.7e-4, magnetizing ρ = 0.013) only one was projected: 5 % of the magnetizing mode stayed in x0+, D_rect re-decided there stayed off and its re-conduction (6.1 ns after the edge in the truth) was dated a step late — exact grade 7.1e-4 / 3.3e-4 / 1.5e-4 at dt = 100 / 50 / 25 ns, first order. The fit now grows while the next second difference is above the stages' relative rounding (the floors still decide acceptance; the same Ritz criterion ρ ≤ γ/(1 + γ) decides what is fast). D_rect now conducts from the edge and the re-initialisation books ½·JᵀLJ with x0+ = (g_off·V_in, 0) to rel 1e-8. `forward_converter` with the split: 1.0e-6 / 3.2e-7 / 2.7e-7 (the waveform's level); with the rule alone 1.5e-4 / 3.3e-5 / 3.5e-5, now set by the D_fw hand-over the rule alone does not locate. Flyback: the secondary current 100 ns after the switch-off equals the exact truth to 1e-11 A (was 1.05e-5 A off) and the stage-2 BE re-take no longer fires there. Only rule-on cells move (19 of 585; rule off byte-identical); no reference class changes.
+
+### Restart rule: a gapped core and its equivalent inductor take the same restart step (F-Z-11)
+
+- Under `discontinuity_restart=True` the impulse probe tested an inductor current against the OFF-leakage floor g_leak·(1 + v_max) but a capacitor state against none, so a permeance's MMF (the same physical state as a winding's current, scaled by N) read a leakage-level flux as a jump: at each DCM body-diode turn-off of a buck the magnetic formulation recorded a `capacitor_loop` re-initialisation (λ ≈ 5e-14 Wb) and its impulsive branch moved the output capacitor by its O(h²) second difference, while the inductor formulation did not. A capacitor on the port-2 island of a gyrator (a winding's magnetic network) now gets that floor mapped through the gyrator, g_leak·(1 + v_max)/g (a saturable or table permeance, in charge: that floor times C(v)). The gapped-core buck and its inductor now agree to 3.6e-12 rel under the rule alone (was 6.45e-9; 1.9e-8 / 1.0e-9 at dt 2e-7 / 5e-8), with no re-initialisation records in either. Circuits without a gyrator: byte-identical; rule off: byte-identical.
+- The saturable-permeance path of that floor is now tested: the same buck with a saturable core (`test_saturable_core_in_a_switching_buck_takes_the_gyrator_floor`) records no re-initialisation under the rule alone or with the split, below the knee (B_sat 3500 T; it equals the linear core to 6.96e-10 rel, the law's curvature, rule on or off) and saturating (0.35 T); before the fix the rule alone recorded 20 per 1 ms in both.
+
+### Fixed engine, split: a failed right-limit solve at a located crossing publishes a consistent state and mask
+
+- With `enable_substep_state_correction=True`, when the right-limit solve at a located V_f = 0 diode crossing failed, the row kept the left state but could carry a diode mask the solve had already re-decided. The row now pairs the left state with the mask decided before the solve (the pair the rule without the split publishes there). Split off: unreachable.
+
 ### Exact engine: faster steps on a repeated step length (results unchanged)
 
 A step of the exact engine reuses each mode's `e^{λh}` and `h·φ₁(λh)·w` when its length equals the previous step's, and the route record counts its segments with one `np.unique`. Stored arrays are bit-identical. The 2000-period synchronous buck runs in 2.4 ms instead of 3.5 ms; the measurement behind it (where the step's bytes and time go) is in the exact-propagator design notes.
