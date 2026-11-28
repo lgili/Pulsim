@@ -468,13 +468,15 @@ class _EventProjections(Mapping):
     ``tau``). Built on first read: a run that never reads it pays nothing."""
 
     def __init__(self, native_res, t_start: float, ncol: int):
-        self._raw = (native_res.get("projection_records"), native_res.get("projection_max_row"),
-                     int(native_res.get("n_projections", 0)), t_start, ncol)
+        # the raw keys are read on first use: construction is on every simulate() (overhead ratchet)
+        self._raw = (native_res, t_start, ncol)
         self._d: Optional[dict] = None
 
     def _built(self) -> dict:
         if self._d is None:
-            recs, pm, n, t0, ncol = self._raw
+            nr, t0, ncol = self._raw
+            recs, pm = nr.get("projection_records"), nr.get("projection_max_row")
+            n, t0 = int(nr.get("n_projections", 0)), float(t0)
             recs = _np.asarray(recs if recs is not None else _np.zeros((0, 4)), dtype=float).reshape(-1, 4)
             pm = _np.asarray(pm if pm is not None else [], dtype=float)
             off = pm.size - ncol   # the stored columns are the tail of the recovered vector
@@ -557,18 +559,15 @@ def _result_from_native(native_res, t_start: float):
             res.diagnostics[key] = native_res[key]
     ncol = res.states.shape[1] if getattr(res, "has_full_states", False) else 0
     if "projection_records" in native_res:
-        proj = _EventProjections(native_res, float(t_start), ncol)
-        res.diagnostics["event_projections"] = proj
-    else:
-        proj = {}
+        res.diagnostics["event_projections"] = _EventProjections(native_res, t_start, ncol)
     if "n_output_capped" in native_res:   # the output-grid rule (output_rtol)
-        # The rule's counters and floors (rows certified "constant up to rounding"
-        # at their rounding floor), never silent: built in C++ (_output_grid_dict
-        # documents the keys; one call instead of ~160 bytecodes per simulate(),
-        # test_simulate_overhead); the event projections are the rule's own report.
+        # The rule's counters, floors (rows certified "constant up to rounding"
+        # at their rounding floor) and every projection of the parasitic
+        # cluster at an event (the keys of _EventProjections), never silent:
+        # built in C++ (_output_grid_dict documents the keys; one call instead
+        # of ~160 bytecodes per simulate(), test_simulate_overhead).
         og = res.diagnostics["output_grid"] = _kern_mod._output_grid_dict(
             native_res, ncol, float(t_start))
-        og.update(proj)
         if og["output_budget_t"] is not None:
             _emit("output_budget",
                 f"simulate(engine='exact', output_rtol=...): the run's output sample budget "

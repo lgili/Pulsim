@@ -359,13 +359,18 @@ def _output_grid_reference(native_res, ncol, t_start):
     fr = np.asarray(native_res.get("output_floor_row", []), dtype=float)
     og["output_floor_max"] = float(fr.max()) if fr.size else 0.0
     og["output_floor_by_column"] = fr[-ncol:] if fr.size >= ncol > 0 else np.zeros(ncol)
-    og["n_projections"] = int(native_res.get("n_projections", 0))
+    # the projection keys: _dsed_dispatch._EventProjections (integration 9f80b681: records are an
+    # (n, 4) array, row -1 = none; `capped` added; a row maps only when ncol <= the recovered rows)
+    og["n_projections"] = n = int(native_res.get("n_projections", 0))
     pm = np.asarray(native_res.get("projection_max_row", []), dtype=float)
     og["projection_max_by_column"] = pm[-ncol:] if pm.size >= ncol > 0 else np.zeros(ncol)
+    recs = np.asarray(native_res.get("projection_records", np.zeros((0, 4))), dtype=float).reshape(-1, 4)
+    off = pm.size - ncol
+    og["capped"] = n > len(recs)
     og["projections"] = [
-        {"t": t + t_start, "amplitude": a, "tau": tau,
-         "column": (int(r) - (pm.size - ncol)) if 0 < ncol and int(r) >= pm.size - ncol else None}
-        for t, a, r, tau in native_res.get("projection_records", [])]
+        {"t": float(t) + t_start, "amplitude": float(a), "tau": float(tau),
+         "column": int(r) - off if 0 < ncol <= pm.size and r >= off else None}
+        for t, a, r, tau in recs]
     tb = native_res["output_budget_t"]
     og["output_budget_t"] = None if tb != tb else tb + t_start
     return og
@@ -377,8 +382,9 @@ def test_the_output_grid_dict_is_the_python_definition(ncol, t_start, budget):
     from pulsim import _pulsim as k
     raw = {"n_output_capped": 2, "n_output_unbounded": 1, "n_output_samples": 41,
            "n_output_floored": 3, "output_floor_row": [1e-15, 4e-15, 2e-15, 3e-15, 5e-16],
-           "n_projections": 3, "projection_max_row": [0.5, 2.0, 0.0, 7.0, 1.0],
-           "projection_records": [(1e-5, 2.0, 1, 1e-12), (2e-5, 7.0, 3, 2e-12), (3e-5, 1.0, 4, 1e-12)],
+           "n_projections": 5, "projection_max_row": [0.5, 2.0, 0.0, 7.0, 1.0],
+           "projection_records": np.array([(1e-5, 2.0, 1, 1e-12), (2e-5, 7.0, 3, 2e-12),
+                                           (3e-5, 1.0, 4, 1e-12), (4e-5, 0.5, -1, 1e-12)]),
            "output_budget_t": budget}
     got, want = k._output_grid_dict(raw, ncol, t_start), _output_grid_reference(raw, ncol, t_start)
     assert list(got) == list(want)

@@ -943,7 +943,35 @@ void init_module(py::module_& m) {
             }
             og["output_floor_max"] = fmax;
             og["output_floor_by_column"] = tail(fr);
-            // the event projections: _dsed_dispatch._EventProjections (built lazily)
+            // the event projections, as _dsed_dispatch._EventProjections defines them (the
+            // run's records are an (n, 4) array [t, amplitude, row (-1: none), tau])
+            const long long n_proj = nr.contains("n_projections")
+                ? nr["n_projections"].cast<long long>() : 0;
+            og["n_projections"] = py::int_(n_proj);
+            const auto pm = vec("projection_max_row");
+            og["projection_max_by_column"] = tail(pm);
+            // a row of the recovered vector that is not a stored column (or none): None
+            const long long first = static_cast<long long>(pm.size()) - ncol;
+            const bool mapped = ncol > 0 && static_cast<long long>(pm.size()) >= ncol;
+            py::list recs;
+            if (nr.contains("projection_records")) {
+                const auto a = py::array_t<double, py::array::c_style | py::array::forcecast>::ensure(
+                    nr["projection_records"]);
+                const auto n = a && a.ndim() == 2 && a.shape(1) == 4 ? a.shape(0) : 0;
+                const double* p = n ? a.data() : nullptr;
+                for (py::ssize_t k = 0; k < n; ++k, p += 4) {
+                    const auto r = static_cast<long long>(p[2]);
+                    py::dict d;
+                    d["t"] = p[0] + t_start;
+                    d["amplitude"] = p[1];
+                    d["tau"] = p[3];
+                    d["column"] = (mapped && r >= first) ? py::object(py::int_(r - first))
+                                                         : py::object(py::none());
+                    recs.append(d);
+                }
+            }
+            og["capped"] = py::bool_(n_proj > static_cast<long long>(py::len(recs)));
+            og["projections"] = recs;
             const double tb = nr["output_budget_t"].cast<double>();
             og["output_budget_t"] = std::isnan(tb) ? py::object(py::none())
                                                    : py::object(py::float_(tb + t_start));
