@@ -1,6 +1,6 @@
 {
  "n_steps": 3001,
- "n_commutations": 6,
+ "n_commutations": 5,
  "switch_digest": "sha256:976eb696c737e576efbe1006b0e336c11d199dc5ff4ca318034a8aa7d04f3d6a",
  "checkpoints": [
   {
