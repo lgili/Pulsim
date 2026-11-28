@@ -21,7 +21,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed engine, split: a failed right-limit solve at a located crossing publishes a consistent state and mask
 
-- With `enable_substep_state_correction=True`, when the right-limit solve at a located V_f = 0 diode crossing failed, the row kept the left state but could carry a diode mask the solve had already re-decided. The row now carries the left mask with the left state. Split off: unreachable.
+- With `enable_substep_state_correction=True`, when the right-limit solve at a located V_f = 0 diode crossing failed, the row kept the left state but could carry a diode mask the solve had already re-decided. The row now pairs the left state with the mask decided before the solve (the pair the rule without the split publishes there). Split off: unreachable.
 
 ### TR-BDF2: a run started from an inconsistent state now starts from a consistent one, and its numbers move (F-Z-6, part 1)
 
