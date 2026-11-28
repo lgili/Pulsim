@@ -55,10 +55,11 @@ CELLS = {
         "pwl+split": ("pwl", SPLIT, 0.0, 1e-7, "instants"),
     },
     "circuits/diodes/diode_half_wave_rl_load.yaml": {
-        # finding F-SB-3: the right limit of V(out) at D1's turn-off is the projected value
-        # (-3.1e-6 V; the truth -0.314 V) with no projection record: limits 0.030. With a
-        # record, rule (1) prices it as a 1 ns collapsed transient (~5e-6)
-        "dsed F-SB-3": ("dsed", {}, 1e-2, 0.1, "limits"),
+        # finding F-SB-3 / F-R-3 (closed): the right limit of V(out) at D1's turn-off is the
+        # projected value (-3.1e-6 V; the truth -0.314 V). Without a projection record it read
+        # limits 0.030; the exact engine now records every event projection, so rule (1)
+        # prices it as a 1 ns collapsed transient (instants 4.8e-6)
+        "dsed F-SB-3": ("dsed", {}, 0.0, 1e-4, "instants"),
     },
 }
 

@@ -304,3 +304,69 @@ def test_diode_right_side_is_exactly_zero_after_turn_off():
         # carries forward current, an off one exactly none
         assert np.all(right >= 0.0), (q, right[right < 0])
     assert n_off >= 4
+
+
+def _half_wave_rl():
+    # benchmarks/circuits/diodes/diode_half_wave_rl_load.yaml: a series diode
+    # into R + L (its turn-off carries the inductor's residual current)
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[2] / "benchmarks"
+    sys.path[:0] = [str(root / "tools"), str(root)]
+    import v1_reader
+    case = v1_reader.load(root / "circuits/diodes/diode_half_wave_rl_load.yaml")
+    kcl = {"in": ["Vac", "D1"], "out": ["-D1", "R1"], "n_l": ["-R1", "L1"]}
+    return case.build()[0], case.t_end, 20e-6, kcl, {"D1": ("in", "out", 200.0, 1e-6)}, {}
+
+
+def _rectifier_laws():
+    b, _, t_end, kcl, _ = _rectifier()
+    dio = {nm: (a, c, 1e3, 1e-9) for nm, a, c in
+           (("D1", "s", "dp"), ("D2", "gnd", "dp"), ("D3", "dn", "s"), ("D4", "dn", "gnd"))}
+    return b, t_end, 1e-6, kcl, dio, {"Cf": 100e-6}
+
+
+@pytest.mark.parametrize("split", [False, True], ids=["rule_off", "split"])
+@pytest.mark.parametrize("circ", ["rectifier", "half_wave_rl"])
+def test_every_row_obeys_kcl_and_the_diode_law(circ, split):
+    # Every recorder row (kept rows, both sides of every event row) on the
+    # fixed engine, with the split (discontinuity_restart +
+    # enable_substep_state_correction) and without. Before the fix the split's
+    # located V_f = 0 turn-ons (continuity points) published the left state
+    # read under the ON law: i(D1) = g_on·v_D(left) = 2.06 mA on the rectifier
+    # (KCL at s/dp off by 2 mA; at t = 0.030004 D3 off by 17 mA).
+    b, t_end, dt, kcl, dio, caps = (_rectifier_laws if circ == "rectifier" else _half_wave_rl)()
+    devs = sorted({x.lstrip("-") for ts in kcl.values() for x in ts})
+    nodes = sorted({n for a, c, _, _ in dio.values() for n in (a, c) if n != "gnd"} | set(kcl))
+    probes = [f"i({d})" for d in devs] + [f"v({n})" for n in nodes]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        res = p.simulate(b, t_end, engine="pwl", dt=dt, discontinuity_restart=split,
+                         enable_substep_state_correction=split,
+                         recorders=[p.Recorder("r", probes)])
+    a = res.recorded["r"]
+    ev = a.event_t
+    if split:   # the located crossings are exercised (off the dt grid)
+        assert np.count_nonzero(np.abs(ev / dt - np.round(ev / dt)) > 1e-6) >= 4, ev
+    vmax = max(np.max(np.abs(a[f"v({n})"])) for n in nodes if n != "gnd")
+    # the right limit's backward-Euler companion at eps = 1e-3·γ·dt turns one
+    # ulp of a capacitor voltage into C·eps_mach·|v| / eps of current
+    floor = sum(8 * c * EPS * vmax / (1e-3 * (2 - np.sqrt(2)) * dt) for c in caps.values())
+    sides = [("rows", lambda q: np.asarray(a[q]), a.times)]
+    if ev.size:
+        sides += [("left", lambda q: np.asarray(a.event_left[q]), ev),
+                  ("right", lambda q: np.asarray(a.event_right[q]), ev)]
+    for side, g, t in sides:
+        def v(n):
+            return 0.0 if n == "gnd" else g(f"v({n})")
+        for node, terms in kcl.items():
+            cols = [(-1.0 if x[0] == "-" else 1.0, f"i({x.lstrip('-')})") for x in terms]
+            scale = max(np.max(np.abs(a[q])) for _, q in cols)   # the run's currents
+            s = sum(sg * g(q) for sg, q in cols)
+            bad = np.flatnonzero(np.abs(s) > 1e-12 * scale + floor)
+            assert bad.size == 0, (side, node, t[bad[:5]], s[bad[:5]])
+        for d, (an, ca, gon, goff) in dio.items():
+            # an ON diode reads g_on·v_D, an OFF one g_off·v_D (V_th = 0)
+            vd, i = v(an) - v(ca), g(f"i({d})")
+            err = np.minimum(np.abs(i - gon * vd), np.abs(i - goff * vd))
+            bad = np.flatnonzero(err > 64 * EPS * gon * vmax + 1e-12 * np.abs(i))
+            assert bad.size == 0, (side, d, t[bad[:5]], i[bad[:5]], vd[bad[:5]])

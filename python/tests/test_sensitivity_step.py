@@ -92,8 +92,10 @@ def test_rc_on_esdirk43_matches_the_closed_form():
     assert abs(r.sens("out", "C.C")[-1] / dC - 1) < 1e-5
     ref_R = np.array([_rc_closed_form(tk)[0] for tk in s.times])
     assert np.max(np.abs(r.sens("out", "R.R") - ref_R)) < 1e-5 * abs(dR)
-    # 5 implicit stages, one first solve per stage and parameter
-    assert s.counters["n_sens_solves"] == 2 * 5 * r.stats.n_accept
+    # 5 implicit stages, one first solve per stage and parameter; plus the
+    # start's probe, committed as a trapezoidal step (one stage, not an accept:
+    # its states move by more than atol = 1e-12 over 1e-15 s), as at a gate edge
+    assert s.counters["n_sens_solves"] == 2 * (5 * r.stats.n_accept + 1)
     assert s.counters["n_sens_iterations"] == 0
 
 

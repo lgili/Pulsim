@@ -943,27 +943,7 @@ void init_module(py::module_& m) {
             }
             og["output_floor_max"] = fmax;
             og["output_floor_by_column"] = tail(fr);
-            og["n_projections"] = nr.contains("n_projections")
-                ? py::int_(nr["n_projections"]) : py::int_(0);
-            const auto pm = vec("projection_max_row");
-            og["projection_max_by_column"] = tail(pm);
-            // a row of the recovered vector that is not a stored column: None
-            const long long first = static_cast<long long>(pm.size()) - ncol;
-            py::list recs;
-            if (nr.contains("projection_records")) {
-                for (const auto& rec : nr["projection_records"]) {
-                    const auto t = rec.cast<py::tuple>();
-                    const long long r = t[2].cast<long long>();
-                    py::dict d;
-                    d["t"] = t[0].cast<double>() + t_start;
-                    d["amplitude"] = t[1].cast<double>();
-                    d["tau"] = t[3].cast<double>();
-                    d["column"] = (ncol > 0 && r >= first) ? py::object(py::int_(r - first))
-                                                           : py::object(py::none());
-                    recs.append(d);
-                }
-            }
-            og["projections"] = recs;
+            // the event projections: _dsed_dispatch._EventProjections (built lazily)
             const double tb = nr["output_budget_t"].cast<double>();
             og["output_budget_t"] = std::isnan(tb) ? py::object(py::none())
                                                    : py::object(py::float_(tb + t_start));
@@ -1806,13 +1786,28 @@ void init_module(py::module_& m) {
                 d["n_output_inconsistent"] = sim.n_output_inconsistent();
                 const auto& fr = sim.output_floor_row();
                 d["output_floor_row"] = std::vector<double>(fr.data(), fr.data() + fr.size());
+            }
+            {   // every event projection, rule on or off (F-SB-3 / F-R-3): one (n, 4)
+                // array [t, amplitude, row (-1: none, rule off), tau]; Python builds the
+                // records only when they are read. The per-row maximum exists under the rule
                 d["n_projections"] = sim.n_projections();
-                const auto pm = sim.projection_max();
-                d["projection_max_row"] = std::vector<double>(pm.data(), pm.data() + pm.size());
-                py::list recs;
-                for (const auto& r : sim.projection_records())
-                    recs.append(py::make_tuple(r.t, r.amplitude, r.row, r.tau));
-                d["projection_records"] = recs;
+                if (output_rtol > Real{0}) {
+                    const auto pm = sim.projection_max();
+                    d["projection_max_row"] = std::vector<double>(pm.data(), pm.data() + pm.size());
+                }
+                const auto recs = sim.projection_records();
+                py::array_t<double> a({static_cast<py::ssize_t>(recs.size()), py::ssize_t{4}});
+                auto m = a.mutable_unchecked<2>();
+                for (std::size_t k = 0; k < recs.size(); ++k) {
+                    const auto& r = recs[k];
+                    const auto i = static_cast<py::ssize_t>(k);
+                    m(i, 0) = r.t;
+                    m(i, 1) = r.amplitude;
+                    m(i, 2) = r.row == std::remove_cvref_t<decltype(sim)>::kNoProjectionRow
+                                  ? -1.0 : static_cast<double>(r.row);
+                    m(i, 3) = r.tau;
+                }
+                d["projection_records"] = a;
             }
             d["exact"] = exact_report_dict(adapter, res.n_predicate_evals);
             if (mode_shadow_h_e > Real{0}) {

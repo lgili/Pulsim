@@ -41,6 +41,7 @@ import re
 import sys
 
 import numpy as _np
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Callable, Literal, Optional, cast
 
@@ -457,6 +458,49 @@ def _exact_result(
     return res
 
 
+class _EventProjections(Mapping):
+    """``diagnostics['event_projections']``: every projection of the parasitic cluster
+    at an event, rule on or off (never silent; F-SB-3 / F-R-3). Keys: ``n_projections``;
+    ``capped`` (more projections than the 1000 records kept); ``projection_max_by_column``
+    (per stored column the largest amplitude it moved; zeros rule off, where the default
+    path recovers nothing); ``projections`` (instant ``t``, largest ``amplitude`` -- rule
+    off max |Δx| over the state --, its stored ``column`` or None, the cluster's slowest
+    ``tau``). Built on first read: a run that never reads it pays nothing."""
+
+    def __init__(self, native_res, t_start: float, ncol: int):
+        self._raw = (native_res.get("projection_records"), native_res.get("projection_max_row"),
+                     int(native_res.get("n_projections", 0)), t_start, ncol)
+        self._d: Optional[dict] = None
+
+    def _built(self) -> dict:
+        if self._d is None:
+            recs, pm, n, t0, ncol = self._raw
+            recs = _np.asarray(recs if recs is not None else _np.zeros((0, 4)), dtype=float).reshape(-1, 4)
+            pm = _np.asarray(pm if pm is not None else [], dtype=float)
+            off = pm.size - ncol   # the stored columns are the tail of the recovered vector
+            self._d = dict(
+                n_projections=n, capped=n > len(recs),
+                projection_max_by_column=(pm[-ncol:] if pm.size >= ncol > 0 else _np.zeros(ncol)),
+                projections=[
+                    {"t": float(t) + t0, "amplitude": float(a), "tau": float(tau),
+                     # a row that is not a stored column (or none, rule off): None
+                     "column": int(r) - off if 0 < ncol <= pm.size and r >= off else None}
+                    for t, a, r, tau in recs])
+        return self._d
+
+    def __getitem__(self, key):
+        return self._built()[key]
+
+    def __iter__(self):
+        return iter(self._built())
+
+    def __len__(self) -> int:
+        return len(self._built())
+
+    def __repr__(self) -> str:
+        return repr(self._built())
+
+
 def _result_from_native(native_res, t_start: float):
     """The result of a Bridge.11 run (``run_*_native_builder``). ``t_start``:
     the engine ran on its own clock from 0; every time it reports is
@@ -511,15 +555,20 @@ def _result_from_native(native_res, t_start: float):
     for key in ("mode_shadow", "mode_selection", "mode_guard"):
         if key in native_res:
             res.diagnostics[key] = native_res[key]
+    ncol = res.states.shape[1] if getattr(res, "has_full_states", False) else 0
+    if "projection_records" in native_res:
+        proj = _EventProjections(native_res, float(t_start), ncol)
+        res.diagnostics["event_projections"] = proj
+    else:
+        proj = {}
     if "n_output_capped" in native_res:   # the output-grid rule (output_rtol)
-        # The rule's counters, floors (rows certified "constant up to rounding"
-        # at their rounding floor) and every projection of the parasitic
-        # cluster at an event (instant, amplitude, stored column, tau), never
-        # silent: built in C++ (_output_grid_dict documents the keys; one call
-        # instead of ~160 bytecodes per simulate(), test_simulate_overhead).
+        # The rule's counters and floors (rows certified "constant up to rounding"
+        # at their rounding floor), never silent: built in C++ (_output_grid_dict
+        # documents the keys; one call instead of ~160 bytecodes per simulate(),
+        # test_simulate_overhead); the event projections are the rule's own report.
         og = res.diagnostics["output_grid"] = _kern_mod._output_grid_dict(
-            native_res, res.states.shape[1] if getattr(res, "has_full_states", False) else 0,
-            float(t_start))
+            native_res, ncol, float(t_start))
+        og.update(proj)
         if og["output_budget_t"] is not None:
             _emit("output_budget",
                 f"simulate(engine='exact', output_rtol=...): the run's output sample budget "
