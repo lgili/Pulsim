@@ -2546,26 +2546,74 @@ inline SimulationResult run_transient_trbdf2(
         history.refresh_derivatives(x_trial, last_probe_dt);
         history.snapshot_into(hist_rec);
         history.restore(hist_rec0);
-        for (Size i = 0; i < hist_rec.size(); ++i) {
-            const auto& a = hist_rec0[i];
-            const auto& b = hist_rec[i];
-            const bool cap = a.kind == pwl::DevicePool::StoredKind::Capacitor;
-            const Real d = cap ? (b.i_prev - a.i_prev) : (b.v_prev - a.v_prev);
-            const Real y = cap ? a.v_prev : a.i_prev;
-            if (!stateful) {
-                // a probe that moved y by a few ulps (a DC start) rebuilds the
-                // slot from round-off amplified by 2h/dt ~ 2e7: consistent
-                const Real ya = cap ? entry_v(entries[i], x) : x[entries[i].inductor_branch_var_id];
-                const Real yb = cap ? entry_v(entries[i], x_trial)
-                                    : x_trial[entries[i].inductor_branch_var_id];
-                if (std::abs(yb - ya) <= Real{8} * std::numeric_limits<Real>::epsilon()
-                                             * std::max(std::abs(ya), std::abs(yb))) {
-                    continue;
+        // the slot jump d_i(dtp) of entry i, or 0 (consistent by round-off)
+        auto slot_jumps = [&](const std::vector<pwl::HistoryEntry>& rec, const Vector& xt) {
+            std::vector<Real> d(rec.size(), Real{0});
+            for (Size i = 0; i < rec.size(); ++i) {
+                const auto& a = hist_rec0[i];
+                const bool cap = a.kind == pwl::DevicePool::StoredKind::Capacitor;
+                if (!stateful) {
+                    // a probe that moved y by a few ulps (a DC start) rebuilds the
+                    // slot from round-off amplified by 2h/dt ~ 2e7: consistent
+                    const Real ya = cap ? entry_v(entries[i], x) : x[entries[i].inductor_branch_var_id];
+                    const Real yb = cap ? entry_v(entries[i], xt)
+                                        : xt[entries[i].inductor_branch_var_id];
+                    if (std::abs(yb - ya) <= Real{8} * std::numeric_limits<Real>::epsilon()
+                                                 * std::max(std::abs(ya), std::abs(yb))) {
+                        continue;
+                    }
+                }
+                d[i] = cap ? (rec[i].i_prev - a.i_prev) : (rec[i].v_prev - a.v_prev);
+            }
+            return d;
+        };
+        auto jumps_ok = [&](const std::vector<Real>& d) {
+            for (Size i = 0; i < d.size(); ++i) {
+                const auto& a = hist_rec0[i];
+                const bool cap = a.kind == pwl::DevicePool::StoredKind::Capacitor;
+                const Real y = cap ? a.v_prev : a.i_prev;
+                if (!(std::abs(d[i]) * h / a.C_or_L <= opts.atol + opts.rtol * std::abs(y))) {
+                    return false;
                 }
             }
-            if (!(std::abs(d) * h / a.C_or_L <= opts.atol + opts.rtol * std::abs(y))) {
-                return false;
+            return true;
+        };
+        const std::vector<Real> d1 = slot_jumps(hist_rec, x_trial);
+        if (!jumps_ok(d1)) {
+            if (stateful) return false;
+            // A consistent start whose sources move (a ramp from 0) still sees the
+            // slot change over the probe, d(dtp) = slot' * dtp + O(dtp^2) (rc_step at
+            // rtol 1e-8: 5e9 V/s ramp). A second probe at 2 dtp extrapolates the
+            // jump to dtp -> 0; an inconsistent slot (v_L = 0 for 48 V) keeps it.
+            const Real dt1 = last_probe_dt;
+            const Vector x1 = x_trial;
+            const std::vector<pwl::HistoryEntry> rec1 = hist_rec;
+            x_trial = x;
+            bool ok2 = false;
+            try {
+                ok2 = probe_solve(*start_probe_m, t, Real{2} * dt1, x_trial) && x_trial.allFinite();
+            } catch (const pwl::NewtonRoundoffBudgetExceeded&) {
+                throw;
+            } catch (const std::runtime_error&) {
+                ok2 = false;
             }
+            const Real dt2 = last_probe_dt;
+            bool consistent = false;
+            if (ok2 && dt2 > dt1 * Real{1.5}) {
+                history.refresh_derivatives(x_trial, dt2);
+                history.snapshot_into(hist_rec);
+                history.restore(hist_rec0);
+                const std::vector<Real> d2 = slot_jumps(hist_rec, x_trial);
+                std::vector<Real> d0(d1.size());
+                for (Size i = 0; i < d1.size(); ++i) {
+                    d0[i] = (dt2 * d1[i] - dt1 * d2[i]) / (dt2 - dt1);
+                }
+                consistent = jumps_ok(d0);
+            }
+            x_trial = x1;   // the adopt/commit paths take the first probe
+            last_probe_dt = dt1;
+            hist_rec = rec1;
+            if (!consistent) return false;
         }
         if (!stateful) return true;
         pwl::StatefulHistories::Snapshot snap;

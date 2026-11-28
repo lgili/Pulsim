@@ -99,6 +99,24 @@ def test_start_slots_resume_like_the_uninterrupted_run():
     assert c[k] == pytest.approx(1.0 - np.exp(-10.0), rel=1e-5)
 
 
+@pytest.mark.parametrize("rtol", [None, 1e-8])
+def test_a_ramp_from_zero_is_a_consistent_start(rtol):
+    # rc_step: v_in ramps from 0 (5e9 V/s), v_in(0) = 0 = v_C(0) is consistent;
+    # the probe's slot at t + dtp carries the ramp (slot' * dtp), which the
+    # two-length extrapolation to dtp -> 0 removes: no start refresh, only the
+    # ramp corner's (1 ns) edge refresh the run had before the start probe
+    case = v1_reader.load(ROOT / "benchmarks/circuits/linear/rc_step.yaml")
+    kw = {} if rtol is None else dict(rtol=rtol, atol=1e-12)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = case.run("trbdf2", **kw)
+    assert r._trbdf2_stats["n_derivative_refreshes"] == 1
+    # the inconsistent start (10 V across an inductor at t = 0+) is still seen
+    p, b = _rl()
+    assert _sim(p, b, t_end=2e-6, rtol=1e-8, atol=1e-12)._trbdf2_stats[
+        "n_derivative_refreshes"] >= 1
+
+
 def test_a_given_initial_state_takes_no_start_probe():
     # initial_state is seeded as a DC operating point (zero slots by contract):
     # PSS period runs start there and must keep the map they had
