@@ -6,6 +6,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed engine, split: event rows at located diode crossings obey KCL and the diode law
+
+- With `discontinuity_restart=True, enable_substep_state_correction=True`, a located crossing where only V_f = 0 diodes flip was published as a continuity point: the right limit was the left state read under the new mode's law. A turn-on read `g_on·v_D(left)` (the location's residual voltage): on a bridge rectifier `i(D1)` = 2.06 mA at t = 21.79 ms (KCL at `s` / `dp` off by 2.06 mA) and `i(D3)` = 17.1 mA at t = 30.004 ms (KCL at `s` / `dn` off by 17.1 mA). The right limit is now solved in the decided mode like every other event's, for the recorder rows, the stored right-limit states and the loss booking; every row now satisfies KCL to the solver's floor and each diode reads its ON or OFF law (`test_recorder_device_readings.py::test_every_row_obeys_kcl_and_the_diode_law`, rectifier and `diode_half_wave_rl_load`). A turn-off's right limit follows the OFF law: `v_out` moves by the residual current through `1/g_off` (2.8e-5 V on the half-wave RL load). The rule alone (split off) and the default engine are unchanged.
+
 ### Exact engine, `output_rtol`: the first sample after an event is placed by the rule
 
 - The sample stored just past an event (F-X-7) sat a fixed 2 ps out; on a node with a fast resolved post-event mode the chord from the right limit to it left the trajectory by up to 59 × the promise (`cl_buck_pi`'s switch node; `buck_dcm` 5.4 ×). It is now the rule's own chord step from the right limit, at most 2 ps and at least `64·eps·max(1, |t|)`, counted in the interval's cap and the run's budget. Referee: first line after an event 59.4 → 1.5e-5 (`cl_buck_pi`), 2.79 → 0.91 (`cl_boost_pi`), 5.42 → 1.7e-5 (`buck_dcm`); a closing switch on an RC (τ = 50 ps) 19.7 × → 0.99 × against the closed form. Samples: ≈ 2 more per event on `cl_buck_pi` (+3030 over 1491 events), 0.04 on `cl_boost_pi`, 0.4 on `buck_dcm`; open-loop cells unchanged. Without `output_rtol` nothing changes.
